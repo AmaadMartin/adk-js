@@ -37,6 +37,26 @@ describe('LiveRequestQueue', () => {
     expect(request).toEqual({activityEnd: {}});
   });
 
+  it('should handle sendAudioStreamEnd', async () => {
+    const queue = new LiveRequestQueue();
+    queue.sendAudioStreamEnd();
+    expect(await queue.get()).toEqual({audioStreamEnd: true});
+  });
+
+  it('should mark the request partial when sendContent is told to', async () => {
+    const queue = new LiveRequestQueue();
+    const content = createUserContent('partial test');
+    queue.sendContent(content, true);
+    expect(await queue.get()).toEqual({content, partial: true});
+  });
+
+  it('should carry a state delta on a request', async () => {
+    const queue = new LiveRequestQueue();
+    const request: LiveRequest = {stateDelta: {theme: 'dark'}};
+    queue.send(request);
+    expect(await queue.get()).toEqual({stateDelta: {theme: 'dark'}});
+  });
+
   it('should handle close', async () => {
     const queue = new LiveRequestQueue();
     queue.close();

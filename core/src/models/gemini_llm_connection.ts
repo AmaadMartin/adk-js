@@ -192,6 +192,13 @@ export class GeminiLlmConnection implements BaseLlmConnection {
   }
 
   /**
+   * Signals the end of the audio input stream to the model.
+   */
+  async sendAudioStreamEnd(): Promise<void> {
+    return this.sendRealtime({audioStreamEnd: true});
+  }
+
+  /**
    * Receives the model responses until the connection closes.
    *
    * Every response carries the live session id once the server reports it in

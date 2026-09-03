@@ -36,6 +36,7 @@ class RecordingConnection implements BaseLlmConnection {
   readonly realtimeCalls: Blob[] = [];
   activityStartCalls = 0;
   activityEndCalls = 0;
+  audioStreamEndCalls = 0;
   closed = false;
   sendContentError?: Error;
   sendRealtimeError?: Error;
@@ -84,6 +85,9 @@ class RecordingConnection implements BaseLlmConnection {
   }
   async sendActivityEnd(): Promise<void> {
     this.activityEndCalls += 1;
+  }
+  async sendAudioStreamEnd(): Promise<void> {
+    this.audioStreamEndCalls += 1;
   }
   async *receive(): AsyncGenerator<LlmResponse, void, void> {
     for await (const response of this.queue) {
@@ -1301,6 +1305,72 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('Simulated outbound connection error on empty receive');
 
     expect(llm.connection!.closed).toBe(true);
+  });
+
+  it('carries a live state delta through to the session state', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.send({stateDelta: {theme: 'dark'}});
+    queue.send({
+      content: {role: 'user', parts: [{text: 'hello'}]},
+      stateDelta: {locale: 'fr'},
+    });
+    queue.close();
+
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      // drain
+    }
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(session!.state['theme']).toBe('dark');
+    expect(session!.state['locale']).toBe('fr');
+    const sentEvents = session!.events.filter((e) => e.author === 'user');
+    expect(sentEvents).toHaveLength(2);
+    expect(sentEvents[0].content).toBeUndefined();
+    expect(sentEvents[1].content?.parts?.[0].text).toBe('hello');
+  });
+
+  it('forwards an audio stream end signal to the connection', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.sendRealtime({mimeType: 'audio/pcm', data: 'AAAA'});
+    queue.sendAudioStreamEnd();
+    queue.close();
+
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      // drain
+    }
+
+    expect(llm.connection!.realtimeCalls).toHaveLength(1);
+    expect(llm.connection!.audioStreamEndCalls).toBe(1);
   });
 });
 
