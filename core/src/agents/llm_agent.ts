@@ -50,6 +50,7 @@ import {
   traceCallLlm,
   tracer,
 } from '../telemetry/tracing.js';
+import {isGoogleSearchTool} from '../tools/google_search_tool.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {BaseAgent, BaseAgentConfig, isBaseAgent} from './base_agent.js';
@@ -58,6 +59,7 @@ import {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
 } from './processors/base_llm_processor.js';
+import {getTransferTargets} from './transfer_targets.js';
 
 import {
   generateAuthEvent,
@@ -513,11 +515,35 @@ function validateToolUnion(toolUnion: ToolUnion): void {
   }
 }
 
+/**
+ * Resolves one entry of an agent's `tools` into the tools the model sees.
+ *
+ * @param toolUnion The entry to resolve.
+ * @param context The context a toolset resolves its tools against.
+ * @param getModel The agent's model, which a substituted sub-agent runs on.
+ *     Called only when a substitution happens, so resolving a model an agent
+ *     never uses cannot fail the whole tool list.
+ * @param multipleTools Whether the model will see more than one tool, which is
+ *     what a built-in tool cannot be used with.
+ */
 async function convertToolUnionToTools(
   toolUnion: ToolUnion,
-  context?: ReadonlyContext,
+  context: ReadonlyContext | undefined,
+  getModel: () => string | BaseLlm,
+  multipleTools: boolean,
 ): Promise<BaseTool[]> {
   validateToolUnion(toolUnion);
+  if (
+    multipleTools &&
+    isGoogleSearchTool(toolUnion) &&
+    toolUnion.bypassMultiToolsLimit
+  ) {
+    // Imported here rather than at the top of the file: the module builds an
+    // LlmAgent, so a static import would close the cycle.
+    const {createGoogleSearchAgent, GoogleSearchAgentTool} =
+      await import('../tools/google_search_agent_tool.js');
+    return [new GoogleSearchAgentTool(createGoogleSearchAgent(getModel()))];
+  }
   if (isBaseTool(toolUnion)) {
     return [toolUnion];
   }
@@ -976,10 +1002,31 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   async canonicalTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const resolvedTools: BaseTool[] = [];
     for (const toolUnion of this.tools) {
-      const tools = await convertToolUnionToTools(toolUnion, context);
+      const tools = await this.resolveToolUnion(toolUnion, context);
       resolvedTools.push(...tools);
     }
     return resolvedTools;
+  }
+
+  /**
+   * Resolves one entry of {@link tools}, substituting a built-in tool that
+   * cannot be used alongside the others.
+   *
+   * A transfer target counts as another tool because the model reaches it
+   * through `transfer_to_agent`.
+   */
+  private async resolveToolUnion(
+    toolUnion: ToolUnion,
+    context?: ReadonlyContext,
+  ): Promise<BaseTool[]> {
+    const multipleTools =
+      this.tools.length > 1 || getTransferTargets(this).length > 0;
+    return convertToolUnionToTools(
+      toolUnion,
+      context,
+      () => this.canonicalModel,
+      multipleTools,
+    );
   }
 
   /**
@@ -1429,7 +1476,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     for (const toolUnion of this.tools) {
       const toolContext = new Context({invocationContext});
       const tools = (
-        await convertToolUnionToTools(
+        await this.resolveToolUnion(
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
@@ -1807,7 +1854,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       // process all tools from this tool union
       const tools = (
-        await convertToolUnionToTools(
+        await this.resolveToolUnion(
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
