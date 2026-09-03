@@ -157,10 +157,13 @@ function formatMisplacedFields(fields: string[]): string {
  * catches construction from a parsed document, where the object is untyped.
  *
  * Ported from adk-python's
- * `LlmAgent._reject_misplaced_generate_content_kwargs`, with one deliberate
- * difference: an unrecognized key on its own is accepted, because an object
- * carrying extra properties is legal TypeScript. Unrecognized keys are named
- * only when the same object also carries a misplaced setting.
+ * `LlmAgent._reject_misplaced_generate_content_kwargs`, with two deliberate
+ * differences, both because TypeScript has no keyword arguments. An
+ * unrecognized key on its own is accepted, since an object carrying extra
+ * properties is legal; such keys are named only when the same object also
+ * carries a misplaced setting. And a key whose value is `undefined` carries no
+ * setting, so it is ignored — spreading an optional value leaves the key
+ * behind.
  *
  * @param config The raw constructor argument.
  * @throws Error naming the option to use instead.
@@ -173,7 +176,7 @@ export function assertNoMisplacedGenerateContentKwargs(config: object): void {
   const entries: Array<[string, unknown]> = Object.entries(config);
 
   for (const [key, value] of entries) {
-    if (LLM_AGENT_CONFIG_KEYS.has(key)) {
+    if (LLM_AGENT_CONFIG_KEYS.has(key) || value === undefined) {
       continue;
     }
     if (key === 'httpOptions' && hasBaseUrl(value)) {

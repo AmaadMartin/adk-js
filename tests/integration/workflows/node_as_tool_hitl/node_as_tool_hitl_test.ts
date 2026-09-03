@@ -54,6 +54,7 @@ describe('workflow integration — HITL through a node-tool', () => {
       },
       {
         name: 'calculate_discount',
+        description: 'Calculates the discount for a customer tier.',
         inputSchema: z.object({tier: z.string()}),
         rerunOnResume: true,
       },

@@ -188,7 +188,7 @@ export class AgentRegistry {
         tools: tools ?? [],
         disallowTransferToParent: config.disallowTransferToParent === 'true',
         disallowTransferToPeers: config.disallowTransferToPeers === 'true',
-        temperature: config.generateContentConfig?.temperature,
+        generateContentConfig: config.generateContentConfig,
       };
 
       let agent: BaseAgent;

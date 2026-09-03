@@ -109,6 +109,27 @@ describe('LlmAgent misplaced generation settings', () => {
     expect(message).toContain('Extra inputs are not permitted: temperatur.');
   });
 
+  it('ignores a key that is present but undefined', () => {
+    // Spreading an optional value leaves the key behind with no value, which
+    // says nothing about where the setting belongs.
+    const agent = buildFromDocument({
+      name: 'test_agent',
+      temperature: undefined,
+    });
+
+    expect(agent.name).toBe('test_agent');
+  });
+
+  it('still reports a misplaced setting beside an undefined one', () => {
+    expect(() => {
+      buildFromDocument({
+        name: 'test_agent',
+        temperature: undefined,
+        topP: 0.95,
+      });
+    }).toThrow(/topP is a GenerateContentConfig field/);
+  });
+
   it('accepts an unrecognized key on its own', () => {
     const agent = buildFromDocument({name: 'test_agent', notAField: true});
 
