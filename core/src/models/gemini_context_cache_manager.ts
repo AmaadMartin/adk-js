@@ -288,7 +288,7 @@ export function estimateCacheablePrefixTokens(
  *     Gemini family member.
  */
 export function minimumCacheTokens(model?: string): number | undefined {
-  const modelName = (model ?? '').split('/').pop() ?? '';
+  const modelName = (model ?? '').replace(/^.*\//, '');
   if (modelName.startsWith('gemini-2.5-')) {
     return GEMINI_2_5_MIN_CACHE_TOKENS;
   }
@@ -330,6 +330,58 @@ export function applyCacheToRequest(
 }
 
 /**
+ * Narrows metadata to its active arm, which is the only arm that names a
+ * cache. Fingerprint-only metadata records a prefix, not a live cache.
+ */
+function activeCacheMetadata(
+  cacheMetadata: CacheMetadata | undefined,
+): ActiveCacheMetadata | undefined {
+  return cacheMetadata?.cacheName !== undefined ? cacheMetadata : undefined;
+}
+
+/**
+ * Returns a request's cache metadata when the cache it names may still be
+ * used, and `undefined` otherwise.
+ *
+ * @param llmRequest The request carrying the metadata to check.
+ * @param cacheScope The backend namespace that owns the cache.
+ * @throws Error If the request carries no cache configuration.
+ */
+async function validActiveCache(
+  llmRequest: LlmRequest,
+  cacheScope: QualifiedCacheScope,
+): Promise<ActiveCacheMetadata | undefined> {
+  const cacheMetadata = activeCacheMetadata(llmRequest.cacheMetadata);
+  if (!cacheMetadata) {
+    return undefined;
+  }
+  const {cacheName, expireTime, invocationsUsed} = cacheMetadata;
+  const cacheConfig = requireCacheConfig(llmRequest);
+
+  if (Date.now() / 1000 >= expireTime) {
+    logger.info(`Cache expired: ${cacheName}`);
+    return undefined;
+  }
+  if (invocationsUsed > cacheConfig.cacheIntervals) {
+    logger.info(
+      `Cache exceeded cache intervals: ${cacheName} (${invocationsUsed} > ` +
+        `${cacheConfig.cacheIntervals} intervals)`,
+    );
+    return undefined;
+  }
+  const currentFingerprint = await generateCacheFingerprint(
+    llmRequest,
+    cacheMetadata.contentsCount,
+    cacheScope,
+  );
+  if (currentFingerprint !== cacheMetadata.fingerprint) {
+    logger.debug('Cache content fingerprint mismatch');
+    return undefined;
+  }
+  return cacheMetadata;
+}
+
+/**
  * Reports whether the cache named by a request's metadata may still be used.
  *
  * @param llmRequest The request carrying the metadata to check.
@@ -342,41 +394,7 @@ export async function isCacheValid(
   llmRequest: LlmRequest,
   cacheScope: QualifiedCacheScope,
 ): Promise<boolean> {
-  const cacheMetadata = llmRequest.cacheMetadata;
-  if (!cacheMetadata) {
-    return false;
-  }
-  const {cacheName, expireTime, invocationsUsed} = cacheMetadata;
-  if (
-    cacheName === undefined ||
-    expireTime === undefined ||
-    invocationsUsed === undefined
-  ) {
-    return false;
-  }
-  const cacheConfig = requireCacheConfig(llmRequest);
-
-  if (Date.now() / 1000 >= expireTime) {
-    logger.info(`Cache expired: ${cacheName}`);
-    return false;
-  }
-  if (invocationsUsed > cacheConfig.cacheIntervals) {
-    logger.info(
-      `Cache exceeded cache intervals: ${cacheName} (${invocationsUsed} > ` +
-        `${cacheConfig.cacheIntervals} intervals)`,
-    );
-    return false;
-  }
-  const currentFingerprint = await generateCacheFingerprint(
-    llmRequest,
-    cacheMetadata.contentsCount,
-    cacheScope,
-  );
-  if (currentFingerprint !== cacheMetadata.fingerprint) {
-    logger.debug('Cache content fingerprint mismatch');
-    return false;
-  }
-  return true;
+  return (await validActiveCache(llmRequest, cacheScope)) !== undefined;
 }
 
 /**
@@ -468,18 +486,15 @@ export class GeminiContextCacheManager {
       return fingerprintOnlyMetadata(llmRequest, this.cacheScope);
     }
 
-    if (await isCacheValid(llmRequest, this.cacheScope)) {
-      const cacheName = oldCacheMetadata.cacheName;
-      if (cacheName === undefined) {
-        throw new Error('A valid cache must have active metadata.');
-      }
-      logger.debug(`Cache is valid, reusing cache: ${cacheName}`);
+    const validCache = await validActiveCache(llmRequest, this.cacheScope);
+    if (validCache) {
+      logger.debug(`Cache is valid, reusing cache: ${validCache.cacheName}`);
       applyCacheToRequest(
         llmRequest,
-        cacheName,
-        oldCacheMetadata.contentsCount,
+        validCache.cacheName,
+        validCache.contentsCount,
       );
-      return {...oldCacheMetadata};
+      return {...validCache};
     }
 
     if (oldCacheMetadata.cacheName !== undefined) {

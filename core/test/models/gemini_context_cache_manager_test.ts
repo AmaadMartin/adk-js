@@ -1292,6 +1292,82 @@ describe('GeminiContextCacheManager paths the reference does not reach', () => {
     expect(findCountOfContentsToCache([])).toBe(0);
   });
 
+  it('reports no valid cache when the request carries no metadata', async () => {
+    const llmRequest = createLlmRequest(undefined, 2);
+
+    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+  });
+
+  it('skips cache creation below the configured minimum token count', async () => {
+    const llmRequest = createLlmRequest(undefined, 0);
+    llmRequest.config!.systemInstruction = 'x'.repeat(12_000);
+    llmRequest.cacheConfig = {
+      cacheIntervals: 10,
+      ttlSeconds: 1800,
+      minTokens: 4_000,
+    };
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    const fingerprint = await generateCacheFingerprint(
+      llmRequest,
+      0,
+      GEMINI_SCOPE,
+    );
+    llmRequest.cacheMetadata = {fingerprint, contentsCount: 0};
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.cacheName).toBeUndefined();
+    expect(result.fingerprint).toBe(fingerprint);
+    expect(client.caches.create).not.toHaveBeenCalled();
+  });
+
+  it('fingerprints a tool that declares no functions', async () => {
+    const withSearch = createLlmRequest(undefined, 0);
+    withSearch.config!.tools = [{googleSearch: {}}];
+    const withoutSearch = createLlmRequest(undefined, 0);
+    withoutSearch.config!.tools = [{urlContext: {}}];
+
+    expect(
+      await generateCacheFingerprint(withSearch, 0, GEMINI_SCOPE),
+    ).not.toBe(await generateCacheFingerprint(withoutSearch, 0, GEMINI_SCOPE));
+  });
+
+  it('sorts a declaration that carries no name before a named one', async () => {
+    const nameFirst = createLlmRequest(undefined, 0);
+    nameFirst.config!.tools = [
+      {functionDeclarations: [{description: 'a'}, {name: 'b'}]},
+    ];
+    const nameLast = createLlmRequest(undefined, 0);
+    nameLast.config!.tools = [
+      {functionDeclarations: [{name: 'b'}, {description: 'a'}]},
+    ];
+
+    expect(await generateCacheFingerprint(nameFirst, 0, GEMINI_SCOPE)).toBe(
+      await generateCacheFingerprint(nameLast, 0, GEMINI_SCOPE),
+    );
+  });
+
+  it('orders two identically named declarations without reordering them', async () => {
+    const twice = createLlmRequest(undefined, 0);
+    twice.config!.tools = [
+      {functionDeclarations: [{name: 'same'}, {name: 'same'}]},
+    ];
+    const once = createLlmRequest(undefined, 0);
+    once.config!.tools = [{functionDeclarations: [{name: 'same'}]}];
+
+    expect(await generateCacheFingerprint(twice, 0, GEMINI_SCOPE)).not.toBe(
+      await generateCacheFingerprint(once, 0, GEMINI_SCOPE),
+    );
+  });
+
+  it('counts a content that carries no parts as no characters', () => {
+    const llmRequest = createLlmRequest(undefined, 0);
+    llmRequest.config = {};
+    llmRequest.contents = [{role: 'user'}];
+
+    expect(estimateRequestTokens(llmRequest)).toBe(0);
+  });
+
   it('reports no token floor for a model that is not named', () => {
     expect(minimumCacheTokens(undefined)).toBeUndefined();
     expect(minimumCacheTokens('claude-3-opus')).toBeUndefined();
