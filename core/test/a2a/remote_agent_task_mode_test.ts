@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AgentCard, Message, MessageSendParams, Task} from '@a2a-js/sdk';
+import {
+  AgentCard,
+  Message,
+  MessageSendParams,
+  Task,
+  TaskStatusUpdateEvent,
+} from '@a2a-js/sdk';
 import {
   Client,
   ClientFactory,
@@ -487,6 +493,95 @@ describe('RemoteA2AAgent task mode', () => {
           ),
         ),
       ).toBe(true);
+    });
+
+    /** The terminal frame a running task actually reports its end with. */
+    const statusUpdate = (
+      state: 'failed' | 'canceled',
+      message?: string,
+    ): TaskStatusUpdateEvent => ({
+      kind: 'status-update',
+      taskId: 'task-1',
+      contextId: 'ctx-1',
+      final: true,
+      status: {
+        state,
+        ...(message
+          ? {
+              message: {
+                kind: 'message',
+                messageId: 'err-1',
+                role: 'agent',
+                parts: [{kind: 'text', text: message}],
+              },
+            }
+          : {}),
+      },
+    });
+
+    it('reports a task that failed after it started', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield statusUpdate('failed', 'disk on fire');
+        })(),
+      );
+
+      const events = await run(buildAgent(), contextFor([triggerEvent()]));
+
+      const error = events.find((event) =>
+        event.errorMessage?.startsWith('Remote A2A task failed'),
+      );
+      expect(error?.errorMessage).toContain('disk on fire');
+      expect(error?.customMetadata?.['a2a:task_id']).toBe('task-1');
+      expect(events[events.length - 1].actions.endOfAgent).toBe(true);
+    });
+
+    it('reports a cancellation that carries no message', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield statusUpdate('canceled');
+        })(),
+      );
+
+      const events = await run(buildAgent(), contextFor([triggerEvent()]));
+
+      expect(
+        events.find((event) => event.errorMessage)?.errorMessage,
+      ).toContain('Task canceled');
+      expect(events[events.length - 1].actions.endOfAgent).toBe(true);
+    });
+
+    it('reports a failure with no reason as an unknown error', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield statusUpdate('failed');
+        })(),
+      );
+
+      const events = await run(buildAgent(), contextFor([triggerEvent()]));
+
+      expect(
+        events.find((event) => event.errorMessage)?.errorMessage,
+      ).toContain('Unknown error');
+    });
+
+    it('keeps going on a non-terminal status update', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield {
+            kind: 'status-update',
+            taskId: 'task-1',
+            contextId: 'ctx-1',
+            final: false,
+            status: {state: 'working'},
+          } as TaskStatusUpdateEvent;
+        })(),
+      );
+
+      const events = await run(buildAgent(), contextFor([triggerEvent()]));
+
+      expect(events.some((event) => event.errorMessage)).toBe(false);
+      expect(events[events.length - 1]?.actions.endOfAgent).toBeUndefined();
     });
 
     it('reports a canceled remote task', async () => {

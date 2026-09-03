@@ -586,6 +586,37 @@ describe('remote_agent_utils', () => {
     });
   });
 
+  describe('peerRequestedCallIds', () => {
+    /** An event carrying one function call. */
+    const callEvent = (author: string, id: string) =>
+      createEvent({
+        author,
+        content: {
+          role: 'model',
+          parts: [
+            {functionCall: {id, name: 'adk_request_credential', args: {}}},
+          ],
+        },
+      });
+
+    it("treats the peer's own request as peer-requested", () => {
+      const events = [callEvent('test-agent', 'peer-fc')];
+
+      expect([...peerRequestedCallIds(events, 'test-agent')]).toEqual([
+        'peer-fc',
+      ]);
+    });
+
+    it("never treats this agent's own transport credential as the peer's", () => {
+      // The agent raises its own credential request under its own name, so an
+      // author check alone would exempt the answer from the scrub and forward
+      // the credential to the peer.
+      const events = [callEvent('test-agent', '_adk_toolset_auth_test-agent')];
+
+      expect([...peerRequestedCallIds(events, 'test-agent')]).toEqual([]);
+    });
+  });
+
   describe('fullHistoryWhenStateless', () => {
     const userTurn = (text: string) =>
       createEvent({author: 'user', content: {role: 'user', parts: [{text}]}});

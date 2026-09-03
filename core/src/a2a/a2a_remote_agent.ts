@@ -33,7 +33,13 @@ import {
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
-import {isTask, MessageRole} from './a2a_event.js';
+import {
+  getFailedTaskStatusUpdateEventError,
+  isTask,
+  isTaskStatusUpdateEvent,
+  MessageRole,
+  TaskState,
+} from './a2a_event.js';
 import {
   buildAuthInterceptors,
   deriveCredentialKey,
@@ -236,21 +242,58 @@ function releaseTaskControl(control: TaskControl, errorMessage: string): void {
  * The failure text for a task that ended badly, or `undefined` when the task
  * has not failed.
  */
-function taskFailureText(task: Task, event: AdkEvent): string | undefined {
-  const state = task.status?.state;
-  if (state === 'canceled') {
-    return 'Task canceled';
-  }
-  if (state !== 'failed') {
+/** A remote task that ended badly: which task, and why. */
+interface TaskFailure {
+  taskId: string;
+  text: string;
+}
+
+/**
+ * The failure a response chunk reports, or `undefined` when it reports none.
+ *
+ * A terminal state reaches the client either as a whole `Task` (the first frame
+ * of a stream, and the only frame of a non-streaming send) or as a
+ * `status-update` frame once the task is already running. Both are checked: a
+ * task that fails after it started only ever reports it the second way, and the
+ * A2A client forwards those frames without folding them into a running task.
+ */
+function taskFailure(
+  chunk: A2AStreamEventData,
+  event?: AdkEvent,
+): TaskFailure | undefined {
+  const isTaskChunk = isTask(chunk);
+  if (!isTaskChunk && !isTaskStatusUpdateEvent(chunk)) {
     return undefined;
   }
-  // A failed task arrives with its reason on `errorMessage` and no content, so
-  // read that first and fall back to whatever text the event does carry.
-  const text = (event.content?.parts ?? [])
+  const state = chunk.status?.state;
+  if (state !== TaskState.FAILED && state !== TaskState.CANCELED) {
+    return undefined;
+  }
+  const taskId = isTaskChunk ? chunk.id : chunk.taskId;
+  if (state === TaskState.CANCELED) {
+    return {taskId, text: 'Task canceled'};
+  }
+  return {taskId, text: failureText(chunk, event)};
+}
+
+/** The reason a failed task gives, from the chunk or the event built from it. */
+function failureText(
+  chunk: Task | TaskStatusUpdateEvent,
+  event?: AdkEvent,
+): string {
+  // A failed task converts to an event carrying its reason on `errorMessage`
+  // and no content, so read that first and fall back to any text either the
+  // event or the chunk's own status message carries.
+  const eventText = (event?.content?.parts ?? [])
     .map((part) => part.text)
     .filter((part): part is string => !!part)
     .join('\n');
-  return event.errorMessage || text || 'Unknown error';
+  return (
+    event?.errorMessage ||
+    eventText ||
+    getFailedTaskStatusUpdateEventError(chunk) ||
+    'Unknown error'
+  );
 }
 
 /**
@@ -640,64 +683,64 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           context.branch,
           a2aPartConverter,
         );
-        if (!converted) {
-          continue;
-        }
+        const adkEvent = converted
+          ? await executeAfterRequestInterceptors(
+              this.requestInterceptors,
+              context,
+              chunk,
+              converted,
+            )
+          : undefined;
 
-        const adkEvent = await executeAfterRequestInterceptors(
-          this.requestInterceptors,
-          context,
-          chunk,
-          converted,
-        );
-        if (!adkEvent) {
-          continue;
-        }
+        if (adkEvent) {
+          processor.updateCustomMetadata(adkEvent, chunk);
 
-        processor.updateCustomMetadata(adkEvent, chunk);
-
-        if (this.finishTaskTool && isFinishTaskTerminalResponse(adkEvent)) {
-          adkEvent.output = this.taskOutput(context, adkEvent);
-          yield adkEvent;
-          // Returning early stops the stream reader, ignoring any duplicate
-          // responses the server sends at the end of the run.
-          control.release = true;
-          return;
-        }
-
-        if (!useStreaming) {
-          yield adkEvent;
-        } else {
-          for (const ev of processor.aggregatePartial(
-            context,
-            chunk,
-            adkEvent,
-          )) {
-            yield ev;
-          }
-        }
-
-        if (this.finishTaskTool && isTask(chunk)) {
-          const failure = taskFailureText(chunk, adkEvent);
-          if (failure !== undefined) {
-            logger.warn(
-              `Remote task ${chunk.id} reported ${chunk.status.state}.` +
-                ' Releasing control.',
-            );
-            const errorMessage = `Remote A2A task failed: ${failure}`;
-            yield createEvent({
-              author: this.name,
-              invocationId: context.invocationId,
-              branch: context.branch,
-              errorMessage,
-              customMetadata: {
-                [A2AErrorMetadataKeys.ERROR]: errorMessage,
-                [AdkMetadataKeys.TASK_ID]: chunk.id,
-              },
-            });
-            releaseTaskControl(control, errorMessage);
+          if (this.finishTaskTool && isFinishTaskTerminalResponse(adkEvent)) {
+            adkEvent.output = this.taskOutput(context, adkEvent);
+            yield adkEvent;
+            // Returning early stops the stream reader, ignoring any duplicate
+            // responses the server sends at the end of the run.
+            control.release = true;
             return;
           }
+
+          if (!useStreaming) {
+            yield adkEvent;
+          } else {
+            for (const ev of processor.aggregatePartial(
+              context,
+              chunk,
+              adkEvent,
+            )) {
+              yield ev;
+            }
+          }
+        }
+
+        // Checked against the chunk, not the event: a terminal status update
+        // often carries no content and converts to no event at all.
+        const failure = this.finishTaskTool
+          ? taskFailure(chunk, adkEvent)
+          : undefined;
+        if (failure) {
+          logger.warn(
+            `Remote task ${failure.taskId} reported ${failure.text}.` +
+              ' Releasing control.',
+          );
+          const errorMessage = `Remote A2A task failed: ${failure.text}`;
+          yield createEvent({
+            author: this.name,
+            invocationId: context.invocationId,
+            branch: context.branch,
+            isolationScope: context.isolationScope,
+            errorMessage,
+            customMetadata: {
+              [A2AErrorMetadataKeys.ERROR]: errorMessage,
+              [AdkMetadataKeys.TASK_ID]: failure.taskId,
+            },
+          });
+          releaseTaskControl(control, errorMessage);
+          return;
         }
       }
     } catch (e: unknown) {
