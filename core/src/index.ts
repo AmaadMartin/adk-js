@@ -16,7 +16,30 @@ export {
   AgentEngineSandboxCodeExecutor,
   type AgentEngineSandboxCodeExecutorOptions,
 } from './code_executors/agent_engine_sandbox_code_executor.js';
+export {
+  AgentSandboxClient,
+  defaultSandboxClientFactory,
+  type AgentSandboxClientOptions,
+  type SandboxObjectsApi,
+} from './code_executors/agent_sandbox_client.js';
 export {CodeExecutionLanguage} from './code_executors/code_execution_utils.js';
+export {
+  GkeCodeExecutor,
+  type GkeApiClients,
+  type GkeCodeExecutorOptions,
+  type GkeExecutorType,
+  type GkeJobWatcher,
+  type GkeJobsApi,
+  type GkePodsApi,
+} from './code_executors/gke_code_executor.js';
+export {
+  SandboxInfrastructureError,
+  SandboxTimeoutError,
+  type SandboxClient,
+  type SandboxClientFactory,
+  type SandboxClientOptions,
+  type SandboxRunResult,
+} from './code_executors/sandbox_client.js';
 export {
   UnsafeLocalCodeExecutor,
   type UnsafeLocalCodeExecutorOptions,
