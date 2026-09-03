@@ -16,10 +16,8 @@ import {describe, expect, it} from 'vitest';
 
 function invocation(query: string, response: string): Invocation {
   return {
-    invocationId: '',
     userContent: {parts: [{text: query}]},
     finalResponse: {parts: [{text: response}]},
-    creationTimestamp: 0,
   };
 }
 
@@ -42,19 +40,6 @@ function scored(meanScore: number): VertexEvaluationResult {
 }
 
 describe('SingleTurnVertexAiEvalFacade', () => {
-  it('rejects a call without expected invocations when the metric needs them', async () => {
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 0.5,
-      metricName: 'COHERENCE',
-      expectedInvocationsRequired: true,
-      client: new FakeEvalClient([]),
-    });
-
-    await expect(
-      facade.evaluateInvocations([invocation('q', 'a')]),
-    ).rejects.toThrow('expectedInvocations is needed by this metric.');
-  });
-
   it('rejects invocation lists of different lengths', async () => {
     const facade = new SingleTurnVertexAiEvalFacade({
       threshold: 0.5,

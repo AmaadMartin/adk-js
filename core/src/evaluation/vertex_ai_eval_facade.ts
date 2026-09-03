@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError} from '../errors/input_validation_error.js';
+import type {Content} from '@google/genai';
 import {Invocation} from './eval_case.js';
+import {EvalStatus} from './eval_metrics.js';
 import {
-  emptyEvaluationResult,
   EvaluationResult,
   Evaluator,
-  getEvalStatus,
-  getTextFromContent,
   PerInvocationResult,
   validateInvocationLengths,
 } from './evaluator.js';
@@ -67,9 +65,6 @@ export interface VertexAiEvalFacadeOptions {
   /** The name of the metric to request from the service. */
   metricName: string;
 
-  /** Whether the metric needs golden invocations. Defaults to false. */
-  expectedInvocationsRequired?: boolean;
-
   /** The client that reaches the service. */
   client: VertexAiEvalClient;
 }
@@ -80,6 +75,24 @@ function getScore(result: VertexEvaluationResult): number | undefined {
   return Number.isFinite(meanScore) ? meanScore : undefined;
 }
 
+/** Returns the status of a score, which is absent when nothing was scored. */
+function getEvalStatus(
+  score: number | undefined,
+  threshold: number,
+): EvalStatus {
+  if (score === undefined) {
+    return EvalStatus.NOT_EVALUATED;
+  }
+  return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
+}
+
+/** Joins the text parts of a content with newlines. */
+function getTextFromContent(content?: Content): string {
+  return (content?.parts ?? [])
+    .flatMap((part) => (part.text ? [part.text] : []))
+    .join('\n');
+}
+
 /**
  * Scores invocations one at a time with a single-turn metric of the Vertex AI
  * Gen AI evaluation service.
@@ -87,30 +100,21 @@ function getScore(result: VertexEvaluationResult): number | undefined {
 export class SingleTurnVertexAiEvalFacade implements Evaluator {
   private readonly threshold: number;
   private readonly metricName: string;
-  private readonly expectedInvocationsRequired: boolean;
   private readonly client: VertexAiEvalClient;
 
   constructor(options: VertexAiEvalFacadeOptions) {
     this.threshold = options.threshold;
     this.metricName = options.metricName;
-    this.expectedInvocationsRequired =
-      options.expectedInvocationsRequired ?? false;
     this.client = options.client;
   }
 
   /**
-   * @throws InputValidationError if the metric needs golden invocations and
-   *     none are given, or if the two lists have different lengths.
+   * @throws InputValidationError if the two lists have different lengths.
    */
   async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
   ): Promise<EvaluationResult> {
-    if (this.expectedInvocationsRequired && expectedInvocations === undefined) {
-      throw new InputValidationError(
-        'expectedInvocations is needed by this metric.',
-      );
-    }
     validateInvocationLengths(actualInvocations, expectedInvocations);
 
     const perInvocationResults: PerInvocationResult[] = [];
@@ -144,10 +148,6 @@ export class SingleTurnVertexAiEvalFacade implements Evaluator {
         score,
         evalStatus: getEvalStatus(score, this.threshold),
       });
-    }
-
-    if (perInvocationResults.length === 0) {
-      return emptyEvaluationResult();
     }
 
     const overallScore =

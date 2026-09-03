@@ -45,10 +45,8 @@ class MyEvalClient implements VertexAiEvalClient {
 
 const actual: Invocation[] = [
   {
-    invocationId: '',
     userContent: {parts: [{text: 'Tell me a joke.'}]},
     finalResponse: {parts: [{text: 'Why did the chicken cross the road?'}]},
-    creationTimestamp: 0,
   },
 ];
 

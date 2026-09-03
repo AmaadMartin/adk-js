@@ -4,20 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Content} from '@google/genai';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import type {Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
-
-/**
- * The verdict a metric returns for an invocation, or for a whole eval case.
- *
- * The numeric values match the `EvalStatus` of `google/adk-python`, so a
- * serialized status is portable between the two runtimes. The enum lives in
- * `eval_metrics.ts`, and is re-exported here so that a metric reads its whole
- * contract from this module.
- */
-export {EvalStatus};
 
 /** Metric evaluation score for one invocation. */
 export interface PerInvocationResult {
@@ -53,22 +42,13 @@ export interface Evaluator {
    *
    * @param actualInvocations The invocations obtained from the agent under
    *   test.
-   * @param expectedInvocations Golden invocations. A metric that needs them
-   *   rejects the call when they are absent. When supplied, the list must
-   *   have the same length as `actualInvocations`.
+   * @param expectedInvocations Golden invocations. When supplied, the list
+   *   must have the same length as `actualInvocations`.
    */
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
   ): EvaluationResult | Promise<EvaluationResult>;
-}
-
-/** The result returned when nothing could be evaluated. */
-export function emptyEvaluationResult(): EvaluationResult {
-  return {
-    overallEvalStatus: EvalStatus.NOT_EVALUATED,
-    perInvocationResults: [],
-  };
 }
 
 /**
@@ -90,22 +70,4 @@ export function validateInvocationLengths(
         `got ${actualInvocations.length} and ${expectedInvocations.length}.`,
     );
   }
-}
-
-/** Returns the status of a score, which is absent when nothing was scored. */
-export function getEvalStatus(
-  score: number | undefined,
-  threshold: number,
-): EvalStatus {
-  if (score === undefined) {
-    return EvalStatus.NOT_EVALUATED;
-  }
-  return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
-}
-
-/** Joins the text parts of a content with newlines. */
-export function getTextFromContent(content?: Content): string {
-  return (content?.parts ?? [])
-    .flatMap((part) => (part.text ? [part.text] : []))
-    .join('\n');
 }

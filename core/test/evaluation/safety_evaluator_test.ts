@@ -17,10 +17,8 @@ import {describe, expect, it} from 'vitest';
 
 function invocation(query: string, response: string): Invocation {
   return {
-    invocationId: '',
     userContent: {parts: [{text: query}]},
     finalResponse: {parts: [{text: response}]},
-    creationTimestamp: 0,
   };
 }
 
