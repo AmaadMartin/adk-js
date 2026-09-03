@@ -311,24 +311,29 @@ describe('mutual TLS without a certificate', () => {
     await rm(home, {recursive: true, force: true});
   });
 
-  it('should stay on the plain endpoint when no certificate resolves', async () => {
-    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+  it.each(['auto', 'always'])(
+    'should stay on the plain endpoint when no certificate resolves (%s)',
+    async (setting) => {
+      vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+      vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', setting);
 
-    const result = await getGcpExporters({
-      enableTracing: true,
-      googleAuth: {authClient: new FakeAuthClient(), projectId: PROJECT_ID},
-    });
+      const result = await getGcpExporters({
+        enableTracing: true,
+        googleAuth: {authClient: new FakeAuthClient(), projectId: PROJECT_ID},
+      });
 
-    // The mutual-TLS endpoint rejects a connection that presents no
-    // certificate, which would drop all telemetry.
-    const config = vi.mocked(OTLPTraceExporter).mock.calls[0][0];
-    expect(config?.url).toBe('https://telemetry.googleapis.com/v1/traces');
-    expect(config?.httpAgentOptions).toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('No context-aware client certificate'),
-    );
-    await shutdown(result);
-  });
+      // The mutual-TLS endpoint rejects a connection that presents no
+      // certificate, which would drop all telemetry. adk-python selects it
+      // anyway; this port does not.
+      const config = vi.mocked(OTLPTraceExporter).mock.calls[0][0];
+      expect(config?.url).toBe('https://telemetry.googleapis.com/v1/traces');
+      expect(config?.httpAgentOptions).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('No context-aware client certificate'),
+      );
+      await shutdown(result);
+    },
+  );
 });
 
 describe('project number conversion', () => {
