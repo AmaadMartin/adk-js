@@ -229,66 +229,6 @@ describe('evalModel nesting', () => {
   });
 });
 
-describe('evalModel dumping', () => {
-  const finalResponse: Content = {role: 'model', parts: [{text: 'Booked.'}]};
-
-  it('emits canonical camelCase keys by default', () => {
-    const parsed = conversationScenario.parse({
-      starting_prompt: 'hi',
-      conversation_plan: 'chat',
-    });
-
-    expect(conversationScenario.dump(parsed)).toEqual({
-      startingPrompt: 'hi',
-      conversationPlan: 'chat',
-    });
-  });
-
-  it('emits snake_case alias keys with byAlias, at every level', () => {
-    const parsed = evalCase.parse(evalCaseFixture(finalResponse));
-
-    expect(evalCase.dump(parsed, {byAlias: true})).toEqual({
-      case_id: 'case-1',
-      root_scenario: {
-        starting_prompt: 'I need to book a flight.',
-        conversation_plan: 'Book SFO to LAX.',
-      },
-      scenarios: [
-        {
-          starting_prompt: 'What can you do?',
-          conversation_plan: 'Ask and stop.',
-        },
-      ],
-      final_response: finalResponse,
-      raw_score: 0.5,
-    });
-  });
-
-  it('never rewrites the keys inside an arbitrary-typed value', () => {
-    const opaque: Content = {
-      role: 'user',
-      parts: [{functionCall: {name: 'book', args: {departure_city: 'SFO'}}}],
-    };
-    const parsed = evalCase.parse(evalCaseFixture(opaque));
-
-    const dumped = evalCase.dump(parsed, {byAlias: true});
-
-    expect(dumped['final_response']).toEqual({
-      role: 'user',
-      parts: [{functionCall: {name: 'book', args: {departure_city: 'SFO'}}}],
-    });
-  });
-
-  it('round trips through both dump forms', () => {
-    const parsed = evalCase.parse(evalCaseFixture(finalResponse));
-
-    expect(evalCase.parse(evalCase.dump(parsed))).toEqual(parsed);
-    expect(evalCase.parse(evalCase.dump(parsed, {byAlias: true}))).toEqual(
-      parsed,
-    );
-  });
-});
-
 describe('evalModel aliases', () => {
   it('derives an alias that does not split a digit segment', () => {
     expect(derivedAliasMetricResult.parse({metric_name1: 'safety'})).toEqual({
@@ -305,9 +245,6 @@ describe('evalModel aliases', () => {
     expect(metricResult.parse({metric_name_1: 'safety'})).toEqual({
       metricName1: 'safety',
     });
-    expect(metricResult.dump({metricName1: 'safety'}, {byAlias: true})).toEqual(
-      {metric_name_1: 'safety'},
-    );
   });
 
   it('no longer accepts the derived alias once overridden', () => {

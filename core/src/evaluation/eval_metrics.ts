@@ -307,16 +307,6 @@ export interface EvalMetric {
   customFunctionPath?: string;
 }
 
-/**
- * An {@link EvalMetric} that an LLM-as-a-judge metric scores.
- *
- * It narrows the criterion, so that a criterion written inline keeps its
- * `judgeModelOptions` instead of failing the excess-property check.
- */
-export interface LlmAsAJudgeMetric extends EvalMetric {
-  criterion?: LlmAsAJudgeCriterion;
-}
-
 /** Supporting detail a metric reports alongside its score. */
 export interface EvalMetricResultDetails {
   /** The scores obtained by applying the criterion's rubrics. */
@@ -501,21 +491,6 @@ const toolTrajectoryCriterionModel: EvalModel<ToolTrajectoryCriterion> =
     },
     {...CRITERION_OPTIONS, name: 'ToolTrajectoryCriterion'},
   );
-
-/**
- * A function that validates a criterion read from a config file, and applies
- * its defaults.
- *
- * {@link LlmAsJudge} takes one of these so that it can name the criterion type
- * its metric expects when the criterion does not fit. It is the callable form
- * of {@link CriterionType}, which an evaluator class declares instead.
- */
-export interface CriterionParser<CriterionT extends BaseCriterion> {
-  (raw: unknown): CriterionT;
-
-  /** The name of the criterion type, for error messages. */
-  readonly criterionName: string;
-}
 
 /**
  * Validates a base criterion payload, keeping any metric-specific keys.

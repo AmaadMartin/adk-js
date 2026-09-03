@@ -6,7 +6,7 @@
 
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {toSnakeCaseKey} from '../utils/object_notation_utils.js';
+import {isRecord, toSnakeCaseKey} from '../utils/object_notation_utils.js';
 
 /** How an eval model treats a key its shape does not name. */
 export type ExtraKeysPolicy = 'forbid' | 'allow';
@@ -35,12 +35,6 @@ export interface EvalModelOptions {
   readonly extraKeys?: ExtraKeysPolicy;
 }
 
-/** Options for {@link EvalModel.dump}. */
-export interface EvalDumpOptions {
-  /** Emits snake_case alias keys instead of the canonical camelCase ones. */
-  readonly byAlias?: boolean;
-}
-
 /** An evaluation model: the shared validation configuration, applied. */
 export interface EvalModel<T extends object> {
   /**
@@ -55,9 +49,6 @@ export interface EvalModel<T extends object> {
    * @throws {InputValidationError} If the value is not a valid `T`.
    */
   parse(raw: unknown): T;
-
-  /** Renders a validated value as JSON. */
-  dump(value: T, options?: EvalDumpOptions): Record<string, unknown>;
 }
 
 /**
@@ -87,28 +78,22 @@ export function evalModel<Shape extends z.ZodRawShape>(
   shape: Shape,
   options: EvalModelOptions,
 ): EvalModel<z.infer<z.ZodObject<Shape>>> {
-  const aliases = new Map<string, string>();
-  for (const property of Object.keys(shape)) {
-    aliases.set(
-      property,
-      options.aliases?.[property] ?? toSnakeCaseKey(property),
-    );
-  }
   const properties = new Map<string, string>();
-  for (const [property, alias] of aliases) {
-    properties.set(alias, property);
+  for (const property of Object.keys(shape)) {
+    properties.set(
+      options.aliases?.[property] ?? toSnakeCaseKey(property),
+      property,
+    );
   }
 
   const object =
     options.extraKeys === 'allow'
       ? z.looseObject(shape)
       : z.strictObject(shape);
-  const schema = z
-    .codec(z.looseObject({}), z.looseObject({}), {
-      decode: (raw) => renameKeys(raw, properties),
-      encode: (value) => renameKeys(value, aliases),
-    })
-    .pipe(object);
+  const schema = z.preprocess(
+    (raw) => (isRecord(raw) ? renameKeys(raw, properties) : raw),
+    object,
+  );
 
   return {
     schema,
@@ -121,9 +106,6 @@ export function evalModel<Shape extends z.ZodRawShape>(
         );
       }
       return result.data;
-    },
-    dump(value, dumpOptions) {
-      return dumpOptions?.byAlias ? schema.encode(value) : {...value};
     },
   };
 }

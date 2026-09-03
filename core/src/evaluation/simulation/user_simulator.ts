@@ -140,7 +140,8 @@ export interface LlmUserSimulatorConfig extends BaseUserSimulatorConfig {
 
   /**
    * Instructions that replace the built-in simulator prompt. They must name
-   * every placeholder in {@link REQUIRED_INSTRUCTION_PLACEHOLDERS}.
+   * `stop_signal`, `conversation_plan` and `conversation_history`, each inside
+   * a `{{ }}` pair.
    */
   customInstructions?: string;
 
@@ -158,7 +159,7 @@ export interface LlmUserSimulatorConfig extends BaseUserSimulatorConfig {
  * variables it leaves undeclared. adk-js has no Jinja, so it checks that each
  * name appears inside a `{{ }}` pair instead.
  */
-export const REQUIRED_INSTRUCTION_PLACEHOLDERS = [
+const REQUIRED_INSTRUCTION_PLACEHOLDERS = [
   'stop_signal',
   'conversation_plan',
   'conversation_history',
@@ -169,7 +170,7 @@ const PLACEHOLDER_PATTERNS = REQUIRED_INSTRUCTION_PLACEHOLDERS.map(
 );
 
 /** Message adk-python raises when custom instructions omit a placeholder. */
-export const MISSING_INSTRUCTION_PLACEHOLDER_ERROR =
+const MISSING_INSTRUCTION_PLACEHOLDER_ERROR =
   'custom_instructions must contain each of the following formatting ' +
   'placeholders using Jinja syntax: {{ stop_signal }}, ' +
   '{{ conversation_plan }}, {{ conversation_history }}';
@@ -181,9 +182,7 @@ export const MISSING_INSTRUCTION_PLACEHOLDER_ERROR =
  * @param instructions The instructions to check.
  * @returns Whether every placeholder appears inside a `{{ }}` pair.
  */
-export function hasRequiredInstructionPlaceholders(
-  instructions: string,
-): boolean {
+function hasRequiredInstructionPlaceholders(instructions: string): boolean {
   return PLACEHOLDER_PATTERNS.every((pattern) => pattern.test(instructions));
 }
 

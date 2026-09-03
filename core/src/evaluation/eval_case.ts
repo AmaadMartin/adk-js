@@ -13,6 +13,7 @@ import {
 } from '@google/genai';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
+import {isRecord} from '../utils/object_notation_utils.js';
 import {AppDetails} from './app_details.js';
 import {ConversationScenario} from './conversation_scenarios.js';
 // Type-only: `eval_rubrics.ts` imports `EvalCase` and `Invocation` from here,
@@ -92,12 +93,7 @@ export interface Invocation {
 /** The state of the session an eval case runs in. */
 export type SessionState = Record<string, unknown>;
 
-/**
- * Values that initialize the session an eval case runs in.
- *
- * Unknown keys are carried rather than rejected, matching adk-python's
- * `extra="allow"` on this model.
- */
+/** Values that initialize the session an eval case runs in. */
 export interface SessionInput {
   appName: string;
 
@@ -113,8 +109,6 @@ export interface SessionInput {
 
   /** The state the session starts from. Applied only when creating it. */
   state?: SessionState;
-
-  [key: string]: unknown;
 }
 
 /** A conversation whose user turns are already recorded. */
@@ -153,8 +147,6 @@ export interface EvalCase {
 
   /** The expected session state at the end of the conversation. */
   finalSessionState?: SessionState;
-
-  [key: string]: unknown;
 }
 
 /** A tool call paired with its response, when one was recorded. */
@@ -170,10 +162,6 @@ const RECORDED_TRAJECTORY_KEYS = [
 const CONVERSATION_XOR_MESSAGE =
   'Exactly one of conversation and conversation_scenario must be provided in' +
   ' an EvalCase.';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /** Returns true when the intermediate data is a list of invocation events. */
 export function isInvocationEvents(value: unknown): value is InvocationEvents {

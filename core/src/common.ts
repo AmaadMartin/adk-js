@@ -13,11 +13,8 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
-export {
-  agentRefConfigSchema,
-  codeConfigSchema,
-} from './agents/common_configs.js';
-export type {AgentRefConfig, CodeConfig} from './agents/common_configs.js';
+export {codeConfigSchema} from './agents/common_configs.js';
+export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -166,15 +163,11 @@ export {
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export {evalModel} from './evaluation/common.js';
 export type {
-  EvalDumpOptions,
   EvalModel,
   EvalModelOptions,
   ExtraKeysPolicy,
 } from './evaluation/common.js';
-export {
-  DEFAULT_LIVE_TIMEOUT_SECONDS,
-  MISSING_EVAL_DEPENDENCIES_MESSAGE,
-} from './evaluation/constants.js';
+export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
 export {
   getAllToolCalls,
   getAllToolCallsWithResponses,
@@ -204,7 +197,6 @@ export {
 } from './evaluation/eval_config.js';
 export type {
   Criterion,
-  CustomMetricCodeConfig,
   CustomMetricConfig,
   EvalConfig,
   LiveModelConfig,
@@ -262,7 +254,6 @@ export type {
   RubricContent,
   RubricScore,
 } from './evaluation/eval_rubrics.js';
-export type {EvalSet} from './evaluation/eval_set.js';
 export {
   DEFAULT_USER_SIMULATOR_AUDIO_MODEL,
   DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
@@ -276,10 +267,7 @@ export {
   DEFAULT_MAX_ALLOWED_INVOCATIONS,
   DEFAULT_USER_SIMULATOR_MODEL,
   DEFAULT_USER_SIMULATOR_THINKING_BUDGET,
-  MISSING_INSTRUCTION_PLACEHOLDER_ERROR,
-  REQUIRED_INSTRUCTION_PLACEHOLDERS,
   UserSimulatorStatus,
-  hasRequiredInstructionPlaceholders,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
 export type {

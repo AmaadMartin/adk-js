@@ -9,9 +9,9 @@ import {z} from 'zod';
 import {codeConfigSchema, type CodeConfig} from '../agents/common_configs.js';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
+import {isRecord, toCamelCase} from '../utils/object_notation_utils.js';
 import {evalModel, optionalField, type EvalModel} from './common.js';
 import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
-import {isRecord, toCamelKeys} from './eval_json.js';
 import {
   parseMetricInfo,
   PrebuiltMetrics,
@@ -36,14 +36,6 @@ import {
  * that need more than one setting.
  */
 export type Criterion = number | BaseCriterion;
-
-/**
- * Locates the scoring function of a custom metric.
- *
- * @deprecated Use {@link CodeConfig}, which adk-python's `CustomMetricConfig`
- *   refers to as well.
- */
-export type CustomMetricCodeConfig = CodeConfig;
 
 /** Declares a metric that is scored by user-supplied code. */
 export interface CustomMetricConfig {
@@ -137,7 +129,7 @@ const criterionSchema = z.unknown().transform((raw, ctx): Criterion => {
   if (typeof raw === 'number') {
     return raw;
   }
-  const converted = toCamelKeys(raw);
+  const converted = toCamelCase(raw);
   const threshold = isRecord(converted) ? converted['threshold'] : undefined;
   if (!isRecord(converted) || typeof threshold !== 'number') {
     ctx.addIssue({

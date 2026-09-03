@@ -182,34 +182,6 @@ const MALFORMED: IntermediateDataType = JSON.parse(
   '"this is not a valid type"',
 );
 
-describe('extra key passthrough', () => {
-  it('carries unknown keys on a SessionInput', () => {
-    const sessionInput: SessionInput = {
-      appName: 'app',
-      userId: 'user',
-      evalGroup: 'retrieval',
-      source: 'nightly',
-    };
-
-    expect(sessionInput['evalGroup']).toBe('retrieval');
-    expect(sessionInput['source']).toBe('nightly');
-  });
-
-  it('carries unknown keys on an EvalCase through a JSON round trip', () => {
-    const evalCase: EvalCase = {
-      evalId: 'case_1',
-      conversation: [],
-      sessionInput: {appName: 'app', userId: 'user', source: 'nightly'},
-      owner: 'platform',
-    };
-
-    const roundTripped: EvalCase = JSON.parse(JSON.stringify(evalCase));
-
-    expect(roundTripped['owner']).toBe('platform');
-    expect(roundTripped.sessionInput?.['source']).toBe('nightly');
-  });
-});
-
 describe('model defaults', () => {
   it('leaves an InvocationEvent without content undefined', () => {
     const event: InvocationEvent = {author: 'agent'};
@@ -533,12 +505,10 @@ describe('reading a validated eval case', () => {
           },
         },
       ],
-      owner: 'platform',
     });
 
     const [invocation] = evalCase.conversation ?? [];
 
-    expect(evalCase['owner']).toBe('platform');
     expect(getAllToolCallsWithResponses(invocation?.intermediateData)).toEqual([
       [
         {id: 'call1', name: 'get_weather', args: {city: 'SFO'}},
