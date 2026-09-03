@@ -155,6 +155,22 @@ describe('batchLoadYamlTestDefs', () => {
     expect(test?.spec.agent).toBe('test-agent');
   });
 
+  it('should reject a spec whose key is misspelled', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/t1/spec.yaml',
+    ]);
+    // The typo is snake_case in the file, so this also pins the order: the
+    // loader camelCases the spec first, then validates it.
+    (fs.readFile as Mock).mockResolvedValue(
+      'description: d\nagent: a\nuser_mesages:\n  - text: typo\n',
+    );
+
+    await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
+      /Unrecognized key: "userMesages"/,
+    );
+  });
+
   it('should throw an error if a required file is missing', async () => {
     const rootDir = '/root/tests';
     (fg.stream as unknown as Mock).mockReturnValue([
