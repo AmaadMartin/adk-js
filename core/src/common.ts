@@ -327,6 +327,13 @@ export {
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
+  SET_MODEL_RESPONSE_ITEMS_PARAMETER,
+  SET_MODEL_RESPONSE_TOOL_NAME,
+  SET_MODEL_RESPONSE_VALUE_PARAMETER,
+  createSetModelResponseTool,
+  getStructuredModelResponse,
+} from './tools/set_model_response_tool.js';
+export {
   IntentMismatchError,
   ToolConfirmation,
   isIntentMismatchError,
@@ -347,7 +354,8 @@ export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
-export type {SchemaLike} from './utils/schema.js';
+export {schemaShape} from './utils/schema.js';
+export type {SchemaLike, SchemaShape} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export {Task} from './utils/task.js';
 export type {TaskExecutable} from './utils/task.js';
