@@ -159,3 +159,15 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Whether a thrown value is Node's "no such file or directory" error, so a
+ * caller can report a missing path without also swallowing a permission
+ * failure under the same message.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return Whether the value carries the `ENOENT` error code.
+ */
+export function isFileNotFoundError(err: unknown): boolean {
+  return asRecord(err)?.['code'] === 'ENOENT';
+}

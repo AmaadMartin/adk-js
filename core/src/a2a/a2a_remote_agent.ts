@@ -29,7 +29,8 @@ import {
   toForwardableA2AParts,
   toMissingRemoteSessionParts,
 } from './a2a_remote_agent_utils.js';
-import {resolveAgentCard} from './agent_card.js';
+import {adoptedCardDescription, resolveAgentCard} from './agent_card.js';
+import {validateAgentCard} from './agent_card_validation.js';
 import {toAdkEvent} from './event_converter_utils.js';
 import {getA2ASessionMetadata} from './metadata_converter_utils.js';
 
@@ -125,10 +126,28 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   private card?: AgentCard;
   private isInitialized = false;
 
+  /**
+   * Redeclared without `readonly`: a card reached over the network only names
+   * the remote late, so the description it supplies is adopted on first
+   * resolution. `declare` emits nothing, so the base class still owns the
+   * field and its constructor value.
+   */
+  declare description: string;
+
   constructor(private readonly a2aConfig: RemoteA2AAgentConfig) {
     super(a2aConfig);
     if (!a2aConfig.agentCard && !a2aConfig.client) {
       throw new Error('Either AgentCard or Client must be provided');
+    }
+    if (typeof a2aConfig.agentCard === 'string') {
+      if (!a2aConfig.agentCard.trim()) {
+        throw new Error('agentCard string cannot be empty');
+      }
+    } else if (!this.description && a2aConfig.agentCard?.description) {
+      // A card supplied directly never goes through the resolution path, and a
+      // parent agent reads the description to build its transfer instruction
+      // before this agent ever runs.
+      this.description = a2aConfig.agentCard.description;
     }
   }
 
@@ -142,7 +161,18 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
 
     if (this.a2aConfig.agentCard) {
-      this.card = await resolveAgentCard(this.a2aConfig.agentCard);
+      const source = this.a2aConfig.agentCard;
+      const card = await resolveAgentCard(source);
+      if (typeof source === 'string') {
+        // Validate before caching. A rejected card left on the instance reads
+        // as already resolved, so the next call would skip the check and talk
+        // to the origin that card named.
+        validateAgentCard(card, source);
+        if (!this.description && card.description) {
+          this.description = adoptedCardDescription(card.description, source);
+        }
+      }
+      this.card = card;
 
       if (!this.client) {
         const factory = this.a2aConfig.clientFactory || new ClientFactory();

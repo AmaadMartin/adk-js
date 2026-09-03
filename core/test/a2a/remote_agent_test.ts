@@ -25,6 +25,10 @@ import {
   Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  QUOTED_CONTENT_BEGIN,
+  QUOTED_CONTENT_END,
+} from '../../src/utils/fencing_utils.js';
 
 type A2AStreamEventData =
   | Message
@@ -45,6 +49,29 @@ vi.mock('@a2a-js/sdk/client', () => {
   }));
   return {Client, ClientFactory, DefaultAgentCardResolver};
 });
+
+/** A minimal card served from `https://example.com`, with per-test overrides. */
+function peerCard(overrides: Partial<AgentCard> = {}): AgentCard {
+  return {
+    name: 'Remote',
+    description: 'test',
+    protocolVersion: '1.0',
+    defaultInputModes: [],
+    defaultOutputModes: [],
+    capabilities: {streaming: true},
+    skills: [],
+    url: 'https://example.com',
+    version: '1.0',
+    ...overrides,
+  };
+}
+
+/** Consumes an event stream, so a rejection surfaces to the caller. */
+async function drain(events: AsyncGenerator<AdkEvent, void, void>) {
+  for await (const _ of events) {
+    // discard
+  }
+}
 
 describe('A2ARemoteAgent', () => {
   let mockClient: Client;
@@ -96,6 +123,82 @@ describe('A2ARemoteAgent', () => {
       () =>
         new RemoteA2AAgent({name: 'test'} as unknown as RemoteA2AAgentConfig),
     ).toThrow('Either AgentCard or Client must be provided');
+  });
+
+  it('rejects an empty agentCard string at construction', () => {
+    expect(
+      () => new RemoteA2AAgent({name: 'test-agent', agentCard: '   '}),
+    ).toThrow('agentCard string cannot be empty');
+  });
+
+  it('adopts an object card description verbatim at construction', () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: peerCard({description: 'books flights'}),
+    });
+    expect(agent.description).toBe('books flights');
+  });
+
+  it('keeps an explicit description over the object card description', () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      description: 'mine',
+      agentCard: peerCard({description: 'books flights'}),
+    });
+    expect(agent.description).toBe('mine');
+  });
+
+  it('fences a description adopted from a card fetched over the network', async () => {
+    vi.mocked(mockResolver.resolve).mockResolvedValue(
+      peerCard({description: 'books flights'}),
+    );
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+      clientFactory: mockClientFactory,
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      (async function* () {})(),
+    );
+
+    for await (const _ of agent.runAsync(createMockContext())) {
+      // drain
+    }
+
+    expect(agent.description).toBe(
+      `${QUOTED_CONTENT_BEGIN}\nbooks flights\n${QUOTED_CONTENT_END}`,
+    );
+  });
+
+  it('rejects a fetched card whose RPC URL points at another origin', async () => {
+    vi.mocked(mockResolver.resolve).mockResolvedValue(
+      peerCard({url: 'https://attacker.example.net/a2a'}),
+    );
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+      clientFactory: mockClientFactory,
+    });
+
+    await expect(drain(agent.runAsync(createMockContext()))).rejects.toThrow(
+      /must have the same origin/,
+    );
+    expect(mockClientFactory.createFromAgentCard).not.toHaveBeenCalled();
+  });
+
+  it('re-validates a rejected card on every call instead of caching it', async () => {
+    vi.mocked(mockResolver.resolve).mockResolvedValue(
+      peerCard({url: 'http://attacker.example.net/a2a'}),
+    );
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+      clientFactory: mockClientFactory,
+    });
+
+    await expect(drain(agent.runAsync(createMockContext()))).rejects.toThrow();
+    await expect(drain(agent.runAsync(createMockContext()))).rejects.toThrow();
+    expect(mockResolver.resolve).toHaveBeenCalledTimes(2);
   });
 
   it('should resolve card from URL and send message streaming', async () => {

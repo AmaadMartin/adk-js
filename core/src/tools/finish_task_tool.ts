@@ -6,7 +6,9 @@
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
 
+import {Event, getFunctionResponses} from '../events/event.js';
 import {appendInstructions} from '../models/llm_request.js';
+import {objectSchemaFields, SchemaLike} from '../utils/schema.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -22,6 +24,50 @@ export const FINISH_TASK_TOOL_NAME = 'finish_task';
  * validation-error retry signal.
  */
 export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
+
+/**
+ * The result that marks a task as ended in failure. A remote task agent has no
+ * local tool run to produce it, so the delegating agent writes it.
+ */
+export const FINISH_TASK_ERROR_RESULT = 'Task failed.';
+
+/** The key a non-object output value is wrapped under. */
+const FINISH_TASK_DEFAULT_WRAPPER_KEY = 'result';
+
+/**
+ * Whether an event carries a `finish_task` function response that ends the
+ * task, either successfully or in failure.
+ *
+ * A validation-error response is not terminal, so the caller keeps iterating
+ * and the agent gets a chance to retry.
+ */
+export function isFinishTaskTerminalFr(event: Event): boolean {
+  return getFunctionResponses(event).some((fr) => {
+    if (fr.name !== FINISH_TASK_TOOL_NAME) {
+      return false;
+    }
+    const result = (fr.response as {result?: unknown} | undefined)?.result;
+    return (
+      result === FINISH_TASK_SUCCESS_RESULT ||
+      result === FINISH_TASK_ERROR_RESULT
+    );
+  });
+}
+
+/**
+ * The key a `finish_task` call wraps its output value under, or `undefined`
+ * when the schema is an object and the call arguments are the output itself.
+ */
+export function getOutputWrapperKey(
+  outputSchema?: SchemaLike,
+): string | undefined {
+  if (!outputSchema) {
+    return undefined;
+  }
+  return objectSchemaFields(outputSchema)
+    ? undefined
+    : FINISH_TASK_DEFAULT_WRAPPER_KEY;
+}
 
 /** The default output schema when the task agent declares none. */
 const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
