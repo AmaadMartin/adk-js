@@ -10,7 +10,8 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
-import {GoogleTool} from '../google_tool.js';
+import {ToolInputParameters} from '../function_tool.js';
+import {GoogleTool, GoogleToolExecuteFunction} from '../google_tool.js';
 
 import {BigtableCredentialsConfig} from './bigtable_credentials.js';
 import {BigtableClientPool} from './client.js';
@@ -79,6 +80,12 @@ export interface BigtableToolsetOptions {
   bigtableToolSettings?: BigtableToolSettings;
 }
 
+/** One Bigtable operation: the tool, plus the name a filter matches. */
+interface BigtableToolEntry {
+  operation: string;
+  tool: BaseTool;
+}
+
 /**
  * Tools for reading Bigtable data and metadata (Experimental).
  *
@@ -117,9 +124,17 @@ export class BigtableToolset extends BaseToolset {
       options.bigtableToolSettings ?? new BigtableToolSettings();
   }
 
-  /** Returns the tools the filter admits, under their unprefixed names. */
+  /**
+   * Returns the tools the filter admits, under their prefixed names.
+   *
+   * The prefix is applied here, as `McpToolset` and `OpenApiToolset` apply
+   * theirs, because nothing downstream applies it. The filter still names the
+   * unprefixed operation, which is how adk-python's filter reads.
+   */
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    return this.buildTools().filter((tool) => this.isSelected(tool, context));
+    return this.buildTools()
+      .filter((entry) => this.isSelected(entry, context))
+      .map((entry) => entry.tool);
   }
 
   /** Releases every Bigtable client the tools opened. */
@@ -128,119 +143,132 @@ export class BigtableToolset extends BaseToolset {
   }
 
   /**
-   * Whether the filter admits a tool.
+   * Whether the filter admits an operation.
    *
    * Unset admits everything; a list is a membership test, so an empty list
    * admits nothing; a predicate decides. This is adk-python's reading, not
-   * the base class's. A predicate with no context to read admits the tool,
-   * as `OpenApiToolset` does.
+   * the base class's, which reads an empty list as no filter at all. A
+   * predicate with no context to read admits the tool, as `OpenApiToolset`
+   * does.
    */
-  private isSelected(tool: BaseTool, context?: ReadonlyContext): boolean {
+  private isSelected(
+    entry: BigtableToolEntry,
+    context?: ReadonlyContext,
+  ): boolean {
     if (this.filter === undefined) {
       return true;
     }
     if (typeof this.filter === 'function') {
-      return context === undefined || this.filter(tool, context);
+      return context === undefined || this.filter(entry.tool, context);
     }
-    return this.filter.includes(tool.name);
+    return this.filter.includes(entry.operation);
+  }
+
+  /** Builds the tool for one Bigtable operation. */
+  private buildTool<TParameters extends ToolInputParameters>(
+    operation: string,
+    description: string,
+    parameters: TParameters,
+    execute: GoogleToolExecuteFunction<TParameters, BigtableToolSettings>,
+  ): BigtableToolEntry {
+    return {
+      operation,
+      tool: new GoogleTool({
+        name: `${DEFAULT_BIGTABLE_TOOL_NAME_PREFIX}_${operation}`,
+        description,
+        parameters,
+        execute,
+        credentialsConfig: this.credentialsConfig,
+        toolSettings: this.toolSettings,
+      }),
+    };
   }
 
   /** Builds one tool per Bigtable operation, in a stable order. */
-  private buildTools(): BaseTool[] {
-    const credentialsConfig = this.credentialsConfig;
-    const toolSettings = this.toolSettings;
+  private buildTools(): BigtableToolEntry[] {
     const clients = this.clients;
-    const shared = {credentialsConfig, toolSettings};
 
     return [
-      new GoogleTool({
-        ...shared,
-        name: 'list_instances',
-        description:
-          'List the Bigtable instance ids in a Google Cloud project.',
-        parameters: ProjectSchema,
-        execute: async (input, call) =>
+      this.buildTool(
+        'list_instances',
+        'List the Bigtable instance ids in a Google Cloud project.',
+        ProjectSchema,
+        async (input, call) =>
           listInstances(
             await clients.get(input.projectId, call.credentials),
             input.projectId,
           ),
-      }),
-      new GoogleTool({
-        ...shared,
-        name: 'get_instance_info',
-        description: 'Get the metadata of a Bigtable instance.',
-        parameters: InstanceSchema,
-        execute: async (input, call) =>
+      ),
+      this.buildTool(
+        'get_instance_info',
+        'Get the metadata of a Bigtable instance.',
+        InstanceSchema,
+        async (input, call) =>
           getInstanceInfo(
             await clients.get(input.projectId, call.credentials),
             input.projectId,
             input.instanceId,
           ),
-      }),
-      new GoogleTool({
-        ...shared,
-        name: 'list_tables',
-        description: 'List the tables of a Bigtable instance.',
-        parameters: InstanceSchema,
-        execute: async (input, call) =>
+      ),
+      this.buildTool(
+        'list_tables',
+        'List the tables of a Bigtable instance.',
+        InstanceSchema,
+        async (input, call) =>
           listTables(
             await clients.get(input.projectId, call.credentials),
             input.projectId,
             input.instanceId,
           ),
-      }),
-      new GoogleTool({
-        ...shared,
-        name: 'get_table_info',
-        description: 'Get the column families of a Bigtable table.',
-        parameters: TableSchema,
-        execute: async (input, call) =>
+      ),
+      this.buildTool(
+        'get_table_info',
+        'Get the column families of a Bigtable table.',
+        TableSchema,
+        async (input, call) =>
           getTableInfo(
             await clients.get(input.projectId, call.credentials),
             input.projectId,
             input.instanceId,
             input.tableId,
           ),
-      }),
-      new GoogleTool({
-        ...shared,
-        name: 'list_clusters',
-        description: 'List the clusters of a Bigtable instance.',
-        parameters: InstanceSchema,
-        execute: async (input, call) =>
+      ),
+      this.buildTool(
+        'list_clusters',
+        'List the clusters of a Bigtable instance.',
+        InstanceSchema,
+        async (input, call) =>
           listClusters(
             await clients.get(input.projectId, call.credentials),
             input.projectId,
             input.instanceId,
           ),
-      }),
-      new GoogleTool({
-        ...shared,
-        name: 'get_cluster_info',
-        description: 'Get the metadata of a Bigtable cluster.',
-        parameters: ClusterSchema,
-        execute: async (input, call) =>
+      ),
+      this.buildTool(
+        'get_cluster_info',
+        'Get the metadata of a Bigtable cluster.',
+        ClusterSchema,
+        async (input, call) =>
           getClusterInfo(
             await clients.get(input.projectId, call.credentials),
             input.projectId,
             input.instanceId,
             input.clusterId,
           ),
-      }),
-      new GoogleTool({
-        ...shared,
-        name: 'execute_sql',
-        description: 'Execute a GoogleSQL query against a Bigtable instance.',
-        parameters: ExecuteSqlSchema,
-        execute: async (input, call) =>
+      ),
+      this.buildTool(
+        'execute_sql',
+        'Execute a GoogleSQL query against a Bigtable instance.',
+        ExecuteSqlSchema,
+        async (input, call) =>
           executeSql(await clients.get(input.projectId, call.credentials), {
             instanceId: input.instanceId,
             query: input.query,
             parameters: input.parameters,
             parameterTypes: input.parameterTypes,
-            maxRows: (call.settings ?? toolSettings).maxQueryResultRows,
+            maxRows: this.toolSettings.maxQueryResultRows,
           }),
-      }),
+      ),
     ];
   }
 }

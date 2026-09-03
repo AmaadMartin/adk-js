@@ -13,7 +13,7 @@ import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {version} from '../../version.js';
 
 /** The optional peer the Bigtable tools load on their first call. */
-const BIGTABLE_PEER = {
+export const BIGTABLE_PEER = {
   packageName: '@google-cloud/bigtable',
   feature: 'BigtableToolset',
 };
