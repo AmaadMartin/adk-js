@@ -114,6 +114,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Runner
 
+- [Choosing a Runner entry point](runner/run_entry_points/index.md) - When to
+  run an invocation ahead of the caller that reads it, and what that changes.
 - [Resuming an invocation](runner/invocation_resume/index.md) - How the runner
   decides which invocation a message belongs to, and how to resume one.
 - [Starting a run](runner/starting_a_run/index.md) - How the runner finds or

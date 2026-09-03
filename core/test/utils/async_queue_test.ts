@@ -152,3 +152,77 @@ describe('AsyncQueue — failure & lifecycle', () => {
     await expect(drain(queue)).rejects.toThrow('first');
   });
 });
+
+describe('AsyncQueue back-pressure', () => {
+  it('does not make a producer wait when no mark is set', async () => {
+    const queue = new AsyncQueue<number>();
+    for (let i = 0; i < 100; i++) {
+      queue.push(i);
+    }
+
+    await expect(queue.whenDrained()).resolves.toBeUndefined();
+    expect(queue.size).toBe(100);
+  });
+
+  it('makes the producer wait once the buffer reaches the mark', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 2});
+    queue.push(1);
+    queue.push(2);
+    let released = false;
+    const waiting = queue.whenDrained().then(() => {
+      released = true;
+    });
+
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    const iterator = queue[Symbol.asyncIterator]();
+    await iterator.next();
+    await waiting;
+    expect(released).toBe(true);
+  });
+
+  it('caps how far a producer runs ahead of a slow consumer', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 3});
+    let maxSize = 0;
+
+    const producer = (async () => {
+      for (let i = 0; i < 20; i++) {
+        queue.push(i);
+        maxSize = Math.max(maxSize, queue.size);
+        await queue.whenDrained();
+      }
+      queue.close();
+    })();
+
+    const seen: number[] = [];
+    for await (const value of queue) {
+      seen.push(value);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await producer;
+
+    expect(seen).toHaveLength(20);
+    expect(maxSize).toBeLessThanOrEqual(3);
+  });
+
+  it('releases a waiting producer when the queue closes', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 1});
+    queue.push(1);
+    const waiting = queue.whenDrained();
+
+    queue.close();
+
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it('releases a waiting producer when the queue fails', async () => {
+    const queue = new AsyncQueue<number>({highWaterMark: 1});
+    queue.push(1);
+    const waiting = queue.whenDrained();
+
+    queue.fail(new Error('stop'));
+
+    await expect(waiting).resolves.toBeUndefined();
+  });
+});
