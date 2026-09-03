@@ -62,14 +62,14 @@ export function getContents(
   const filteredEvents: Event[] = [];
 
   for (const event of events) {
-    if (isCompactedEvent(event)) {
-      filteredEvents.push(convertCompactedEvent(event));
-      continue;
-    }
-
     if (
       !shouldIncludeEventInContext(event, currentBranch, currentIsolationScope)
     ) {
+      continue;
+    }
+
+    if (isCompactedEvent(event)) {
+      filteredEvents.push(convertCompactedEvent(event));
       continue;
     }
 
@@ -107,7 +107,12 @@ function shouldIncludeEventInContext(
   currentBranch?: string,
   currentIsolationScope?: string,
 ): boolean {
-  if (!event.content?.role || event.content.parts?.[0]?.text === '') {
+  // A compacted event carries its text in `compactedContent`, not in `content`,
+  // so the emptiness test does not apply to it.
+  if (
+    !isCompactedEvent(event) &&
+    (!event.content?.role || event.content.parts?.[0]?.text === '')
+  ) {
     return false;
   }
   if (
