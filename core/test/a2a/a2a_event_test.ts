@@ -12,6 +12,7 @@ import {
 } from '@a2a-js/sdk';
 import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {
+  createFinalTaskStatusEvent,
   createInputMissingErrorEvent,
   createTask,
   createTaskArtifactUpdateEvent,
@@ -29,6 +30,7 @@ import {
   isTaskArtifactUpdateEvent,
   isTaskStatusUpdateEvent,
   isTerminalTaskStatusUpdateEvent,
+  TaskState,
 } from '../../src/a2a/a2a_event.js';
 
 vi.mock('../../src/utils/env_aware_utils.js', () => ({
@@ -383,6 +385,57 @@ describe('a2a_event', () => {
           metadata: undefined,
         },
       );
+    });
+
+    it('createFinalTaskStatusEvent', () => {
+      const message: Message = {
+        kind: 'message',
+        messageId: 'm1',
+        role: 'agent',
+        parts: [{kind: 'text', text: 'needs a token'}],
+      };
+
+      expect(
+        createFinalTaskStatusEvent({
+          taskId: 't1',
+          contextId: 'c1',
+          state: TaskState.AUTH_REQUIRED,
+          message,
+          metadata: {m: 1},
+        }),
+      ).toEqual({
+        kind: 'status-update',
+        taskId: 't1',
+        contextId: 'c1',
+        final: true,
+        status: {
+          state: 'auth-required',
+          message,
+          timestamp: '2024-01-01T00:00:00.000Z',
+        },
+        metadata: {m: 1},
+      });
+    });
+
+    it('createFinalTaskStatusEvent without a message', () => {
+      expect(
+        createFinalTaskStatusEvent({
+          taskId: 't1',
+          contextId: 'c1',
+          state: TaskState.CANCELED,
+        }),
+      ).toEqual({
+        kind: 'status-update',
+        taskId: 't1',
+        contextId: 'c1',
+        final: true,
+        status: {
+          state: 'canceled',
+          message: undefined,
+          timestamp: '2024-01-01T00:00:00.000Z',
+        },
+        metadata: undefined,
+      });
     });
 
     it('createTaskArtifactUpdateEvent', () => {
