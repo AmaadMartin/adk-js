@@ -22,6 +22,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   BaseGoogleCredentialsConfig,
+  BaseGoogleCredentialsConfigOptions,
   GoogleCredentialsManager,
   googleCredentialKey,
   isCredentialExpired,
@@ -55,16 +56,34 @@ function createToolContext(state: Record<string, unknown> = {}): Context {
   });
 }
 
+/**
+ * A config that caches its credential. Only a subclass can name the cache key,
+ * as `BigtableCredentialsConfig` does.
+ */
+class CachingCredentialsConfig extends BaseGoogleCredentialsConfig {
+  declare readonly tokenCacheKey: string;
+
+  constructor(
+    options: BaseGoogleCredentialsConfigOptions,
+    tokenCacheKey: string,
+  ) {
+    super(options);
+    this.tokenCacheKey = tokenCacheKey;
+  }
+}
+
 /** An OAuth2 config that drives a consent flow and caches its result. */
 function createOAuthConfig(
   tokenCacheKey?: string,
 ): BaseGoogleCredentialsConfig {
-  return new BaseGoogleCredentialsConfig({
+  const options = {
     clientId: CLIENT_ID,
     clientSecret: CLIENT_SECRET,
     scopes: SCOPES,
-    tokenCacheKey,
-  });
+  };
+  return tokenCacheKey
+    ? new CachingCredentialsConfig(options, tokenCacheKey)
+    : new BaseGoogleCredentialsConfig(options);
 }
 
 /** A user credential, the kind a consent flow mints. */
@@ -760,10 +779,10 @@ describe('GoogleCredentialsManager', () => {
 
   it('uses the external access token from session state', async () => {
     const manager = new GoogleCredentialsManager(
-      new BaseGoogleCredentialsConfig({
-        externalAccessTokenKey: 'user_access_token',
-        tokenCacheKey: TOKEN_CACHE_KEY,
-      }),
+      new CachingCredentialsConfig(
+        {externalAccessTokenKey: 'user_access_token'},
+        TOKEN_CACHE_KEY,
+      ),
     );
     const context = createToolContext({
       user_access_token: 'external-access-token',

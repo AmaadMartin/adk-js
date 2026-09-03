@@ -20,17 +20,6 @@ export const BIGTABLE_DEFAULT_SCOPE = [
 ];
 
 /**
- * Options accepted by {@link BigtableCredentialsConfig}.
- *
- * `tokenCacheKey` is omitted because the class pins it to
- * {@link BIGTABLE_TOKEN_CACHE_KEY}.
- */
-export type BigtableCredentialsConfigOptions = Omit<
-  BaseGoogleCredentialsConfigOptions,
-  'tokenCacheKey'
->;
-
-/**
  * How a Cloud Bigtable tool obtains credentials (Experimental).
  *
  * It is {@link BaseGoogleCredentialsConfig} with the Bigtable scopes and cache
@@ -46,7 +35,7 @@ export class BigtableCredentialsConfig extends BaseGoogleCredentialsConfig {
   /** Always {@link BIGTABLE_TOKEN_CACHE_KEY}. The caller cannot change it. */
   declare readonly tokenCacheKey: string;
 
-  constructor(options: BigtableCredentialsConfigOptions) {
+  constructor(options: BaseGoogleCredentialsConfigOptions) {
     // The base validator rejects `scopes` alongside `credentials` or
     // `externalAccessTokenKey`, so the default is applied after it runs.
     super(options);

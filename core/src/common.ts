@@ -290,7 +290,6 @@ export {
   BIGTABLE_TOKEN_CACHE_KEY,
   BigtableCredentialsConfig,
 } from './tools/bigtable/bigtable_credentials.js';
-export type {BigtableCredentialsConfigOptions} from './tools/bigtable/bigtable_credentials.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {

@@ -88,13 +88,14 @@ config and does not change the exported constant.
 ## Token cache
 
 `tokenCacheKey` is always `BIGTABLE_TOKEN_CACHE_KEY`, the string
-`'bigtable_token_cache'`. The options type omits the field, so a caller cannot
-set it.
+`'bigtable_token_cache'`. Only a subclass can set it, so a caller cannot.
 
-`GoogleCredentialsManager` reads that session-state key before it does anything
-else, and writes the granted credential back after a consent flow. The entry is
-JSON in the shape adk-python's `Credentials.to_json()` writes, so a session
-written by either SDK is readable by the other.
+`GoogleCredentialsManager` reads that session-state key in the held-credential
+and OAuth2-client modes, and writes the granted credential back after a consent
+flow. It bypasses the cache entirely when `externalAccessTokenKey` is set, and
+returns the host's token. The entry is JSON in the shape adk-python's
+`Credentials.to_json()` writes, so a session written by either SDK is readable by
+the other.
 
 ## Errors
 

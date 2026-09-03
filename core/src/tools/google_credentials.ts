@@ -53,7 +53,7 @@ interface AuthorizedUserCache {
 export interface BaseGoogleCredentialsConfigOptions {
   /**
    * Credentials the tool already holds, used for every end user. Mutually
-   * exclusive with every other option here except {@link tokenCacheKey}.
+   * exclusive with every other option here.
    */
   credentials?: AuthClient;
   /**
@@ -67,11 +67,6 @@ export interface BaseGoogleCredentialsConfigOptions {
   clientSecret?: string;
   /** The OAuth2 scopes to ask the end user for. */
   scopes?: string[];
-  /**
-   * Session-state key the resolved credential is cached under. Leave it unset
-   * and nothing is read from or written to the cache.
-   */
-  tokenCacheKey?: string;
 }
 
 /**
@@ -91,6 +86,7 @@ export class BaseGoogleCredentialsConfig {
   readonly clientId?: string;
   readonly clientSecret?: string;
   readonly scopes?: string[];
+  /** Session-state key the credential is cached under. Set by a subclass. */
   readonly tokenCacheKey?: string;
 
   constructor(options: BaseGoogleCredentialsConfigOptions) {
@@ -98,7 +94,6 @@ export class BaseGoogleCredentialsConfig {
 
     this.credentials = options.credentials;
     this.externalAccessTokenKey = options.externalAccessTokenKey;
-    this.tokenCacheKey = options.tokenCacheKey;
 
     // User credentials already carry the OAuth2 client that minted them, so a
     // consent flow can be re-run without the caller repeating it.
