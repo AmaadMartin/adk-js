@@ -568,6 +568,7 @@ export {
   LogLevel,
   formatLogArgs,
   getLogger,
+  logger,
   setLogLevel,
   setLogger,
 } from './utils/logger.js';
