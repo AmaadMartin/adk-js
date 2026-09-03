@@ -8,6 +8,20 @@ import {Content} from '@google/genai';
 
 import {Event} from '../../events/event.js';
 
+/** The settings every user-simulator config carries. */
+export interface BaseUserSimulatorConfig {
+  /**
+   * Names the concrete config. Every concrete config sets it to a value of
+   * its own, which selects that config when an eval config is read and
+   * selects its simulator when the conversation runs.
+   *
+   * It is absent on the base, and absent is not a value a simulator answers
+   * to: a config with no `type` is promoted to a concrete one before it is
+   * used.
+   */
+  type?: string;
+}
+
 /** The resulting status of {@link UserSimulator.getNextUserMessage}. */
 export enum UserSimulatorStatus {
   /** A message was generated successfully. */

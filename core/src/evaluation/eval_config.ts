@@ -5,10 +5,30 @@
  */
 
 import * as fs from 'node:fs/promises';
+import {z} from 'zod';
+import {CodeConfig, codeConfigSchema} from '../agents/common_configs.js';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
 import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
 import {isRecord, toCamelKeys} from './eval_json.js';
-import {BaseCriterion, EvalMetric, PrebuiltMetrics} from './eval_metrics.js';
+import {
+  BaseCriterion,
+  EvalMetric,
+  MetricInfo,
+  parseMetricInfo,
+  PrebuiltMetrics,
+  setConfigCustomFunctionPath,
+} from './eval_metrics.js';
+import {
+  LLM_AUDIO_USER_SIMULATOR_TYPE,
+  LlmAudioUserSimulatorConfig,
+  parseLlmAudioUserSimulatorConfig,
+} from './simulation/llm_audio_user_simulator.js';
+import {
+  LLM_BACKED_USER_SIMULATOR_TYPE,
+  LlmBackedUserSimulatorConfig,
+  parseLlmBackedUserSimulatorConfig,
+} from './simulation/llm_backed_user_simulator.js';
 
 /**
  * How a metric is judged: a bare threshold, or a criterion object for metrics
@@ -16,18 +36,29 @@ import {BaseCriterion, EvalMetric, PrebuiltMetrics} from './eval_metrics.js';
  */
 export type Criterion = number | BaseCriterion;
 
-/** Locates the scoring function of a custom metric. */
-export interface CustomMetricCodeConfig {
-  /** Module specifier of the scoring function. */
-  name: string;
-}
+/**
+ * Locates the scoring function of a custom metric. An alias of the shared
+ * {@link CodeConfig}, which adk-python's `CustomMetricConfig` also names.
+ */
+export type CustomMetricCodeConfig = CodeConfig;
 
 /** Declares a metric that is scored by user-supplied code. */
 export interface CustomMetricConfig {
-  codeConfig: CustomMetricCodeConfig;
+  codeConfig: CodeConfig;
+
+  /**
+   * What the eval framework knows about the metric: the range it reports
+   * values in, and a description of what it measures.
+   */
+  metricInfo?: MetricInfo;
 
   description?: string;
 }
+
+/** The user-simulator settings an eval config carries, named by their `type`. */
+export type UserSimulatorConfig =
+  | LlmBackedUserSimulatorConfig
+  | LlmAudioUserSimulatorConfig;
 
 /** Settings for evaluating a model in live (bidirectional streaming) mode. */
 export interface LiveModelConfig {
@@ -47,10 +78,11 @@ export interface EvalConfig {
   customMetrics?: Record<string, CustomMetricConfig>;
 
   /**
-   * Settings for the user simulator. The simulator subsystem owns this shape
-   * and reads it; this package forwards it unchanged.
+   * Settings for the user simulator. Its `type` names the simulator that
+   * reads it; a config written before `type` existed reads as
+   * {@link LlmBackedUserSimulatorConfig}.
    */
-  userSimulatorConfig?: Record<string, unknown>;
+  userSimulatorConfig?: UserSimulatorConfig;
 
   liveModelConfig?: LiveModelConfig;
 }
@@ -68,6 +100,8 @@ export const DEFAULT_EVAL_CONFIG: EvalConfig = {
  *
  * The keys of the `criteria` and `custom_metrics` maps are metric names, so
  * they are left exactly as written; every other key is converted to camelCase.
+ * A field is read by either spelling, so a config written by adk-python and a
+ * config written by this package both load.
  */
 export function parseEvalConfig(raw: unknown): EvalConfig {
   if (!isRecord(raw)) {
@@ -75,10 +109,29 @@ export function parseEvalConfig(raw: unknown): EvalConfig {
   }
   return {
     criteria: mapValuesToCamelCase(raw['criteria']),
-    customMetrics: parseCustomMetrics(raw['custom_metrics']),
-    userSimulatorConfig: parseNestedRecord(raw['user_simulator_config']),
-    liveModelConfig: parseLiveModelConfig(raw['live_model_config']),
+    customMetrics: parseCustomMetrics(
+      readField(raw, 'customMetrics', 'custom_metrics'),
+    ),
+    userSimulatorConfig: parseUserSimulatorConfig(
+      readField(raw, 'userSimulatorConfig', 'user_simulator_config'),
+    ),
+    liveModelConfig: parseLiveModelConfig(
+      readField(raw, 'liveModelConfig', 'live_model_config'),
+    ),
   };
+}
+
+/**
+ * Reads a field by its canonical camelCase key, falling back to the snake_case
+ * spelling adk-python writes. The canonical spelling wins when a document
+ * carries both, which is what adk-python's `populate_by_name` does.
+ */
+function readField(
+  raw: Record<string, unknown>,
+  key: string,
+  alias: string,
+): unknown {
+  return key in raw ? raw[key] : raw[alias];
 }
 
 /** Converts each value of a map, leaving the map's own keys untouched. */
@@ -113,39 +166,120 @@ function parseCustomMetrics(
   }
   const customMetrics: Record<string, CustomMetricConfig> = {};
   for (const [metricName, config] of Object.entries(raw)) {
-    const converted = toCamelKeys(config);
-    if (!isRecord(converted) || !isRecord(converted['codeConfig'])) {
-      throw new Error(
-        `Custom metric '${metricName}' must have a \`code_config\`.`,
-      );
-    }
-    const name = converted['codeConfig']['name'];
-    if (typeof name !== 'string') {
-      throw new Error(
-        `Custom metric '${metricName}' must have a \`code_config.name\`.`,
-      );
-    }
-    customMetrics[metricName] = {
-      codeConfig: {name},
-      description:
-        typeof converted['description'] === 'string'
-          ? converted['description']
-          : undefined,
-    };
+    customMetrics[metricName] = parseCustomMetric(metricName, config);
   }
   return customMetrics;
 }
 
-function parseNestedRecord(raw: unknown): Record<string, unknown> | undefined {
+function parseCustomMetric(
+  metricName: string,
+  raw: unknown,
+): CustomMetricConfig {
   const converted = toCamelKeys(raw);
-  return isRecord(converted) ? converted : undefined;
+  if (!isRecord(converted) || !isRecord(converted['codeConfig'])) {
+    throw new Error(
+      `Custom metric '${metricName}' must have a \`code_config\`.`,
+    );
+  }
+  if (typeof converted['codeConfig']['name'] !== 'string') {
+    throw new Error(
+      `Custom metric '${metricName}' must have a \`code_config.name\`.`,
+    );
+  }
+  const metricInfo = converted['metricInfo'];
+  return {
+    codeConfig: parseCodeConfig(metricName, converted['codeConfig']),
+    metricInfo:
+      metricInfo === undefined || metricInfo === null
+        ? undefined
+        : parseMetricInfo(metricInfo),
+    description:
+      typeof converted['description'] === 'string'
+        ? converted['description']
+        : undefined,
+  };
+}
+
+/**
+ * Validates the code reference of a custom metric against the shared
+ * {@link codeConfigSchema}, so it holds the same contract wherever adk-js
+ * reads a code reference: a non-empty `name`, and no key besides it.
+ */
+function parseCodeConfig(metricName: string, raw: unknown): CodeConfig {
+  const result = codeConfigSchema.safeParse(raw);
+  if (!result.success) {
+    throw new InputValidationError(
+      `Custom metric '${metricName}' has an invalid \`code_config\`: ` +
+        z.prettifyError(result.error),
+      {cause: result.error},
+    );
+  }
+  return result.data;
+}
+
+/**
+ * The `type` given to a user-simulator config that carries none, so that a
+ * config written before the discriminator existed still loads.
+ */
+const LEGACY_DEFAULT_USER_SIMULATOR_TYPE = LLM_BACKED_USER_SIMULATOR_TYPE;
+
+/** The user-simulator config each `type` selects. */
+const USER_SIMULATOR_PARSERS = new Map<
+  string,
+  (raw: unknown) => UserSimulatorConfig
+>([
+  [LLM_BACKED_USER_SIMULATOR_TYPE, parseLlmBackedUserSimulatorConfig],
+  [LLM_AUDIO_USER_SIMULATOR_TYPE, parseLlmAudioUserSimulatorConfig],
+]);
+
+/**
+ * Validates the user-simulator section of an eval config, selecting the
+ * config its `type` names.
+ *
+ * @throws {InputValidationError} When the section is not an object, or names
+ *   a `type` no simulator answers to.
+ */
+function parseUserSimulatorConfig(
+  raw: unknown,
+): UserSimulatorConfig | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  const converted = toCamelKeys(raw);
+  if (!isRecord(converted)) {
+    throw new InputValidationError(
+      'The `userSimulatorConfig` of an eval config must be a JSON object.',
+    );
+  }
+  const type = converted['type'] ?? defaultUserSimulatorType();
+  const parse =
+    typeof type === 'string' ? USER_SIMULATOR_PARSERS.get(type) : undefined;
+  if (!parse) {
+    throw new InputValidationError(
+      `The \`userSimulatorConfig\` of an eval config names an unknown ` +
+        `\`type\` ${JSON.stringify(type)}. Accepted values: ` +
+        `${[...USER_SIMULATOR_PARSERS.keys()].join(', ')}.`,
+    );
+  }
+  return parse({...converted, type});
+}
+
+/** Reports that a config carries no `type`, and names the one it gets. */
+function defaultUserSimulatorType(): string {
+  logger.debug(
+    '`userSimulatorConfig` has no `type`; reading it as ' +
+      `'${LEGACY_DEFAULT_USER_SIMULATOR_TYPE}'. Add ` +
+      `"type": "${LEGACY_DEFAULT_USER_SIMULATOR_TYPE}" to the eval config to ` +
+      'make this explicit.',
+  );
+  return LEGACY_DEFAULT_USER_SIMULATOR_TYPE;
 }
 
 function parseLiveModelConfig(raw: unknown): LiveModelConfig | undefined {
   if (!isRecord(raw)) {
     return undefined;
   }
-  const timeoutSeconds = raw['timeout_seconds'];
+  const timeoutSeconds = readField(raw, 'timeoutSeconds', 'timeout_seconds');
   return {
     timeoutSeconds:
       typeof timeoutSeconds === 'number'
@@ -189,18 +323,28 @@ function isFileNotFoundError(err: unknown): boolean {
   return isRecord(err) && err['code'] === 'ENOENT';
 }
 
-/** Maps the criteria of an eval config to the metrics an eval run scores. */
+/**
+ * Maps the criteria of an eval config to the metrics an eval run scores.
+ *
+ * The path a config declares for a custom metric travels with the metric, so
+ * two apps in one process can name the same metric and each still reaches its
+ * own scoring function. Read it back with `getConfigCustomFunctionPath`.
+ */
 export function getEvalMetricsFromConfig(evalConfig: EvalConfig): EvalMetric[] {
   return Object.entries(evalConfig.criteria).map(([metricName, criterion]) => {
     const customFunctionPath =
       evalConfig.customMetrics?.[metricName]?.codeConfig.name;
     const resolved: BaseCriterion =
       typeof criterion === 'number' ? {threshold: criterion} : criterion;
-    return {
+    const evalMetric: EvalMetric = {
       metricName,
       threshold: resolved.threshold,
       criterion: resolved,
       customFunctionPath,
     };
+    if (customFunctionPath !== undefined) {
+      setConfigCustomFunctionPath(evalMetric, customFunctionPath);
+    }
+    return evalMetric;
   });
 }

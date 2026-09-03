@@ -13,6 +13,7 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -168,6 +169,7 @@ export type {
   CustomMetricConfig,
   EvalConfig,
   LiveModelConfig,
+  UserSimulatorConfig,
 } from './evaluation/eval_config.js';
 export {
   PrebuiltMetrics,
@@ -192,6 +194,20 @@ export type {
   ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
 export type {Rubric, RubricContent} from './evaluation/eval_rubrics.js';
+export {
+  LLM_AUDIO_USER_SIMULATOR_TYPE,
+  parseLlmAudioUserSimulatorConfig,
+} from './evaluation/simulation/llm_audio_user_simulator.js';
+export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
+export {
+  LLM_BACKED_USER_SIMULATOR_TYPE,
+  parseLlmBackedUserSimulatorConfig,
+} from './evaluation/simulation/llm_backed_user_simulator.js';
+export type {
+  LlmBackedUserSimulatorConfig,
+  LlmUserSimulatorFields,
+} from './evaluation/simulation/llm_backed_user_simulator.js';
+export type {BaseUserSimulatorConfig} from './evaluation/simulation/user_simulator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
