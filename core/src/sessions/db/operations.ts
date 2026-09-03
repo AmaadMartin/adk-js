@@ -10,8 +10,10 @@ import {
   FilterQuery,
   MikroORM,
   Options as MikroORMOptions,
+  PoolConfig,
   RequiredEntityData,
 } from '@mikro-orm/core';
+import {Event} from '../../events/event.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
@@ -22,12 +24,43 @@ import {
   SCHEMA_VERSION_0_PICKLE,
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
+  StorageAppState,
+  StorageEvent,
   StorageMetadata,
+  StorageSession,
+  StorageUserState,
 } from './schema.js';
+import {
+  StorageAppStateV0,
+  StorageEventV0,
+  storageEventV0ToEvent,
+  StorageSessionV0,
+  StorageUserStateV0,
+} from './schema_v0.js';
 
 const SQLITE_BACKEND = 'sqlite';
 const SQLITE_URI_PREFIX = 'sqlite://';
 const SQLITE_MEMORY_URI = 'sqlite://:memory:';
+
+/** Backends whose `SELECT ... FOR UPDATE` takes a row-level write lock. */
+const ROW_LEVEL_LOCKING_BACKENDS = new Set(['mysql', 'mariadb', 'postgresql']);
+
+/** Newest event first, with the id breaking a timestamp tie. */
+export const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
+
+/**
+ * Find options that route a query to a read replica.
+ *
+ * MikroORM falls back to the write connection when the caller configured no
+ * replica, so this is inert until one exists. It mirrors the read-only engine
+ * adk-python builds for its own read paths.
+ *
+ * Spread it into a fresh options object at every call site. MikroORM fills
+ * defaults into the options it is handed, so passing this object itself would
+ * let one query's defaults leak into the next one. Frozen so that mistake
+ * fails loudly instead of silently dropping an `orderBy`.
+ */
+export const READ_ONLY = Object.freeze({connectionType: 'read'} as const);
 
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
@@ -86,6 +119,127 @@ const DRIVER_LOADERS: Record<string, () => Promise<unknown>> = {
   mssql: loadMsSqlDriver,
   [SQLITE_BACKEND]: loadSqliteDriver,
 };
+
+/**
+ * The knex handle a SQL connection exposes.
+ *
+ * `@mikro-orm/knex` declares `getKnex()`, but it installs alongside the driver
+ * peers rather than with adk-js, so the shape is declared here rather than
+ * imported from a package that may be absent.
+ */
+interface KnexBackedConnection {
+  getKnex(): {client: {dialect: string}};
+}
+
+function exposesKnex(connection: object): connection is KnexBackedConnection {
+  return 'getKnex' in connection && typeof connection.getKnex === 'function';
+}
+
+/**
+ * Names the database backend an open connection speaks to.
+ *
+ * The names match the ones adk-python reads off the SQLAlchemy dialect, so a
+ * behaviour gated on the backend is gated the same way in both SDKs. knex
+ * spells sqlite `sqlite3`, which is the one name that has to be translated.
+ *
+ * MikroORM's MariaDB driver reports `mysql` here, because its knex dialect
+ * extends the MySQL one. Both backends take row-level locks, so the only
+ * consumer of this name is unaffected.
+ *
+ * @param orm The MikroORM instance to inspect.
+ * @returns The backend name, or an empty string for a connection that exposes
+ *     no knex handle.
+ */
+export function databaseBackendOf(orm: MikroORM): string {
+  const connection = orm.em.getConnection();
+  if (!exposesKnex(connection)) {
+    return '';
+  }
+  const {dialect} = connection.getKnex().client;
+  return dialect === 'sqlite3' ? SQLITE_BACKEND : dialect;
+}
+
+/**
+ * Reports whether a backend supports row-level locking.
+ *
+ * Mirrors `DatabaseSessionService._supports_row_level_locking` in adk-python.
+ * sqlite ignores `FOR UPDATE`, and MSSQL turns it into a `WITH (UPDLOCK)`
+ * table hint that adk-python never takes, so neither is asked for one.
+ *
+ * @param backend The backend name, as {@link databaseBackendOf} reports it.
+ */
+export function supportsRowLevelLocking(backend: string): boolean {
+  return ROW_LEVEL_LOCKING_BACKENDS.has(backend);
+}
+
+/** The statement the pre-ping hook issues to prove a connection still works. */
+const PING_STATEMENT = 'select 1';
+
+/**
+ * A pooled driver connection that answers a callback-style query.
+ *
+ * Every driver knex loads for the backends here — `pg`, `mysql2` and
+ * `mariadb/callback` — exposes this form.
+ */
+interface QueryableConnection {
+  query(sql: string, callback: (error?: unknown) => void): unknown;
+}
+
+function isQueryable(connection: unknown): connection is QueryableConnection {
+  return (
+    typeof connection === 'object' &&
+    connection !== null &&
+    'query' in connection &&
+    typeof connection.query === 'function'
+  );
+}
+
+/**
+ * Reports whether a pooled connection still answers the database.
+ *
+ * A connection that exposes no query method cannot be probed from here, so it
+ * is reported alive and left to knex's own per-dialect liveness check. The
+ * probe never throws: knex treats a rejection as a dead connection anyway, and
+ * returning `false` says the same thing without a log line per checkout.
+ *
+ * @param connection The raw driver connection knex is about to hand out.
+ */
+export async function connectionIsAlive(connection: unknown): Promise<boolean> {
+  if (!isQueryable(connection)) {
+    return true;
+  }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      connection.query(PING_STATEMENT, (error) =>
+        error ? reject(error) : resolve(),
+      );
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Extends MikroORM's pool options with the knex hook they omit.
+ *
+ * MikroORM forwards `pool` to knex verbatim but does not declare `validate`.
+ */
+interface PrePingPoolConfig extends PoolConfig {
+  validate?: (connection: unknown) => Promise<boolean>;
+}
+
+/**
+ * Pool options that discard a dead connection instead of handing it out.
+ *
+ * This is adk-python's `pool_pre_ping`. A connection idle long enough for a
+ * server or a firewall to close it fails the next query it is used for; knex
+ * awaits this hook on every checkout, so the pool replaces it first. The cost
+ * is one extra round trip per checkout, which is why sqlite does not get it.
+ */
+export function prePingPoolOptions(): {pool: PrePingPoolConfig} {
+  return {pool: {validate: connectionIsAlive}};
+}
 
 /** Why a connection URI is not one this service can open. */
 export enum DatabaseUriProblem {
@@ -208,7 +362,10 @@ async function deriveConnectionOptionsFromUri(
       driver,
       // Every connection to a SQLite in-memory database opens a separate,
       // empty database, so a pool wider than one connection loses the schema
-      // and the rows written through its siblings.
+      // and the rows written through its siblings. adk-python pins the same
+      // shape with SQLAlchemy's StaticPool; its companion
+      // `check_same_thread=False` has no Node equivalent, because the driver
+      // is not thread-affine here.
       ...(isMemory ? {pool: {min: 1, max: 1}} : {}),
     } as MikroORMOptions;
   }
@@ -217,6 +374,7 @@ async function deriveConnectionOptionsFromUri(
     entities: ENTITIES,
     clientUrl: uri,
     driver,
+    ...prePingPoolOptions(),
   } as MikroORMOptions;
 }
 
@@ -341,6 +499,96 @@ export async function detectDatabaseSchemaVersion(
   }
 
   return SCHEMA_VERSION_1_JSON;
+}
+
+/** The session columns a read needs, in either schema version. */
+type StoredSessionRow = {
+  id: string;
+  appName: string;
+  userId: string;
+  state: Record<string, unknown>;
+  updateTime: Date;
+};
+
+/** The app-state columns a read needs, in either schema version. */
+type StoredAppStateRow = {
+  appName: string;
+  state: Record<string, unknown>;
+};
+
+/** The user-state columns a read needs, in either schema version. */
+type StoredUserStateRow = {
+  appName: string;
+  userId: string;
+  state: Record<string, unknown>;
+};
+
+/** Selects the events of one session, optionally from a timestamp onwards. */
+export type EventFilter = {
+  appName: string;
+  userId: string;
+  sessionId: string;
+  timestamp?: {$gte: Date};
+};
+
+/**
+ * The entity set and event decoding of one schema version.
+ *
+ * Mirrors adk-python's `_SchemaClasses`. Only reads are routed through it:
+ * this SDK writes v1 rows only, so the write paths name the v1 entities
+ * directly.
+ */
+export interface SessionSchema {
+  readonly sessions: EntityName<StoredSessionRow>;
+  readonly appStates: EntityName<StoredAppStateRow>;
+  readonly userStates: EntityName<StoredUserStateRow>;
+  /** Reads one session's events, oldest first. */
+  readonly readEvents: (
+    em: EntityManager,
+    where: EventFilter,
+    limit?: number,
+  ) => Promise<Event[]>;
+}
+
+const SESSION_SCHEMA_V1: SessionSchema = {
+  sessions: StorageSession,
+  appStates: StorageAppState,
+  userStates: StorageUserState,
+  async readEvents(em, where, limit) {
+    const rows = await em.find(StorageEvent, where, {
+      ...READ_ONLY,
+      orderBy: NEWEST_EVENT_FIRST,
+      limit,
+    });
+    rows.reverse();
+    return rows.map((row) => row.eventData);
+  },
+};
+
+const SESSION_SCHEMA_V0: SessionSchema = {
+  sessions: StorageSessionV0,
+  appStates: StorageAppStateV0,
+  userStates: StorageUserStateV0,
+  async readEvents(em, where, limit) {
+    const rows = await em.find(StorageEventV0, where, {
+      ...READ_ONLY,
+      orderBy: NEWEST_EVENT_FIRST,
+      limit,
+    });
+    rows.reverse();
+    return rows.map(storageEventV0ToEvent);
+  },
+};
+
+/**
+ * Returns the entity set that reads a database holding `version`.
+ *
+ * @param version A version {@link detectDatabaseSchemaVersion} reported.
+ */
+export function sessionSchemaFor(version: string): SessionSchema {
+  return version === SCHEMA_VERSION_0_PICKLE
+    ? SESSION_SCHEMA_V0
+    : SESSION_SCHEMA_V1;
 }
 
 /**
