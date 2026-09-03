@@ -34,6 +34,7 @@ import {
 
 const EVAL_SET_ID = 'set-1';
 const EVAL_ID = 'case-1';
+const SESSION_ID = 'session-1';
 const MATCH_METRIC = PrebuiltMetrics.RESPONSE_MATCH_SCORE;
 const TRAJECTORY_METRIC = PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE;
 
@@ -99,6 +100,7 @@ function createEvalCaseResult(
     evalId,
     finalEvalStatus,
     evalMetricResultPerInvocation,
+    sessionId: SESSION_ID,
   };
 }
 

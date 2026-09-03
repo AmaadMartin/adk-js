@@ -78,6 +78,7 @@ export class StubEvalService implements BaseEvalService {
         evalSetId: inferenceResult.evalSetId,
         evalId: inferenceResult.evalCaseId,
         finalEvalStatus: statusOf(index),
+        sessionId: inferenceResult.sessionId ?? '',
         overallEvalMetricResults: [
           {
             metricName: STUB_METRIC_NAME,

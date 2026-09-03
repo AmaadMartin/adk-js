@@ -31,6 +31,7 @@ function result(overrides: Partial<EvalCaseResult> = {}): EvalCaseResult {
     evalId: 'lights_on',
     finalEvalStatus: EvalStatus.PASSED,
     evalMetricResultPerInvocation: [],
+    sessionId: 'lights_on_session',
     ...overrides,
   };
 }

@@ -35,6 +35,7 @@ const CASE_RESULT: EvalCaseResult = {
   evalId: 'lights_on',
   finalEvalStatus: EvalStatus.PASSED,
   evalMetricResultPerInvocation: [],
+  sessionId: 'lights_on_session',
 };
 
 let agentsDir: string;
