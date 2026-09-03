@@ -99,7 +99,7 @@ export abstract class BaseAuthenticatedTool extends BaseTool {
   private readonly responseForAuthRequired?: Record<string, unknown> | string;
 
   constructor(params: BaseAuthenticatedToolParams) {
-    super({name: params.name, description: params.description});
+    super(params);
 
     this.responseForAuthRequired = params.responseForAuthRequired;
 

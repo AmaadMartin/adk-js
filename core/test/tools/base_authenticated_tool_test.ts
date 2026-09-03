@@ -135,6 +135,30 @@ describe('BaseAuthenticatedTool', () => {
     expect(manager.getAuthCredential).toHaveBeenCalledOnce();
   });
 
+  it('forwards isLongRunning to the base tool', () => {
+    const longRunning = new RecordingAuthenticatedTool({
+      name: 'test_tool',
+      description: 'Test description',
+      isLongRunning: true,
+      authConfig: {
+        authScheme: OAUTH2_SCHEME,
+        rawAuthCredential: OAUTH2_CREDENTIAL,
+        credentialKey: 'test_tool',
+      },
+    });
+
+    expect(longRunning.isLongRunning).toBe(true);
+  });
+
+  it('defaults isLongRunning to false', () => {
+    const tool = new RecordingAuthenticatedTool({
+      name: 'test_tool',
+      description: 'Test description',
+    });
+
+    expect(tool.isLongRunning).toBe(false);
+  });
+
   it('runs unauthenticated when no auth config is given', async () => {
     const tool = new RecordingAuthenticatedTool({
       name: 'test_auth_tool',
@@ -463,7 +487,10 @@ describe('BaseAuthenticatedTool with a real CredentialManager', () => {
 
     const exchangedCredential: AuthCredential = {
       authType: AuthCredentialTypes.OAUTH2,
-      oauth2: {accessToken: 'access-token', expiresAt: 9_999_999_999},
+      oauth2: {
+        accessToken: 'access-token',
+        expiresAt: Date.now() + 3_600_000,
+      },
     };
     const secondContext = createToolContext({credentialService});
     await credentialService.saveCredential(
