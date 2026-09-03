@@ -4,78 +4,62 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {lookup} from 'node:dns/promises';
-
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   assertPubliclyRoutable,
   hasBackslashInAuthority,
   isBlockedHostname,
-  parseRequestTarget,
+  parseTargetHostname,
 } from '../../src/utils/url_safety_utils.js';
 
-vi.mock('node:dns/promises', () => ({
-  lookup: vi.fn(),
+import {lookupMock, resolveTo} from './dns_mock_utils.js';
+
+vi.mock('node:dns/promises', async () => ({
+  lookup: (await import('./dns_mock_utils.js')).lookupMock,
 }));
-
-// `lookup` is overloaded; treat the mock as a plain Mock so `mockResolvedValue`
-// accepts the `{all: true}` array-return shape used by the implementation.
-const lookupMock = lookup as unknown as Mock;
-
-/** Resolves any hostname to the given IP list for the DNS `lookup` mock. */
-function resolveTo(...addresses: string[]): void {
-  lookupMock.mockResolvedValue(
-    addresses.map((address) => ({
-      address,
-      family: address.includes(':') ? 6 : 4,
-    })),
-  );
-}
 
 describe('url_safety_utils', () => {
   beforeEach(() => {
     lookupMock.mockReset();
   });
 
-  describe('parseRequestTarget', () => {
-    it('returns the parsed url and hostname for an http(s) target', () => {
-      const target = parseRequestTarget('https://example.com/search?q=adk');
-
-      expect(target.hostname).toBe('example.com');
-      expect(target.url.pathname).toBe('/search');
-      expect(target.url.search).toBe('?q=adk');
+  describe('parseTargetHostname', () => {
+    it('returns the host of an http(s) target', () => {
+      expect(parseTargetHostname('https://example.com/search?q=adk')).toBe(
+        'example.com',
+      );
     });
 
     it('strips the brackets from an IPv6 literal host', () => {
-      expect(
-        parseRequestTarget('http://[2001:4860:4860::8888]/').hostname,
-      ).toBe('2001:4860:4860::8888');
+      expect(parseTargetHostname('http://[2001:4860:4860::8888]/')).toBe(
+        '2001:4860:4860::8888',
+      );
     });
 
     it('rejects a scheme other than http(s)', () => {
-      expect(() => parseRequestTarget('file:///etc/passwd')).toThrow(
+      expect(() => parseTargetHostname('file:///etc/passwd')).toThrow(
         'Unsupported url scheme: file:///etc/passwd',
       );
-      expect(() => parseRequestTarget('ftp://example.com/x')).toThrow(
+      expect(() => parseTargetHostname('ftp://example.com/x')).toThrow(
         'Unsupported url scheme',
       );
     });
 
     it('rejects a malformed url', () => {
-      expect(() => parseRequestTarget('not a url')).toThrow();
-      expect(() => parseRequestTarget('http://')).toThrow();
+      expect(() => parseTargetHostname('not a url')).toThrow();
+      expect(() => parseTargetHostname('http://')).toThrow();
     });
 
     it('rejects a url whose port is out of range', () => {
-      expect(() => parseRequestTarget('http://example.com:99999/')).toThrow(
+      expect(() => parseTargetHostname('http://example.com:99999/')).toThrow(
         'Invalid URL',
       );
     });
 
     it('rejects a url with no hostname', () => {
-      expect(() => parseRequestTarget('http://:8080/')).toThrow('Invalid URL');
-      expect(() => parseRequestTarget('http://@/')).toThrow('Invalid URL');
+      expect(() => parseTargetHostname('http://:8080/')).toThrow('Invalid URL');
+      expect(() => parseTargetHostname('http://@/')).toThrow('Invalid URL');
     });
   });
 

@@ -9,7 +9,7 @@ import {z} from 'zod';
 import {
   assertPubliclyRoutable,
   isBlockedHostname,
-  parseRequestTarget,
+  parseTargetHostname,
 } from '../utils/url_safety_utils.js';
 
 import {FunctionTool} from './function_tool.js';
@@ -33,11 +33,11 @@ function failedToFetchMessage(url: string): string {
  * Throws for malformed URLs, disallowed schemes, and blocked hostnames.
  */
 function assertUrlAllowed(url: string): string {
-  const target = parseRequestTarget(url);
-  if (isBlockedHostname(target.hostname)) {
-    throw new Error(`Blocked host: ${target.hostname}`);
+  const hostname = parseTargetHostname(url);
+  if (isBlockedHostname(hostname)) {
+    throw new Error(`Blocked host: ${hostname}`);
   }
-  return target.hostname;
+  return hostname;
 }
 
 /** Decodes the small set of HTML entities that survive tag stripping. */

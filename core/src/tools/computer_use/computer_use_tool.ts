@@ -175,14 +175,13 @@ function safetyConfirmationHint(
   args: Record<string, unknown>,
 ): string | undefined {
   const decision = args['safety_decision'];
-  if (typeof decision !== 'object' || decision === null) {
+  if (
+    !isRecord(decision) ||
+    decision['decision'] !== REQUIRE_CONFIRMATION_DECISION
+  ) {
     return undefined;
   }
-  const fields = decision as Record<string, unknown>;
-  if (fields['decision'] !== REQUIRE_CONFIRMATION_DECISION) {
-    return undefined;
-  }
-  const explanation = fields['explanation'];
+  const explanation = decision['explanation'];
   return typeof explanation === 'string' && explanation
     ? explanation
     : DEFAULT_CONFIRMATION_HINT;

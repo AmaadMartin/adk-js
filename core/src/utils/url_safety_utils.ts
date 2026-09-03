@@ -52,33 +52,25 @@ const BLOCKED_IPV6_CIDRS = [
 /** Matches the scheme and the `//` that introduce a url's authority. */
 const SCHEME_PREFIX = /^[a-z][a-z\d+.-]*:\/\//i;
 
-/** A url that passed the shape checks in {@link parseRequestTarget}. */
-export interface RequestTarget {
-  /** The parsed url. */
-  url: URL;
-  /** The host, with the brackets of an IPv6 literal removed. */
-  hostname: string;
-}
-
 /**
- * Parses `url` and checks its shape: it must be a well-formed `http`/`https`
- * url. The WHATWG parser this uses rejects an `http` url that carries no
- * hostname or an out-of-range port, so those need no separate check.
+ * Checks the shape of `url` and returns its host: it must be a well-formed
+ * `http`/`https` url. The WHATWG parser this uses rejects an `http` url that
+ * carries no hostname or an out-of-range port, so those need no separate check.
  *
  * Performs no network access. Says nothing about where the host points; pass
- * the hostname to {@link isBlockedHostname} and {@link assertPubliclyRoutable}
+ * the result to {@link isBlockedHostname} and {@link assertPubliclyRoutable}
  * for that.
  *
- * @param url The url to parse.
- * @return The parsed target.
+ * @param url The url to check.
+ * @return The host, with the brackets of an IPv6 literal removed.
  * @throws If the url is malformed or uses another scheme.
  */
-export function parseRequestTarget(url: string): RequestTarget {
+export function parseTargetHostname(url: string): string {
   const parsed = new URL(url);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
     throw new Error(`Unsupported url scheme: ${url}`);
   }
-  return {url: parsed, hostname: normalizeHost(parsed.hostname)};
+  return normalizeHost(parsed.hostname);
 }
 
 /**

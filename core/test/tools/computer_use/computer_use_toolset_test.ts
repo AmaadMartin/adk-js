@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {lookup} from 'node:dns/promises';
-
 import {
   ComputerEnvironment,
   ComputerUseTool,
@@ -16,7 +14,9 @@ import {
   URL_REFUSED_ERROR,
 } from '@google/adk';
 import {Environment} from '@google/genai';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+
+import {lookupMock, resolveTo} from '../../utils/dns_mock_utils.js';
 
 import {
   createTestLlmRequest,
@@ -24,13 +24,9 @@ import {
   FakeComputer,
 } from './computer_use_test_utils.js';
 
-vi.mock('node:dns/promises', () => ({
-  lookup: vi.fn(),
+vi.mock('node:dns/promises', async () => ({
+  lookup: (await import('../../utils/dns_mock_utils.js')).lookupMock,
 }));
-
-// `lookup` is overloaded; treat the mock as a plain Mock so `mockResolvedValue`
-// accepts the `{all: true}` array-return shape used by the implementation.
-const lookupMock = lookup as unknown as Mock;
 
 /** The 14 predefined computer-use functions, in the order they are declared. */
 const ACTION_NAMES = [
@@ -49,16 +45,6 @@ const ACTION_NAMES = [
   'drag_and_drop',
   'current_state',
 ];
-
-/** Resolves any hostname to the given IP list for the DNS `lookup` mock. */
-function resolveTo(...addresses: string[]): void {
-  lookupMock.mockResolvedValue(
-    addresses.map((address) => ({
-      address,
-      family: address.includes(':') ? 6 : 4,
-    })),
-  );
-}
 
 /** Runs one action of the toolset by its wire name. */
 async function runAction(

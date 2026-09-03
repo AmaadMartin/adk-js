@@ -275,6 +275,10 @@ describe('ComputerUseTool safety confirmation', () => {
   it.each([
     ['another decision', {safety_decision: {decision: 'proceed'}}],
     ['a decision that is not an object', {safety_decision: 'proceed'}],
+    [
+      'a decision that is an array',
+      {safety_decision: ['require_confirmation']},
+    ],
     ['a null decision', {safety_decision: null}],
     ['no safety decision at all', {}],
   ])('runs the action for %s', async (_name, args) => {

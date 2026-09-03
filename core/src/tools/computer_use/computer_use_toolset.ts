@@ -16,7 +16,7 @@ import {
   assertPubliclyRoutable,
   hasBackslashInAuthority,
   isBlockedHostname,
-  parseRequestTarget,
+  parseTargetHostname,
 } from '../../utils/url_safety_utils.js';
 import {BaseToolset} from '../base_toolset.js';
 
@@ -448,14 +448,14 @@ export class ComputerUseToolset extends BaseToolset {
       return false;
     }
     try {
-      const target = parseRequestTarget(url);
+      const hostname = parseTargetHostname(url);
       if (this.allowPrivateNetworkAccess) {
         return true;
       }
-      if (isBlockedHostname(target.hostname)) {
+      if (isBlockedHostname(hostname)) {
         return false;
       }
-      await assertPubliclyRoutable(target.hostname);
+      await assertPubliclyRoutable(hostname);
       return true;
     } catch {
       return false;
