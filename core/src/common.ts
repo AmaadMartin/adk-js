@@ -327,6 +327,22 @@ export {
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
+  APPROXIMATE_NEAREST_NEIGHBORS,
+  Capabilities,
+  EXACT_NEAREST_NEIGHBORS,
+  QueryResultMode,
+  createSpannerToolSettings,
+  createSpannerVectorStoreSettings,
+  createVectorSearchIndexSettings,
+} from './tools/spanner/settings.js';
+export type {
+  NearestNeighborsAlgorithm,
+  SpannerToolSettings,
+  SpannerVectorStoreSettings,
+  TableColumn,
+  VectorSearchIndexSettings,
+} from './tools/spanner/settings.js';
+export {
   IntentMismatchError,
   ToolConfirmation,
   isIntentMismatchError,
