@@ -100,10 +100,14 @@ export const baseToolConfigSchema = z.strictObject({});
 /**
  * The args of one tool, as declared in a configuration document.
  *
- * The args are free key-value pairs whose shape belongs to the tool, so this
- * type states only that the value is an object. It is `object` rather than an
- * index signature so that a tool's own config interface stays assignable to
- * it; an index signature would also turn off key checking for every consumer.
+ * The args are free key-value pairs whose shape belongs to the tool, so the
+ * type states only that the value is an object and
+ * {@link toolArgsConfigSchema} decides what a document may actually hold.
+ *
+ * The type is `object` rather than `Record<string, unknown>` so that a tool
+ * can narrow it to its own config interface: TypeScript does not give an
+ * interface an implicit index signature, so an interface is not assignable to
+ * `Record<string, unknown>` (TS2322).
  *
  * @experimental (Experimental, subject to change)
  */
@@ -146,15 +150,12 @@ export interface ToolConfig {
  * Validates one tool entry of a configuration document.
  *
  * The entry carries `name` and optionally `args`, and any other key is
- * rejected. `args` accepts `null`, because `args:` written with no value in
- * YAML parses to `null`.
+ * rejected under the key the document actually used. `args` accepts `null`,
+ * because `args:` written with no value in YAML parses to `null`.
  *
  * @experimental (Experimental, subject to change)
  */
-export const toolConfigSchema: z.ZodType<ToolConfig, unknown> = z.preprocess(
-  camelCaseKeys,
-  z.strictObject({
-    name: z.string(),
-    args: toolArgsConfigSchema.nullish(),
-  }),
-);
+export const toolConfigSchema = z.strictObject({
+  name: z.string(),
+  args: toolArgsConfigSchema.nullish(),
+});
