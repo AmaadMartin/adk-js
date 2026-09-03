@@ -909,11 +909,16 @@ export type {
 export {runWithSyncCallableRunner} from './tools/sync_callable_runner.js';
 export type {SyncCallableRunner} from './tools/sync_callable_runner.js';
 export {
+  baseToolConfigSchema,
   createToolConfig,
   toolArgsConfigSchema,
   toolConfigSchema,
 } from './tools/tool_configs.js';
-export type {ToolArgsConfig, ToolConfig} from './tools/tool_configs.js';
+export type {
+  BaseToolConfig,
+  ToolArgsConfig,
+  ToolConfig,
+} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
   ToolConfirmation,

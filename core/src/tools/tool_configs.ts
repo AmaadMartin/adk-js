@@ -28,6 +28,35 @@ export const toolArgsConfigSchema = z.preprocess(
 );
 
 /**
+ * The base a custom tool's own config extends.
+ *
+ * The schema declares no key and rejects every key it was not extended with,
+ * so a config built from it treats a misspelled key as an error rather than
+ * as an extension point. A custom tool adds its keys with `.extend()`:
+ *
+ * ```ts
+ * const myToolConfigSchema = baseToolConfigSchema.extend({
+ *   threshold: z.number(),
+ * });
+ * myToolConfigSchema.parse({threshold: 1, thresold: 2}); // rejects the typo
+ * ```
+ *
+ * This is the adk-python `BaseToolConfig` extension point, which carries
+ * pydantic's `extra="forbid"` to a subclass.
+ *
+ * @experimental (Experimental, subject to change)
+ */
+export const baseToolConfigSchema = z.strictObject({});
+
+/**
+ * The config a custom tool declares by extending
+ * {@link baseToolConfigSchema}.
+ *
+ * @experimental (Experimental, subject to change)
+ */
+export type BaseToolConfig = z.infer<typeof baseToolConfigSchema>;
+
+/**
  * The declared args of one tool in a configuration file.
  *
  * A config comes from outside the type system, so the shape is whatever the
@@ -40,6 +69,8 @@ export const toolArgsConfigSchema = z.preprocess(
  * factory that narrows its parameter the same way, must stay assignable to
  * this type, and a TypeScript interface is not assignable to an
  * index-signature type.
+ *
+ * @experimental (Experimental, subject to change)
  */
 export type ToolArgsConfig = object;
 
@@ -78,9 +109,14 @@ export const toolConfigSchema = z.strictObject({
  */
 export type ToolConfig = z.infer<typeof toolConfigSchema>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+// The schema of one standalone declaration, as {@link createToolConfig} reads
+// it. It is not {@link toolConfigSchema}: an agent config document addresses a
+// tool by a non-empty name, while a standalone declaration carries whatever
+// name its caller wrote.
+const toolDeclarationSchema = baseToolConfigSchema.extend({
+  name: z.string(),
+  args: z.looseObject({}).nullish(),
+});
 
 /**
  * Validates a parsed tool declaration and returns it as a {@link ToolConfig}.
@@ -88,8 +124,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * The input is whatever a YAML or JSON parse produced, so it is typed
  * `unknown` and every field is checked. A declaration comes from outside the
  * type system, so an undeclared key is a typo rather than an extension point,
- * and it is rejected instead of dropped in silence. `args` is shallow-copied,
- * so the returned config never aliases the caller's object.
+ * and it is rejected instead of dropped in silence. `args` is copied, so the
+ * returned config never aliases the caller's object.
+ *
+ * The error names the offending key and the expected type. It never echoes
+ * the offending value, because a tool's args can carry credentials.
  *
  * This checks one standalone declaration. {@link toolConfigSchema} checks the
  * same entry inside an agent config document.
@@ -103,30 +142,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @experimental
  */
 export function createToolConfig(value: unknown): ToolConfig {
-  if (!isRecord(value)) {
-    throw new InputValidationError('ToolConfig must be a non-null object.');
-  }
-  const unknownKeys = Object.keys(value).filter(
-    (key) => key !== 'name' && key !== 'args',
-  );
-  if (unknownKeys.length > 0) {
+  const result = toolDeclarationSchema.safeParse(value);
+  if (!result.success) {
     throw new InputValidationError(
-      `ToolConfig received unknown key(s): ${unknownKeys.join(', ')}.`,
+      result.error.issues
+        .map(
+          (issue) =>
+            `${issue.path.join('.') || 'ToolConfig'}: ${issue.message}`,
+        )
+        .join('; '),
     );
   }
-
-  const {name, args} = value;
-  if (name === undefined) {
-    throw new InputValidationError('ToolConfig `name` is required.');
-  }
-  if (typeof name !== 'string') {
-    throw new InputValidationError('ToolConfig `name` must be a string.');
-  }
-  if (args === undefined || args === null) {
-    return {name};
-  }
-  if (!isRecord(args)) {
-    throw new InputValidationError('ToolConfig `args` must be an object.');
-  }
-  return {name, args: {...args}};
+  const {name, args} = result.data;
+  return args == null ? {name} : {name, args};
 }
