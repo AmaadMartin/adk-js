@@ -26,12 +26,6 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 /** The `type` google-auth-library requires in an authorized-user JSON blob. */
 const AUTHORIZED_USER_TYPE = 'authorized_user';
 
-/** Prefix of every session-state key minted by {@link googleCredentialKey}. */
-const CREDENTIAL_KEY_PREFIX = 'google_credentials_';
-
-/** Hex characters of the digest kept in a {@link googleCredentialKey}. */
-const CREDENTIAL_KEY_DIGEST_LENGTH = 16;
-
 /**
  * The cached credential, in the shape `Credentials.to_json()` writes in
  * adk-python. A session written by either SDK is readable by the other.
@@ -108,7 +102,10 @@ export class BaseGoogleCredentialsConfig {
         : undefined;
     this.clientId = userCredentials?._clientId ?? options.clientId;
     this.clientSecret = userCredentials?._clientSecret ?? options.clientSecret;
-    this.scopes = userCredentials ? scopesOf(userCredentials) : options.scopes;
+    // google-auth-library stores the granted scopes space-delimited.
+    this.scopes = userCredentials
+      ? userCredentials.credentials.scope?.split(' ')
+      : options.scopes;
   }
 }
 
@@ -174,16 +171,17 @@ export function isCredentialValid(client: AuthClient): boolean {
  * Whether these credentials came from a user OAuth2 consent flow, and so can
  * be re-obtained by running that flow again.
  *
- * Neither the base class nor a refresh token discriminates. `JWT`, `Compute`
- * and `Impersonated` all extend `OAuth2Client`, and each writes its own
- * placeholder into `credentials.refresh_token`. `UserRefreshClient` is the
- * only client that refreshes with a real user refresh token, and the
- * `_refreshToken` field it declares is the marker for it.
+ * `UserRefreshClient` is the only client that refreshes with a real user
+ * refresh token, but `instanceof UserRefreshClient` fails when two copies of
+ * `google-auth-library` share a runtime, and that class carries no
+ * `Symbol.hasInstance` shim to survive it. The `_refreshToken` field it
+ * declares is the marker instead. `credentials.refresh_token` is not one:
+ * `JWT`, `Compute` and `Impersonated` each write a placeholder into it.
  *
  * A bare `OAuth2Client` is therefore classified non-user here, where
- * adk-python classifies an equivalent `google.oauth2.credentials.Credentials`
- * as a user credential. Both paths refresh it when it is stale and return it,
- * so the credentials the caller receives are the same.
+ * adk-python classifies the equivalent object as a user credential. Both paths
+ * refresh it when it is stale and return it, so the caller receives the same
+ * credentials.
  */
 export function isUserOAuth2Credentials(
   client: AuthClient,
@@ -195,15 +193,17 @@ export function isUserOAuth2Credentials(
  * Whether a refresh failed at the token endpoint, as opposed to a bug in the
  * caller. Mirrors adk-python's `except RefreshError`: only a rejection by the
  * endpoint may fall through to a new consent flow.
+ *
+ * The HTTP status is the marker. `GaxiosError` leaves `name` at `'Error'`, and
+ * `instanceof GaxiosError` holds only within one gaxios version, so neither
+ * recognises a rejection raised by a second copy of the library.
  */
 export function isTokenRefreshFailure(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  if (error.name === 'GaxiosError') {
-    return true;
-  }
-  return 'status' in error && typeof error.status === 'number';
+  return (
+    error instanceof Error &&
+    'status' in error &&
+    typeof error.status === 'number'
+  );
 }
 
 /**
@@ -220,8 +220,8 @@ export function googleCredentialKey(
   const digest = createHash('sha256')
     .update(JSON.stringify({clientId, scopes: [...scopes].sort()}))
     .digest('hex')
-    .slice(0, CREDENTIAL_KEY_DIGEST_LENGTH);
-  return `${CREDENTIAL_KEY_PREFIX}${digest}`;
+    .slice(0, 16);
+  return `google_credentials_${digest}`;
 }
 
 /** Rejects any option combination that is not exactly one credential mode. */
@@ -259,11 +259,6 @@ function validateCredentialsConfig(
         'and clientSecret pair.',
     );
   }
-}
-
-/** The granted scopes, which google-auth-library stores space-delimited. */
-function scopesOf(client: AuthClient): string[] | undefined {
-  return client.credentials.scope?.split(' ');
 }
 
 /** Builds credentials from an access token the host put in session state. */

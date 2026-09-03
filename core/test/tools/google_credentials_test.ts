@@ -18,7 +18,8 @@ import {
   OAuth2Client,
   UserRefreshClient,
 } from 'google-auth-library';
-import {describe, expect, it, vi} from 'vitest';
+import {Server, createServer} from 'node:http';
+import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 
 import {
   BaseGoogleCredentialsConfig,
@@ -38,6 +39,32 @@ const FUNCTION_CALL_ID = 'test-function-call-id';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const AUTHORIZATION_URL = 'https://accounts.google.com/o/oauth2/auth';
 const HOUR_MS = 3600000;
+
+/** A local stand-in for Google's token endpoint, which refuses every refresh. */
+let tokenEndpoint: Server;
+let tokenEndpointUrl: string;
+
+beforeAll(async () => {
+  tokenEndpoint = createServer((_request, response) => {
+    response.writeHead(400, {'content-type': 'application/json'});
+    response.end(JSON.stringify({error: 'invalid_grant'}));
+  });
+  await new Promise<void>((resolve) => {
+    tokenEndpoint.listen(0, '127.0.0.1', resolve);
+  });
+
+  const address = tokenEndpoint.address();
+  if (address === null || typeof address === 'string') {
+    expect.fail('the local token endpoint reported no port');
+  }
+  tokenEndpointUrl = `http://127.0.0.1:${address.port}/token`;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) => {
+    tokenEndpoint.close((error) => (error ? reject(error) : resolve()));
+  });
+});
 
 function createToolContext(state: Record<string, unknown> = {}): Context {
   return new Context({
@@ -107,11 +134,29 @@ function mockRefreshSuccess(
   });
 }
 
-/** The rejection shape gaxios raises when the token endpoint refuses. */
-function createTokenEndpointError(): Error {
-  const error = new Error('invalid_grant');
-  error.name = 'GaxiosError';
-  return error;
+/** A user client whose token endpoint is the local server that always refuses. */
+function createRefusedClient(credentials: Credentials): UserRefreshClient {
+  const client = new UserRefreshClient({
+    clientId: CLIENT_ID,
+    clientSecret: CLIENT_SECRET,
+    refreshToken: 'user-refresh-token',
+    endpoints: {oauth2TokenUrl: tokenEndpointUrl},
+  });
+  client.setCredentials(credentials);
+  return client;
+}
+
+/**
+ * The rejection google-auth-library really raises when the token endpoint
+ * refuses. Captured from a live refresh, so no test pins an invented shape.
+ */
+async function captureTokenEndpointError(): Promise<unknown> {
+  return createRefusedClient({refresh_token: 'user-refresh-token'})
+    .refreshAccessToken()
+    .then(
+      () => expect.fail('the local token endpoint accepted the refresh'),
+      (error: unknown) => error,
+    );
 }
 
 /** A cache entry in the shape adk-python's `Credentials.to_json()` writes. */
@@ -298,8 +343,11 @@ describe('isUserOAuth2Credentials', () => {
 });
 
 describe('isTokenRefreshFailure', () => {
-  it('accepts a rejection from the token endpoint', () => {
-    expect(isTokenRefreshFailure(createTokenEndpointError())).toBe(true);
+  it('accepts a real rejection from the token endpoint', async () => {
+    const error = await captureTokenEndpointError();
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isTokenRefreshFailure(error)).toBe(true);
   });
 
   it('accepts an error carrying an HTTP status', () => {
@@ -559,14 +607,11 @@ describe('GoogleCredentialsManager', () => {
   });
 
   it('requests consent when the token endpoint refuses the refresh', async () => {
-    const credentials = createUserClient({
+    const credentials = createRefusedClient({
       access_token: 'stale-access-token',
       refresh_token: 'user-refresh-token',
       expiry_date: Date.now() - HOUR_MS,
     });
-    vi.spyOn(credentials, 'refreshAccessToken').mockRejectedValue(
-      createTokenEndpointError(),
-    );
     const manager = new GoogleCredentialsManager(
       new BaseGoogleCredentialsConfig({credentials}),
     );
