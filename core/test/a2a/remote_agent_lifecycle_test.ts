@@ -188,6 +188,49 @@ describe('RemoteA2AAgent empty request', () => {
 });
 
 describe('RemoteA2AAgent request metadata provider', () => {
+  it('sends the metadata an interceptor set on the parameters', async () => {
+    const transport = new FakeTransport([REPLY]);
+    const agent = new RemoteA2AAgent({
+      name: 'peer_agent',
+      agentCard: peerAgentCard(),
+      client: fakeClient(transport),
+      requestInterceptors: [
+        {
+          beforeRequest: async (_ctx, request, params) => [
+            request,
+            {...params, requestMetadata: {from: 'interceptor'}},
+          ],
+        },
+      ],
+    });
+
+    await collect(agent.runAsync(invocationContext({agent})));
+
+    expect(transport.sends[0].params.metadata).toEqual({from: 'interceptor'});
+  });
+
+  it('lets the provider override what an interceptor set', async () => {
+    const transport = new FakeTransport([REPLY]);
+    const agent = new RemoteA2AAgent({
+      name: 'peer_agent',
+      agentCard: peerAgentCard(),
+      client: fakeClient(transport),
+      requestInterceptors: [
+        {
+          beforeRequest: async (_ctx, request, params) => [
+            request,
+            {...params, requestMetadata: {from: 'interceptor'}},
+          ],
+        },
+      ],
+      a2aRequestMetaProvider: () => ({from: 'provider'}),
+    });
+
+    await collect(agent.runAsync(invocationContext({agent})));
+
+    expect(transport.sends[0].params.metadata).toEqual({from: 'provider'});
+  });
+
   it('supplies the outgoing request metadata', async () => {
     const transport = new FakeTransport([REPLY]);
     const agent = new RemoteA2AAgent({

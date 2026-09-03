@@ -566,6 +566,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
       const metadata =
         this.a2aConfig.a2aRequestMetaProvider?.(context, message) ??
+        requestParameters.requestMetadata ??
         this.a2aConfig.metadata ??
         context.a2aMetadata;
       const params: MessageSendParams = {
