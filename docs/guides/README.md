@@ -8,6 +8,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ## Index
 
+### A2A
+
+- [A2AAgentExecutor](a2a/agent_executor/index.md) - Serving an ADK agent over Agent2Agent: request conversion, interceptors, task result aggregation and cancellation.
+
 ### Agents
 
 - [Agent Identity](agents/identity/index.md) - What the framework tells the model about the agent, and how a single-turn agent opts out.
