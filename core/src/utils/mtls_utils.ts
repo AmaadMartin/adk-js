@@ -12,7 +12,19 @@ import {promisify} from 'node:util';
 
 import {logger} from './logger.js';
 
-const execFileAsync = promisify(execFile);
+/**
+ * Runs the certificate provider command and returns what it printed.
+ *
+ * `execFile` is read here rather than at module load, so that importing this
+ * module costs nothing on a process that never asks for a client certificate.
+ */
+async function runCertProviderCommand(
+  file: string,
+  args: string[],
+): Promise<string> {
+  const {stdout} = await promisify(execFile)(file, args);
+  return stdout;
+}
 
 /** How `GOOGLE_API_USE_MTLS_ENDPOINT` picks between the two endpoints. */
 export enum MtlsEndpointSetting {
@@ -179,7 +191,7 @@ export async function defaultClientCertSource(): Promise<
   const [file, ...args] = command;
   let stdout: string;
   try {
-    ({stdout} = await execFileAsync(file, args));
+    stdout = await runCertProviderCommand(file, args);
   } catch (e: unknown) {
     logger.warn(`The \`${CERT_PROVIDER_COMMAND_KEY}\` \`${file}\` failed.`, e);
     return undefined;
