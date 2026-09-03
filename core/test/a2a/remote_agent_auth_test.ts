@@ -14,6 +14,7 @@ import {
   AuthScheme,
   createEvent,
   createSession,
+  credentialRequestId,
   InvocationContext,
   PluginManager,
   RemoteA2AAgent,
@@ -298,6 +299,111 @@ describe('RemoteA2AAgent auth', () => {
     await collect(agent, createContext());
 
     expect(afterAgentRan).toBe(false);
+  });
+
+  it('resolves the credential the client sent on the previous turn', async () => {
+    const agent = new RemoteA2AAgent({
+      name: 'peer_agent',
+      agentCard: CARD_URL,
+      clientFactory: harness.clientFactory,
+      fetchImpl: harness.fetchImpl,
+      authScheme: API_KEY_SCHEME,
+    });
+
+    const firstTurn = createContext();
+    const [request] = await collect(agent, firstTurn);
+    expect(harness.cardRequests).toHaveLength(0);
+
+    // What the client sends back: the AuthConfig from the request, with the
+    // credential filled in.
+    const requestId = credentialRequestId('peer_agent');
+    const answered = {
+      ...(request.content?.parts?.[0].functionCall?.args?.[
+        'authConfig'
+      ] as object),
+      exchangedAuthCredential: {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'collected-key',
+      },
+    };
+    const secondTurn = createContext({
+      events: [
+        ...firstTurn.session.events,
+        request,
+        createEvent({
+          author: 'user',
+          content: {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  id: requestId,
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: answered,
+                },
+              },
+            ],
+          },
+        }),
+      ],
+    });
+
+    const events = await collect(agent, secondTurn);
+
+    expect(
+      events.some(
+        (event) =>
+          event.content?.parts?.[0].functionCall?.name ===
+          REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+      ),
+    ).toBe(false);
+    expect(harness.cardRequests[0].headers.get('x-api-key')).toBe(
+      'collected-key',
+    );
+    expect(harness.sendOptions).toEqual([{'X-Api-Key': 'collected-key'}]);
+  });
+
+  it('does not read a credential answered for another request', async () => {
+    const agent = new RemoteA2AAgent({
+      name: 'peer_agent',
+      agentCard: CARD_URL,
+      clientFactory: harness.clientFactory,
+      fetchImpl: harness.fetchImpl,
+      authScheme: API_KEY_SCHEME,
+    });
+    const ctx = createContext({
+      events: [
+        createEvent({
+          author: 'user',
+          content: {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  id: credentialRequestId('another_agent'),
+                  name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                  response: {
+                    authScheme: API_KEY_SCHEME,
+                    credentialKey: 'adk_a2a_another_agent',
+                    exchangedAuthCredential: {
+                      authType: AuthCredentialTypes.API_KEY,
+                      apiKey: 'not-mine',
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        }),
+      ],
+    });
+
+    const events = await collect(agent, ctx);
+
+    expect(events[0].content?.parts?.[0].functionCall?.name).toBe(
+      REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+    );
+    expect(harness.cardRequests).toHaveLength(0);
   });
 
   it('rejects a credential whose exchange produced no token', async () => {

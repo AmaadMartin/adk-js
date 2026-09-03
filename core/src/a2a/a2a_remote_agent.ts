@@ -403,7 +403,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     if (this.authConfig) {
       let resolved;
       try {
-        resolved = resolveRemoteAuth(this.authConfig, ctx, this.name);
+        resolved = await resolveRemoteAuth(this.authConfig, ctx, this.name);
       } catch (e: unknown) {
         yield this.errorEvent(
           ctx,

@@ -21,6 +21,7 @@ export type {
   BeforeA2ARequestCallback,
   RemoteA2AAgentConfig,
 } from './a2a_remote_agent.js';
+export {credentialRequestId} from './a2a_remote_agent_auth.js';
 export type {
   A2ACardRequestConfig,
   A2ACardRequestInterceptor,
