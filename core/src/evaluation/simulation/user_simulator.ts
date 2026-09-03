@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import {Content, GenerateContentConfig} from '@google/genai';
+import {z} from 'zod';
 
 import {Event} from '../../events/event.js';
+import {optionalField} from '../common.js';
 
 /** The resulting status of {@link UserSimulator.getNextUserMessage}. */
 export enum UserSimulatorStatus {
@@ -77,3 +79,131 @@ export function validateNextUserMessage(next: NextUserMessage): void {
     throw new Error(USER_MESSAGE_IFF_SUCCESS_ERROR);
   }
 }
+
+/**
+ * Configuration common to every user simulator.
+ *
+ * adk-python declares `extra="allow"` on this model, so a key the shape does
+ * not name is kept rather than dropped. The index signature is the counterpart
+ * of that, and it is what lets a simulator read a setting this package does
+ * not model.
+ */
+export interface BaseUserSimulatorConfig {
+  /**
+   * Names the concrete config. A concrete config narrows this to its own
+   * literal, such as `'llm_backed'`. It is not a value a simulator can be
+   * chosen by on its own: a base config must be promoted to a concrete one
+   * first.
+   */
+  type?: string;
+
+  [key: string]: unknown;
+}
+
+/** The model an LLM-backed user simulator prompts when a config names none. */
+export const DEFAULT_USER_SIMULATOR_MODEL = 'gemini-2.5-flash';
+
+/** The thinking budget an LLM-backed user simulator asks its model for. */
+export const DEFAULT_USER_SIMULATOR_THINKING_BUDGET = 10240;
+
+/** How many invocations a simulated conversation runs for by default. */
+export const DEFAULT_MAX_ALLOWED_INVOCATIONS = 20;
+
+/**
+ * The settings every LLM-backed user simulator config carries.
+ *
+ * adk-python repeats these fields on each concrete config rather than sharing
+ * a class; they are declared once here and both concrete configs extend them.
+ */
+export interface LlmUserSimulatorConfig extends BaseUserSimulatorConfig {
+  /**
+   * The model that generates the user's turns. Defaults to
+   * {@link DEFAULT_USER_SIMULATOR_MODEL}.
+   */
+  model?: string;
+
+  /**
+   * The configuration for that model. Defaults to a thinking config of
+   * {@link DEFAULT_USER_SIMULATOR_THINKING_BUDGET} tokens with thoughts
+   * included.
+   */
+  modelConfiguration?: GenerateContentConfig;
+
+  /**
+   * How many invocations the simulated conversation may run for, which stops a
+   * run-off conversation between the agent and the simulator. The opening
+   * fixed prompt counts as one. Defaults to
+   * {@link DEFAULT_MAX_ALLOWED_INVOCATIONS}; `-1` removes the limit, which is
+   * not recommended.
+   */
+  maxAllowedInvocations?: number;
+
+  /**
+   * Instructions that replace the built-in simulator prompt. They must name
+   * every placeholder in {@link REQUIRED_INSTRUCTION_PLACEHOLDERS}.
+   */
+  customInstructions?: string;
+
+  /**
+   * Whether the conversation history given to the simulator includes function
+   * calls and their responses. Defaults to false.
+   */
+  includeFunctionCalls?: boolean;
+}
+
+/**
+ * The placeholders custom simulator instructions must name.
+ *
+ * adk-python parses the instructions as a Jinja template and reports the
+ * variables it leaves undeclared. adk-js has no Jinja, so it checks that each
+ * name appears inside a `{{ }}` pair instead.
+ */
+export const REQUIRED_INSTRUCTION_PLACEHOLDERS = [
+  'stop_signal',
+  'conversation_plan',
+  'conversation_history',
+] as const;
+
+const PLACEHOLDER_PATTERNS = REQUIRED_INSTRUCTION_PLACEHOLDERS.map(
+  (name) => new RegExp(`\\{\\{[^{}]*\\b${name}\\b[^{}]*\\}\\}`),
+);
+
+/** Message adk-python raises when custom instructions omit a placeholder. */
+export const MISSING_INSTRUCTION_PLACEHOLDER_ERROR =
+  'custom_instructions must contain each of the following formatting ' +
+  'placeholders using Jinja syntax: {{ stop_signal }}, ' +
+  '{{ conversation_plan }}, {{ conversation_history }}';
+
+/**
+ * Reports whether custom simulator instructions name every required
+ * placeholder.
+ *
+ * @param instructions The instructions to check.
+ * @returns Whether every placeholder appears inside a `{{ }}` pair.
+ */
+export function hasRequiredInstructionPlaceholders(
+  instructions: string,
+): boolean {
+  return PLACEHOLDER_PATTERNS.every((pattern) => pattern.test(instructions));
+}
+
+/** The shared field schemas of an LLM-backed user simulator config. */
+export const llmUserSimulatorConfigShape = {
+  model: z.string().default(DEFAULT_USER_SIMULATOR_MODEL),
+  modelConfiguration: z.custom<GenerateContentConfig>().default(() => ({
+    thinkingConfig: {
+      includeThoughts: true,
+      thinkingBudget: DEFAULT_USER_SIMULATOR_THINKING_BUDGET,
+    },
+  })),
+  maxAllowedInvocations: z
+    .number()
+    .int()
+    .default(DEFAULT_MAX_ALLOWED_INVOCATIONS),
+  customInstructions: optionalField(
+    z.string().refine(hasRequiredInstructionPlaceholders, {
+      error: MISSING_INSTRUCTION_PLACEHOLDER_ERROR,
+    }),
+  ),
+  includeFunctionCalls: z.boolean().default(false),
+};
