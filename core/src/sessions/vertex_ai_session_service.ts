@@ -20,6 +20,7 @@ import {
   Content,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
+  HttpOptions,
 } from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
@@ -87,6 +88,16 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 export function quoteFilterLiteral(value: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+/**
+ * Wraps an HTTP-options override as a request `config`, or as nothing when
+ * there is no override, so the default service sends the request unchanged.
+ */
+function httpOptionsConfig(httpOptions: HttpOptions | undefined): {
+  config?: {httpOptions: HttpOptions};
+} {
+  return httpOptions ? {config: {httpOptions}} : {};
 }
 
 /** Resolves after `ms` milliseconds. */
@@ -203,6 +214,19 @@ export class VertexAiSessionService extends BaseSessionService {
     }
   }
 
+  /**
+   * HTTP options applied to every Agent Engine request, for a subclass to
+   * override. Returns undefined by default.
+   *
+   * adk-python installs the equivalent override on the client it builds. The
+   * `@google-cloud/vertexai` `Client` takes no HTTP options, so this service
+   * carries them on each request config instead. The observable effect is the
+   * same, and it also reaches requests made through an injected client.
+   */
+  protected apiClientHttpOptionsOverride(): HttpOptions | undefined {
+    return undefined;
+  }
+
   private getReasoningEngineId(appName: string): string {
     if (this.agentEngineId) {
       return this.agentEngineId;
@@ -246,6 +270,7 @@ export class VertexAiSessionService extends BaseSessionService {
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const filteredState = state ? trimTempState(state) : undefined;
+    const httpOptions = this.apiClientHttpOptionsOverride();
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
@@ -257,6 +282,7 @@ export class VertexAiSessionService extends BaseSessionService {
         ...(displayName != null ? {displayName} : {}),
         ...(labels != null ? {labels} : {}),
         ...(waitForCompletion != null ? {waitForCompletion} : {}),
+        ...(httpOptions ? {httpOptions} : {}),
       },
     });
 
@@ -267,6 +293,7 @@ export class VertexAiSessionService extends BaseSessionService {
       const [nextResponse] = await Promise.all([
         this.sessions.getSessionOperationInternal({
           operationName: operationName,
+          ...httpOptionsConfig(httpOptions),
         }),
         delay(CREATE_POLL_DELAY_MS),
       ]);
@@ -304,6 +331,8 @@ export class VertexAiSessionService extends BaseSessionService {
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
 
+    const httpOptions = this.apiClientHttpOptionsOverride();
+
     try {
       let getSessionResponse: VertexAiSession | undefined;
       let eventsIterator: VertexAiSessionEvent[] = [];
@@ -311,9 +340,12 @@ export class VertexAiSessionService extends BaseSessionService {
       if (config && config.numRecentEvents === 0) {
         getSessionResponse = (await this.sessions.get({
           name: sessionResourceName,
+          ...httpOptionsConfig(httpOptions),
         })) as VertexAiSession;
       } else {
-        const listConfig: ListAgentEngineSessionEventsConfig = {};
+        const listConfig: ListAgentEngineSessionEventsConfig = {
+          ...(httpOptions ? {httpOptions} : {}),
+        };
         if (config && config.afterTimestamp) {
           listConfig.filter = `timestamp>="${new Date(
             config.afterTimestamp,
@@ -321,7 +353,10 @@ export class VertexAiSessionService extends BaseSessionService {
         }
 
         const [sessionRes, firstPage] = await Promise.all([
-          this.sessions.get({name: sessionResourceName}),
+          this.sessions.get({
+            name: sessionResourceName,
+            ...httpOptionsConfig(httpOptions),
+          }),
           this.sessions.events.listInternal({
             name: sessionResourceName,
             config: listConfig,
@@ -400,6 +435,7 @@ export class VertexAiSessionService extends BaseSessionService {
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const httpOptions = this.apiClientHttpOptionsOverride();
     const adkSessions: Session[] = [];
     let pageToken: string | undefined = undefined;
 
@@ -409,6 +445,7 @@ export class VertexAiSessionService extends BaseSessionService {
         config: {
           ...(userId ? {filter: `user_id=${quoteFilterLiteral(userId)}`} : {}),
           ...(pageToken ? {pageToken} : {}),
+          ...(httpOptions ? {httpOptions} : {}),
         },
       });
 
@@ -502,6 +539,7 @@ export class VertexAiSessionService extends BaseSessionService {
 
     await this.sessions.delete({
       name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
+      ...httpOptionsConfig(this.apiClientHttpOptionsOverride()),
     });
   }
 
@@ -535,6 +573,11 @@ export class VertexAiSessionService extends BaseSessionService {
       'errorMessage',
     ]);
     config.actions = toApiActions(event.actions);
+
+    const httpOptions = this.apiClientHttpOptionsOverride();
+    if (httpOptions) {
+      config.httpOptions = httpOptions;
+    }
 
     // Strip Part fields the Sessions API rejects (e.g. `partMetadata`) from
     // both the wire content and the `rawEvent` blob it is stored under, so the
