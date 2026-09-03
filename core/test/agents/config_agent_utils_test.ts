@@ -18,6 +18,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   answerSchema,
+  factoryArgs,
   firstCallback,
   genaiAnswerSchema,
   helperAgent,
@@ -128,11 +129,14 @@ describe('resolveTools', () => {
   });
 
   it('calls a factory with no args with an empty object', async () => {
+    factoryArgs.length = 0;
+
     const [tool] = await resolveTools(
       [{name: ref('createRetriever')}],
       CONFIG_PATH,
     );
 
+    expect(factoryArgs).toEqual([{}]);
     expect(isBaseTool(tool) && tool.name).toBe('retrieve_default-corpus');
   });
 

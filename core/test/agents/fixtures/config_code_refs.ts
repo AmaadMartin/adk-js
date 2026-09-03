@@ -52,8 +52,12 @@ export const searchTool = new FunctionTool({
   execute: () => ({results: ['a result']}),
 });
 
+/** Records the args each factory call received. */
+export const factoryArgs: Array<{corpus_id?: string}> = [];
+
 /** A factory, the case tool `args` exist for. */
 export function createRetriever(args: {corpus_id?: string}): FunctionTool {
+  factoryArgs.push(args);
   const corpusId = args.corpus_id ?? 'default-corpus';
   return new FunctionTool({
     name: `retrieve_${corpusId}`,
