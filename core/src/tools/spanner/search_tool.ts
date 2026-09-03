@@ -75,7 +75,9 @@ function optionalStringOption(
     return undefined;
   }
   if (typeof value !== 'string') {
-    throw new Error(`Option '${key}' must be a string, got ${String(value)}.`);
+    throw new Error(
+      `Option '${key}' must be a string, got ${JSON.stringify(value)}.`,
+    );
   }
   return value;
 }
@@ -98,7 +100,7 @@ function optionalIntOption(
     typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
   if (typeof parsed !== 'number' || !Number.isInteger(parsed)) {
     throw new Error(
-      `Option '${key}' must be an integer, got ${String(value)}.`,
+      `Option '${key}' must be an integer, got ${JSON.stringify(value)}.`,
     );
   }
   return parsed;
@@ -466,7 +468,7 @@ const similaritySearchParams = z.object({
     .array(z.string())
     .describe('The columns to return alongside the distance.'),
   embedding_options: z
-    .record(z.string(), z.string())
+    .record(z.string(), z.unknown())
     .describe(
       'Exactly one of "vertex_ai_embedding_model_name" (a public Vertex AI' +
         ' model, embedded on the client, either dialect),' +
@@ -517,12 +519,17 @@ export const similaritySearchTool: SpannerToolDefinition<
     if (args.additional_filter) {
       validateAdditionalFilter(args.additional_filter);
     }
-    const googlesql = args.embedding_options[SPANNER_GSQL_EMBEDDING_MODEL_NAME];
+    const googlesql = optionalStringOption(
+      args.embedding_options,
+      SPANNER_GSQL_EMBEDDING_MODEL_NAME,
+    );
     if (googlesql) {
       validateIdentifier(googlesql, SPANNER_GSQL_EMBEDDING_MODEL_NAME);
     }
-    const endpoint =
-      args.embedding_options[SPANNER_PG_VERTEX_AI_EMBEDDING_MODEL_ENDPOINT];
+    const endpoint = optionalStringOption(
+      args.embedding_options,
+      SPANNER_PG_VERTEX_AI_EMBEDDING_MODEL_ENDPOINT,
+    );
     if (endpoint) {
       validateVertexAiEndpoint(endpoint);
     }

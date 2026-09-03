@@ -73,7 +73,7 @@ export interface SpannerOAuthClientCredentials {
 export async function createTokenAuthClient(
   token: SpannerAccessToken,
   oauthClient: SpannerOAuthClientCredentials = {},
-): Promise<SpannerAuthClient> {
+): Promise<OAuth2Client> {
   const client = new OAuth2Client(oauthClient);
   client.setCredentials({
     access_token: token.accessToken,
