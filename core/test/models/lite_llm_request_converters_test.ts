@@ -1552,6 +1552,68 @@ describe('contentToMessageParam Anthropic thinking blocks', () => {
     expect(message.reasoning_content).toBeUndefined();
   });
 
+  it('skips a thought part that carries no text', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: '', thought: true},
+            {text: 'thinking text', thought: true},
+            {text: 'Answer'},
+          ],
+        },
+        ANTHROPIC_NO_MODEL,
+      ),
+    );
+
+    expect(contentBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'thinking text'},
+      {type: 'text', text: 'Answer'},
+    ]);
+  });
+
+  it('puts the blocks ahead of a multipart content list', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: 'thinking text', thought: true},
+            {text: 'look'},
+            {inlineData: {data: 'AAA', mimeType: 'image/png'}},
+          ],
+        },
+        ANTHROPIC_NO_MODEL,
+      ),
+    );
+
+    expect(contentBlocks(message)).toStrictEqual([
+      {type: 'thinking', thinking: 'thinking text'},
+      {type: 'text', text: 'look'},
+      {type: 'image_url', image_url: {url: 'data:image/png;base64,AAA'}},
+    ]);
+  });
+
+  it('sends null content when every thought part is text-less', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {text: '', thought: true, thoughtSignature: SIG_A},
+            {functionCall: {id: 'c1', name: 'add', args: {a: 1}}},
+          ],
+        },
+        ANTHROPIC_NO_MODEL,
+      ),
+    );
+
+    expect(message.content).toBeNull();
+    expect(message.tool_calls).toHaveLength(1);
+    expect(message.reasoning_content).toBeUndefined();
+  });
+
   it('rejoins thinking split across streaming deltas', () => {
     const message = singleMessage(
       contentToMessageParam(

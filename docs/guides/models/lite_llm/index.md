@@ -210,6 +210,31 @@ LiteLLM's Gemini prompt conversion reads the first and the OpenAI-compatible
 endpoint reads the second. See
 [the Gemini thought-signature documentation](https://ai.google.dev/gemini-api/docs/thought-signatures).
 
+## Anthropic thinking blocks
+
+Claude reports its reasoning as thinking blocks rather than as a single
+reasoning string, and it needs them back on the next turn. LiteLLM's Anthropic
+prompt template drops the top-level `reasoning_content` field, so a plain
+reasoning string disappears from a multi-turn history and Claude stops
+producing thinking after the first turn. `LiteLlm` rebuilds the blocks instead,
+with no configuration.
+
+A model string that names Claude gets the blocks as a top-level
+`thinking_blocks` array. Only a block that has both text and a signature goes
+in, because Anthropic rejects an unsigned block in a multi-turn conversation.
+Streaming splits one block across many deltas — text-only chunks, then a
+signature-only chunk — and `LiteLlm` rejoins them into one block first.
+
+Any other route that reaches Claude gets the blocks at the head of the message
+content list, with the ordinary content after them. This is the path a caller
+takes when it names `anthropic` as the provider without a model string, and the
+path a signature-less turn falls back to.
+
+Every other route keeps `reasoning_content` unchanged. Bedrock and Vertex AI
+host Llama, Titan and Gemini alongside Claude, so the route test reads the
+model name and not just the provider: those models return a 400 when a request
+carries thinking blocks.
+
 ## Supplying your own client
 
 `LiteLlmClient` has two methods, one per mode. Implementing it replaces the
