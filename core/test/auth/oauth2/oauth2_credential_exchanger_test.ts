@@ -165,7 +165,7 @@ describe('OAuth2CredentialExchanger', () => {
   });
 
   describe('exchangeClientCredentials', () => {
-    it('throws CredentialExchangeError if token endpoint is missing', async () => {
+    it('returns the original credential if token endpoint is missing', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
       } as AuthCredential;
@@ -173,12 +173,16 @@ describe('OAuth2CredentialExchanger', () => {
 
       vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(undefined);
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
-    it('throws CredentialExchangeError if clientId or clientSecret is missing', async () => {
+    it('returns the original credential if clientId or clientSecret is missing', async () => {
       const authCredential = {oauth2: {}} as AuthCredential;
       const authScheme = {} as AuthScheme;
 
@@ -186,9 +190,13 @@ describe('OAuth2CredentialExchanger', () => {
         'https://example.com/token',
       );
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
     it('calls fetchOAuth2Tokens and returns updated credential', async () => {
@@ -215,7 +223,7 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails', async () => {
+    it('returns the original credential if fetchOAuth2Tokens fails', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
       } as AuthCredential;
@@ -228,12 +236,16 @@ describe('OAuth2CredentialExchanger', () => {
         new Error('Network error'),
       );
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails with non-Error', async () => {
+    it('returns the original credential if fetchOAuth2Tokens fails with non-Error', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
       } as AuthCredential;
@@ -246,14 +258,18 @@ describe('OAuth2CredentialExchanger', () => {
         'String error',
       );
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
   });
 
   describe('exchangeAuthorizationCode', () => {
-    it('throws CredentialExchangeError if token endpoint is missing', async () => {
+    it('returns the original credential if token endpoint is missing', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
       } as AuthCredential;
@@ -261,12 +277,16 @@ describe('OAuth2CredentialExchanger', () => {
 
       vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(undefined);
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
-    it('throws CredentialExchangeError if required fields are missing', async () => {
+    it('returns the original credential if required fields are missing', async () => {
       const authCredential = {oauth2: {clientId: 'id'}} as AuthCredential;
       const authScheme = {} as AuthScheme;
 
@@ -274,9 +294,13 @@ describe('OAuth2CredentialExchanger', () => {
         'https://example.com/token',
       );
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
     it('parses code from authResponseUri if authCode is missing', async () => {
@@ -307,7 +331,7 @@ describe('OAuth2CredentialExchanger', () => {
       );
     });
 
-    it('throws if no code found in authResponseUri', async () => {
+    it('returns the original credential if no code found in authResponseUri', async () => {
       const authCredential = {
         oauth2: {
           clientId: 'id',
@@ -322,9 +346,13 @@ describe('OAuth2CredentialExchanger', () => {
       );
       vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue(undefined);
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
     it('calls fetchOAuth2Tokens and returns updated credential', async () => {
@@ -348,7 +376,7 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails', async () => {
+    it('returns the original credential if fetchOAuth2Tokens fails', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
       } as AuthCredential;
@@ -361,12 +389,16 @@ describe('OAuth2CredentialExchanger', () => {
         new Error('Network error'),
       );
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails with non-Error', async () => {
+    it('returns the original credential if fetchOAuth2Tokens fails with non-Error', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
       } as AuthCredential;
@@ -379,9 +411,13 @@ describe('OAuth2CredentialExchanger', () => {
         'String error',
       );
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
     });
 
     it('throws CredentialExchangeError if state in authResponseUri does not match expected state', async () => {
