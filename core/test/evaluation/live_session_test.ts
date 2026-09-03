@@ -10,7 +10,6 @@ import {
   BaseTool,
   Context,
   createEvent,
-  EdgeItem,
   Event,
   getLogger,
   InMemoryArtifactService,
@@ -22,7 +21,6 @@ import {
   LlmResponse,
   Logger,
   RunAsyncToolRequest,
-  RunnableNode,
   Runner,
   SequentialAgent,
   Session,
@@ -44,7 +42,7 @@ import {
   requireLiveEvalRoot,
 } from '../../src/evaluation/live_session.js';
 
-import {FakeLiveConnection, FakeLiveLlm} from './test_helpers.js';
+import {FakeLiveLlm} from './test_helpers.js';
 
 const APP_NAME = 'live_eval_app';
 const USER_ID = 'live_eval_user';
@@ -673,103 +671,7 @@ describe('EvalLiveSession', () => {
   });
 });
 
-const WORKFLOW_NAME = 'eval_workflow';
-const RECORD_FAILURE_PREFIX = 'Failed to record app details for agent';
 const NODE_AGENT_NAME = 'node_agent';
-const OTHER_AGENT_NAME = 'other_agent';
-const OTHER_INSTRUCTION = 'Answer in two words.';
-
-/** A tool the node agent can run, so a scripted function call resolves. */
-class NamedTool extends BaseTool {
-  constructor(name: string) {
-    super({name, description: `Runs ${name}.`});
-  }
-
-  override _getDeclaration(): FunctionDeclaration {
-    return {name: this.name, description: this.description};
-  }
-
-  override async runAsync(): Promise<unknown> {
-    return {done: true};
-  }
-}
-
-/** One agent of the workflow graph, and the script its own model replays. */
-interface NodeAgentSpec {
-  name: string;
-  script: Array<LlmResponse | Error>;
-  instruction?: string;
-  toolNames?: string[];
-}
-
-interface WorkflowHarness {
-  runner: Runner;
-  session: Session;
-  plugin: RecordingPlugin;
-  /** The connection each agent's model serves, by agent name. */
-  connections: Map<string, FakeLiveConnection>;
-}
-
-/**
- * Builds a runner whose root is a workflow. Every agent is a graph node fanned
- * out from `START`, so each drives its own connection concurrently.
- */
-async function createWorkflowHarness(options: {
-  agents: NodeAgentSpec[];
-  extraNodes?: RunnableNode[];
-  plugin?: RecordingPlugin;
-}): Promise<WorkflowHarness> {
-  const sessionService = new InMemorySessionService();
-  const session = await sessionService.createSession({
-    appName: APP_NAME,
-    userId: USER_ID,
-  });
-  const connections = new Map<string, FakeLiveConnection>();
-  const nodes: RunnableNode[] = options.agents.map((spec) => {
-    const llm = new FakeLiveLlm();
-    llm.connection.emit(...spec.script);
-    connections.set(spec.name, llm.connection);
-    return new LlmAgent({
-      name: spec.name,
-      model: llm,
-      instruction: spec.instruction ?? INSTRUCTION,
-      tools: (spec.toolNames ?? []).map((name) => new NamedTool(name)),
-    });
-  });
-  // Chained rather than fanned out: a fan-out leaves two terminal nodes both
-  // producing output, which a workflow rejects.
-  const chain: RunnableNode[] = [...nodes, ...(options.extraNodes ?? [])];
-  const workflow = new Workflow({
-    name: WORKFLOW_NAME,
-    edges: chain.map(
-      (node, index): EdgeItem => [
-        index === 0 ? 'START' : chain[index - 1],
-        node,
-      ],
-    ),
-  });
-  const plugin = options.plugin ?? new RecordingPlugin();
-  const runner = new Runner({
-    appName: APP_NAME,
-    agent: workflow,
-    plugins: [plugin],
-    sessionService,
-    artifactService: new InMemoryArtifactService(),
-  });
-  return {runner, session, plugin, connections};
-}
-
-/** The connection of the named agent, failing the test when there is none. */
-function connectionOf(
-  harness: WorkflowHarness,
-  agentName: string,
-): FakeLiveConnection {
-  const connection = harness.connections.get(agentName);
-  if (connection === undefined) {
-    expect.fail(`the harness built no connection for ${agentName}`);
-  }
-  return connection;
-}
 
 /** A model response carrying one function call. */
 function callingResponse(...names: string[]): LlmResponse {
@@ -779,20 +681,6 @@ function callingResponse(...names: string[]): LlmResponse {
       parts: names.map((name) => ({functionCall: {name, args: {}}})),
     },
   };
-}
-
-/** Only the warnings about a failed app-details recording. */
-function recordingFailures(recordingLogger: RecordingLogger): string[] {
-  return recordingLogger.warnings.filter((warning) =>
-    warning.startsWith(RECORD_FAILURE_PREFIX),
-  );
-}
-
-/** The names of the agents the driver recorded app details for. */
-function recordedAgentNames(harness: WorkflowHarness): string[] {
-  return harness.plugin.beforeCalls
-    .map((call) => call.callbackContext.agentName)
-    .sort();
 }
 
 describe('opensToolRound', () => {

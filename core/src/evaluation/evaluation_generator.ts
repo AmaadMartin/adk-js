@@ -527,7 +527,7 @@ interface EvalRun {
 }
 
 /** The services, session and app an eval conversation runs against. */
-interface EvalRunParams {
+export interface EvalRunParams {
   rootAgent: RunnableRoot;
   resetFunc?: () => unknown;
   initialSession?: SessionInput;

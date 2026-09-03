@@ -237,6 +237,7 @@ export {
 export type {
   EvalCaseResponses,
   EvalRow,
+  EvalRunParams,
 } from './evaluation/evaluation_generator.js';
 export {
   BASE_CRITERION_TYPE,

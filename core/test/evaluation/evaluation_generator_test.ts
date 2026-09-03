@@ -47,7 +47,6 @@ import {
   setLogger,
   UserSimulator,
   UserSimulatorStatus,
-  Workflow,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
 import {mkdtemp, writeFile} from 'node:fs/promises';
