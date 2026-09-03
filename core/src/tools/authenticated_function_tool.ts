@@ -70,26 +70,16 @@ function declaresCredentialParam(parameters: ToolInputParameters): boolean {
 function withoutCredentialParam(
   declaration: FunctionDeclaration,
 ): FunctionDeclaration {
-  const parameters = declaration.parameters;
-  if (!parameters?.properties) {
-    return declaration;
-  }
+  const parameters = {...declaration.parameters};
   const properties = {...parameters.properties};
   delete properties[CREDENTIAL_PARAM];
-  return {
-    ...declaration,
-    parameters: {
-      ...parameters,
-      properties,
-      ...(parameters.required
-        ? {
-            required: parameters.required.filter(
-              (name) => name !== CREDENTIAL_PARAM,
-            ),
-          }
-        : {}),
-    },
-  };
+  parameters.properties = properties;
+  if (parameters.required) {
+    parameters.required = parameters.required.filter(
+      (name) => name !== CREDENTIAL_PARAM,
+    );
+  }
+  return {...declaration, parameters};
 }
 
 /**

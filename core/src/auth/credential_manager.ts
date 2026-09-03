@@ -42,13 +42,11 @@ function isClientCredentialsFlow(authScheme: AuthScheme): boolean {
   if (authScheme.type === 'oauth2') {
     return authScheme.flows.clientCredentials !== undefined;
   }
-  return (
-    'grantTypesSupported' in authScheme &&
-    (authScheme.grantTypesSupported?.includes(
-      OAuthGrantType.CLIENT_CREDENTIALS,
-    ) ??
-      false)
-  );
+  const grantTypes =
+    'grantTypesSupported' in authScheme
+      ? authScheme.grantTypesSupported
+      : undefined;
+  return grantTypes?.includes(OAuthGrantType.CLIENT_CREDENTIALS) ?? false;
 }
 
 /**
