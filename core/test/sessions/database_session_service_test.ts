@@ -19,14 +19,31 @@ import {
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
+import {mkdtempSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
+import {extractStateDelta} from '../../src/sessions/base_session_service.js';
+import {
+  describeOpenFailure,
+  isDatabaseConnectionString,
+  rowsToLock,
+} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
 import {
   ENTITIES,
   StorageAppState,
   StorageUserState,
 } from '../../src/sessions/db/schema.js';
+import {logger} from '../../src/utils/logger.js';
 
 /** Opens a service that records every statement MikroORM sends. */
 async function createLoggingService(): Promise<{
@@ -985,13 +1002,14 @@ describe('DatabaseSessionService.close', () => {
     });
 
   it('releases the connection the service opened', async () => {
+    const closed = vi.spyOn(MikroORM.prototype, 'close');
     const service = newService();
     await service.init();
-    const orm = (service as unknown as {orm: MikroORM}).orm;
 
     await service.close();
 
-    await expect(orm.isConnected()).resolves.toBe(false);
+    expect(closed).toHaveBeenCalledOnce();
+    closed.mockRestore();
   });
 
   it('does nothing on a service that was never used', async () => {
@@ -1955,5 +1973,643 @@ describe('DatabaseSessionService concurrent state rows', () => {
     await expect(
       service.createSession({appName: 'app', userId: 'u1', sessionId: 's1'}),
     ).rejects.toThrow(/app_states/);
+  });
+});
+
+/**
+ * Creates a database holding the legacy v0 schema, the way adk-python 1.19
+ * through 1.21 wrote it: flat event columns, a pickled `actions` blob, no
+ * `event_data` column and no metadata table.
+ *
+ * @returns The path of the database file.
+ */
+async function writeLegacyDatabase(rows: {
+  events: Array<Record<string, unknown>>;
+  appState?: Record<string, unknown>;
+  userState?: Record<string, unknown>;
+}): Promise<string> {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'adk-v0-')), 'v0.db');
+  const orm = await MikroORM.init({
+    dbName: file,
+    driver: SqliteDriver,
+    entities: [],
+    discovery: {warnWhenNoEntities: false},
+  });
+  const connection = orm.em.getConnection();
+  await connection.execute(`create table sessions (
+    id VARCHAR(191) NOT NULL, app_name VARCHAR(191) NOT NULL,
+    user_id VARCHAR(191) NOT NULL, state JSON NOT NULL,
+    create_time DATETIME NOT NULL, update_time DATETIME NOT NULL,
+    PRIMARY KEY (id, app_name, user_id))`);
+  await connection.execute(`create table app_states (
+    app_name VARCHAR(191) NOT NULL PRIMARY KEY, state JSON NOT NULL,
+    update_time DATETIME NOT NULL)`);
+  await connection.execute(`create table user_states (
+    app_name VARCHAR(191) NOT NULL, user_id VARCHAR(191) NOT NULL,
+    state JSON NOT NULL, update_time DATETIME NOT NULL,
+    PRIMARY KEY (app_name, user_id))`);
+  await connection.execute(`create table events (
+    id VARCHAR(191) NOT NULL, app_name VARCHAR(191) NOT NULL,
+    user_id VARCHAR(191) NOT NULL, session_id VARCHAR(191) NOT NULL,
+    invocation_id VARCHAR(256) NOT NULL, author VARCHAR(256) NOT NULL,
+    branch VARCHAR(256), timestamp DATETIME NOT NULL, actions BLOB,
+    long_running_tool_ids_json TEXT, content JSON, grounding_metadata JSON,
+    custom_metadata JSON, usage_metadata JSON, citation_metadata JSON,
+    input_transcription JSON, output_transcription JSON, partial BOOLEAN,
+    turn_complete BOOLEAN, interrupted BOOLEAN, error_code VARCHAR(256),
+    error_message TEXT,
+    PRIMARY KEY (id, app_name, user_id, session_id))`);
+
+  await connection.execute(
+    `insert into sessions (id, app_name, user_id, state, create_time, update_time)
+     values (?, ?, ?, ?, ?, ?)`,
+    [LEGACY_SESSION_ID, LEGACY_APP, LEGACY_USER, '{"turn":1}', 1000, 5000],
+  );
+  await connection.execute(
+    'insert into app_states (app_name, state, update_time) values (?, ?, ?)',
+    [LEGACY_APP, JSON.stringify(rows.appState ?? {}), 1000],
+  );
+  await connection.execute(
+    `insert into user_states (app_name, user_id, state, update_time)
+     values (?, ?, ?, ?)`,
+    [LEGACY_APP, LEGACY_USER, JSON.stringify(rows.userState ?? {}), 1000],
+  );
+  for (const event of rows.events) {
+    const columns = Object.keys(event);
+    await connection.execute(
+      `insert into events (app_name, user_id, session_id, ${columns.join(', ')})
+       values (?, ?, ?, ${columns.map(() => '?').join(', ')})`,
+      [
+        LEGACY_APP,
+        LEGACY_USER,
+        LEGACY_SESSION_ID,
+        ...columns.map((c) => event[c]),
+      ],
+    );
+  }
+  await orm.close();
+  return file;
+}
+
+const LEGACY_APP = 'legacy-app';
+const LEGACY_USER = 'legacy-user';
+const LEGACY_SESSION_ID = 'legacy-session';
+/** The pickle adk-python writes into the v0 `actions` column. */
+const PICKLED_ACTIONS = Buffer.from('\x80\x04\x95pickled', 'binary');
+
+describe('DatabaseSessionService against a legacy v0 database', () => {
+  let service: DatabaseSessionService;
+  let warn: MockInstance<typeof logger.warn>;
+
+  beforeEach(() => {
+    warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    await service?.close();
+    warn.mockRestore();
+  });
+
+  /** Opens a service over a legacy database holding `events`. */
+  async function openLegacy(
+    events: Array<Record<string, unknown>>,
+    states?: {
+      appState?: Record<string, unknown>;
+      userState?: Record<string, unknown>;
+    },
+  ): Promise<DatabaseSessionService> {
+    const file = await writeLegacyDatabase({events, ...states});
+    service = new DatabaseSessionService(`sqlite://${file}`);
+    await service.init();
+    return service;
+  }
+
+  it('opens instead of refusing to start', async () => {
+    await expect(openLegacy([])).resolves.toBeDefined();
+  });
+
+  it('returns the stored events oldest first, from their flat columns', async () => {
+    await openLegacy([
+      {
+        id: 'e2',
+        invocation_id: 'inv-2',
+        author: 'agent',
+        branch: 'root.child',
+        timestamp: 2000,
+        content: '{"role":"model","parts":[{"text":"second"}]}',
+      },
+      {
+        id: 'e1',
+        invocation_id: 'inv-1',
+        author: 'user',
+        timestamp: 1000,
+        content: '{"role":"user","parts":[{"text":"first"}]}',
+      },
+    ]);
+
+    const session = await service.getSession({
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+      sessionId: LEGACY_SESSION_ID,
+    });
+
+    expect(session?.events.map((event) => event.id)).toEqual(['e1', 'e2']);
+    expect(session?.events[0].author).toBe('user');
+    expect(session?.events[0].invocationId).toBe('inv-1');
+    expect(session?.events[0].content).toEqual({
+      role: 'user',
+      parts: [{text: 'first'}],
+    });
+    expect(session?.events[1].branch).toBe('root.child');
+    expect(session?.state).toMatchObject({turn: 1});
+  });
+
+  it('returns empty actions and warns once, whatever the event count', async () => {
+    await openLegacy([
+      {
+        id: 'e1',
+        invocation_id: 'i',
+        author: 'a',
+        timestamp: 1000,
+        actions: PICKLED_ACTIONS,
+      },
+      {
+        id: 'e2',
+        invocation_id: 'i',
+        author: 'a',
+        timestamp: 2000,
+        actions: PICKLED_ACTIONS,
+      },
+      {
+        id: 'e3',
+        invocation_id: 'i',
+        author: 'a',
+        timestamp: 3000,
+        actions: PICKLED_ACTIONS,
+      },
+    ]);
+
+    const first = await service.getSession({
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+      sessionId: LEGACY_SESSION_ID,
+    });
+    await service.getSession({
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+      sessionId: LEGACY_SESSION_ID,
+    });
+
+    expect(first?.events).toHaveLength(3);
+    for (const event of first?.events ?? []) {
+      expect(event.actions).toEqual(createEventActions());
+    }
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('adk migrate session');
+  });
+
+  it('does not warn when the legacy session holds no event', async () => {
+    await openLegacy([]);
+
+    await service.getSession({
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+      sessionId: LEGACY_SESSION_ID,
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('round-trips the long-running tool ids, and tolerates a null column', async () => {
+    await openLegacy([
+      {
+        id: 'e1',
+        invocation_id: 'i',
+        author: 'a',
+        timestamp: 1000,
+        long_running_tool_ids_json: JSON.stringify(['call-1', 'call-2']),
+      },
+      {id: 'e2', invocation_id: 'i', author: 'a', timestamp: 2000},
+    ]);
+
+    const session = await service.getSession({
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+      sessionId: LEGACY_SESSION_ID,
+    });
+
+    expect(session?.events[0].longRunningToolIds).toEqual(['call-1', 'call-2']);
+    expect(session?.events[1].longRunningToolIds).toEqual([]);
+  });
+
+  it('lists the legacy sessions and reads the legacy user state', async () => {
+    await openLegacy([], {
+      appState: {theme: 'dark'},
+      userState: {locale: 'en-GB'},
+    });
+
+    const listed = await service.listSessions({
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+    });
+    const userState = await service.getUserState({
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+    });
+
+    expect(listed.sessions.map((session) => session.id)).toEqual([
+      LEGACY_SESSION_ID,
+    ]);
+    expect(listed.sessions[0].state).toMatchObject({
+      'app:theme': 'dark',
+      'user:locale': 'en-GB',
+      'turn': 1,
+    });
+    expect(userState).toEqual({locale: 'en-GB'});
+  });
+
+  it('refuses every write with the migration command', async () => {
+    await openLegacy([]);
+    const session = createSession({
+      id: LEGACY_SESSION_ID,
+      appName: LEGACY_APP,
+      userId: LEGACY_USER,
+    });
+
+    await expect(
+      service.createSession({appName: LEGACY_APP, userId: LEGACY_USER}),
+    ).rejects.toThrow('adk migrate session');
+    await expect(
+      service.appendEvent({session, event: createEvent({timestamp: 1})}),
+    ).rejects.toThrow('adk migrate session');
+    await expect(
+      service.deleteSession({
+        appName: LEGACY_APP,
+        userId: LEGACY_USER,
+        sessionId: LEGACY_SESSION_ID,
+      }),
+    ).rejects.toThrow('adk migrate session');
+  });
+
+  it('adds no column to the legacy events table', async () => {
+    const file = await writeLegacyDatabase({events: []});
+    service = new DatabaseSessionService(`sqlite://${file}`);
+    await service.init();
+    await service.close();
+
+    const inspector = await MikroORM.init({
+      dbName: file,
+      driver: SqliteDriver,
+      entities: [],
+      discovery: {warnWhenNoEntities: false},
+    });
+    const columns: Array<{name: string}> = await inspector.em
+      .getConnection()
+      .execute('pragma table_info(events)', [], 'all');
+    await inspector.close();
+
+    expect(columns.map((column) => column.name)).not.toContain('event_data');
+  });
+
+  it('creates no table and stamps no schema version', async () => {
+    const file = await writeLegacyDatabase({events: []});
+    const queries: string[] = [];
+    service = new DatabaseSessionService(`sqlite://${file}`, {
+      debug: ['query'],
+      logger: (message: string) => queries.push(message),
+    });
+
+    await service.init();
+
+    expect(queries.filter((query) => /create table/i.test(query))).toEqual([]);
+    await expect(
+      service.getSession({
+        appName: LEGACY_APP,
+        userId: LEGACY_USER,
+        sessionId: LEGACY_SESSION_ID,
+      }),
+    ).resolves.toBeDefined();
+
+    const inspector = await MikroORM.init({
+      dbName: file,
+      driver: SqliteDriver,
+      entities: [],
+      discovery: {warnWhenNoEntities: false},
+    });
+    const tables: Array<{name: string}> = await inspector.em
+      .getConnection()
+      .execute(
+        "select name from sqlite_master where type = 'table'",
+        [],
+        'all',
+      );
+    await inspector.close();
+
+    expect(tables.map((table) => table.name)).not.toContain(
+      'adk_internal_metadata',
+    );
+  });
+
+  it('refuses a caller-supplied ORM, whose entity set is already fixed', async () => {
+    const file = await writeLegacyDatabase({events: []});
+    const orm = await MikroORM.init({
+      dbName: file,
+      driver: SqliteDriver,
+      entities: ENTITIES,
+    });
+    const callerOwned = new DatabaseSessionService(orm);
+
+    await expect(callerOwned.init()).rejects.toThrow(
+      /entity set.*connection string/s,
+    );
+
+    await orm.close();
+  });
+});
+
+describe('describeOpenFailure', () => {
+  it('names the URL with its password masked', () => {
+    const password = 'sup3rs3cret';
+    const cause = new Error('connect ECONNREFUSED 127.0.0.1:5432');
+
+    const described = describeOpenFailure(
+      cause,
+      `postgres://user:${password}@localhost:5432/db`,
+    );
+
+    expect(described.message).toContain(
+      "Failed to create database engine for URL 'postgres://user:***@localhost:5432/db'",
+    );
+    expect(described.message).not.toContain(password);
+    expect(described.cause).toBe(cause);
+  });
+
+  it('replaces a URL too malformed to parse with a placeholder', () => {
+    const password = 'sup3rs3cret';
+
+    const described = describeOpenFailure(
+      new Error('nope'),
+      `postgres://user:${password}@[not-a-host/db`,
+    );
+
+    expect(described.message).toBe(
+      'Failed to create database engine for URL ' +
+        "'postgres://<unparseable URI, redacted>'",
+    );
+    expect(described.message).not.toContain(password);
+  });
+
+  it('invents no URL when the caller supplied none', () => {
+    expect(describeOpenFailure(new Error('nope')).message).toBe(
+      'Failed to create database engine for URL the database',
+    );
+  });
+});
+
+describe('DatabaseSessionService open failures', () => {
+  it('wraps a MikroORM failure, keeping the original as the cause', async () => {
+    // A regular file cannot be a parent directory, so opening the database
+    // below it fails inside MikroORM.init rather than in the URI check.
+    const blocker = path.join(
+      mkdtempSync(path.join(tmpdir(), 'adk-blocked-')),
+      'blocker',
+    );
+    writeFileSync(blocker, '');
+    const uri = `sqlite://${path.join(blocker, 'sessions.db')}`;
+    const service = new DatabaseSessionService(uri);
+
+    // The message names the URL, redacted. Which spelling it lands on depends
+    // on the platform, because a Windows temp path is not a parseable URL, so
+    // describeOpenFailure's own tests pin the two forms against fixed input.
+    await expect(service.init()).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /^Failed to create database engine for URL '.+'$/,
+        ),
+        cause: expect.any(Error),
+      }),
+    );
+  });
+
+  it('still reports a bad scheme the way it always did', () => {
+    expect(
+      () => new DatabaseSessionService('oracle://user:pw@host/db'),
+    ).toThrow('Unsupported database URI');
+    expect(() => new DatabaseSessionService('not a url at all')).toThrow(
+      'Invalid database URL format or argument',
+    );
+    expect(
+      () => new DatabaseSessionService('sqlite+aiosqlite:///sessions.db'),
+    ).toThrow(/'aiosqlite' driver/);
+  });
+});
+
+describe('DatabaseSessionService read routing', () => {
+  let service: DatabaseSessionService;
+  let orm: MikroORM;
+  let connectionTypes: string[];
+
+  beforeEach(async () => {
+    const file = path.join(
+      mkdtempSync(path.join(tmpdir(), 'adk-replica-')),
+      'primary.db',
+    );
+    orm = await MikroORM.init({
+      dbName: file,
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      replicas: [{name: 'reader'}],
+      // Off, so that only the read paths that ask for the read connection
+      // reach it. Left on, MikroORM would send every SELECT there and the
+      // assertions below would hold with or without the change under test.
+      preferReadReplicas: false,
+    });
+    service = new DatabaseSessionService(orm);
+    await service.init();
+
+    const driver = orm.em.getDriver();
+    const readConnection = driver.getConnection('read');
+    const writeConnection = driver.getConnection('write');
+    connectionTypes = [];
+    vi.spyOn(driver, 'getConnection').mockImplementation((type = 'write') => {
+      connectionTypes.push(type);
+      return type === 'read' ? readConnection : writeConnection;
+    });
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await service.close();
+    await orm.close();
+  });
+
+  it('sends every read to the read connection', async () => {
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        timestamp: 1000,
+        actions: createEventActions({stateDelta: {'user:seen': true}}),
+      }),
+    });
+
+    connectionTypes.length = 0;
+    await service.getSession({appName: 'app', userId: 'u1', sessionId: 's1'});
+    await service.listSessions({appName: 'app', userId: 'u1'});
+    await service.getUserState({appName: 'app', userId: 'u1'});
+
+    expect(connectionTypes).not.toHaveLength(0);
+    expect(connectionTypes).not.toContain('write');
+  });
+
+  it('keeps every write on the write connection', async () => {
+    connectionTypes.length = 0;
+    const session = await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: 1000}),
+    });
+    await service.deleteSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+
+    expect(connectionTypes).not.toHaveLength(0);
+    expect(connectionTypes).not.toContain('read');
+  });
+
+  it('pages a bare offset through the read connection', async () => {
+    for (const sessionId of ['s1', 's2', 's3']) {
+      await service.createSession({appName: 'app', userId: 'u1', sessionId});
+    }
+
+    connectionTypes.length = 0;
+    const listed = await service.listSessions({
+      appName: 'app',
+      userId: 'u1',
+      offset: 1,
+    });
+
+    expect(listed.sessions).toHaveLength(2);
+    expect(listed.totalItems).toBe(3);
+    expect(listed.page).toBe(1);
+    expect(connectionTypes).not.toContain('write');
+  });
+
+  it('reads and writes correctly with no replica configured', async () => {
+    const plain = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+    const session = await plain.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await plain.appendEvent({
+      session,
+      event: createEvent({
+        timestamp: 1000,
+        actions: createEventActions({stateDelta: {'user:seen': true}}),
+      }),
+    });
+
+    const loaded = await plain.getSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    const listed = await plain.listSessions({appName: 'app', userId: 'u1'});
+    const userState = await plain.getUserState({appName: 'app', userId: 'u1'});
+    await plain.close();
+
+    expect(loaded?.events).toHaveLength(1);
+    expect(listed.sessions.map((s) => s.id)).toEqual(['s1']);
+    expect(userState).toEqual({seen: true});
+  });
+});
+
+describe('rowsToLock', () => {
+  /**
+   * Ports adk-python's `test_append_event_locks_only_scopes_with_deltas`. A
+   * scope with no delta is only read, so it is never a lock candidate.
+   */
+  const scopes: Array<{
+    name: string;
+    stateDelta: Record<string, unknown>;
+    appState: boolean;
+    userState: boolean;
+  }> = [
+    {name: 'no state delta', stateDelta: {}, appState: false, userState: false},
+    {
+      name: 'session delta only',
+      stateDelta: {sessionKey: 'v'},
+      appState: false,
+      userState: false,
+    },
+    {
+      name: 'app delta only',
+      stateDelta: {'app:key': 'v'},
+      appState: true,
+      userState: false,
+    },
+    {
+      name: 'user delta only',
+      stateDelta: {'user:key': 'v'},
+      appState: false,
+      userState: true,
+    },
+    {
+      name: 'every scope',
+      stateDelta: {'app:a': '1', 'user:b': '2', 'sk': '3'},
+      appState: true,
+      userState: true,
+    },
+  ];
+
+  for (const scope of scopes) {
+    it(`locks the state rows a ${scope.name} touches, on a locking backend`, () => {
+      expect(
+        rowsToLock('postgresql', extractStateDelta(scope.stateDelta)),
+      ).toEqual({
+        session: true,
+        appState: scope.appState,
+        userState: scope.userState,
+      });
+    });
+
+    it(`locks nothing for a ${scope.name} on sqlite`, () => {
+      expect(rowsToLock('sqlite', extractStateDelta(scope.stateDelta))).toEqual(
+        {
+          session: false,
+          appState: false,
+          userState: false,
+        },
+      );
+    });
+  }
+
+  it('locks nothing on MSSQL, where FOR UPDATE becomes a table hint', () => {
+    expect(rowsToLock('mssql', extractStateDelta({'app:a': '1'}))).toEqual({
+      session: false,
+      appState: false,
+      userState: false,
+    });
+  });
+
+  it('locks the session row on every backend that supports it', () => {
+    for (const backend of ['mysql', 'mariadb', 'postgresql']) {
+      expect(rowsToLock(backend, extractStateDelta({})).session).toBe(true);
+    }
   });
 });

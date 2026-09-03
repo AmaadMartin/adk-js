@@ -15,6 +15,13 @@ MikroORM.init = async () => {
       updateSchema: async () => {},
     },
     em: {
+      // The schema probe reads the metadata and events tables; an empty
+      // database answers neither, so the fake rejects the way one does.
+      getConnection: () => ({
+        execute: async () => {
+          throw new Error('no such table');
+        },
+      }),
       fork: () => ({
         findOne: async () => null,
         create: () => ({}),

@@ -6,7 +6,6 @@
 
 import {
   EntityManager,
-  FilterQuery,
   LockMode,
   Options as MikroDBOptions,
   MikroORM,
@@ -18,6 +17,8 @@ import {StaleSessionError} from '../errors/stale_session_error.js';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {KeyedMutex} from '../utils/keyed_mutex.js';
+import {logger} from '../utils/logger.js';
+import {redactUriPassword} from '../utils/redact_uri.js';
 import {
   AppendEventRequest,
   applyTempState,
@@ -37,21 +38,30 @@ import {
 } from './base_session_service.js';
 import {
   assertSupportedDatabaseUri,
+  databaseBackendOf,
   detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
+  EventFilter,
   getConnectionOptionsFromUri,
   getOrCreateRow,
   namesSupportedDatabaseBackend,
+  NEWEST_EVENT_FIRST,
+  READ_ONLY,
+  SessionSchema,
+  sessionSchemaFor,
+  supportsRowLevelLocking,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_0_PICKLE,
+  SCHEMA_VERSION_1_JSON,
   StorageAppState,
   StorageEvent,
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
+import {ENTITIES_V0} from './db/schema_v0.js';
 import {CompositeSessionKey, createSession, Session} from './session.js';
 
 /**
@@ -62,21 +72,35 @@ const STALE_SESSION_ERROR_MESSAGE =
   'The session has been modified in storage since it was loaded. ' +
   'Please reload the session before appending more events.';
 
-/** Newest event first, with the id breaking a timestamp tie. */
-const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
+/** The command that turns a legacy v0 database into one this SDK can write. */
+const MIGRATE_COMMAND = 'the adk-python `adk migrate session` command';
 
-/**
- * Selects the events of one session, optionally from a timestamp onwards.
- *
- * Spelled out rather than built from `CompositeSessionKey`, because MikroORM's
- * `FilterQuery` only accepts a type that carries an implicit index signature,
- * which an interface does not have.
- */
-type EventFilter = {
+/** Why a write against a legacy v0 database is refused. */
+const LEGACY_READ_ONLY_MESSAGE =
+  'This database uses the legacy v0 session schema, which stores event ' +
+  'actions as a Python pickle. adk-js can read it but cannot write it, ' +
+  'because a write would leave the actions unreadable to adk-python. ' +
+  `Migrate the database with ${MIGRATE_COMMAND} first.`;
+
+/** Why a caller-supplied MikroORM instance cannot open a legacy database. */
+const LEGACY_CALLER_ORM_MESSAGE =
+  'This database uses the legacy v0 session schema, which needs its own ' +
+  'entity set. MikroORM fixes the entity set when the instance is created, ' +
+  'so a caller-supplied instance cannot be switched over. Construct ' +
+  'DatabaseSessionService from a connection string instead, or migrate the ' +
+  `database with ${MIGRATE_COMMAND}.`;
+
+/** Says once that the actions of every legacy event read back empty. */
+const LEGACY_ACTIONS_WARNING =
+  'This database uses the legacy v0 session schema, which stores event ' +
+  'actions as a Python pickle. adk-js cannot decode it, so every event is ' +
+  `returned with empty actions. Migrate the database with ${MIGRATE_COMMAND} ` +
+  'to recover them.';
+
+/** Selects the sessions of one app, optionally narrowed to one user. */
+type SessionFilter = {
   appName: string;
-  userId: string;
-  sessionId: string;
-  timestamp?: {$gte: Date};
+  userId?: string;
 };
 
 /**
@@ -116,8 +140,27 @@ function isMikroORM(source: MikroDBOptions | MikroORM): source is MikroORM {
   return 'em' in source && 'schema' in source && 'close' in source;
 }
 
+/**
+ * Restates a failure to open the database, naming the URL it happened on.
+ *
+ * Mirrors the fallback branch of adk-python's engine construction, so a driver
+ * that refused the connection does not surface a raw stack trace. The URL is
+ * redacted, and a caller who supplied a MikroORM instance or an options object
+ * has no URL to name.
+ *
+ * @param error The failure MikroORM raised.
+ * @param uri The connection string, if the caller gave one.
+ */
+export function describeOpenFailure(error: unknown, uri?: string): Error {
+  const target =
+    uri === undefined ? 'the database' : `'${redactUriPassword(uri)}'`;
+  return new Error(`Failed to create database engine for URL ${target}`, {
+    cause: error,
+  });
+}
+
 /** The exact storage revision a session row is currently at. */
-function updateMarkerOf(storageSession: StorageSession): string {
+function updateMarkerOf(storageSession: {updateTime: Date}): string {
   return storageSession.updateTime.toISOString();
 }
 
@@ -146,6 +189,30 @@ async function readRevision(
 /** Read options that take a row-level write lock when `enabled`. */
 function writeLock(enabled: boolean): {lockMode?: LockMode} {
   return enabled ? {lockMode: LockMode.PESSIMISTIC_WRITE} : {};
+}
+
+/**
+ * Decides which rows `appendEvent` locks, mirroring adk-python.
+ *
+ * A scope with no delta is only read, so locking it would serialize appends
+ * that never contend. A backend without row-level locking is asked for none:
+ * on MSSQL `FOR UPDATE` becomes a `WITH (UPDLOCK)` table hint that adk-python
+ * never takes, and on sqlite it compiles away.
+ *
+ * @param backend The backend name, as `databaseBackendOf` reports it.
+ * @param delta The event's state delta, split by scope.
+ * @returns Whether the session, app-state and user-state rows are locked.
+ */
+export function rowsToLock(
+  backend: string,
+  delta: ScopedStateDelta,
+): {session: boolean; appState: boolean; userState: boolean} {
+  const enabled = supportsRowLevelLocking(backend);
+  return {
+    session: enabled,
+    appState: enabled && Object.keys(delta.app).length > 0,
+    userState: enabled && Object.keys(delta.user).length > 0,
+  };
 }
 
 /** Merges a scoped delta into a stored state row, if it has any entries. */
@@ -189,6 +256,10 @@ export class DatabaseSessionService extends BaseSessionService {
   private optionOverrides?: Partial<MikroDBOptions>;
   private readonly ownsOrm: boolean;
   private readonly sessionLocks = new KeyedMutex();
+  private schema: SessionSchema = sessionSchemaFor(SCHEMA_VERSION_1_JSON);
+  private legacyDatabase = false;
+  private backend = '';
+  private warnedAboutLegacyActions = false;
 
   /**
    * @param source A connection string, a MikroORM options object, or a
@@ -246,23 +317,66 @@ export class DatabaseSessionService extends BaseSessionService {
     // Hold the instance locally: a `close()` that lands while this is in
     // flight clears the field, and the rest of the method would then run
     // against nothing.
-    const orm = (this.orm ??= await MikroORM.init(await this.resolveOptions()));
+    const orm = (this.orm ??= await this.openOrm(ENTITIES));
 
     // Detect before creating anything: `ensureDatabaseCreated` adds the v1
     // `event_data` column to a legacy `events` table, which erases the
     // evidence the detection reads.
     const version = await detectDatabaseSchemaVersion(orm);
     if (version === SCHEMA_VERSION_0_PICKLE) {
-      throw new Error(
-        'This database uses the legacy v0 session schema, which stores event ' +
-          'actions as a Python pickle that this SDK cannot read. Migrate it ' +
-          'with the adk-python `adk migrate session` command first.',
-      );
+      // Neither create tables nor stamp a version: both would make a legacy
+      // database report itself as current while its events read back empty.
+      await this.reopenWithLegacyEntities();
+    } else {
+      await ensureDatabaseCreated(orm);
+      await validateDatabaseSchemaVersion(orm);
     }
 
-    await ensureDatabaseCreated(orm);
-    await validateDatabaseSchemaVersion(orm);
+    this.backend = databaseBackendOf(this.orm!.em.getConnection());
     this.initialized = true;
+  }
+
+  /**
+   * Opens a MikroORM instance over the configured source.
+   *
+   * @param entities The entity set to register, which MikroORM fixes for the
+   *     lifetime of the instance.
+   * @throws Error naming the connection URL with its password masked.
+   */
+  private async openOrm(
+    entities: MikroDBOptions['entities'],
+  ): Promise<MikroORM> {
+    // The driver load sits outside the wrapping: `loadOptionalPeer` already
+    // names the package and the command that installs it, which is more use
+    // than a redacted URL.
+    const options = await this.resolveOptions();
+    try {
+      return await MikroORM.init({...options, entities});
+    } catch (error: unknown) {
+      throw describeOpenFailure(error, this.connectionString);
+    }
+  }
+
+  /**
+   * Reopens the database with the legacy v0 entity set.
+   *
+   * The entity set is fixed at `MikroORM.init` time, so reading a legacy
+   * database means closing the instance opened with the current entities and
+   * opening a second one.
+   *
+   * @throws Error if the caller supplied the MikroORM instance.
+   */
+  private async reopenWithLegacyEntities(): Promise<void> {
+    if (!this.ownsOrm) {
+      throw new Error(LEGACY_CALLER_ORM_MESSAGE);
+    }
+    const opened = this.orm;
+    this.orm = undefined;
+    await opened?.close();
+
+    this.orm = await this.openOrm(ENTITIES_V0);
+    this.schema = sessionSchemaFor(SCHEMA_VERSION_0_PICKLE);
+    this.legacyDatabase = true;
   }
 
   private async resolveOptions(): Promise<MikroDBOptions> {
@@ -272,6 +386,18 @@ export class DatabaseSessionService extends BaseSessionService {
           this.connectionString,
           this.optionOverrides,
         );
+  }
+
+  /** Rejects a write that a legacy v0 database cannot accept. */
+  private assertWritable(): void {
+    if (this.legacyDatabase) {
+      throw new Error(LEGACY_READ_ONLY_MESSAGE);
+    }
+  }
+
+  /** A fork that cannot flush, for the read paths. */
+  private readEm(): EntityManager {
+    return this.orm!.em.fork({disableTransactions: true});
   }
 
   /**
@@ -299,6 +425,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
     await this.init();
+    this.assertWritable();
     const em = this.orm!.em.fork();
 
     const id = sessionId || randomUUID();
@@ -381,13 +508,13 @@ export class DatabaseSessionService extends BaseSessionService {
     validateGetSessionConfig(config);
 
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = this.readEm();
 
-    const storageSession = await em.findOne(StorageSession, {
-      appName,
-      userId,
-      id: sessionId,
-    });
+    const storageSession = await em.findOne(
+      this.schema.sessions,
+      {appName, userId, id: sessionId},
+      {...READ_ONLY},
+    );
 
     if (!storageSession) {
       return undefined;
@@ -399,11 +526,16 @@ export class DatabaseSessionService extends BaseSessionService {
       config,
     );
 
-    const appStateModel = await em.findOne(StorageAppState, {appName});
-    const userStateModel = await em.findOne(StorageUserState, {
-      appName,
-      userId,
-    });
+    const appStateModel = await em.findOne(
+      this.schema.appStates,
+      {appName},
+      {...READ_ONLY},
+    );
+    const userStateModel = await em.findOne(
+      this.schema.userStates,
+      {appName, userId},
+      {...READ_ONLY},
+    );
 
     const mergedState = mergeStates(
       appStateModel?.state || {},
@@ -427,12 +559,12 @@ export class DatabaseSessionService extends BaseSessionService {
     userId,
   }: GetUserStateRequest): Promise<Record<string, unknown>> {
     await this.init();
-    const em = this.orm!.em.fork();
 
-    const userStateModel = await em.findOne(StorageUserState, {
-      appName,
-      userId,
-    });
+    const userStateModel = await this.readEm().findOne(
+      this.schema.userStates,
+      {appName, userId},
+      {...READ_ONLY},
+    );
     return {...(userStateModel?.state ?? {})};
   }
 
@@ -459,12 +591,23 @@ export class DatabaseSessionService extends BaseSessionService {
       where.timestamp = {$gte: new Date(config.afterTimestamp)};
     }
 
-    const storageEvents = await em.find(StorageEvent, where, {
-      orderBy: NEWEST_EVENT_FIRST,
-      limit: config?.numRecentEvents,
-    });
-    storageEvents.reverse();
-    return storageEvents.map((storageEvent) => storageEvent.eventData);
+    const events = await this.schema.readEvents(
+      em,
+      where,
+      config?.numRecentEvents,
+    );
+    if (events.length > 0) {
+      this.warnOnceAboutLegacyActions();
+    }
+    return events;
+  }
+
+  /** Says once per service that legacy events come back without actions. */
+  private warnOnceAboutLegacyActions(): void {
+    if (this.legacyDatabase && !this.warnedAboutLegacyActions) {
+      this.warnedAboutLegacyActions = true;
+      logger.warn(LEGACY_ACTIONS_WARNING);
+    }
   }
 
   async listSessions({
@@ -476,9 +619,9 @@ export class DatabaseSessionService extends BaseSessionService {
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = this.readEm();
 
-    const where: FilterQuery<StorageSession> = {appName};
+    const where: SessionFilter = {appName};
     if (userId) {
       where.userId = userId;
     }
@@ -493,7 +636,9 @@ export class DatabaseSessionService extends BaseSessionService {
     >;
 
     if (limit !== undefined) {
-      const totalItems = await em.count(StorageSession, where);
+      const totalItems = await em.count(this.schema.sessions, where, {
+        ...READ_ONLY,
+      });
       const totalPages = limit === 0 ? 0 : Math.ceil(totalItems / limit);
 
       let effectiveOffset: number;
@@ -507,15 +652,19 @@ export class DatabaseSessionService extends BaseSessionService {
           limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1;
       }
 
-      storageSessions = await em.find(StorageSession, where, {
+      storageSessions = await em.find(this.schema.sessions, where, {
+        ...READ_ONLY,
         orderBy,
         limit,
         offset: effectiveOffset,
       });
       paginationMeta = {page: effectivePage, limit, totalItems, totalPages};
     } else if (offset) {
-      const totalItems = await em.count(StorageSession, where);
-      storageSessions = await em.find(StorageSession, where, {
+      const totalItems = await em.count(this.schema.sessions, where, {
+        ...READ_ONLY,
+      });
+      storageSessions = await em.find(this.schema.sessions, where, {
+        ...READ_ONLY,
         orderBy,
         offset,
       });
@@ -526,7 +675,10 @@ export class DatabaseSessionService extends BaseSessionService {
         totalPages: totalItems === 0 ? 0 : 1,
       };
     } else {
-      storageSessions = await em.find(StorageSession, where, {orderBy});
+      storageSessions = await em.find(this.schema.sessions, where, {
+        ...READ_ONLY,
+        orderBy,
+      });
       const totalItems = storageSessions.length;
       paginationMeta = {
         page: 1,
@@ -536,15 +688,27 @@ export class DatabaseSessionService extends BaseSessionService {
       };
     }
 
-    const appStateModel = await em.findOne(StorageAppState, {appName});
+    const appStateModel = await em.findOne(
+      this.schema.appStates,
+      {appName},
+      {...READ_ONLY},
+    );
     const appState = appStateModel?.state || {};
     const userStateMap: Record<string, Record<string, unknown>> = {};
 
     if (userId) {
-      const u = await em.findOne(StorageUserState, {appName, userId});
+      const u = await em.findOne(
+        this.schema.userStates,
+        {appName, userId},
+        {...READ_ONLY},
+      );
       if (u) userStateMap[userId] = u.state;
     } else {
-      const allUserStates = await em.find(StorageUserState, {appName});
+      const allUserStates = await em.find(
+        this.schema.userStates,
+        {appName},
+        {...READ_ONLY},
+      );
       for (const u of allUserStates) {
         userStateMap[u.userId] = u.state;
       }
@@ -573,6 +737,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     await this.init();
+    this.assertWritable();
     const em = this.orm!.em.fork();
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
@@ -584,6 +749,7 @@ export class DatabaseSessionService extends BaseSessionService {
     event,
   }: AppendEventRequest): Promise<Event> {
     await this.init();
+    this.assertWritable();
 
     if (event.partial) {
       return event;
@@ -624,14 +790,13 @@ export class DatabaseSessionService extends BaseSessionService {
     event: Event,
     delta: ScopedStateDelta,
   ): Promise<{lastUpdateTime: number; marker: string}> {
-    const hasAppDelta = Object.keys(delta.app).length > 0;
-    const hasUserDelta = Object.keys(delta.user).length > 0;
+    const locked = rowsToLock(this.backend, delta);
 
     return this.orm!.em.fork().transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
         StorageSession,
         {appName: session.appName, userId: session.userId, id: session.id},
-        writeLock(true),
+        writeLock(locked.session),
       );
       if (!storageSession) {
         throw new SessionNotFoundError(`Session ${session.id} not found.`);
@@ -640,7 +805,7 @@ export class DatabaseSessionService extends BaseSessionService {
       const storageAppState = await txEm.findOne(
         StorageAppState,
         {appName: session.appName},
-        writeLock(hasAppDelta),
+        writeLock(locked.appState),
       );
       if (!storageAppState) {
         throw new Error(
@@ -652,7 +817,7 @@ export class DatabaseSessionService extends BaseSessionService {
       const storageUserState = await txEm.findOne(
         StorageUserState,
         {appName: session.appName, userId: session.userId},
-        writeLock(hasUserDelta),
+        writeLock(locked.userState),
       );
       if (!storageUserState) {
         throw new Error(

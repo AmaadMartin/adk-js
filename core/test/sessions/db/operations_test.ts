@@ -8,10 +8,16 @@ import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  connectionIsAlive,
+  databaseBackendOf,
   detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
   getOrCreateRow,
+  prePingPoolOptions,
+  READ_ONLY,
+  sessionSchemaFor,
+  supportsRowLevelLocking,
   validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
@@ -28,6 +34,11 @@ import {
   StorageSession,
   StorageUserState,
 } from '../../../src/sessions/db/schema.js';
+import {
+  StorageAppStateV0,
+  StorageSessionV0,
+  StorageUserStateV0,
+} from '../../../src/sessions/db/schema_v0.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
 vi.mock('@mikro-orm/postgresql', () => ({
@@ -498,6 +509,176 @@ describe('operations', () => {
       await expect(validateDatabaseSchemaVersion(orm)).rejects.toThrow(
         'ADK Database schema version 999 is not compatible',
       );
+    });
+  });
+  describe('prePingPoolOptions', () => {
+    it('gives a non-sqlite URI a connection check', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'postgres://user:pass@localhost:5432/db',
+      );
+
+      expect(options.pool).toEqual(prePingPoolOptions().pool);
+      expect(prePingPoolOptions().pool.validate).toBe(connectionIsAlive);
+    });
+
+    it('leaves sqlite without one', async () => {
+      const memory = await getConnectionOptionsFromUri('sqlite://:memory:');
+      const file = await getConnectionOptionsFromUri('sqlite:///tmp/a.db');
+
+      expect(memory.pool).not.toHaveProperty('validate');
+      expect(file.pool).toBeUndefined();
+    });
+
+    it('lets the caller switch the check off through the overrides', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'postgres://user:pass@localhost:5432/db',
+        {pool: {min: 2, max: 8}},
+      );
+
+      expect(options.pool).toEqual({min: 2, max: 8});
+      expect(options.pool).not.toHaveProperty('validate');
+    });
+
+    it('hands back a fresh options object each call', () => {
+      expect(prePingPoolOptions().pool).not.toBe(prePingPoolOptions().pool);
+    });
+  });
+
+  describe('sqlite foreign keys', () => {
+    let orm: MikroORM;
+
+    afterEach(async () => {
+      await orm.close();
+    });
+
+    it('are on for every sqlite connection MikroORM opens', async () => {
+      orm = await MikroORM.init(
+        await getConnectionOptionsFromUri('sqlite://:memory:'),
+      );
+
+      const rows: Array<{foreign_keys: number}> = await orm.em
+        .getConnection()
+        .execute('pragma foreign_keys', [], 'all');
+
+      expect(rows).toEqual([{foreign_keys: 1}]);
+    });
+  });
+
+  describe('connectionIsAlive', () => {
+    it('accepts a connection whose query answers', async () => {
+      const queried: string[] = [];
+      const connection = {
+        query(sql: string, callback: (error?: unknown) => void) {
+          queried.push(sql);
+          callback();
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(true);
+      expect(queried).toEqual(['select 1']);
+    });
+
+    it('rejects a connection whose query fails', async () => {
+      const connection = {
+        query(_sql: string, callback: (error?: unknown) => void) {
+          callback(new Error('server closed the connection'));
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(false);
+    });
+
+    it('rejects a connection whose query throws outright', async () => {
+      const connection = {
+        query() {
+          throw new Error('socket destroyed');
+        },
+      };
+
+      await expect(connectionIsAlive(connection)).resolves.toBe(false);
+    });
+
+    it('accepts a connection it cannot probe', async () => {
+      await expect(connectionIsAlive({})).resolves.toBe(true);
+      await expect(connectionIsAlive(undefined)).resolves.toBe(true);
+      await expect(connectionIsAlive(null)).resolves.toBe(true);
+      await expect(connectionIsAlive({query: 'not a function'})).resolves.toBe(
+        true,
+      );
+    });
+  });
+
+  describe('supportsRowLevelLocking', () => {
+    it('accepts the backends that take a row lock', () => {
+      expect(supportsRowLevelLocking('mysql')).toBe(true);
+      expect(supportsRowLevelLocking('mariadb')).toBe(true);
+      expect(supportsRowLevelLocking('postgresql')).toBe(true);
+    });
+
+    it('refuses the backends that do not', () => {
+      expect(supportsRowLevelLocking('sqlite')).toBe(false);
+      expect(supportsRowLevelLocking('mssql')).toBe(false);
+      expect(supportsRowLevelLocking('oracle')).toBe(false);
+      expect(supportsRowLevelLocking('')).toBe(false);
+    });
+  });
+
+  describe('databaseBackendOf', () => {
+    let orm: MikroORM;
+
+    afterEach(async () => {
+      await orm.close();
+    });
+
+    it('translates the knex sqlite dialect to the adk-python name', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+        pool: {min: 1, max: 1},
+      });
+
+      const backend = databaseBackendOf(orm.em.getConnection());
+
+      expect(backend).toBe('sqlite');
+      expect(supportsRowLevelLocking(backend)).toBe(false);
+    });
+
+    it('passes a non-sqlite dialect through unchanged', () => {
+      const postgres = {getKnex: () => ({client: {dialect: 'postgresql'}})};
+
+      expect(databaseBackendOf(postgres)).toBe('postgresql');
+      expect(supportsRowLevelLocking(databaseBackendOf(postgres))).toBe(true);
+    });
+
+    it('names no backend for a connection with no knex handle', () => {
+      expect(databaseBackendOf({})).toBe('');
+      expect(databaseBackendOf({getKnex: 'not a function'})).toBe('');
+    });
+  });
+
+  describe('READ_ONLY', () => {
+    it('cannot be mutated by a caller that passes it straight through', () => {
+      expect(READ_ONLY.connectionType).toBe('read');
+      expect(Object.isFrozen(READ_ONLY)).toBe(true);
+    });
+  });
+
+  describe('sessionSchemaFor', () => {
+    it('selects the legacy entity set only for the legacy version', () => {
+      const legacy = sessionSchemaFor(SCHEMA_VERSION_0_PICKLE);
+      const current = sessionSchemaFor(SCHEMA_VERSION_1_JSON);
+
+      expect(legacy.sessions).toBe(StorageSessionV0);
+      expect(legacy.appStates).toBe(StorageAppStateV0);
+      expect(legacy.userStates).toBe(StorageUserStateV0);
+      expect(current.sessions).toBe(StorageSession);
+      expect(current.appStates).toBe(StorageAppState);
+      expect(current.userStates).toBe(StorageUserState);
+    });
+
+    it('falls back to the current entity set for an unknown version', () => {
+      expect(sessionSchemaFor('7').sessions).toBe(StorageSession);
     });
   });
 });
