@@ -16,6 +16,7 @@ import {filterAudioParts} from '../utils/content_utils.js';
 import {LiveResponseAggregator} from '../utils/live_connection_utils.js';
 import {logger} from '../utils/logger.js';
 import {isGemini35LiveTranslate, isGemini3xLive} from '../utils/model_name.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {
   BaseLlmConnection,
@@ -30,6 +31,17 @@ import {LlmResponse} from './llm_response.js';
  */
 const RESPONSE_TRIGGER_TEXT = '.';
 
+/** The fields of a `LiveClientRealtimeInput`. */
+const REALTIME_INPUT_FIELDS: ReadonlySet<string> = new Set([
+  'activityEnd',
+  'activityStart',
+  'audio',
+  'audioStreamEnd',
+  'mediaChunks',
+  'text',
+  'video',
+]);
+
 /**
  * Returns whether a realtime input is a media blob rather than a control
  * signal.
@@ -39,6 +51,26 @@ const RESPONSE_TRIGGER_TEXT = '.';
  */
 function isBlobInput(input: RealtimeInput): input is Blob {
   return 'mimeType' in input || 'data' in input || 'displayName' in input;
+}
+
+/**
+ * Returns whether every field of the input belongs to
+ * `LiveClientRealtimeInput`. An input with an unknown field is not a realtime
+ * input at all, and the caller rejects it.
+ */
+function isRealtimeControlInput(input: RealtimeInput): boolean {
+  return Object.keys(input).every((field) => REALTIME_INPUT_FIELDS.has(field));
+}
+
+/** Describes a rejected input for the error message. */
+function describeInput(input: unknown): string {
+  if (input === null) {
+    return 'null';
+  }
+  if (typeof input !== 'object') {
+    return typeof input;
+  }
+  return `object with fields [${Object.keys(input).join(', ')}]`;
 }
 
 /** Adds the live session id to a response once the id is known. */
@@ -51,10 +83,19 @@ function withLiveSessionId(
 
 /** The Gemini model connection. */
 export class GeminiLlmConnection implements BaseLlmConnection {
+  /**
+   * @param geminiSession The live session to send on and receive from.
+   * @param modelVersion The version of the model behind the session.
+   * @param messageQueue The queue of server messages {@link receive} reads.
+   * @param apiBackend The Google backend the session was opened against. The
+   *     connection reports it for callers that behave differently on Vertex AI
+   *     and on the Gemini API.
+   */
   constructor(
     private readonly geminiSession: Session,
     private readonly modelVersion?: string,
     private readonly messageQueue?: AsyncIterable<LiveServerMessage>,
+    readonly apiBackend: GoogleLLMVariant = GoogleLLMVariant.VERTEX_AI,
   ) {}
 
   /**
@@ -146,16 +187,21 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    * the model.
    *
    * @param input The blob or control signal to send to the model.
+   * @throws An `Error` when the input is neither a `Blob` nor a
+   *     `LiveClientRealtimeInput`.
    */
   async sendRealtime(input: RealtimeInput): Promise<void> {
     if (!input || typeof input !== 'object') {
-      throw new Error(`Unsupported input type: ${typeof input}`);
+      throw new Error(`Unsupported input type: ${describeInput(input)}`);
     }
 
     if (isBlobInput(input)) {
       logger.debug('Sending LLM Blob:', input);
       this.sendBlob(input);
       return;
+    }
+    if (!isRealtimeControlInput(input)) {
+      throw new Error(`Unsupported input type: ${describeInput(input)}`);
     }
     if (input.activityStart) {
       logger.debug('Sending LLM activity start signal.');

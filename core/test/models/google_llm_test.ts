@@ -9,6 +9,7 @@ import {
   Gemini,
   geminiInitParams,
   GeminiParams,
+  GoogleLLMVariant,
   isResourceExhaustedError,
   LlmRequest,
   LlmResponse,
@@ -847,6 +848,27 @@ describe('GoogleLlm', () => {
             tools: [{googleSearch: {}}],
           }),
         }),
+      );
+    });
+
+    it('passes the api backend to the connection', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        model: 'gemini-2.5-flash',
+      });
+      const request: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        config: {},
+        toolsDict: {},
+      };
+
+      const connection = await llm.connect(request);
+
+      expect(connection).toHaveProperty(
+        'apiBackend',
+        GoogleLLMVariant.GEMINI_API,
       );
     });
 
