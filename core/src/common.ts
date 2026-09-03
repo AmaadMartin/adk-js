@@ -175,7 +175,14 @@ export {
   DEFAULT_LIVE_TIMEOUT_SECONDS,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
 } from './evaluation/constants.js';
-export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export {
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+  isIntermediateData,
+  isInvocationEvents,
+  validateEvalCase,
+} from './evaluation/eval_case.js';
 export type {
   ConversationScenario,
   EvalCase,
@@ -187,6 +194,7 @@ export type {
   SessionInput,
   SessionState,
   StaticConversation,
+  ToolCallAndResponse,
 } from './evaluation/eval_case.js';
 export {
   DEFAULT_EVAL_CONFIG,
