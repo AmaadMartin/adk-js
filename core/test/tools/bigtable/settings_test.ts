@@ -65,7 +65,7 @@ describe('Bigtable tool settings', () => {
   describe('createBigtableToolSettings', () => {
     const cases: Array<{
       name: string;
-      params: BigtableToolSettings;
+      params: Partial<BigtableToolSettings>;
       expectedRows: number;
     }> = [
       {name: 'an empty object', params: {}, expectedRows: 50},
