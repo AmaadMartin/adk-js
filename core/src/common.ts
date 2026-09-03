@@ -7,11 +7,8 @@
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
 export {
-  ADK_AGENT_CLASSES,
-  DEFAULT_AGENT_CLASS,
   agentConfigDiscriminator,
   baseAgentYamlConfigSchema,
-  isAdkAgentClass,
   llmAgentYamlConfigSchema,
   loopAgentYamlConfigSchema,
   parallelAgentYamlConfigSchema,
@@ -19,7 +16,6 @@ export {
   sequentialAgentYamlConfigSchema,
 } from './agents/agent_config.js';
 export type {
-  AdkAgentClass,
   AgentConfig,
   AgentConfigTag,
   BaseAgentYamlConfig,

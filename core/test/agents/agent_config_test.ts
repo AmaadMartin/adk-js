@@ -8,10 +8,10 @@ import {
   AgentConfigTag,
   InputValidationError,
   agentConfigDiscriminator,
-  isAdkAgentClass,
   parseAgentConfig,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {isAdkAgentClass} from '../../src/agents/agent_config.js';
 import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -312,14 +312,39 @@ describe('parseAgentConfig', () => {
     });
   });
 
-  it('rejects a null static instruction', () => {
+  it('accepts a list of parts as the static instruction', () => {
+    const config = parseAgentConfig({
+      name: 'my_agent',
+      instruction: 'do the thing',
+      static_instruction: [{text: 'read this first'}, 'and this'],
+    });
+
+    expect(config).toMatchObject({
+      staticInstruction: [{text: 'read this first'}, 'and this'],
+    });
+  });
+
+  it.each([null, 42, true])(
+    'rejects %s as the static instruction, which is not a ContentUnion',
+    (staticInstruction) => {
+      expect(() =>
+        parseAgentConfig({
+          name: 'my_agent',
+          instruction: 'do the thing',
+          static_instruction: staticInstruction,
+        }),
+      ).toThrow(/staticInstruction must be a string, a Part, or a Content/);
+    },
+  );
+
+  it('rejects a list as the generate_content_config', () => {
     expect(() =>
       parseAgentConfig({
         name: 'my_agent',
         instruction: 'do the thing',
-        static_instruction: null,
+        generate_content_config: [{temperature: 0.5}],
       }),
-    ).toThrow(/staticInstruction must be a string, a Part, or a Content/);
+    ).toThrow(/generateContentConfig must be an object/);
   });
 
   it('rejects a generate_content_config that is not an object', () => {

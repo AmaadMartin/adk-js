@@ -17,33 +17,29 @@ const AGENT_CONFIG_DEPRECATION =
   'is now loaded via reflection so the separate config class is no longer ' +
   'needed.';
 
-/** The bare names of the agent classes ADK owns. */
-export const ADK_AGENT_CLASSES = [
+/** Names the config shape a document is validated against. */
+export type AgentConfigTag =
+  | 'LlmAgent'
+  | 'LoopAgent'
+  | 'ParallelAgent'
+  | 'SequentialAgent'
+  | 'BaseAgent';
+
+/** The bare name of an agent class ADK owns. */
+export type AdkAgentClass = Exclude<AgentConfigTag, 'BaseAgent'>;
+
+const ADK_AGENT_CLASSES: readonly AdkAgentClass[] = [
   'LlmAgent',
   'LoopAgent',
   'ParallelAgent',
   'SequentialAgent',
-] as const;
+];
 
-/** The bare name of an agent class ADK owns. */
-export type AdkAgentClass = (typeof ADK_AGENT_CLASSES)[number];
+const DEFAULT_AGENT_CLASS: AdkAgentClass = 'LlmAgent';
 
-/** Names the config shape a document is validated against. */
-export type AgentConfigTag = AdkAgentClass | 'BaseAgent';
-
-/** The agent class of a document that does not name one. */
-export const DEFAULT_AGENT_CLASS: AdkAgentClass = 'LlmAgent';
-
-const ADK_AGENT_CLASS_NAMES: ReadonlySet<string> = new Set(ADK_AGENT_CLASSES);
-
-/**
- * Reports whether `value` is the bare name of an agent class ADK owns.
- *
- * A fully qualified name such as `google.adk.agents.LlmAgent` is not one: only
- * the bare names select a built-in config shape.
- */
+/** Reports whether `value` is the bare name of an agent class ADK owns. */
 export function isAdkAgentClass(value: unknown): value is AdkAgentClass {
-  return typeof value === 'string' && ADK_AGENT_CLASS_NAMES.has(value);
+  return ADK_AGENT_CLASSES.some((name) => name === value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -51,14 +47,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const staticInstructionSchema = z.custom<ContentUnion>(
-  (value) => value !== null && value !== undefined,
+  (value) =>
+    typeof value === 'string' || Array.isArray(value) || isRecord(value),
   {error: 'staticInstruction must be a string, a Part, or a Content'},
 );
 
-const generateContentConfigSchema = z.custom<GenerateContentConfig>(
-  (value) => typeof value === 'object' && value !== null,
-  {error: 'generateContentConfig must be an object'},
-);
+const generateContentConfigSchema = z.custom<GenerateContentConfig>(isRecord, {
+  error: 'generateContentConfig must be an object',
+});
 
 const baseAgentFields = {
   /** The name of the agent. */
@@ -80,9 +76,7 @@ const baseAgentFields = {
  * class can read its own fields off the parsed config.
  *
  * @experimental
- * @deprecated BaseAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export const baseAgentYamlConfigSchema = z.preprocess(
   camelCaseKeys,
@@ -96,9 +90,7 @@ export const baseAgentYamlConfigSchema = z.preprocess(
  * The config of an agent class ADK does not own.
  *
  * @experimental
- * @deprecated BaseAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export type BaseAgentYamlConfig = z.infer<typeof baseAgentYamlConfigSchema>;
 
@@ -106,9 +98,7 @@ export type BaseAgentYamlConfig = z.infer<typeof baseAgentYamlConfigSchema>;
  * Schema of an `LlmAgent` config.
  *
  * @experimental
- * @deprecated LlmAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export const llmAgentYamlConfigSchema = z.preprocess(
   camelCaseKeys,
@@ -159,9 +149,7 @@ export const llmAgentYamlConfigSchema = z.preprocess(
  * The config of an `LlmAgent`.
  *
  * @experimental
- * @deprecated LlmAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export type LlmAgentYamlConfig = z.infer<typeof llmAgentYamlConfigSchema>;
 
@@ -169,9 +157,7 @@ export type LlmAgentYamlConfig = z.infer<typeof llmAgentYamlConfigSchema>;
  * Schema of a `LoopAgent` config.
  *
  * @experimental
- * @deprecated LoopAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export const loopAgentYamlConfigSchema = z.preprocess(
   camelCaseKeys,
@@ -187,9 +173,7 @@ export const loopAgentYamlConfigSchema = z.preprocess(
  * The config of a `LoopAgent`.
  *
  * @experimental
- * @deprecated LoopAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export type LoopAgentYamlConfig = z.infer<typeof loopAgentYamlConfigSchema>;
 
@@ -197,9 +181,7 @@ export type LoopAgentYamlConfig = z.infer<typeof loopAgentYamlConfigSchema>;
  * Schema of a `ParallelAgent` config.
  *
  * @experimental
- * @deprecated ParallelAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export const parallelAgentYamlConfigSchema = z.preprocess(
   camelCaseKeys,
@@ -213,9 +195,7 @@ export const parallelAgentYamlConfigSchema = z.preprocess(
  * The config of a `ParallelAgent`.
  *
  * @experimental
- * @deprecated ParallelAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export type ParallelAgentYamlConfig = z.infer<
   typeof parallelAgentYamlConfigSchema
@@ -225,9 +205,7 @@ export type ParallelAgentYamlConfig = z.infer<
  * Schema of a `SequentialAgent` config.
  *
  * @experimental
- * @deprecated SequentialAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export const sequentialAgentYamlConfigSchema = z.preprocess(
   camelCaseKeys,
@@ -241,9 +219,7 @@ export const sequentialAgentYamlConfigSchema = z.preprocess(
  * The config of a `SequentialAgent`.
  *
  * @experimental
- * @deprecated SequentialAgentConfig is deprecated and will be removed in future
- * versions. Config is now loaded via reflection so the separate config class is
- * no longer needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export type SequentialAgentYamlConfig = z.infer<
   typeof sequentialAgentYamlConfigSchema
@@ -253,9 +229,7 @@ export type SequentialAgentYamlConfig = z.infer<
  * The config of an agent, as declared in a config document.
  *
  * @experimental
- * @deprecated AgentConfig is deprecated and will be removed in future versions.
- * Config is now loaded via reflection so the separate config class is no longer
- * needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export type AgentConfig =
   | LlmAgentYamlConfig
@@ -307,9 +281,7 @@ export function agentConfigDiscriminator(document: unknown): AgentConfigTag {
  * @throws InputValidationError if the document does not match its config shape.
  *
  * @experimental
- * @deprecated AgentConfig is deprecated and will be removed in future versions.
- * Config is now loaded via reflection so the separate config class is no longer
- * needed.
+ * @deprecated Config is now loaded via reflection, not via a config class.
  */
 export function parseAgentConfig(document: unknown): AgentConfig {
   warnDeprecatedOnce('AgentConfig', AGENT_CONFIG_DEPRECATION);
