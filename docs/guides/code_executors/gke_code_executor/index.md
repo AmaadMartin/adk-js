@@ -150,12 +150,13 @@ ADK ships `AgentSandboxClient`, which provisions the `Sandbox` resource and
 talks to the router. Pass `sandboxClientFactory` to substitute your own:
 
 ```ts
-import {GkeCodeExecutor, SandboxClient} from '@google/adk';
+import {AgentSandboxClient, GkeCodeExecutor} from '@google/adk';
 
 new GkeCodeExecutor({
   executorType: 'sandbox',
   namespace: 'agents',
-  sandboxClientFactory: (options): SandboxClient => myClient(options),
+  sandboxClientFactory: (options) =>
+    new AgentSandboxClient({...options, serverPort: 9000}),
 });
 ```
 
@@ -166,10 +167,16 @@ they prove the wire format but not the sandbox. To check the real thing, deploy
 the agent to a cluster with a gVisor node pool and the RBAC above, then run:
 
 ```ts
+import {CodeExecutionLanguage, GkeCodeExecutor} from '@google/adk';
+
 const executor = new GkeCodeExecutor({namespace: 'agents'});
 const result = await executor.executeCode({
   invocationContext,
-  codeExecutionInput: {code: 'print("hello world")'},
+  codeExecutionInput: {
+    code: 'print("hello world")',
+    language: CodeExecutionLanguage.PYTHON,
+    inputFiles: [],
+  },
 });
 ```
 
