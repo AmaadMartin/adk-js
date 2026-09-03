@@ -462,6 +462,79 @@ async function convertToolUnionToTools(
  */
 const LLM_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.llmAgent');
 
+const DEFAULT_MODEL_SYMBOL = Symbol.for('google.adk.llmAgent.defaultModel');
+const DEFAULT_LIVE_MODEL_SYMBOL = Symbol.for(
+  'google.adk.llmAgent.defaultLiveModel',
+);
+
+/**
+ * The default model overrides, held on `globalThis` rather than on the class.
+ *
+ * A bundler inlines `@google/adk` into an agent's bundle, so one process can
+ * hold two copies of `LlmAgent`. A class-level field would be private to the
+ * copy that wrote it, and the CLI's override would never reach the agent. The
+ * shared key mirrors the `Symbol.for('google.adk.*')` brands used for the same
+ * reason elsewhere.
+ */
+const defaultModelHolder: typeof globalThis & {
+  [DEFAULT_MODEL_SYMBOL]?: string | BaseLlm;
+  [DEFAULT_LIVE_MODEL_SYMBOL]?: string | BaseLlm;
+} = globalThis;
+
+/** A model name together with the {@link BaseLlm} last built from it. */
+interface ResolvedModel {
+  name: string;
+  llm: BaseLlm;
+}
+
+/**
+ * Returns the resolution for `name`, reusing `memo` when it names that model.
+ *
+ * `LLMRegistry.newLlm` builds a new instance on every call — its cache holds
+ * the model class, not the instance — so an agent that keeps no memo hands out
+ * a different `BaseLlm` on every read of its canonical model.
+ */
+function resolveModelName(
+  memo: ResolvedModel | undefined,
+  name: string,
+): ResolvedModel {
+  return memo?.name === name ? memo : {name, llm: LLMRegistry.newLlm(name)};
+}
+
+/** Rejects a default model that no agent could resolve. */
+function validateDefaultModel(label: string, model: string | BaseLlm): void {
+  if (!isBaseLlm(model) && typeof model !== 'string') {
+    throw new Error(
+      `${label} must be a model name (string) or BaseLlm instance, got ` +
+        `${typeof model}.`,
+    );
+  }
+  if (model === '') {
+    throw new Error(`${label} must be a non-empty string.`);
+  }
+}
+
+/** Resolves a default model override, or the built-in default behind it. */
+function resolveDefaultModel(
+  override: string | BaseLlm | undefined,
+  builtIn: string,
+): BaseLlm {
+  const model = override ?? builtIn;
+  return isBaseLlm(model) ? model : LLMRegistry.newLlm(model);
+}
+
+/** The nearest ancestor of `agent` that is an {@link LlmAgent}. */
+function nearestLlmAgentAncestor(agent: BaseAgent): LlmAgent | undefined {
+  let ancestor = agent.parentAgent;
+  while (ancestor) {
+    if (isLlmAgent(ancestor)) {
+      return ancestor;
+    }
+    ancestor = ancestor.parentAgent;
+  }
+  return undefined;
+}
+
 /**
  * Type guard to check if an object is an instance of LlmAgent.
  * @param obj The object to check.
@@ -482,6 +555,12 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** A unique symbol to identify ADK LLM agent class. */
   readonly [LLM_AGENT_SIGNATURE_SYMBOL] = true;
+
+  /** The model an agent uses when it sets none and inherits none. */
+  static readonly DEFAULT_MODEL = 'gemini-3.5-flash';
+
+  /** The model live mode uses when an agent sets none and inherits none. */
+  static readonly DEFAULT_LIVE_MODEL = 'gemini-live-2.5-flash-native-audio';
 
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
@@ -528,6 +607,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
+  private resolvedModel?: ResolvedModel;
+  private resolvedLiveModel?: ResolvedModel;
 
   constructor(config: LlmAgentConfig) {
     assertNoMisplacedGenerateContentKwargs(config);
@@ -667,9 +748,41 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * Overrides the model used by an agent that sets none and inherits none.
+   *
+   * The override is process-wide, so it belongs to an entry point such as the
+   * CLI rather than to library code. Pass {@link LlmAgent.DEFAULT_MODEL} to
+   * restore the built-in default.
+   *
+   * @param model Model name or instance.
+   * @throws Error if given an empty name or a value of another type.
+   */
+  static setDefaultModel(model: string | BaseLlm): void {
+    validateDefaultModel('Default model', model);
+    defaultModelHolder[DEFAULT_MODEL_SYMBOL] = model;
+  }
+
+  /**
+   * Overrides the live-mode model for an agent that sets none and inherits
+   * none. See {@link LlmAgent.setDefaultModel}.
+   *
+   * @param model Model name or instance.
+   * @throws Error if given an empty name or a value of another type.
+   */
+  static setDefaultLiveModel(model: string | BaseLlm): void {
+    validateDefaultModel('Default live model', model);
+    defaultModelHolder[DEFAULT_LIVE_MODEL_SYMBOL] = model;
+  }
+
+  /**
    * The resolved BaseLlm instance.
    *
-   * When not set, the agent will inherit the model from its ancestor.
+   * Resolution order: an explicit BaseLlm, this agent's own model name, the
+   * nearest LlmAgent ancestor, then the default set by
+   * {@link LlmAgent.setDefaultModel} (built-in {@link LlmAgent.DEFAULT_MODEL}).
+   *
+   * Reading this twice returns the same instance while {@link model} is
+   * unchanged, and a new one after it is reassigned.
    */
   get canonicalModel(): BaseLlm {
     if (isBaseLlm(this.model)) {
@@ -677,17 +790,48 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     if (typeof this.model === 'string' && this.model) {
-      return LLMRegistry.newLlm(this.model);
+      this.resolvedModel = resolveModelName(this.resolvedModel, this.model);
+      return this.resolvedModel.llm;
     }
 
-    let ancestorAgent = this.parentAgent;
-    while (ancestorAgent) {
-      if (isLlmAgent(ancestorAgent)) {
-        return ancestorAgent.canonicalModel;
-      }
-      ancestorAgent = ancestorAgent.parentAgent;
+    const ancestorAgent = nearestLlmAgentAncestor(this);
+    return ancestorAgent
+      ? ancestorAgent.canonicalModel
+      : resolveDefaultModel(
+          defaultModelHolder[DEFAULT_MODEL_SYMBOL],
+          LlmAgent.DEFAULT_MODEL,
+        );
+  }
+
+  /**
+   * The resolved BaseLlm instance for live mode.
+   *
+   * Live mode resolves separately because the model that serves turn-by-turn
+   * requests is not the model that serves a Live API session. The order matches
+   * {@link canonicalModel}, but a model-less agent ends at the default set by
+   * {@link LlmAgent.setDefaultLiveModel} (built-in
+   * {@link LlmAgent.DEFAULT_LIVE_MODEL}).
+   */
+  get canonicalLiveModel(): BaseLlm {
+    if (isBaseLlm(this.model)) {
+      return this.model;
     }
-    throw new Error(`No model found for ${this.name}.`);
+
+    if (typeof this.model === 'string' && this.model) {
+      this.resolvedLiveModel = resolveModelName(
+        this.resolvedLiveModel,
+        this.model,
+      );
+      return this.resolvedLiveModel.llm;
+    }
+
+    const ancestorAgent = nearestLlmAgentAncestor(this);
+    return ancestorAgent
+      ? ancestorAgent.canonicalLiveModel
+      : resolveDefaultModel(
+          defaultModelHolder[DEFAULT_LIVE_MODEL_SYMBOL],
+          LlmAgent.DEFAULT_LIVE_MODEL,
+        );
   }
 
   /**
@@ -1038,7 +1182,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // =========================================================================
     applyLiveRunConfig(invocationContext.runConfig, llmRequest);
 
-    const llm = this.canonicalModel;
+    const llm = this.canonicalLiveModel;
+    // Preprocess stamped the turn-by-turn model name on the request, and
+    // `connect()` reads the name from there.
+    llmRequest.model = llm.model;
     let reconnectAttempts = 0;
 
     // Outer reconnect loop. Re-enters on recoverable failures when a session
