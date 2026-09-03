@@ -544,6 +544,26 @@ describe('operations', () => {
     });
   });
 
+  describe('sqlite foreign keys', () => {
+    let orm: MikroORM;
+
+    afterEach(async () => {
+      await orm.close();
+    });
+
+    it('are on for every sqlite connection MikroORM opens', async () => {
+      orm = await MikroORM.init(
+        await getConnectionOptionsFromUri('sqlite://:memory:'),
+      );
+
+      const rows: Array<{foreign_keys: number}> = await orm.em
+        .getConnection()
+        .execute('pragma foreign_keys', [], 'all');
+
+      expect(rows).toEqual([{foreign_keys: 1}]);
+    });
+  });
+
   describe('connectionIsAlive', () => {
     it('accepts a connection whose query answers', async () => {
       const queried: string[] = [];

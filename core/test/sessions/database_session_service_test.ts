@@ -31,9 +31,11 @@ import {
   MockInstance,
   vi,
 } from 'vitest';
+import {extractStateDelta} from '../../src/sessions/base_session_service.js';
 import {
   describeOpenFailure,
   isDatabaseConnectionString,
+  rowsToLock,
 } from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
 import {
@@ -2249,6 +2251,26 @@ describe('DatabaseSessionService against a legacy v0 database', () => {
     ).rejects.toThrow('adk migrate session');
   });
 
+  it('adds no column to the legacy events table', async () => {
+    const file = await writeLegacyDatabase({events: []});
+    service = new DatabaseSessionService(`sqlite://${file}`);
+    await service.init();
+    await service.close();
+
+    const inspector = await MikroORM.init({
+      dbName: file,
+      driver: SqliteDriver,
+      entities: [],
+      discovery: {warnWhenNoEntities: false},
+    });
+    const columns: Array<{name: string}> = await inspector.em
+      .getConnection()
+      .execute('pragma table_info(events)', [], 'all');
+    await inspector.close();
+
+    expect(columns.map((column) => column.name)).not.toContain('event_data');
+  });
+
   it('creates no table and stamps no schema version', async () => {
     const file = await writeLegacyDatabase({events: []});
     const queries: string[] = [];
@@ -2506,5 +2528,80 @@ describe('DatabaseSessionService read routing', () => {
     expect(loaded?.events).toHaveLength(1);
     expect(listed.sessions.map((s) => s.id)).toEqual(['s1']);
     expect(userState).toEqual({seen: true});
+  });
+});
+
+describe('rowsToLock', () => {
+  /**
+   * Ports adk-python's `test_append_event_locks_only_scopes_with_deltas`. A
+   * scope with no delta is only read, so it is never a lock candidate.
+   */
+  const scopes: Array<{
+    name: string;
+    stateDelta: Record<string, unknown>;
+    appState: boolean;
+    userState: boolean;
+  }> = [
+    {name: 'no state delta', stateDelta: {}, appState: false, userState: false},
+    {
+      name: 'session delta only',
+      stateDelta: {sessionKey: 'v'},
+      appState: false,
+      userState: false,
+    },
+    {
+      name: 'app delta only',
+      stateDelta: {'app:key': 'v'},
+      appState: true,
+      userState: false,
+    },
+    {
+      name: 'user delta only',
+      stateDelta: {'user:key': 'v'},
+      appState: false,
+      userState: true,
+    },
+    {
+      name: 'every scope',
+      stateDelta: {'app:a': '1', 'user:b': '2', 'sk': '3'},
+      appState: true,
+      userState: true,
+    },
+  ];
+
+  for (const scope of scopes) {
+    it(`locks the state rows a ${scope.name} touches, on a locking backend`, () => {
+      expect(
+        rowsToLock('postgresql', extractStateDelta(scope.stateDelta)),
+      ).toEqual({
+        session: true,
+        appState: scope.appState,
+        userState: scope.userState,
+      });
+    });
+
+    it(`locks nothing for a ${scope.name} on sqlite`, () => {
+      expect(rowsToLock('sqlite', extractStateDelta(scope.stateDelta))).toEqual(
+        {
+          session: false,
+          appState: false,
+          userState: false,
+        },
+      );
+    });
+  }
+
+  it('locks nothing on MSSQL, where FOR UPDATE becomes a table hint', () => {
+    expect(rowsToLock('mssql', extractStateDelta({'app:a': '1'}))).toEqual({
+      session: false,
+      appState: false,
+      userState: false,
+    });
+  });
+
+  it('locks the session row on every backend that supports it', () => {
+    for (const backend of ['mysql', 'mariadb', 'postgresql']) {
+      expect(rowsToLock(backend, extractStateDelta({})).session).toBe(true);
+    }
   });
 });

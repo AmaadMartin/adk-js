@@ -194,6 +194,36 @@ function writeLock(enabled: boolean): {lockMode?: LockMode} {
   return enabled ? {lockMode: LockMode.PESSIMISTIC_WRITE} : {};
 }
 
+/** The rows one `appendEvent` takes a row-level write lock on. */
+export interface LockedRows {
+  session: boolean;
+  appState: boolean;
+  userState: boolean;
+}
+
+/**
+ * Decides which rows `appendEvent` locks, mirroring adk-python.
+ *
+ * A scope with no delta is only read, so locking it would serialize appends
+ * that never contend. A backend without row-level locking is asked for none:
+ * on MSSQL `FOR UPDATE` becomes a `WITH (UPDLOCK)` table hint that adk-python
+ * never takes, and on sqlite it compiles away.
+ *
+ * @param backend The backend name, as `databaseBackendOf` reports it.
+ * @param delta The event's state delta, split by scope.
+ */
+export function rowsToLock(
+  backend: string,
+  delta: ScopedStateDelta,
+): LockedRows {
+  const enabled = supportsRowLevelLocking(backend);
+  return {
+    session: enabled,
+    appState: enabled && Object.keys(delta.app).length > 0,
+    userState: enabled && Object.keys(delta.user).length > 0,
+  };
+}
+
 /** Merges a scoped delta into a stored state row, if it has any entries. */
 function applyScopedDelta(
   row: {state: Record<string, unknown>},
@@ -765,15 +795,13 @@ export class DatabaseSessionService extends BaseSessionService {
     event: Event,
     delta: ScopedStateDelta,
   ): Promise<{lastUpdateTime: number; marker: string}> {
-    const hasAppDelta = Object.keys(delta.app).length > 0;
-    const hasUserDelta = Object.keys(delta.user).length > 0;
-    const useRowLevelLocking = supportsRowLevelLocking(this.backend);
+    const locked = rowsToLock(this.backend, delta);
 
     return this.orm!.em.fork().transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
         StorageSession,
         {appName: session.appName, userId: session.userId, id: session.id},
-        writeLock(useRowLevelLocking),
+        writeLock(locked.session),
       );
       if (!storageSession) {
         throw new SessionNotFoundError(`Session ${session.id} not found.`);
@@ -782,7 +810,7 @@ export class DatabaseSessionService extends BaseSessionService {
       const storageAppState = await txEm.findOne(
         StorageAppState,
         {appName: session.appName},
-        writeLock(useRowLevelLocking && hasAppDelta),
+        writeLock(locked.appState),
       );
       if (!storageAppState) {
         throw new Error(
@@ -794,7 +822,7 @@ export class DatabaseSessionService extends BaseSessionService {
       const storageUserState = await txEm.findOne(
         StorageUserState,
         {appName: session.appName, userId: session.userId},
-        writeLock(useRowLevelLocking && hasUserDelta),
+        writeLock(locked.userState),
       );
       if (!storageUserState) {
         throw new Error(
