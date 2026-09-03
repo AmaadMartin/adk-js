@@ -286,6 +286,31 @@ export type {
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
+export {
+  BaseComputer,
+  ComputerEnvironment,
+  isComputerState,
+} from './tools/computer_use/base_computer.js';
+export type {
+  ComputerState,
+  ScreenSize,
+  ScrollDirection,
+} from './tools/computer_use/base_computer.js';
+export {
+  ComputerUseTool,
+  isComputerUseTool,
+} from './tools/computer_use/computer_use_tool.js';
+export type {
+  ComputerUseFunction,
+  ComputerUseToolOptions,
+} from './tools/computer_use/computer_use_tool.js';
+export {ComputerUseToolset} from './tools/computer_use/computer_use_toolset.js';
+export type {
+  AdaptedComputerUseFunction,
+  ComputerUseToolAdapter,
+  ComputerUseToolsetOptions,
+} from './tools/computer_use/computer_use_toolset.js';
+export type {PredefinedComputerFunction} from './tools/computer_use/predefined_functions.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,

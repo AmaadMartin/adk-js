@@ -77,7 +77,7 @@ function isBlockedHostname(hostname: string): boolean {
 }
 
 /** Strips the surrounding brackets from an IPv6 URL hostname (`[::1]` → `::1`). */
-function normalizeHost(hostname: string): string {
+export function normalizeHost(hostname: string): string {
   return hostname.startsWith('[') ? hostname.slice(1, -1) : hostname;
 }
 
@@ -218,7 +218,7 @@ async function resolveHostAddresses(hostname: string): Promise<string[]> {
  * Validates the URL's scheme and hostname up front (before any network access).
  * Throws for malformed URLs, disallowed schemes, and blocked hostnames.
  */
-function assertUrlAllowed(url: string): URL {
+export function assertUrlAllowed(url: string): URL {
   const parsed = new URL(url);
   if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
     throw new Error(`Unsupported url scheme: ${url}`);
@@ -230,7 +230,9 @@ function assertUrlAllowed(url: string): URL {
 }
 
 /** Resolves the host and throws if any resolved address is not globally routable. */
-async function validateResolvedAddresses(hostname: string): Promise<void> {
+export async function validateResolvedAddresses(
+  hostname: string,
+): Promise<void> {
   const addresses = await resolveHostAddresses(hostname);
   if (addresses.some(isBlockedAddress)) {
     throw new Error(`Blocked host: ${hostname}`);
