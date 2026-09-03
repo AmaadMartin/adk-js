@@ -95,6 +95,38 @@ describe('ContextFilterPlugin edge cases', () => {
     expect(llmRequest.contents[0].parts?.[0].text).toBe('user_prompt_2');
   });
 
+  it('moves the split left to keep a call made in an earlier invocation', async () => {
+    const plugin = new ContextFilterPlugin({numInvocationsToKeep: 1});
+    const llmRequest = createLlmRequest([
+      createContent('user', 'user_prompt_1'),
+      createContent('model', 'model_response_1'),
+      createContent('user', 'user_prompt_2'),
+      {
+        parts: [{functionCall: {id: 'call_1', name: 'tool_a', args: {}}}],
+        role: 'model',
+      },
+      createContent('user', 'user_prompt_3'),
+      {
+        parts: [
+          {
+            functionResponse: {
+              id: 'call_1',
+              name: 'tool_a',
+              response: {result: 'ok'},
+            },
+          },
+        ],
+        role: 'user',
+      },
+      createContent('model', 'model_response_3'),
+    ]);
+
+    await plugin.beforeModelCallback({callbackContext, llmRequest});
+
+    expect(llmRequest.contents).toHaveLength(4);
+    expect(llmRequest.contents[0].parts?.[0].functionCall?.id).toBe('call_1');
+  });
+
   it('keeps every content when a response can never be paired', async () => {
     const plugin = new ContextFilterPlugin({numInvocationsToKeep: 1});
     const contents: Content[] = [
