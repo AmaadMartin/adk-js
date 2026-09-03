@@ -21,11 +21,20 @@ import {
   createOAuth2TokenRequestBody,
   fetchOAuth2Tokens,
   getTokenEndpoint,
+  normalizeAuthUri,
   parseAuthorizationCode,
 } from './oauth2_utils.js';
 
 /**
  * Exchanges OAuth2 credentials from authorization responses using standard fetch.
+ *
+ * An exchange that fails returns the original credential with
+ * `wasExchanged: false`, so a caller can degrade to an unauthenticated call.
+ * Only a missing `authScheme` and a state mismatch reject.
+ *
+ * There is no synchronous counterpart. The Python reference offers one because
+ * a coroutine cannot be called from synchronous code; JavaScript cannot block
+ * on a promise, and every caller here already awaits {@link exchange}.
  */
 export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
   async exchange({
@@ -73,15 +82,13 @@ export function determineGrantType(
     return getOAuthGrantTypeFromFlow(authScheme.flows);
   }
 
-  if ((authScheme as OpenIdConnectWithConfig).grantTypesSupported) {
-    const oidcScheme = authScheme as OpenIdConnectWithConfig;
-
-    if (oidcScheme.grantTypesSupported?.includes('client_credentials')) {
-      return OAuthGrantType.CLIENT_CREDENTIALS;
-    }
-
-    return OAuthGrantType.AUTHORIZATION_CODE;
+  const oidcScheme = authScheme as OpenIdConnectWithConfig;
+  if (authScheme.type === 'openIdConnect' || oidcScheme.grantTypesSupported) {
+    return oidcScheme.grantTypesSupported?.includes('client_credentials')
+      ? OAuthGrantType.CLIENT_CREDENTIALS
+      : OAuthGrantType.AUTHORIZATION_CODE;
   }
+
   return undefined;
 }
 
@@ -93,44 +100,40 @@ export async function exchangeClientCredentials({
   authScheme: AuthScheme;
 }): Promise<ExchangeResult> {
   const tokenEndpoint = getTokenEndpoint(authScheme);
-  if (!tokenEndpoint) {
-    throw new CredentialExchangeError(
-      'Token endpoint not found in auth scheme.',
-    );
-  }
+  const oauth2 = authCredential.oauth2;
 
-  if (
-    !authCredential.oauth2?.clientId ||
-    !authCredential.oauth2?.clientSecret
-  ) {
-    throw new CredentialExchangeError(
-      'clientId and clientSecret are required for client credentials exchange.',
+  if (!tokenEndpoint || !oauth2?.clientId || !oauth2.clientSecret) {
+    logger.warn(
+      'Could not create OAuth2 session for client credentials exchange',
     );
+    return {credential: authCredential, wasExchanged: false};
   }
 
   const body = createOAuth2TokenRequestBody({
     grantType: 'client_credentials',
-    clientId: authCredential.oauth2.clientId,
-    clientSecret: authCredential.oauth2.clientSecret,
+    clientId: oauth2.clientId,
+    clientSecret: oauth2.clientSecret,
   });
 
   try {
     const oauth2Auth = await fetchOAuth2Tokens(tokenEndpoint, body);
+    logger.debug('Successfully exchanged client credentials for access token');
 
     return {
       credential: {
         ...authCredential,
         oauth2: {
-          ...authCredential.oauth2,
+          ...oauth2,
           ...oauth2Auth,
         },
       },
       wasExchanged: true,
     };
-  } catch (error) {
-    throw new CredentialExchangeError(
-      `Failed to exchange tokens: ${error instanceof Error ? error.message : String(error)}`,
+  } catch (error: unknown) {
+    logger.error(
+      `Failed to exchange client credentials: ${error instanceof Error ? error.message : String(error)}`,
     );
+    return {credential: authCredential, wasExchanged: false};
   }
 }
 
@@ -142,75 +145,76 @@ export async function exchangeAuthorizationCode({
   authScheme: AuthScheme;
 }): Promise<ExchangeResult> {
   const tokenEndpoint = getTokenEndpoint(authScheme);
-  if (!tokenEndpoint) {
-    throw new CredentialExchangeError(
-      'Token endpoint not found in auth scheme.',
-    );
-  }
+  const oauth2 = authCredential.oauth2;
+  const authResponseUri = normalizeAuthUri(oauth2?.authResponseUri);
 
   if (
-    !authCredential.oauth2?.clientId ||
-    !authCredential.oauth2?.clientSecret ||
-    (!authCredential.oauth2?.authCode &&
-      !authCredential.oauth2?.authResponseUri)
+    !tokenEndpoint ||
+    !oauth2?.clientId ||
+    !oauth2.clientSecret ||
+    (!oauth2.authCode && !authResponseUri)
   ) {
-    throw new CredentialExchangeError(
-      'clientId, clientSecret, and either authCode or authResponseUri are required for authorization code exchange.',
+    logger.warn(
+      'Could not create OAuth2 session for authorization code exchange',
     );
+    return {credential: authCredential, wasExchanged: false};
   }
 
-  let code = authCredential.oauth2.authCode;
-  if (!code && authCredential.oauth2.authResponseUri) {
-    code = parseAuthorizationCode(authCredential.oauth2.authResponseUri);
+  let code = oauth2.authCode;
+  if (!code && authResponseUri) {
+    code = parseAuthorizationCode(authResponseUri);
   }
 
-  if (authCredential.oauth2.authResponseUri && authCredential.oauth2.state) {
+  if (authResponseUri && oauth2.state) {
+    let receivedState: string | undefined;
     try {
-      const url = new URL(authCredential.oauth2.authResponseUri);
-      const receivedState = url.searchParams.get('state') || undefined;
-      if (authCredential.oauth2.state !== receivedState) {
-        throw new CredentialExchangeError(
-          'State mismatch detected. Potential CSRF attack.',
-        );
-      }
-    } catch (e) {
+      receivedState =
+        new URL(authResponseUri).searchParams.get('state') ?? undefined;
+    } catch (e: unknown) {
       throw new CredentialExchangeError(
         `Failed to parse authResponseUri for state validation: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    if (oauth2.state !== receivedState) {
+      throw new CredentialExchangeError(
+        'State mismatch detected. Potential CSRF attack.',
       );
     }
   }
 
   if (!code) {
-    throw new CredentialExchangeError(
-      'Authorization code not found in auth response.',
-    );
+    logger.warn('Authorization code not found in auth response.');
+    return {credential: authCredential, wasExchanged: false};
   }
 
   const body = createOAuth2TokenRequestBody({
     grantType: 'authorization_code',
-    clientId: authCredential.oauth2.clientId,
-    clientSecret: authCredential.oauth2.clientSecret,
+    clientId: oauth2.clientId,
+    clientSecret: oauth2.clientSecret,
     code,
-    redirectUri: authCredential.oauth2.redirectUri,
-    codeVerifier: authCredential.oauth2.codeVerifier,
+    redirectUri: oauth2.redirectUri,
+    codeVerifier: oauth2.codeVerifier,
   });
 
   try {
     const oauth2Auth = await fetchOAuth2Tokens(tokenEndpoint, body);
+    logger.debug('Successfully exchanged authorization code for access token');
 
     return {
       credential: {
         ...authCredential,
         oauth2: {
-          ...authCredential.oauth2,
+          ...oauth2,
           ...oauth2Auth,
         },
       },
       wasExchanged: true,
     };
   } catch (error: unknown) {
-    throw new CredentialExchangeError(
-      `Failed to exchange tokens: ${error instanceof Error ? error.message : String(error)}`,
+    logger.error(
+      `Failed to exchange authorization code: ${error instanceof Error ? error.message : String(error)}`,
     );
+    return {credential: authCredential, wasExchanged: false};
   }
 }

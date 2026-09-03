@@ -19,7 +19,10 @@ import {
 } from '../../../src/auth/oauth2/oauth2_credential_exchanger.js';
 import * as oauth2Utils from '../../../src/auth/oauth2/oauth2_utils.js';
 
-vi.mock('../../../src/auth/oauth2/oauth2_utils.js', () => ({
+vi.mock('../../../src/auth/oauth2/oauth2_utils.js', async (importActual) => ({
+  ...(await importActual<
+    typeof import('../../../src/auth/oauth2/oauth2_utils.js')
+  >()),
   getTokenEndpoint: vi.fn(),
   fetchOAuth2Tokens: vi.fn(),
   parseAuthorizationCode: vi.fn(),
@@ -110,6 +113,101 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.wasExchanged).toBe(true);
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
+
+    it('performs an authorization code exchange for an OpenIdConnect scheme with no grantTypesSupported', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme = {
+        type: 'openIdConnect',
+        authorizationEndpoint: 'https://example.com/authorize',
+        tokenEndpoint: 'https://example.com/token',
+        scopes: ['openid'],
+      } as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockResolvedValue({
+        accessToken: 'new-token',
+      });
+
+      const result = await exchanger.exchange({authCredential, authScheme});
+
+      expect(result.wasExchanged).toBe(true);
+      expect(result.credential.oauth2?.accessToken).toBe('new-token');
+    });
+
+    it('returns the original credential when the OAuth2 session cannot be created', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {
+        oauth2: {clientId: 'id', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme = {
+        type: 'openIdConnect',
+        authorizationEndpoint: 'https://example.com/authorize',
+        tokenEndpoint: 'https://example.com/token',
+      } as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+
+      const result = await exchanger.exchange({authCredential, authScheme});
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+    });
+
+    it('returns the original credential when the token fetch fails', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme = {
+        type: 'openIdConnect',
+        authorizationEndpoint: 'https://example.com/authorize',
+        tokenEndpoint: 'https://example.com/token',
+      } as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new Error('Token endpoint unreachable'),
+      );
+
+      const result = await exchanger.exchange({authCredential, authScheme});
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+    });
+
+    it('returns the original credential when client credentials cannot be fetched', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret'},
+      } as AuthCredential;
+      const authScheme = {
+        flows: {clientCredentials: {}},
+      } as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new Error('Token endpoint unreachable'),
+      );
+
+      const result = await exchanger.exchange({authCredential, authScheme});
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+    });
   });
 
   describe('determineGrantType', () => {
@@ -150,6 +248,19 @@ describe('OAuth2CredentialExchanger', () => {
     it('returns AUTHORIZATION_CODE for OpenIdConnect without client_credentials in grantTypesSupported', () => {
       const authScheme = {
         grantTypesSupported: ['authorization_code'],
+      } as AuthScheme;
+
+      expect(determineGrantType(authScheme)).toBe(
+        OAuthGrantType.AUTHORIZATION_CODE,
+      );
+    });
+
+    it('returns AUTHORIZATION_CODE for OpenIdConnect with no grantTypesSupported', () => {
+      const authScheme = {
+        type: 'openIdConnect',
+        authorizationEndpoint: 'https://example.com/authorize',
+        tokenEndpoint: 'https://example.com/token',
+        scopes: ['openid'],
       } as AuthScheme;
 
       expect(determineGrantType(authScheme)).toBe(
@@ -465,6 +576,100 @@ describe('OAuth2CredentialExchanger', () => {
       });
 
       expect(result.wasExchanged).toBe(true);
+    });
+
+    it("strips a trailing '#' from authResponseUri before parsing the code", async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://example.com/callback?code=auth_code#',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue(
+        'auth_code',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockResolvedValue({
+        accessToken: 'new-token',
+      });
+
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(true);
+      expect(oauth2Utils.parseAuthorizationCode).toHaveBeenCalledWith(
+        'https://example.com/callback?code=auth_code',
+      );
+    });
+
+    it("throws CredentialExchangeError on a state mismatch when authResponseUri ends in '#'", async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback?code=abc&state=wrong#',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow('State mismatch detected');
+    });
+
+    it('throws CredentialExchangeError if authResponseUri carries no state at all', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback?code=abc',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow('State mismatch detected');
+    });
+
+    it('throws CredentialExchangeError if authResponseUri cannot be parsed for state validation', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'not-a-uri',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue(undefined);
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow('Failed to parse authResponseUri for state validation');
     });
 
     it('passes codeVerifier to createOAuth2TokenRequestBody', async () => {
