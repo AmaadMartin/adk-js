@@ -133,6 +133,8 @@ export {
   OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   OutputSchemaRequestProcessor,
   SET_MODEL_RESPONSE_INSTRUCTION,
+  createFinalModelResponseEvent,
+  getStructuredModelResponse,
 } from './agents/processors/output_schema_request_processor.js';
 export {SingleFlow} from './agents/processors/single_flow.js';
 export {ReadonlyContext} from './agents/readonly_context.js';

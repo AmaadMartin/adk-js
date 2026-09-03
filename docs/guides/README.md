@@ -25,6 +25,9 @@ documentation, visit [adk.dev](https://adk.dev/).
   LangGraph state graph as an ADK agent.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) - Exposing a sub-agent to its parent as a callable tool that runs inline.
 - [Model input context](agents/model_input_context/index.md) - Adding per-turn contents to one LLM request without writing them to the session.
+- [Output schema with tools](agents/output_schema_with_tools/index.md) - How an
+  agent returns a structured answer on a model that cannot accept a response
+  schema and tools in the same request.
 - [ParallelAgent](agents/parallel_agent/index.md) - Running sub-agents
   concurrently on isolated branches, and how the fan-out ends.
 - [ParallelAgent config documents](agents/parallel_agent_config/index.md) - Validating a ParallelAgent configuration document, with the same verdict ADK Python gives.

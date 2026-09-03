@@ -136,8 +136,10 @@ export interface EventActions {
   route?: Route;
 
   /**
-   * The structured output a model produced for this event. Mirrors Python
-   * `EventActions.set_model_response`, which is untyped there too.
+   * The structured output the model submitted through the
+   * `set_model_response` tool, already checked against the agent's output
+   * schema. Its shape is the schema's, so it stays untyped here, as in Python
+   * `EventActions.set_model_response`.
    */
   setModelResponse?: unknown;
 

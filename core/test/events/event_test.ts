@@ -603,6 +603,27 @@ describe('Event Utils', () => {
       const restored = transformToCamelCaseEvent({id: '123'});
       expect(restored.route).toBeUndefined();
     });
+
+    it('round-trips setModelResponse without mangling the schema keys', () => {
+      const original = createEvent({
+        id: '123',
+        invocationId: 'inv1',
+        actions: createEventActions({
+          setModelResponse: {fullName: 'Ada Lovelace', birthYear: 1815},
+        }),
+      });
+
+      const snakeEvent = transformToSnakeCaseEvent(original);
+      const restored = transformToCamelCaseEvent(snakeEvent);
+
+      expect(
+        (snakeEvent.actions as Record<string, unknown>).set_model_response,
+      ).toEqual({fullName: 'Ada Lovelace', birthYear: 1815});
+      expect(restored.actions?.setModelResponse).toEqual({
+        fullName: 'Ada Lovelace',
+        birthYear: 1815,
+      });
+    });
   });
 
   describe('generateClientFunctionCallId', () => {

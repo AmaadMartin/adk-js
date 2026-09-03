@@ -465,7 +465,8 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   // declaration and the call arguments, whose keys must reach the host exactly
   // as the server and the model spelled them.
   'actions.renderUiWidgets.payload',
-  // Arbitrary structured model output: its keys are the model's, not ours.
+  // The model's structured answer follows the agent's output schema, whose
+  // property names the caller chooses.
   'actions.setModelResponse',
   // A compaction summary is `Content`, so its tool-call payloads carry
   // user-defined keys just like the top-level `content` above. Only these two

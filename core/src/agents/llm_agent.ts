@@ -54,7 +54,6 @@ import {BasePlanner} from '../planners/base_planner.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
-import {SET_MODEL_RESPONSE_TOOL_NAME} from '../tools/set_model_response_tool.js';
 
 import {copyHttpOptions} from '../utils/genai_config_utils.js';
 import {logger} from '../utils/logger.js';
@@ -99,6 +98,10 @@ import {dispatchLiveRequest} from './live_send.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {AutoFlow} from './processors/auto_flow.js';
 import {applyRunConfigToLiveConfig} from './processors/basic_llm_request_processor.js';
+import {
+  createFinalModelResponseEvent,
+  getStructuredModelResponse,
+} from './processors/output_schema_request_processor.js';
 import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
@@ -710,8 +713,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.codeExecutor = config.codeExecutor;
     this.planner = config.planner;
 
-    // The flow owns the default pipeline and its order. A caller-supplied
-    // list replaces it wholesale, compaction included.
+    // The flow owns the default pipeline and its order, the output schema
+    // processor included. A caller-supplied list replaces it wholesale,
+    // compaction included.
     const agentTransferDisabled =
       this.disallowTransferToParent &&
       this.disallowTransferToPeers &&
@@ -1694,6 +1698,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       yield authEvent;
     }
     yield functionResponseEvent;
+
+    const jsonResponse = getStructuredModelResponse(functionResponseEvent);
+    if (jsonResponse !== undefined) {
+      yield createFinalModelResponseEvent(invocationContext, jsonResponse);
+    }
   }
 
   private async *runOneStepAsync(
@@ -1885,14 +1894,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
-      const setModelResponseCall = functionCalls.find(
-        (call) => call.name === SET_MODEL_RESPONSE_TOOL_NAME,
-      );
-      if (setModelResponseCall) {
-        const args = setModelResponseCall.args;
-        mergedEvent.content.parts = [{text: JSON.stringify(args)}];
-        mergedEvent.actions.skipSummarization = true;
-      } else if (functionCalls && functionCalls.length) {
+      if (functionCalls.length) {
         populateClientFunctionCallId(mergedEvent);
         // TODO - b/425992518: hacky, transaction log, simplify.
         // Long running is a property of tool in registry.
@@ -1978,6 +1980,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     yield functionResponseEvent;
+
+    const jsonResponse = getStructuredModelResponse(functionResponseEvent);
+    if (jsonResponse !== undefined) {
+      yield createFinalModelResponseEvent(invocationContext, jsonResponse);
+    }
 
     // If model instruct to transfer to an agent, run the transferred agent.
     const nextAgentName = functionResponseEvent.actions.transferToAgent;

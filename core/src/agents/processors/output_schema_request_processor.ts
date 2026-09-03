@@ -4,14 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Event} from '../../events/event.js';
+import {createEvent, Event} from '../../events/event.js';
 import {
   appendInstructions,
   appendTools,
   LlmRequest,
 } from '../../models/llm_request.js';
-import {createSetModelResponseTool} from '../../tools/set_model_response_tool.js';
-import {InvocationContext} from '../invocation_context.js';
+import {getFunctionResponses} from '../../models/llm_response.js';
+import {
+  createSetModelResponseTool,
+  SET_MODEL_RESPONSE_TOOL_NAME,
+} from '../../tools/set_model_response_tool.js';
+import {InvocationContext, requireAgent} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
@@ -37,10 +41,9 @@ export const SET_MODEL_RESPONSE_INSTRUCTION =
  * prompt-based workaround instead: the schema becomes a tool, and the tool call
  * carries the answer.
  *
- * `LlmAgent.postprocess` reads the call back off the merged event and rewrites
- * it into the final content. The live path has no such read-back, so this
- * processor skips it rather than asking the model for an answer that nothing
- * would collect.
+ * `LlmAgent` reads the answer back off the function-response event with
+ * {@link getStructuredModelResponse} and promotes it. Both the async path and
+ * the live path do so, so the workaround applies to both.
  *
  * A task-mode agent already returns its structured result through
  * `finish_task`, so this processor leaves it alone.
@@ -60,7 +63,6 @@ export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
   ): AsyncGenerator<Event, void, void> {
     const agent = invocationContext.agent;
     if (
-      invocationContext.liveRequestQueue ||
       !isLlmAgent(agent) ||
       !agent.outputSchema ||
       !agent.tools?.length ||
@@ -70,7 +72,11 @@ export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    appendTools(llmRequest, [createSetModelResponseTool(agent.outputSchema)]);
+    appendTools(llmRequest, [
+      createSetModelResponseTool(agent.outputSchema, (value) =>
+        agent.validateOutput(value),
+      ),
+    ]);
     appendInstructions(llmRequest, [SET_MODEL_RESPONSE_INSTRUCTION]);
   }
 }
@@ -78,3 +84,54 @@ export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
 /** The shared output schema request processor. */
 export const OUTPUT_SCHEMA_REQUEST_PROCESSOR =
   new OutputSchemaRequestProcessor();
+
+/**
+ * Builds the agent's final answer as an ordinary model-response event, so a
+ * consumer that reads the run's last text sees the structured answer without
+ * knowing the tool round-trip happened.
+ *
+ * @param invocationContext - The invocation the answer belongs to.
+ * @param jsonResponse - The validated answer, already serialized.
+ * @return A model-response event carrying the answer as its only text part.
+ */
+export function createFinalModelResponseEvent(
+  invocationContext: InvocationContext,
+  jsonResponse: string,
+): Event {
+  return createEvent({
+    author: requireAgent(invocationContext).name,
+    invocationId: invocationContext.invocationId,
+    branch: invocationContext.branch,
+    content: {role: 'model', parts: [{text: jsonResponse}]},
+  });
+}
+
+/**
+ * Reads the validated `set_model_response` payload off a function-response
+ * event.
+ *
+ * The payload comes from `actions.setModelResponse`, which only the tool sets
+ * and only after the arguments satisfy the output schema. A rejected call
+ * therefore returns `undefined` here, even though its function response is
+ * present, and the model gets another turn.
+ *
+ * @param functionResponseEvent - The event answering the model's tool calls.
+ * @return The answer as JSON, or `undefined` when the event carries none.
+ */
+export function getStructuredModelResponse(
+  functionResponseEvent: Event,
+): string | undefined {
+  const calledTheTool = getFunctionResponses(functionResponseEvent).some(
+    (functionResponse) =>
+      functionResponse.name === SET_MODEL_RESPONSE_TOOL_NAME,
+  );
+  if (!calledTheTool) {
+    return undefined;
+  }
+
+  const response = functionResponseEvent.actions.setModelResponse;
+  if (response === undefined || response === null) {
+    return undefined;
+  }
+  return JSON.stringify(response);
+}
