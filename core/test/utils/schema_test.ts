@@ -9,6 +9,7 @@ import {describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {
+  formatSchemaValidationError,
   objectSchemaFields,
   parseWithSchema,
   toJsonSchema,
@@ -231,5 +232,44 @@ describe('objectSchemaFields', () => {
   it('returns undefined for a schema that is not an object', () => {
     expect(fieldsOf(z4.string())).toBeUndefined();
     expect(fieldsOf(z3.string())).toBeUndefined();
+  });
+});
+
+describe('formatSchemaValidationError', () => {
+  function errorFrom(schema: z4.ZodType, value: unknown): unknown {
+    try {
+      schema.parse(value);
+    } catch (error: unknown) {
+      return error;
+    }
+    return expect.fail('the schema accepted the value');
+  }
+
+  it('renders a top-level field failure as path and message', () => {
+    const error = errorFrom(z4.object({age: z4.number()}), {age: 'old'});
+
+    expect(formatSchemaValidationError(error)).toBe(
+      'age: Invalid input: expected number, received string',
+    );
+  });
+
+  it('keeps the full path of a nested array failure', () => {
+    const error = errorFrom(z4.array(z4.object({id: z4.number()})), [
+      {id: 'one'},
+    ]);
+
+    expect(formatSchemaValidationError(error)).toContain('0.id: ');
+  });
+
+  it('renders one line per issue', () => {
+    const error = errorFrom(z4.object({a: z4.number(), b: z4.number()}), {});
+
+    expect(formatSchemaValidationError(error).split('\n')).toHaveLength(2);
+  });
+
+  it('falls back to the string form for an error carrying no issues', () => {
+    expect(formatSchemaValidationError(new Error('boom'))).toBe('Error: boom');
+    expect(formatSchemaValidationError('plain')).toBe('plain');
+    expect(formatSchemaValidationError(undefined)).toBe('undefined');
   });
 });

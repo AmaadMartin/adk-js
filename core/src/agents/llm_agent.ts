@@ -7,7 +7,10 @@
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
-import {FunctionTool} from '../tools/function_tool.js';
+import {
+  SET_MODEL_RESPONSE_TOOL_NAME,
+  SetModelResponseTool,
+} from '../tools/set_model_response_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
@@ -450,6 +453,22 @@ export function isLlmAgent(obj: unknown): obj is LlmAgent {
 }
 
 /**
+ * Returns the validated structured output a `set_model_response` call produced,
+ * or `undefined` when the event carries no such call or the call failed
+ * validation.
+ *
+ * Mirrors Python
+ * `flows/llm_flows/_output_schema_processor.get_structured_model_response`,
+ * returning the value rather than a pre-stringified payload.
+ */
+function getStructuredModelResponse(functionResponseEvent: Event): unknown {
+  const responded = getFunctionResponses(functionResponseEvent).some(
+    (response) => response.name === SET_MODEL_RESPONSE_TOOL_NAME,
+  );
+  return responded ? functionResponseEvent.actions.setModelResponse : undefined;
+}
+
+/**
  * An agent that uses a large language model to generate responses.
  */
 export class LlmAgent extends BaseAgent<LlmAgentConfig> {
@@ -494,6 +513,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   readonly outputSchemaSource?: SchemaLike;
   outputKey?: string;
   private _finishTaskTool?: FinishTaskTool;
+  private _setModelResponseTool?: SetModelResponseTool;
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
   beforeToolCallback?: BeforeToolCallback;
@@ -1486,19 +1506,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       allTools.length > 0 &&
       !canUseOutputSchemaWithTools(this.canonicalModel.model)
     ) {
-      const setModelResponseTool = new FunctionTool({
-        name: 'set_model_response',
-        description:
-          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-        parameters: this.outputSchema,
-        execute: async (args, toolContext) => {
-          if (toolContext) {
-            toolContext.actions.skipSummarization = true;
-          }
-          return JSON.stringify(args);
-        },
-      });
-      allTools.push(setModelResponseTool);
+      // Built from the schema as supplied: the converted genai form loses the
+      // refinements and defaults the model's arguments are checked against.
+      this._setModelResponseTool ??= new SetModelResponseTool(
+        this.outputSchemaSource ?? this.outputSchema,
+      );
+      allTools.push(this._setModelResponseTool);
     }
     // Collect turn metadata and event actions
     // TODO - b/425992518: misleading, this is passing metadata.
@@ -1526,7 +1539,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         return (
           !llmRequest.allowedTools ||
           llmRequest.allowedTools.includes(tool.name) ||
-          tool.name === 'set_model_response'
+          tool.name === SET_MODEL_RESPONSE_TOOL_NAME
         );
       });
 
@@ -1659,14 +1672,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
-      const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
-      );
-      if (setModelResponseCall) {
-        const args = setModelResponseCall.args;
-        mergedEvent.content.parts = [{text: JSON.stringify(args)}];
-        mergedEvent.actions.skipSummarization = true;
-      } else if (functionCalls && functionCalls.length) {
+      if (functionCalls && functionCalls.length) {
         populateClientFunctionCallId(mergedEvent);
         // TODO - b/425992518: hacky, transaction log, simplify.
         // Long running is a property of tool in registry.
@@ -1754,6 +1760,25 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     yield functionResponseEvent;
+
+    // A validated `set_model_response` call is the agent's answer: synthesize
+    // the final model event from it, as adk-python's base_llm_flow does. A
+    // failed call sets nothing, so the error reaches the model as a function
+    // response and the loop runs another step -- that is the retry path.
+    const structuredResponse = getStructuredModelResponse(
+      functionResponseEvent,
+    );
+    if (structuredResponse !== undefined) {
+      yield createEvent({
+        invocationId: invocationContext.invocationId,
+        author: this.name,
+        branch: invocationContext.branch,
+        content: {
+          role: 'model',
+          parts: [{text: JSON.stringify(structuredResponse)}],
+        },
+      });
+    }
 
     // If model instruct to transfer to an agent, run the transferred agent.
     const nextAgentName = functionResponseEvent.actions.transferToAgent;

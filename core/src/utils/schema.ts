@@ -108,6 +108,40 @@ export function parseWithSchema<T>(
 }
 
 /**
+ * A validation failure that carries per-field issues. Zod v3 and v4 both throw
+ * an error of this shape, so one guard covers a value rejected by either.
+ */
+interface SchemaValidationIssues {
+  issues: Array<{path: PropertyKey[]; message: string}>;
+}
+
+function hasValidationIssues(error: unknown): error is SchemaValidationIssues {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'issues' in error &&
+    Array.isArray(error.issues)
+  );
+}
+
+/**
+ * Renders a schema validation failure as one `path: message` line per issue,
+ * so a caller can tell the model which field it got wrong.
+ *
+ * A nested failure keeps its full path, e.g. `0.id` for the `id` field of the
+ * first array element. An error carrying no issues falls back to its string
+ * form.
+ */
+export function formatSchemaValidationError(error: unknown): string {
+  if (!hasValidationIssues(error)) {
+    return String(error);
+  }
+  return error.issues
+    .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+    .join('\n');
+}
+
+/**
  * Renders a {@link SchemaLike} as a plain JSON Schema object.
  *
  * Zod v3 and v4 schemas are converted with their respective serializers. A

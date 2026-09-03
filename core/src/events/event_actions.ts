@@ -61,6 +61,14 @@ export interface EventActions {
   requestedToolConfirmations: {[key: string]: ToolConfirmation};
 
   /**
+   * The structured output the model returned through the `set_model_response`
+   * tool, already validated against the agent's output schema. It is set only
+   * when validation passed, so an unset field means the model must call the
+   * tool again. Mirrors Python `EventActions.set_model_response`.
+   */
+  setModelResponse?: unknown;
+
+  /**
    * Workflow: a serialized node/agent state snapshot used for resumable
    * checkpointing. Mirrors Python `EventActions.agent_state`.
    */
@@ -116,7 +124,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.requestedToolConfirmations) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
-    actions.escalate === undefined
+    actions.escalate === undefined &&
+    actions.setModelResponse === undefined
   );
 }
 
@@ -129,9 +138,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `setModelResponse`) — last-writer-wins: the value from the last source
+ *    that sets the field is kept.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -179,6 +188,9 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.setModelResponse !== undefined) {
+      result.setModelResponse = source.setModelResponse;
     }
   }
   return result;
