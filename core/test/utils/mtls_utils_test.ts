@@ -8,7 +8,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {logger} from '../../src/utils/logger.js';
 import {
+  clientCertDispatcher,
+  clientCertsToPresent,
   loadDefaultClientCerts,
   useClientCertEffective,
 } from '../../src/utils/mtls_utils.js';
@@ -282,5 +285,103 @@ describe('loadDefaultClientCerts', () => {
     await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow(
       /^(?!.*PRIVATE KEY)/s,
     );
+  });
+});
+
+describe('clientCertsToPresent', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-mtls-'));
+    homedirMock.mockReturnValue(tempDir);
+    providerPrints([CERT_PEM, KEY_PEM].join('\n'));
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await fs.rm(tempDir, {recursive: true, force: true});
+  });
+
+  /** Writes the SecureConnect metadata into the fake home directory. */
+  async function writeHomeMetadata(contents: string): Promise<void> {
+    const secureConnect = path.join(tempDir, '.secureConnect');
+    await fs.mkdir(secureConnect, {recursive: true});
+    await fs.writeFile(
+      path.join(secureConnect, 'context_aware_metadata.json'),
+      contents,
+      'utf-8',
+    );
+  }
+
+  it('does not look for a certificate when the variable is unset', async () => {
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
+    await writeHomeMetadata(
+      JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
+    );
+
+    await expect(clientCertsToPresent()).resolves.toBeUndefined();
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('loads the certificate when the variable asks for one', async () => {
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+    await writeHomeMetadata(
+      JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
+    );
+
+    await expect(clientCertsToPresent()).resolves.toEqual({
+      cert: CERT_PEM,
+      key: KEY_PEM,
+    });
+  });
+
+  it('resolves undefined when the machine has no metadata file', async () => {
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    await expect(clientCertsToPresent()).resolves.toBeUndefined();
+  });
+
+  it('warns once and resolves undefined when the load fails', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+    await writeHomeMetadata('not json');
+
+    await expect(clientCertsToPresent()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('is not valid JSON');
+  });
+});
+
+describe('clientCertDispatcher', () => {
+  const CERTS = {cert: CERT_PEM, key: KEY_PEM, passphrase: 'secret'};
+
+  it('builds a closable dispatcher for a passphrase-protected key', async () => {
+    const dispatcher = await clientCertDispatcher(CERTS);
+
+    expect(dispatcher.dispatch).toBeTypeOf('function');
+    expect(dispatcher.close).toBeTypeOf('function');
+    await dispatcher.close();
+  });
+
+  it('builds one for a key with no passphrase', async () => {
+    const dispatcher = await clientCertDispatcher({
+      cert: CERT_PEM,
+      key: KEY_PEM,
+    });
+
+    expect(dispatcher.dispatch).toBeTypeOf('function');
+    await dispatcher.close();
+  });
+
+  // A caller must therefore close the dispatcher once. GoogleApiToolset drops
+  // its reference before it awaits the close, so a second close() on the
+  // toolset never reaches a destroyed dispatcher.
+  it('rejects a second close, because undici destroys the client', async () => {
+    const dispatcher = await clientCertDispatcher(CERTS);
+
+    await dispatcher.close();
+    await expect(dispatcher.close()).rejects.toThrow('The client is destroyed');
   });
 });

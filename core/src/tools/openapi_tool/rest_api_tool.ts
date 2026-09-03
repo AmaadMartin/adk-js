@@ -10,6 +10,11 @@ import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
+import {
+  DispatcherRequestInit,
+  resolveSslDispatcher,
+  SslVerify,
+} from '../../utils/ssl_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -20,6 +25,16 @@ import {ToolAuthHandler} from './openapi_spec_parser/tool_auth_handler.js';
 
 import {OperationEndpoint} from './openapi_spec_parser/openapi_spec_parser.js';
 
+/** Options for {@link RestApiTool}. */
+export interface RestApiToolOptions {
+  preservePropertyNames?: boolean;
+  headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+  credentialKey?: string;
+
+  /** TLS transport setting for the request. */
+  sslVerify?: SslVerify;
+}
+
 @experimental
 export class RestApiTool extends BaseTool {
   private operationParser: OperationParser;
@@ -27,6 +42,7 @@ export class RestApiTool extends BaseTool {
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
   private defaultHeaders: Record<string, string> = {};
+  private readonly sslVerify?: SslVerify;
 
   constructor(
     name: string,
@@ -35,17 +51,14 @@ export class RestApiTool extends BaseTool {
     private readonly operation: OpenAPIV3.OperationObject,
     private authScheme?: OpenAPIV3.SecuritySchemeObject,
     private authCredential?: AuthCredential,
-    options: {
-      preservePropertyNames?: boolean;
-      headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-      credentialKey?: string;
-    } = {},
+    options: RestApiToolOptions = {},
   ) {
     super({name, description});
     this.authScheme = authScheme;
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
+    this.sslVerify = options.sslVerify;
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -158,13 +171,19 @@ export class RestApiTool extends BaseTool {
       headers[name] = value;
     }
 
+    const init: DispatcherRequestInit = {
+      method,
+      headers,
+      // eslint-disable-next-line no-undef
+      body: body as BodyInit,
+    };
+    const dispatcher = await resolveSslDispatcher(this.sslVerify);
+    if (dispatcher) {
+      init.dispatcher = dispatcher;
+    }
+
     try {
-      const response = await globalThis.fetch(url, {
-        method,
-        headers,
-        // eslint-disable-next-line no-undef
-        body: body as BodyInit,
-      });
+      const response = await globalThis.fetch(url, init);
 
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
@@ -340,11 +359,7 @@ export function createRestApiTool(
     operation: OpenAPIV3.OperationObject;
     authScheme?: OpenAPIV3.SecuritySchemeObject;
   },
-  options: {
-    preservePropertyNames?: boolean;
-    headerProvider?: (context: ReadonlyContext) => Record<string, string>;
-    credentialKey?: string;
-  } = {},
+  options: RestApiToolOptions = {},
 ): RestApiTool {
   return new RestApiTool(
     parsed.name,

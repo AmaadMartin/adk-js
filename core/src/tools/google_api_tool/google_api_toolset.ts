@@ -9,6 +9,11 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {ServiceAccount} from '../../auth/auth_credential.js';
 import {OpenIdConnectWithConfig} from '../../auth/auth_schemes.js';
 import {experimental} from '../../utils/experimental.js';
+import {
+  clientCertDispatcher,
+  clientCertsToPresent,
+} from '../../utils/mtls_utils.js';
+import type {ClosableDispatcher} from '../../utils/ssl_utils.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
 import {GoogleApiTool} from './google_api_tool.js';
@@ -144,6 +149,7 @@ export class GoogleApiToolset extends BaseToolset {
   private readonly additionalScopes?: string[];
   private readonly discoveryUrl?: string;
   private openApiToolsetPromise?: Promise<OpenAPIToolset>;
+  private mtlsDispatcher?: ClosableDispatcher;
 
   constructor(options: GoogleApiToolsetOptions) {
     super(options.toolFilter ?? [], options.toolNamePrefix);
@@ -215,7 +221,13 @@ export class GoogleApiToolset extends BaseToolset {
     this.toolFilter = toolFilter;
   }
 
-  /** Closes the toolset. A toolset that was never used fetches nothing. */
+  /**
+   * Closes the toolset and releases the client certificate it presents.
+   *
+   * The memoised toolset goes with it, so a `getTools` call after `close`
+   * fetches the document again and builds a fresh dispatcher, rather than
+   * handing out tools bound to a destroyed one.
+   */
   @experimental
   override async close(): Promise<void> {
     // A failed conversion was already reported by getTools; closing must not
@@ -223,7 +235,9 @@ export class GoogleApiToolset extends BaseToolset {
     const openApiToolset = await this.openApiToolsetPromise?.catch(
       () => undefined,
     );
+    this.openApiToolsetPromise = undefined;
     await openApiToolset?.close();
+    await this.releaseMtls();
   }
 
   private loadOpenApiToolset(): Promise<OpenAPIToolset> {
@@ -231,8 +245,9 @@ export class GoogleApiToolset extends BaseToolset {
     // share one discovery fetch. A failed load is forgotten so a later call
     // retries instead of replaying the error for the toolset's lifetime.
     this.openApiToolsetPromise ??= this.buildOpenApiToolset().catch(
-      (error: unknown) => {
+      async (error: unknown) => {
         this.openApiToolsetPromise = undefined;
+        await this.releaseMtls();
         throw error;
       },
     );
@@ -246,12 +261,24 @@ export class GoogleApiToolset extends BaseToolset {
       {discoveryUrl: this.discoveryUrl},
     );
     const spec = await converter.convert();
+
+    const certs = await clientCertsToPresent();
+    this.mtlsDispatcher = certs ? await clientCertDispatcher(certs) : undefined;
+
     // The filter stays with this toolset: OpenAPIToolset captures its own at
     // construction, so a later setToolFilter call would not reach it.
     return new OpenAPIToolset({
       specDict: spec,
       prefix: this.prefix,
       authScheme: googleOidcAuthScheme(spec, this.additionalScopes),
+      sslVerify: this.mtlsDispatcher,
     });
+  }
+
+  /** Destroys the dispatcher that owns the client certificate and its pool. */
+  private async releaseMtls(): Promise<void> {
+    const dispatcher = this.mtlsDispatcher;
+    this.mtlsDispatcher = undefined;
+    await dispatcher?.close();
   }
 }

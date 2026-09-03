@@ -9,7 +9,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
+import {formatError} from './error_utils.js';
 import {logger} from './logger.js';
+import {loadOptionalPeer} from './optional_peer.js';
+import type {ClosableDispatcher} from './ssl_utils.js';
 
 /**
  * Client-certificate material for a mutual-TLS connection.
@@ -197,4 +200,56 @@ export async function loadDefaultClientCerts(
 
   const passphrase = PASSPHRASE_PATTERN.exec(output)?.[1]?.trim();
   return passphrase ? {cert, key, passphrase} : {cert, key};
+}
+
+/**
+ * Loads the client certificate to present, when the environment asks for one.
+ *
+ * A machine with no certificate, and a certificate that cannot be loaded, both
+ * resolve to `undefined`: the caller then connects without one, because a
+ * mutual-TLS host rejects a connection that presents nothing.
+ */
+export async function clientCertsToPresent(): Promise<
+  MtlsClientCerts | undefined
+> {
+  if (!useClientCertEffective()) {
+    return undefined;
+  }
+  try {
+    return await loadDefaultClientCerts();
+  } catch (error: unknown) {
+    logger.warn(
+      'Connecting without a client certificate, because it could not be ' +
+        `loaded: ${formatError(error)}`,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * Builds a fetch dispatcher that presents `certs` on every connection it
+ * opens.
+ *
+ * `globalThis.fetch` has no per-request client-certificate option, so the
+ * certificate has to travel on the dispatcher. This is the transport half of
+ * what adk-python does with an `httpx.AsyncClient` built from
+ * `cert=(cert, key, passphrase)`.
+ *
+ * The returned dispatcher owns the key material and the connection pool until
+ * it is closed.
+ *
+ * @param certs The certificate material to present.
+ * @return The dispatcher to attach to the request.
+ * @throws If `undici` is not installed.
+ */
+export async function clientCertDispatcher(
+  certs: MtlsClientCerts,
+): Promise<ClosableDispatcher> {
+  const undici = await loadOptionalPeer(
+    {packageName: 'undici', feature: 'mutual-TLS client certificates'},
+    () => import('undici'),
+  );
+  // Spreading keeps `passphrase` off the options when the provider emitted
+  // none, which is what adk-python's two-tuple `cert=(cert, key)` does.
+  return new undici.Agent({connect: {...certs}});
 }

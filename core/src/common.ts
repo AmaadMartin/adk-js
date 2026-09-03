@@ -358,6 +358,11 @@ export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
 export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
+export type {
+  ClosableDispatcher,
+  HttpDispatcher,
+  SslVerify,
+} from './utils/ssl_utils.js';
 export {Task} from './utils/task.js';
 export type {TaskExecutable} from './utils/task.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
@@ -398,6 +403,7 @@ export {
   RestApiTool,
   createRestApiTool,
 } from './tools/openapi_tool/rest_api_tool.js';
+export type {RestApiToolOptions} from './tools/openapi_tool/rest_api_tool.js';
 
 // Workflow (parity port of google/adk-python `google/adk/workflow`). Named
 // explicitly (not `export *`) so the top-level surface stays intentional and
