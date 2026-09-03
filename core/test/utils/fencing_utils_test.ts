@@ -5,13 +5,15 @@
  */
 
 import {
-  elideQuoteMarkers,
   QUOTED_CONTENT_BEGIN,
-  QUOTED_CONTENT_ELIDED,
   QUOTED_CONTENT_END,
   quoteUntrusted,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  elideQuoteMarkers,
+  QUOTED_CONTENT_ELIDED,
+} from '../../src/utils/fencing_utils.js';
 
 describe('fencing_utils', () => {
   describe('elideQuoteMarkers', () => {

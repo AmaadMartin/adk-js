@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part as A2APart, AgentCard} from '@a2a-js/sdk';
+import {
+  Part as A2APart,
+  AgentCard,
+  Message,
+  MessageSendParams,
+} from '@a2a-js/sdk';
 import {Client, ClientFactory, RequestOptions} from '@a2a-js/sdk/client';
 import {
   A2ARequestInterceptor,
@@ -20,6 +25,7 @@ import {
 } from '@google/adk';
 import {Part as GenAIPart} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {fakeA2AClient, fakeClientFactory} from './fake_a2a_client.js';
 
 const CARD_URL = 'https://peer.example.com';
 
@@ -46,23 +52,22 @@ interface Harness {
 function createHarness(card: AgentCard = CARD): Harness {
   const cardRequests: Headers[] = [];
   const sendCalls: Array<RequestOptions | undefined> = [];
-  const client = {
-    sendMessageStream: vi.fn((_params, options: RequestOptions | undefined) => {
+  const client = fakeA2AClient({
+    sendMessageStream: vi.fn(async function* (
+      _params: MessageSendParams,
+      options?: RequestOptions,
+    ) {
       sendCalls.push(options);
-      return (async function* () {
-        yield {
-          kind: 'message',
-          messageId: 'm-1',
-          role: 'agent',
-          parts: [{kind: 'text', text: 'pong'}],
-        };
-      })();
+      yield {
+        kind: 'message',
+        messageId: 'm-1',
+        role: 'agent',
+        parts: [{kind: 'text', text: 'pong'}],
+      } satisfies Message;
     }),
     sendMessage: vi.fn(),
-  } as unknown as Client;
-  const clientFactory = {
-    createFromAgentCard: vi.fn().mockResolvedValue(client),
-  } as unknown as ClientFactory;
+  });
+  const clientFactory = fakeClientFactory(vi.fn().mockResolvedValue(client));
   const fetchImpl: typeof fetch = async (_input, init) => {
     cardRequests.push(new Headers(init?.headers));
     return new Response(JSON.stringify(card), {
@@ -255,19 +260,7 @@ describe('RemoteA2AAgent lifecycle', () => {
     expect(harness.client.sendMessageStream).not.toHaveBeenCalled();
   });
 
-  it('releases the card and client it resolved on close', async () => {
-    const agent = agentWith(harness);
-
-    await collect(agent, createContext());
-    agent.close();
-    agent.close();
-    await collect(agent, createContext());
-
-    expect(harness.cardRequests).toHaveLength(2);
-    expect(harness.clientFactory.createFromAgentCard).toHaveBeenCalledTimes(2);
-  });
-
-  it('keeps a client the caller supplied', async () => {
+  it('keeps using the client the caller supplied', async () => {
     const agent = new RemoteA2AAgent({
       name: 'peer_agent',
       agentCard: CARD,
@@ -275,10 +268,10 @@ describe('RemoteA2AAgent lifecycle', () => {
     });
 
     await collect(agent, createContext());
-    agent.close();
     await collect(agent, createContext());
 
     expect(harness.client.sendMessageStream).toHaveBeenCalledTimes(2);
+    expect(harness.clientFactory.createFromAgentCard).not.toHaveBeenCalled();
   });
 
   it('throws for an empty agent card string', () => {

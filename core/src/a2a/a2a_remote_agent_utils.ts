@@ -8,7 +8,11 @@ import {Part as A2APart} from '@a2a-js/sdk';
 import {Content, Part as GenAIPart} from '@google/genai';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../agents/functions.js';
 import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
-import {Event as AdkEvent, createEvent} from '../events/event.js';
+import {
+  Event as AdkEvent,
+  createEvent,
+  getFunctionCalls,
+} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
@@ -312,6 +316,12 @@ export interface MissingRemoteSessionPartsOptions {
   fullHistoryWhenStateless?: boolean;
   /** Converter for a single outbound part. */
   converter?: GenAIPartToA2APartConverter;
+  /**
+   * Restricts the history to one delegated task. Only events in this
+   * isolation scope are forwarded, plus the coordinator's function call whose
+   * id is the scope, which carries the task's inputs.
+   */
+  taskScope?: string;
 }
 
 /**
@@ -331,30 +341,16 @@ export function toMissingRemoteSessionParts(
 ): {parts: A2APart[]; contextId?: string} {
   const events = session.events;
   const peerName = requireAgent(ctx).name;
-  let contextId: string | undefined = undefined;
-  let startIndex = 0;
-
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event.author !== peerName) {
-      continue;
-    }
-    if (event.customMetadata) {
-      contextId = event.customMetadata[AdkMetadataKeys.CONTEXT_ID] as
-        | string
-        | undefined;
-    }
-    if (!options.fullHistoryWhenStateless || contextId) {
-      startIndex = i + 1;
-      break;
-    }
-  }
+  const walk = options.taskScope
+    ? walkTaskScope(events, peerName, options)
+    : walkWholeSession(events, peerName, options);
 
   const peerRequestedIds = peerRequestedCallIds(events, peerName);
+  const remoteCallIds = peerCallIds(events, peerName, options.taskScope);
   const missingParts: A2APart[] = [];
 
-  for (let i = startIndex; i < events.length; i++) {
-    let event = events[i];
+  for (const original of walk.events) {
+    let event = original;
     const fromUser = event.author === 'user';
 
     // Scrub before presentAsUserMessage, not after: it renders a
@@ -380,18 +376,164 @@ export function toMissingRemoteSessionParts(
       continue;
     }
 
-    const parts = toA2AParts(
-      event.content.parts,
-      event.longRunningToolIds,
-      options.converter,
-    );
-    missingParts.push(...(fromUser ? parts.map(markAsUserInput) : parts));
+    for (const part of event.content.parts) {
+      const parts = toTaskScopedA2AParts(part, event, {
+        taskScope: options.taskScope,
+        remoteCallIds,
+        converter: options.converter,
+      });
+      missingParts.push(...(fromUser ? parts.map(markAsUserInput) : parts));
+    }
   }
 
-  return {
-    parts: missingParts,
-    contextId,
-  };
+  return {parts: missingParts, contextId: walk.contextId};
+}
+
+interface HistoryWalk {
+  /** The events to forward, oldest first. */
+  events: AdkEvent[];
+  /** The context id the peer last reported, when it reported one. */
+  contextId?: string;
+}
+
+/**
+ * Walks back to the peer's last reply, or to the start of the session when
+ * the peer keeps no state and the caller asked for the whole history.
+ */
+function walkWholeSession(
+  events: readonly AdkEvent[],
+  peerName: string,
+  options: MissingRemoteSessionPartsOptions,
+): HistoryWalk {
+  let contextId: string | undefined;
+  let startIndex = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.author !== peerName) {
+      continue;
+    }
+    if (event.customMetadata) {
+      contextId = event.customMetadata[AdkMetadataKeys.CONTEXT_ID] as
+        | string
+        | undefined;
+    }
+    if (!options.fullHistoryWhenStateless || contextId) {
+      startIndex = i + 1;
+      break;
+    }
+  }
+  return {events: events.slice(startIndex), contextId};
+}
+
+/**
+ * Walks back through one delegated task only.
+ *
+ * Events outside the task's isolation scope are skipped, so a sibling task's
+ * data never reaches this peer. The walk ends at the peer's own last reply or
+ * at the coordinator's triggering function call, which carries the task's
+ * inputs; anything older is outside the task's lifetime.
+ *
+ * @throws When neither boundary is found. A scope that no function call
+ *   opened is not a task scope — a workflow path scope, for instance.
+ */
+function walkTaskScope(
+  events: readonly AdkEvent[],
+  peerName: string,
+  options: MissingRemoteSessionPartsOptions,
+): HistoryWalk {
+  const taskScope = options.taskScope;
+  const collected: AdkEvent[] = [];
+  let contextId: string | undefined;
+
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.isolationScope === taskScope) {
+      if (event.author === peerName) {
+        if (event.customMetadata) {
+          contextId = event.customMetadata[AdkMetadataKeys.CONTEXT_ID] as
+            | string
+            | undefined;
+        }
+        if (!options.fullHistoryWhenStateless || contextId) {
+          return {events: collected.reverse(), contextId};
+        }
+      }
+      collected.push(event);
+      continue;
+    }
+    if (getFunctionCalls(event).some((call) => call.id === taskScope)) {
+      collected.push(event);
+      return {events: collected.reverse(), contextId};
+    }
+  }
+
+  throw new Error(
+    `RemoteA2AAgent '${peerName}' in task mode could not find the triggering` +
+      ` function call for isolation scope '${taskScope}' in session history.` +
+      ' Workflow path scopes are not supported.',
+  );
+}
+
+/** Ids of the function calls the peer itself made, within the task scope. */
+function peerCallIds(
+  events: readonly AdkEvent[],
+  peerName: string,
+  taskScope?: string,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (event.author !== peerName) {
+      continue;
+    }
+    if (taskScope && event.isolationScope !== taskScope) {
+      continue;
+    }
+    for (const call of getFunctionCalls(event)) {
+      if (call.id) {
+        ids.add(call.id);
+      }
+    }
+  }
+  return ids;
+}
+
+interface TaskScopedPartOptions {
+  taskScope?: string;
+  remoteCallIds: ReadonlySet<string>;
+  converter?: GenAIPartToA2APartConverter;
+}
+
+/**
+ * Converts one part for the outgoing message, applying the task-mode rules.
+ *
+ * A function call the coordinator aimed at another tool is dropped: it is not
+ * this peer's to resume. A function response answering a call the peer never
+ * made becomes text, because the peer has no invocation to resume and its
+ * runner rejects a message that carries such a response.
+ */
+function toTaskScopedA2AParts(
+  part: GenAIPart,
+  event: AdkEvent,
+  {taskScope, remoteCallIds, converter}: TaskScopedPartOptions,
+): A2APart[] {
+  const call = part.functionCall;
+  if (
+    taskScope &&
+    call?.id !== undefined &&
+    call.id !== taskScope &&
+    !remoteCallIds.has(call.id)
+  ) {
+    return [];
+  }
+
+  const response = part.functionResponse;
+  if (taskScope && response && !remoteCallIds.has(response.id ?? '')) {
+    const text =
+      `Tool ${response.name} returned: ` + JSON.stringify(response.response);
+    return [{kind: 'text', text}];
+  }
+
+  return toA2AParts([part], event.longRunningToolIds, converter);
 }
 
 /** Stamps a part the end user authored, so the peer can tell it apart. */

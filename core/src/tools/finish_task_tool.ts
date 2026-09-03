@@ -6,7 +6,9 @@
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
 
+import {Event, getFunctionResponses} from '../events/event.js';
 import {appendInstructions} from '../models/llm_request.js';
+import {SchemaLike, toJsonSchema} from '../utils/schema.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -22,6 +24,53 @@ export const FINISH_TASK_TOOL_NAME = 'finish_task';
  * validation-error retry signal.
  */
 export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
+
+/**
+ * The result returned in the `finish_task` function response when the task
+ * failed. Wire-observable: a delegating agent writes it into the response its
+ * coordinator reads.
+ */
+export const FINISH_TASK_ERROR_RESULT = 'Task failed.';
+
+/**
+ * The key a non-object output schema is wrapped under, because the GenAI API
+ * requires object-typed tool parameters.
+ */
+const FINISH_TASK_DEFAULT_WRAPPER_KEY = 'result';
+
+/**
+ * The key `finish_task` arguments wrap the output value under, or `undefined`
+ * when the schema is object-typed and the value sits at the top level.
+ */
+export function getOutputWrapperKey(
+  outputSchema?: SchemaLike,
+): string | undefined {
+  const schema = outputSchema ?? DEFAULT_TASK_OUTPUT_SCHEMA;
+  const type = toJsonSchema(schema)['type'];
+  return type === 'object' || type === Type.OBJECT
+    ? undefined
+    : FINISH_TASK_DEFAULT_WRAPPER_KEY;
+}
+
+/**
+ * Whether the event carries a terminal `finish_task` function response.
+ *
+ * A non-terminal response — a validation error, say — returns `false`, so the
+ * caller keeps reading and the agent gets a chance to retry.
+ */
+export function isFinishTaskTerminalFr(event: Event): boolean {
+  for (const response of getFunctionResponses(event)) {
+    if (response.name === FINISH_TASK_TOOL_NAME) {
+      const result = (response.response as {result?: unknown} | undefined)
+        ?.result;
+      return (
+        result === FINISH_TASK_SUCCESS_RESULT ||
+        result === FINISH_TASK_ERROR_RESULT
+      );
+    }
+  }
+  return false;
+}
 
 /** The default output schema when the task agent declares none. */
 const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
@@ -66,7 +115,7 @@ export class FinishTaskTool extends BaseTool {
     }
     super({name: FINISH_TASK_TOOL_NAME, description});
     this.outputSchema = schema;
-    this.wrapperKey = schema.type === Type.OBJECT ? undefined : 'result';
+    this.wrapperKey = getOutputWrapperKey(schema);
   }
 
   override _getDeclaration(): FunctionDeclaration {

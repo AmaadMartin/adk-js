@@ -19,10 +19,15 @@ import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthScheme} from '../auth/auth_schemes.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
+import {
+  getOutputWrapperKey,
+  isFinishTaskTerminalFr,
+} from '../tools/finish_task_tool.js';
 import {createLinkedAbort} from '../utils/abort_utils.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {NodeContext} from '../workflow/node_context.js';
 import {MessageRole} from './a2a_event.js';
 import {
   buildRemoteAuthConfig,
@@ -38,9 +43,18 @@ import {
   executeAfterRequestInterceptors,
   executeBeforeCardRequestInterceptors,
   executeBeforeRequestInterceptors,
+  isAdkEvent,
   newIntegrationExtensionInterceptor,
 } from './a2a_remote_agent_interceptors.js';
+import {promoteResponseToOutput} from './a2a_remote_agent_output.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
+import {
+  createEndOfAgentEvent,
+  createFinishTaskFailureEvent,
+  createTaskFailureEvents,
+  findFinishTaskArgsFromHistory,
+  textFromContent,
+} from './a2a_remote_agent_task.js';
 import {
   getUserFunctionCallAt,
   peerRequestedCallIds,
@@ -50,7 +64,10 @@ import {
 import {adoptedCardDescription, resolveAgentCard} from './agent_card.js';
 import {validateAgentCard} from './agent_card_validation.js';
 import {toAdkEvent} from './event_converter_utils.js';
-import {getA2ASessionMetadata} from './metadata_converter_utils.js';
+import {
+  AdkMetadataKeys,
+  getA2ASessionMetadata,
+} from './metadata_converter_utils.js';
 import {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
@@ -171,6 +188,20 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
   credentialKey?: string;
   /** Builds the metadata attached to one outgoing A2A request. */
   a2aRequestMetaProvider?: A2ARequestMetaProvider;
+  /**
+   * Delegation mode. Only `'task'` is supported: the agent runs as a task
+   * sub-agent that a coordinator owns across turns, and hands control back
+   * when the remote task completes.
+   *
+   * This requires the remote agent to call the `finish_task` tool. An ADK
+   * task-mode agent does that natively; a custom A2A server must return a
+   * function response named `finish_task` whose `result` is
+   * `'Task completed.'` or `'Task failed.'`. Set `outputSchema` to mirror the
+   * remote agent's, so the output is unwrapped the same way.
+   *
+   * Unset (the default) leaves the agent a plain transfer target.
+   */
+  mode?: 'task';
 }
 
 /**
@@ -186,12 +217,18 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
  * the client can collect one and the next turn resumes.
  */
 export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
+  /**
+   * Writable here alone: this agent adopts the description its resolved agent
+   * card carries, which it cannot know at construction. `readonly` is not part
+   * of assignability, so a `BaseNode`-typed reference still cannot write it.
+   */
+  declare description: string;
+
   private client?: Client;
   private card?: AgentCard;
   private readonly cardSource?: string;
   private readonly authConfig?: AuthConfig;
   private readonly requestInterceptors?: A2ARequestInterceptor[];
-  private closed = false;
 
   constructor(private readonly a2aConfig: RemoteA2AAgentConfig) {
     super(a2aConfig);
@@ -207,9 +244,11 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       }
       this.cardSource = agentCard.trim();
     } else if (agentCard) {
-      // A card supplied directly never goes through resolution, so its
-      // description is adopted here. A parent agent reads the description to
-      // build its transfer instruction, before this agent ever runs.
+      // A card supplied directly did not come off the network here, so it is
+      // the caller's own object and is not validated, as adk-python also
+      // leaves it. It never goes through resolution, so its description is
+      // adopted here: a parent agent reads the description to build its
+      // transfer instruction, before this agent ever runs.
       this.card = agentCard;
       if (!this.description && agentCard.description) {
         this.description = agentCard.description;
@@ -234,28 +273,23 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         : a2aConfig.requestInterceptors;
   }
 
-  /**
-   * Releases the client and card this agent resolved.
-   *
-   * A client the caller supplied is left alone: this agent never owned it.
-   * Calling this twice is a no-op.
-   */
-  close(): void {
-    if (this.closed) {
-      return;
-    }
-    this.closed = true;
-    if (!this.a2aConfig.client) {
-      this.client = undefined;
-    }
-    if (this.cardSource) {
-      this.card = undefined;
-    }
-    logger.debug(`Released remote A2A agent resources for ${this.name}`);
-  }
-
   private get timeoutMs(): number {
     return this.a2aConfig.timeoutMs ?? DEFAULT_A2A_TIMEOUT_MS;
+  }
+
+  /** The delegation mode this agent runs in. */
+  get mode(): 'task' | undefined {
+    return this.a2aConfig.mode;
+  }
+
+  /**
+   * A delegated task always sends its whole scoped history: the scope is new
+   * to the peer, so there is nothing it has already seen.
+   */
+  private get fullHistoryWhenStateless(): boolean {
+    return (
+      this.a2aConfig.fullHistoryWhenStateless === true || this.mode === 'task'
+    );
   }
 
   /**
@@ -269,7 +303,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   private async ensureResolved(
     ctx: InvocationContext,
     authHeaders?: Record<string, string>,
-  ): Promise<Client> {
+  ): Promise<ResolvedPeer> {
     const interceptorHeaders = await executeBeforeCardRequestInterceptors(
       this.a2aConfig.cardRequestInterceptors,
       ctx,
@@ -280,41 +314,60 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         : undefined;
 
     if (headers && this.cardSource) {
-      const card = await this.resolveAndValidateCard(this.cardSource, headers);
-      return this.a2aConfig.client ?? this.createClient(card);
+      const card = await this.resolveAndValidateCard(
+        this.cardSource,
+        headers,
+        ctx.abortSignal,
+      );
+      this.adoptDescription(card);
+      return {
+        client: this.a2aConfig.client ?? (await this.createClient(card)),
+        card,
+      };
     }
 
     if (this.client) {
-      return this.client;
+      return {client: this.client, card: this.card};
     }
 
     if (this.cardSource && !this.card) {
-      const card = await this.resolveAndValidateCard(this.cardSource, headers);
+      const card = await this.resolveAndValidateCard(
+        this.cardSource,
+        headers,
+        ctx.abortSignal,
+      );
       // Stored only once it has validated. A rejected card left on the
       // instance reads as already resolved, so the next call would skip the
       // check and talk to the origin that card named.
       this.card = card;
-      if (!this.description && card.description) {
-        this.description = adoptedCardDescription(
-          card.description,
-          this.cardSource,
-        );
-      }
+      this.adoptDescription(card);
     }
 
     // The constructor stores a supplied client, and rejects a config with
     // neither a client nor a card, so a card is available here.
     this.client = await this.createClient(this.card!);
-    return this.client;
+    return {client: this.client, card: this.card};
+  }
+
+  /** Takes the card's description when this agent was given none. */
+  private adoptDescription(card: AgentCard): void {
+    if (!this.description && card.description) {
+      this.description = adoptedCardDescription(
+        card.description,
+        this.cardSource,
+      );
+    }
   }
 
   private async resolveAndValidateCard(
     source: string,
     headers?: Record<string, string>,
+    abortSignal?: AbortSignal,
   ): Promise<AgentCard> {
     const card = await resolveAgentCard(source, {
       headers,
       timeoutMs: this.timeoutMs,
+      abortSignal,
       fetchImpl: this.a2aConfig.fetchImpl,
     });
     validateAgentCard(card, source);
@@ -362,8 +415,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     // sending the peer an empty message.
     if (parts.length === 0) {
       const missing = toMissingRemoteSessionParts(ctx, ctx.session, {
-        fullHistoryWhenStateless: this.a2aConfig.fullHistoryWhenStateless,
+        fullHistoryWhenStateless: this.fullHistoryWhenStateless,
         converter: this.a2aConfig.genaiPartConverter,
+        taskScope: this.mode === 'task' ? ctx.isolationScope : undefined,
       });
       parts = missing.parts;
       contextId = missing.contextId ?? contextId;
@@ -385,19 +439,48 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     return message;
   }
 
-  private errorEvent(ctx: InvocationContext, message: string): AdkEvent {
+  private errorEvent(
+    ctx: InvocationContext,
+    message: string,
+    customMetadata?: Record<string, unknown>,
+  ): AdkEvent {
     logger.error(`A2ARemoteAgent ${this.name} failed: ${message}`);
     return createEvent({
       author: this.name,
       invocationId: ctx.invocationId,
       branch: ctx.branch,
+      isolationScope: ctx.isolationScope,
       errorMessage: message,
       turnComplete: true,
+      customMetadata,
     });
   }
 
   protected async *runAsyncImpl(
     ctx: InvocationContext,
+  ): AsyncGenerator<AdkEvent, void, void> {
+    const control: TaskControl = {release: false};
+    try {
+      yield* this.runTurn(ctx, control);
+    } finally {
+      // Every terminating path in task mode hands control back, so the
+      // coordinator is never left waiting on a task that has stopped.
+      if (this.mode === 'task' && control.release) {
+        if (control.errorMessage !== undefined) {
+          yield createFinishTaskFailureEvent(
+            ctx,
+            this.name,
+            control.errorMessage,
+          );
+        }
+        yield createEndOfAgentEvent(ctx, this.name);
+      }
+    }
+  }
+
+  private async *runTurn(
+    ctx: InvocationContext,
+    control: TaskControl,
   ): AsyncGenerator<AdkEvent, void, void> {
     let authHeaders: Record<string, string> | undefined;
     if (this.authConfig) {
@@ -405,15 +488,14 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       try {
         resolved = await resolveRemoteAuth(this.authConfig, ctx, this.name);
       } catch (e: unknown) {
-        yield this.errorEvent(
-          ctx,
-          `Failed to authenticate remote A2A agent: ${formatError(e)}`,
-        );
+        control.errorMessage = `Failed to authenticate remote A2A agent: ${formatError(e)}`;
+        control.release = true;
+        yield this.errorEvent(ctx, control.errorMessage);
         return;
       }
       if (resolved.authRequestEvent) {
         // A pause, not a failure: the invocation resumes once the client
-        // supplies the credential.
+        // supplies the credential, so a task keeps its control here.
         ctx.endInvocation = true;
         yield resolved.authRequestEvent;
         return;
@@ -421,14 +503,13 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       authHeaders = resolved.headers;
     }
 
-    let client: Client;
+    let peer: ResolvedPeer;
     try {
-      client = await this.ensureResolved(ctx, authHeaders);
+      peer = await this.ensureResolved(ctx, authHeaders);
     } catch (e: unknown) {
-      yield this.errorEvent(
-        ctx,
-        `Failed to initialize remote A2A agent: ${formatError(e)}`,
-      );
+      control.errorMessage = `Failed to initialize remote A2A agent: ${formatError(e)}`;
+      control.release = true;
+      yield this.errorEvent(ctx, control.errorMessage);
       return;
     }
 
@@ -436,7 +517,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     try {
       message = this.buildRequest(ctx);
     } catch (e: unknown) {
-      yield this.errorEvent(ctx, formatError(e));
+      control.errorMessage = formatError(e);
+      control.release = true;
+      yield this.errorEvent(ctx, control.errorMessage);
       return;
     }
 
@@ -444,6 +527,8 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       logger.warn(
         'No parts to send to remote A2A agent. Emitting empty event.',
       );
+      control.errorMessage = 'No parts to send to remote A2A agent.';
+      control.release = true;
       yield createEvent({
         author: this.name,
         invocationId: ctx.invocationId,
@@ -458,7 +543,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       ctx,
       message,
     );
-    if (!isA2AMessage(intercepted.request)) {
+    if (isAdkEvent(intercepted.request)) {
+      control.errorMessage = 'Request intercepted';
+      control.release = true;
       yield intercepted.request;
       return;
     }
@@ -470,7 +557,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       params.headers = {...params.headers, ...authHeaders};
     }
 
-    yield* this.sendRequest(ctx, client, message, params);
+    yield* this.sendRequest(ctx, peer, message, params, control);
   }
 
   private buildSendParams(
@@ -487,9 +574,10 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
   private async *sendRequest(
     ctx: InvocationContext,
-    client: Client,
+    peer: ResolvedPeer,
     message: Message,
     params: A2AParametersConfig,
+    control: TaskControl,
   ): AsyncGenerator<AdkEvent, void, void> {
     const sendParams: MessageSendParams = {
       message,
@@ -506,20 +594,99 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       ...(params.headers ? {serviceParameters: params.headers} : {}),
     };
     const processor = new A2ARemoteAgentRunProcessor(sendParams);
-    const useStreaming = this.card?.capabilities?.streaming !== false;
+    const useStreaming = peer.card?.capabilities?.streaming !== false;
 
     try {
       const stream = useStreaming
-        ? client.sendMessageStream(sendParams, options)
-        : toStream(await client.sendMessage(sendParams, options));
+        ? peer.client.sendMessageStream(sendParams, options)
+        : [await peer.client.sendMessage(sendParams, options)];
       for await (const chunk of stream) {
-        yield* this.emitChunk(ctx, chunk, processor, useStreaming);
+        for await (const event of this.emitChunk(
+          ctx,
+          chunk,
+          processor,
+          useStreaming,
+        )) {
+          if (this.mode === 'task' && isFinishTaskTerminalFr(event)) {
+            this.setTaskOutput(ctx, event);
+            yield event;
+            // Returning here ignores a duplicate function response a legacy
+            // server sends at the end of the run.
+            control.release = true;
+            return;
+          }
+          yield event;
+
+          const failure = this.taskFailureEvents(ctx, chunk, event, message);
+          if (failure) {
+            yield* failure;
+            control.release = true;
+            return;
+          }
+        }
       }
     } catch (e: unknown) {
-      yield this.errorEvent(ctx, `A2A request failed: ${formatError(e)}`);
+      const errorMessage = `A2A request failed: ${formatError(e)}`;
+      control.errorMessage = errorMessage;
+      control.release = true;
+      yield this.errorEvent(ctx, errorMessage, {
+        [AdkMetadataKeys.ERROR]: errorMessage,
+        [AdkMetadataKeys.REQUEST]: message,
+      });
     } finally {
       abort.dispose();
     }
+  }
+
+  /** Promotes the peer's `finish_task` arguments to the task output. */
+  private setTaskOutput(ctx: InvocationContext, event: AdkEvent): void {
+    const args = findFinishTaskArgsFromHistory(
+      ctx.session,
+      ctx.isolationScope,
+      event,
+    );
+    if (!args) {
+      logger.warn(
+        'Could not find finish_task arguments in session history for' +
+          ` isolation scope '${ctx.isolationScope}'. Task output is not set.`,
+      );
+      return;
+    }
+    const wrapperKey = getOutputWrapperKey(this.outputSchema);
+    event.output = wrapperKey && wrapperKey in args ? args[wrapperKey] : args;
+  }
+
+  /** The events a failed or cancelled remote task produces, if it is one. */
+  private taskFailureEvents(
+    ctx: InvocationContext,
+    chunk: A2AStreamEventData,
+    event: AdkEvent,
+    request: Message,
+  ): AdkEvent[] | undefined {
+    if (this.mode !== 'task' || chunk.kind !== 'task') {
+      return undefined;
+    }
+    const state = chunk.status?.state;
+    if (state !== 'failed' && state !== 'canceled') {
+      return undefined;
+    }
+    logger.warn(
+      `Remote task reported ${state}. Yielding an error event and releasing` +
+        ' control.',
+    );
+    const errorText =
+      state === 'canceled'
+        ? 'Task canceled'
+        : (textFromContent(event.content) ??
+          event.errorMessage ??
+          'Unknown error');
+    return createTaskFailureEvents({
+      errorText,
+      ctx,
+      agentName: this.name,
+      taskId: chunk.id,
+      request,
+    });
   }
 
   private async *emitChunk(
@@ -561,6 +728,27 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     yield* processor.aggregatePartial(ctx, chunk, adkEvent);
   }
 
+  /**
+   * Runs the agent as a workflow node.
+   *
+   * Promotes the peer's textual answer to `event.output` so the scheduler
+   * propagates it downstream. Without this a `JoinNode` aggregating parallel
+   * `RemoteA2AAgent` predecessors sees `undefined` for each of them: the agent
+   * carries its answer in `event.content` and nothing sets `event.output`.
+   */
+  protected override async *runImpl(
+    ctx: NodeContext,
+    nodeInput: unknown,
+  ): AsyncGenerator<AdkEvent, void, void> {
+    let promoted = false;
+    for await (const event of super.runImpl(ctx, nodeInput)) {
+      if (!promoted && promoteResponseToOutput(event, this.name)) {
+        promoted = true;
+      }
+      yield event;
+    }
+  }
+
   protected runLiveImpl(
     _context: InvocationContext,
   ): AsyncGenerator<AdkEvent, void, void> {
@@ -568,17 +756,14 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   }
 }
 
-/** Yields a single non-streaming response as a stream of one. */
-async function* toStream(
-  result: A2AStreamEventData,
-): AsyncGenerator<A2AStreamEventData, void, void> {
-  yield result;
+/** The client for this turn and the card whose capabilities it honours. */
+interface ResolvedPeer {
+  client: Client;
+  card?: AgentCard;
 }
 
-/**
- * Whether a `beforeRequest` interceptor returned the request rather than an
- * ADK event. An A2A `Message` always carries `kind: 'message'`.
- */
-function isA2AMessage(value: Message | AdkEvent): value is Message {
-  return 'kind' in value;
+/** Tracks whether a delegated task must hand control back, and why. */
+interface TaskControl {
+  release: boolean;
+  errorMessage?: string;
 }

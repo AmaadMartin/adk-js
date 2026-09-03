@@ -6,7 +6,6 @@
 
 import {AgentCard} from '@a2a-js/sdk';
 import {
-  adoptedCardDescription,
   AGENT_CARD_PATH,
   isAgentCardResolutionError,
   QUOTED_CONTENT_BEGIN,
@@ -17,6 +16,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {adoptedCardDescription} from '../../src/a2a/agent_card.js';
 
 const CARD: AgentCard = {
   name: 'peer',

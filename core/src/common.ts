@@ -105,11 +105,7 @@ export type {
 } from './auth/auth_credential.js';
 export {AuthHandler} from './auth/auth_handler.js';
 export {buildAuthHeaders} from './auth/auth_headers.js';
-export {
-  AUTH_PREPROCESSOR,
-  AuthPreprocessor,
-  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
-} from './auth/auth_preprocessor.js';
+export {AUTH_PREPROCESSOR, AuthPreprocessor} from './auth/auth_preprocessor.js';
 export {AuthProviderRegistry} from './auth/auth_provider_registry.js';
 export {OAuthGrantType} from './auth/auth_schemes.js';
 export type {AuthScheme, OpenIdConnectWithConfig} from './auth/auth_schemes.js';
@@ -299,6 +295,7 @@ export {
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
+  FINISH_TASK_ERROR_RESULT,
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
   FinishTaskTool,
@@ -353,9 +350,7 @@ export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {
   QUOTED_CONTENT_BEGIN,
-  QUOTED_CONTENT_ELIDED,
   QUOTED_CONTENT_END,
-  elideQuoteMarkers,
   quoteUntrusted,
 } from './utils/fencing_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
