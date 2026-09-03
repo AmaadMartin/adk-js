@@ -45,9 +45,26 @@ vi.mock('@google-cloud/vertexai', async (importOriginal) => ({
   },
 }));
 
+const expressClientFactory = vi.hoisted(() => vi.fn());
+
+// Records the key the express-mode client is built with, while still building
+// the real client so `new Sessions(...)` gets a working ApiClient.
+vi.mock('../../src/utils/vertex_ai_utils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/vertex_ai_utils.js')>();
+  return {
+    ...actual,
+    createExpressModeApiClient: (apiKey: string) => {
+      expressClientFactory(apiKey);
+      return actual.createExpressModeApiClient(apiKey);
+    },
+  };
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
   clientConstructor.mockClear();
+  expressClientFactory.mockClear();
 });
 
 import {
@@ -173,22 +190,43 @@ describe('VertexAiSessionService', () => {
     });
 
     it.each([
-      ['an expressModeApiKey option', {expressModeApiKey: 'test-api-key'}],
-      ['an API key from the environment', {}],
-      ['an API key and only a project', {projectId: 'test-project'}],
-    ])('throws for %s instead of dropping the key', (_, options) => {
-      expect(() => new VertexAiSessionService(options)).toThrow(
-        'Vertex AI Express Mode',
-      );
+      [
+        'an expressModeApiKey option',
+        {expressModeApiKey: 'test-api-key'},
+        'test-api-key',
+      ],
+      ['an API key from the environment', {}, 'env-api-key'],
+      [
+        'an API key and only a project',
+        {projectId: 'test-project'},
+        'env-api-key',
+      ],
+    ])('builds an API key client for %s', (_, options, expectedKey) => {
+      expect(() => new VertexAiSessionService(options)).not.toThrow();
+
+      expect(expressClientFactory).toHaveBeenCalledWith(expectedKey);
       expect(clientConstructor).not.toHaveBeenCalled();
     });
 
-    it('keeps using project and location when an API key is also in the environment', () => {
+    it('prefers the API key over a project and location', () => {
       new VertexAiSessionService({
         projectId: 'test-project',
         location: 'us-central1',
       });
 
+      expect(expressClientFactory).toHaveBeenCalledWith('env-api-key');
+      expect(clientConstructor).not.toHaveBeenCalled();
+    });
+
+    it('uses project and location when no API key is set', () => {
+      vi.stubEnv('GOOGLE_API_KEY', undefined);
+
+      new VertexAiSessionService({
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(expressClientFactory).not.toHaveBeenCalled();
       expect(clientConstructor).toHaveBeenCalledWith({
         project: 'test-project',
         location: 'us-central1',
