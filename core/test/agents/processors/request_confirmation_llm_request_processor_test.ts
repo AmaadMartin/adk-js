@@ -11,6 +11,7 @@ import {
   Event,
   FunctionTool,
   InMemorySessionService,
+  InputValidationError,
   IntentMismatchError,
   IntentMismatchReason,
   InvocationContext,
@@ -1454,5 +1455,70 @@ describe('RequestConfirmationLlmRequestProcessor approval lifecycle', () => {
       ]);
       expect(resumedCalls).toEqual([noArgs]);
     });
+  });
+});
+
+// --- Malformed confirmation envelopes ----------------------------------------
+//
+// The `{response: '<json>'}` envelope is decoded by
+// `unwrapConfirmationResponse`, which reports a bad envelope as an
+// `InputValidationError`. Before that, a bad envelope raised a raw
+// `SyntaxError`, crashed on `{response: null}`, or denied silently on a
+// non-string. A payload nobody can read is not a decision, so the resume path
+// now says so.
+
+describe('RequestConfirmationLlmRequestProcessor malformed envelope', () => {
+  async function runWithResponse(
+    response: Record<string, unknown>,
+  ): Promise<void> {
+    const agent = new LlmAgent({name: AGENT_NAME, model: 'gemini-2.5-flash'});
+    vi.spyOn(agent, 'canonicalTools').mockResolvedValue([wireTransferTool]);
+    const invocationContext = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({
+        id: 'test-session',
+        events: [
+          ...pausedCallEvents(),
+          createEvent({
+            invocationId: 'test-invocation',
+            author: 'user',
+            content: {
+              role: 'user',
+              parts: [
+                {
+                  functionResponse: {
+                    id: 'gate-1',
+                    name: REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+                    response,
+                  },
+                },
+              ],
+            },
+          }),
+        ],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      pluginManager: new PluginManager([]),
+    });
+    await collectEvents(invocationContext);
+  }
+
+  it.each([
+    ['a JSON string that does not parse', {response: 'not json'}],
+    ['an object where a JSON string belongs', {response: {confirmed: true}}],
+    ['a null envelope', {response: null}],
+    ['a number envelope', {response: 123}],
+  ])('refuses %s', async (_label, response) => {
+    await expect(runWithResponse(response)).rejects.toBeInstanceOf(
+      InputValidationError,
+    );
+  });
+
+  it('still resumes on a well-formed envelope', async () => {
+    await expect(
+      runWithResponse({response: JSON.stringify({confirmed: true})}),
+    ).resolves.toBeUndefined();
   });
 });
