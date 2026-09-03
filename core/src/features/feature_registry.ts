@@ -13,6 +13,8 @@ import {logger} from '../utils/logger.js';
 export enum FeatureName {
   /** The declarative YAML agent-config document surface. */
   AGENT_CONFIG = 'AGENT_CONFIG',
+  /** Configuration surface for the Bigtable tools. */
+  BIGTABLE_TOOL_SETTINGS = 'BIGTABLE_TOOL_SETTINGS',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
   /**
    * Declares a function tool's parameters as a raw JSON schema
@@ -50,6 +52,10 @@ export interface FeatureConfig {
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.AGENT_CONFIG]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
+  [FeatureName.BIGTABLE_TOOL_SETTINGS]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },

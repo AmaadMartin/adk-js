@@ -753,6 +753,8 @@ export type {
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 // `ToolArgsConfig` is exported below, from its own module `tool_configs.js`.
 export type {ToolPredicate} from './tools/base_toolset.js';
+export {createBigtableToolSettings} from './tools/bigtable/settings.js';
+export type {BigtableToolSettings} from './tools/bigtable/settings.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
 export {
   BaseComputer,

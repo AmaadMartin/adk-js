@@ -198,6 +198,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [BaseRetrievalTool](tools/base_retrieval_tool/index.md) - The shared `query`
   declaration every retrieval tool contributes, and the two shapes it takes.
 - [BaseTool custom metadata and response scheduling](tools/base_tool/index.md) - Carrying tool metadata, and controlling when a live model reacts to a tool response.
+- [Bigtable tool settings](tools/bigtable_tool_settings/index.md) - Capping how many rows a Bigtable query returns, and the experimental flag that gates the settings.
 - [ConnectionsClient](tools/connections_client/index.md) - Reading Integration Connectors metadata and building the connector OpenAPI spec from it.
 - [ExampleTool.fromConfig](tools/example_tool/index.md) - Building an ExampleTool from a configuration record, and naming an example provider that user code exports.
 - [FunctionTool parameters and the sync-callable runner](tools/function_tool/index.md) - How a tool's parameter declaration is built, and how a host keeps a blocking tool body off the event loop.
