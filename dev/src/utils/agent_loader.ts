@@ -77,6 +77,36 @@ const FILE_MODULE_TYPE_EXTENSION_MAP = {
 };
 
 /**
+ * Packages that must never be inlined into the bundled agent file.
+ *
+ * See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
+ */
+const EXTERNAL_PACKAGES = [
+  // Resolve the ADK runtime from the project's node_modules (see
+  // linkProjectNodeModules) instead of embedding a copy per agent, so a
+  // directory of N agents loads one shared ADK rather than N of them.
+  '@google/adk',
+  '@google/adk-devtools',
+  'sqlite3',
+  'better-sqlite3',
+  'mysql',
+  'mysql2',
+  // Native addons must remain external so Node can resolve their
+  // platform-specific assets at runtime.
+  'onnxruntime-node',
+  'oracledb',
+  'pg-native',
+  'pg-query-stream',
+  'tedious',
+  'libsql',
+  // Optional peer dependencies of vite and eslint that are not
+  // installed and MUST NOT be bundled.
+  'lightningcss',
+  'jiti',
+  'jiti/package.json',
+];
+
+/**
  * Metadata for a file.
  */
 interface FileMetadata {
@@ -279,35 +309,7 @@ export class AgentFile {
         // transpile. Nothing is being inlined in that mode, so there is
         // nothing to hold out of the bundle either.
         ...(this.options.bundle
-          ? {
-              packages: 'bundle' as const,
-              // See http://mikro-orm.io/docs/deployment#deploy-a-bundle-of-entities-and-dependencies-with-esbuild for more details
-              external: [
-                // Resolve the ADK runtime from the project's node_modules (see
-                // linkProjectNodeModules) instead of embedding a copy per
-                // agent, so a directory of N agents loads one shared ADK
-                // rather than N of them.
-                '@google/adk',
-                '@google/adk-devtools',
-                'sqlite3',
-                'better-sqlite3',
-                'mysql',
-                'mysql2',
-                // Native addons must remain external so Node can resolve their
-                // platform-specific assets at runtime.
-                'onnxruntime-node',
-                'oracledb',
-                'pg-native',
-                'pg-query-stream',
-                'tedious',
-                'libsql',
-                // Optional peer dependencies of vite and eslint that are not
-                // installed and MUST NOT be bundled.
-                'lightningcss',
-                'jiti',
-                'jiti/package.json',
-              ],
-            }
+          ? {packages: 'bundle' as const, external: EXTERNAL_PACKAGES}
           : {}),
       });
 
