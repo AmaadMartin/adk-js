@@ -110,6 +110,6 @@ The ingest request is dispatched without being awaited, so it cannot reject the
 caller. A failed request is logged at `error` and the events are lost; use the
 generate path when a write must be confirmed.
 
-`searchMemory` never throws on a malformed response. It skips a result with no
-memory or no fact, logs each skip at `warn`, and returns the results collected
-so far if iteration fails.
+`searchMemory` tolerates a malformed response. It skips a result with no memory
+and a result with no fact, and logs each skip at `warn`, so one bad result does
+not cost you the others.

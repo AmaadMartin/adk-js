@@ -52,9 +52,7 @@ const CREATE_MEMORY_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'expireTime',
   'httpOptions',
   'memoryId',
-  'metadata',
   'revisionExpireTime',
-  'revisionLabels',
   'revisionTtl',
   'topics',
   'ttl',
@@ -144,19 +142,21 @@ function toVertexMetadataValue(
   return {stringValue: String(value)};
 }
 
-function fromVertexMetadataValue(value: MemoryMetadataValue): unknown {
-  const {boolValue, doubleValue, stringValue, timestampValue} = value;
-  return boolValue ?? doubleValue ?? stringValue ?? timestampValue ?? value;
-}
-
 function fromVertexMetadata(
   vertexMetadata?: Record<string, MemoryMetadataValue>,
 ): Record<string, unknown> {
-  const metadata: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(vertexMetadata || {})) {
-    metadata[key] = fromVertexMetadataValue(value);
-  }
-  return metadata;
+  return Object.fromEntries(
+    Object.entries(vertexMetadata ?? {}).map(([key, value]) => [
+      key,
+      // A value of an unrecognised kind passes through unchanged. The optional
+      // chain keeps a null in a malformed response from throwing.
+      value?.boolValue ??
+        value?.doubleValue ??
+        value?.stringValue ??
+        value?.timestampValue ??
+        value,
+    ]),
+  );
 }
 
 export interface VertexAiMemoryBankServiceOptions {
@@ -276,30 +276,24 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     logger.debug('Search memory response received.');
 
     const memoryEvents: MemoryEntry[] = [];
-    try {
-      for (const retrievedMemory of retrievedMemoriesResponse.retrievedMemories ||
-        []) {
-        logger.debug(`Retrieved memory: ${JSON.stringify(retrievedMemory)}`);
-        const memory = retrievedMemory.memory;
-        if (!memory) {
-          logger.warn('Skipping memory entry with missing memory object.');
-          continue;
-        }
-        if (!memory.fact) {
-          logger.warn('Skipping memory entry with empty or missing fact.');
-          continue;
-        }
-        memoryEvents.push({
-          author: 'user',
-          content: createUserContent(memory.fact),
-          timestamp: memory.updateTime,
-          customMetadata: fromVertexMetadata(memory.metadata),
-        });
+    for (const retrievedMemory of retrievedMemoriesResponse.retrievedMemories ||
+      []) {
+      logger.debug(`Retrieved memory: ${JSON.stringify(retrievedMemory)}`);
+      const memory = retrievedMemory.memory;
+      if (!memory) {
+        logger.warn('Skipping memory entry with missing memory object.');
+        continue;
       }
-    } catch (error: unknown) {
-      logger.error(
-        `Error while iterating memory results. Returning ${memoryEvents.length} partial results: ${error}`,
-      );
+      if (!memory.fact) {
+        logger.warn('Skipping memory entry with empty or missing fact.');
+        continue;
+      }
+      memoryEvents.push({
+        author: 'user',
+        content: createUserContent(memory.fact),
+        timestamp: memory.updateTime,
+        customMetadata: fromVertexMetadata(memory.metadata),
+      });
     }
 
     return {memories: memoryEvents};
@@ -491,16 +485,6 @@ function toIngestionEvent(event: Event): IngestionDirectContentsSourceEvent {
   return ingestionEvent;
 }
 
-/**
- * Narrows a caller-supplied metadata value to a trigger configuration. The
- * caller owns its shape; the Vertex service rejects a malformed one.
- */
-function isGenerationTriggerConfig(
-  value: unknown,
-): value is MemoryGenerationTriggerConfig {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function ingestOptionsFromMetadata(
   customMetadata?: Record<string, unknown>,
 ): Partial<IngestEventsRequestParameters> {
@@ -520,9 +504,12 @@ function ingestOptionsFromMetadata(
     options.config = {forceFlush};
   }
 
+  // The caller owns the shape of the trigger config; the Vertex service
+  // rejects a malformed one.
   const generationTriggerConfig = customMetadata['generationTriggerConfig'];
-  if (isGenerationTriggerConfig(generationTriggerConfig)) {
-    options.generationTriggerConfig = generationTriggerConfig;
+  if (generationTriggerConfig && typeof generationTriggerConfig === 'object') {
+    options.generationTriggerConfig =
+      generationTriggerConfig as MemoryGenerationTriggerConfig;
   }
 
   return options;

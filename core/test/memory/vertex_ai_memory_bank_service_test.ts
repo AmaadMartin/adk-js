@@ -453,7 +453,9 @@ describe('VertexAiMemoryBankService', () => {
       await service.addEventsToMemory({
         appName: 'test-app',
         userId: 'test-user',
-        events: [{content: {parts: [{thought: true}]} as Content} as Event],
+        events: [
+          createEvent({author: 'user', content: {parts: [{thought: true}]}}),
+        ],
         customMetadata: {revisionTtl: '3600s'},
       });
 
@@ -483,7 +485,7 @@ describe('VertexAiMemoryBankService', () => {
       await service.addEventsToMemory({
         appName: 'test-app',
         userId: 'test-user',
-        events: [{content: {parts: [part]} as Content} as Event],
+        events: [createEvent({author: 'user', content: {parts: [part]}})],
       });
 
       const [params] = mockMemories.ingestEventsInternal.mock.calls[0];
@@ -496,7 +498,9 @@ describe('VertexAiMemoryBankService', () => {
       await service.addEventsToMemory({
         appName: 'test-app',
         userId: 'test-user',
-        events: [{content: {parts: [{thought: true}]} as Content} as Event],
+        events: [
+          createEvent({author: 'user', content: {parts: [{thought: true}]}}),
+        ],
       });
 
       expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
@@ -822,18 +826,10 @@ describe('VertexAiMemoryBankService', () => {
       expect(response.memories[0].timestamp).toBeUndefined();
     });
 
-    it('returns the results collected before an entry throws', async () => {
-      const loggerSpy = vi
-        .spyOn(getLogger(), 'error')
-        .mockImplementation(() => {});
+    it('keeps a null metadata value instead of throwing on it', async () => {
       mockMemories.retrieveInternal.mockResolvedValue({
         retrievedMemories: [
-          {memory: {fact: 'user likes blue'}},
-          {
-            get memory(): {fact: string} {
-              throw new Error('entry boom');
-            },
-          },
+          {memory: {fact: 'user likes blue', metadata: {broken: null}}},
         ],
       });
 
@@ -843,11 +839,7 @@ describe('VertexAiMemoryBankService', () => {
         query: 'find blue',
       });
 
-      expect(response.memories).toHaveLength(1);
-      expect(loggerSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Returning 1 partial results'),
-      );
-      loggerSpy.mockRestore();
+      expect(response.memories[0].customMetadata).toEqual({broken: null});
     });
 
     it.each([
