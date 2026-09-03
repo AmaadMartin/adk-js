@@ -7,9 +7,15 @@
 import {ComputerUse, ToolUnion} from '@google/genai';
 
 import {Context} from '../../agents/context.js';
+import {LlmRequest} from '../../models/llm_request.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {RunAsyncToolRequest, ToolProcessLlmRequest} from '../base_tool.js';
+import {isRecord} from '../../utils/object_notation_utils.js';
+import {
+  isInModelTool,
+  RunAsyncToolRequest,
+  ToolProcessLlmRequest,
+} from '../base_tool.js';
 import {
   FunctionTool,
   ToolExecuteFunction,
@@ -103,11 +109,6 @@ function isPositiveSize(size: ScreenSize): boolean {
     size.width > 0 &&
     size.height > 0
   );
-}
-
-/** Whether `value` is a non-array object, so a field can be added to it. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -218,6 +219,27 @@ function toStateResponse(state: ComputerState): Record<string, unknown> {
   };
 }
 
+/**
+ * Claims `tool`'s name on the request.
+ *
+ * A computer-use tool is callable, so it follows the rule
+ * `BaseTool.processLlmRequest` applies: a name another callable tool already
+ * holds is a conflict to report, not an entry to overwrite. The predefined
+ * names are generic enough (`wait`, `search`, `navigate`) that a user tool can
+ * plausibly collide with one.
+ */
+function registerTool(llmRequest: LlmRequest, tool: ComputerUseTool): void {
+  // `Object.hasOwn` rather than `in`, so a tool named after an
+  // `Object.prototype` member is not read as already registered.
+  const registered = Object.hasOwn(llmRequest.toolsDict, tool.name)
+    ? llmRequest.toolsDict[tool.name]
+    : undefined;
+  if (registered && registered !== tool && !isInModelTool(registered)) {
+    throw new Error(`Duplicate tool name: ${tool.name}`);
+  }
+  llmRequest.toolsDict[tool.name] = tool;
+}
+
 /** Whether a tool already on the request configures computer use. */
 function hasComputerUse(tool: ToolUnion): boolean {
   return 'computerUse' in tool && !!tool.computerUse;
@@ -289,18 +311,13 @@ export class ComputerUseTool extends FunctionTool<ToolInputParameters> {
     if (gated) {
       return gated;
     }
-    try {
-      const args = normalizeCoordinates(
-        req.args,
-        this.screenSize,
-        this.virtualScreenSize,
-      );
-      const result = await super.runAsync({args, toolContext: req.toolContext});
-      return buildResponse(result, req.toolContext);
-    } catch (error: unknown) {
-      logger.error('Error in ComputerUseTool.runAsync:', error);
-      throw error;
-    }
+    const args = normalizeCoordinates(
+      req.args,
+      this.screenSize,
+      this.virtualScreenSize,
+    );
+    const result = await super.runAsync({args, toolContext: req.toolContext});
+    return buildResponse(result, req.toolContext);
   }
 
   /**
@@ -315,7 +332,7 @@ export class ComputerUseTool extends FunctionTool<ToolInputParameters> {
   override async processLlmRequest({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    llmRequest.toolsDict[this.name] = this;
+    registerTool(llmRequest, this);
     if (!this.computerUse) {
       return;
     }

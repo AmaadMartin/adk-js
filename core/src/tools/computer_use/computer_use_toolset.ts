@@ -11,14 +11,14 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {BaseToolset} from '../base_toolset.js';
-import {ToolInputParameters} from '../function_tool.js';
 import {
   assertSchemeAllowed,
   isBlockedHostname,
   normalizeHost,
   validateResolvedAddresses,
-} from '../load_web_page.js';
+} from '../../utils/url_safety_utils.js';
+import {BaseToolset} from '../base_toolset.js';
+import {ToolInputParameters} from '../function_tool.js';
 
 import {BaseComputer, ComputerEnvironment} from './base_computer.js';
 import {
@@ -214,13 +214,8 @@ export class ComputerUseToolset extends BaseToolset {
     toolContext: Context,
     llmRequest: LlmRequest,
   ): Promise<void> {
-    try {
-      for (const tool of await this.getTools()) {
-        await tool.processLlmRequest({toolContext, llmRequest});
-      }
-    } catch (error: unknown) {
-      logger.error('Error in ComputerUseToolset.processLlmRequest:', error);
-      throw error;
+    for (const tool of await this.getTools()) {
+      await tool.processLlmRequest({toolContext, llmRequest});
     }
   }
 

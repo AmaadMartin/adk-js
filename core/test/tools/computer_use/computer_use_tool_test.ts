@@ -7,6 +7,8 @@
 import {
   ComputerUseFunction,
   ComputerUseTool,
+  FunctionTool,
+  GOOGLE_SEARCH,
   LlmRequest,
   ScreenSize,
   ToolConfirmation,
@@ -319,6 +321,46 @@ describe('ComputerUseTool.processLlmRequest', () => {
 
     expect(llmRequest.config.tools).toHaveLength(1);
     expect(llmRequest.toolsDict['current_state']).toBeDefined();
+  });
+
+  // The predefined names are generic, so a user tool can hold one already.
+  // Overwriting it would take the user's tool away without saying so.
+  it('reports a callable tool already holding the name', async () => {
+    const llmRequest = emptyRequest();
+    const userTool = new FunctionTool({
+      name: 'current_state',
+      description: "The user's own tool.",
+      execute: async () => 'mine',
+    });
+    llmRequest.toolsDict['current_state'] = userTool;
+
+    await expect(
+      register(configuredTool(COMPUTER_USE), llmRequest),
+    ).rejects.toThrow('Duplicate tool name: current_state');
+    expect(llmRequest.toolsDict['current_state']).toBe(userTool);
+  });
+
+  it('registers twice without reporting itself as a duplicate', async () => {
+    const llmRequest = emptyRequest();
+    const tool = configuredTool(COMPUTER_USE);
+
+    await register(tool, llmRequest);
+    await register(tool, llmRequest);
+
+    expect(llmRequest.toolsDict['current_state']).toBe(tool);
+    expect(llmRequest.config?.tools).toHaveLength(1);
+  });
+
+  // A tool the model runs itself holds the name only so a call can be routed,
+  // so a genuinely callable tool of the same name takes it over.
+  it('displaces an in-model tool holding the name', async () => {
+    const llmRequest = emptyRequest();
+    llmRequest.toolsDict['current_state'] = GOOGLE_SEARCH;
+    const tool = configuredTool(COMPUTER_USE);
+
+    await register(tool, llmRequest);
+
+    expect(llmRequest.toolsDict['current_state']).toBe(tool);
   });
 
   it('registers without configuring when it carries no configuration', async () => {

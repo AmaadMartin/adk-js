@@ -9,6 +9,7 @@ import {
   BaseLlmConnection,
   ComputerUseToolset,
   Event,
+  FunctionTool,
   InMemoryRunner,
   LlmAgent,
   LlmRequest,
@@ -137,6 +138,40 @@ describe('ComputerUseToolset driven by an LlmAgent', () => {
       image: {mimetype: 'image/png', data: 'dGVzdA=='},
       url: `${MOCK_PAGE_URL}/click/960/540`,
     });
+  });
+
+  // The predefined names are generic, so a user tool can already hold one.
+  // Taking it over silently would remove a tool the user asked for.
+  it('reports a user tool that collides with a predefined name', async () => {
+    const agent = new LlmAgent({
+      name: 'browser_agent',
+      model: new ClickingLlm(),
+      tools: [
+        new FunctionTool({
+          name: 'search',
+          description: "The user's own search tool.",
+          execute: async () => 'mine',
+        }),
+        new ComputerUseToolset({computer: new MockComputer()}),
+      ],
+    });
+    const runner = new InMemoryRunner({agent, appName: 'collision_app'});
+    const session = await runner.sessionService.createSession({
+      appName: 'collision_app',
+      userId: 'u1',
+    });
+
+    const turn = async () => {
+      for await (const event of runner.runAsync({
+        userId: 'u1',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: 'go'}]},
+      })) {
+        expect(event).toBeDefined();
+      }
+    };
+
+    await expect(turn()).rejects.toThrow('Duplicate tool name: search');
   });
 
   it('configures computer use once, not once per turn', async () => {

@@ -310,7 +310,6 @@ export type {
   ComputerUseToolAdapter,
   ComputerUseToolsetOptions,
 } from './tools/computer_use/computer_use_toolset.js';
-export type {PredefinedComputerFunction} from './tools/computer_use/predefined_functions.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,

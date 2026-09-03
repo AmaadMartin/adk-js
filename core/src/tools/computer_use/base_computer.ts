@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {types} from 'node:util';
+
 import {Context} from '../../agents/context.js';
 import {experimental} from '../../utils/experimental.js';
 
@@ -40,11 +42,7 @@ export function isComputerState(value: unknown): value is ComputerState {
   if (typeof value !== 'object' || value === null || !('screenshot' in value)) {
     return false;
   }
-  // A `Uint8Array` built in another realm fails `instanceof`, so compare the
-  // brand instead.
-  if (
-    Object.prototype.toString.call(value.screenshot) !== '[object Uint8Array]'
-  ) {
+  if (!types.isUint8Array(value.screenshot)) {
     return false;
   }
   if (!('url' in value)) {
