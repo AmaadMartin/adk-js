@@ -8,6 +8,7 @@ import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {ListAgentEngineSessionEventsResponse} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {
   createEvent,
+  createSession,
   isCompactedEvent,
   State,
   VertexAiSessionService,
@@ -1773,13 +1774,13 @@ describe('VertexAiSessionService', () => {
     const RETRY_DELAY_MS = 1000;
 
     const appendSession = () =>
-      ({
+      createSession({
         id: 'append-session',
         appName: '12345',
         userId: 'testUser',
         events: [],
         lastUpdateTime: Date.now(),
-      }) as unknown as Session;
+      });
 
     const helloEvent = () =>
       createEvent({
