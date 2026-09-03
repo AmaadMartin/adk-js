@@ -370,6 +370,29 @@ describe('populateAuthSchemeFromDiscovery', () => {
     expect(scheme.flows.password?.tokenUrl).toBe('');
   });
 
+  it('leaves every endpoint that is already configured untouched', async () => {
+    const configured = {
+      implicit: {authorizationUrl: 'https://set.example.com/a', scopes: {}},
+      password: {tokenUrl: 'https://set.example.com/p', scopes: {}},
+      clientCredentials: {tokenUrl: 'https://set.example.com/c', scopes: {}},
+      authorizationCode: {
+        authorizationUrl: 'https://set.example.com/ac',
+        tokenUrl: 'https://set.example.com/at',
+        scopes: {},
+      },
+    };
+    const scheme: ExtendedOAuth2 = {
+      type: 'oauth2',
+      issuerUrl: ISSUER_URL,
+      flows: structuredClone(configured),
+    };
+
+    expect(
+      await populateAuthSchemeFromDiscovery(scheme, discoveryManager(METADATA)),
+    ).toBe(true);
+    expect(scheme.flows).toEqual(configured);
+  });
+
   it('leaves a flow the scheme does not declare absent', async () => {
     const scheme: ExtendedOAuth2 = {
       type: 'oauth2',
