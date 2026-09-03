@@ -106,6 +106,12 @@ describe('isDefaultEventActions', () => {
   it.each(nonDefaults)('returns false when %s', (_label, overrides) => {
     expect(isDefaultEventActions(createEventActions(overrides))).toBe(false);
   });
+
+  it('returns false when setModelResponse is set', () => {
+    const actions = createEventActions({setModelResponse: {answer: '42'}});
+
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
 });
 
 describe('mergeEventActions', () => {
@@ -226,6 +232,14 @@ describe('mergeEventActions', () => {
       createEventActions({escalate: true}),
     ]);
     expect(result.escalate).toBe(true);
+  });
+
+  it('uses last-writer-wins for setModelResponse', () => {
+    const result = mergeEventActions([
+      createEventActions({setModelResponse: {answer: 'first'}}),
+      createEventActions({setModelResponse: {answer: 'second'}}),
+    ]);
+    expect(result.setModelResponse).toEqual({answer: 'second'});
   });
 
   it('applies target as the base before merging sources', () => {
