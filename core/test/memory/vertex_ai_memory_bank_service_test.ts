@@ -40,7 +40,9 @@ describe('VertexAiMemoryBankService', () => {
   let mockMemories: {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
+    ingestEventsInternal: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
+    retrieveProfiles: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
@@ -51,6 +53,10 @@ describe('VertexAiMemoryBankService', () => {
       generateInternal: vi
         .fn()
         .mockResolvedValue({name: 'operations/generate-op', done: true}),
+      ingestEventsInternal: vi
+        .fn()
+        .mockResolvedValue({name: 'operations/ingest-op', done: true}),
+      retrieveProfiles: vi.fn().mockResolvedValue({}),
       retrieveInternal: vi.fn().mockResolvedValue({
         retrievedMemories: [
           {
@@ -154,7 +160,7 @@ describe('VertexAiMemoryBankService', () => {
   });
 
   describe('addSessionToMemory', () => {
-    it('calls generateInternal with events', async () => {
+    it('calls ingestEventsInternal with events', async () => {
       const session = createSession({
         id: 'test-session-id',
         appName: 'test-app',
@@ -172,15 +178,18 @@ describe('VertexAiMemoryBankService', () => {
 
       await service.addSessionToMemory(session);
 
-      expect(mockMemories.generateInternal).toHaveBeenCalledWith(
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'reasoningEngines/test-engine-id',
           scope: {app_name: 'test-app', user_id: 'test-user'},
           directContentsSource: {
-            events: [{content: {parts: [{text: 'event 1'}]}}],
+            events: [
+              expect.objectContaining({content: {parts: [{text: 'event 1'}]}}),
+            ],
           },
         }),
       );
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
     });
 
     it('filters out events without text or data', async () => {
@@ -202,6 +211,9 @@ describe('VertexAiMemoryBankService', () => {
       await service.addSessionToMemory(session);
 
       expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+        expect.not.objectContaining({directContentsSource: expect.anything()}),
+      );
     });
   });
 
@@ -360,6 +372,9 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // waitForCompletion routes this write to memories.generate, which
+          // is the path this test exercises.
+          waitForCompletion: false,
           myBool: true,
           myNumber: 42,
           myString: 'hello',
@@ -409,6 +424,9 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // waitForCompletion routes this write to memories.generate, which
+          // is the path this test exercises.
+          waitForCompletion: false,
           myPreFormatted: {stringValue: 'already converted'},
         },
       });
@@ -447,6 +465,9 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // waitForCompletion routes this write to memories.generate, which
+          // is the path this test exercises.
+          waitForCompletion: false,
           mySymbol: mySymbol,
         },
       });
