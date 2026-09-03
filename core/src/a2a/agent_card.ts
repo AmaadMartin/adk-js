@@ -19,34 +19,147 @@ import {ReadonlyContext} from '../agents/readonly_context.js';
 import {isSequentialAgent} from '../agents/sequential_agent.js';
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {isBaseToolset} from '../tools/base_toolset.js';
+import {formatError} from '../utils/error_utils.js';
+import {quoteUntrusted} from '../utils/fencing_utils.js';
 import {logger} from '../utils/logger.js';
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
+import {
+  AgentCardResolutionError,
+  isRemoteCardSource,
+} from './agent_card_validation.js';
+
+/**
+ * A card description fetched over the network is peer-controlled text that a
+ * parent agent puts in its own instruction, so it is capped before it is
+ * fenced.
+ */
+const MAX_CARD_DESCRIPTION_CHARS = 1024;
+
+/**
+ * Marks a capped description as incomplete, so neither the model nor a reader
+ * takes the cut-off text for the whole description.
+ */
+const CARD_DESCRIPTION_TRUNCATION_SUFFIX = '... [truncated]';
+
+/** Options for {@link resolveAgentCard}. */
+export interface ResolveAgentCardOptions {
+  /** Extra headers to send with the card request. */
+  headers?: Record<string, string>;
+  /** Abort the card request after this many milliseconds. */
+  timeoutMs?: number;
+  /** `fetch` implementation to use. Defaults to the global `fetch`. */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Returns the description to adopt from a resolved agent card.
+ *
+ * A parent agent interpolates a transfer target's description straight into
+ * its own instruction, so a description that arrived over the network is
+ * capped and fenced as quoted peer content. A card read from a local file is
+ * the caller's own text and is adopted unchanged.
+ */
+export function adoptedCardDescription(
+  description: string,
+  source?: string,
+): string {
+  if (!source || !isRemoteCardSource(source)) {
+    return description;
+  }
+  let capped = description.slice(0, MAX_CARD_DESCRIPTION_CHARS);
+  if (capped.length < description.length) {
+    capped += CARD_DESCRIPTION_TRUNCATION_SUFFIX;
+  }
+  return quoteUntrusted(capped);
+}
 
 /**
  * Resolves the AgentCard from the provided source.
+ *
+ * @param agentCard - A card, an http(s) URL, or a local file path.
+ * @param options - Card request options. Only used for a URL source.
+ * @throws {@link AgentCardResolutionError} when the card cannot be fetched,
+ *   read, or parsed.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
+  options: ResolveAgentCardOptions = {},
 ): Promise<AgentCard> {
   if (typeof agentCard === 'object') {
     return agentCard;
   }
 
-  const source = agentCard as string;
-  if (source.startsWith('http://') || source.startsWith('https://')) {
-    const resolver = new DefaultAgentCardResolver();
-    return await resolver.resolve(source);
+  const source = agentCard;
+  if (isRemoteCardSource(source)) {
+    return resolveAgentCardFromUrl(source, options);
   }
+  return resolveAgentCardFromFile(source);
+}
 
+async function resolveAgentCardFromUrl(
+  source: string,
+  options: ResolveAgentCardOptions,
+): Promise<AgentCard> {
+  const {headers, timeoutMs, fetchImpl = globalThis.fetch} = options;
+  const controller = new AbortController();
+  const timer =
+    timeoutMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          controller.abort();
+        }, timeoutMs);
+  // The resolver owns how the well-known card path is derived from `source`;
+  // the wrapper only adds the headers and the deadline it has no hook for.
+  const resolver = new DefaultAgentCardResolver({
+    fetchImpl: (input, init) =>
+      fetchImpl(input, {
+        ...init,
+        ...(headers ? {headers} : {}),
+        signal: controller.signal,
+      }),
+  });
   try {
-    const content = await fs.readFile(source, 'utf-8');
-    return JSON.parse(content) as AgentCard;
+    return await resolver.resolve(source);
   } catch (err: unknown) {
-    throw new Error(
-      `Failed to read agent card from file ${source}: ${(err as Error).message}`,
+    throw new AgentCardResolutionError(
+      `Failed to resolve AgentCard from URL ${source}: ${formatError(err)}`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function resolveAgentCardFromFile(source: string): Promise<AgentCard> {
+  let content: string;
+  try {
+    content = await fs.readFile(source, 'utf-8');
+  } catch (err: unknown) {
+    if (isFileNotFoundError(err)) {
+      throw new AgentCardResolutionError(
+        `Agent card file not found: ${source}`,
+      );
+    }
+    throw new AgentCardResolutionError(
+      `Failed to resolve AgentCard from file ${source}: ${formatError(err)}`,
     );
   }
+  try {
+    return JSON.parse(content) as AgentCard;
+  } catch (err: unknown) {
+    throw new AgentCardResolutionError(
+      `Invalid JSON in agent card file ${source}: ${formatError(err)}`,
+    );
+  }
+}
+
+function isFileNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as {code?: unknown}).code === 'ENOENT'
+  );
 }
 
 /**
