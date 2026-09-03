@@ -17,7 +17,7 @@ import {
   FeatureName,
   isFeatureEnabled,
 } from '../../features/feature_registry.js';
-import {formatError} from '../../utils/error_utils.js';
+import {formatError, timeoutErrorName} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {logger} from '../../utils/logger.js';
@@ -59,6 +59,16 @@ const MAX_TOOL_NAME_LENGTH = 60;
  */
 export type FetchFn = typeof globalThis.fetch;
 
+/**
+ * Deadline for one REST API call, in milliseconds.
+ *
+ * `fetch` aborts a whole request rather than one phase of it, so this is the
+ * sum of the sequential budgets adk-python gives its client in
+ * `_DEFAULT_TIMEOUT`: waiting for a pooled connection (10s), opening the
+ * connection (10s), then the longer of reading and writing (600s).
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 620_000;
+
 /** Options accepted by `RestApiTool` and `createRestApiTool`. */
 export interface RestApiToolOptions extends OperationParserOptions {
   headerProvider?: (context: ReadonlyContext) => Record<string, string>;
@@ -73,6 +83,8 @@ export interface RestApiToolOptions extends OperationParserOptions {
    * elsewhere, and install the result with `setOperationParser`.
    */
   shouldParseOperation?: boolean;
+  /** Deadline for one call. Defaults to {@link DEFAULT_REQUEST_TIMEOUT_MS}. */
+  timeoutMs?: number;
 }
 
 /** The error type a telemetry consumer records for an in-band HTTP failure. */
@@ -91,6 +103,7 @@ export class RestApiTool extends BaseTool {
   private fetchFn?: FetchFn;
   private defaultHeaders: Record<string, string> = {};
   private sslVerify?: SslVerify;
+  private readonly timeoutMs: number;
 
   constructor(
     name: string,
@@ -112,6 +125,7 @@ export class RestApiTool extends BaseTool {
     this.credentialKey = options.credentialKey;
     this.fetchFn = options.fetchFn;
     this.sslVerify = options.sslVerify;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     if (options.shouldParseOperation ?? true) {
       this.operationParser = new OperationParser(this.operation, options);
     }
@@ -342,6 +356,7 @@ export class RestApiTool extends BaseTool {
       headers,
       // eslint-disable-next-line no-undef
       body: body as BodyInit,
+      signal: AbortSignal.timeout(this.timeoutMs),
     };
     const dispatcher = await resolveSslDispatcher(this.sslVerify);
     if (dispatcher) {
@@ -388,7 +403,23 @@ export class RestApiTool extends BaseTool {
       } catch {
         return {text: bodyText};
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      const timeoutName = timeoutErrorName(error);
+      if (timeoutName !== undefined) {
+        // An apiKey scheme can put a secret in the query string, so only the
+        // path is logged. adk-python logs a URL without a query string too.
+        logger.warn(
+          `API call timed out for tool ${this.name}: ${method} ` +
+            `${url.split('?')[0]}`,
+        );
+        return {
+          error:
+            `Tool ${this.name} execution failed. Analyze this execution error` +
+            ' and your inputs. Retry with adjustments if applicable. But' +
+            " make sure don't retry more than 3 times. Execution Error:" +
+            ` Request timed out (${timeoutName}).`,
+        };
+      }
       return {
         error: `Failed to execute API call: ${(error as Error).message}`,
       };
@@ -567,6 +598,32 @@ function applySchemaDefaults(
   return filled;
 }
 
+/**
+ * Adds one query parameter, matching what adk-python sends: a null or
+ * undefined parameter is dropped, an array repeats the key once per element,
+ * and nothing is JSON-encoded.
+ *
+ * A model that has nothing to say for an optional parameter sends null rather
+ * than leaving the key out. `?cursor=null` is a value the server reads, so the
+ * key is dropped instead. `false`, `0` and `''` are values the model chose, and
+ * they survive.
+ */
+function appendQueryParam(
+  queryParams: URLSearchParams,
+  name: string,
+  value: unknown,
+): void {
+  if (value === null || value === undefined) {
+    return;
+  }
+  for (const item of Array.isArray(value) ? value : [value]) {
+    queryParams.append(
+      name,
+      item === null || item === undefined ? '' : String(item),
+    );
+  }
+}
+
 export function prepareRequestParams(
   endpoint: OperationEndpoint,
   parameters: ApiParameter[],
@@ -594,13 +651,7 @@ export function prepareRequestParams(
         String(argValue),
       );
     } else if (location === 'query') {
-      // A model that has nothing to say for an optional parameter sends null
-      // rather than leaving the key out. `?cursor=null` is a value the server
-      // reads, so the key is dropped instead. `false`, `0` and `''` are values
-      // the model chose, and they survive.
-      if (argValue !== null && argValue !== undefined) {
-        queryParams.append(originalName, String(argValue));
-      }
+      appendQueryParam(queryParams, originalName, argValue);
     } else if (location === 'cookie') {
       cookiePairs.push(`${originalName}=${String(argValue)}`);
     } else if (location === 'header') {

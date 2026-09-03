@@ -15,6 +15,7 @@ import {
   credentialToParam,
   FeatureName,
   FetchFn,
+  getLogger,
   INTERNAL_AUTH_PREFIX,
   InvocationContext,
   LlmAgent,
@@ -26,6 +27,7 @@ import {
   ParsedOperation,
   PluginManager,
   RestApiTool,
+  RestApiToolOptions,
   tokenToSchemeCredential,
   ToolAuthHandler,
   version,
@@ -3220,5 +3222,250 @@ describe('RestApiTool detectErrorInResponse', () => {
     });
 
     expect(tool.detectErrorInResponse(response)).toBeUndefined();
+  });
+});
+
+describe('RestApiTool request timeouts', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'get',
+  };
+  const operation: OpenAPIV3.OperationObject = {responses: {}};
+
+  function buildTool(options?: RestApiToolOptions): RestApiTool {
+    return new RestApiTool(
+      'timeout_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      undefined,
+      options,
+    );
+  }
+
+  function callContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-timeout-test',
+        session: createSession({id: 'session-1', appName: 'test-app'}),
+        pluginManager: new PluginManager([]),
+      }),
+    });
+  }
+
+  function stubFetch() {
+    return vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('ok', {
+        status: 200,
+        headers: {'content-type': 'text/plain'},
+      }),
+    );
+  }
+
+  function timeoutError(name: string): string {
+    return (
+      'Tool timeout_tool execution failed. Analyze this execution error and' +
+      ' your inputs. Retry with adjustments if applicable. But make sure' +
+      ` don't retry more than 3 times. Execution Error: Request timed out` +
+      ` (${name}).`
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('runAsync', () => {
+    it('sends a deadline that has not expired', async () => {
+      const fetchSpy = stubFetch();
+
+      await buildTool().runAsync({
+        args: {},
+        toolContext: callContext(),
+      });
+
+      const init = fetchSpy.mock.calls[0][1];
+      if (init?.signal == null) {
+        expect.fail('fetch was called without an abort signal');
+      }
+      expect(init.signal.aborted).toBe(false);
+    });
+
+    it('deadlines a default request after the adk-python budget', async () => {
+      const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
+      stubFetch();
+
+      await buildTool().runAsync({
+        args: {},
+        toolContext: callContext(),
+      });
+
+      expect(deadlineSpy).toHaveBeenCalledWith(10_000 + 10_000 + 600_000);
+    });
+
+    it('deadlines an overridden request after the shorter budget', async () => {
+      const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
+      stubFetch();
+
+      await buildTool({timeoutMs: 500}).runAsync({
+        args: {},
+        toolContext: callContext(),
+      });
+
+      expect(deadlineSpy).toHaveBeenCalledWith(500);
+    });
+
+    it('reports an aborted request as a timeout', async () => {
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+        new DOMException(
+          'The operation was aborted due to timeout',
+          'TimeoutError',
+        ),
+      );
+
+      const result = await buildTool().runAsync({
+        args: {},
+        toolContext: callContext(),
+      });
+
+      expect(result).toEqual({error: timeoutError('TimeoutError')});
+    });
+
+    it('reports an undici transport timeout wrapped by fetch', async () => {
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+        new TypeError('fetch failed', {
+          cause: Object.assign(new Error('Connect Timeout Error'), {
+            name: 'ConnectTimeoutError',
+            code: 'UND_ERR_CONNECT_TIMEOUT',
+          }),
+        }),
+      );
+
+      const result = await buildTool().runAsync({
+        args: {},
+        toolContext: callContext(),
+      });
+
+      expect(result).toEqual({error: timeoutError('ConnectTimeoutError')});
+    });
+
+    it('still reports a non-timeout failure as an API call failure', async () => {
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+        new TypeError('fetch failed', {cause: new Error('ECONNREFUSED')}),
+      );
+
+      const result = await buildTool().runAsync({
+        args: {},
+        toolContext: callContext(),
+      });
+
+      expect(result).toEqual({
+        error: 'Failed to execute API call: fetch failed',
+      });
+    });
+
+    it('logs one warning naming the tool, the method and the path', async () => {
+      const warnSpy = vi
+        .spyOn(getLogger(), 'warn')
+        .mockImplementation(() => {});
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+        new DOMException('timed out', 'TimeoutError'),
+      );
+
+      await buildTool().runAsync({
+        args: {},
+        toolContext: callContext(),
+      });
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'API call timed out for tool timeout_tool: GET http://api.example.com/test',
+      );
+    });
+  });
+});
+
+describe('query parameter encoding', () => {
+  const itemsEndpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/items',
+    method: 'GET',
+  };
+
+  function queryParameter(name: string): ApiParameter {
+    return {
+      name,
+      originalName: name,
+      paramLocation: 'query',
+      paramSchema: {},
+      required: false,
+    };
+  }
+
+  it('repeats the key once per array element', () => {
+    const result = prepareRequestParams(
+      itemsEndpoint,
+      [queryParameter('tags')],
+      {tags: ['a', 'b']},
+    );
+
+    expect(result.url).toBe('http://api.example.com/items?tags=a&tags=b');
+  });
+
+  it('contributes no key for an empty array', () => {
+    const result = prepareRequestParams(
+      itemsEndpoint,
+      [queryParameter('tags')],
+      {tags: []},
+    );
+
+    expect(result.url).toBe('http://api.example.com/items');
+  });
+
+  it('encodes a null array element as an empty value', () => {
+    const result = prepareRequestParams(
+      itemsEndpoint,
+      [queryParameter('tags')],
+      {tags: ['a', null]},
+    );
+
+    expect(result.url).toBe('http://api.example.com/items?tags=a&tags=');
+  });
+
+  it('drops null and undefined but keeps false, zero and the empty string', () => {
+    const result = prepareRequestParams(
+      itemsEndpoint,
+      [
+        queryParameter('cursor'),
+        queryParameter('after'),
+        queryParameter('flag'),
+        queryParameter('offset'),
+        queryParameter('note'),
+      ],
+      {cursor: null, after: undefined, flag: false, offset: 0, note: ''},
+    );
+
+    expect(result.url).toBe(
+      'http://api.example.com/items?flag=false&offset=0&note=',
+    );
+  });
+
+  it('stringifies a number, a boolean and an object without JSON encoding', () => {
+    const result = prepareRequestParams(
+      itemsEndpoint,
+      [
+        queryParameter('limit'),
+        queryParameter('active'),
+        queryParameter('filter'),
+      ],
+      {limit: 25, active: true, filter: {a: 1}},
+    );
+
+    const params = new URL(result.url).searchParams;
+    expect(params.get('limit')).toBe('25');
+    expect(params.get('active')).toBe('true');
+    expect(params.get('filter')).toBe('[object Object]');
   });
 });

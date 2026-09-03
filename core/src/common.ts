@@ -861,6 +861,7 @@ export type {
 } from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';
 export {
+  DEFAULT_REQUEST_TIMEOUT_MS,
   RestApiTool,
   createRestApiTool,
   createRestApiToolFromJson,

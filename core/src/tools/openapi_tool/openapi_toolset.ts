@@ -37,6 +37,8 @@ export class OpenAPIToolset extends BaseToolset {
       /** Issues each tool's request. Defaults to `globalThis.fetch`. */
       fetchFn?: FetchFn;
       sslVerify?: SslVerify;
+      /** Deadline for one call. Defaults to `DEFAULT_REQUEST_TIMEOUT_MS`. */
+      timeoutMs?: number;
     } = {},
   ) {
     super(options.toolFilter || [], options.prefix);
@@ -80,6 +82,7 @@ export class OpenAPIToolset extends BaseToolset {
           credentialKey: options.credentialKey,
           fetchFn: options.fetchFn,
           sslVerify: options.sslVerify,
+          timeoutMs: options.timeoutMs,
         },
       );
 
