@@ -14,6 +14,7 @@ import {
 } from '@google/genai';
 
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
+import type {AgentRefConfig} from '../agents/common_configs.js';
 import {isLlmAgent, LlmAgent} from '../agents/llm_agent.js';
 import {RunConfig, StreamingMode} from '../agents/run_config.js';
 import {
@@ -73,18 +74,6 @@ export interface AgentToolConfig {
    * state under `temp:_adk_grounding_metadata`. Defaults to false.
    */
   propagateGroundingMetadata?: boolean;
-}
-
-/**
- * A reference to an agent named in a configuration file. Exactly one field is
- * set.
- */
-export interface AgentRefConfig {
-  /** Fully-qualified name of an agent instance defined in code. */
-  code?: string;
-
-  /** Path to the agent's own config file, relative to the referring file. */
-  configPath?: string;
 }
 
 /**
