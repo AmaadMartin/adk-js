@@ -400,7 +400,7 @@ async function loadRecordings(file: string): Promise<Recordings> {
     if (typeof parsed !== 'object' || parsed === null) {
       throw new Error('Recordings file must be a YAML mapping');
     }
-    return camelcaseKeys(parsed, {deep: true}) as unknown as Recordings;
+    return camelcaseKeys(parsed, {deep: true}) as Recordings;
   } catch (e: unknown) {
     logger.error(`Failed to load recordings from ${file}: ${errorMessage(e)}`);
     return {recordings: []};

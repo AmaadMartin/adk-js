@@ -102,7 +102,7 @@ async function readFixture(
   const raw = await fs.readFile(path.join(dir, file), 'utf-8');
   return camelcaseKeys(yaml.load(raw) as object, {
     deep: true,
-  }) as unknown as Recordings;
+  }) as Recordings;
 }
 
 /** Runs one non-streaming model turn end to end. */

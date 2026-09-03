@@ -155,7 +155,7 @@ describe('recordings round trip', () => {
     const reloaded = camelcaseKeys(
       yaml.load(await fs.readFile(file, 'utf-8')) as object,
       {deep: true},
-    ) as unknown as Recordings;
+    ) as Recordings;
 
     // `toolsDict` is the one field the writer drops, so compare against the
     // fixture without it rather than against the fixture itself.
