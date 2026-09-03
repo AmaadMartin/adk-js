@@ -219,10 +219,11 @@ describe('executeAfterEventInterceptors', () => {
     expect(afterEvent).toHaveBeenCalledWith(executorContext, event, adkEvent);
   });
 
-  it('fans one event out into several', async () => {
+  it('fans one event out into several, skipping an interceptor without the hook', async () => {
     const event = createStatusUpdate(TaskState.WORKING);
     const extra = createStatusUpdate(TaskState.WORKING);
     const interceptors: ExecuteInterceptor[] = [
+      {},
       {afterEvent: async (_ctx, e) => [e, extra]},
     ];
 
