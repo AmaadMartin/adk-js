@@ -247,8 +247,11 @@ export class GeminiLlmConnection implements BaseLlmConnection {
   /**
    * Receives the model responses until the connection closes.
    *
-   * Every response carries the live session id once the server reports it in
-   * its setup acknowledgement.
+   * `LiveResponseAggregator` maps each server message to the responses a
+   * caller consumes: it aggregates streamed text, flushes transcriptions,
+   * accumulates the grounding metadata of a turn, buffers tool calls and
+   * remaps live token usage. Every response carries the live session id once
+   * the server reports it in its setup acknowledgement.
    *
    * @returns A generator of LlmResponse.
    */

@@ -32,7 +32,7 @@ const GROUNDING_QUERY_FIELDS = [
  * `turnComplete`. `@google/genai` 2.9.0 does not declare the field yet, so the
  * aggregator reads it through this extension rather than dropping it.
  */
-interface LiveServerContentWithInteractionStatus extends LiveServerContent {
+export interface LiveServerContentWithInteractionStatus extends LiveServerContent {
   interactionStatus?: InteractionStatus;
 }
 

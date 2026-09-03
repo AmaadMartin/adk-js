@@ -838,6 +838,9 @@ describe('GeminiLlmConnection', () => {
         }),
       );
       messageQueue.push(
+        liveServerMessage({serverContent: {turnComplete: true}}),
+      );
+      messageQueue.push(
         liveServerMessage({usageMetadata: {totalTokenCount: 30}}),
       );
       messageQueue.close();
