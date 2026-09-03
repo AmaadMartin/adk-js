@@ -178,6 +178,7 @@ export type {
 export {isAuthConfig} from './auth/auth_tool.js';
 export type {AuthConfig} from './auth/auth_tool.js';
 export type {BaseAuthProvider} from './auth/base_auth_provider.js';
+export {CredentialManager} from './auth/credential_manager.js';
 export type {BaseCredentialService} from './auth/credential_service/base_credential_service.js';
 export {InMemoryCredentialService} from './auth/credential_service/in_memory_credential_service.js';
 export {SessionStateCredentialService} from './auth/credential_service/session_state_credential_service.js';
@@ -644,6 +645,11 @@ export type {
   AgentToolArgsConfig,
   AgentToolConfig,
 } from './tools/agent_tool.js';
+export {
+  AuthenticatedFunctionTool,
+  PENDING_USER_AUTHORIZATION,
+} from './tools/authenticated_function_tool.js';
+export type {AuthenticatedFunctionToolOptions} from './tools/authenticated_function_tool.js';
 export {
   BaseRetrievalTool,
   isBaseRetrievalTool,

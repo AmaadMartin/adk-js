@@ -50,6 +50,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   logging one without leaking the secret.
 - [Authenticated tools and the credential key](auth/tool_auth/index.md) - How a
   tool asks for a user credential, and which calls resume once it arrives.
+- [AuthenticatedFunctionTool](auth/authenticated_function_tool/index.md) - A function tool that resolves a credential before it runs, and pauses for user consent when it cannot.
 - [BaseAuthCredentialExchanger](auth/credential_exchanger/index.md) - The
   OpenAPI tool auth layer's exchange contract, and the error that reports a
   missing credential.
