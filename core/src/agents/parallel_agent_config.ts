@@ -10,9 +10,6 @@ import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {warnDeprecatedOnce} from '../utils/deprecated.js';
 
-/** Identifies the deprecation, so it warns at most once per process. */
-const DEPRECATION_KEY = 'ParallelAgentConfig';
-
 /** Wording taken from the `@deprecated` decorator on the Python class. */
 const DEPRECATION_MESSAGE =
   'ParallelAgentConfig is deprecated and will be removed in future versions. ' +
@@ -64,14 +61,11 @@ const agentRefSchema = z
  * camelCase; both validate to the same camelCase config. Unknown keys are
  * rejected, which is what adk-python's `extra="forbid"` does.
  *
- * Use this directly for `safeParse` semantics;
- * {@link parseParallelAgentYamlConfig} is the throwing entry point.
- *
  * @experimental
  * @deprecated Config is now loaded via reflection, so the separate config
  *   schema is no longer needed.
  */
-export const parallelAgentYamlConfigSchema = z.preprocess(
+export const ParallelAgentYamlConfigSchema = z.preprocess(
   camelCaseKeys,
   z.strictObject({
     agentClass: z.string().default('ParallelAgent'),
@@ -86,13 +80,28 @@ export const parallelAgentYamlConfigSchema = z.preprocess(
 /**
  * A validated `ParallelAgent` config document.
  *
+ * Declared rather than inferred, so the package surface does not depend on the
+ * schema. `parseParallelAgentYamlConfig` returns what the schema produced as
+ * this type, so a field the schema drops or retypes fails to compile.
+ *
  * @experimental
  * @deprecated Config is now loaded via reflection, so the separate config
  *   schema is no longer needed.
  */
-export type ParallelAgentYamlConfig = z.infer<
-  typeof parallelAgentYamlConfigSchema
->;
+export interface ParallelAgentYamlConfig {
+  /** Identifies the class. `'ParallelAgent'` when the document omits it. */
+  agentClass: string;
+  /** The name of the agent. */
+  name: string;
+  /** The description of the agent. `''` when the document omits it. */
+  description: string;
+  /** The sub-agents, each named by config file or by code reference. */
+  subAgents?: Array<{configPath?: string; code?: string}>;
+  /** Callbacks to run before the agent, each by fully qualified name. */
+  beforeAgentCallbacks?: Array<{name: string}>;
+  /** Callbacks to run after the agent, each by fully qualified name. */
+  afterAgentCallbacks?: Array<{name: string}>;
+}
 
 /**
  * Validates an already-parsed `ParallelAgent` config document.
@@ -112,13 +121,13 @@ export type ParallelAgentYamlConfig = z.infer<
 export function parseParallelAgentYamlConfig(
   document: unknown,
 ): ParallelAgentYamlConfig {
-  warnDeprecatedOnce(DEPRECATION_KEY, DEPRECATION_MESSAGE);
+  warnDeprecatedOnce('ParallelAgentConfig', DEPRECATION_MESSAGE);
 
   if (!isFeatureEnabled(FeatureName.AGENT_CONFIG)) {
     throw new Error(`Feature ${FeatureName.AGENT_CONFIG} is not enabled.`);
   }
 
-  const result = parallelAgentYamlConfigSchema.safeParse(document);
+  const result = ParallelAgentYamlConfigSchema.safeParse(document);
   if (!result.success) {
     throw new InputValidationError(
       `Invalid ParallelAgent config: ${z.prettifyError(result.error)}`,

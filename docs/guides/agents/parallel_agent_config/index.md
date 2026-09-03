@@ -89,21 +89,6 @@ does not satisfy the schema. The message starts with
 An empty file loads as `null`, and `null` is rejected like any other
 non-object. So are a string, an array and a number.
 
-For a caller that prefers a result over an exception, the schema is exported
-too:
-
-```ts
-import {parallelAgentYamlConfigSchema} from '@google/adk';
-
-const result = parallelAgentYamlConfigSchema.safeParse(document);
-if (!result.success) {
-  // result.error lists every failing field.
-}
-```
-
-The schema alone skips the deprecation warning and the feature gate described
-below.
-
 ## Deprecation and the feature gate
 
 adk-python marks `ParallelAgentConfig` deprecated: it loads config by

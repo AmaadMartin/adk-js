@@ -7,11 +7,13 @@
 import {
   FeatureName,
   InputValidationError,
-  parallelAgentYamlConfigSchema,
   parseParallelAgentYamlConfig,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+// The schema stays out of the package surface, so the test reaches for it
+// here: it skips the guards that the parse entry point applies.
+import {ParallelAgentYamlConfigSchema} from '../../src/agents/parallel_agent_config.js';
 import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -209,15 +211,15 @@ describe('parseParallelAgentYamlConfig', () => {
   });
 });
 
-describe('parallelAgentYamlConfigSchema', () => {
+describe('ParallelAgentYamlConfigSchema', () => {
   it('reports a bad document through safeParse instead of throwing', () => {
-    const result = parallelAgentYamlConfigSchema.safeParse({name: 42});
+    const result = ParallelAgentYamlConfigSchema.safeParse({name: 42});
 
     expect(result.success).toBe(false);
   });
 
   it('parses a good document without the deprecation or feature gate', () => {
-    const result = parallelAgentYamlConfigSchema.safeParse({name: 'p'});
+    const result = ParallelAgentYamlConfigSchema.safeParse({name: 'p'});
 
     expect(result).toEqual({
       success: true,
