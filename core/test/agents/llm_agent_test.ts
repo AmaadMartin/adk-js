@@ -1507,11 +1507,11 @@ describe('LlmAgent toolset request processing', () => {
     });
     const invocationContext = new InvocationContext({
       invocationId: 'inv_toolset',
-      session: {
+      session: createSession({
         id: 'sess_toolset',
-        state: {hasDelta: () => false, get: () => undefined, set: () => {}},
-        events: [],
-      } as unknown as Session,
+        appName: 'toolset_app',
+        userId: 'test_user',
+      }),
       agent,
       pluginManager: new PluginManager(),
     });
