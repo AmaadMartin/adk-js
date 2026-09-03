@@ -669,6 +669,13 @@ export {
   PENDING_USER_AUTHORIZATION,
 } from './tools/authenticated_function_tool.js';
 export type {AuthenticatedFunctionToolOptions} from './tools/authenticated_function_tool.js';
+// `PENDING_USER_AUTHORIZATION` is exported above, from
+// `authenticated_function_tool.js`. Both modules declare the same string.
+export {BaseAuthenticatedTool} from './tools/base_authenticated_tool.js';
+export type {
+  AuthenticatedRunAsyncToolRequest,
+  BaseAuthenticatedToolParams,
+} from './tools/base_authenticated_tool.js';
 export {
   BaseRetrievalTool,
   isBaseRetrievalTool,

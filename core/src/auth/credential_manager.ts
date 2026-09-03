@@ -160,7 +160,30 @@ async function refreshCredential(
  */
 @experimental
 export class CredentialManager {
+  /**
+   * The exchanger this manager runs a credential through, built once so a
+   * caller can replace an entry with
+   * {@link CredentialManager.registerCredentialExchanger}.
+   */
+  private readonly exchanger = new AutoAuthCredentialExchanger(
+    OAUTH2_EXCHANGERS,
+  );
+
   constructor(private readonly authConfig: AuthConfig) {}
+
+  /**
+   * Registers a credential exchanger for a credential type, replacing the
+   * default one when there is one.
+   *
+   * @param credentialType The credential type to exchange.
+   * @param exchanger The exchanger to run for that type.
+   */
+  registerCredentialExchanger(
+    credentialType: AuthCredentialTypes,
+    exchanger: BaseCredentialExchanger,
+  ): void {
+    this.exchanger.exchangers.set(credentialType, exchanger);
+  }
 
   /**
    * Asks the client to supply a credential. The invocation pauses until the
@@ -215,9 +238,7 @@ export class CredentialManager {
       credential = cloneDeep(rawAuthCredential);
     }
 
-    const exchanged = await new AutoAuthCredentialExchanger(
-      OAUTH2_EXCHANGERS,
-    ).exchange({
+    const exchanged = await this.exchanger.exchange({
       authCredential: credential,
       authScheme,
     });
