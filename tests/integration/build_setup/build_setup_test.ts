@@ -46,8 +46,9 @@ describe('Build setup', () => {
         expect(buildResult.stderr).toBe('');
         expect(buildResult.stdout).toContain('\nBuild complete');
       }
-      // Replaces the project's 120s hookTimeout rather than raising it: the
-      // fixture build is slow on Windows CI.
+      // This hook neither installs nor tears down, so the project's hook
+      // budget is not its single source. The value replaces that 120s budget
+      // rather than raising it: the fixture build is slow on Windows CI.
     }, 300000);
 
     it(
@@ -134,7 +135,8 @@ describe('Build setup', () => {
             );
           });
       }
-      // No hook budget: the 120s project hookTimeout already applies.
+      // No hook budget: this is a teardown hook, so the project's 120s
+      // hookTimeout is its single source.
     });
   });
 });

@@ -11,8 +11,9 @@ import {defineConfig} from 'vitest/config';
  * Hook budget (ms) for every `beforeAll` in the `integration` project. The
  * hooks spawn an ADK server child process or compile a fixture, which exceeds
  * Vitest's 10s default on a slow or loaded machine. `tests/integration/
- * global_setup.ts` installs the fixture dependencies before the pool starts,
- * so no hook pays for an `npm install`.
+ * global_setup.ts` installs the fixture dependencies before the pool starts
+ * and removes them after it stops, so no hook pays for an `npm install` or for
+ * the recursive `node_modules` teardown that follows one.
  *
  * This is a hang guard, not an expected runtime: the slowest hook is a fixture
  * `npm run build`, measured at 3.6s on ubuntu. Nothing measures the server
@@ -20,8 +21,12 @@ import {defineConfig} from 'vitest/config';
  * somebody does. Keep it above the 60s server start watchdog in
  * `tests/integration/test_api_server.ts`, so a server that boots but never
  * announces itself fails with that watchdog's message rather than a bare
- * `Hook timed out`. A per-file `it()`/hook argument replaces this value rather
- * than raising it, so a file that states one must record the measurement
+ * `Hook timed out`.
+ *
+ * This value is the single source for an install or teardown hook. Such a hook
+ * must not pass its own timeout argument, which shadows this floor rather than
+ * raising it. Any other per-file hook argument also replaces this value rather
+ * than raising it, so a hook that states one must record the measurement
  * behind it. Trade-off: a stuck hook takes this long to surface.
  */
 const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
@@ -29,9 +34,10 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
 /**
  * Test budget (ms) for the `integration` project: a test body spawns
  * `npm run start` and reads the child's stdout to EOF with no internal
- * timeout, so this budget is its only bound. A per-file `it()`/hook argument
+ * timeout, so this budget is its only bound. A per-test `it()` argument
  * replaces this value rather than raising it, so a file that states one must
- * record the measurement behind it.
+ * record the measurement behind it. A hook argument does not reach this value;
+ * the hook budget above governs hooks.
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
