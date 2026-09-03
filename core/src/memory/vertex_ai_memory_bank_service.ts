@@ -27,11 +27,7 @@ import {
   SearchMemoryRequest,
   SearchMemoryResponse,
 } from './base_memory_service.js';
-import {MemoryEntry} from './memory_entry.js';
-
-interface MemoryEntryWithMetadata extends MemoryEntry {
-  customMetadata?: Record<string, unknown>;
-}
+import {createMemoryEntry, MemoryEntry} from './memory_entry.js';
 
 const GENERATE_MEMORIES_KNOWN_FIELDS = [
   'disableConsolidation',
@@ -101,6 +97,21 @@ function toVertexMetadataValue(
     return undefined;
   }
   return {stringValue: String(value)};
+}
+
+function fromVertexMetadataValue(value: MemoryMetadataValue): unknown {
+  const {boolValue, doubleValue, stringValue, timestampValue} = value;
+  return boolValue ?? doubleValue ?? stringValue ?? timestampValue ?? value;
+}
+
+function fromVertexMetadata(
+  vertexMetadata?: Record<string, MemoryMetadataValue>,
+): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(vertexMetadata || {})) {
+    metadata[key] = fromVertexMetadataValue(value);
+  }
+  return metadata;
 }
 
 export interface VertexAiMemoryBankServiceOptions {
@@ -215,11 +226,14 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       logger.debug(`Retrieved memory: ${JSON.stringify(retrievedMemory)}`);
       if (retrievedMemory.memory && retrievedMemory.memory.fact) {
         const content = createUserContent(retrievedMemory.memory.fact);
-        memoryEvents.push({
-          author: 'user',
-          content: content,
-          timestamp: retrievedMemory.memory.updateTime,
-        });
+        memoryEvents.push(
+          createMemoryEntry({
+            author: 'user',
+            content: content,
+            timestamp: retrievedMemory.memory.updateTime,
+            customMetadata: fromVertexMetadata(retrievedMemory.memory.metadata),
+          }),
+        );
       }
     }
 
@@ -274,8 +288,6 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       const memory = validatedMemories[index];
       const memoryFact = memoryEntryToFact(memory, index);
 
-      // We don't have customMetadata on MemoryEntry in JS yet, so we pass undefined or handle it if we extend it.
-      // For now, we assume it's not there as per the current interface.
       const memoryMetadata = mergeCustomMetadataForMemory({
         customMetadata: request.customMetadata,
         memory: memory,
@@ -285,6 +297,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       const config = buildCreateMemoryConfig({
         customMetadata: memoryMetadata,
         memoryRevisionLabels,
+        memoryId: memory.id,
       });
 
       const params = {
@@ -342,8 +355,14 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 function buildCreateMemoryConfig(params: {
   customMetadata?: Record<string, unknown>;
   memoryRevisionLabels?: Record<string, string>;
+  memoryId?: string;
 }): AgentEngineMemoryConfig {
   const config: Record<string, unknown> = {waitForCompletion: false};
+
+  // Seeded before the loop so a memoryId in customMetadata overwrites it.
+  if (params.memoryId !== undefined) {
+    config['memoryId'] = params.memoryId;
+  }
 
   if (params.customMetadata) {
     logger.debug(
@@ -561,10 +580,8 @@ function mergeCustomMetadataForMemory(params: {
     Object.assign(mergedMetadata, params.customMetadata);
   }
 
-  // Check if memory has customMetadata (it might if passed by user, even if not in interface)
-  const memoryWithMetadata = params.memory as MemoryEntryWithMetadata;
-  if (memoryWithMetadata.customMetadata) {
-    Object.assign(mergedMetadata, memoryWithMetadata.customMetadata);
+  if (params.memory.customMetadata) {
+    Object.assign(mergedMetadata, params.memory.customMetadata);
   }
 
   if (Object.keys(mergedMetadata).length === 0) {
