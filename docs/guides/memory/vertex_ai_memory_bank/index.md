@@ -136,8 +136,7 @@ comes back as `'onboarding'`.
 ## Failure modes
 
 `searchMemory` never throws because of one bad entry. It warns and skips an
-entry with no memory object or an empty fact, and if reading the results throws
-part-way it logs the error and returns the entries it already read.
+entry with no memory object or an empty fact.
 
 A malformed `customMetadata` value is warned about and dropped rather than
 throwing. The exception is `enable_consolidation`, which must be a boolean and
