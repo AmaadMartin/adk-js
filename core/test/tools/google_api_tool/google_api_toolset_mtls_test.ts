@@ -286,6 +286,20 @@ describe('GoogleApiToolset mTLS', () => {
     expect(requestMock).toHaveBeenCalledTimes(2);
   });
 
+  // A runner closes its toolsets after every invocation, so a toolset that
+  // forgot its tools here would refetch the Discovery document once per turn.
+  it('keeps the memoised tools across a close with no certificate', async () => {
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
+    const toolset = createToolset();
+    await toolset.getTools();
+
+    await toolset.close();
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(CALENDAR_TOOL_NAMES);
+    expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+
   it('reads no certificate and sends no dispatcher by default', async () => {
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
     const toolset = createToolset();

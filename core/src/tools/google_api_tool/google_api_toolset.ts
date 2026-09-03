@@ -224,9 +224,11 @@ export class GoogleApiToolset extends BaseToolset {
   /**
    * Closes the toolset and releases the client certificate it presents.
    *
-   * The memoised toolset goes with it, so a `getTools` call after `close`
-   * fetches the document again and builds a fresh dispatcher, rather than
-   * handing out tools bound to a destroyed one.
+   * A toolset that presented a certificate also forgets its memoised tools,
+   * because those tools hold the dispatcher that is about to be destroyed. A
+   * toolset that presented none keeps them: a runner closes its toolsets after
+   * every invocation, so forgetting them would refetch the Discovery document
+   * once per turn.
    */
   @experimental
   override async close(): Promise<void> {
@@ -235,9 +237,12 @@ export class GoogleApiToolset extends BaseToolset {
     const openApiToolset = await this.openApiToolsetPromise?.catch(
       () => undefined,
     );
-    this.openApiToolsetPromise = undefined;
+    const dispatcher = this.takeMtlsDispatcher();
+    if (dispatcher) {
+      this.openApiToolsetPromise = undefined;
+    }
     await openApiToolset?.close();
-    await this.releaseMtls();
+    await dispatcher?.close();
   }
 
   private loadOpenApiToolset(): Promise<OpenAPIToolset> {
@@ -247,7 +252,7 @@ export class GoogleApiToolset extends BaseToolset {
     this.openApiToolsetPromise ??= this.buildOpenApiToolset().catch(
       async (error: unknown) => {
         this.openApiToolsetPromise = undefined;
-        await this.releaseMtls();
+        await this.takeMtlsDispatcher()?.close();
         throw error;
       },
     );
@@ -275,10 +280,14 @@ export class GoogleApiToolset extends BaseToolset {
     });
   }
 
-  /** Destroys the dispatcher that owns the client certificate and its pool. */
-  private async releaseMtls(): Promise<void> {
+  /**
+   * Detaches the dispatcher that owns the client certificate, so the caller
+   * can close it. Detaching before the close leaves no window in which a
+   * second caller closes the same dispatcher.
+   */
+  private takeMtlsDispatcher(): ClosableDispatcher | undefined {
     const dispatcher = this.mtlsDispatcher;
     this.mtlsDispatcher = undefined;
-    await dispatcher?.close();
+    return dispatcher;
   }
 }
