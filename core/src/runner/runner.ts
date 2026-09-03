@@ -46,6 +46,7 @@ import {isBaseToolset} from '../tools/base_toolset.js';
 import {printEvent} from '../utils/debug_output.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
+import {stringifyWithRedactedInlineData} from '../utils/redact_inline_data.js';
 import type {RunnableNode} from '../workflow/graph.js';
 import type {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {
@@ -1060,6 +1061,12 @@ export function determineAgentForResumption(
       continue;
     }
     visitedAuthors.add(event.author);
+
+    // The dump sits behind the memoization guard: serializing every event of a
+    // long session is the cost this scan was optimized to avoid. The redacting
+    // serializer keeps an inline attachment payload out of the log, because the
+    // log is a different trust boundary from whoever uploaded the file.
+    logger.debug('event:', stringifyWithRedactedInlineData(event));
 
     const agent = rootAgent.findSubAgent(event.author);
     if (!agent) {
