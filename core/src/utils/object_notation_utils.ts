@@ -5,6 +5,16 @@
  */
 
 /**
+ * Narrows a value to an indexable record: a non-null, non-array object.
+ *
+ * @param value The value to check.
+ * @returns Whether the value can be read and extended by string key.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
  * Converts an object with snake_case keys to camelCase keys.
  *
  * @param obj The object to convert.
