@@ -8,7 +8,6 @@ import {
   Content,
   ContentUnion,
   CreateCachedContentConfig,
-  FunctionDeclaration,
   GoogleGenAI,
   Tool,
   ToolUnion,
@@ -41,6 +40,16 @@ const GEMINI_3_MIN_CACHE_TOKENS = 4096;
 const CHARACTERS_PER_TOKEN = 4;
 
 /**
+ * The part of the GenAI client that the cache manager uses.
+ *
+ * A `GoogleGenAI` satisfies it, and so does a test double, which keeps the
+ * manager free of a cast to the full client type.
+ */
+export interface CacheClient {
+  readonly caches: Pick<GoogleGenAI['caches'], 'create' | 'delete'>;
+}
+
+/**
  * The backend namespace that owns explicit cache resources.
  *
  * A cache created against one backend, project or location cannot be read from
@@ -67,7 +76,7 @@ export interface CacheScope {
  * @returns The floor in tokens, or `undefined` when the model has none.
  */
 export function minimumCacheTokens(model?: string): number | undefined {
-  const modelName = (model ?? '').split('/').pop() ?? '';
+  const modelName = (model ?? '').replace(/^.*\//, '');
   if (modelName.startsWith('gemini-2.5-')) {
     return GEMINI_2_5_MIN_CACHE_TOKENS;
   }
@@ -328,7 +337,7 @@ export class GeminiContextCacheManager {
    * @param scope The backend namespace those resources live in.
    */
   constructor(
-    private readonly genaiClient: GoogleGenAI,
+    private readonly genaiClient: CacheClient,
     private readonly scope: CacheScope,
   ) {}
 
@@ -588,30 +597,24 @@ function parseExpireTime(expireTime?: string): number | undefined {
 }
 
 /**
- * Orders the tools and their function declarations so that a reordered tool
- * list produces the same fingerprint.
+ * Orders the tools so that a reordered tool list produces the same
+ * fingerprint.
  */
-function canonicalizeTools(tools: ToolUnion[]): Tool[] {
-  return tools
-    .filter(isTool)
-    .map(sortFunctionDeclarations)
-    .sort((left, right) => compare(canonicalJson(left), canonicalJson(right)));
+function canonicalizeTools(tools: ToolUnion[]): string[] {
+  return tools.filter(isTool).map(canonicalizeTool).sort();
 }
 
-function sortFunctionDeclarations(tool: Tool): Tool {
+/**
+ * Serializes a tool so that reordering its function declarations does not
+ * change the text. Only {@link generateCacheFingerprint} reads the result, so
+ * the text carries everything the fingerprint needs.
+ */
+function canonicalizeTool(tool: Tool): string {
   if (!tool.functionDeclarations) {
-    return tool;
+    return canonicalJson(tool);
   }
-  const declarations = [...tool.functionDeclarations].sort(
-    (left: FunctionDeclaration, right: FunctionDeclaration) =>
-      compare(left.name ?? '', right.name ?? ''),
-  );
-  return {...tool, functionDeclarations: declarations};
-}
-
-function compare(left: string, right: string): number {
-  if (left === right) {
-    return 0;
-  }
-  return left < right ? -1 : 1;
+  return canonicalJson({
+    ...tool,
+    functionDeclarations: tool.functionDeclarations.map(canonicalJson).sort(),
+  });
 }
