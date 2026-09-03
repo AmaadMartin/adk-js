@@ -26,17 +26,18 @@ come from `BaseGoogleCredentialsConfig` unchanged. This mirrors
 `bigtable_credentials.py` in adk-python.
 
 The configuration is inert data. `GoogleCredentialsManager` is what reads it,
-resolves a live credential, and writes the cache entry. Note that adk-js does
-not yet ship a Bigtable toolset, so today you pass this configuration to a tool
-you write yourself.
+resolves a live credential, and writes the cache entry. adk-js does not yet ship
+a Bigtable toolset, so today you pair the two yourself inside a tool you write.
 
 ## Get started
 
 The smallest configuration is an OAuth2 client id and secret. The scopes and the
-cache key are filled in for you.
+cache key are filled in for you. Hand the configuration to a
+`GoogleCredentialsManager`, and it returns a credential your tool can call
+Bigtable with.
 
 ```ts
-import {BigtableCredentialsConfig} from '@google/adk';
+import {BigtableCredentialsConfig, GoogleCredentialsManager} from '@google/adk';
 
 const config = new BigtableCredentialsConfig({
   clientId: process.env.OAUTH_CLIENT_ID,
@@ -49,6 +50,19 @@ config.scopes;
 //   'https://www.googleapis.com/auth/bigtable.data',
 // ]
 config.tokenCacheKey; // 'bigtable_token_cache'
+
+const manager = new GoogleCredentialsManager(config);
+```
+
+Inside a tool, `getValidCredentials` takes the tool's `Context`. It returns the
+credential, or `undefined` when it has asked the end user for consent and your
+tool should return so they can answer.
+
+```ts
+const credentials = await manager.getValidCredentials(context);
+if (!credentials) {
+  return {status: 'awaiting user consent'};
+}
 ```
 
 ## The three credential modes
@@ -107,8 +121,9 @@ configuration's `scopes` does not affect the next one.
 ## The token cache key
 
 Every instance caches under `BIGTABLE_TOKEN_CACHE_KEY`, the literal string
-`bigtable_token_cache`. A `tokenCacheKey` you pass is overridden, which matches
-adk-python. The entry written there is the JSON shape adk-python's
+`bigtable_token_cache`. The key is not yours to change:
+`BigtableCredentialsConfigOptions` omits `tokenCacheKey`, so passing one is a
+compile error. The entry written there is the JSON shape adk-python's
 `Credentials.to_json()` writes, so a session started by either SDK is readable
 by the other.
 

@@ -20,6 +20,18 @@ export const BIGTABLE_DEFAULT_SCOPE = [
 ];
 
 /**
+ * Options accepted by {@link BigtableCredentialsConfig}.
+ *
+ * `tokenCacheKey` is fixed at {@link BIGTABLE_TOKEN_CACHE_KEY} and is not a
+ * caller's to set, so it is omitted here rather than accepted and discarded.
+ * adk-python keeps it private for the same reason.
+ */
+export type BigtableCredentialsConfigOptions = Omit<
+  BaseGoogleCredentialsConfigOptions,
+  'tokenCacheKey'
+>;
+
+/**
  * How a Bigtable tool obtains credentials (Experimental).
  *
  * Adds the Bigtable scopes and token-cache key to
@@ -32,7 +44,7 @@ export const BIGTABLE_DEFAULT_SCOPE = [
 export class BigtableCredentialsConfig extends BaseGoogleCredentialsConfig {
   declare readonly scopes: string[];
 
-  constructor(options: BaseGoogleCredentialsConfigOptions) {
+  constructor(options: BigtableCredentialsConfigOptions) {
     // The base validator rejects `scopes` alongside `credentials` or
     // `externalAccessTokenKey`, so the default can only be applied once it has
     // run. adk-python applies it in the same order.

@@ -290,6 +290,7 @@ export {
   BIGTABLE_TOKEN_CACHE_KEY,
   BigtableCredentialsConfig,
 } from './tools/bigtable/bigtable_credentials.js';
+export type {BigtableCredentialsConfigOptions} from './tools/bigtable/bigtable_credentials.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
@@ -312,7 +313,10 @@ export type {
   ToolOptions,
 } from './tools/function_tool.js';
 export {getUserChoiceTool} from './tools/get_user_choice_tool.js';
-export {BaseGoogleCredentialsConfig} from './tools/google_credentials.js';
+export {
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
+} from './tools/google_credentials.js';
 export type {BaseGoogleCredentialsConfigOptions} from './tools/google_credentials.js';
 export {
   GOOGLE_MAPS_GROUNDING,

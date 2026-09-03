@@ -8,6 +8,7 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  GoogleCredentialsManager,
   InvocationContext,
   PluginManager,
   createSession,
@@ -20,10 +21,7 @@ import {
   BIGTABLE_TOKEN_CACHE_KEY,
   BigtableCredentialsConfig,
 } from '../../../src/tools/bigtable/bigtable_credentials.js';
-import {
-  GoogleCredentialsManager,
-  googleCredentialKey,
-} from '../../../src/tools/google_credentials.js';
+import {googleCredentialKey} from '../../../src/tools/google_credentials.js';
 
 const CLIENT_ID = 'test-client-id.apps.googleusercontent.com';
 const CLIENT_SECRET = 'test-client-secret';
@@ -154,16 +152,6 @@ describe('BigtableCredentialsConfig', () => {
     const config = new BigtableCredentialsConfig({
       clientId: CLIENT_ID,
       clientSecret: CLIENT_SECRET,
-    });
-
-    expect(config.tokenCacheKey).toBe(BIGTABLE_TOKEN_CACHE_KEY);
-  });
-
-  it('overrides a caller-supplied cache key', () => {
-    const config = new BigtableCredentialsConfig({
-      clientId: CLIENT_ID,
-      clientSecret: CLIENT_SECRET,
-      tokenCacheKey: 'caller_cache_key',
     });
 
     expect(config.tokenCacheKey).toBe(BIGTABLE_TOKEN_CACHE_KEY);
