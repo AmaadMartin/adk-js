@@ -226,6 +226,7 @@ export {
   isCustomAuthScheme,
   isExtendedOAuth2,
   isOAuth2Scheme,
+  isOpenIdConnectWithConfig,
 } from './auth/auth_schemes.js';
 export type {
   AuthScheme,

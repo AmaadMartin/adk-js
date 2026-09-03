@@ -2143,3 +2143,18 @@ describe('InvocationContext credential service', () => {
     expect(child.credentialService).toBe(credentialService);
   });
 });
+
+describe('InvocationContext credential service', () => {
+  it('exposes the credential service it was constructed with', () => {
+    const credentialService = new InMemoryCredentialService();
+
+    const context = new InvocationContext({
+      invocationId: 'inv-credential',
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    expect(context.credentialService).toBe(credentialService);
+  });
+});

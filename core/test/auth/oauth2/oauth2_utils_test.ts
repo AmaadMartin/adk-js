@@ -495,3 +495,124 @@ describe('oauth2_utils', () => {
     });
   });
 });
+
+// The suite below arrived with the custom auth scheme pull request. It stubs
+// the discovery manager with a spy rather than a subclass, so both styles of
+// coverage are kept.
+
+describe('populateAuthSchemeFromDiscovery', () => {
+  const ISSUER_URL = 'https://issuer.example.com';
+  const METADATA = {
+    issuer: ISSUER_URL,
+    authorization_endpoint: 'https://issuer.example.com/authorize',
+    token_endpoint: 'https://issuer.example.com/token',
+  };
+
+  function discoveryManager(
+    metadata: typeof METADATA | undefined,
+  ): OAuth2DiscoveryManager {
+    const manager = new OAuth2DiscoveryManager();
+    vi.spyOn(manager, 'discoverAuthServerMetadata').mockResolvedValue(metadata);
+    return manager;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('fills every empty endpoint of every declared flow', async () => {
+    const scheme: ExtendedOAuth2 = {
+      type: 'oauth2',
+      issuerUrl: ISSUER_URL,
+      flows: {
+        implicit: {authorizationUrl: '', scopes: {}},
+        password: {tokenUrl: '', scopes: {}},
+        clientCredentials: {tokenUrl: '', scopes: {}},
+        authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+      },
+    };
+
+    expect(
+      await populateAuthSchemeFromDiscovery(scheme, discoveryManager(METADATA)),
+    ).toBe(true);
+    expect(scheme.flows).toEqual({
+      implicit: {
+        authorizationUrl: METADATA.authorization_endpoint,
+        scopes: {},
+      },
+      password: {tokenUrl: METADATA.token_endpoint, scopes: {}},
+      clientCredentials: {tokenUrl: METADATA.token_endpoint, scopes: {}},
+      authorizationCode: {
+        authorizationUrl: METADATA.authorization_endpoint,
+        tokenUrl: METADATA.token_endpoint,
+        scopes: {},
+      },
+    });
+  });
+
+  it('returns false without fetching when the scheme names no issuer', async () => {
+    const manager = discoveryManager(METADATA);
+    const scheme: AuthScheme = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+      },
+    };
+
+    expect(await populateAuthSchemeFromDiscovery(scheme, manager)).toBe(false);
+    expect(manager.discoverAuthServerMetadata).not.toHaveBeenCalled();
+  });
+
+  it('returns false when the issuer publishes no metadata', async () => {
+    const scheme: ExtendedOAuth2 = {
+      type: 'oauth2',
+      issuerUrl: ISSUER_URL,
+      flows: {password: {tokenUrl: '', scopes: {}}},
+    };
+
+    expect(
+      await populateAuthSchemeFromDiscovery(
+        scheme,
+        discoveryManager(undefined),
+      ),
+    ).toBe(false);
+    expect(scheme.flows.password?.tokenUrl).toBe('');
+  });
+
+  it('leaves every endpoint that is already configured untouched', async () => {
+    const configured = {
+      implicit: {authorizationUrl: 'https://set.example.com/a', scopes: {}},
+      password: {tokenUrl: 'https://set.example.com/p', scopes: {}},
+      clientCredentials: {tokenUrl: 'https://set.example.com/c', scopes: {}},
+      authorizationCode: {
+        authorizationUrl: 'https://set.example.com/ac',
+        tokenUrl: 'https://set.example.com/at',
+        scopes: {},
+      },
+    };
+    const scheme: ExtendedOAuth2 = {
+      type: 'oauth2',
+      issuerUrl: ISSUER_URL,
+      flows: structuredClone(configured),
+    };
+
+    expect(
+      await populateAuthSchemeFromDiscovery(scheme, discoveryManager(METADATA)),
+    ).toBe(true);
+    expect(scheme.flows).toEqual(configured);
+  });
+
+  it('leaves a flow the scheme does not declare absent', async () => {
+    const scheme: ExtendedOAuth2 = {
+      type: 'oauth2',
+      issuerUrl: ISSUER_URL,
+      flows: {implicit: {authorizationUrl: '', scopes: {}}},
+    };
+
+    await populateAuthSchemeFromDiscovery(scheme, discoveryManager(METADATA));
+
+    expect(scheme.flows.authorizationCode).toBeUndefined();
+    expect(scheme.flows.password).toBeUndefined();
+    expect(scheme.flows.clientCredentials).toBeUndefined();
+  });
+});

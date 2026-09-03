@@ -132,6 +132,20 @@ export function isExtendedOAuth2(
 }
 
 /**
+ * Reports whether the scheme is an OpenID Connect scheme that carries the
+ * flattened discovery configuration.
+ */
+export function isOpenIdConnectWithConfig(
+  scheme: AuthScheme,
+): scheme is OpenIdConnectWithConfig {
+  return (
+    scheme.type === AuthSchemeType.OPEN_ID_CONNECT &&
+    'authorizationEndpoint' in scheme &&
+    'tokenEndpoint' in scheme
+  );
+}
+
+/**
  * Represents the OAuth2 flow (or grant type).
  */
 export enum OAuthGrantType {
