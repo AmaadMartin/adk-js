@@ -774,6 +774,7 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
         stdout: result.stdout,
         stderr: result.stderr ?? '',
         outputFiles: [],
+        exitCode: result.exitCode,
       };
     } catch (err) {
       await closeSandboxQuietly(sandbox);

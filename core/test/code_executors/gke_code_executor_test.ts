@@ -883,6 +883,29 @@ describe('GkeCodeExecutor', () => {
   });
 
   describe('sandbox lifecycle', () => {
+    it('reports the status the sandbox command exited with', async () => {
+      const sandbox = makeSandbox({stdout: '', stderr: 'boom', exitCode: 3});
+      const sandboxClientFactory = vi.fn().mockResolvedValue(sandbox);
+
+      const result = await executeWith(
+        newExecutor({executorType: 'sandbox', sandboxClientFactory}),
+      );
+
+      expect(result.exitCode).toBe(3);
+      expect(result.stderr).toBe('boom');
+    });
+
+    it('reports no status when the sandbox does not give one', async () => {
+      const sandbox = makeSandbox({stdout: 'ok'});
+      const sandboxClientFactory = vi.fn().mockResolvedValue(sandbox);
+
+      const result = await executeWith(
+        newExecutor({executorType: 'sandbox', sandboxClientFactory}),
+      );
+
+      expect(result.exitCode).toBeUndefined();
+    });
+
     it('closes the sandbox after a successful run', async () => {
       const sandbox = makeSandbox({stdout: 'ok'});
       const sandboxClientFactory = vi.fn().mockResolvedValue(sandbox);

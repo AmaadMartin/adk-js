@@ -321,6 +321,30 @@ describe('AgentSandboxClient.run', () => {
     });
   });
 
+  it('reports the status the command exited with', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
+      routerResponse({
+        body: {stdout: '', stderr: 'boom', exit_code: 3},
+      }),
+    );
+    const {client} = setup({fetchFn});
+
+    expect(await client.run('cmd')).toEqual({
+      stdout: '',
+      stderr: 'boom',
+      exitCode: 3,
+    });
+  });
+
+  it('reports no status when the response omits the exit code', async () => {
+    const fetchFn = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(routerResponse({body: {stdout: 'ok'}}));
+    const {client} = setup({fetchFn});
+
+    expect((await client.run('cmd')).exitCode).toBeUndefined();
+  });
+
   it('defaults missing stdout and stderr to empty strings', async () => {
     const fetchFn = vi
       .fn<typeof fetch>()

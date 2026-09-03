@@ -16,6 +16,11 @@ export interface SandboxRunResult {
   stdout: string;
   /** The standard error of the command. May be empty or absent on success. */
   stderr?: string;
+  /**
+   * The status the command exited with, absent when the sandbox does not
+   * report one.
+   */
+  exitCode?: number;
 }
 
 /** Options used to open a connection to an Agent Sandbox. */

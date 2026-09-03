@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {randomUUID} from 'node:crypto';
 import {isIP} from 'node:net';
 
 import type {CustomObjectsApi} from '@kubernetes/client-node';
@@ -170,7 +171,14 @@ export class AgentSandboxClient implements SandboxClient {
     );
   }
 
-  /** Runs `command` in the sandbox and returns its stdout and stderr. */
+  /**
+   * Runs `command` in the sandbox and returns its output.
+   *
+   * The `execute` endpoint answers with the `ExecutionResult` shape the
+   * reference client models: `stdout`, `stderr` and `exit_code`. A response
+   * that omits the status reports none, rather than the reference's `-1`
+   * placeholder.
+   */
   async run(command: string): Promise<SandboxRunResult> {
     const connection = await this.ensureConnected();
     const response = await this.sendRouterRequest(
@@ -182,8 +190,13 @@ export class AgentSandboxClient implements SandboxClient {
     const result = (await response.json()) as {
       stdout?: string;
       stderr?: string;
+      exit_code?: number;
     };
-    return {stdout: result.stdout ?? '', stderr: result.stderr ?? ''};
+    return {
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
+      exitCode: result.exit_code,
+    };
   }
 
   /** Deletes the provisioned `Sandbox`. Idempotent; never throws. */
@@ -548,7 +561,7 @@ function buildRouterHeaders(
     [HEADER_SANDBOX_NAMESPACE]: connection.namespace,
     [HEADER_SANDBOX_PORT]: String(serverPort),
     [HEADER_SANDBOX_TIMEOUT]: (remainingMs / 1000).toString(),
-    [HEADER_REQUEST_ID]: crypto.randomUUID(),
+    [HEADER_REQUEST_ID]: randomUUID(),
   };
   if (connection.podIp) {
     headers[HEADER_SANDBOX_POD_IP] = connection.podIp;
