@@ -17,10 +17,6 @@ import {
   TranscriptionManager,
   createEvent,
   createSession,
-  getLogger,
-  getTranscriptionStats,
-  handleInputTranscription,
-  handleOutputTranscription,
 } from '@google/adk';
 import {Transcription} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -180,11 +176,13 @@ describe('TranscriptionManager', () => {
 });
 
 describe('additional coverage', () => {
+  const manager = new TranscriptionManager();
+
   it('throws when the output path has no agent', () => {
     const invocationContext = makeContext({agentName: null});
 
     expect(() =>
-      handleOutputTranscription(invocationContext, {text: 'no agent'}),
+      manager.handleOutputTranscription(invocationContext, {text: 'no agent'}),
     ).toThrowError(/InvocationContext.agent is not set/);
   });
 
@@ -192,7 +190,10 @@ describe('additional coverage', () => {
     const invocationContext = makeContext();
     const transcription: Transcription = {finished: true};
 
-    const event = handleInputTranscription(invocationContext, transcription);
+    const event = manager.handleInputTranscription(
+      invocationContext,
+      transcription,
+    );
 
     expect(event.author).toBe('user');
     expect(event.inputTranscription).toBe(transcription);
@@ -208,7 +209,7 @@ describe('additional coverage', () => {
       }),
     ];
 
-    const stats = getTranscriptionStats(makeContext({events}));
+    const stats = manager.getTranscriptionStats(makeContext({events}));
 
     expect(stats).toEqual({
       inputTranscriptions: 1,
@@ -220,8 +221,12 @@ describe('additional coverage', () => {
   it('gives each event a fresh id', () => {
     const invocationContext = makeContext();
 
-    const first = handleInputTranscription(invocationContext, {text: 'one'});
-    const second = handleInputTranscription(invocationContext, {text: 'two'});
+    const first = manager.handleInputTranscription(invocationContext, {
+      text: 'one',
+    });
+    const second = manager.handleInputTranscription(invocationContext, {
+      text: 'two',
+    });
 
     expect(first.id).not.toBe(second.id);
     expect(first.id.length).toBeGreaterThan(0);
@@ -230,21 +235,6 @@ describe('additional coverage', () => {
   it('passes the transcription through without copying it', () => {
     const invocationContext = makeContext();
     const transcription: Transcription = {text: 'same object'};
-
-    const input = handleInputTranscription(invocationContext, transcription);
-    const output = handleOutputTranscription(invocationContext, transcription);
-
-    expect(input.inputTranscription).toBe(transcription);
-    expect(output.outputTranscription).toBe(transcription);
-  });
-
-  it('delegates the class methods to the module functions', () => {
-    const manager = new TranscriptionManager();
-    const events = [
-      createEvent({author: 'user', inputTranscription: {text: 'counted'}}),
-    ];
-    const invocationContext = makeContext({agentName: 'delegate', events});
-    const transcription: Transcription = {text: 'delegated'};
 
     const input = manager.handleInputTranscription(
       invocationContext,
@@ -255,15 +245,8 @@ describe('additional coverage', () => {
       transcription,
     );
 
-    expect(input.author).toBe(
-      handleInputTranscription(invocationContext, transcription).author,
-    );
-    expect(output.author).toBe(
-      handleOutputTranscription(invocationContext, transcription).author,
-    );
-    expect(manager.getTranscriptionStats(invocationContext)).toEqual(
-      getTranscriptionStats(invocationContext),
-    );
+    expect(input.inputTranscription).toBe(transcription);
+    expect(output.outputTranscription).toBe(transcription);
   });
 
   it('leaves the session events untouched', () => {
@@ -273,31 +256,12 @@ describe('additional coverage', () => {
     const invocationContext = makeContext({events});
     const before = [...invocationContext.session.events];
 
-    handleInputTranscription(invocationContext, {text: 'not appended'});
-    handleOutputTranscription(invocationContext, {text: 'not appended'});
-    getTranscriptionStats(invocationContext);
+    manager.handleInputTranscription(invocationContext, {text: 'not appended'});
+    manager.handleOutputTranscription(invocationContext, {
+      text: 'not appended',
+    });
+    manager.getTranscriptionStats(invocationContext);
 
     expect(invocationContext.session.events).toEqual(before);
-  });
-
-  it('logs and re-throws when the event cannot be built', () => {
-    const error = new Error('transcription payload is unreadable');
-    const transcription: Transcription = {
-      get text(): string {
-        throw error;
-      },
-    };
-    const invocationContext = makeContext();
-    const logError = vi.spyOn(getLogger(), 'error');
-
-    expect(() =>
-      handleInputTranscription(invocationContext, transcription),
-    ).toThrowError(error);
-    expect(logError).toHaveBeenCalledOnce();
-    expect(String(logError.mock.calls[0][0])).toContain(
-      'Failed to save input transcription event',
-    );
-
-    logError.mockRestore();
   });
 });

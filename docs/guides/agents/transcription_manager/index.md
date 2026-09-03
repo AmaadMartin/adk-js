@@ -51,26 +51,15 @@ function onLiveTranscription(ctx: InvocationContext) {
 }
 ```
 
-Each method has a module-level equivalent, so you can import the function
-instead of the class:
-
-```ts
-import {
-  getTranscriptionStats,
-  handleInputTranscription,
-  handleOutputTranscription,
-} from '@google/adk';
-```
-
 ## Counting transcriptions
 
 `getTranscriptionStats` walks `ctx.session.events` and returns the counts:
 
 ```ts
-import {InvocationContext, getTranscriptionStats} from '@google/adk';
+import {InvocationContext, TranscriptionManager} from '@google/adk';
 
 function report(ctx: InvocationContext) {
-  return getTranscriptionStats(ctx);
+  return new TranscriptionManager().getTranscriptionStats(ctx);
   // {inputTranscriptions: 2, outputTranscriptions: 1, totalTranscriptions: 3}
 }
 ```
@@ -87,7 +76,4 @@ object; it never mutates anything.
   the object on the event is the object you handed over.
 - Each event gets a fresh id and a `Date.now()` timestamp.
 - `handleOutputTranscription` throws when the invocation has no agent, because
-  it has no name to author the event with. The check runs before the event is
-  built, so the error is not logged as a build failure.
-- A failure while building the event is logged at error level and re-thrown.
-  The caller always sees the original error.
+  it has no name to author the event with.
