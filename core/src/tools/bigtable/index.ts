@@ -18,7 +18,6 @@ export {
 } from './bigtable_credentials.js';
 export {
   BigtableToolset,
-  DEFAULT_BIGTABLE_TOOL_NAME_PREFIX,
   type BigtableToolsetOptions,
 } from './bigtable_toolset.js';
 export {

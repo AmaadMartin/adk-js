@@ -57,9 +57,8 @@ any project the credentials reach.
 | `get_cluster_info`  | one cluster, including its autoscaling limits       |
 | `execute_sql`       | the rows a GoogleSQL query returns                  |
 
-`getTools()` returns these names as they are, and that is what the model sees
-today. The toolset also carries the prefix `bigtable`, matching
-`tool_name_prefix` in adk-python, but nothing in adk-js reads it yet.
+These are the names the model sees. adk-python prefixes the same tools with
+`bigtable_`; adk-js has no equivalent step, so the names stay bare here.
 
 Every tool answers with the same envelope. A success carries
 `{"status": "SUCCESS", ...}`, and a failure carries

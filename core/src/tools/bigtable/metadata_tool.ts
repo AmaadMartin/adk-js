@@ -152,7 +152,7 @@ function getClusters(
  * Builds the six Bigtable metadata tools.
  *
  * @param clients The client cache the tools read through.
- * @return The tools, with adk-python's unprefixed names.
+ * @return The six tools.
  */
 export function createMetadataTools(clients: BigtableClientCache): BaseTool[] {
   return [

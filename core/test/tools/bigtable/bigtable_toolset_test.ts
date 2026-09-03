@@ -6,10 +6,7 @@
 
 import {describe, expect, it, vi} from 'vitest';
 import {BaseTool} from '../../../src/tools/base_tool.js';
-import {
-  BigtableToolset,
-  DEFAULT_BIGTABLE_TOOL_NAME_PREFIX,
-} from '../../../src/tools/bigtable/bigtable_toolset.js';
+import {BigtableToolset} from '../../../src/tools/bigtable/bigtable_toolset.js';
 import {logger} from '../../../src/utils/logger.js';
 import {createToolContext, FakeBigtable} from './bigtable_fakes.js';
 
@@ -33,29 +30,11 @@ function names(tools: BaseTool[]): string[] {
 }
 
 describe('BigtableToolset', () => {
-  it('carries adk-python\u2019s tool name prefix', () => {
-    expect(new BigtableToolset().prefix).toBe(
-      DEFAULT_BIGTABLE_TOOL_NAME_PREFIX,
-    );
-    expect(DEFAULT_BIGTABLE_TOOL_NAME_PREFIX).toBe('bigtable');
-  });
-
-  it('returns the seven tools, unprefixed', async () => {
+  it('returns the seven tools', async () => {
     const tools = await new BigtableToolset().getTools();
 
     expect(tools).toHaveLength(7);
     expect(new Set(names(tools))).toEqual(new Set(ALL_TOOL_NAMES));
-  });
-
-  it('applies the prefix through the framework, not through getTools', async () => {
-    const toolset = new BigtableToolset();
-
-    const declared = (await toolset.getTools()).map(
-      (tool) => tool._getDeclaration()?.name,
-    );
-
-    expect(declared).not.toContain('bigtable_execute_sql');
-    expect(declared).toContain('execute_sql');
   });
 
   it.each([

@@ -16,9 +16,6 @@ import {createMetadataTools} from './metadata_tool.js';
 import {createQueryTool} from './query_tool.js';
 import {BigtableToolSettings} from './settings.js';
 
-/** The prefix the toolset's tool names carry, as in adk-python. */
-export const DEFAULT_BIGTABLE_TOOL_NAME_PREFIX = 'bigtable';
-
 /** How a {@link BigtableToolset} is configured. */
 export interface BigtableToolsetOptions {
   /**
@@ -70,10 +67,13 @@ function selectTools(
  *
  * The toolset exposes seven tools: `list_instances`, `get_instance_info`,
  * `list_tables`, `get_table_info`, `list_clusters`, `get_cluster_info` and
- * `execute_sql`. `getTools()` returns the names unprefixed and the toolset
- * carries {@link DEFAULT_BIGTABLE_TOOL_NAME_PREFIX}, matching adk-python,
- * whose `get_tools()` is bare and whose `get_tools_with_prefix()` adds the
- * prefix.
+ * `execute_sql`.
+ *
+ * adk-python prefixes these names with `bigtable_`, through a
+ * `get_tools_with_prefix()` that adk-js has no counterpart for: nothing here
+ * reads `BaseToolset.prefix`, and each sibling toolset prefixes inside its own
+ * `getTools()`. Rather than hard-code a prefix that the base class is due to
+ * own, this toolset returns the bare names.
  *
  * The `@google-cloud/bigtable` package is an optional peer dependency, loaded
  * on the first call rather than when this module is imported.
@@ -85,14 +85,14 @@ export class BigtableToolset extends BaseToolset {
   private readonly settings?: BigtableToolSettings;
 
   constructor(options: BigtableToolsetOptions = {}) {
-    super(options.toolFilter ?? [], DEFAULT_BIGTABLE_TOOL_NAME_PREFIX);
+    super(options.toolFilter ?? []);
     this.clients = new BigtableClientCache(options.credentialsConfig);
     this.filter = options.toolFilter;
     this.settings = options.bigtableToolSettings;
   }
 
   /**
-   * Returns the tools the filter admits, with unprefixed names.
+   * Returns the tools the filter admits.
    *
    * @param context The context the tools are being listed for.
    * @return The selected tools.

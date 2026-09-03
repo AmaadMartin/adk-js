@@ -28,11 +28,13 @@ type QueryParameters = NonNullable<
 /** One value in that bag. */
 type QueryParameterValue = QueryParameters[string];
 
-/** What a model can put in a query parameter, since it only emits JSON. */
-type JsonScalar = string | number | boolean | null;
-
-/** The same, once the `null` case has been handled by the caller. */
-type JsonValue = Exclude<JsonScalar, null>;
+/**
+ * What a model can put in a query parameter, since it only emits JSON.
+ *
+ * A `null` never reaches a converter: {@link toQueryParameters} passes it
+ * straight through.
+ */
+type JsonValue = string | number | boolean;
 
 /**
  * The GoogleSQL types a query parameter may be declared as.
@@ -263,45 +265,21 @@ function toBytes(name: string, value: JsonValue): Uint8Array {
   return decoded;
 }
 
-/** Passes a BOOL parameter through, once it really is one. */
-function toBool(name: string, value: JsonValue): boolean {
-  return typeof value === 'boolean'
-    ? value
-    : rejectParameter(name, 'bool', value);
-}
-
-/** Passes a STRING parameter through, once it really is one. */
-function toStringValue(name: string, value: JsonValue): string {
-  return typeof value === 'string'
-    ? value
-    : rejectParameter(name, 'string', value);
-}
-
-/** Passes a FLOAT32 parameter through, once it really is a number. */
-function toFloat32(name: string, value: JsonValue): number {
-  return typeof value === 'number'
-    ? value
-    : rejectParameter(name, 'float32', value);
-}
-
-/** Passes a FLOAT64 parameter through, once it really is a number. */
-function toFloat64(name: string, value: JsonValue): number {
-  return typeof value === 'number'
-    ? value
-    : rejectParameter(name, 'float64', value);
-}
-
 /** Builds the native value each declarable type needs from a JSON scalar. */
 const PARAMETER_CONVERTERS: Record<
   ScalarTypeName,
   (name: string, value: JsonValue) => QueryParameterValue
 > = {
-  bool: toBool,
+  bool: (name, value) =>
+    typeof value === 'boolean' ? value : rejectParameter(name, 'bool', value),
   bytes: toBytes,
-  float32: toFloat32,
-  float64: toFloat64,
+  float32: (name, value) =>
+    typeof value === 'number' ? value : rejectParameter(name, 'float32', value),
+  float64: (name, value) =>
+    typeof value === 'number' ? value : rejectParameter(name, 'float64', value),
   int64: toInt64,
-  string: toStringValue,
+  string: (name, value) =>
+    typeof value === 'string' ? value : rejectParameter(name, 'string', value),
 };
 
 /**
@@ -427,7 +405,7 @@ async function executeQuery(
  *
  * @param clients The client cache the tool reads through.
  * @param settings The row cap configuration.
- * @return The tool, with adk-python's unprefixed name.
+ * @return The query tool.
  */
 export function createQueryTool(
   clients: BigtableClientCache,
