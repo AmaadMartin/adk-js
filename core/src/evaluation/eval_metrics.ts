@@ -6,6 +6,7 @@
 
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {Invocation} from './eval_case.js';
+import type {RubricScore} from './eval_rubrics.js';
 
 /** The verdict for one metric, or for a whole eval case. */
 export enum EvalStatus {
@@ -100,12 +101,21 @@ export interface EvalMetric {
   customFunctionPath?: string;
 }
 
+/** The metric-specific detail behind a score. */
+export interface EvalMetricResultDetails {
+  /** Per-rubric scores, when the metric assessed rubrics. */
+  rubricScores?: RubricScore[];
+}
+
 /** The computed value of an {@link EvalMetric}. */
 export interface EvalMetricResult extends EvalMetric {
   /** Undefined when the metric was not evaluated. */
   score?: number;
 
   evalStatus: EvalStatus;
+
+  /** How the score was arrived at. Absent when the metric reports none. */
+  details?: EvalMetricResultDetails;
 }
 
 /** The metric results for a single invocation. */
