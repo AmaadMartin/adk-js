@@ -9,8 +9,14 @@ import {Content, Part as GenAIPart} from '@google/genai';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../agents/functions.js';
 import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
 import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from '../auth/auth_preprocessor.js';
-import {Event as AdkEvent, createEvent} from '../events/event.js';
+import {
+  Event as AdkEvent,
+  createEvent,
+  getFunctionCalls,
+  getFunctionResponses,
+} from '../events/event.js';
 import {Session} from '../sessions/session.js';
+import {FINISH_TASK_TOOL_NAME} from '../tools/finish_task_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
@@ -305,40 +311,128 @@ export function toForwardableA2AParts(
 }
 
 /**
+ * The arguments of the most recent `finish_task` call in the session.
+ *
+ * @param session - The session whose history to search.
+ * @param isolationScope - Restricts the search to one task's events.
+ * @param completedEvent - The terminal `finish_task` response, when there is
+ *   one. Its response id picks out the matching call, so a task that called
+ *   `finish_task` more than once resolves to the call that actually completed.
+ * @returns The call arguments, or `undefined` when there is no matching call.
+ */
+export function findFinishTaskArgsFromHistory(
+  session: Session,
+  isolationScope?: string,
+  completedEvent?: AdkEvent,
+): Record<string, unknown> | undefined {
+  const matchingCallId = completedEvent
+    ? getFunctionResponses(completedEvent).find(
+        (fr) => fr.name === FINISH_TASK_TOOL_NAME,
+      )?.id
+    : undefined;
+
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const event = session.events[i];
+    if (isolationScope && event.isolationScope !== isolationScope) {
+      continue;
+    }
+    for (const call of getFunctionCalls(event)) {
+      if (call.name !== FINISH_TASK_TOOL_NAME) {
+        continue;
+      }
+      if (matchingCallId !== undefined && call.id !== matchingCallId) {
+        continue;
+      }
+      return {...(call.args ?? {})};
+    }
+  }
+  return undefined;
+}
+
+/** Options for {@link toMissingRemoteSessionParts}. */
+export interface MissingRemoteSessionPartsOptions {
+  /** Per-part conversion for the outgoing message. Defaults to `toA2APart`. */
+  converter?: GenAIPartToA2APartConverter;
+  /**
+   * Task mode: the isolation scope of the delegated task. The walk is
+   * restricted to it, so one task never sees another task's history.
+   */
+  taskScope?: string;
+  /**
+   * Send the whole session to a peer that has not returned a context id. A
+   * stateless peer keeps no history of its own, so stopping at its last reply
+   * would drop everything before it.
+   */
+  fullHistoryWhenStateless?: boolean;
+}
+
+/**
  * Returns A2A content parts for all events not yet seen by the remote agent,
  * along with the A2A context ID found in the most recent remote agent event.
  *
  * @param ctx - The current invocation context, used to identify the remote
  *   agent's authored events.
  * @param session - The local session whose event history to diff.
- * @param converter - Per-part conversion. Defaults to `toA2APart`.
+ * @param options - Converter, task scope and stateless-history behaviour.
  * @returns An object with the missing `parts` and an optional `contextId`.
+ * @throws If a task scope names a FunctionCall that is not in the history.
  */
 export function toMissingRemoteSessionParts(
   ctx: InvocationContext,
   session: Session,
-  converter: GenAIPartToA2APartConverter = toA2APart,
+  options: MissingRemoteSessionPartsOptions = {},
 ): {parts: A2APart[]; contextId?: string} {
+  const {
+    converter = toA2APart,
+    taskScope,
+    fullHistoryWhenStateless = false,
+  } = options;
   const events = session.events;
   const peerName = requireAgent(ctx).name;
   let contextId: string | undefined = undefined;
-  let lastRemoteResponseIndex = -1;
+  const eventsToProcess: AdkEvent[] = [];
+  let foundBoundary = false;
 
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event.author === peerName) {
-      lastRemoteResponseIndex = i;
-      const metadata = event.customMetadata || {};
-      contextId = metadata[AdkMetadataKeys.CONTEXT_ID] as string;
-      break;
+
+    if (taskScope && event.isolationScope !== taskScope) {
+      // The coordinator's FunctionCall that triggered this task carries the
+      // task's inputs, and nothing older belongs to this task's lifetime.
+      if (getFunctionCalls(event).some((fc) => fc.id === taskScope)) {
+        eventsToProcess.push(event);
+        foundBoundary = true;
+        break;
+      }
+      continue;
     }
+
+    if (isRemoteResponse(event, peerName, taskScope !== undefined)) {
+      contextId = readContextId(event) ?? contextId;
+      // A stateful peer already holds this history in its own session. A
+      // stateless one (no context id) needs it resent when the caller asks.
+      if (!fullHistoryWhenStateless || contextId) {
+        foundBoundary = true;
+        break;
+      }
+    }
+    eventsToProcess.push(event);
+  }
+
+  if (taskScope && !foundBoundary) {
+    throw new Error(
+      `RemoteA2aAgent '${peerName}' in task mode could not find the triggering` +
+        ` FunctionCall for isolation scope '${taskScope}' in session history.` +
+        ' Workflow path scopes are not supported.',
+    );
   }
 
   const peerRequestedIds = peerRequestedCallIds(events, peerName);
+  const remoteCallIds = peerIssuedCallIds(events, peerName, taskScope);
   const missingParts: A2APart[] = [];
 
-  for (let i = lastRemoteResponseIndex + 1; i < events.length; i++) {
-    let event = events[i];
+  for (const original of eventsToProcess.reverse()) {
+    let event = original;
 
     // Scrub before presentAsUserMessage, not after: it renders a
     // function_call/function_response as text with its arguments inlined,
@@ -351,30 +445,139 @@ export function toMissingRemoteSessionParts(
       event = {...event, content: scrubbedContent};
     }
 
-    if (event.author !== 'user' && event.author !== peerName) {
+    const isUserInput = event.author === 'user';
+    if (!isUserInput && event.author !== peerName) {
       event = presentAsUserMessage(ctx, event);
     }
 
-    if (
-      !event.content ||
-      !event.content.parts ||
-      event.content.parts.length === 0
-    ) {
-      continue;
+    for (const part of event.content?.parts ?? []) {
+      const converted = toForwardedParts(part, {
+        converter,
+        taskScope,
+        remoteCallIds,
+        longRunningToolIds: event.longRunningToolIds,
+      });
+      if (converted === undefined) {
+        continue;
+      }
+      if (converted.length === 0) {
+        logger.warn(
+          `Failed to convert part to A2A format: ${JSON.stringify(part)}`,
+        );
+        continue;
+      }
+      if (isUserInput) {
+        for (const a2aPart of converted) {
+          a2aPart.metadata = {...a2aPart.metadata, is_user_input: true};
+        }
+      }
+      missingParts.push(...converted);
     }
-
-    const parts = toA2AParts(
-      event.content.parts,
-      event.longRunningToolIds,
-      converter,
-    );
-    missingParts.push(...parts);
   }
 
   return {
     parts: missingParts,
     contextId,
   };
+}
+
+/**
+ * Whether an event is a reply the remote peer produced, and therefore already
+ * present in a stateful peer's own session.
+ */
+function isRemoteResponse(
+  event: AdkEvent,
+  peerName: string,
+  taskMode: boolean,
+): boolean {
+  if (event.author === peerName) {
+    return true;
+  }
+  // In task mode the delegation also completes through a function response
+  // named after the peer, synthesized by the coordinator.
+  return (
+    taskMode && getFunctionResponses(event).some((fr) => fr.name === peerName)
+  );
+}
+
+/** The A2A context id an event carries, if it carries one. */
+function readContextId(event: AdkEvent): string | undefined {
+  const contextId = event.customMetadata?.[AdkMetadataKeys.CONTEXT_ID];
+  return typeof contextId === 'string' ? contextId : undefined;
+}
+
+/**
+ * The ids of function calls the peer issued itself, within the task scope when
+ * there is one. A function response answering one of these resumes a call the
+ * peer made; anything else belongs to someone else's call.
+ */
+function peerIssuedCallIds(
+  events: readonly AdkEvent[],
+  peerName: string,
+  taskScope?: string,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const event of events) {
+    if (event.author !== peerName) {
+      continue;
+    }
+    if (taskScope && event.isolationScope !== taskScope) {
+      continue;
+    }
+    for (const call of getFunctionCalls(event)) {
+      if (call.id) {
+        ids.add(call.id);
+      }
+    }
+  }
+  return ids;
+}
+
+/** Context {@link toForwardedParts} needs to decide how to send one part. */
+interface ForwardedPartOptions {
+  converter: GenAIPartToA2APartConverter;
+  taskScope?: string;
+  remoteCallIds: ReadonlySet<string>;
+  /** Ids of the source event's long-running calls, kept on the wire. */
+  longRunningToolIds?: string[];
+}
+
+/** Converts one GenAI part into the A2A parts that carry it to the peer. */
+function toForwardedParts(
+  part: GenAIPart,
+  {
+    converter,
+    taskScope,
+    remoteCallIds,
+    longRunningToolIds,
+  }: ForwardedPartOptions,
+): A2APart[] | undefined {
+  const callId = part.functionCall?.id;
+  if (
+    taskScope &&
+    callId &&
+    callId !== taskScope &&
+    !remoteCallIds.has(callId)
+  ) {
+    // A sibling call the coordinator made for another tool or agent. Skipped
+    // deliberately, so `undefined` rather than an empty conversion.
+    return undefined;
+  }
+
+  const response = part.functionResponse;
+  if (taskScope && response && !remoteCallIds.has(response.id ?? '')) {
+    // The peer has no invocation to resume for a call it never made, and the
+    // receiving runner rejects a function response alongside the same history
+    // as text.
+    return [
+      {
+        kind: 'text',
+        text: `Tool ${response.name} returned: ${JSON.stringify(response.response)}`,
+      },
+    ];
+  }
+
+  return toA2AParts([part], longRunningToolIds, converter);
 }
 
 /**
