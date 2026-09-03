@@ -236,6 +236,67 @@ describe('parseEvalSetResultJson', () => {
     );
   });
 
+  it('refuses a case result missing a required field', () => {
+    const message =
+      'Every eval case result must have an `eval_set_id`, an `eval_id`, a ' +
+      '`session_id`, a `final_eval_status` and ' +
+      '`eval_metric_result_per_invocation`.';
+    const complete = {
+      eval_set_id: EVAL_SET_ID,
+      eval_id: 'lights_on',
+      session_id: SESSION_ID,
+      final_eval_status: 1,
+      eval_metric_result_per_invocation: [],
+    };
+
+    for (const missing of Object.keys(complete)) {
+      const caseResult: Record<string, unknown> = {...complete};
+      delete caseResult[missing];
+
+      expect(() =>
+        parseEvalSetResultJson(
+          JSON.stringify({
+            eval_set_result_id: 'run_a',
+            eval_set_id: EVAL_SET_ID,
+            eval_case_results: [caseResult],
+          }),
+        ),
+      ).toThrowError(message);
+    }
+  });
+
+  it('refuses a case result that is not an object', () => {
+    expect(() =>
+      parseEvalSetResultJson(
+        JSON.stringify({
+          eval_set_result_id: 'run_a',
+          eval_set_id: EVAL_SET_ID,
+          eval_case_results: [42],
+        }),
+      ),
+    ).toThrowError('Every eval case result must have an `eval_set_id`');
+  });
+
+  it('refuses a case result whose status is not an EvalStatus', () => {
+    expect(() =>
+      parseEvalSetResultJson(
+        JSON.stringify({
+          eval_set_result_id: 'run_a',
+          eval_set_id: EVAL_SET_ID,
+          eval_case_results: [
+            {
+              eval_set_id: EVAL_SET_ID,
+              eval_id: 'lights_on',
+              session_id: SESSION_ID,
+              final_eval_status: 99,
+              eval_metric_result_per_invocation: [],
+            },
+          ],
+        }),
+      ),
+    ).toThrowError('Every eval case result must have an `eval_set_id`');
+  });
+
   it('refuses a result without its case results', () => {
     expect(() =>
       parseEvalSetResultJson(

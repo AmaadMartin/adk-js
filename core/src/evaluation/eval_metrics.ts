@@ -119,35 +119,6 @@ export interface EvalMetricResultPerInvocation {
   evalMetricResults: EvalMetricResult[];
 }
 
-const MATCH_TYPES_BY_NAME = new Map<string, ToolTrajectoryMatchType>(
-  Object.values(ToolTrajectoryMatchType).map((matchType) => [
-    matchType,
-    matchType,
-  ]),
-);
-
-/**
- * Returns the match type a value names, or `undefined` when it names none.
- *
- * An absent value reads as {@link ToolTrajectoryMatchType.EXACT}, the field
- * default. A string is trimmed, upper-cased, and its dashes and spaces read
- * as underscores, so `'any order'` and `'ANY-ORDER'` both resolve.
- */
-export function normalizeToolTrajectoryMatchType(
-  value: unknown,
-): ToolTrajectoryMatchType | undefined {
-  if (value === undefined) {
-    return ToolTrajectoryMatchType.EXACT;
-  }
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  return MATCH_TYPES_BY_NAME.get(
-    value.trim().toUpperCase().replace(/[- ]/g, '_'),
-  );
-}
-
 /**
  * Returns the threshold configured for a metric.
  *
