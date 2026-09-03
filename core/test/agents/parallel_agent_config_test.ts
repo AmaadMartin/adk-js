@@ -165,6 +165,17 @@ describe('parseParallelAgentYamlConfig', () => {
       );
     });
 
+    it('counts an empty code string as provided, not as absent', () => {
+      const error = rejectionOf({
+        name: 'a',
+        sub_agents: [{config_path: 'a.yaml', code: ''}],
+      });
+
+      expect(error.message).toContain(
+        'Only one of `code` or `config_path` should be provided',
+      );
+    });
+
     it('rejects a sub-agent that sets neither code nor config_path', () => {
       const error = rejectionOf({name: 'a', sub_agents: [{}]});
 

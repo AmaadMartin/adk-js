@@ -24,13 +24,6 @@ import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {warnDeprecatedOnce} from '../utils/deprecated.js';
 
-const DEPRECATION_KEY = 'ParallelAgentYamlConfig';
-
-const DEPRECATION_MESSAGE =
-  'ParallelAgentYamlConfig is deprecated and will be removed in a future ' +
-  'version. It ports adk-python ParallelAgentConfig, which is deprecated ' +
-  'there.';
-
 /** Ports `CodeConfig`: a variable, function or class named by its fully qualified name. */
 const codeRefSchema = z.strictObject({name: z.string()});
 
@@ -41,10 +34,8 @@ const agentRefSchema = z
     code: z.string().optional(),
   })
   .check((ctx) => {
-    const refCount =
-      Number(ctx.value.code !== undefined) +
-      Number(ctx.value.configPath !== undefined);
-    if (refCount === 1) {
+    const {code, configPath} = ctx.value;
+    if ((code === undefined) !== (configPath === undefined)) {
       return;
     }
     ctx.issues.push({
@@ -53,9 +44,9 @@ const agentRefSchema = z
       // The adk-python wording, kept verbatim so both SDKs report the same
       // thing for the same document.
       message:
-        refCount === 2
-          ? 'Only one of `code` or `config_path` should be provided'
-          : 'Exactly one of `code` or `config_path` must be provided',
+        code === undefined
+          ? 'Exactly one of `code` or `config_path` must be provided'
+          : 'Only one of `code` or `config_path` should be provided',
     });
   });
 
@@ -112,7 +103,12 @@ export type ParallelAgentYamlConfig = z.infer<
 export function parseParallelAgentYamlConfig(
   document: unknown,
 ): ParallelAgentYamlConfig {
-  warnDeprecatedOnce(DEPRECATION_KEY, DEPRECATION_MESSAGE);
+  warnDeprecatedOnce(
+    'ParallelAgentYamlConfig',
+    'ParallelAgentYamlConfig is deprecated and will be removed in a future ' +
+      'version. It ports adk-python ParallelAgentConfig, which is deprecated ' +
+      'there.',
+  );
   if (!isFeatureEnabled(FeatureName.AGENT_CONFIG)) {
     throw new Error(`Feature ${FeatureName.AGENT_CONFIG} is not enabled.`);
   }

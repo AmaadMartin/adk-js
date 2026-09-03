@@ -74,6 +74,10 @@ try {
 }
 ```
 
+The key conversion runs before validation, so a message names the camelCase
+spelling of the offending key. A file that writes `sub_agent:` is reported as
+`Unrecognized key: "subAgent"`, as above. ADK Python names the key as written.
+
 A sub-agent entry that sets both `code` and `config_path` reports `Only one of
 \`code\` or \`config_path\` should be provided`. An entry that sets neither
 reports `Exactly one of \`code\` or \`config_path\` must be provided`. Both
