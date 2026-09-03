@@ -20,7 +20,7 @@ import {
   vi,
 } from 'vitest';
 
-import {App, inferAgentOrigin, isApp} from '@google/adk';
+import {App, inferAgentOrigin, isApp, isBaseAgent} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
@@ -804,6 +804,30 @@ describe('AgentLoader', () => {
       expect(inferAgentOrigin(await agentFile.load())).toEqual({
         appName: 'agent4',
         path: dir,
+      });
+      await agentLoader.disposeAll();
+    });
+
+    it('records where it loaded each agent from', async () => {
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      const fromDirectory = await (
+        await agentLoader.getAgentFile('agent3')
+      ).loadAgent();
+      const fromFile = await (
+        await agentLoader.getAgentFile('agent1')
+      ).loadAgent();
+
+      if (!isBaseAgent(fromDirectory) || !isBaseAgent(fromFile)) {
+        expect.fail('both fixtures must load as agents');
+      }
+      expect(inferAgentOrigin(fromDirectory)).toEqual({
+        appName: 'agent3',
+        path: path.join(tempAgentsDir, 'agent3'),
+      });
+      expect(inferAgentOrigin(fromFile)).toEqual({
+        appName: 'agent1',
+        path: tempAgentsDir,
       });
       await agentLoader.disposeAll();
     });

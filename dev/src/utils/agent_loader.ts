@@ -7,6 +7,7 @@
 import {
   App,
   isApp,
+  isBaseAgent,
   isRunnableRoot,
   RunnableRoot,
   stampAgentOrigin,
@@ -666,7 +667,8 @@ export class AgentLoader {
  * Records the directory an agent was loaded from, and the app name it implies.
  *
  * A runner built under a different app name reads sessions from somewhere
- * else, so it explains that mismatch when a lookup fails.
+ * else, so it explains that mismatch when a lookup fails. A `Workflow` root is
+ * skipped: only an agent carries an origin.
  */
 function stampRootAgentOrigin(
   loaded: RunnableRoot | App,
@@ -674,7 +676,9 @@ function stampRootAgentOrigin(
   dirPath: string,
 ): void {
   const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
-  stampAgentOrigin(rootAgent, {appName, path: dirPath});
+  if (isBaseAgent(rootAgent)) {
+    stampAgentOrigin(rootAgent, {appName, path: dirPath});
+  }
 }
 
 function isJsFile(fileExt?: string): boolean {

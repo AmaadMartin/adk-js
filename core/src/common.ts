@@ -544,7 +544,10 @@ export {
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
-export {PluginManager} from './plugins/plugin_manager.js';
+export {
+  DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS,
+  PluginManager,
+} from './plugins/plugin_manager.js';
 export {
   ADK_HANDLE_MODEL_ERROR_TOOL_NAME,
   RESERVED_TOOL_CALL_ERROR_TYPE,

@@ -126,7 +126,8 @@ export abstract class BasePlugin {
    * file handles.
    *
    * `Runner.close` calls this once for every registered plugin. The default
-   * does nothing, so a plugin that holds no resource needs no override.
+   * does nothing, so a plugin that holds no resource needs no override. An
+   * override must be idempotent.
    */
   async close(): Promise<void> {
     return;

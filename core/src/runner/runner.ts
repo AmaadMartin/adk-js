@@ -130,6 +130,13 @@ export interface RunnerConfig {
    * An optional resumability configuration applied to the runner.
    */
   resumabilityConfig?: ResumabilityConfig;
+
+  /**
+   * How long, in seconds, each plugin gets to finish its `close()` when
+   * {@link Runner.close} runs. Defaults to 5. A value of zero or less waits
+   * indefinitely.
+   */
+  pluginCloseTimeoutSeconds?: number;
 }
 
 /**
@@ -443,6 +450,8 @@ export class Runner {
    * join; see {@link findActiveTaskScope}.
    */
   private readonly taskAgentNames: ReadonlySet<string>;
+  /** Whether {@link close} has already closed the plugins. */
+  private pluginsClosed = false;
 
   /**
    * Creates a new Runner instance.
@@ -455,7 +464,10 @@ export class Runner {
     // A workflow is kept as itself rather than wrapped: the runner drives a
     // node directly (see `runRoot`), so there is no agent to manufacture.
     this.agent = this.app.rootAgent;
-    this.pluginManager = new PluginManager(this.app.plugins);
+    this.pluginManager = new PluginManager(
+      this.app.plugins,
+      input.pluginCloseTimeoutSeconds,
+    );
     this.artifactService = input.artifactService;
     this.sessionService = input.sessionService;
     this.memoryService = input.memoryService;
@@ -482,7 +494,10 @@ export class Runner {
   private enforceAppNameAlignment(origin: AgentOrigin): void {
     const originName = origin.appName;
     // A `__`-prefixed directory is a loader's own scratch space, not an app.
+    // A runner with no app name of its own disagrees with nothing: it reports
+    // the missing name at the session lookup instead.
     if (
+      !this.appName ||
       !originName ||
       originName.startsWith('__') ||
       originName === this.appName
@@ -665,6 +680,12 @@ export class Runner {
         ctx,
         this,
         async function* () {
+          // Checked before resolving the session, so a cancelled run neither
+          // creates one nor reports a missing one.
+          if (params.abortSignal?.aborted) {
+            return;
+          }
+
           const session = await this.getOrCreateSession({
             userId,
             sessionId,
@@ -988,12 +1009,18 @@ export class Runner {
    *
    * Call it when the runner is no longer needed. It is safe to call after
    * `runAsync`, which closes the toolsets itself, because closing a toolset
-   * twice is not an error.
+   * twice is not an error. The plugins close on the first call only: a run
+   * reopens a toolset it needs, and no run reopens a plugin.
    *
-   * @throws If one or more plugins failed to close.
+   * @throws An `AggregateError` naming every plugin that failed to close. The
+   *     toolsets are closed first and their failures stay swallowed.
    */
   async close(): Promise<void> {
     await this.closeToolsets();
+    if (this.pluginsClosed) {
+      return;
+    }
+    this.pluginsClosed = true;
     await this.pluginManager.close();
   }
 
@@ -1269,6 +1296,12 @@ export class Runner {
         ctx,
         this,
         async function* () {
+          // Checked before resolving the session, so a cancelled run neither
+          // creates one nor reports a missing one.
+          if (params.abortSignal?.aborted) {
+            return;
+          }
+
           const session = await this.getOrCreateSession({
             userId: params.userId,
             sessionId: params.sessionId,

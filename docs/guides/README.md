@@ -113,6 +113,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Plugins
 
 - [Plugin agent callbacks](plugins/agent_callbacks/index.md) - The agent lifecycle hooks a plugin gets, their precedence over an agent's own callbacks, and the agent error notification.
+- [Plugin close lifecycle](plugins/plugin_close_lifecycle/index.md) - Releasing
+  the resources a plugin holds, and the timeout that bounds each shutdown.
 
 ### Runner
 
@@ -132,6 +134,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [DatabaseSessionService](sessions/database_session_service/index.md) -
   Storing sessions in SQL, the connection URLs it accepts, rejecting stale
   writes, reading user state, and opening a legacy database adk-python wrote.
+- [Session resolution](sessions/session_resolution/index.md) - How a runner
+  resolves the session id you give it, and when it creates a missing session.
 - [Session state and its scopes](sessions/state/index.md) - Session state and
   the app:, user: and temp: prefixes that decide what is shared and what is
   stored.
