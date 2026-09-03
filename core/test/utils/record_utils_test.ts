@@ -13,15 +13,16 @@ import {
 } from '../../src/utils/record_utils.js';
 
 describe('isRecord', () => {
-  it('accepts a plain object', () => {
-    expect(isRecord({a: 1})).toBe(true);
+  it.each([[{}], [{a: 1}], [new Date()]])('accepts %o', (value) => {
+    expect(isRecord(value)).toBe(true);
   });
 
-  it('rejects an array, null and a primitive', () => {
-    expect(isRecord([1, 2])).toBe(false);
-    expect(isRecord(null)).toBe(false);
-    expect(isRecord('a string')).toBe(false);
-  });
+  it.each([[null], [undefined], ['text'], [7], [[1, 2]]])(
+    'rejects %o',
+    (value) => {
+      expect(isRecord(value)).toBe(false);
+    },
+  );
 });
 
 describe('stringField', () => {

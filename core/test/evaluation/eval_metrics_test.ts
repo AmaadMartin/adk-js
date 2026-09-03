@@ -676,6 +676,54 @@ describe('parseToolTrajectoryCriterion', () => {
       'Invalid ToolTrajectoryCriterion: matchType: Invalid tool trajectory match type: "sideways"',
     );
   });
+
+  it('prefers the camelCase key when a payload carries both spellings', () => {
+    const criterion = parseToolTrajectoryCriterion({
+      threshold: 1,
+      matchType: 'ANY_ORDER',
+      match_type: 'IN_ORDER',
+      ignoreArgs: false,
+      ignore_args: true,
+    });
+
+    expect(criterion.matchType).toBe(ToolTrajectoryMatchType.ANY_ORDER);
+    expect(criterion.ignoreArgs).toBe(false);
+  });
+
+  it('keeps a key the criterion does not name', () => {
+    const criterion = parseToolTrajectoryCriterion({
+      threshold: 1,
+      judgeModelOptions: {model: 'gemini-2.5-flash'},
+    });
+
+    expect(criterion).toMatchObject({
+      judgeModelOptions: {model: 'gemini-2.5-flash'},
+    });
+  });
+
+  it.each([['not an object'], [null], [42], [[{threshold: 1}]]])(
+    'rejects the payload %s, which is not a record',
+    (raw) => {
+      expect(() => parseToolTrajectoryCriterion(raw)).toThrow(
+        InputValidationError,
+      );
+    },
+  );
+
+  it.each([[{}], [{threshold: 'high'}], [{threshold: Number.NaN}]])(
+    'rejects the payload %o, which carries no numeric threshold',
+    (raw) => {
+      expect(() => parseToolTrajectoryCriterion(raw)).toThrow(
+        InputValidationError,
+      );
+    },
+  );
+
+  it('rejects an ignoreArgs that is not a boolean', () => {
+    expect(() =>
+      parseToolTrajectoryCriterion({threshold: 1, ignoreArgs: 'yes'}),
+    ).toThrow(InputValidationError);
+  });
 });
 
 describe('normalizeToolTrajectoryMatchType', () => {

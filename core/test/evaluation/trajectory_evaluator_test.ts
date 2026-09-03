@@ -10,6 +10,7 @@ import {
   ToolTrajectoryMatchType,
   TrajectoryEvaluator,
   type BaseCriterion,
+  type ConversationScenario,
   type EvalMetric,
   type Invocation,
 } from '@google/adk';
@@ -47,11 +48,14 @@ function eventsInvocation(...toolCalls: FunctionCall[]): Invocation {
 }
 
 /** Returns an evaluator configured from a metric criterion. */
-function evaluatorFor(matchType: string): TrajectoryEvaluator {
+function evaluatorFor(
+  matchType: string,
+  ignoreArgs = false,
+): TrajectoryEvaluator {
   return new TrajectoryEvaluator({
     evalMetric: {
       metricName: METRIC_NAME,
-      criterion: {threshold: THRESHOLD, matchType},
+      criterion: {threshold: THRESHOLD, matchType, ignoreArgs},
     },
   });
 }
@@ -68,6 +72,12 @@ const t4: FunctionCall = {name: 't4', args: {}};
 
 describe('TrajectoryEvaluator', () => {
   describe('construction', () => {
+    it('names the criterion type it accepts', () => {
+      expect(TrajectoryEvaluator.criterionType.name).toBe(
+        'ToolTrajectoryCriterion',
+      );
+    });
+
     it('reads the match type from a criterion string', () => {
       const result = evaluatorFor('in_order').evaluateInvocations(
         [invocation(t1, t1_1, t2)],
@@ -173,10 +183,9 @@ describe('TrajectoryEvaluator', () => {
             },
           }),
       ).toThrowError(
-        new InputValidationError(
-          `\`${METRIC_NAME}\` metric expects a criterion of type` +
-            ' `ToolTrajectoryCriterion`.',
-        ),
+        `\`${METRIC_NAME}\` metric expects a criterion of type` +
+          ' `ToolTrajectoryCriterion`. Invalid ToolTrajectoryCriterion:' +
+          ' threshold:',
       );
     });
 
@@ -227,10 +236,15 @@ describe('TrajectoryEvaluator', () => {
 
     it('rejects a criterion whose match type is unknown', () => {
       expect(() => evaluatorFor('random string')).toThrowError(
-        new InputValidationError(
-          `\`${METRIC_NAME}\` metric expects a criterion of type` +
-            ' `ToolTrajectoryCriterion`.',
-        ),
+        InputValidationError,
+      );
+    });
+
+    it('names the criterion type and the reason it rejected one', () => {
+      expect(() => evaluatorFor('random string')).toThrowError(
+        `\`${METRIC_NAME}\` metric expects a criterion of type` +
+          ' `ToolTrajectoryCriterion`. Invalid ToolTrajectoryCriterion:' +
+          ' matchType: Invalid tool trajectory match type: "random string"',
       );
     });
   });
@@ -343,6 +357,15 @@ describe('TrajectoryEvaluator', () => {
       expect(result.overallScore).toBe(0.0);
       expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
     });
+
+    it('scores an empty expected trajectory 1.0', () => {
+      const result = evaluatorFor('IN_ORDER').evaluateInvocations(
+        [invocation(t1)],
+        [invocation()],
+      );
+
+      expect(result.overallScore).toBe(1.0);
+    });
   });
 
   describe('ANY_ORDER match', () => {
@@ -422,6 +445,194 @@ describe('TrajectoryEvaluator', () => {
 
       expect(result.overallScore).toBe(0.0);
       expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
+    });
+  });
+
+  describe('ignoreArgs', () => {
+    const cases: Array<{
+      name: string;
+      matchType: ToolTrajectoryMatchType;
+      actual: FunctionCall[];
+      expected: FunctionCall[];
+      score: number;
+    }> = [
+      {
+        name: 'EXACT with different arguments passes',
+        matchType: ToolTrajectoryMatchType.EXACT,
+        actual: [
+          {name: 't1', args: {a: 1}},
+          {name: 't2', args: {b: 2}},
+        ],
+        expected: [
+          {name: 't1', args: {x: 99}},
+          {name: 't2', args: {y: 100}},
+        ],
+        score: 1.0,
+      },
+      {
+        name: 'EXACT with different names fails',
+        matchType: ToolTrajectoryMatchType.EXACT,
+        actual: [{name: 't1', args: {}}],
+        expected: [{name: 't2', args: {}}],
+        score: 0.0,
+      },
+      {
+        name: 'EXACT with a different tool count fails',
+        matchType: ToolTrajectoryMatchType.EXACT,
+        actual: [
+          {name: 't1', args: {}},
+          {name: 't2', args: {}},
+        ],
+        expected: [{name: 't1', args: {}}],
+        score: 0.0,
+      },
+      {
+        name: 'EXACT with empty trajectories passes',
+        matchType: ToolTrajectoryMatchType.EXACT,
+        actual: [],
+        expected: [],
+        score: 1.0,
+      },
+      {
+        name: 'IN_ORDER with different arguments and extra tools passes',
+        matchType: ToolTrajectoryMatchType.IN_ORDER,
+        actual: [
+          {name: 't1', args: {a: 1}},
+          {name: 'extra', args: {}},
+          {name: 't2', args: {b: 2}},
+        ],
+        expected: [
+          {name: 't1', args: {x: 99}},
+          {name: 't2', args: {y: 100}},
+        ],
+        score: 1.0,
+      },
+      {
+        name: 'IN_ORDER in the wrong order fails',
+        matchType: ToolTrajectoryMatchType.IN_ORDER,
+        actual: [
+          {name: 't2', args: {}},
+          {name: 't1', args: {}},
+        ],
+        expected: [
+          {name: 't1', args: {}},
+          {name: 't2', args: {}},
+        ],
+        score: 0.0,
+      },
+      {
+        name: 'IN_ORDER with a missing tool fails',
+        matchType: ToolTrajectoryMatchType.IN_ORDER,
+        actual: [{name: 't1', args: {}}],
+        expected: [
+          {name: 't1', args: {}},
+          {name: 't2', args: {}},
+        ],
+        score: 0.0,
+      },
+      {
+        name: 'ANY_ORDER with different arguments and swapped order passes',
+        matchType: ToolTrajectoryMatchType.ANY_ORDER,
+        actual: [
+          {name: 't2', args: {b: 2}},
+          {name: 't1', args: {a: 1}},
+        ],
+        expected: [
+          {name: 't1', args: {x: 99}},
+          {name: 't2', args: {y: 100}},
+        ],
+        score: 1.0,
+      },
+      {
+        name: 'ANY_ORDER with a missing tool fails',
+        matchType: ToolTrajectoryMatchType.ANY_ORDER,
+        actual: [{name: 't1', args: {}}],
+        expected: [
+          {name: 't1', args: {}},
+          {name: 't2', args: {}},
+        ],
+        score: 0.0,
+      },
+    ];
+
+    it.each(cases)('compares names only: $name', (testCase) => {
+      const result = evaluatorFor(testCase.matchType, true).evaluateInvocations(
+        [invocation(...testCase.actual)],
+        [invocation(...testCase.expected)],
+      );
+
+      expect(result.overallScore).toBe(testCase.score);
+    });
+
+    it('still compares arguments when it is false', () => {
+      const result = evaluatorFor(
+        ToolTrajectoryMatchType.EXACT,
+        false,
+      ).evaluateInvocations(
+        [invocation({name: 't1', args: {a: 1}})],
+        [invocation({name: 't1', args: {a: 2}})],
+      );
+
+      expect(result.overallScore).toBe(0.0);
+    });
+
+    it('applies to each invocation on its own', () => {
+      const result = evaluatorFor(
+        ToolTrajectoryMatchType.EXACT,
+        true,
+      ).evaluateInvocations(
+        [
+          invocation({name: 't1', args: {a: 1}}),
+          invocation({name: 't1', args: {}}),
+        ],
+        [
+          invocation({name: 't1', args: {z: 99}}),
+          invocation({name: 't2', args: {}}),
+        ],
+      );
+
+      expect(result.overallScore).toBe(0.5);
+      expect(result.perInvocationResults[0].score).toBe(1.0);
+      expect(result.perInvocationResults[1].score).toBe(0.0);
+    });
+
+    it('is read from a criterion written as a config object', () => {
+      const criterion: BaseCriterion = JSON.parse(
+        '{"threshold": 0.5, "matchType": "EXACT", "ignore_args": true}',
+      );
+      const evaluator = new TrajectoryEvaluator({
+        evalMetric: {metricName: METRIC_NAME, criterion},
+      });
+
+      const result = evaluator.evaluateInvocations(
+        [invocation({name: 't1', args: {a: 1}})],
+        [invocation({name: 't1', args: {z: 999}})],
+      );
+
+      expect(result.overallScore).toBe(1.0);
+    });
+  });
+
+  describe('conversationScenario', () => {
+    it('scores the same whether a scenario is passed or omitted', () => {
+      const scenario: ConversationScenario = {
+        startingPrompt: 'I need to book a flight.',
+        conversationPlan: 'Book a one-way flight, then rent a car.',
+      };
+      const actual = [invocation({name: 't1', args: {a: 1}})];
+      const expected = [invocation({name: 't1', args: {a: 1}})];
+
+      const withScenario = exactEvaluator().evaluateInvocations(
+        actual,
+        expected,
+        scenario,
+      );
+      const withoutScenario = exactEvaluator().evaluateInvocations(
+        actual,
+        expected,
+      );
+
+      expect(withScenario).toEqual(withoutScenario);
     });
   });
 

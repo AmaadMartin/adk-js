@@ -7,18 +7,22 @@
 import type {FunctionCall} from '@google/genai';
 import {isEqual} from 'lodash-es';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {getAllToolCalls, type Invocation} from './eval_case.js';
+import {
+  getAllToolCalls,
+  type ConversationScenario,
+  type Invocation,
+} from './eval_case.js';
 import {
   getMetricThreshold,
-  normalizeToolTrajectoryMatchType,
+  parseToolTrajectoryCriterion,
   ToolTrajectoryMatchType,
-  type BaseCriterion,
   type EvalMetric,
-  type ToolTrajectoryCriterion,
+  type ParsedToolTrajectoryCriterion,
 } from './eval_metrics.js';
 import {
   EvalStatus,
   validateInvocationLengths,
+  type CriterionType,
   type EvaluationResult,
   type Evaluator,
   type PerInvocationResult,
@@ -28,7 +32,7 @@ import {
  * Options for {@link TrajectoryEvaluator}.
  *
  * Supply exactly one of the two: a plain threshold, or the metric the
- * evaluator reads its threshold and match type from.
+ * evaluator reads its criterion from.
  */
 export interface TrajectoryEvaluatorOptions {
   /** Minimum score at which the metric passes. Range [0, 1]. */
@@ -37,6 +41,12 @@ export interface TrajectoryEvaluatorOptions {
   /** A metric parsed from an eval config. */
   evalMetric?: EvalMetric;
 }
+
+/** Whether two tool calls count as the same call. */
+export type ToolCallEquality = (
+  actual: FunctionCall,
+  expected: FunctionCall,
+) => boolean;
 
 /**
  * Two tool calls are equal when their name and arguments are equal.
@@ -51,14 +61,28 @@ function toolCallsEqual(actual: FunctionCall, expected: FunctionCall): boolean {
   );
 }
 
-/** Whether both trajectories hold the same calls in the same order. */
+/** Two tool calls are equal when their names are equal. */
+function toolCallNamesEqual(
+  actual: FunctionCall,
+  expected: FunctionCall,
+): boolean {
+  return actual.name === expected.name;
+}
+
+/**
+ * Whether both trajectories hold the same calls in the same order.
+ *
+ * `equals` decides when two calls are the same call, and compares names and
+ * arguments when the caller names none.
+ */
 export function areToolCallsExactMatch(
   actual: FunctionCall[],
   expected: FunctionCall[],
+  equals: ToolCallEquality = toolCallsEqual,
 ): boolean {
   return (
     actual.length === expected.length &&
-    actual.every((call, index) => toolCallsEqual(call, expected[index]))
+    actual.every((call, index) => equals(call, expected[index]))
   );
 }
 
@@ -67,14 +91,18 @@ export function areToolCallsExactMatch(
  *
  * Extra actual calls between the expected ones are tolerated, and an empty
  * expected trajectory matches anything.
+ *
+ * `equals` decides when two calls are the same call, and compares names and
+ * arguments when the caller names none.
  */
 export function areToolCallsInOrderMatch(
   actual: FunctionCall[],
   expected: FunctionCall[],
+  equals: ToolCallEquality = toolCallsEqual,
 ): boolean {
   let matched = 0;
   for (const call of actual) {
-    if (matched < expected.length && toolCallsEqual(call, expected[matched])) {
+    if (matched < expected.length && equals(call, expected[matched])) {
       matched++;
     }
   }
@@ -87,16 +115,18 @@ export function areToolCallsInOrderMatch(
  *
  * A matched call is consumed, so an expected call that repeats needs the
  * actual trajectory to hold it as many times.
+ *
+ * `equals` decides when two calls are the same call, and compares names and
+ * arguments when the caller names none.
  */
 export function areToolCallsAnyOrderMatch(
   actual: FunctionCall[],
   expected: FunctionCall[],
+  equals: ToolCallEquality = toolCallsEqual,
 ): boolean {
   const remaining = [...actual];
   for (const call of expected) {
-    const index = remaining.findIndex((candidate) =>
-      toolCallsEqual(candidate, call),
-    );
+    const index = remaining.findIndex((candidate) => equals(candidate, call));
     if (index === -1) {
       return false;
     }
@@ -110,6 +140,7 @@ export function areToolCallsAnyOrderMatch(
 type ToolCallMatcher = (
   actual: FunctionCall[],
   expected: FunctionCall[],
+  equals: ToolCallEquality,
 ) => boolean;
 
 const TOOL_CALL_MATCHERS: Record<ToolTrajectoryMatchType, ToolCallMatcher> = {
@@ -122,25 +153,6 @@ const TOOL_CALL_MATCHERS: Record<ToolTrajectoryMatchType, ToolCallMatcher> = {
 type ScoredInvocationResult = PerInvocationResult & {score: number};
 
 /**
- * Returns the match type a criterion asks for, or `undefined` when the
- * criterion is not a usable {@link ToolTrajectoryCriterion}.
- *
- * A criterion parsed from a config file is untrusted, so its threshold is
- * checked at runtime as well.
- */
-function resolveCriterionMatchType(
-  criterion: BaseCriterion | ToolTrajectoryCriterion,
-): ToolTrajectoryMatchType | undefined {
-  if (!Number.isFinite(criterion.threshold)) {
-    return undefined;
-  }
-
-  return normalizeToolTrajectoryMatchType(
-    'matchType' in criterion ? criterion.matchType : undefined,
-  );
-}
-
-/**
  * Scores an agent's tool use trajectory against a golden one.
  *
  * An invocation scores 1.0 when its tool calls match the expected calls under
@@ -148,8 +160,16 @@ function resolveCriterionMatchType(
  * over the invocations, and a score at or above the threshold passes.
  */
 export class TrajectoryEvaluator implements Evaluator {
+  /** The criterion type a metric must carry for this evaluator to read it. */
+  static readonly criterionType: CriterionType<ParsedToolTrajectoryCriterion> =
+    {
+      name: 'ToolTrajectoryCriterion',
+      validate: parseToolTrajectoryCriterion,
+    };
+
   private readonly threshold: number;
   private readonly matches: ToolCallMatcher;
+  private readonly equals: ToolCallEquality;
 
   /**
    * @throws {InputValidationError} When both `threshold` and `evalMetric` are
@@ -165,19 +185,10 @@ export class TrajectoryEvaluator implements Evaluator {
       );
     }
 
-    let matchType = ToolTrajectoryMatchType.EXACT;
+    let criterion: ParsedToolTrajectoryCriterion | undefined;
     if (evalMetric?.criterion !== undefined) {
-      const criterionMatchType = resolveCriterionMatchType(
-        evalMetric.criterion,
-      );
-      if (criterionMatchType === undefined) {
-        throw new InputValidationError(
-          `\`${evalMetric.metricName}\` metric expects a criterion of type` +
-            ' `ToolTrajectoryCriterion`.',
-        );
-      }
-      this.threshold = evalMetric.criterion.threshold;
-      matchType = criterionMatchType;
+      criterion = validateCriterion(evalMetric);
+      this.threshold = criterion.threshold;
     } else if (evalMetric !== undefined) {
       this.threshold = getMetricThreshold(evalMetric);
     } else if (threshold !== undefined) {
@@ -188,14 +199,18 @@ export class TrajectoryEvaluator implements Evaluator {
       );
     }
 
-    this.matches = TOOL_CALL_MATCHERS[matchType];
+    this.matches =
+      TOOL_CALL_MATCHERS[criterion?.matchType ?? ToolTrajectoryMatchType.EXACT];
+    this.equals = criterion?.ignoreArgs ? toolCallNamesEqual : toolCallsEqual;
   }
 
   /**
    * Scores each actual invocation against its expected counterpart.
    *
    * Scoring an empty list evaluates nothing: the result carries no overall
-   * score and the status {@link EvalStatus.NOT_EVALUATED}.
+   * score and the status {@link EvalStatus.NOT_EVALUATED}. The conversation
+   * scenario is not read, because this metric scores each invocation on its
+   * own.
    *
    * @throws {InputValidationError} When `expectedInvocations` is absent, or
    *   when the two lists have different lengths.
@@ -203,6 +218,7 @@ export class TrajectoryEvaluator implements Evaluator {
   evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
+    _conversationScenario?: ConversationScenario,
   ): EvaluationResult {
     if (expectedInvocations === undefined) {
       throw new InputValidationError(
@@ -254,6 +270,7 @@ export class TrajectoryEvaluator implements Evaluator {
     return this.matches(
       getAllToolCalls(actualInvocation.intermediateData),
       getAllToolCalls(expectedInvocation.intermediateData),
+      this.equals,
     )
       ? 1.0
       : 0.0;
@@ -261,5 +278,32 @@ export class TrajectoryEvaluator implements Evaluator {
 
   private getEvalStatus(score: number): EvalStatus {
     return score >= this.threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
+  }
+}
+
+/**
+ * Returns the criterion a metric carries, as the type this evaluator declares.
+ *
+ * The reason the criterion was rejected is appended to the message, and the
+ * rejection itself is chained as the cause. Only the message of the rejection
+ * is read: `formatError` would unwrap the cause too, and the schema error
+ * under a criterion rejection renders as its whole issue list.
+ *
+ * @throws {InputValidationError} Naming the metric, when the criterion is not
+ *   of that type.
+ */
+function validateCriterion(
+  evalMetric: EvalMetric,
+): ParsedToolTrajectoryCriterion {
+  const criterionType = TrajectoryEvaluator.criterionType;
+  try {
+    return criterionType.validate(evalMetric.criterion);
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new InputValidationError(
+      `\`${evalMetric.metricName}\` metric expects a criterion of type` +
+        ` \`${criterionType.name}\`. ${reason}`,
+      {cause: error},
+    );
   }
 }

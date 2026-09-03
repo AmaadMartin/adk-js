@@ -342,6 +342,7 @@ export {
 } from './evaluation/constants.js';
 export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
 export type {
+  ConversationScenario,
   EvalCase,
   IntermediateData,
   IntermediateDataType,
@@ -404,6 +405,7 @@ export type {
   MetricInfo,
   MetricInfoProvider,
   MetricValueInfo,
+  ParsedToolTrajectoryCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
   Threshold,
@@ -441,6 +443,7 @@ export type {
   EvalRow,
 } from './evaluation/evaluation_generator.js';
 export type {
+  CriterionType,
   EvaluationResult,
   Evaluator,
   PerInvocationResult,
