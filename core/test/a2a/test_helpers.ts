@@ -160,7 +160,13 @@ export function recordingCardFetch(card: AgentCard = peerAgentCard()): {
 } {
   const headers: Array<Record<string, string>> = [];
   const fetchImpl: typeof fetch = async (_input, init) => {
-    headers.push(Object.fromEntries(new Headers(init?.headers).entries()));
+    const sent: Record<string, string> = {};
+    // `Headers` is only iterable under `DOM.Iterable`, which the root tsconfig
+    // does not include; `forEach` is in plain `DOM`.
+    new Headers(init?.headers).forEach((value, key) => {
+      sent[key] = value;
+    });
+    headers.push(sent);
     return new Response(JSON.stringify(card), {
       status: 200,
       headers: {'content-type': 'application/json'},
