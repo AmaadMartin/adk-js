@@ -88,8 +88,6 @@ Two calls throw instead:
 
 ```ts
 import {
-  createThread,
-  resetThreadFactory,
   setThreadFactory,
   type Thread,
   type ThreadFactory,
@@ -110,14 +108,17 @@ const factory: ThreadFactory = {
   },
 };
 
-setThreadFactory(factory);
 // Every later createThread call now goes to the factory.
-resetThreadFactory();
+setThreadFactory(factory);
 ```
 
 `createThread` returns whatever the factory returned, unchanged. Threads that
 already exist keep the implementation they were created with. A factory must
 return an unstarted `Thread`; the module does not check this.
+
+Install the factory once, during host startup. There is no public uninstall:
+`resetThreadFactory` exists in the module for tests and is deliberately not on
+the public barrel, matching `resetLogger`.
 
 There is no `daemon` flag. A pending promise does not hold the Node event loop
 open, so the flag would have no reader.

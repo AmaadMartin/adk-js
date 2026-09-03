@@ -218,11 +218,7 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
-export {
-  createThread,
-  resetThreadFactory,
-  setThreadFactory,
-} from './platform/thread.js';
+export {createThread, setThreadFactory} from './platform/thread.js';
 export type {Thread, ThreadFactory, ThreadTarget} from './platform/thread.js';
 export {
   GLOBAL_SCOPE_KEY,

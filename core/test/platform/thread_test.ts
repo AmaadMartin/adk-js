@@ -7,7 +7,6 @@
 import {
   createThread,
   getLogger,
-  resetThreadFactory,
   setLogger,
   setThreadFactory,
   type Logger,
@@ -16,6 +15,7 @@ import {
   type ThreadTarget,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {resetThreadFactory} from '../../src/platform/thread.js';
 
 /** A logger that keeps every `error` call so a test can assert on it. */
 class RecordingLogger implements Logger {
