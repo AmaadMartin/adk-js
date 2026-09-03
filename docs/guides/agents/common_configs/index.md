@@ -68,12 +68,14 @@ A reference only names an object. A configuration document cannot pass
 constructor arguments. To use a configured object, build it in code and name its
 export.
 
-A name cannot reach a Node built-in. `node:child_process#exec` and the bare
-`child_process#exec` are both refused, so a configuration file cannot run a
-shell command through this path.
+A name cannot reach a Node built-in: `node:child_process#exec` and the bare
+`child_process#exec` are both refused. A name also cannot carry a URL scheme,
+which stops a `data:` URL from supplying the module body itself.
 
-Resolution imports the named module, which runs that module's top-level code.
-Trust a name exactly as far as you trust the configuration file it came from.
+Neither refusal makes a name safe. Resolution imports the named module, which
+runs that module's top-level code, so a name pointing at a file on disk runs
+whatever that file does. Trust a name exactly as far as you trust the
+configuration file it came from.
 
 ## Failures
 

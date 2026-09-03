@@ -54,28 +54,23 @@ export interface AgentRefConfig {
 const CODE_CONFIG_SHAPE_MESSAGE =
   'A code reference must be an object with a `name` and no other key.';
 
-/** Reported when an agent reference does not have the shape of one. */
-const AGENT_REF_SHAPE_MESSAGE =
-  'An agent reference must be an object with `code` or `configPath` and no ' +
-  'other key.';
-
-/** Reported when an agent reference names both of its two sources. */
-const BOTH_SOURCES_MESSAGE =
-  'An agent reference sets both `code` and `configPath`; exactly one of ' +
-  '`code` and `configPath` must be set.';
-
-/** Reported when an agent reference names neither of its two sources. */
-const NO_SOURCE_MESSAGE =
-  'An agent reference sets neither `code` nor `configPath`; exactly one of ' +
-  '`code` and `configPath` must be set.';
-
 const codeConfigSchema = z.strictObject({name: z.string().min(1)});
 
 /**
- * Accepts the `config_path` spelling adk-python writes, and treats an explicit
- * `null` as "not provided" the way `Optional[str] = None` does. The alias
- * applies only when `configPath` is absent, so a document carrying both
- * spellings keeps `config_path` and fails as an unknown key.
+ * An agent reference source. An explicit `null` counts as "not provided", the
+ * way `Optional[str] = None` does, because a YAML key written with no value
+ * parses to `null`.
+ */
+const agentRefSource = z
+  .string()
+  .min(1)
+  .nullish()
+  .transform((value) => value ?? undefined);
+
+/**
+ * Accepts the `config_path` spelling adk-python writes. The alias applies only
+ * when `configPath` is absent, so a document carrying both spellings keeps
+ * `config_path` and fails as an unknown key.
  */
 function normalizeAgentRefKeys(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -86,20 +81,12 @@ function normalizeAgentRefKeys(raw: unknown): unknown {
     normalized['configPath'] = normalized['config_path'];
     delete normalized['config_path'];
   }
-  for (const field of ['code', 'configPath']) {
-    if (normalized[field] === null) {
-      delete normalized[field];
-    }
-  }
   return normalized;
 }
 
 const agentRefConfigSchema = z.preprocess(
   normalizeAgentRefKeys,
-  z.strictObject({
-    configPath: z.string().min(1).optional(),
-    code: z.string().min(1).optional(),
-  }),
+  z.strictObject({configPath: agentRefSource, code: agentRefSource}),
 );
 
 /**
@@ -146,12 +133,23 @@ export function parseCodeConfig(raw: unknown): CodeConfig {
  *   `AgentRefConfig`.
  */
 export function parseAgentRefConfig(raw: unknown): AgentRefConfig {
-  const ref = parseConfig(agentRefConfigSchema, raw, AGENT_REF_SHAPE_MESSAGE);
+  const ref = parseConfig(
+    agentRefConfigSchema,
+    raw,
+    'An agent reference must be an object with `code` or `configPath` and ' +
+      'no other key.',
+  );
   if (ref.code !== undefined && ref.configPath !== undefined) {
-    throw new InputValidationError(BOTH_SOURCES_MESSAGE);
+    throw new InputValidationError(
+      'An agent reference sets both `code` and `configPath`; exactly one of ' +
+        '`code` and `configPath` must be set.',
+    );
   }
   if (ref.code === undefined && ref.configPath === undefined) {
-    throw new InputValidationError(NO_SOURCE_MESSAGE);
+    throw new InputValidationError(
+      'An agent reference sets neither `code` nor `configPath`; exactly one ' +
+        'of `code` and `configPath` must be set.',
+    );
   }
   return ref;
 }

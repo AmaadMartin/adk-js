@@ -112,6 +112,28 @@ describe('resolveFullyQualifiedName', () => {
     );
   });
 
+  it('refuses a data: URL, which carries its own module body', async () => {
+    const dataUrl = 'data:text/javascript,export const run = () => 1;';
+    const error = await rejectionOf(
+      resolveFullyQualifiedName(`${dataUrl}#run`),
+    );
+
+    expect(error).toBeInstanceOf(InputValidationError);
+    expect(error).toHaveProperty(
+      'cause.message',
+      `Module specifier "${dataUrl}" uses the "data:" URL scheme. A ` +
+        'configuration file can name a file path or a package, nothing else.',
+    );
+  });
+
+  it('refuses an http: URL specifier', async () => {
+    await expect(
+      resolveFullyQualifiedName('https://example.test/evil.js#run'),
+    ).rejects.toThrow(
+      'Invalid fully qualified name: https://example.test/evil.js#run',
+    );
+  });
+
   it('keeps the import failure as the cause of an unknown module', async () => {
     const error = await rejectionOf(
       resolveFullyQualifiedName(
