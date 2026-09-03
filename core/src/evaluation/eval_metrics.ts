@@ -5,9 +5,14 @@
  */
 
 import type {GenerateContentConfig} from '@google/genai';
+import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
+import {evalModel, optionalField, type EvalModel} from './common.js';
 import type {Invocation} from './eval_case.js';
 import type {Rubric, RubricScore} from './eval_rubrics.js';
+import {rubricModel, rubricScoreModel} from './eval_rubrics.js';
+
+export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 
 /** The verdict for one metric, or for a whole eval case. */
 export enum EvalStatus {
@@ -38,6 +43,9 @@ export enum PrebuiltMetrics {
   RUBRIC_BASED_MULTI_TURN_TRAJECTORY_QUALITY_V1 = 'rubric_based_multi_turn_trajectory_quality_v1',
 }
 
+/** The value a metric's score is compared against to decide pass from fail. */
+export type Threshold = number;
+
 /** The model a judge-backed metric prompts when no other model is named. */
 export const DEFAULT_JUDGE_MODEL = 'gemini-2.5-flash';
 
@@ -63,7 +71,13 @@ export interface JudgeModelOptions {
   /** The configuration for the judge model. */
   judgeModelConfig?: GenerateContentConfig;
 
-  /** Defaults to {@link DEFAULT_JUDGE_NUM_SAMPLES}. */
+  /**
+   * How many times to sample the model for one invocation evaluation.
+   *
+   * Models carry a degree of unreliability, so the same data is sampled
+   * repeatedly and the samples are aggregated. Defaults to
+   * {@link DEFAULT_JUDGE_NUM_SAMPLES}.
+   */
   numSamples?: number;
 
   /**
@@ -126,13 +140,48 @@ export function resolveJudgeModelOptions(
 }
 
 /**
+ * Validates a {@link JudgeModelOptions} payload.
+ *
+ * `judgeModelConfig` passes through by reference: it holds a `@google/genai`
+ * object this schema does not describe, matching adk-python's
+ * `arbitrary_types_allowed`.
+ */
+const judgeModelOptionsModel: EvalModel<ResolvedJudgeModelOptions> = evalModel(
+  {
+    judgeModel: z.string().default(DEFAULT_JUDGE_MODEL),
+    judgeModelConfig: z.custom<GenerateContentConfig>().optional(),
+    numSamples: z.number().int().default(DEFAULT_JUDGE_NUM_SAMPLES),
+    parallelismLimit: z
+      .number()
+      .int()
+      .min(MIN_JUDGE_PARALLELISM_LIMIT)
+      .default(DEFAULT_JUDGE_PARALLELISM_LIMIT),
+  },
+  {name: 'JudgeModelOptions'},
+);
+
+/**
+ * Validates a judge model options payload and applies every default.
+ *
+ * @throws {InputValidationError} When the payload names an option a judge
+ *   cannot honour, such as a `parallelismLimit` below 1.
+ */
+export function parseJudgeModelOptions(
+  raw: unknown,
+): ResolvedJudgeModelOptions {
+  return judgeModelOptionsModel.parse(raw);
+}
+
+/**
  * The criterion a metric is judged against.
  *
- * Metrics that need more than a threshold extend this, so a criterion read
- * from a config file can carry fields this interface does not name.
+ * Metrics that need more than a threshold extend this. A criterion read from a
+ * config file keeps the fields this interface does not name, so an evaluator
+ * can read its own criterion out of a value validated as a base one.
  */
 export interface BaseCriterion {
-  threshold: number;
+  /** The threshold to be used by the metric. */
+  threshold: Threshold;
 
   /**
    * Whether to judge the intermediate text an agent emits before its tool
@@ -144,11 +193,13 @@ export interface BaseCriterion {
 
 /** Criterion for a metric that asks a judge model to score a response. */
 export interface LlmAsAJudgeCriterion extends BaseCriterion {
+  /** Options for the judge model. */
   judgeModelOptions?: JudgeModelOptions;
 }
 
 /** Criterion for a metric that scores a response against rubrics. */
 export interface RubricsBasedCriterion extends BaseCriterion {
+  /** Options for the judge model. */
   judgeModelOptions?: JudgeModelOptions;
 
   /**
@@ -161,6 +212,7 @@ export interface RubricsBasedCriterion extends BaseCriterion {
 
 /** Criterion for scoring an agent response for hallucinations. */
 export interface HallucinationsCriterion extends BaseCriterion {
+  /** Options for the judge model. */
   judgeModelOptions?: JudgeModelOptions;
 
   /**
@@ -315,6 +367,7 @@ export interface MetricInfo {
 
 /** Implemented by anything that describes a metric to the eval framework. */
 export interface MetricInfoProvider {
+  /** Returns the {@link MetricInfo} for the metric this provider owns. */
   getMetricInfo(): MetricInfo;
 }
 
@@ -347,6 +400,240 @@ export function normalizeToolTrajectoryMatchType(
   );
 }
 
+const matchTypeSchema = z
+  .unknown()
+  .optional()
+  .transform((value, ctx) => {
+    const matchType = normalizeToolTrajectoryMatchType(value);
+    if (matchType === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `Invalid tool trajectory match type: ${JSON.stringify(value)}`,
+      });
+      return z.NEVER;
+    }
+    return matchType;
+  });
+
+const baseCriterionShape = {
+  threshold: z.number(),
+  includeIntermediateResponsesInFinal: z.boolean().default(false),
+};
+
+/**
+ * A criterion keeps the keys its own shape does not name.
+ *
+ * adk-python declares `BaseCriterion` with `extra="allow"` rather than
+ * inheriting `EvalBaseModel`, because an eval config holds one criterion
+ * literal whose metric-specific fields must survive being read as a base
+ * criterion.
+ */
+const CRITERION_OPTIONS = {extraKeys: 'allow'} as const;
+
+/** Validates a {@link BaseCriterion} payload. */
+const baseCriterionModel: EvalModel<BaseCriterion> = evalModel(
+  baseCriterionShape,
+  {...CRITERION_OPTIONS, name: 'BaseCriterion'},
+);
+
+const judgeModelOptionsField = judgeModelOptionsModel.schema.prefault({});
+
+const llmAsAJudgeCriterionShape = {
+  ...baseCriterionShape,
+  judgeModelOptions: judgeModelOptionsField,
+};
+
+/** Validates an {@link LlmAsAJudgeCriterion} payload. */
+const llmAsAJudgeCriterionModel: EvalModel<LlmAsAJudgeCriterion> = evalModel(
+  llmAsAJudgeCriterionShape,
+  {
+    ...CRITERION_OPTIONS,
+    name: 'LlmAsAJudgeCriterion',
+  },
+);
+
+/** Validates a {@link RubricsBasedCriterion} payload. */
+const rubricsBasedCriterionModel: EvalModel<RubricsBasedCriterion> = evalModel(
+  {
+    ...llmAsAJudgeCriterionShape,
+    rubrics: z.array(rubricModel.schema).default(() => []),
+  },
+  {...CRITERION_OPTIONS, name: 'RubricsBasedCriterion'},
+);
+
+/** Validates a {@link HallucinationsCriterion} payload. */
+const hallucinationsCriterionModel: EvalModel<HallucinationsCriterion> =
+  evalModel(
+    {
+      ...llmAsAJudgeCriterionShape,
+      evaluateIntermediateNlResponses: z.boolean().default(false),
+    },
+    {...CRITERION_OPTIONS, name: 'HallucinationsCriterion'},
+  );
+
+/** Validates an {@link LlmBackedUserSimulatorCriterion} payload. */
+const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimulatorCriterion> =
+  evalModel(
+    {
+      ...llmAsAJudgeCriterionShape,
+      stopSignal: z.string().default(DEFAULT_USER_SIMULATOR_STOP_SIGNAL),
+    },
+    {...CRITERION_OPTIONS, name: 'LlmBackedUserSimulatorCriterion'},
+  );
+
+/** Validates a {@link ToolTrajectoryCriterion} payload. */
+const toolTrajectoryCriterionModel: EvalModel<ToolTrajectoryCriterion> =
+  evalModel(
+    {
+      ...baseCriterionShape,
+      matchType: matchTypeSchema,
+      ignoreArgs: z.boolean().default(false),
+    },
+    {...CRITERION_OPTIONS, name: 'ToolTrajectoryCriterion'},
+  );
+
+/**
+ * Validates a base criterion payload, keeping any metric-specific keys.
+ *
+ * @throws {InputValidationError} When the payload names no threshold.
+ */
+export function parseBaseCriterion(raw: unknown): BaseCriterion {
+  return baseCriterionModel.parse(raw);
+}
+
+/**
+ * Validates a judge-backed criterion payload.
+ *
+ * @throws {InputValidationError} When the payload is not a valid criterion.
+ */
+export function parseLlmAsAJudgeCriterion(raw: unknown): LlmAsAJudgeCriterion {
+  return llmAsAJudgeCriterionModel.parse(raw);
+}
+
+/**
+ * Validates a rubric-backed criterion payload.
+ *
+ * @throws {InputValidationError} When the payload is not a valid criterion, or
+ *   one of its rubrics is invalid.
+ */
+export function parseRubricsBasedCriterion(
+  raw: unknown,
+): RubricsBasedCriterion {
+  return rubricsBasedCriterionModel.parse(raw);
+}
+
+/**
+ * Validates a hallucinations criterion payload.
+ *
+ * @throws {InputValidationError} When the payload is not a valid criterion.
+ */
+export function parseHallucinationsCriterion(
+  raw: unknown,
+): HallucinationsCriterion {
+  return hallucinationsCriterionModel.parse(raw);
+}
+
+/**
+ * Validates a user simulator criterion payload.
+ *
+ * @throws {InputValidationError} When the payload is not a valid criterion.
+ */
+export function parseLlmBackedUserSimulatorCriterion(
+  raw: unknown,
+): LlmBackedUserSimulatorCriterion {
+  return llmBackedUserSimulatorCriterionModel.parse(raw);
+}
+
+/**
+ * Validates a tool trajectory criterion payload.
+ *
+ * @throws {InputValidationError} When the payload names a match type
+ *   {@link normalizeToolTrajectoryMatchType} does not resolve.
+ */
+export function parseToolTrajectoryCriterion(
+  raw: unknown,
+): ToolTrajectoryCriterion {
+  return toolTrajectoryCriterionModel.parse(raw);
+}
+
+const evalMetricShape = {
+  metricName: z.string(),
+  threshold: optionalField(z.number()),
+  criterion: optionalField(baseCriterionModel.schema),
+  customFunctionPath: optionalField(z.string()),
+};
+
+/** Validates an {@link EvalMetric} payload. */
+const evalMetricModel: EvalModel<EvalMetric> = evalModel(evalMetricShape, {
+  name: 'EvalMetric',
+});
+
+/**
+ * Validates an eval metric payload.
+ *
+ * The result never carries a config-declared custom function path, whatever
+ * the payload named. See {@link setConfigCustomFunctionPath}.
+ *
+ * @throws {InputValidationError} When the payload names an unrecognized key or
+ *   omits `metricName`.
+ */
+export function parseEvalMetric(raw: unknown): EvalMetric {
+  return evalMetricModel.parse(raw);
+}
+
+/** Validates an {@link EvalMetricResultDetails} payload. */
+const evalMetricResultDetailsModel: EvalModel<EvalMetricResultDetails> =
+  evalModel(
+    {rubricScores: optionalField(z.array(rubricScoreModel.schema))},
+    {name: 'EvalMetricResultDetails'},
+  );
+
+/** Validates an {@link EvalMetricResult} payload. */
+const evalMetricResultModel: EvalModel<EvalMetricResult> = evalModel(
+  {
+    ...evalMetricShape,
+    score: optionalField(z.number()),
+    evalStatus: z.enum(EvalStatus),
+    details: evalMetricResultDetailsModel.schema.prefault({}),
+  },
+  {name: 'EvalMetricResult'},
+);
+
+/**
+ * Validates an eval metric result payload.
+ *
+ * @throws {InputValidationError} When the payload omits `evalStatus`, or names
+ *   an unrecognized key.
+ */
+export function parseEvalMetricResult(raw: unknown): EvalMetricResult {
+  return evalMetricResultModel.parse(raw);
+}
+
+const configCustomFunctionPaths = new WeakMap<EvalMetric, string>();
+
+/**
+ * Records the custom function path an eval config declared for this metric.
+ *
+ * The path is kept off the metric's own shape so a metric parsed from an
+ * inbound payload cannot carry one: the public {@link EvalMetric.customFunctionPath}
+ * field is settable by whoever built that payload, this is not. It is keyed by
+ * the metric object rather than by metric name, so two apps in one process can
+ * declare the same metric name and each still resolves its own function.
+ */
+export function setConfigCustomFunctionPath(
+  evalMetric: EvalMetric,
+  customFunctionPath: string,
+): void {
+  configCustomFunctionPaths.set(evalMetric, customFunctionPath);
+}
+
+/** Returns the path an eval config declared for this metric, if any. */
+export function getConfigCustomFunctionPath(
+  evalMetric: EvalMetric,
+): string | undefined {
+  return configCustomFunctionPaths.get(evalMetric);
+}
+
 /**
  * Returns the threshold configured for a metric.
  *
@@ -366,4 +653,59 @@ export function getMetricThreshold(evalMetric: EvalMetric): number {
   throw new InputValidationError(
     `Evaluation metric '${evalMetric.metricName}' requires a threshold.`,
   );
+}
+
+/** Validates an {@link Interval} payload. */
+const intervalModel: EvalModel<Interval> = evalModel(
+  {
+    minValue: z.number(),
+    openAtMin: z.boolean().default(false),
+    maxValue: z.number(),
+    openAtMax: z.boolean().default(false),
+  },
+  {name: 'Interval'},
+);
+
+/** Validates a {@link MetricValueInfo} payload. */
+const metricValueInfoModel: EvalModel<MetricValueInfo> = evalModel(
+  {interval: optionalField(intervalModel.schema)},
+  {name: 'MetricValueInfo'},
+);
+
+/** Validates a {@link MetricInfo} payload. */
+const metricInfoModel: EvalModel<MetricInfo> = evalModel(
+  {
+    metricName: z.string(),
+    description: optionalField(z.string()),
+    metricValueInfo: metricValueInfoModel.schema,
+  },
+  {name: 'MetricInfo'},
+);
+
+/**
+ * Validates an interval payload.
+ *
+ * @throws {InputValidationError} When the payload omits an end of the interval.
+ */
+export function parseInterval(raw: unknown): Interval {
+  return intervalModel.parse(raw);
+}
+
+/**
+ * Validates a metric value info payload.
+ *
+ * @throws {InputValidationError} When the payload names an invalid interval.
+ */
+export function parseMetricValueInfo(raw: unknown): MetricValueInfo {
+  return metricValueInfoModel.parse(raw);
+}
+
+/**
+ * Validates a metric info payload.
+ *
+ * @throws {InputValidationError} When the payload omits `metricName` or
+ *   `metricValueInfo`.
+ */
+export function parseMetricInfo(raw: unknown): MetricInfo {
+  return metricInfoModel.parse(raw);
 }

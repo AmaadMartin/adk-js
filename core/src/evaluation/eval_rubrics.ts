@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {z} from 'zod';
+import {evalModel, optionalField, type EvalModel} from './common.js';
+
 /**
  * The content of a rubric.
  */
@@ -48,4 +51,50 @@ export interface RubricScore {
 
   /** Absent when the assessment did not happen. */
   score?: number;
+}
+
+/** Validates a {@link RubricContent} payload. */
+const rubricContentModel: EvalModel<RubricContent> = evalModel(
+  {textProperty: optionalField(z.string())},
+  {name: 'RubricContent'},
+);
+
+/** Validates a {@link Rubric} payload. */
+export const rubricModel: EvalModel<Rubric> = evalModel(
+  {
+    rubricId: z.string(),
+    rubricContent: rubricContentModel.schema,
+    description: optionalField(z.string()),
+    type: optionalField(z.string()),
+  },
+  {name: 'Rubric'},
+);
+
+/** Validates a {@link RubricScore} payload. */
+export const rubricScoreModel: EvalModel<RubricScore> = evalModel(
+  {
+    rubricId: z.string(),
+    rationale: optionalField(z.string()),
+    score: optionalField(z.number()),
+  },
+  {name: 'RubricScore'},
+);
+
+/**
+ * Validates a rubric payload written in either the adk-python spelling
+ * (`rubric_id`) or the adk-js one (`rubricId`).
+ *
+ * @throws {InputValidationError} When the payload is not a valid rubric.
+ */
+export function parseRubric(raw: unknown): Rubric {
+  return rubricModel.parse(raw);
+}
+
+/**
+ * Validates a rubric score payload.
+ *
+ * @throws {InputValidationError} When the payload is not a valid rubric score.
+ */
+export function parseRubricScore(raw: unknown): RubricScore {
+  return rubricScoreModel.parse(raw);
 }

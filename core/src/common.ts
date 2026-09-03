@@ -223,7 +223,10 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {
   LlmCallsLimitExceededError,
   isLlmCallsLimitExceededError,
@@ -309,9 +312,23 @@ export {
   EvalStatus,
   PrebuiltMetrics,
   ToolTrajectoryMatchType,
+  getConfigCustomFunctionPath,
   getMetricThreshold,
   normalizeToolTrajectoryMatchType,
+  parseBaseCriterion,
+  parseEvalMetric,
+  parseEvalMetricResult,
+  parseHallucinationsCriterion,
+  parseInterval,
+  parseJudgeModelOptions,
+  parseLlmAsAJudgeCriterion,
+  parseLlmBackedUserSimulatorCriterion,
+  parseMetricInfo,
+  parseMetricValueInfo,
+  parseRubricsBasedCriterion,
+  parseToolTrajectoryCriterion,
   resolveJudgeModelOptions,
+  setConfigCustomFunctionPath,
 } from './evaluation/eval_metrics.js';
 export type {
   BaseCriterion,
@@ -330,9 +347,11 @@ export type {
   MetricValueInfo,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
+  Threshold,
   ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
 export type {EvalCaseResult} from './evaluation/eval_result.js';
+export {parseRubric, parseRubricScore} from './evaluation/eval_rubrics.js';
 export type {
   Rubric,
   RubricContent,
