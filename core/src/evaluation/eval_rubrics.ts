@@ -50,7 +50,7 @@ export interface RubricScore {
 }
 
 /** Validates a {@link RubricContent} payload. */
-export const rubricContentModel: EvalModel<RubricContent> = evalModel(
+const rubricContentModel: EvalModel<RubricContent> = evalModel(
   {textProperty: optionalField(z.string())},
   {name: 'RubricContent'},
 );

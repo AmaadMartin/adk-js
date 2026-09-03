@@ -37,15 +37,7 @@ const toCamelCaseKey = (key: string) =>
     letter.toUpperCase(),
   );
 
-/**
- * Converts a single camelCase key to its snake_case spelling.
- *
- * Each upper-case letter becomes an underscore followed by its lower-case
- * form, so `metricName1` becomes `metric_name1`. A digit does not start a new
- * segment, which differs from pydantic's `to_camel` inverse
- * (`metric_name_1`), so a field whose name ends in a digit segment needs an
- * explicit alias rather than this converter.
- */
+/** Converts a single camelCase key to its snake_case spelling. */
 export const toSnakeCaseKey = (key: string) =>
   key.replace(/[A-Z]/g, (g) => '_' + g.toLowerCase());
 

@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  evalModel,
-  isInputValidationError,
-  type InputValidationError,
-} from '@google/adk';
+import {isInputValidationError, type InputValidationError} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {z, ZodError} from 'zod';
+import {evalModel} from '../../src/evaluation/common.js';
 
 /** A value the schema must not describe, to prove it passes by reference. */
 interface Opaque {
@@ -79,18 +76,6 @@ describe('evalModel', () => {
       textProperty: 'a',
       surprise: 1,
     });
-  });
-
-  it('prefers an explicit alias over the derived snake_case one', () => {
-    const aliased = evalModel(
-      {metricName1: z.string()},
-      {name: 'Aliased', aliases: {metricName1: 'metric_name_1'}},
-    );
-
-    expect(aliased.parse({metric_name_1: 'a'})).toEqual({metricName1: 'a'});
-    expect(() => aliased.parse({metric_name1: 'a'})).toThrow(
-      'Unrecognized key: "metric_name1"',
-    );
   });
 
   it('passes a custom field through by reference', () => {

@@ -158,12 +158,6 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export {evalModel} from './evaluation/common.js';
-export type {
-  EvalModel,
-  EvalModelOptions,
-  ExtraKeysPolicy,
-} from './evaluation/common.js';
 export {
   EvalStatus,
   PrebuiltMetrics,
@@ -197,7 +191,6 @@ export type {
   LlmBackedUserSimulatorCriterion,
   MetricInfo,
   MetricInfoProvider,
-  MetricName,
   MetricValueInfo,
   Rubric,
   RubricContent,

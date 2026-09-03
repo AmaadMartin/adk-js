@@ -17,12 +17,6 @@ export interface EvalModelOptions {
   readonly name: string;
 
   /**
-   * Wire aliases for fields whose alias is not the snake_case form of the
-   * property name.
-   */
-  readonly aliases?: Readonly<Record<string, string>>;
-
-  /**
    * Whether an unrecognized key is an error. Defaults to `'forbid'`, matching
    * adk-python's `EvalBaseModel`. `'allow'` keeps the key, matching
    * `BaseCriterion`.
@@ -60,13 +54,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function propertiesByAlias(
-  shape: z.ZodRawShape,
-  aliases: Readonly<Record<string, string>>,
-): ReadonlyMap<string, string> {
+function propertiesByAlias(shape: z.ZodRawShape): ReadonlyMap<string, string> {
   const byAlias = new Map<string, string>();
   for (const property of Object.keys(shape)) {
-    const alias = aliases[property] ?? toSnakeCaseKey(property);
+    const alias = toSnakeCaseKey(property);
     if (alias !== property) {
       byAlias.set(alias, property);
     }
@@ -120,7 +111,7 @@ export function evalModel<Shape extends z.ZodRawShape>(
   shape: Shape,
   options: EvalModelOptions,
 ): EvalModel<z.infer<z.ZodObject<Shape>>> {
-  const propertyByAlias = propertiesByAlias(shape, options.aliases ?? {});
+  const propertyByAlias = propertiesByAlias(shape);
   const object =
     options.extraKeys === 'allow'
       ? z.looseObject(shape)

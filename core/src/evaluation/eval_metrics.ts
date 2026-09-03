@@ -43,9 +43,6 @@ export enum PrebuiltMetrics {
   RUBRIC_BASED_MULTI_TURN_TRAJECTORY_QUALITY_V1 = 'rubric_based_multi_turn_trajectory_quality_v1',
 }
 
-/** The name of a metric: a {@link PrebuiltMetrics} member or a custom name. */
-export type MetricName = string | PrebuiltMetrics;
-
 /** The value a metric's score is compared against to decide pass from fail. */
 export type Threshold = number;
 
@@ -88,7 +85,7 @@ export interface JudgeModelOptions {
  * object this schema does not describe, matching adk-python's
  * `arbitrary_types_allowed`.
  */
-export const judgeModelOptionsModel: EvalModel<JudgeModelOptions> = evalModel(
+const judgeModelOptionsModel: EvalModel<JudgeModelOptions> = evalModel(
   {
     judgeModel: z.string().default(DEFAULT_JUDGE_MODEL),
     judgeModelConfig: z.custom<GenerateContentConfig>().optional(),
@@ -271,7 +268,7 @@ const baseCriterionShape = {
 const CRITERION_OPTIONS = {extraKeys: 'allow'} as const;
 
 /** Validates a {@link BaseCriterion} payload. */
-export const baseCriterionModel: EvalModel<BaseCriterion> = evalModel(
+const baseCriterionModel: EvalModel<BaseCriterion> = evalModel(
   baseCriterionShape,
   {...CRITERION_OPTIONS, name: 'BaseCriterion'},
 );
@@ -284,24 +281,25 @@ const llmAsAJudgeCriterionShape = {
 };
 
 /** Validates an {@link LlmAsAJudgeCriterion} payload. */
-export const llmAsAJudgeCriterionModel: EvalModel<LlmAsAJudgeCriterion> =
-  evalModel(llmAsAJudgeCriterionShape, {
+const llmAsAJudgeCriterionModel: EvalModel<LlmAsAJudgeCriterion> = evalModel(
+  llmAsAJudgeCriterionShape,
+  {
     ...CRITERION_OPTIONS,
     name: 'LlmAsAJudgeCriterion',
-  });
+  },
+);
 
 /** Validates a {@link RubricsBasedCriterion} payload. */
-export const rubricsBasedCriterionModel: EvalModel<RubricsBasedCriterion> =
-  evalModel(
-    {
-      ...llmAsAJudgeCriterionShape,
-      rubrics: z.array(rubricModel.schema).default(() => []),
-    },
-    {...CRITERION_OPTIONS, name: 'RubricsBasedCriterion'},
-  );
+const rubricsBasedCriterionModel: EvalModel<RubricsBasedCriterion> = evalModel(
+  {
+    ...llmAsAJudgeCriterionShape,
+    rubrics: z.array(rubricModel.schema).default(() => []),
+  },
+  {...CRITERION_OPTIONS, name: 'RubricsBasedCriterion'},
+);
 
 /** Validates a {@link HallucinationsCriterion} payload. */
-export const hallucinationsCriterionModel: EvalModel<HallucinationsCriterion> =
+const hallucinationsCriterionModel: EvalModel<HallucinationsCriterion> =
   evalModel(
     {
       ...llmAsAJudgeCriterionShape,
@@ -311,7 +309,7 @@ export const hallucinationsCriterionModel: EvalModel<HallucinationsCriterion> =
   );
 
 /** Validates an {@link LlmBackedUserSimulatorCriterion} payload. */
-export const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimulatorCriterion> =
+const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimulatorCriterion> =
   evalModel(
     {
       ...llmAsAJudgeCriterionShape,
@@ -321,7 +319,7 @@ export const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimula
   );
 
 /** Validates a {@link ToolTrajectoryCriterion} payload. */
-export const toolTrajectoryCriterionModel: EvalModel<ToolTrajectoryCriterion> =
+const toolTrajectoryCriterionModel: EvalModel<ToolTrajectoryCriterion> =
   evalModel(
     {
       ...baseCriterionShape,
@@ -421,10 +419,9 @@ const evalMetricShape = {
 };
 
 /** Validates an {@link EvalMetric} payload. */
-export const evalMetricModel: EvalModel<EvalMetric> = evalModel(
-  evalMetricShape,
-  {name: 'EvalMetric'},
-);
+const evalMetricModel: EvalModel<EvalMetric> = evalModel(evalMetricShape, {
+  name: 'EvalMetric',
+});
 
 /**
  * Validates an eval metric payload.
@@ -446,7 +443,7 @@ export interface EvalMetricResultDetails {
 }
 
 /** Validates an {@link EvalMetricResultDetails} payload. */
-export const evalMetricResultDetailsModel: EvalModel<EvalMetricResultDetails> =
+const evalMetricResultDetailsModel: EvalModel<EvalMetricResultDetails> =
   evalModel(
     {rubricScores: optionalField(z.array(rubricScoreModel.schema))},
     {name: 'EvalMetricResultDetails'},
@@ -465,7 +462,7 @@ export interface EvalMetricResult extends EvalMetric {
 }
 
 /** Validates an {@link EvalMetricResult} payload. */
-export const evalMetricResultModel: EvalModel<EvalMetricResult> = evalModel(
+const evalMetricResultModel: EvalModel<EvalMetricResult> = evalModel(
   {
     ...evalMetricShape,
     score: optionalField(z.number()),
@@ -547,7 +544,7 @@ export interface Interval {
 }
 
 /** Validates an {@link Interval} payload. */
-export const intervalModel: EvalModel<Interval> = evalModel(
+const intervalModel: EvalModel<Interval> = evalModel(
   {
     minValue: z.number(),
     openAtMin: z.boolean().default(false),
@@ -564,7 +561,7 @@ export interface MetricValueInfo {
 }
 
 /** Validates a {@link MetricValueInfo} payload. */
-export const metricValueInfoModel: EvalModel<MetricValueInfo> = evalModel(
+const metricValueInfoModel: EvalModel<MetricValueInfo> = evalModel(
   {interval: optionalField(intervalModel.schema)},
   {name: 'MetricValueInfo'},
 );
@@ -582,7 +579,7 @@ export interface MetricInfo {
 }
 
 /** Validates a {@link MetricInfo} payload. */
-export const metricInfoModel: EvalModel<MetricInfo> = evalModel(
+const metricInfoModel: EvalModel<MetricInfo> = evalModel(
   {
     metricName: z.string(),
     description: optionalField(z.string()),
