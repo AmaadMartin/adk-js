@@ -143,6 +143,12 @@ export {
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
+export {ToolboxToolset} from './tools/toolbox_toolset.js';
+export type {
+  ToolboxAuthTokenGetter,
+  ToolboxHeaderValue,
+  ToolboxToolsetOptions,
+} from './tools/toolbox_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './integrations/langchain/langchain_tool.js';
