@@ -22,7 +22,6 @@ import {
   GroundingMetadata,
   HttpOptions,
 } from '@google/genai';
-import {ApiClient} from '@google/genai/vertex_internal';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
@@ -32,6 +31,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
+  createAgentEngineSessions,
   createExpressModeApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
@@ -54,7 +54,6 @@ const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_TOO_MANY_REQUESTS = 429;
-const APPEND_MAX_ATTEMPTS = 2;
 const APPEND_RETRY_DELAY_MS = 1000;
 const CREATE_POLL_DELAY_MS = 1000;
 
@@ -89,23 +88,6 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 export function quoteFilterLiteral(value: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
-}
-
-/**
- * Builds the Agent Engine `Sessions` client from an `ApiClient`.
- *
- * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
- * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
- * `ApiClient` here is a structurally distinct class (its private fields make
- * the two nominally incompatible) from the one `Sessions` declares. The
- * instances are interchangeable at runtime -- the mismatch is a
- * duplicate-dependency artifact, not a real API difference -- so the cast is
- * confined to this one boundary.
- */
-function createAgentEngineSessions(apiClient: ApiClient): Sessions {
-  return new Sessions(
-    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
-  );
 }
 
 /**
@@ -150,18 +132,14 @@ async function appendWithRateLimitRetry(
   sessions: Sessions,
   params: AppendAgentEngineSessionEventRequestParameters,
 ): Promise<void> {
-  // The attempt cap lives only in the guard below, so the loop has one bound
-  // rather than two that can disagree and let it end by swallowing the error.
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await sessions.events.append(params);
-      return;
-    } catch (error: unknown) {
-      if (!isRateLimitError(error) || attempt >= APPEND_MAX_ATTEMPTS) {
-        throw error;
-      }
-      await delay(APPEND_RETRY_DELAY_MS);
+  try {
+    await sessions.events.append(params);
+  } catch (error: unknown) {
+    if (!isRateLimitError(error)) {
+      throw error;
     }
+    await delay(APPEND_RETRY_DELAY_MS);
+    await sessions.events.append(params);
   }
 }
 

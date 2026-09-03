@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {createEvent, Session, VertexAiSessionService} from '@google/adk';
+import {createAgentEngineSessions} from '@google/adk/utils/vertex_ai_utils.js';
 import {
   ApiClient,
   Auth,
@@ -19,23 +19,6 @@ import {json} from 'node:stream/consumers';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 
 const AGENT_ENGINE_ID = '12345';
-
-/**
- * Builds the Agent Engine `Sessions` client from an `ApiClient`.
- *
- * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
- * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
- * `ApiClient` this test constructs is a structurally distinct class (its
- * private fields make the two nominally incompatible) from the one `Sessions`
- * declares. The instances are interchangeable at runtime -- the mismatch is a
- * duplicate-dependency artifact, not a real API difference -- so the cast is
- * confined to this one boundary.
- */
-function createSessionsClient(apiClient: ApiClient): Sessions {
-  return new Sessions(
-    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
-  );
-}
 
 /**
  * Exercises `getSession`'s NOT_FOUND handling against an error the SDK builds
@@ -73,7 +56,7 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: createAgentEngineSessions(apiClient),
     });
   });
 
@@ -138,7 +121,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: createAgentEngineSessions(apiClient),
     });
   });
 
@@ -250,7 +233,7 @@ describe('VertexAiSessionService pagination and rate limits over the wire', () =
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: createAgentEngineSessions(apiClient),
     });
   });
 
