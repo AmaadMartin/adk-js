@@ -107,6 +107,30 @@ export function base64Decode(data: string): string {
 }
 
 /**
+ * Decodes the given base64 string to bytes.
+ *
+ * The byte-safe counterpart of {@link base64Encode}. {@link base64Decode}
+ * returns a UTF-8 string, so it corrupts any payload that is not UTF-8 text;
+ * use this one for binary such as audio.
+ *
+ * @param data The base64-encoded string.
+ * @return The decoded bytes.
+ */
+export function base64DecodeBytes(data: string): Uint8Array {
+  if (isBrowser()) {
+    // `atob` yields one character per byte, so char codes are the bytes.
+    const binary = base64Decode(data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  return new Uint8Array(Buffer.from(data, 'base64'));
+}
+
+/**
  * Checks if the given string is base64-encoded.
  *
  * @param data The string to check.
