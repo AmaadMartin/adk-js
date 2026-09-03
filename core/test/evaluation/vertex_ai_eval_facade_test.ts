@@ -14,7 +14,6 @@ import {
   resolveVertexAiEvalClientConfig,
   SingleTurnVertexAiEvalFacade,
   VertexAiEvalClient,
-  VertexAiEvalClientConfig,
   VertexAiEvalRequest,
   VertexEvaluationResult,
 } from '@google/adk';
@@ -274,7 +273,7 @@ describe('SingleTurnVertexAiEvalFacade', () => {
   });
 });
 
-describe('environment-based client configuration', () => {
+describe('resolveVertexAiEvalClientConfig', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -290,89 +289,43 @@ describe('environment-based client configuration', () => {
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', values.location);
   }
 
-  /** A factory that records the configuration it is handed. */
-  function recordingFactory(): {
-    configs: VertexAiEvalClientConfig[];
-    factory: (config: VertexAiEvalClientConfig) => VertexAiEvalClient;
-  } {
-    const configs: VertexAiEvalClientConfig[] = [];
-    return {
-      configs,
-      factory: (config: VertexAiEvalClientConfig) => {
-        configs.push(config);
-        return new FakeEvalClient([]);
-      },
-    };
-  }
-
-  it('builds the client from the API key', () => {
+  it('reads the API key', () => {
     stubEnvironment({apiKey: 'test_api_key'});
-    const {configs, factory} = recordingFactory();
 
-    new SingleTurnVertexAiEvalFacade({
-      threshold: 0.8,
-      metricName: 'COHERENCE',
-      clientFactory: factory,
+    expect(resolveVertexAiEvalClientConfig()).toEqual({
+      apiKey: 'test_api_key',
     });
-
-    expect(configs).toEqual([{apiKey: 'test_api_key'}]);
   });
 
-  it('builds the client from the project and the location', () => {
+  it('reads the project and the location', () => {
     stubEnvironment({project: 'test_project', location: 'test_location'});
-    const {configs, factory} = recordingFactory();
 
-    new MultiTurnVertexAiEvalFacade({
-      threshold: 0.8,
-      metricName: 'CONVERSATIONAL_COHERENCE',
-      clientFactory: factory,
+    expect(resolveVertexAiEvalClientConfig()).toEqual({
+      project: 'test_project',
+      location: 'test_location',
     });
-
-    expect(configs).toEqual([
-      {project: 'test_project', location: 'test_location'},
-    ]);
   });
 
   it('rejects a project without a location', () => {
     stubEnvironment({project: 'test_project'});
-    const {factory} = recordingFactory();
 
-    expect(
-      () =>
-        new SingleTurnVertexAiEvalFacade({
-          threshold: 0.8,
-          metricName: 'COHERENCE',
-          clientFactory: factory,
-        }),
-    ).toThrow(/^Missing location\./);
+    expect(() => resolveVertexAiEvalClientConfig()).toThrow(
+      /^Missing location\./,
+    );
   });
 
   it('rejects a location without a project', () => {
     stubEnvironment({location: 'test_location'});
-    const {factory} = recordingFactory();
 
-    expect(
-      () =>
-        new SingleTurnVertexAiEvalFacade({
-          threshold: 0.8,
-          metricName: 'COHERENCE',
-          clientFactory: factory,
-        }),
-    ).toThrow(/^Missing project id\./);
+    expect(() => resolveVertexAiEvalClientConfig()).toThrow(
+      /^Missing project id\./,
+    );
   });
 
   it('rejects an environment that configures nothing', () => {
     stubEnvironment({});
-    const {factory} = recordingFactory();
 
-    expect(
-      () =>
-        new SingleTurnVertexAiEvalFacade({
-          threshold: 0.8,
-          metricName: 'COHERENCE',
-          clientFactory: factory,
-        }),
-    ).toThrow(
+    expect(() => resolveVertexAiEvalClientConfig()).toThrow(
       'Either API Key or Google cloud Project id and location should be specified.',
     );
   });
@@ -383,15 +336,10 @@ describe('environment-based client configuration', () => {
       project: 'test_project',
       location: 'test_location',
     });
-    const {configs, factory} = recordingFactory();
 
-    new SingleTurnVertexAiEvalFacade({
-      threshold: 0.8,
-      metricName: 'COHERENCE',
-      clientFactory: factory,
+    expect(resolveVertexAiEvalClientConfig()).toEqual({
+      apiKey: 'test_api_key',
     });
-
-    expect(configs).toEqual([{apiKey: 'test_api_key'}]);
   });
 
   it('reads an empty value as an absent one', () => {
@@ -400,44 +348,23 @@ describe('environment-based client configuration', () => {
       project: 'test_project',
       location: 'test_location',
     });
-    const {configs, factory} = recordingFactory();
 
-    new SingleTurnVertexAiEvalFacade({
-      threshold: 0.8,
-      metricName: 'COHERENCE',
-      clientFactory: factory,
+    expect(resolveVertexAiEvalClientConfig()).toEqual({
+      project: 'test_project',
+      location: 'test_location',
     });
-
-    expect(configs).toEqual([
-      {project: 'test_project', location: 'test_location'},
-    ]);
   });
 
-  it('leaves the environment unread when a client is given', () => {
+  it('constructs a facade without reading the environment', () => {
     stubEnvironment({});
-    const {configs, factory} = recordingFactory();
 
     const facade = new SingleTurnVertexAiEvalFacade({
       threshold: 0.8,
       metricName: 'COHERENCE',
       client: new FakeEvalClient([]),
-      clientFactory: factory,
     });
 
     expect(facade).toBeInstanceOf(SingleTurnVertexAiEvalFacade);
-    expect(configs).toEqual([]);
-  });
-
-  it('rejects a facade given neither a client nor a factory', () => {
-    stubEnvironment({apiKey: 'test_api_key'});
-
-    expect(
-      () =>
-        new MultiTurnVertexAiEvalFacade({
-          threshold: 0.8,
-          metricName: 'CONVERSATIONAL_COHERENCE',
-        }),
-    ).toThrow(/Pass `client`, or `clientFactory`/);
   });
 
   it('resolves the configuration from the environment it is given', () => {

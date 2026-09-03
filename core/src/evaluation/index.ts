@@ -21,12 +21,6 @@ export type {
   InvocationEvents,
 } from './eval_case.js';
 export {EvalStatus} from './eval_metrics.js';
-export {
-  emptyEvaluationResult,
-  getEvalStatus,
-  getTextFromContent,
-  validateInvocationLengths,
-} from './evaluator.js';
 export type {
   EvaluationResult,
   Evaluator,

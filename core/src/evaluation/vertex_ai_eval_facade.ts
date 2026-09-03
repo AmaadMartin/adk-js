@@ -7,9 +7,8 @@
 import {Content, Tool} from '@google/genai';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {AgentDetails} from './app_details.js';
 import {ConversationScenario} from './conversation_scenarios.js';
-import {Invocation, InvocationEvent, isInvocationEvents} from './eval_case.js';
+import {Invocation, isInvocationEvents} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
 import {
   emptyEvaluationResult,
@@ -134,14 +133,11 @@ export interface VertexAiEvalFacadeOptions {
   /** Whether the metric needs golden invocations. Defaults to false. */
   expectedInvocationsRequired?: boolean;
 
-  /** The client that reaches the service. */
-  client?: VertexAiEvalClient;
-
   /**
-   * Builds the client from the configuration found in the environment. Read
-   * only when {@link client} is absent.
+   * The client that reaches the service. Build one from the environment with
+   * {@link resolveVertexAiEvalClientConfig}.
    */
-  clientFactory?: (config: VertexAiEvalClientConfig) => VertexAiEvalClient;
+  client: VertexAiEvalClient;
 }
 
 /**
@@ -189,32 +185,6 @@ function getScore(result: VertexEvaluationResult): number | undefined {
   return Number.isFinite(meanScore) ? meanScore : undefined;
 }
 
-function resolveClient(options: VertexAiEvalFacadeOptions): VertexAiEvalClient {
-  if (options.client) {
-    return options.client;
-  }
-  const config = resolveVertexAiEvalClientConfig();
-  if (!options.clientFactory) {
-    throw new InputValidationError(
-      'The Vertex AI Gen AI evaluation service has no JavaScript SDK, so the' +
-        ' caller supplies the transport. Pass `client`, or `clientFactory` to' +
-        ' build one from the configuration found in the environment.',
-    );
-  }
-  return options.clientFactory(config);
-}
-
-/** Maps the details of one agent onto the shape the service expects. */
-function mapAgentDetailsToAgentConfig(
-  details: AgentDetails,
-): VertexAgentConfig {
-  return {
-    agentId: details.name,
-    instruction: details.instructions,
-    tools: details.toolDeclarations,
-  };
-}
-
 /**
  * Collects the agents that served the conversation, keyed by agent name.
  *
@@ -230,17 +200,15 @@ function getAgentConfigs(
       invocation.appDetails?.agentDetails ?? {},
     )) {
       if (!(name in agentConfigs)) {
-        agentConfigs[name] = mapAgentDetailsToAgentConfig(details);
+        agentConfigs[name] = {
+          agentId: details.name,
+          instruction: details.instructions,
+          tools: details.toolDeclarations,
+        };
       }
     }
   }
   return agentConfigs;
-}
-
-function mapInvocationEventToAgentEvent(
-  event: InvocationEvent,
-): VertexAgentEvent {
-  return {author: event.author, content: event.content};
 }
 
 /** Maps one invocation onto a turn, as `[user, ...intermediate, agent]`. */
@@ -255,7 +223,7 @@ function mapInvocationTurn(
   const intermediateData = invocation.intermediateData;
   if (intermediateData !== undefined && isInvocationEvents(intermediateData)) {
     for (const event of intermediateData.invocationEvents) {
-      events.push(mapInvocationEventToAgentEvent(event));
+      events.push({author: event.author, content: event.content});
     }
   }
 
@@ -264,17 +232,13 @@ function mapInvocationTurn(
   return {turnIndex, events, turnId: invocation.invocationId};
 }
 
-function getTurns(invocations: Invocation[]): VertexConversationTurn[] {
-  return invocations.map((invocation, index) =>
-    mapInvocationTurn(index, invocation),
-  );
-}
-
 /** Maps a conversation onto the agent-centric view the service scores. */
 function getAgentData(invocations: Invocation[]): VertexAgentData {
   return {
     agents: getAgentConfigs(invocations),
-    turns: getTurns(invocations),
+    turns: invocations.map((invocation, index) =>
+      mapInvocationTurn(index, invocation),
+    ),
   };
 }
 
@@ -282,9 +246,7 @@ function getAgentData(invocations: Invocation[]): VertexAgentData {
  * The state both facades over the Vertex AI Gen AI evaluation service share.
  *
  * A facade reaches the service through the {@link VertexAiEvalClient} it is
- * given. When it is given none, it builds one from the configuration in the
- * environment, so a broken environment fails construction rather than the
- * first call.
+ * given, and the caller owns how that client is built and authenticated.
  */
 export abstract class VertexAiEvalFacade implements Evaluator {
   protected readonly threshold: number;
@@ -292,16 +254,12 @@ export abstract class VertexAiEvalFacade implements Evaluator {
   protected readonly expectedInvocationsRequired: boolean;
   protected readonly client: VertexAiEvalClient;
 
-  /**
-   * @throws {InputValidationError} When no client is given and the
-   *   environment or the options cannot produce one.
-   */
   constructor(options: VertexAiEvalFacadeOptions) {
     this.threshold = options.threshold;
     this.metricName = options.metricName;
     this.expectedInvocationsRequired =
       options.expectedInvocationsRequired ?? false;
-    this.client = resolveClient(options);
+    this.client = options.client;
   }
 
   abstract evaluateInvocations(

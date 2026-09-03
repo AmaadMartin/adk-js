@@ -83,25 +83,32 @@ result.perInvocationResults[1].evalStatus === EvalStatus.PASSED;
 
 ## Configure the client from the environment
 
-Pass `clientFactory` instead of `client`, and the facade reads the
-configuration from the environment and hands it to your factory:
+`resolveVertexAiEvalClientConfig()` reads the configuration the service needs
+from the environment, so a client can be built from it in one line:
 
 ```ts
+import {resolveVertexAiEvalClientConfig} from '@google/adk';
+
 const facade = new MultiTurnVertexAiEvalFacade({
   threshold: 0.8,
   metricName: 'MULTI_TURN_TASK_SUCCESS',
-  clientFactory: (config: VertexAiEvalClientConfig) => new MyEvalClient(config),
+  client: new MyEvalClient(resolveVertexAiEvalClientConfig()),
 });
 ```
 
-`GOOGLE_API_KEY` wins when it is set. Otherwise the facade reads
+`GOOGLE_API_KEY` wins when it is set. Otherwise the function reads
 `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`, and it needs both. An empty
-value reads as an absent one.
+value reads as an absent one. It throws an `InputValidationError` when the
+environment names neither an API key nor both a project and a location.
 
-The constructor throws an `InputValidationError` when the environment names
-neither an API key nor both a project and a location, and when you pass neither
-`client` nor `clientFactory`. Construction fails rather than the first call, so
-a misconfigured facade cannot escape into a run.
+Pass an environment of your own to read from something else:
+
+```ts
+const config = resolveVertexAiEvalClientConfig({
+  GOOGLE_CLOUD_PROJECT: 'my-project',
+  GOOGLE_CLOUD_LOCATION: 'us-central1',
+});
+```
 
 ## What the multi-turn request carries
 
