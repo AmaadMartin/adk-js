@@ -44,6 +44,12 @@ export enum AdkMetadataKeys {
   CONTEXT_ID = `${A2A_METADATA_KEY_PREFIX}context_id`,
 }
 
+/** Keys describing a failed A2A call on the resulting ADK event. */
+export enum A2AErrorMetadataKeys {
+  ERROR = `${A2A_METADATA_KEY_PREFIX}error`,
+  STATUS_CODE = `${A2A_METADATA_KEY_PREFIX}status_code`,
+}
+
 /**
  * Creates ADK Event metadata from an A2A Event.
  *

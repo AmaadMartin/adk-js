@@ -15,14 +15,31 @@ import {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {Client, ClientFactory} from '@a2a-js/sdk/client';
+import {Client, ClientFactory, RequestOptions} from '@a2a-js/sdk/client';
 import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
+import {AuthCredential} from '../auth/auth_credential.js';
+import {AuthScheme} from '../auth/auth_schemes.js';
+import {AuthConfig} from '../auth/auth_tool.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {MessageRole} from './a2a_event.js';
+import {
+  buildAuthInterceptors,
+  deriveCredentialKey,
+  resolveAuthCredential,
+} from './a2a_remote_agent_auth.js';
+import {
+  A2ACardRequestInterceptor,
+  A2ARequestInterceptor,
+  executeAfterRequestInterceptors,
+  executeBeforeCardRequestInterceptors,
+  executeBeforeRequestInterceptors,
+  isA2AMessage,
+  newIntegrationExtensionInterceptor,
+} from './a2a_remote_agent_interceptors.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
   getUserFunctionCallAt,
@@ -37,9 +54,24 @@ import {
 } from './agent_card.js';
 import {validateAgentCard} from './agent_card_validation.js';
 import {toAdkEvent} from './event_converter_utils.js';
-import {getA2ASessionMetadata} from './metadata_converter_utils.js';
+import {
+  A2AErrorMetadataKeys,
+  getA2ASessionMetadata,
+} from './metadata_converter_utils.js';
+import {
+  A2APartToGenAIPartConverter,
+  GenAIPartToA2APartConverter,
+  toA2APart,
+  toGenAIPart,
+} from './part_converter_utils.js';
 
 export {AGENT_CARD_PATH};
+
+/**
+ * Milliseconds a card fetch and a message send are allowed to take before they
+ * are aborted. Matches adk-python's `DEFAULT_TIMEOUT` of 600 seconds.
+ */
+export const DEFAULT_A2A_TIMEOUT_MS = 600_000;
 
 /**
  * Type alias for A2A stream event data.
@@ -117,6 +149,58 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
    * If omitted, defaults to `context.a2aMetadata` from the current invocation context.
    */
   metadata?: Record<string, unknown>;
+
+  /**
+   * Milliseconds after which the agent card fetch and the message send are
+   * aborted. Defaults to {@link DEFAULT_A2A_TIMEOUT_MS}.
+   */
+  timeout?: number;
+
+  /** Converts a GenAI part for the outgoing request. Defaults to `toA2APart`. */
+  genaiPartConverter?: GenAIPartToA2APartConverter;
+
+  /** Converts an A2A part of the response. Defaults to `toGenAIPart`. */
+  a2aPartConverter?: A2APartToGenAIPartConverter;
+
+  /** Interceptors around the A2A message send. */
+  requestInterceptors?: A2ARequestInterceptor[];
+
+  /** Interceptors around the remote agent card fetch. */
+  cardRequestInterceptors?: A2ACardRequestInterceptor[];
+
+  /**
+   * When `false`, tells the server to use its new ADK integration by sending
+   * {@link NEW_A2A_ADK_INTEGRATION_EXTENSION} in the A2A extension header.
+   */
+  useLegacy?: boolean;
+
+  /**
+   * Scheme used to authenticate the calls to the remote agent. When set, the
+   * credential is resolved once per invocation and attached to both the agent
+   * card fetch and the message send.
+   */
+  authScheme?: AuthScheme;
+
+  /** Credential for {@link authScheme}. Ignored when no scheme is set. */
+  authCredential?: AuthCredential;
+
+  /**
+   * Key the resolved credential is cached under. Defaults to a digest of the
+   * scheme, the credential and the remote.
+   */
+  credentialKey?: string;
+}
+
+/**
+ * The HTTP status code a thrown value carries, when it carries one. A transport
+ * error from the A2A client reports the response status this way.
+ */
+function httpStatusCode(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null || !('status' in err)) {
+    return undefined;
+  }
+  const {status} = err;
+  return typeof status === 'number' ? status : undefined;
 }
 
 /**
@@ -149,6 +233,10 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   private isInitialized = false;
   /** The location a string-sourced card is fetched from, once trimmed. */
   private readonly cardSource?: string;
+  private readonly timeoutMs: number;
+  private readonly authConfig?: AuthConfig;
+  private readonly requestInterceptors: A2ARequestInterceptor[];
+  private readonly cardRequestInterceptors: A2ACardRequestInterceptor[];
 
   constructor(private readonly a2aConfig: RemoteA2AAgentConfig) {
     super(withAdoptedCardDescription(a2aConfig));
@@ -161,9 +249,37 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       }
       this.cardSource = a2aConfig.agentCard.trim();
     }
+    this.timeoutMs = a2aConfig.timeout ?? DEFAULT_A2A_TIMEOUT_MS;
+
+    // Copied rather than used in place, so this agent's own interceptors never
+    // land on another agent that shares the same config object.
+    this.requestInterceptors = [...(a2aConfig.requestInterceptors ?? [])];
+    this.cardRequestInterceptors = [
+      ...(a2aConfig.cardRequestInterceptors ?? []),
+    ];
+    if (a2aConfig.useLegacy === false) {
+      this.requestInterceptors.push(newIntegrationExtensionInterceptor);
+    }
+    if (a2aConfig.authScheme) {
+      this.authConfig = {
+        authScheme: a2aConfig.authScheme,
+        rawAuthCredential: a2aConfig.authCredential,
+        credentialKey:
+          a2aConfig.credentialKey ??
+          deriveCredentialKey(
+            a2aConfig.authScheme,
+            a2aConfig.authCredential,
+            a2aConfig.agentCard ?? this.name,
+          ),
+      };
+      // Appended last, so the credential wins over a caller's own header.
+      const auth = buildAuthInterceptors(this.authConfig);
+      this.cardRequestInterceptors.push(auth.card);
+      this.requestInterceptors.push(auth.request);
+    }
   }
 
-  private async init() {
+  private async init(context?: InvocationContext) {
     if (this.isInitialized) {
       return;
     }
@@ -177,7 +293,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       // given, as it is in the reference. Only a card this agent went and
       // fetched is validated.
       const card = this.cardSource
-        ? await this.resolveAndValidateCard(this.cardSource)
+        ? await this.resolveAndValidateCard(this.cardSource, context)
         : (this.a2aConfig.agentCard as AgentCard);
       this.card = card;
 
@@ -196,9 +312,21 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
    * has validated: a rejected card left behind reads as already resolved, so
    * the next call would skip the check and talk to the origin that card named.
    */
-  private async resolveAndValidateCard(source: string): Promise<AgentCard> {
+  private async resolveAndValidateCard(
+    source: string,
+    context?: InvocationContext,
+  ): Promise<AgentCard> {
     const remoteSource = isRemoteCardSource(source) ? source : undefined;
-    const card = await resolveAgentCard(source);
+    const headers = remoteSource
+      ? await executeBeforeCardRequestInterceptors(
+          this.cardRequestInterceptors,
+          context,
+        )
+      : undefined;
+    const card = await resolveAgentCard(source, {
+      headers,
+      timeoutMs: this.timeoutMs,
+    });
     validateAgentCard(card, remoteSource);
     if (!this.description && card.description) {
       this.description = adoptedCardDescription(card.description, source);
@@ -206,11 +334,70 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     return card;
   }
 
+  /**
+   * Returns the client and card to use for this invocation.
+   *
+   * Per the A2A spec an authenticated agent card is scoped to one
+   * authenticated session, so when card interceptors are configured for a URL
+   * source the card and the client are built per invocation and kept local.
+   * That stops one session's authenticated card leaking into another.
+   */
+  private async ensureResolved(
+    context: InvocationContext,
+  ): Promise<{client: Client; card?: AgentCard}> {
+    const source = this.cardSource;
+    if (
+      source &&
+      isRemoteCardSource(source) &&
+      this.cardRequestInterceptors.length > 0
+    ) {
+      const card = await this.resolveAndValidateCard(source, context);
+      const factory = this.a2aConfig.clientFactory || new ClientFactory();
+      const client =
+        this.a2aConfig.client ?? (await factory.createFromAgentCard(card));
+      return {client, card};
+    }
+
+    await this.init(context);
+    // The constructor rejects a config with neither a card nor a client, so
+    // init() always leaves one behind.
+    return {client: this.client!, card: this.card};
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<AdkEvent, void, void> {
+    if (this.authConfig) {
+      let authRequestEvent: AdkEvent | undefined;
+      try {
+        authRequestEvent = await resolveAuthCredential(
+          context,
+          this.authConfig,
+          this.name,
+        );
+      } catch (e: unknown) {
+        const errorMessage = `Failed to authenticate remote A2A agent: ${formatError(e)}`;
+        logger.error(errorMessage);
+        yield createEvent({
+          author: this.name,
+          invocationId: context.invocationId,
+          errorMessage,
+          turnComplete: true,
+        });
+        return;
+      }
+      if (authRequestEvent) {
+        // A pause, not a failure: the invocation resumes once the client
+        // supplies the credential.
+        yield authRequestEvent;
+        return;
+      }
+    }
+
+    let client: Client;
+    let card: AgentCard | undefined;
     try {
-      await this.init();
+      ({client, card} = await this.ensureResolved(context));
     } catch (e: unknown) {
       const errorMessage = `Failed to initialize remote A2A agent: ${formatError(e)}`;
       logger.error(errorMessage);
@@ -238,6 +425,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       let taskId: string | undefined = undefined;
       let contextId: string | undefined = undefined;
 
+      const genaiPartConverter = this.a2aConfig.genaiPartConverter ?? toA2APart;
+      const a2aPartConverter = this.a2aConfig.a2aPartConverter ?? toGenAIPart;
+
       if (userFnCall) {
         const event = userFnCall.response;
         // Route through the shared scrub: this credential response must not
@@ -252,11 +442,16 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           event.content,
           event.longRunningToolIds,
           peerRequestedIds,
+          genaiPartConverter,
         );
         taskId = userFnCall.taskId;
         contextId = userFnCall.contextId;
       } else {
-        const missing = toMissingRemoteSessionParts(context, context.session);
+        const missing = toMissingRemoteSessionParts(
+          context,
+          context.session,
+          genaiPartConverter,
+        );
         parts = missing.parts;
         contextId = missing.contextId;
       }
@@ -290,65 +485,85 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         }
       }
 
-      const useStreaming = this.card
-        ? this.card.capabilities?.streaming !== false
-        : true;
-      if (useStreaming) {
-        for await (const chunk of this.client!.sendMessageStream(params)) {
-          if (this.a2aConfig.afterRequestCallbacks) {
-            for (const callback of this.a2aConfig.afterRequestCallbacks) {
-              await callback(context, chunk);
-            }
-          }
+      const intercepted = await executeBeforeRequestInterceptors(
+        this.requestInterceptors,
+        context,
+        params.message,
+      );
+      if (!isA2AMessage(intercepted.request)) {
+        yield intercepted.request;
+        return;
+      }
+      params.message = intercepted.request;
+      if (intercepted.params.requestMetadata) {
+        params.metadata = intercepted.params.requestMetadata;
+      }
+      const options: RequestOptions = {
+        signal: AbortSignal.timeout(this.timeoutMs),
+        ...(intercepted.params.headers
+          ? {serviceParameters: intercepted.params.headers}
+          : {}),
+      };
 
-          const adkEvent = toAdkEvent(
-            chunk,
-            context.invocationId,
-            this.name,
-            context.branch,
-          );
-          if (!adkEvent) {
-            continue;
-          }
+      const useStreaming = card ? card.capabilities?.streaming !== false : true;
+      const responses = useStreaming
+        ? client.sendMessageStream(params, options)
+        : [await client.sendMessage(params, options)];
 
-          processor.updateCustomMetadata(adkEvent, chunk);
-
-          const eventsToEmit = processor.aggregatePartial(
-            context,
-            chunk,
-            adkEvent,
-          );
-          for (const ev of eventsToEmit) {
-            yield ev;
-          }
-        }
-      } else {
-        const result = await this.client!.sendMessage(params);
+      for await (const chunk of responses) {
         if (this.a2aConfig.afterRequestCallbacks) {
           for (const callback of this.a2aConfig.afterRequestCallbacks) {
-            await callback(context, result);
+            await callback(context, chunk);
           }
         }
-        const adkEvent = toAdkEvent(
-          result,
+
+        const converted = toAdkEvent(
+          chunk,
           context.invocationId,
           this.name,
           context.branch,
+          a2aPartConverter,
         );
-        if (adkEvent) {
-          processor.updateCustomMetadata(adkEvent, result);
+        if (!converted) {
+          continue;
+        }
+
+        const adkEvent = await executeAfterRequestInterceptors(
+          this.requestInterceptors,
+          context,
+          chunk,
+          converted,
+        );
+        if (!adkEvent) {
+          continue;
+        }
+
+        processor.updateCustomMetadata(adkEvent, chunk);
+
+        if (!useStreaming) {
           yield adkEvent;
+          continue;
+        }
+        for (const ev of processor.aggregatePartial(context, chunk, adkEvent)) {
+          yield ev;
         }
       }
     } catch (e: unknown) {
-      const error = e as Error;
-      logger.error(`A2ARemoteAgent ${this.name} failed:`, error);
+      const errorMessage = `A2A request failed: ${formatError(e)}`;
+      logger.error(errorMessage);
+      const statusCode = httpStatusCode(e);
 
       yield createEvent({
         author: this.name,
         invocationId: context.invocationId,
-        errorMessage: error.message,
+        errorMessage,
         turnComplete: true,
+        customMetadata: {
+          [A2AErrorMetadataKeys.ERROR]: errorMessage,
+          ...(statusCode === undefined
+            ? {}
+            : {[A2AErrorMetadataKeys.STATUS_CODE]: statusCode}),
+        },
       });
     }
   }

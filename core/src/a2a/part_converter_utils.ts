@@ -35,17 +35,45 @@ enum DataPartType {
 }
 
 /**
+ * Converts one GenAI part into the A2A parts that carry it, or `undefined` to
+ * drop it. Supplied by a caller that needs a conversion other than the default
+ * `toA2APart`.
+ */
+export type GenAIPartToA2APartConverter = (
+  part: GenAIPart,
+  longRunningToolIDs?: string[],
+) => A2APart | A2APart[] | undefined;
+
+/**
+ * Converts one A2A part into a GenAI part, or `undefined` to drop it. Supplied
+ * by a caller that needs a conversion other than the default `toGenAIPart`.
+ */
+export type A2APartToGenAIPartConverter = (
+  a2aPart: A2APart,
+) => GenAIPart | undefined;
+
+/**
  * Converts an array of GenAI Parts to A2A Parts.
  *
  * @param parts - The GenAI parts to convert. Defaults to an empty array.
  * @param longRunningToolIDs - IDs of function calls that are long-running.
+ * @param converter - Per-part conversion. Defaults to {@link toA2APart}.
  * @returns An array of A2A parts.
  */
 export function toA2AParts(
   parts: GenAIPart[] = [],
   longRunningToolIDs: string[] = [],
+  converter: GenAIPartToA2APartConverter = toA2APart,
 ): A2APart[] {
-  return parts.map((part) => toA2APart(part, longRunningToolIDs));
+  const converted: A2APart[] = [];
+  for (const part of parts) {
+    const result = converter(part, longRunningToolIDs);
+    if (!result) {
+      continue;
+    }
+    converted.push(...(Array.isArray(result) ? result : [result]));
+  }
+  return converted;
 }
 
 /**
@@ -209,10 +237,21 @@ export function toGenAIContent(a2aMessage: Message): GenAIContent {
  * Converts an array of A2A Parts to GenAI Parts.
  *
  * @param a2aParts - The A2A parts to convert.
- * @returns An array of GenAI parts.
+ * @param converter - Per-part conversion. Defaults to {@link toGenAIPart}.
+ * @returns An array of GenAI parts, without the parts the converter dropped.
  */
-export function toGenAIParts(a2aParts: A2APart[]): GenAIPart[] {
-  return a2aParts.map((a2aPart) => toGenAIPart(a2aPart));
+export function toGenAIParts(
+  a2aParts: A2APart[],
+  converter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIPart[] {
+  const converted: GenAIPart[] = [];
+  for (const a2aPart of a2aParts) {
+    const result = converter(a2aPart);
+    if (result) {
+      converted.push(result);
+    }
+  }
+  return converted;
 }
 
 /**

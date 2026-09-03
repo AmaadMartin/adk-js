@@ -7,6 +7,7 @@
 import {Content} from '@google/genai';
 
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -56,6 +57,9 @@ export interface InvocationContextParams {
   abortSignal?: AbortSignal;
   workflowInstructionScope?: WorkflowInstructionScope;
   isolationScope?: string;
+
+  /** Credentials already resolved for this invocation, keyed by credential key. */
+  credentialByKey?: Record<string, AuthCredential>;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
   nodeToolDepth?: number;
   liveRequestQueue?: LiveRequestQueue;
@@ -268,6 +272,14 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Credentials resolved during this invocation, keyed by credential key.
+   *
+   * Shared by reference across {@link clone}, so a credential resolved once
+   * serves every agent in the invocation and is never written to the session.
+   */
+  readonly credentialByKey: Record<string, AuthCredential>;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -289,6 +301,7 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
+    this.credentialByKey = params.credentialByKey ?? {};
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop
