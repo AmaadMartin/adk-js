@@ -1292,10 +1292,56 @@ describe('GeminiContextCacheManager paths the reference does not reach', () => {
     expect(findCountOfContentsToCache([])).toBe(0);
   });
 
+  it('keeps a cache that has served exactly its interval budget', async () => {
+    const llmRequest = createLlmRequest(undefined, 3);
+    llmRequest.cacheMetadata = await withRealFingerprint(
+      createCacheMetadata(CACHE_CONFIG.cacheIntervals),
+      llmRequest,
+    );
+
+    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(true);
+  });
+
+  it('drops a cache one invocation past its interval budget', async () => {
+    const llmRequest = createLlmRequest(undefined, 3);
+    llmRequest.cacheMetadata = await withRealFingerprint(
+      createCacheMetadata(CACHE_CONFIG.cacheIntervals + 1),
+      llmRequest,
+    );
+
+    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+  });
+
+  it('keeps a cache that expires in the future', async () => {
+    const llmRequest = createLlmRequest(undefined, 3);
+    llmRequest.cacheMetadata = await withRealFingerprint(
+      {...createCacheMetadata(1), expireTime: Date.now() / 1000 + 1},
+      llmRequest,
+    );
+
+    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(true);
+  });
+
   it('reports no valid cache when the request carries no metadata', async () => {
     const llmRequest = createLlmRequest(undefined, 2);
 
     expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+  });
+
+  it('treats a measured zero as a measurement, not as a missing count', async () => {
+    // A model with no known floor, so only the measured count decides.
+    const llmRequest = createLlmRequest(undefined, 0);
+    llmRequest.model = 'projects/test/locations/us-central1/endpoints/tuned';
+    llmRequest.cacheableContentsTokenCount = 0;
+    llmRequest.cacheMetadata = {
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+    client.caches.create.mockResolvedValue({name: 'cachedContents/measured'});
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.cacheName).toBe('cachedContents/measured');
   });
 
   it('skips cache creation below the configured minimum token count', async () => {
