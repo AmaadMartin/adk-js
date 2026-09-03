@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  SpannerVectorStoreSettings,
-  resolveVectorStoreSettings,
-} from '@google/adk/tools/spanner';
+import {SpannerVectorStoreSettings} from '@google/adk/tools/spanner';
 import {describe, expect, it} from 'vitest';
+// Not part of the public entry point: the toolset constructor is its only
+// caller, so it is imported from the source it lives in.
+import {resolveVectorStoreSettings} from '../../../src/tools/spanner/settings.js';
 
 function vectorStore(
   overrides: Partial<SpannerVectorStoreSettings> = {},

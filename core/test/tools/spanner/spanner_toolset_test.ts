@@ -219,14 +219,12 @@ describe('SpannerToolset', () => {
       ]);
     });
 
-    it('warns and applies nothing when a predicate has no context', async () => {
-      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    it('applies nothing when a predicate has no context', async () => {
+      // A predicate cannot run without a context, so every tool is returned,
+      // as `OpenAPIToolset` does in the same situation.
       const toolset = makeToolset({toolFilter: () => false});
 
       expect(await toolNames(toolset)).toHaveLength(7);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('a ToolPredicate toolFilter was provided'),
-      );
     });
   });
 

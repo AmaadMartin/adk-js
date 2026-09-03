@@ -213,6 +213,15 @@ class FakeSpanner {
 /** The module shape `vi.mock('@google-cloud/spanner', ...)` returns. */
 export const fakeSpannerModule = {Spanner: FakeSpanner};
 
+/**
+ * Builds one row from its column names and values, as the Spanner client
+ * yields it. Prefer this over {@link valueRow} whenever the tool reads a
+ * column by name, so the fixture carries the same labels the client does.
+ */
+export function namedRow(fields: Record<string, unknown>): FakeRow {
+  return Object.entries(fields).map(([name, value]) => ({name, value}));
+}
+
 /** Builds one row out of positional values, as a non-`json` request sees it. */
 export function valueRow(...values: unknown[]): FakeRow {
   return values.map((value, index) => ({name: `col${index}`, value}));

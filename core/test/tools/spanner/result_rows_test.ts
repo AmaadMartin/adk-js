@@ -7,6 +7,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   toJsonSafe,
+  toNamedRow,
   toValueRow,
 } from '../../../src/tools/spanner/result_rows.js';
 
@@ -29,6 +30,30 @@ describe('toValueRow', () => {
 
   it('reads an empty row as no values', () => {
     expect(toValueRow([])).toEqual([]);
+  });
+});
+
+describe('toNamedRow', () => {
+  it('keys a field row by the column each value came from', () => {
+    const row = [
+      {name: 'INDEX_NAME', value: 'PRIMARY_KEY'},
+      {name: 'IS_UNIQUE', value: true},
+    ];
+
+    expect(toNamedRow(row)).toEqual({
+      INDEX_NAME: 'PRIMARY_KEY',
+      IS_UNIQUE: true,
+    });
+  });
+
+  it('returns a row the client already keyed unchanged', () => {
+    const row = {INDEX_NAME: 'PRIMARY_KEY', IS_UNIQUE: true};
+
+    expect(toNamedRow(row)).toBe(row);
+  });
+
+  it('reads an empty row as no columns', () => {
+    expect(toNamedRow([])).toEqual({});
   });
 });
 

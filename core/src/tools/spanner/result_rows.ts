@@ -34,6 +34,25 @@ export async function selectValueRows(
 }
 
 /**
+ * Runs `query` and reads each row as an object keyed by column name.
+ *
+ * The client labels every value with the column it came from, so a caller
+ * that wants the names does not have to restate the `SELECT` list and risk
+ * the two drifting apart.
+ *
+ * @param snapshot The read-only snapshot to run against.
+ * @param query The statement and its parameters.
+ * @return One object per row, keyed by column name.
+ */
+export async function selectNamedRows(
+  snapshot: Snapshot,
+  query: SpannerQuery,
+): Promise<Array<Record<string, unknown>>> {
+  const [rows] = await snapshot.run(query);
+  return rows.map(toNamedRow);
+}
+
+/**
  * One row of a Spanner result set: an array of `{name, value}` fields, or an
  * object keyed by column name when the request asked for `json`.
  * `@google-cloud/spanner` declares both shapes but exports neither by name
@@ -53,6 +72,18 @@ export function toValueRow(row: SpannerRow): unknown[] {
   return Array.isArray(row)
     ? row.map((field) => field.value)
     : Object.values(row);
+}
+
+/**
+ * Reads one row as an object keyed by column name.
+ *
+ * @param row One row of a result set.
+ * @return The row's values, keyed by the column each came from.
+ */
+export function toNamedRow(row: SpannerRow): Record<string, unknown> {
+  return Array.isArray(row)
+    ? Object.fromEntries(row.map((field) => [field.name, field.value]))
+    : row;
 }
 
 /**

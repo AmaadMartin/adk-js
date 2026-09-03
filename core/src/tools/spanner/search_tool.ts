@@ -50,9 +50,7 @@ const NUM_LEAVES_TO_SEARCH = 'num_leaves_to_search';
 
 const DISTANCE_ALIAS = 'distance';
 const GOOGLESQL_TEXT_QUERY_PARAMETER = 'query';
-const POSTGRESQL_TEXT_QUERY_PARAMETER = '1';
 const GOOGLESQL_EMBEDDING_PARAMETER = 'embedding';
-const POSTGRESQL_EMBEDDING_PARAMETER = '1';
 
 const DEFAULT_DISTANCE_TYPE = 'COSINE';
 const DEFAULT_TOP_K = 4;
@@ -133,7 +131,7 @@ function postgresqlEmbeddingQuery(
       JSONB_BUILD_ARRAY(
           JSONB_BUILD_OBJECT(
               'content',
-              $${POSTGRESQL_TEXT_QUERY_PARAMETER}::TEXT
+              $1::TEXT
           )
       )
   `;
@@ -172,7 +170,7 @@ async function embedInSpanner(
     model.kind === 'postgresql'
       ? {
           sql: postgresqlEmbeddingQuery(model.endpoint, outputDimensionality),
-          params: {[`p${POSTGRESQL_TEXT_QUERY_PARAMETER}`]: query},
+          params: {['p1']: query},
         }
       : {
           sql: googlesqlEmbeddingQuery(model.modelName),
@@ -236,7 +234,7 @@ function generateSqlForKnn(search: SearchSql): string {
     ? distanceFunction(POSTGRESQL_DISTANCE_FUNCTIONS, search.distanceType)
     : distanceFunction(GOOGLESQL_DISTANCE_FUNCTIONS, search.distanceType);
   const embeddingParameter = postgres
-    ? `$${POSTGRESQL_EMBEDDING_PARAMETER}`
+    ? '$1'
     : `@${GOOGLESQL_EMBEDDING_PARAMETER}`;
   const columns = [
     ...search.columns,
@@ -443,7 +441,7 @@ async function similaritySearch(
 
   const params =
     dialect === POSTGRESQL_DIALECT
-      ? {[`p${POSTGRESQL_EMBEDDING_PARAMETER}`]: embedding}
+      ? {['p1']: embedding}
       : {[GOOGLESQL_EMBEDDING_PARAMETER]: embedding};
   const rows = await withSnapshot(database, (snapshot) =>
     selectValueRows(snapshot, {sql, params}),

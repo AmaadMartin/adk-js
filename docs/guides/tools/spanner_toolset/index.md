@@ -196,8 +196,7 @@ const toolset = new SpannerToolset({
 ```
 
 `spanner_vector_store_similarity_search` then takes `{query}` alone. The
-constructor rejects a vector store whose `vectorLength` is not positive, or
-whose `primaryKeyColumns` name a column the settings do not define. When
+constructor rejects a vector store whose `vectorLength` is not positive. When
 `selectedColumns` is absent, the search returns the content column.
 
 ## Dialects

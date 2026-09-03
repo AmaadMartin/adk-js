@@ -8,6 +8,7 @@ import {SpannerToolset} from '@google/adk/tools/spanner';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   errorOf,
+  namedRow,
   runTool,
   spannerFake,
   successOf,
@@ -156,7 +157,15 @@ describe('spanner_list_table_indexes', () => {
       {
         match: 'INFORMATION_SCHEMA.INDEXES',
         rows: [
-          valueRow('PRIMARY_KEY', '', 'PRIMARY_KEY', '', true, false, null),
+          namedRow({
+            INDEX_NAME: 'PRIMARY_KEY',
+            TABLE_SCHEMA: '',
+            INDEX_TYPE: 'PRIMARY_KEY',
+            PARENT_TABLE_NAME: '',
+            IS_UNIQUE: true,
+            IS_NULL_FILTERED: false,
+            INDEX_STATE: null,
+          }),
         ],
       },
     ];
@@ -187,7 +196,17 @@ describe('spanner_list_table_indexes', () => {
     spannerFake.responses = [
       {
         match: 'INFORMATION_SCHEMA.INDEXES',
-        rows: [valueRow('IDX', '', 'INDEX', '', true, false, 1n)],
+        rows: [
+          namedRow({
+            INDEX_NAME: 'IDX',
+            TABLE_SCHEMA: '',
+            INDEX_TYPE: 'INDEX',
+            PARENT_TABLE_NAME: '',
+            IS_UNIQUE: true,
+            IS_NULL_FILTERED: false,
+            INDEX_STATE: 1n,
+          }),
+        ],
       },
     ];
 
@@ -222,7 +241,16 @@ describe('spanner_list_table_index_columns', () => {
     spannerFake.responses = [
       {
         match: 'INFORMATION_SCHEMA.INDEX_COLUMNS',
-        rows: [valueRow('PRIMARY_KEY', '', 'SingerId', 1, 'NO', 'INT64')],
+        rows: [
+          namedRow({
+            INDEX_NAME: 'PRIMARY_KEY',
+            TABLE_SCHEMA: '',
+            COLUMN_NAME: 'SingerId',
+            ORDINAL_POSITION: 1,
+            IS_NULLABLE: 'NO',
+            SPANNER_TYPE: 'INT64',
+          }),
+        ],
       },
     ];
 
@@ -248,7 +276,16 @@ describe('spanner_list_table_index_columns', () => {
     spannerFake.responses = [
       {
         match: 'INFORMATION_SCHEMA.INDEX_COLUMNS',
-        rows: [valueRow('PRIMARY_KEY', '', 'SingerId', 1n, 'NO', 'INT64')],
+        rows: [
+          namedRow({
+            INDEX_NAME: 'PRIMARY_KEY',
+            TABLE_SCHEMA: '',
+            COLUMN_NAME: 'SingerId',
+            ORDINAL_POSITION: 1n,
+            IS_NULLABLE: 'NO',
+            SPANNER_TYPE: 'INT64',
+          }),
+        ],
       },
     ];
 
@@ -285,37 +322,54 @@ describe('spanner_get_table_schema', () => {
       {
         match: 'INFORMATION_SCHEMA.COLUMNS',
         rows: [
-          valueRow('SingerId', '', 'INT64', 1, null, 'NO', 'NEVER', null, null),
-          valueRow(
-            'Name',
-            '',
-            'STRING(MAX)',
-            2,
-            null,
-            'YES',
-            'NEVER',
-            null,
-            null,
-          ),
+          namedRow({
+            COLUMN_NAME: 'SingerId',
+            TABLE_SCHEMA: '',
+            SPANNER_TYPE: 'INT64',
+            ORDINAL_POSITION: 1,
+            COLUMN_DEFAULT: null,
+            IS_NULLABLE: 'NO',
+            IS_GENERATED: 'NEVER',
+            GENERATION_EXPRESSION: null,
+            IS_STORED: null,
+          }),
+          namedRow({
+            COLUMN_NAME: 'Name',
+            TABLE_SCHEMA: '',
+            SPANNER_TYPE: 'STRING(MAX)',
+            ORDINAL_POSITION: 2,
+            COLUMN_DEFAULT: null,
+            IS_NULLABLE: 'YES',
+            IS_GENERATED: 'NEVER',
+            GENERATION_EXPRESSION: null,
+            IS_STORED: null,
+          }),
         ],
       },
       {
         match: 'INFORMATION_SCHEMA.KEY_COLUMN_USAGE',
-        rows: [valueRow('SingerId', 'PK_Singers', 1, null)],
+        rows: [
+          namedRow({
+            COLUMN_NAME: 'SingerId',
+            CONSTRAINT_NAME: 'PK_Singers',
+            ORDINAL_POSITION: 1,
+            POSITION_IN_UNIQUE_CONSTRAINT: null,
+          }),
+        ],
       },
       {
         match: 'INFORMATION_SCHEMA.TABLES',
         rows: [
-          valueRow(
-            '',
-            'Singers',
-            'BASE TABLE',
-            null,
-            null,
-            'COMMITTED',
-            null,
-            null,
-          ),
+          namedRow({
+            TABLE_SCHEMA: '',
+            TABLE_NAME: 'Singers',
+            TABLE_TYPE: 'BASE TABLE',
+            PARENT_TABLE_NAME: null,
+            ON_DELETE_ACTION: null,
+            SPANNER_STATE: 'COMMITTED',
+            INTERLEAVE_TYPE: null,
+            ROW_DELETION_POLICY_EXPRESSION: null,
+          }),
         ],
       },
     ];
@@ -387,8 +441,18 @@ describe('spanner_get_table_schema', () => {
     spannerFake.responses[1] = {
       match: 'INFORMATION_SCHEMA.KEY_COLUMN_USAGE',
       rows: [
-        valueRow('SingerId', 'PK_Singers', 1, null),
-        valueRow('SingerId', 'FK_Singers', 1, 2),
+        namedRow({
+          COLUMN_NAME: 'SingerId',
+          CONSTRAINT_NAME: 'PK_Singers',
+          ORDINAL_POSITION: 1,
+          POSITION_IN_UNIQUE_CONSTRAINT: null,
+        }),
+        namedRow({
+          COLUMN_NAME: 'SingerId',
+          CONSTRAINT_NAME: 'FK_Singers',
+          ORDINAL_POSITION: 1,
+          POSITION_IN_UNIQUE_CONSTRAINT: 2,
+        }),
       ],
     };
 
@@ -407,7 +471,14 @@ describe('spanner_get_table_schema', () => {
   it('drops a key column the column query did not return', async () => {
     spannerFake.responses[1] = {
       match: 'INFORMATION_SCHEMA.KEY_COLUMN_USAGE',
-      rows: [valueRow('Dropped', 'PK_Old', 1, null)],
+      rows: [
+        namedRow({
+          COLUMN_NAME: 'Dropped',
+          CONSTRAINT_NAME: 'PK_Old',
+          ORDINAL_POSITION: 1,
+          POSITION_IN_UNIQUE_CONSTRAINT: null,
+        }),
+      ],
     };
 
     const result = await runTool(
@@ -437,7 +508,17 @@ describe('spanner_get_table_schema', () => {
     spannerFake.responses[0] = {
       match: 'INFORMATION_SCHEMA.COLUMNS',
       rows: [
-        valueRow('SingerId', '', 'INT64', 1n, null, 'NO', 'NEVER', null, null),
+        namedRow({
+          COLUMN_NAME: 'SingerId',
+          TABLE_SCHEMA: '',
+          SPANNER_TYPE: 'INT64',
+          ORDINAL_POSITION: 1n,
+          COLUMN_DEFAULT: null,
+          IS_NULLABLE: 'NO',
+          IS_GENERATED: 'NEVER',
+          GENERATION_EXPRESSION: null,
+          IS_STORED: null,
+        }),
       ],
     };
 

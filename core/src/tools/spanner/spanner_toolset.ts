@@ -6,7 +6,6 @@
 
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {experimental} from '../../utils/experimental.js';
-import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {
@@ -52,15 +51,6 @@ export interface SpannerToolsetOptions {
    */
   toolFilter?: ToolPredicate | string[];
 }
-
-/**
- * The filter a toolset created without a `toolFilter` carries.
- *
- * `BaseToolset` requires a filter, so an absent one needs a stand-in. A
- * predicate keeps "no filter" distinct from the empty array, which adk-python
- * reads as "expose nothing".
- */
-const SELECT_EVERY_TOOL: ToolPredicate = () => true;
 
 /**
  * Tools for reading Spanner data, schemas and indexes.
@@ -112,7 +102,10 @@ export class SpannerToolset extends BaseToolset {
    *   than one, or if `vectorStoreSettings` is not usable.
    */
   constructor(options: SpannerToolsetOptions) {
-    super(options.toolFilter ?? SELECT_EVERY_TOOL, SPANNER_TOOL_NAME_PREFIX);
+    // `BaseToolset` requires a filter, so an absent one becomes a predicate
+    // that selects everything. That keeps "no filter" distinct from the empty
+    // array, which adk-python reads as "expose nothing".
+    super(options.toolFilter ?? (() => true), SPANNER_TOOL_NAME_PREFIX);
     validateSpannerCredentialsConfig(options.credentialsConfig);
     const settings = options.spannerToolSettings ?? {};
     if (settings.vectorStoreSettings) {
@@ -166,18 +159,12 @@ export class SpannerToolset extends BaseToolset {
     if (context) {
       return this.tools.filter((tool) => this.isToolSelected(tool, context));
     }
+    // A predicate needs a context, so without one only a name filter applies.
+    // `OpenAPIToolset` returns every tool in the same situation.
     const filter = this.toolFilter;
-    if (Array.isArray(filter)) {
-      return this.tools.filter((tool) => filter.includes(tool.name));
-    }
-    if (filter !== SELECT_EVERY_TOOL) {
-      logger.warn(
-        'SpannerToolset: a ToolPredicate toolFilter was provided but' +
-          ' getTools() was called without a ReadonlyContext. The filter will' +
-          ' not be applied.',
-      );
-    }
-    return this.tools;
+    return Array.isArray(filter)
+      ? this.tools.filter((tool) => filter.includes(tool.name))
+      : this.tools;
   }
 
   /**

@@ -5,15 +5,17 @@
  */
 
 import {AuthCredential, AuthCredentialTypes, Context} from '@google/adk';
-import {
-  SPANNER_DEFAULT_SCOPES,
-  SPANNER_TOKEN_CACHE_KEY,
-  SpannerCredentialsManager,
-  validateSpannerCredentialsConfig,
-} from '@google/adk/tools/spanner';
+import {SPANNER_DEFAULT_SCOPES} from '@google/adk/tools/spanner';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {SpannerAccessToken} from '../../../src/tools/spanner/client.js';
+// Not part of the public entry point: the toolset constructor is the only
+// caller, so these are imported from the source they live in.
+import {
+  SPANNER_TOKEN_CACHE_KEY,
+  SpannerCredentialsManager,
+  validateSpannerCredentialsConfig,
+} from '../../../src/tools/spanner/spanner_credentials.js';
 import {
   FUNCTION_CALL_ID,
   makeToolContext,

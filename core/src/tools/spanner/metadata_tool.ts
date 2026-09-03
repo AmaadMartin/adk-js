@@ -6,7 +6,7 @@
 
 import {z} from 'zod';
 import {withSnapshot} from './client.js';
-import {selectValueRows, toJsonSafe} from './result_rows.js';
+import {selectNamedRows, selectValueRows, toJsonSafe} from './result_rows.js';
 import {
   POSTGRESQL_DIALECT,
   rejectPostgresql,
@@ -129,68 +129,6 @@ const NAMED_SCHEMAS_QUERY = `
         SCHEMA_NAME NOT IN ('', 'INFORMATION_SCHEMA', 'SPANNER_SYS');
     `;
 
-/** Keys of one `INFORMATION_SCHEMA.INDEXES` row, in the order selected. */
-const INDEX_FIELDS = [
-  'INDEX_NAME',
-  'TABLE_SCHEMA',
-  'INDEX_TYPE',
-  'PARENT_TABLE_NAME',
-  'IS_UNIQUE',
-  'IS_NULL_FILTERED',
-  'INDEX_STATE',
-] as const;
-
-/** Keys of one `INFORMATION_SCHEMA.INDEX_COLUMNS` row, in the order selected. */
-const INDEX_COLUMN_FIELDS = [
-  'INDEX_NAME',
-  'TABLE_SCHEMA',
-  'COLUMN_NAME',
-  'ORDINAL_POSITION',
-  'IS_NULLABLE',
-  'SPANNER_TYPE',
-] as const;
-
-/** Keys of one column's schema entry, after `COLUMN_NAME`. */
-const COLUMN_FIELDS = [
-  'TABLE_SCHEMA',
-  'SPANNER_TYPE',
-  'ORDINAL_POSITION',
-  'COLUMN_DEFAULT',
-  'IS_NULLABLE',
-  'IS_GENERATED',
-  'GENERATION_EXPRESSION',
-  'IS_STORED',
-] as const;
-
-/** Keys of one key column's entry, after `COLUMN_NAME`. */
-const KEY_COLUMN_FIELDS = [
-  'CONSTRAINT_NAME',
-  'ORDINAL_POSITION',
-  'POSITION_IN_UNIQUE_CONSTRAINT',
-] as const;
-
-/** Keys of one `INFORMATION_SCHEMA.TABLES` row, in the order selected. */
-const TABLE_METADATA_FIELDS = [
-  'TABLE_SCHEMA',
-  'TABLE_NAME',
-  'TABLE_TYPE',
-  'PARENT_TABLE_NAME',
-  'ON_DELETE_ACTION',
-  'SPANNER_STATE',
-  'INTERLEAVE_TYPE',
-  'ROW_DELETION_POLICY_EXPRESSION',
-] as const;
-
-/** Labels the values of one row with the field names selected for it. */
-function labelRow(
-  fields: readonly string[],
-  values: readonly unknown[],
-): Record<string, unknown> {
-  return Object.fromEntries(
-    fields.map((field, index) => [field, values[index]]),
-  );
-}
-
 /** One column's schema entry, with its key constraints once they are read. */
 interface ColumnSchema extends Record<string, unknown> {
   KEY_COLUMN_USAGE?: Array<Record<string, unknown>>;
@@ -252,38 +190,37 @@ export const getTableSchemaTool: SpannerToolDefinition<
 
     // One snapshot, so the three statements see one consistent schema.
     await withSnapshot(database, async (snapshot) => {
-      const columns = await selectValueRows(snapshot, {
+      const columns = await selectNamedRows(snapshot, {
         sql: COLUMNS_QUERY,
         params,
         types,
       });
-      for (const [columnName, ...values] of columns) {
-        schema[String(columnName)] = labelRow(COLUMN_FIELDS, values);
+      for (const {COLUMN_NAME, ...column} of columns) {
+        schema[String(COLUMN_NAME)] = column;
       }
 
-      const keyColumns = await selectValueRows(snapshot, {
+      const keyColumns = await selectNamedRows(snapshot, {
         sql: KEY_COLUMN_USAGE_QUERY,
         params,
         types,
       });
-      for (const [columnName, ...values] of keyColumns) {
-        const column = schema[String(columnName)];
+      for (const {COLUMN_NAME, ...constraint} of keyColumns) {
+        const column = schema[String(COLUMN_NAME)];
         // A key column the column query did not return is dropped, as it is
         // in adk-python.
         if (column) {
           column.KEY_COLUMN_USAGE ??= [];
-          column.KEY_COLUMN_USAGE.push(labelRow(KEY_COLUMN_FIELDS, values));
+          column.KEY_COLUMN_USAGE.push(constraint);
         }
       }
 
-      const tables = await selectValueRows(snapshot, {
-        sql: TABLE_METADATA_QUERY,
-        params,
-        types,
-      });
-      for (const values of tables) {
-        metadata.push(labelRow(TABLE_METADATA_FIELDS, values));
-      }
+      metadata.push(
+        ...(await selectNamedRows(snapshot, {
+          sql: TABLE_METADATA_QUERY,
+          params,
+          types,
+        })),
+      );
     });
 
     return {results: toJsonSafe({schema, metadata})};
@@ -298,15 +235,13 @@ export const listTableIndexesTool: SpannerToolDefinition<typeof tableParams> = {
   async run({database, dialect}, args) {
     rejectPostgresql(dialect, UNSUPPORTED_DIALECT);
     const rows = await withSnapshot(database, (snapshot) =>
-      selectValueRows(snapshot, {
+      selectNamedRows(snapshot, {
         sql: INDEXES_QUERY,
         params: {table_id: args.table_id},
         types: {table_id: 'string'},
       }),
     );
-    return {
-      results: rows.map((values) => toJsonSafe(labelRow(INDEX_FIELDS, values))),
-    };
+    return {results: rows.map(toJsonSafe)};
   },
 };
 
@@ -320,17 +255,13 @@ export const listTableIndexColumnsTool: SpannerToolDefinition<
   async run({database, dialect}, args) {
     rejectPostgresql(dialect, UNSUPPORTED_DIALECT);
     const rows = await withSnapshot(database, (snapshot) =>
-      selectValueRows(snapshot, {
+      selectNamedRows(snapshot, {
         sql: INDEX_COLUMNS_QUERY,
         params: {table_id: args.table_id},
         types: {table_id: 'string'},
       }),
     );
-    return {
-      results: rows.map((values) =>
-        toJsonSafe(labelRow(INDEX_COLUMN_FIELDS, values)),
-      ),
-    };
+    return {results: rows.map(toJsonSafe)};
   },
 };
 

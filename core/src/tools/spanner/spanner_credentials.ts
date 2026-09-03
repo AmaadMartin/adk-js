@@ -28,8 +28,8 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /**
  * How the Spanner tools obtain credentials. Exactly one of three shapes is
- * valid, which TypeScript cannot express, so
- * {@link validateSpannerCredentialsConfig} enforces it at runtime:
+ * valid, which TypeScript cannot express, so the {@link SpannerToolset}
+ * constructor enforces it at runtime:
  *
  *   1. `authClient` alone — one identity for every end user.
  *   2. `externalAccessTokenKey` alone — a token another component already
