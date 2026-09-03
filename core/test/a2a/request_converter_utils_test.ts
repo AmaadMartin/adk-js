@@ -4,30 +4,61 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part as A2APart} from '@a2a-js/sdk';
-import {RequestContext} from '@a2a-js/sdk/server';
+import {Part as A2APart, Message, Task} from '@a2a-js/sdk';
+import {RequestContext, ServerCallContext} from '@a2a-js/sdk/server';
 import {convertA2aRequestToAgentRunRequest, getUserId} from '@google/adk';
 import {Part as GenAIPart} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-function createRequestContext(overrides = {}): RequestContext {
-  return {
-    contextId: 'context-1',
-    taskId: 'task-1',
-    userMessage: {
-      kind: 'message',
-      messageId: 'message-1',
-      role: 'user',
-      parts: [{kind: 'text', text: 'hello'}],
-    },
-    ...overrides,
-  } as unknown as RequestContext;
+const DEFAULT_MESSAGE: Message = {
+  kind: 'message',
+  messageId: 'message-1',
+  role: 'user',
+  parts: [{kind: 'text', text: 'hello'}],
+};
+
+function createRequestContext({
+  userMessage = DEFAULT_MESSAGE,
+  taskId = 'task-1',
+  contextId = 'context-1',
+  task,
+  context,
+}: {
+  userMessage?: Message;
+  taskId?: string;
+  contextId?: string;
+  task?: Task;
+  context?: ServerCallContext;
+} = {}): RequestContext {
+  return new RequestContext(
+    userMessage,
+    taskId,
+    contextId,
+    task,
+    undefined,
+    context,
+  );
+}
+
+/**
+ * A request the SDK's own type forbids: `userMessage` is required there, and
+ * the guard under test exists for the context that arrives without one.
+ */
+function createMessagelessRequestContext(): RequestContext {
+  return new RequestContext(
+    undefined as unknown as Message,
+    'task-1',
+    'context-1',
+  );
 }
 
 describe('getUserId', () => {
   it('uses the authenticated principal from the call context', () => {
     const request = createRequestContext({
-      context: {user: {isAuthenticated: true, userName: 'alice@example.com'}},
+      context: new ServerCallContext(undefined, {
+        isAuthenticated: true,
+        userName: 'alice@example.com',
+      }),
     });
 
     expect(getUserId(request)).toBe('alice@example.com');
@@ -39,7 +70,10 @@ describe('getUserId', () => {
 
   it('falls back to the context id when the user has no name', () => {
     const request = createRequestContext({
-      context: {user: {isAuthenticated: false, userName: ''}},
+      context: new ServerCallContext(undefined, {
+        isAuthenticated: false,
+        userName: '',
+      }),
     });
 
     expect(getUserId(request)).toBe('A2A_USER_context-1');
@@ -119,9 +153,7 @@ describe('convertA2aRequestToAgentRunRequest', () => {
 
   it('throws when the request carries no message', () => {
     expect(() =>
-      convertA2aRequestToAgentRunRequest(
-        createRequestContext({userMessage: undefined}),
-      ),
+      convertA2aRequestToAgentRunRequest(createMessagelessRequestContext()),
     ).toThrow('message not provided');
   });
 });
