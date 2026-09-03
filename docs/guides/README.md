@@ -184,7 +184,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [AgentTool](tools/agent_tool/index.md) - Exposing an agent to another agent as a callable tool: the isolation of the nested run, the arguments it accepts, the run settings it inherits, and when the sub-runner is released.
 - [APIHubClient](tools/apihub_client/index.md) - Reading an OpenAPI spec out of Google Cloud API Hub, from a resource path or a Console URL.
 - [ApplicationIntegrationToolset](tools/application_integration_toolset/index.md) - Turn a Google Cloud Application Integration integration, or an Integration Connectors connection, into agent tools.
-- [BaseComputer](tools/computer_use/index.md) - The interface an agent uses to drive a computer environment, and the contract an implementation accepts.
+- [BaseComputer and ComputerUseToolset](tools/computer_use/index.md) - Driving a browser with a Gemini computer-use model: the interface you implement, and the coordinate and URL-safety rules the toolset applies.
 - [BaseRetrievalTool](tools/base_retrieval_tool/index.md) - The shared `query`
   declaration every retrieval tool contributes, and the two shapes it takes.
 - [BaseTool custom metadata and response scheduling](tools/base_tool/index.md) - Carrying tool metadata, and controlling when a live model reacts to a tool response.

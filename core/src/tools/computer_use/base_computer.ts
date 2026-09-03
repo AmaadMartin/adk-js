@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {types} from 'node:util';
+
 import {Context} from '../../agents/context.js';
 import {experimental} from '../../utils/experimental.js';
 
@@ -19,6 +21,18 @@ export enum ComputerEnvironment {
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
 
 /**
+ * The size of a screen, in pixels.
+ *
+ * {@link ComputerUseTool} takes the screen size in this named form.
+ * {@link BaseComputer.screenSize} reports the same pair as a
+ * `[width, height]` tuple, which is the shape adk-python returns.
+ */
+export interface ScreenSize {
+  width: number;
+  height: number;
+}
+
+/**
  * The state of the computer environment after an action.
  *
  * Both fields are optional: an implementation that cannot take a screenshot,
@@ -29,6 +43,30 @@ export interface ComputerState {
   screenshot?: Uint8Array;
   /** The current URL of the webpage being displayed. */
   url?: string;
+}
+
+/**
+ * Whether `value` is a {@link ComputerState} carrying a screenshot, so that a
+ * computer method's return value can be told apart from an already-formatted
+ * tool response.
+ *
+ * The screenshot is what makes the two tellable apart, so a state without one
+ * does not pass. A caller that formats a state reads the screenshot, and this
+ * guard is what promises the screenshot is there.
+ */
+export function isComputerState(
+  value: unknown,
+): value is ComputerState & {screenshot: Uint8Array} {
+  if (typeof value !== 'object' || value === null || !('screenshot' in value)) {
+    return false;
+  }
+  if (!types.isUint8Array(value.screenshot)) {
+    return false;
+  }
+  if (!('url' in value)) {
+    return true;
+  }
+  return value.url === undefined || typeof value.url === 'string';
 }
 
 /**

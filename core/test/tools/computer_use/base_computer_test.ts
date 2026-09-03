@@ -13,8 +13,16 @@ import {
   PluginManager,
   ScrollDirection,
   createSession,
+  isComputerState,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+import {
+  MOCK_PAGE_URL,
+  MOCK_SCREENSHOT,
+  MockComputer as SharedMockComputer,
+  createToolContext,
+} from './computer_use_test_utils.js';
 
 const PAGE_URL = 'https://example.com';
 const SEARCH_URL = 'https://search.example.com';
@@ -355,5 +363,117 @@ describe('BaseComputer', () => {
 
     expect(state.url).toBe(PAGE_URL);
     expect(state.screenshot).toEqual(SCREENSHOT);
+  });
+});
+
+describe('isComputerState', () => {
+  it('accepts a state with a url', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT, url: 'a'})).toBe(true);
+  });
+
+  it('accepts a state without a url', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT})).toBe(true);
+  });
+
+  it('accepts a state whose url is explicitly undefined', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT, url: undefined})).toBe(
+      true,
+    );
+  });
+
+  it('rejects an object with no screenshot', () => {
+    expect(isComputerState({url: 'https://example.com'})).toBe(false);
+  });
+
+  it('rejects a screenshot that is not bytes', () => {
+    expect(isComputerState({screenshot: 'not-bytes'})).toBe(false);
+  });
+
+  it('rejects a state whose url is not a string', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT, url: 5})).toBe(false);
+  });
+
+  it('rejects non-objects', () => {
+    expect(isComputerState(null)).toBe(false);
+    expect(isComputerState('state')).toBe(false);
+  });
+});
+
+// The suite above drives a mock that answers every action with the same URL,
+// so it proves an action is reachable. This one drives the shared mock, which
+// writes its arguments into the URL it returns, so it proves the arguments
+// reach the implementation.
+describe('BaseComputer subclass dispatch', () => {
+  const computer = new SharedMockComputer();
+
+  it('reports its screen size and environment', async () => {
+    expect(await computer.screenSize()).toEqual([1920, 1080]);
+    expect(await computer.environment()).toBe(
+      ComputerEnvironment.ENVIRONMENT_BROWSER,
+    );
+  });
+
+  it('dispatches every action to the subclass', async () => {
+    expect((await computer.openWebBrowser()).url).toBe(MOCK_PAGE_URL);
+    expect((await computer.clickAt({x: 1, y: 2})).url).toBe(
+      `${MOCK_PAGE_URL}/click/1/2`,
+    );
+    expect((await computer.hoverAt({x: 3, y: 4})).url).toBe(
+      `${MOCK_PAGE_URL}/hover/3/4`,
+    );
+    expect(
+      (
+        await computer.typeTextAt({
+          x: 5,
+          y: 6,
+          text: 'hi',
+          pressEnter: false,
+          clearBeforeTyping: false,
+        })
+      ).url,
+    ).toBe(`${MOCK_PAGE_URL}/type/5/6/hi/false/false`);
+    expect((await computer.scrollDocument({direction: 'down'})).url).toBe(
+      `${MOCK_PAGE_URL}/scroll/down`,
+    );
+    expect(
+      (await computer.scrollAt({x: 7, y: 8, direction: 'up', magnitude: 9}))
+        .url,
+    ).toBe(`${MOCK_PAGE_URL}/scroll/7/8/up/9`);
+    expect((await computer.wait({seconds: 2})).url).toBe(
+      `${MOCK_PAGE_URL}/wait/2`,
+    );
+    expect((await computer.goBack()).url).toBe(`${MOCK_PAGE_URL}/back`);
+    expect((await computer.goForward()).url).toBe(`${MOCK_PAGE_URL}/forward`);
+    expect((await computer.search()).url).toBe(`${MOCK_PAGE_URL}/search`);
+    expect((await computer.navigate({url: 'https://a.test/'})).url).toBe(
+      'https://a.test/',
+    );
+    expect((await computer.keyCombination({keys: ['control', 'c']})).url).toBe(
+      `${MOCK_PAGE_URL}/keys/control+c`,
+    );
+    expect(
+      (
+        await computer.dragAndDrop({
+          x: 1,
+          y: 2,
+          destinationX: 3,
+          destinationY: 4,
+        })
+      ).url,
+    ).toBe(`${MOCK_PAGE_URL}/drag/1/2/3/4`);
+    expect((await computer.currentState()).url).toBe(MOCK_PAGE_URL);
+  });
+
+  it('records the lifecycle calls the toolset makes', async () => {
+    const lifecycleComputer = new SharedMockComputer();
+    const toolContext = createToolContext();
+
+    await lifecycleComputer.initialize();
+    await lifecycleComputer.prepare(toolContext);
+    await lifecycleComputer.close();
+
+    expect(lifecycleComputer.initializeCalled).toBe(1);
+    expect(lifecycleComputer.prepareCalls).toEqual([toolContext]);
+    expect(lifecycleComputer.closeCalled).toBe(1);
   });
 });
