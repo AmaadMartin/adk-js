@@ -4,10 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Part as A2APart, AgentCard} from '@a2a-js/sdk';
+import {
+  Part as A2APart,
+  AgentCard,
+  Message,
+  Task,
+  TaskState,
+} from '@a2a-js/sdk';
 import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {
+  A2AStreamEventData,
   AsyncQueue,
+  createEvent,
   createSession,
   Event,
   InvocationContext,
@@ -16,6 +24,8 @@ import {
   RemoteA2AAgent,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {promoteResponseToOutput} from '../../src/a2a/a2a_remote_agent_output.js';
+import {fakeA2AClient, fakeClientFactory} from './fake_a2a_client.js';
 
 const CARD: AgentCard = {
   name: 'peer',
@@ -29,37 +39,27 @@ const CARD: AgentCard = {
   defaultOutputModes: ['text'],
 };
 
-function clientYielding(...chunks: Array<Record<string, unknown>>): {
+function clientYielding(...chunks: A2AStreamEventData[]): {
   client: Client;
   clientFactory: ClientFactory;
 } {
-  const client = {
-    sendMessageStream: vi.fn(() =>
-      (async function* () {
-        for (const chunk of chunks) {
-          yield chunk;
-        }
-      })(),
-    ),
+  const client = fakeA2AClient({
+    sendMessageStream: vi.fn(async function* () {
+      for (const chunk of chunks) {
+        yield chunk;
+      }
+    }),
     sendMessage: vi.fn(),
-  } as unknown as Client;
-  const clientFactory = {
-    createFromAgentCard: vi.fn().mockResolvedValue(client),
-  } as unknown as ClientFactory;
+  });
+  const clientFactory = fakeClientFactory(vi.fn().mockResolvedValue(client));
   return {client, clientFactory};
 }
 
-function agentMessage(parts: A2APart[], metadata?: Record<string, unknown>) {
-  return {
-    kind: 'message',
-    messageId: 'm-1',
-    role: 'agent',
-    parts,
-    ...(metadata ? {metadata} : {}),
-  };
+function agentMessage(parts: A2APart[]): Message {
+  return {kind: 'message', messageId: 'm-1', role: 'agent', parts};
 }
 
-function task(state: string, text: string) {
+function task(state: TaskState, text: string): Task {
   return {
     kind: 'task',
     id: 't-1',
@@ -77,18 +77,11 @@ async function runAsNode(agent: RemoteA2AAgent): Promise<Event[]> {
       id: 's-1',
       appName: 'app-1',
       events: [
-        {
+        createEvent({
           author: 'user',
-          id: 'e-1',
           invocationId: 'inv-1',
-          timestamp: 0,
-          actions: {
-            stateDelta: {},
-            artifactDelta: {},
-            requestedAuthConfigs: {},
-          },
           content: {role: 'user', parts: [{text: 'ping'}]},
-        } as unknown as Event,
+        }),
       ],
     }),
   });
@@ -111,7 +104,7 @@ async function runAsNode(agent: RemoteA2AAgent): Promise<Event[]> {
   return events;
 }
 
-function agentFor(...chunks: Array<Record<string, unknown>>): RemoteA2AAgent {
+function agentFor(...chunks: A2AStreamEventData[]): RemoteA2AAgent {
   return new RemoteA2AAgent({
     name: 'peer_agent',
     agentCard: CARD,
@@ -203,22 +196,14 @@ describe('RemoteA2AAgent as a workflow node', () => {
     expect(promoted[0].output).toBe('first');
   });
 
-  it('promotes when the peer sends a task with a malformed status', async () => {
-    const events = await runAsNode(
-      agentFor({
-        kind: 'task',
-        id: 't-1',
-        contextId: 'c-1',
-        status: 'completed',
-        artifacts: [
-          {artifactId: 'a-1', parts: [{kind: 'text', text: 'from artifact'}]},
-        ],
-      }),
-    );
+  it('promotes nothing from an event whose content has no parts', () => {
+    const event = createEvent({
+      author: 'peer_agent',
+      content: {role: 'model'},
+    });
 
-    expect(events.find((event) => event.output !== undefined)?.output).toBe(
-      'from artifact',
-    );
+    expect(promoteResponseToOutput(event, 'peer_agent')).toBe(false);
+    expect(event.output).toBeUndefined();
   });
 
   it('skips a partial streaming chunk', async () => {

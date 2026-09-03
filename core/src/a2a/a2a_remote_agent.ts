@@ -13,7 +13,6 @@ import {
   MessageSendParams,
 } from '@a2a-js/sdk';
 import {Client, ClientFactory, RequestOptions} from '@a2a-js/sdk/client';
-import {Content as GenAIContent} from '@google/genai';
 import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {AuthCredential} from '../auth/auth_credential.js';
@@ -44,14 +43,17 @@ import {
   executeAfterRequestInterceptors,
   executeBeforeCardRequestInterceptors,
   executeBeforeRequestInterceptors,
+  isAdkEvent,
   newIntegrationExtensionInterceptor,
 } from './a2a_remote_agent_interceptors.js';
+import {promoteResponseToOutput} from './a2a_remote_agent_output.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
 import {
   createEndOfAgentEvent,
   createFinishTaskFailureEvent,
   createTaskFailureEvents,
   findFinishTaskArgsFromHistory,
+  textFromContent,
 } from './a2a_remote_agent_task.js';
 import {
   getUserFunctionCallAt,
@@ -215,12 +217,18 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
  * the client can collect one and the next turn resumes.
  */
 export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
+  /**
+   * Writable here alone: this agent adopts the description its resolved agent
+   * card carries, which it cannot know at construction. `readonly` is not part
+   * of assignability, so a `BaseNode`-typed reference still cannot write it.
+   */
+  declare description: string;
+
   private client?: Client;
   private card?: AgentCard;
   private readonly cardSource?: string;
   private readonly authConfig?: AuthConfig;
   private readonly requestInterceptors?: A2ARequestInterceptor[];
-  private closed = false;
 
   constructor(private readonly a2aConfig: RemoteA2AAgentConfig) {
     super(a2aConfig);
@@ -263,26 +271,6 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
             newIntegrationExtensionInterceptor,
           ]
         : a2aConfig.requestInterceptors;
-  }
-
-  /**
-   * Releases the client and card this agent resolved.
-   *
-   * A client the caller supplied is left alone: this agent never owned it.
-   * Calling this twice is a no-op.
-   */
-  close(): void {
-    if (this.closed) {
-      return;
-    }
-    this.closed = true;
-    if (!this.a2aConfig.client) {
-      this.client = undefined;
-    }
-    if (this.cardSource) {
-      this.card = undefined;
-    }
-    logger.debug(`Released remote A2A agent resources for ${this.name}`);
   }
 
   private get timeoutMs(): number {
@@ -555,7 +543,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       ctx,
       message,
     );
-    if (!isA2AMessage(intercepted.request)) {
+    if (isAdkEvent(intercepted.request)) {
       control.errorMessage = 'Request intercepted';
       control.release = true;
       yield intercepted.request;
@@ -611,7 +599,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     try {
       const stream = useStreaming
         ? peer.client.sendMessageStream(sendParams, options)
-        : toStream(await peer.client.sendMessage(sendParams, options));
+        : [await peer.client.sendMessage(sendParams, options)];
       for await (const chunk of stream) {
         for await (const event of this.emitChunk(
           ctx,
@@ -768,71 +756,6 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   }
 }
 
-/**
- * A2A task states that carry work in progress rather than the answer. An event
- * stamped with one of them must not become the node's output.
- */
-const NON_FINAL_TASK_STATES: ReadonlySet<string> = new Set([
-  'submitted',
-  'working',
-  'input-required',
-  'auth-required',
-  'unknown',
-]);
-
-/**
- * Sets `event.output` from the event's non-thought text, when it is eligible.
- *
- * A node produces at most one output, so the caller stops after the first
- * event this returns `true` for. An event is skipped when it is partial, when
- * its output is already set, when this agent did not author it, when it
- * carries no plain text, or when the peer's task is still in progress.
- * Streaming converters do not always mark `working` text as a thought, so the
- * task state is checked as well.
- *
- * The author, not `nodeInfo.path`: the node runner stamps the path after the
- * node yields, so it is not set yet here.
- */
-function promoteResponseToOutput(event: AdkEvent, agentName: string): boolean {
-  if (event.partial || event.output !== undefined) {
-    return false;
-  }
-  if (event.author !== agentName) {
-    return false;
-  }
-  if (isNonFinalTaskResponse(event)) {
-    return false;
-  }
-  const text = (event.content?.parts ?? [])
-    .filter(
-      (part) =>
-        part.text &&
-        !part.thought &&
-        !part.functionCall &&
-        !part.functionResponse,
-    )
-    .map((part) => part.text)
-    .join('');
-  if (!text) {
-    return false;
-  }
-  event.output = text;
-  event.nodeInfo = {...event.nodeInfo, messageAsOutput: true};
-  return true;
-}
-
-/** Whether the A2A response metadata reports a task still in progress. */
-function isNonFinalTaskResponse(event: AdkEvent): boolean {
-  const response = event.customMetadata?.[AdkMetadataKeys.RESPONSE];
-  const status = isRecord(response) ? response['status'] : undefined;
-  const state = isRecord(status) ? status['state'] : undefined;
-  return typeof state === 'string' && NON_FINAL_TASK_STATES.has(state);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /** The client for this turn and the card whose capabilities it honours. */
 interface ResolvedPeer {
   client: Client;
@@ -843,29 +766,4 @@ interface ResolvedPeer {
 interface TaskControl {
   release: boolean;
   errorMessage?: string;
-}
-
-/** The joined text of a content's text parts, or `undefined` when it has none. */
-function textFromContent(
-  content: GenAIContent | undefined,
-): string | undefined {
-  const texts = (content?.parts ?? [])
-    .map((part) => part.text)
-    .filter((text): text is string => Boolean(text));
-  return texts.length > 0 ? texts.join('\n') : undefined;
-}
-
-/** Yields a single non-streaming response as a stream of one. */
-async function* toStream(
-  result: A2AStreamEventData,
-): AsyncGenerator<A2AStreamEventData, void, void> {
-  yield result;
-}
-
-/**
- * Whether a `beforeRequest` interceptor returned the request rather than an
- * ADK event. An A2A `Message` always carries `kind: 'message'`.
- */
-function isA2AMessage(value: Message | AdkEvent): value is Message {
-  return 'kind' in value;
 }

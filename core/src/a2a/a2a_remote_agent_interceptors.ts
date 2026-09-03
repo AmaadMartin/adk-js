@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {HTTP_EXTENSION_HEADER, Message} from '@a2a-js/sdk';
+import {Extensions, HTTP_EXTENSION_HEADER, Message} from '@a2a-js/sdk';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event as AdkEvent} from '../events/event.js';
 import {
@@ -28,19 +28,17 @@ export const newIntegrationExtensionInterceptor: A2ARequestInterceptor = {
     request: Message,
     params: A2AParametersConfig,
   ) {
-    const declared = (params.headers?.[HTTP_EXTENSION_HEADER] ?? '')
-      .split(',')
-      .filter(Boolean);
-    if (!declared.includes(NEW_A2A_ADK_INTEGRATION_EXTENSION)) {
-      declared.push(NEW_A2A_ADK_INTEGRATION_EXTENSION);
-    }
+    const declared = Extensions.createFrom(
+      Extensions.parseServiceParameter(params.headers?.[HTTP_EXTENSION_HEADER]),
+      NEW_A2A_ADK_INTEGRATION_EXTENSION,
+    );
     return {
       request,
       params: {
         ...params,
         headers: {
           ...params.headers,
-          [HTTP_EXTENSION_HEADER]: declared.join(','),
+          [HTTP_EXTENSION_HEADER]: Extensions.toServiceParameter(declared),
         },
       },
     };
@@ -130,6 +128,6 @@ export async function executeAfterRequestInterceptors(
  * object, and two copies of this package in one runtime would break identity
  * checks anyway.
  */
-function isAdkEvent(value: Message | AdkEvent): value is AdkEvent {
+export function isAdkEvent(value: Message | AdkEvent): value is AdkEvent {
   return !('kind' in value);
 }

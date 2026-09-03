@@ -21,7 +21,6 @@ export type {
   BeforeA2ARequestCallback,
   RemoteA2AAgentConfig,
 } from './a2a_remote_agent.js';
-export {credentialRequestId} from './a2a_remote_agent_auth.js';
 export type {
   A2ACardRequestConfig,
   A2ACardRequestInterceptor,
@@ -30,23 +29,9 @@ export type {
 } from './a2a_remote_agent_config.js';
 export {
   NEW_A2A_ADK_INTEGRATION_EXTENSION,
-  executeAfterRequestInterceptors,
-  executeBeforeCardRequestInterceptors,
-  executeBeforeRequestInterceptors,
   newIntegrationExtensionInterceptor,
 } from './a2a_remote_agent_interceptors.js';
-export {
-  createEndOfAgentEvent,
-  createFinishTaskFailureEvent,
-  createTaskFailureEvents,
-  findFinishTaskArgsFromHistory,
-} from './a2a_remote_agent_task.js';
-export type {TaskFailureEventsParams} from './a2a_remote_agent_task.js';
-export {
-  adoptedCardDescription,
-  getA2AAgentCard,
-  resolveAgentCard,
-} from './agent_card.js';
+export {getA2AAgentCard, resolveAgentCard} from './agent_card.js';
 export type {ResolveAgentCardOptions} from './agent_card.js';
 export {
   AgentCardResolutionError,

@@ -14,15 +14,16 @@ import {
   AuthScheme,
   createEvent,
   createSession,
-  credentialRequestId,
   InvocationContext,
   PluginManager,
   RemoteA2AAgent,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   Session,
-  TOOLSET_AUTH_CREDENTIAL_ID_PREFIX,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {credentialRequestId} from '../../src/a2a/a2a_remote_agent_auth.js';
+import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from '../../src/auth/auth_preprocessor.js';
+import {fakeA2AClient, fakeClientFactory} from './fake_a2a_client.js';
 
 const CARD_URL = 'https://peer.example.com';
 
@@ -66,16 +67,14 @@ interface Harness {
 function createHarness(card: AgentCard = CARD): Harness {
   const cardRequests: Array<{url: string; headers: Headers}> = [];
   const sendOptions: Array<Record<string, string> | undefined> = [];
-  const client = {
+  const client = fakeA2AClient({
     sendMessageStream: vi.fn((_params, options) => {
       sendOptions.push(options?.serviceParameters);
       return (async function* () {})();
     }),
     sendMessage: vi.fn(),
-  } as unknown as Client;
-  const clientFactory = {
-    createFromAgentCard: vi.fn().mockResolvedValue(client),
-  } as unknown as ClientFactory;
+  });
+  const clientFactory = fakeClientFactory(vi.fn().mockResolvedValue(client));
   const fetchImpl: typeof fetch = async (input, init) => {
     cardRequests.push({
       url: String(input),

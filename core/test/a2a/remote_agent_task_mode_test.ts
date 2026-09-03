@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AgentCard} from '@a2a-js/sdk';
+import {AgentCard, Message, MessageSendParams} from '@a2a-js/sdk';
 import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {
+  A2AStreamEventData,
   Event as AdkEvent,
   createEvent,
   createSession,
@@ -20,6 +21,7 @@ import {
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {fakeA2AClient, fakeClientFactory} from './fake_a2a_client.js';
 
 const AGENT_NAME = 'peer_agent';
 const TASK_SCOPE = 'coordinator-call-1';
@@ -39,30 +41,26 @@ const CARD: AgentCard = {
 interface Harness {
   client: Client;
   clientFactory: ClientFactory;
-  sent: Array<Record<string, unknown>>;
+  sent: Message[];
 }
 
-function harnessYielding(...chunks: Array<Record<string, unknown>>): Harness {
-  const sent: Array<Record<string, unknown>> = [];
-  const client = {
-    sendMessageStream: vi.fn((params: {message: Record<string, unknown>}) => {
+function harnessYielding(...chunks: A2AStreamEventData[]): Harness {
+  const sent: Message[] = [];
+  const client = fakeA2AClient({
+    sendMessageStream: vi.fn(async function* (params: MessageSendParams) {
       sent.push(params.message);
-      return (async function* () {
-        for (const chunk of chunks) {
-          yield chunk;
-        }
-      })();
+      for (const chunk of chunks) {
+        yield chunk;
+      }
     }),
     sendMessage: vi.fn(),
-  } as unknown as Client;
-  const clientFactory = {
-    createFromAgentCard: vi.fn().mockResolvedValue(client),
-  } as unknown as ClientFactory;
+  });
+  const clientFactory = fakeClientFactory(vi.fn().mockResolvedValue(client));
   return {client, clientFactory, sent};
 }
 
 /** The peer's terminal `finish_task` reply, as an A2A message. */
-function finishTaskMessage(result: string) {
+function finishTaskMessage(result: string): Message {
   return {
     kind: 'message',
     messageId: 'm-finish',

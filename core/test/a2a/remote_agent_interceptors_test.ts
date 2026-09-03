@@ -13,15 +13,17 @@ import {
   Event as AdkEvent,
   createEvent,
   createSession,
-  executeAfterRequestInterceptors,
-  executeBeforeCardRequestInterceptors,
-  executeBeforeRequestInterceptors,
   InvocationContext,
   NEW_A2A_ADK_INTEGRATION_EXTENSION,
   newIntegrationExtensionInterceptor,
   PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  executeAfterRequestInterceptors,
+  executeBeforeCardRequestInterceptors,
+  executeBeforeRequestInterceptors,
+} from '../../src/a2a/a2a_remote_agent_interceptors.js';
 
 const CTX = new InvocationContext({
   invocationId: 'inv-1',
@@ -248,6 +250,16 @@ describe('newIntegrationExtensionInterceptor', () => {
   it('appends to an existing extension list', async () => {
     await expect(
       run({headers: {[HTTP_EXTENSION_HEADER]: 'https://other/ext'}}),
+    ).resolves.toBe(`https://other/ext,${NEW_A2A_ADK_INTEGRATION_EXTENSION}`);
+  });
+
+  it('trims a spaced list so a re-add does not duplicate', async () => {
+    await expect(
+      run({
+        headers: {
+          [HTTP_EXTENSION_HEADER]: `https://other/ext, ${NEW_A2A_ADK_INTEGRATION_EXTENSION}`,
+        },
+      }),
     ).resolves.toBe(`https://other/ext,${NEW_A2A_ADK_INTEGRATION_EXTENSION}`);
   });
 

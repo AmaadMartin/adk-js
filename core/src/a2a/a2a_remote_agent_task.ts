@@ -5,6 +5,7 @@
  */
 
 import {Message} from '@a2a-js/sdk';
+import {Content as GenAIContent} from '@google/genai';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {
   Event as AdkEvent,
@@ -93,6 +94,16 @@ export function createTaskFailureEvents({
     errorMessage,
   );
   return [errorEvent, finishEvent];
+}
+
+/** The joined text of a content's text parts, or `undefined` when it has none. */
+export function textFromContent(
+  content: GenAIContent | undefined,
+): string | undefined {
+  const texts = (content?.parts ?? [])
+    .map((part) => part.text)
+    .filter((text): text is string => Boolean(text));
+  return texts.length > 0 ? texts.join('\n') : undefined;
 }
 
 /** The event that hands control back to the delegating coordinator. */

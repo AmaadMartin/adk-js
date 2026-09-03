@@ -134,10 +134,6 @@ const bookingAgent = new RemoteA2AAgent({
 });
 ```
 
-`close()` releases the card and the client the agent resolved. A client or a
-`fetchImpl` you supplied is left alone — the agent never owned it — and calling
-`close()` twice is a no-op.
-
 ## Interceptors
 
 A `requestInterceptor` sees every outgoing message and every converted response.

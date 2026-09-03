@@ -6,24 +6,29 @@
 
 import {
   Event as AdkEvent,
-  createEndOfAgentEvent,
   createEvent,
-  createFinishTaskFailureEvent,
   createSession,
-  createTaskFailureEvents,
-  findFinishTaskArgsFromHistory,
   FINISH_TASK_ERROR_RESULT,
   FINISH_TASK_SUCCESS_RESULT,
   getFunctionResponses,
-  getOutputWrapperKey,
   InvocationContext,
-  isFinishTaskTerminalFr,
   PluginManager,
   Session,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v4';
+import {
+  createEndOfAgentEvent,
+  createFinishTaskFailureEvent,
+  createTaskFailureEvents,
+  findFinishTaskArgsFromHistory,
+  textFromContent,
+} from '../../src/a2a/a2a_remote_agent_task.js';
+import {
+  getOutputWrapperKey,
+  isFinishTaskTerminalFr,
+} from '../../src/tools/finish_task_tool.js';
 
 function ctxFor(events: AdkEvent[] = [], isolationScope?: string) {
   return new InvocationContext({
@@ -193,6 +198,22 @@ describe('findFinishTaskArgsFromHistory', () => {
     expect(
       findFinishTaskArgsFromHistory(sessionOf([finishCall({n: 1}), other])),
     ).toEqual({n: 1});
+  });
+});
+
+describe('textFromContent', () => {
+  it('joins the text parts', () => {
+    expect(
+      textFromContent({role: 'model', parts: [{text: 'a'}, {text: 'b'}]}),
+    ).toBe('a\nb');
+  });
+
+  it('is undefined for content with no text', () => {
+    expect(textFromContent(undefined)).toBeUndefined();
+    expect(textFromContent({role: 'model'})).toBeUndefined();
+    expect(
+      textFromContent({role: 'model', parts: [{thought: true}]}),
+    ).toBeUndefined();
   });
 });
 
