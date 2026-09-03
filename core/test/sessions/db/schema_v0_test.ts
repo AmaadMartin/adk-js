@@ -89,6 +89,13 @@ describe('storageEventV0ToEvent', () => {
     expect(storageEventV0ToEvent(row).longRunningToolIds).toEqual([]);
   });
 
+  it('yields no long-running tool ids when the column holds no array', () => {
+    const row = fullRow();
+    row.longRunningToolIdsJson = '{"not": "an array"}';
+
+    expect(storageEventV0ToEvent(row).longRunningToolIds).toEqual([]);
+  });
+
   it('leaves every nullable column undefined when it is not set', () => {
     const row = new StorageEventV0();
     row.id = 'bare';

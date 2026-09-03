@@ -219,7 +219,11 @@ export const ENTITIES_V0 = [
 
 /** Parses the JSON array v0 stores the long-running tool ids in. */
 function parseLongRunningToolIds(json?: string): string[] {
-  return json ? (JSON.parse(json) as string[]) : [];
+  if (!json) {
+    return [];
+  }
+  const parsed: unknown = JSON.parse(json);
+  return Array.isArray(parsed) ? parsed.map(String) : [];
 }
 
 /**
