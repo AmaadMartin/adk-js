@@ -206,7 +206,7 @@ export function isTokenExpired(token: OAuth2Auth, leeway = 60): boolean {
  */
 export async function populateAuthSchemeFromDiscovery(
   authScheme: AuthScheme,
-  discoveryManager: OAuth2DiscoveryManager = new OAuth2DiscoveryManager(),
+  discoveryManager: OAuth2DiscoveryManager,
 ): Promise<boolean> {
   if (!isExtendedOAuth2(authScheme)) {
     logger.warn('No issuerUrl was provided for auto-discovery.');

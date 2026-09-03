@@ -128,6 +128,7 @@ function createToolContext(
     state?: Record<string, unknown>;
     userId?: string;
     functionCallId?: string;
+    omitFunctionCallId?: boolean;
   } = {},
 ): Context {
   const session = createSession({
@@ -145,7 +146,9 @@ function createToolContext(
   });
   return new Context({
     invocationContext,
-    functionCallId: options.functionCallId ?? 'function-call-1',
+    functionCallId: options.omitFunctionCallId
+      ? undefined
+      : (options.functionCallId ?? 'function-call-1'),
   });
 }
 
@@ -843,21 +846,15 @@ describe('CredentialManager.requestCredential', () => {
     expect(context.eventActions.requestedAuthConfigs['call-42']).toBeDefined();
   });
 
-  it('throws a TypeError for a context that cannot request a credential', () => {
-    const readonlyShaped: Partial<Context> = {
-      invocationContext: createToolContext().invocationContext,
-    };
+  it('throws for a context that is not a tool call', () => {
     const manager = new CredentialManager({
       authScheme: apiKeyScheme(),
-      credentialKey: 'key-readonly',
+      credentialKey: 'key-no-function-call',
     });
 
-    expect(() => manager.requestCredential(readonlyShaped as Context)).toThrow(
-      new TypeError(
-        'requestCredential requires a ToolContext with a requestCredential ' +
-          'method, not a plain CallbackContext',
-      ),
-    );
+    expect(() =>
+      manager.requestCredential(createToolContext({omitFunctionCallId: true})),
+    ).toThrow('functionCallId is not set.');
   });
 
   it('does not leak one user resolved credential into another user request', async () => {

@@ -5,7 +5,6 @@
  */
 
 import {
-  AuthScheme,
   ExtendedOAuth2,
   isCustomAuthScheme,
   isExtendedOAuth2,
@@ -14,13 +13,14 @@ import {
   OAuthGrantType,
   OpenIdConnectWithConfig,
 } from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 import {getOAuthGrantTypeFromFlow} from '../../src/auth/auth_schemes.js';
 
 const AUTH_ENDPOINT = 'https://auth.example.com/authorize';
 const TOKEN_ENDPOINT = 'https://auth.example.com/token';
 
-const OAUTH2_SCHEME: AuthScheme = {
+const OAUTH2_SCHEME: OpenAPIV3.OAuth2SecurityScheme = {
   type: 'oauth2',
   flows: {
     authorizationCode: {
@@ -112,7 +112,7 @@ describe('auth_schemes type guards', () => {
     });
 
     it('returns false for an OAuth2 scheme with no flows', () => {
-      expect(isOAuth2Scheme({type: 'oauth2'} as AuthScheme)).toBe(false);
+      expect(isOAuth2Scheme({type: 'oauth2'})).toBe(false);
     });
 
     it('returns false for a scheme of another type', () => {
@@ -125,7 +125,7 @@ describe('auth_schemes type guards', () => {
       const scheme: ExtendedOAuth2 = {
         ...OAUTH2_SCHEME,
         issuerUrl: 'https://auth.example.com',
-      } as ExtendedOAuth2;
+      };
       expect(isExtendedOAuth2(scheme)).toBe(true);
     });
 
@@ -137,7 +137,7 @@ describe('auth_schemes type guards', () => {
       const scheme: ExtendedOAuth2 = {
         ...OAUTH2_SCHEME,
         issuerUrl: '',
-      } as ExtendedOAuth2;
+      };
       expect(isExtendedOAuth2(scheme)).toBe(false);
     });
 
@@ -152,12 +152,13 @@ describe('auth_schemes type guards', () => {
     });
 
     it('returns false for an OIDC scheme missing the token endpoint', () => {
-      const scheme = {
-        type: 'openIdConnect',
-        openIdConnectUrl: 'https://auth.example.com',
-        authorizationEndpoint: AUTH_ENDPOINT,
-      } as AuthScheme;
-      expect(isOpenIdConnectWithConfig(scheme)).toBe(false);
+      expect(
+        isOpenIdConnectWithConfig({
+          type: 'openIdConnect',
+          openIdConnectUrl: 'https://auth.example.com',
+          authorizationEndpoint: AUTH_ENDPOINT,
+        }),
+      ).toBe(false);
     });
 
     it('returns false for a scheme of another type', () => {

@@ -45,32 +45,19 @@ import {CredentialRefresherRegistry} from './refresher/credential_refresher_regi
  */
 const authProviderRegistry = new AuthProviderRegistry();
 
-/** Credential types that a tool can use with no exchange and no refresh. */
-const READY_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
-  AuthCredentialTypes.API_KEY,
-  AuthCredentialTypes.HTTP,
-]);
-
-/** Scheme types that cannot produce a credential without a raw one. */
-const RAW_CREDENTIAL_REQUIRED_SCHEME_TYPES: ReadonlySet<string> =
-  new Set<string>([AuthSchemeType.OAUTH2, AuthSchemeType.OPEN_ID_CONNECT]);
-
-/** Credential types whose raw form must carry an `oauth2` block. */
-const OAUTH2_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
-  AuthCredentialTypes.OAUTH2,
-  AuthCredentialTypes.OPEN_ID_CONNECT,
-]);
-
 /** Reports whether a credential is usable without exchange or refresh. */
-export function isReadyToUse(credential: AuthCredential): boolean {
-  return READY_CREDENTIAL_TYPES.has(credential.authType);
+function isReadyToUse(credential: AuthCredential): boolean {
+  return (
+    credential.authType === AuthCredentialTypes.API_KEY ||
+    credential.authType === AuthCredentialTypes.HTTP
+  );
 }
 
 /**
  * Reports whether a scheme uses the OAuth2 client credentials flow, which the
  * agent can complete on its own without asking the end user to authorize.
  */
-export function isClientCredentialsFlow(authScheme: AuthScheme): boolean {
+function isClientCredentialsFlow(authScheme: AuthScheme): boolean {
   if (isOAuth2Scheme(authScheme)) {
     return !!authScheme.flows.clientCredentials;
   }
@@ -88,9 +75,7 @@ export function isClientCredentialsFlow(authScheme: AuthScheme): boolean {
  * Returns the dotted path of the first endpoint an OAuth2 scheme declares a
  * flow for but leaves empty, or undefined when nothing is missing.
  */
-export function missingOAuth2FlowUrl(
-  authScheme: AuthScheme,
-): string | undefined {
+function missingOAuth2FlowUrl(authScheme: AuthScheme): string | undefined {
   if (!isOAuth2Scheme(authScheme)) {
     return undefined;
   }
@@ -122,20 +107,24 @@ export function missingOAuth2FlowUrl(
  * @param discoveryManager The manager that fetches the issuer's metadata.
  * @throws {Error} When the config cannot produce a credential.
  */
-export async function validateAuthConfig(
+async function validateAuthConfig(
   authConfig: AuthConfig,
   discoveryManager: OAuth2DiscoveryManager,
 ): Promise<void> {
   const {authScheme, rawAuthCredential} = authConfig;
 
   if (!rawAuthCredential) {
-    if (RAW_CREDENTIAL_REQUIRED_SCHEME_TYPES.has(authScheme.type)) {
+    if (
+      authScheme.type === AuthSchemeType.OAUTH2 ||
+      authScheme.type === AuthSchemeType.OPEN_ID_CONNECT
+    ) {
       throw new Error(
         `rawAuthCredential is required for auth scheme type ${authScheme.type}`,
       );
     }
   } else if (
-    OAUTH2_CREDENTIAL_TYPES.has(rawAuthCredential.authType) &&
+    (rawAuthCredential.authType === AuthCredentialTypes.OAUTH2 ||
+      rawAuthCredential.authType === AuthCredentialTypes.OPEN_ID_CONNECT) &&
     !rawAuthCredential.oauth2
   ) {
     throw new Error(
@@ -163,7 +152,7 @@ export async function validateAuthConfig(
  * @returns The exchanged credential, or the credential unchanged with
  *     `wasExchanged: false` when no exchanger serves its type.
  */
-export async function exchangeCredential(
+async function exchangeCredential(
   credential: AuthCredential,
   authScheme: AuthScheme,
   registry: CredentialExchangerRegistry,
@@ -179,32 +168,22 @@ export async function exchangeCredential(
  * Refreshes an expired credential through the refresher registered for its
  * type.
  *
- * The result reuses {@link ExchangeResult}, where `wasExchanged` reads as "the
- * credential was modified". That keeps the caller's "did anything change" test
- * uniform across the exchange step and the refresh step.
- *
- * @returns The refreshed credential, or the credential unchanged with
- *     `wasExchanged: false` when no refresher serves its type or the
- *     credential is still valid.
+ * @returns The refreshed credential, or undefined when no refresher serves its
+ *     type or the credential is still valid.
  */
-export async function refreshCredential(
+async function refreshCredential(
   credential: AuthCredential,
   authScheme: AuthScheme,
   registry: CredentialRefresherRegistry,
-): Promise<ExchangeResult> {
-  const refresher: BaseCredentialRefresher | undefined = registry.getRefresher(
-    credential.authType,
-  );
-  if (!refresher) {
-    return {credential, wasExchanged: false};
+): Promise<AuthCredential | undefined> {
+  const refresher = registry.getRefresher(credential.authType);
+  if (
+    !refresher ||
+    !(await refresher.isRefreshNeeded(credential, authScheme))
+  ) {
+    return undefined;
   }
-  if (!(await refresher.isRefreshNeeded(credential, authScheme))) {
-    return {credential, wasExchanged: false};
-  }
-  return {
-    credential: await refresher.refresh(credential, authScheme),
-    wasExchanged: true,
-  };
+  return refresher.refresh(credential, authScheme);
 }
 
 /**
@@ -224,7 +203,7 @@ export async function refreshCredential(
  * @throws {Error} When no provider serves the scheme, or the provider returns
  *     nothing.
  */
-export async function resolveCustomSchemeCredential(
+async function resolveCustomSchemeCredential(
   authConfig: AuthConfig,
   scheme: CustomAuthScheme,
   context: Context,
@@ -272,16 +251,6 @@ async function saveCredential(
   const authConfigToSave = cloneDeep(authConfig);
   authConfigToSave.exchangedAuthCredential = credential;
   await credentialService.saveCredential(authConfigToSave, context);
-}
-
-/**
- * Reports whether a context can ask the client for a credential. Only a tool
- * context can; a read-only context or a partial one cannot.
- */
-function canRequestCredential(
-  context: Context,
-): context is Context & {requestCredential: (authConfig: AuthConfig) => void} {
-  return typeof (context as Partial<Context>)?.requestCredential === 'function';
 }
 
 /**
@@ -400,15 +369,10 @@ export class CredentialManager {
    * the invocation until the user authorizes.
    *
    * @param context The context of the current tool call.
-   * @throws {TypeError} When the context cannot request a credential.
+   * @throws {Error} When the context is not a tool call's, so it has no
+   *     function call id to park the request against.
    */
   requestCredential(context: Context): void {
-    if (!canRequestCredential(context)) {
-      throw new TypeError(
-        'requestCredential requires a ToolContext with a requestCredential ' +
-          'method, not a plain CallbackContext',
-      );
-    }
     context.requestCredential(this.authConfig);
   }
 
@@ -480,8 +444,10 @@ export class CredentialManager {
         authScheme,
         this.refresherRegistry,
       );
-      credential = refreshed.credential;
-      wasRefreshed = refreshed.wasExchanged;
+      if (refreshed) {
+        credential = refreshed;
+        wasRefreshed = true;
+      }
     }
 
     if (
