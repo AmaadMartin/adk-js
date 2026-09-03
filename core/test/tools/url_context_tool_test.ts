@@ -4,28 +4,60 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  LlmRequest,
+  PluginManager,
+  URL_CONTEXT,
+  UrlContextTool,
+} from '@google/adk';
+import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
-function makeRequest(model?: string, tools = []): LlmRequest {
+function makeRequest(
+  model?: string,
+  tools: Tool[] = [],
+  isManagedAgent?: boolean,
+): LlmRequest {
   return {
     model,
     config: {tools},
     contents: [],
     toolsDict: {},
     liveConnectConfig: {},
-  } as unknown as LlmRequest;
+    isManagedAgent,
+  };
+}
+
+/** Builds a real `Context` backed by real ADK plumbing, with no stubs. */
+function makeToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('UrlContextTool', () => {
   describe('processLlmRequest', () => {
-    it('returns early when model is not set', async () => {
+    it('throws when model is not set', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest(undefined);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: {} as never,
-      });
+
+      await expect(
+        tool.processLlmRequest({
+          llmRequest: req,
+          toolContext: makeToolContext(),
+        }),
+      ).rejects.toThrow(
+        'URL context tool is not supported for model undefined',
+      );
 
       expect(req.config?.tools).toEqual([]);
     });
@@ -35,7 +67,7 @@ describe('UrlContextTool', () => {
       const req = makeRequest('gemini-2.0-flash');
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
@@ -46,23 +78,21 @@ describe('UrlContextTool', () => {
       const req = makeRequest('gemini-2.5-pro');
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
 
-    it('throws for Gemini 1.x model', async () => {
+    it('adds urlContext for a Gemini 1.x model', async () => {
       const tool = new UrlContextTool();
       const req = makeRequest('gemini-1.5-pro');
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: {} as never,
-        }),
-      ).rejects.toThrow(
-        'URL context tool requires Gemini 2 or above, but got gemini-1.5-pro',
-      );
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: makeToolContext(),
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
     });
 
     it('throws for unsupported (non-Gemini) model', async () => {
@@ -71,7 +101,7 @@ describe('UrlContextTool', () => {
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
-          toolContext: {} as never,
+          toolContext: makeToolContext(),
         }),
       ).rejects.toThrow('URL context tool is not supported for model gpt-4');
     });
@@ -83,10 +113,10 @@ describe('UrlContextTool', () => {
         contents: [],
         toolsDict: {},
         liveConnectConfig: {},
-      } as unknown as LlmRequest;
+      };
       await tool.processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
