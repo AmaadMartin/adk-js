@@ -65,27 +65,4 @@ describe('resolveVectorStoreSettings', () => {
       resolveVectorStoreSettings(vectorStore({vectorLength})),
     ).toThrow('Invalid vector length in the Spanner vector store settings.');
   });
-
-  it('accepts a primary key naming the content or embedding column', () => {
-    const settings = vectorStore({primaryKeyColumns: ['content', 'embedding']});
-
-    expect(() => resolveVectorStoreSettings(settings)).not.toThrow();
-  });
-
-  it('accepts a primary key naming an extra column it also sets up', () => {
-    const settings = vectorStore({
-      additionalColumnsToSetup: [{name: 'doc_id', type: 'STRING(MAX)'}],
-      primaryKeyColumns: ['doc_id'],
-    });
-
-    expect(() => resolveVectorStoreSettings(settings)).not.toThrow();
-  });
-
-  it('rejects a primary key that names no defined column', () => {
-    const settings = vectorStore({primaryKeyColumns: ['content', 'missing']});
-
-    expect(() => resolveVectorStoreSettings(settings)).toThrow(
-      "Primary key column 'missing' not found in column definitions.",
-    );
-  });
 });

@@ -12,7 +12,11 @@ import {
   QueryResultMode,
   SpannerToolSettings,
 } from './settings.js';
-import {POSTGRESQL_DIALECT, SpannerToolDefinition} from './spanner_tool.js';
+import {
+  rejectPostgresql,
+  SpannerToolDefinition,
+  UNSUPPORTED_DIALECT,
+} from './spanner_tool.js';
 
 const executeSqlParams = z.object({
   project_id: z
@@ -75,9 +79,7 @@ export function getExecuteSqlTool(
       databaseRole: settings.databaseRole,
     }),
     async run({database, dialect}, args) {
-      if (dialect === POSTGRESQL_DIALECT) {
-        throw new Error('PostgreSQL dialect is not supported.');
-      }
+      rejectPostgresql(dialect, UNSUPPORTED_DIALECT);
       return withSnapshot(database, async (snapshot) => {
         const rows: unknown[] = [];
         let budget = maxRows;

@@ -21,6 +21,30 @@ export const SPANNER_TOOL_NAME_PREFIX = 'spanner';
 /** The dialect name the tools that only speak GoogleSQL refuse. */
 export const POSTGRESQL_DIALECT = 'POSTGRESQL';
 
+/** What a tool reports when it cannot run against a PostgreSQL database. */
+export const UNSUPPORTED_DIALECT = 'PostgreSQL dialect is not supported.';
+
+/**
+ * Refuses a PostgreSQL database.
+ *
+ * Only `spanner_list_table_names` and the two search tools work against a
+ * PostgreSQL dialect database; everything else queries `INFORMATION_SCHEMA`
+ * with GoogleSQL syntax. adk-python writes this message without a trailing
+ * period in `get_table_schema` alone, and the callers reproduce that.
+ *
+ * @param dialect The dialect the database reported.
+ * @param message The message to report.
+ * @throws Error if the database speaks PostgreSQL.
+ */
+export function rejectPostgresql(
+  dialect: string | undefined,
+  message: string,
+): void {
+  if (dialect === POSTGRESQL_DIALECT) {
+    throw new Error(message);
+  }
+}
+
 /** The database one tool call reads, and the dialect it speaks. */
 export interface SpannerToolCall {
   database: Database;

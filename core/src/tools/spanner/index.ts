@@ -25,8 +25,6 @@ export type {
   ResolvedVectorStoreSettings,
   SpannerToolSettings,
   SpannerVectorStoreSettings,
-  TableColumn,
-  VectorSearchIndexSettings,
 } from './settings.js';
 export {
   SPANNER_DEFAULT_SCOPES,

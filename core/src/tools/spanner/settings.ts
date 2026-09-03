@@ -29,35 +29,6 @@ export enum QueryResultMode {
   DICT_LIST = 'dict_list',
 }
 
-/** One column of a vector store table. */
-export interface TableColumn {
-  /** The name of the column. */
-  name: string;
-  /**
-   * The type of the column, e.g. `STRING(MAX)` or `INT64` for GoogleSQL, and
-   * `text` or `int8` for PostgreSQL.
-   */
-  type: string;
-  /** Whether the column is nullable. Defaults to `true`. */
-  isNullable?: boolean;
-}
-
-/** The vector index an approximate nearest neighbour search reads. */
-export interface VectorSearchIndexSettings {
-  /** The name of the vector similarity search index. */
-  indexName: string;
-  /** Extra key columns in the index, after the embedding column. */
-  additionalKeyColumns?: string[];
-  /** Columns the index stores, so filtering can drop rows while walking it. */
-  additionalStoringColumns?: string[];
-  /** The tree depth, either 2 or 3. Defaults to 2. */
-  treeDepth?: number;
-  /** The number of leaves the vector data is partitioned into. Defaults to 1000. */
-  numLeaves?: number;
-  /** The number of branches, for a tree of depth 3 only. */
-  numBranches?: number;
-}
-
 /**
  * The vector store table `spanner_vector_store_similarity_search` searches.
  *
@@ -93,12 +64,6 @@ export interface SpannerVectorStoreSettings {
   numLeavesToSearch?: number;
   /** An extra condition added to the `WHERE` clause of the search. */
   additionalFilter?: string;
-  /** The vector index, required for an approximate search. */
-  vectorSearchIndexSettings?: VectorSearchIndexSettings;
-  /** Extra columns to create when a new vector store table is set up. */
-  additionalColumnsToSetup?: TableColumn[];
-  /** The primary key of a new vector store table. Defaults to a generated `id`. */
-  primaryKeyColumns?: string[];
 }
 
 /**
@@ -121,7 +86,11 @@ export interface SpannerToolSettings {
   maxExecutedQueryResultRows?: number;
   /** How `spanner_execute_sql` shapes a row. Defaults to `DEFAULT`. */
   queryResultMode?: QueryResultMode;
-  /** The database role the Spanner session runs as. */
+  /**
+   * The database role `spanner_execute_sql` opens its session as. The metadata
+   * and search tools do not use it, matching adk-python, where only
+   * `utils.execute_sql` passes `database_role`.
+   */
   databaseRole?: string;
   /** The vector store table, which adds `spanner_vector_store_similarity_search`. */
   vectorStoreSettings?: SpannerVectorStoreSettings;
@@ -137,8 +106,7 @@ export const DEFAULT_MAX_EXECUTED_QUERY_RESULT_ROWS = 50;
  * @param settings The settings as the developer wrote them.
  * @return The settings with {@link SpannerVectorStoreSettings.selectedColumns}
  *   set.
- * @throws Error if the vector length is not positive, or if a primary key
- *   column is not one of the columns the table defines.
+ * @throws Error if the vector length is not positive.
  */
 export function resolveVectorStoreSettings(
   settings: SpannerVectorStoreSettings,
@@ -147,18 +115,6 @@ export function resolveVectorStoreSettings(
     throw new Error(
       'Invalid vector length in the Spanner vector store settings.',
     );
-  }
-
-  const columns = new Set([settings.contentColumn, settings.embeddingColumn]);
-  for (const column of settings.additionalColumnsToSetup ?? []) {
-    columns.add(column.name);
-  }
-  for (const primaryKey of settings.primaryKeyColumns ?? []) {
-    if (!columns.has(primaryKey)) {
-      throw new Error(
-        `Primary key column '${primaryKey}' not found in column definitions.`,
-      );
-    }
   }
 
   const selectedColumns = settings.selectedColumns?.length

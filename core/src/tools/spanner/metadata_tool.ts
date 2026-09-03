@@ -7,7 +7,12 @@
 import {z} from 'zod';
 import {withSnapshot} from './client.js';
 import {selectValueRows, toJsonSafe} from './result_rows.js';
-import {POSTGRESQL_DIALECT, SpannerToolDefinition} from './spanner_tool.js';
+import {
+  POSTGRESQL_DIALECT,
+  rejectPostgresql,
+  SpannerToolDefinition,
+  UNSUPPORTED_DIALECT,
+} from './spanner_tool.js';
 
 const projectIdField = z
   .string()
@@ -50,26 +55,6 @@ function databaseTarget(args: z.infer<typeof databaseParams>) {
     databaseId: args.database_id,
   };
 }
-
-/**
- * Refuses a PostgreSQL database.
- *
- * Only `spanner_list_table_names` and the two search tools work against a
- * PostgreSQL dialect database; everything else queries `INFORMATION_SCHEMA`
- * with GoogleSQL syntax. adk-python writes this message without a trailing
- * period in `get_table_schema` alone, and the callers reproduce that.
- *
- * @param dialect The dialect the database reported.
- * @param message The message to report.
- * @throws Error if the database speaks PostgreSQL.
- */
-function rejectPostgresql(dialect: string | undefined, message: string): void {
-  if (dialect === POSTGRESQL_DIALECT) {
-    throw new Error(message);
-  }
-}
-
-const UNSUPPORTED_DIALECT = 'PostgreSQL dialect is not supported.';
 
 const LIST_TABLES_QUERY = 'SELECT TABLE_NAME\nFROM INFORMATION_SCHEMA.TABLES\n';
 
