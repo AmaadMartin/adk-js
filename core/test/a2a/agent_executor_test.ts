@@ -860,18 +860,14 @@ describe('A2AAgentExecutor', () => {
           events: [pendingCall],
         }),
       );
-      const runAsync = vi.fn();
-      vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => ({
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync,
-      })) as unknown as () => Runner);
+      const runAsync = vi.fn(async function* () {});
+      mockRunner(runAsync);
 
       const executor = createExecutor();
       await executor.execute(createRequestContext(), mockEventBus);
 
       // Without the leading task, the SDK's result manager drops the gate's
-      // status update as belonging to a task it has never seen.
+      // status update: it belongs to a task the manager does not know.
       expect(publishedEvents().map((event) => event.kind)).toEqual([
         'task',
         'status-update',
