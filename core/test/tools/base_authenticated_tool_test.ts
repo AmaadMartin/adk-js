@@ -10,7 +10,6 @@ import {
   AuthCredentialTypes,
   AuthenticatedRunAsyncToolRequest,
   AuthScheme,
-  BaseAgent,
   BaseAuthenticatedTool,
   Context,
   createSession,
@@ -86,7 +85,6 @@ function createInvocationContext(options?: {
 }): InvocationContext {
   return new InvocationContext({
     invocationId: 'invocation-1',
-    agent: {name: 'test-agent'} as BaseAgent,
     session: createSession({
       id: 'session-1',
       appName: 'test-app',

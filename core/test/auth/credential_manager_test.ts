@@ -9,7 +9,6 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   AuthScheme,
-  BaseAgent,
   BaseCredentialExchanger,
   Context,
   createSession,
@@ -59,7 +58,6 @@ function createToolContext(options?: {
   return new Context({
     invocationContext: new InvocationContext({
       invocationId: 'invocation-1',
-      agent: {name: 'test-agent'} as BaseAgent,
       session: createSession({
         id: 'session-1',
         appName: 'test-app',
