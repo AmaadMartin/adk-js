@@ -300,3 +300,18 @@ function findTimeoutName(err: unknown, seen: Set<unknown>): string | undefined {
 export function timeoutErrorName(err: unknown): string | undefined {
   return findTimeoutName(err, new Set<unknown>());
 }
+
+/**
+ * Whether a thrown value is Node's "no such file or directory" error.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return `true` when the value carries the `ENOENT` error code.
+ */
+export function isFileNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    err.code === 'ENOENT'
+  );
+}

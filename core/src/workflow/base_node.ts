@@ -89,7 +89,13 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
   readonly [BASE_NODE_SIGNATURE_SYMBOL] = true;
 
   readonly name: string;
-  readonly description: string;
+  /**
+   * Not `readonly`: a node whose description is resolved asynchronously fills
+   * it in after construction. A `RemoteA2AAgent` pointed at an agent card URL
+   * only learns the remote's description once it has fetched the card, and a
+   * parent agent reads this field to build its transfer instruction.
+   */
+  description: string;
   readonly rerunOnResume: boolean;
   readonly waitForOutput: boolean;
   readonly retryConfig?: RetryConfig;

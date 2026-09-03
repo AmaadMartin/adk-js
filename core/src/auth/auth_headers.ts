@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {base64Encode} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {AuthCredential, HttpAuth} from './auth_credential.js';
@@ -22,10 +23,9 @@ function httpAuthHeaders(http: HttpAuth): Record<string, string> | undefined {
     if (!username || !password) {
       return undefined;
     }
-    const encoded = Buffer.from(`${username}:${password}`, 'utf8').toString(
-      'base64',
-    );
-    return {Authorization: `Basic ${encoded}`};
+    // `base64Encode` is used rather than `Buffer`, which the web build has no
+    // polyfill for.
+    return {Authorization: `Basic ${base64Encode(`${username}:${password}`)}`};
   }
 
   // Any other registered scheme keeps the spelling it was configured with.
@@ -46,6 +46,12 @@ function apiKeyHeaders(
     logger.warn(
       'Only header-based API key authentication is supported. Configured ' +
         `location: ${authScheme.in}.`,
+    );
+    return undefined;
+  }
+  if (!authScheme.name) {
+    logger.warn(
+      'Cannot send an API key: the API key scheme does not name a header.',
     );
     return undefined;
   }
