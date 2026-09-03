@@ -20,6 +20,8 @@ export interface AgentRunRequest {
   userId: string;
   sessionId: string;
   newMessage: GenAIContent;
+  /** State the run seeds the session with before the agent starts. */
+  stateDelta?: Record<string, unknown>;
   /**
    * Run configuration the converter derived from the request. The executor
    * merges it over its own configured run config.

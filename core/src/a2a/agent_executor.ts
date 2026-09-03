@@ -137,17 +137,23 @@ export interface AgentExecutorConfig {
 }
 
 /**
+ * What `cancelTask` needs to settle and stop one running execution, addressed
+ * by the task id the A2A request handler gives it.
+ */
+interface InFlightExecution {
+  contextId: string;
+  abortController: AbortController;
+}
+
+/**
  * AgentExecutor invokes an ADK agent and translates session events to A2A events.
  */
 export class A2AAgentExecutor implements AgentExecutor {
-  private agentPartialArtifactIdsMap: Record<string, string> = {};
-
   /**
-   * The context id each in-flight task is running under, so `cancelTask` can
-   * address the right context from a task id alone. An entry lives only for
-   * the duration of one `execute` call.
+   * The executions this executor is running. An entry lives only for the
+   * duration of one `execute` call.
    */
-  private readonly contextIdsByTaskId = new Map<string, string>();
+  private readonly inFlightExecutions = new Map<string, InFlightExecution>();
 
   constructor(private readonly config: AgentExecutorConfig) {}
 
@@ -160,7 +166,14 @@ export class A2AAgentExecutor implements AgentExecutor {
       this.config.executeInterceptors,
     );
     const {taskId, contextId} = requireRequestContext(reqCtx);
-    this.contextIdsByTaskId.set(taskId, contextId);
+    const abortController = new AbortController();
+    this.inFlightExecutions.set(taskId, {contextId, abortController});
+
+    // The submitted signal precedes every event this execution publishes,
+    // including the terminal event of a run that failed while resolving the
+    // runner or the session. The SDK's result manager drops a status update
+    // for a task it has not seen, so the caller would receive no task at all.
+    enqueueSubmittedSignal(reqCtx, eventBus);
 
     let executorContext: ExecutorContext | undefined;
     try {
@@ -181,9 +194,23 @@ export class A2AAgentExecutor implements AgentExecutor {
         a2aMetadata: getA2aRequestMetadata(reqCtx),
       });
 
-      await this.runLegacy(runner, runRequest, executorContext, eventBus);
+      await this.runLegacy(
+        runner,
+        runRequest,
+        executorContext,
+        eventBus,
+        abortController.signal,
+      );
     } catch (e: unknown) {
       const error = toError(e);
+      // A cancelled run already published `canceled`, which is terminal. A
+      // `failed` event after it makes the request handler reject the
+      // cancellation it has already accepted.
+      if (abortController.signal.aborted) {
+        logger.debug(`A2A task ${taskId} was canceled while running:`, error);
+
+        return;
+      }
       logger.error('Error handling A2A request:', error);
 
       await this.publishFinalTaskStatus({
@@ -200,18 +227,18 @@ export class A2AAgentExecutor implements AgentExecutor {
         }),
       });
     } finally {
-      this.contextIdsByTaskId.delete(taskId);
+      this.inFlightExecutions.delete(taskId);
     }
   }
 
   /**
-   * Publishes the terminal `canceled` status update the A2A cancellation
-   * contract requires. The request handler drains events until it sees one, so
-   * a cancellation that publishes nothing never completes.
+   * Stops the running execution and publishes the terminal `canceled` status
+   * update the A2A cancellation contract requires. The request handler drains
+   * events until it sees one, so a cancellation that publishes nothing never
+   * completes.
    *
-   * The run itself is not interrupted: adk-js has no way to abort an
-   * in-flight invocation, so the agent finishes and its own terminal event
-   * follows the cancellation.
+   * The run stops at the runner's next abort checkpoint, and the execution
+   * publishes no terminal event of its own after that.
    *
    * @throws {Error} When the task id is empty, or when this executor has no
    *   execution in flight for it.
@@ -221,16 +248,17 @@ export class A2AAgentExecutor implements AgentExecutor {
       throw new Error('A2A cancellation must have a task ID');
     }
 
-    const contextId = this.contextIdsByTaskId.get(taskId);
-    if (!contextId) {
+    const execution = this.inFlightExecutions.get(taskId);
+    if (!execution) {
       throw new Error(`No active A2A task ${taskId} to cancel`);
     }
-    this.contextIdsByTaskId.delete(taskId);
+    this.inFlightExecutions.delete(taskId);
+    execution.abortController.abort();
 
     eventBus.publish(
       createFinalTaskStatusEvent({
         taskId,
-        contextId,
+        contextId: execution.contextId,
         state: TaskState.CANCELED,
       }),
     );
@@ -241,6 +269,7 @@ export class A2AAgentExecutor implements AgentExecutor {
     runRequest: AgentRunRequest,
     executorContext: ExecutorContext,
     eventBus: ExecutionEventBus,
+    abortSignal: AbortSignal,
   ): Promise<void> {
     const ctx = executorContext.requestContext;
     const {taskId, contextId} = ctx;
@@ -265,8 +294,6 @@ export class A2AAgentExecutor implements AgentExecutor {
       });
     }
 
-    enqueueSubmittedSignal(ctx, eventBus);
-
     eventBus.publish(
       createTaskWorkingEvent({
         taskId,
@@ -277,12 +304,17 @@ export class A2AAgentExecutor implements AgentExecutor {
 
     const aggregator = new TaskResultAggregator();
     const adkEvents: AdkEvent[] = [];
+    // Held per execution: two concurrent requests to one executor must not
+    // append their streamed parts to each other's artifact.
+    const partialArtifactIds = new Map<string | undefined, string>();
     let lastAdkEvent: AdkEvent | undefined;
 
     for await (const adkEvent of runner.runAsync({
+      abortSignal,
       userId: runRequest.userId,
       sessionId: runRequest.sessionId,
       newMessage: runRequest.newMessage,
+      stateDelta: runRequest.stateDelta,
       // Marked remote so the run knows this message came from a peer rather
       // than from the operator: a human-in-the-loop gate is not answerable
       // over A2A unless the deployment opts in.
@@ -296,7 +328,11 @@ export class A2AAgentExecutor implements AgentExecutor {
       adkEvents.push(adkEvent);
       lastAdkEvent = adkEvent;
 
-      for (const converted of this.convertAdkEvent(adkEvent, executorContext)) {
+      for (const converted of this.convertAdkEvent(
+        adkEvent,
+        executorContext,
+        partialArtifactIds,
+      )) {
         const a2aEvents = await executeAfterEventInterceptors(
           converted,
           executorContext,
@@ -313,6 +349,14 @@ export class A2AAgentExecutor implements AgentExecutor {
           eventBus.publish(a2aEvent);
         }
       }
+    }
+
+    if (abortSignal.aborted) {
+      logger.debug(
+        `A2A task ${taskId} was canceled; the cancellation is its terminal event.`,
+      );
+
+      return;
     }
 
     const finalMetadata = {
@@ -391,6 +435,7 @@ export class A2AAgentExecutor implements AgentExecutor {
   private convertAdkEvent(
     adkEvent: AdkEvent,
     executorContext: ExecutorContext,
+    partialArtifactIds: Map<string | undefined, string>,
   ): A2AEvent[] {
     const genAiPartConverter = this.config.genAiPartConverter ?? toA2APart;
     if (this.config.eventConverter) {
@@ -401,47 +446,12 @@ export class A2AAgentExecutor implements AgentExecutor {
       );
     }
 
-    return this.convertAdkEventToArtifactUpdate(
+    return convertAdkEventToArtifactUpdate(
       adkEvent,
       executorContext,
       genAiPartConverter,
+      partialArtifactIds,
     );
-  }
-
-  private convertAdkEventToArtifactUpdate(
-    adkEvent: AdkEvent,
-    executorContext: ExecutorContext,
-    genAiPartConverter: GenAIPartToA2APartConverter,
-  ): A2AEvent[] {
-    const a2aParts = toA2AParts(
-      adkEvent.content?.parts,
-      adkEvent.longRunningToolIds,
-      genAiPartConverter,
-    );
-    if (a2aParts.length === 0) {
-      return [];
-    }
-
-    const artifactId =
-      this.agentPartialArtifactIdsMap[adkEvent.author!] || randomUUID();
-
-    const a2aEvent = createTaskArtifactUpdateEvent({
-      taskId: executorContext.requestContext.taskId,
-      contextId: executorContext.requestContext.contextId,
-      artifactId,
-      parts: a2aParts,
-      metadata: getA2AEventMetadata(adkEvent, executorContext),
-      append: adkEvent.partial,
-      lastChunk: !adkEvent.partial,
-    });
-
-    if (adkEvent.partial) {
-      this.agentPartialArtifactIdsMap[adkEvent.author!] = artifactId;
-    } else {
-      delete this.agentPartialArtifactIdsMap[adkEvent.author!];
-    }
-
-    return [a2aEvent];
   }
 
   /**
@@ -468,6 +478,50 @@ export class A2AAgentExecutor implements AgentExecutor {
 
     eventBus.publish(event);
   }
+}
+
+/**
+ * Converts one ADK event into the streaming artifact update that carries its
+ * parts, or into nothing when it carries none.
+ *
+ * `partialArtifactIds` holds the artifact each author is still streaming into,
+ * so the chunks of one response append to one artifact. It belongs to a single
+ * execution.
+ */
+function convertAdkEventToArtifactUpdate(
+  adkEvent: AdkEvent,
+  executorContext: ExecutorContext,
+  genAiPartConverter: GenAIPartToA2APartConverter,
+  partialArtifactIds: Map<string | undefined, string>,
+): A2AEvent[] {
+  const a2aParts = toA2AParts(
+    adkEvent.content?.parts,
+    adkEvent.longRunningToolIds,
+    genAiPartConverter,
+  );
+  if (a2aParts.length === 0) {
+    return [];
+  }
+
+  const artifactId = partialArtifactIds.get(adkEvent.author) ?? randomUUID();
+
+  const a2aEvent = createTaskArtifactUpdateEvent({
+    taskId: executorContext.requestContext.taskId,
+    contextId: executorContext.requestContext.contextId,
+    artifactId,
+    parts: a2aParts,
+    metadata: getA2AEventMetadata(adkEvent, executorContext),
+    append: adkEvent.partial,
+    lastChunk: !adkEvent.partial,
+  });
+
+  if (adkEvent.partial) {
+    partialArtifactIds.set(adkEvent.author, artifactId);
+  } else {
+    partialArtifactIds.delete(adkEvent.author);
+  }
+
+  return [a2aEvent];
 }
 
 /**

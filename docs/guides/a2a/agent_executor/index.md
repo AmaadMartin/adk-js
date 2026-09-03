@@ -106,8 +106,13 @@ registered first has the last word on the terminal event.
 request handler drains events until it sees a terminal state, so an executor
 that publishes nothing there never completes the client's call.
 
-Two limits are worth knowing. The executor can only cancel a task it is running
-right now: it remembers the context id of each in-flight execution and throws
-for a task id it does not hold. And the run itself is not interrupted, because
-adk-js cannot abort an in-flight invocation — the agent finishes and its own
-terminal event follows the cancellation.
+The cancellation also stops the run. The executor gives each execution an
+`AbortController` and passes its signal to `runner.runAsync`, so the run ends at
+the runner's next abort checkpoint. The execution then publishes no terminal
+event of its own. The `canceled` update is the terminal one, and a `completed`
+or `failed` event after it makes the request handler reject the cancellation it
+has already accepted.
+
+One limit is worth knowing. The executor can only cancel a task it is running
+right now. It holds one entry per in-flight execution, and throws for a task id
+it does not hold.
