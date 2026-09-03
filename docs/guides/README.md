@@ -209,6 +209,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [GoogleSearchTool](tools/google_search/index.md) - Grounding a Gemini model's
   answers in Google Search, and the requests the tool accepts.
 - [GoogleTool](tools/google_tool/index.md) - Handcrafting a Google API tool, and the OAuth handshake and token cache it manages for you.
+- [GoogleTool with credential injection](tools/google_tool_credential_injection/index.md) - Calling a Google API from a
+  handcrafted tool, with credential resolution and argument injection.
 - [LlamaIndexRetrievalTool](tools/llama_index_retrieval/index.md) - Grounding an agent in a LlamaIndex.TS index you already built, without adding the dependency to ADK.
 - [MCP Apps, trace context and HTTP debug capture](tools/mcp_apps/index.md) - Rendering an MCP App next to a tool response, continuing a trace into the MCP server, and reading a failed call's HTTP exchanges.
 - [MCPTool authentication and confirmation](tools/mcp_tool/index.md) - Authenticating an MCP tool call, gating it on human approval, and adding per-call headers and progress notifications.

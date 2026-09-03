@@ -844,6 +844,14 @@ export type {
   GoogleToolExecuteFunction,
   GoogleToolOptions,
 } from './tools/google_tool.js';
+// A second port of `GoogleTool`. It injects the credential and the settings as
+// call arguments, where the module above passes them as a third parameter. The
+// module above already holds the plain names, so the barrel prefixes these.
+export {GoogleTool as CredentialInjectingGoogleTool} from './tools/google_tool_credential_injection.js';
+export type {
+  GoogleToolErrorResponse as CredentialInjectingGoogleToolErrorResponse,
+  GoogleToolOptions as CredentialInjectingGoogleToolOptions,
+} from './tools/google_tool_credential_injection.js';
 export {
   BaseGoogleCredentialsConfig as GoogleToolCredentialsConfig,
   GoogleCredentialsManager as GoogleToolCredentialsManager,
