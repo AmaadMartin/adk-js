@@ -10,6 +10,7 @@ import {
   EventActions as ApiEventActions,
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
+  CreateAgentEngineSessionConfig,
   EventMetadata,
   ListAgentEngineSessionEventsConfig,
   Session as VertexAiSession,
@@ -153,6 +154,12 @@ export interface VertexAiCreateSessionRequest extends CreateSessionRequest {
   ttl?: string;
   /** Absolute RFC 3339 UTC expiration, e.g. `'2025-10-01T00:00:00Z'`. */
   expireTime?: string;
+  /** Human-readable name for the session. */
+  displayName?: CreateAgentEngineSessionConfig['displayName'];
+  /** User-defined labels, for organizing sessions. */
+  labels?: CreateAgentEngineSessionConfig['labels'];
+  /** Let the SDK wait for the create operation instead of polling for it. */
+  waitForCompletion?: CreateAgentEngineSessionConfig['waitForCompletion'];
 }
 
 /**
@@ -226,6 +233,9 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
     ttl,
     expireTime,
+    displayName,
+    labels,
+    waitForCompletion,
   }: VertexAiCreateSessionRequest): Promise<Session> {
     // The API rejects both together; fail before the RPC.
     if (ttl != null && expireTime != null) {
@@ -244,6 +254,9 @@ export class VertexAiSessionService extends BaseSessionService {
         ...(sessionId ? {sessionId} : {}),
         ...(ttl != null ? {ttl} : {}),
         ...(expireTime != null ? {expireTime} : {}),
+        ...(displayName != null ? {displayName} : {}),
+        ...(labels != null ? {labels} : {}),
+        ...(waitForCompletion != null ? {waitForCompletion} : {}),
       },
     });
 
