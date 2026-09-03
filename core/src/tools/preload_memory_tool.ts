@@ -30,12 +30,7 @@ export class PreloadMemoryTool extends BaseTool {
     });
   }
 
-  override async runAsync({
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    args,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    toolContext,
-  }: RunAsyncToolRequest): Promise<unknown> {
+  override async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
     // Should not be called by model because it's not declared in LLM tools list.
     throw new Error('PreloadMemoryTool should not be called by model');
   }
