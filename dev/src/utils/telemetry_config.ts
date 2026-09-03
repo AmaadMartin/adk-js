@@ -7,8 +7,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {readJsonObject} from './fs_utils.js';
 import {AdkLogger} from './logger.js';
-import {isRecord, toMessage} from './value_utils.js';
+import {toMessage} from './value_utils.js';
 
 const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
@@ -24,16 +25,6 @@ export function getUserConfigPath(): string {
   return path.join(os.homedir(), '.adk', 'config.json');
 }
 
-/** Reads the config file, returning `{}` for anything that is not an object. */
-function readConfig(configPath: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    return isRecord(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 /**
  * Reads the recorded telemetry consent.
  *
@@ -41,24 +32,8 @@ function readConfig(configPath: string): Record<string, unknown> {
  *   `undefined` when no preference is recorded or the config cannot be read.
  */
 export function readTelemetryConsent(): boolean | undefined {
-  const configPath = getUserConfigPath();
-  if (!fs.existsSync(configPath)) {
-    return undefined;
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    if (!isRecord(parsed)) {
-      return undefined;
-    }
-    const value = parsed[TELEMETRY_KEY];
-    return typeof value === 'boolean' ? value : undefined;
-  } catch (error: unknown) {
-    logger.warn(
-      `Failed to read telemetry config from ${configPath}: ${toMessage(error)}`,
-    );
-    return undefined;
-  }
+  const value = readJsonObject(getUserConfigPath())?.[TELEMETRY_KEY];
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 /**
@@ -70,7 +45,7 @@ export function writeTelemetryConsent(enabled: boolean): void {
   const configPath = getUserConfigPath();
   try {
     fs.mkdirSync(path.dirname(configPath), {recursive: true});
-    const config = fs.existsSync(configPath) ? readConfig(configPath) : {};
+    const config = readJsonObject(configPath) ?? {};
     config[TELEMETRY_KEY] = enabled;
     fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, {
       encoding: 'utf-8',
