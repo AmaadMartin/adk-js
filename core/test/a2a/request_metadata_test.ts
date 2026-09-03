@@ -559,6 +559,7 @@ describe('A2A Request Metadata Propagation', () => {
         expect.objectContaining({
           metadata: expectedMetadata,
         }),
+        expect.anything(),
       );
     });
 
@@ -620,6 +621,7 @@ describe('A2A Request Metadata Propagation', () => {
         expect.objectContaining({
           metadata: explicitMetadata,
         }),
+        expect.anything(),
       );
     });
   });
