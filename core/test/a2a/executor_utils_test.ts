@@ -5,7 +5,6 @@
  */
 
 import {Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AEvent,
   createEvent,
@@ -13,7 +12,7 @@ import {
   createSession,
   TaskState,
 } from '@google/adk';
-import {describe, expect, it, Mocked, vi} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {createExecutorContext} from '../../src/a2a/executor_context.js';
 import {
   enqueueSubmittedSignal,
@@ -23,6 +22,7 @@ import {
   ExecuteInterceptor,
   requireRequestContext,
 } from '../../src/a2a/executor_utils.js';
+import {createEventBus, createRequestContext} from './fixtures.js';
 
 const adkEvent = createEvent({
   author: 'model',
@@ -36,29 +36,11 @@ const executorContext = createExecutorContext({
   requestContext: createRequestContext(),
 });
 
-function createRequestContext(overrides = {}): RequestContext {
-  return {
-    contextId: 'context-1',
-    taskId: 'task-1',
-    userMessage: {
-      kind: 'message',
-      messageId: 'message-1',
-      role: 'user',
-      parts: [{kind: 'text', text: 'hello'}],
-    },
-    ...overrides,
-  } as unknown as RequestContext;
-}
-
-function createEventBus(): Mocked<ExecutionEventBus> {
-  return {publish: vi.fn()} as unknown as Mocked<ExecutionEventBus>;
-}
-
 function createStatusUpdate(state: TaskState): TaskStatusUpdateEvent {
   return {
     kind: 'status-update',
-    taskId: 'task-1',
-    contextId: 'context-1',
+    taskId: 'test-task',
+    contextId: 'test-context',
     final: false,
     status: {state, timestamp: '2026-01-01T00:00:00.000Z'},
   };
@@ -67,8 +49,8 @@ function createStatusUpdate(state: TaskState): TaskStatusUpdateEvent {
 describe('requireRequestContext', () => {
   it('returns the task id and context id', () => {
     expect(requireRequestContext(createRequestContext())).toEqual({
-      taskId: 'task-1',
-      contextId: 'context-1',
+      taskId: 'test-task',
+      contextId: 'test-context',
     });
   });
 
@@ -101,15 +83,20 @@ describe('enqueueSubmittedSignal', () => {
     expect(eventBus.publish).toHaveBeenCalledTimes(1);
     const task = eventBus.publish.mock.calls[0][0] as Task;
     expect(task.kind).toBe('task');
-    expect(task.id).toBe('task-1');
-    expect(task.contextId).toBe('context-1');
+    expect(task.id).toBe('test-task');
+    expect(task.contextId).toBe('test-context');
     expect(task.status.state).toBe(TaskState.SUBMITTED);
   });
 
   it('publishes nothing when the task already exists', () => {
     const eventBus = createEventBus();
     const ctx = createRequestContext({
-      task: {kind: 'task', id: 'task-1', contextId: 'context-1'},
+      task: {
+        kind: 'task',
+        id: 'test-task',
+        contextId: 'test-context',
+        status: {state: TaskState.WORKING},
+      },
     });
 
     enqueueSubmittedSignal(ctx, eventBus);
@@ -150,7 +137,7 @@ describe('executeBeforeAgentInterceptors', () => {
       interceptors,
     );
 
-    expect(seen).toEqual(['task-1', 'first']);
+    expect(seen).toEqual(['test-task', 'first']);
     expect(result).toBe(second);
   });
 });

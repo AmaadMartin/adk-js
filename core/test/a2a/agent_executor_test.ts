@@ -11,7 +11,7 @@ import {
   TaskStatusUpdateEvent,
   TextPart,
 } from '@a2a-js/sdk';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+import {RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   A2AEvent,
@@ -22,6 +22,7 @@ import {
   createEventActions,
   createSession,
   ExecutorContext,
+  LlmAgent,
   Runner,
   RunnerConfig,
   Session,
@@ -29,9 +30,15 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
 import {toGenAIPart} from '../../src/a2a/part_converter_utils.js';
+import {
+  createEventBus,
+  createRequestContext,
+  SpiedEventBus,
+} from './fixtures.js';
 
-/** Marks a duck-typed object as a Runner for `isRunner`. */
-const RUNNER_SIGNATURE_SYMBOL = Symbol.for('google.adk.runner');
+const {Runner: ActualRunner} = await vi.importActual<
+  typeof import('../../src/runner/runner.js')
+>('../../src/runner/runner.js');
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -49,7 +56,7 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
 
 describe('A2AAgentExecutor', () => {
   let mockSessionService: Mocked<BaseSessionService>;
-  let mockEventBus: Mocked<ExecutionEventBus>;
+  let mockEventBus: SpiedEventBus;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,19 +70,8 @@ describe('A2AAgentExecutor', () => {
       appendEvent: vi.fn(),
     } as unknown as Mocked<BaseSessionService>;
 
-    mockEventBus = {
-      publish: vi.fn(),
-    } as unknown as Mocked<ExecutionEventBus>;
+    mockEventBus = createEventBus();
   });
-
-  const createRequestContext = (overrides = {}): RequestContext => {
-    return {
-      contextId: 'test-context',
-      taskId: 'test-task',
-      userMessage: {role: 'user', parts: [{kind: 'text', text: 'hello'}]}, // a2a UserMessage
-      ...overrides,
-    } as unknown as RequestContext;
-  };
 
   it('should throw an error if no message is provided', async () => {
     const executor = new A2AAgentExecutor({
@@ -202,6 +198,8 @@ describe('A2AAgentExecutor', () => {
         status: {
           state: 'input-required',
           message: {
+            kind: 'message',
+            messageId: 'pending-request',
             role: 'agent',
             parts: [
               {
@@ -325,23 +323,22 @@ describe('A2AAgentExecutor', () => {
       appName: 'test-app',
     });
 
-  const mockRunner = (
-    runAsync: (params: unknown) => AsyncGenerator<AdkEvent, void, undefined>,
-  ) => {
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+  const mockRunner = (runAsync: Runner['runAsync']) => {
+    vi.mocked(Runner).mockImplementation((config: RunnerConfig) => {
+      const runner = new ActualRunner({
+        agent: new LlmAgent({name: 'test-agent'}),
+        ...config,
+      });
+      vi.spyOn(runner, 'runAsync').mockImplementation(runAsync);
+
+      return runner;
+    });
   };
 
-  const runnerConfig = () =>
-    ({
-      appName: 'test-app',
-      sessionService: mockSessionService,
-    }) as unknown as RunnerConfig;
+  const runnerConfig = (): RunnerConfig => ({
+    appName: 'test-app',
+    sessionService: mockSessionService,
+  });
 
   const createExecutor = (config: Partial<AgentExecutorConfig> = {}) =>
     new A2AAgentExecutor({runner: runnerConfig(), ...config});
@@ -831,11 +828,13 @@ describe('A2AAgentExecutor', () => {
   });
 
   describe('event metadata', () => {
-    it('puts the session metadata on the working event and the event ids on the terminal one', async () => {
+    it('puts the session metadata on the working event and the last event ids on the terminal one', async () => {
       mockSessionService.getSession.mockResolvedValue(testSession());
-      const adkEvent = modelEvent('hello');
+      const firstEvent = modelEvent('hello');
+      const lastEvent = modelEvent('goodbye');
       mockRunner(async function* () {
-        yield adkEvent;
+        yield firstEvent;
+        yield lastEvent;
       });
 
       const executor = createExecutor({
@@ -857,13 +856,14 @@ describe('A2AAgentExecutor', () => {
         adk_app_name: 'test-app',
         adk_user_id: 'test-user',
         adk_session_id: 'session-id',
-        adk_invocation_id: adkEvent.invocationId,
+        adk_invocation_id: lastEvent.invocationId,
         adk_author: 'model',
-        adk_event_id: adkEvent.id,
+        adk_event_id: lastEvent.id,
       });
+      expect(lastEvent.id).not.toBe(firstEvent.id);
     });
 
-    it('omits the last-event keys when the run produced no event', async () => {
+    it('completes a run that produced no event, with no last-event keys', async () => {
       mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
 
@@ -871,6 +871,12 @@ describe('A2AAgentExecutor', () => {
       await executor.execute(createRequestContext(), mockEventBus);
 
       const terminal = publishedEvents().at(-1) as TaskStatusUpdateEvent;
+      expect(terminal.status.state).toBe('completed');
+      expect(terminal.metadata).toEqual({
+        adk_app_name: 'test-app',
+        adk_user_id: 'test-user',
+        adk_session_id: 'session-id',
+      });
       expect(terminal.metadata).not.toHaveProperty('adk_event_id');
     });
   });
@@ -934,13 +940,14 @@ describe('A2AAgentExecutor', () => {
   describe('runner resolution', () => {
     it('runs a Runner instance as it is', async () => {
       mockSessionService.getSession.mockResolvedValue(testSession());
-      const runAsync = vi.fn(async function* () {});
-      const runner = {
-        [RUNNER_SIGNATURE_SYMBOL]: true,
+      const runner = new ActualRunner({
         appName: 'test-app',
+        agent: new LlmAgent({name: 'test-agent'}),
         sessionService: mockSessionService,
-        runAsync,
-      } as unknown as Runner;
+      });
+      const runAsync = vi
+        .spyOn(runner, 'runAsync')
+        .mockImplementation(async function* () {});
 
       await new A2AAgentExecutor({runner}).execute(
         createRequestContext(),

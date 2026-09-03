@@ -5,44 +5,33 @@
  */
 
 import {Part as A2APart} from '@a2a-js/sdk';
-import {RequestContext} from '@a2a-js/sdk/server';
 import {convertA2aRequestToAgentRunRequest, getUserId} from '@google/adk';
 import {Part as GenAIPart} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-
-function createRequestContext(overrides = {}): RequestContext {
-  return {
-    contextId: 'context-1',
-    taskId: 'task-1',
-    userMessage: {
-      kind: 'message',
-      messageId: 'message-1',
-      role: 'user',
-      parts: [{kind: 'text', text: 'hello'}],
-    },
-    ...overrides,
-  } as unknown as RequestContext;
-}
+import {createCallContext, createRequestContext} from './fixtures.js';
 
 describe('getUserId', () => {
   it('uses the authenticated principal from the call context', () => {
     const request = createRequestContext({
-      context: {user: {isAuthenticated: true, userName: 'alice@example.com'}},
+      context: createCallContext({
+        isAuthenticated: true,
+        userName: 'alice@example.com',
+      }),
     });
 
     expect(getUserId(request)).toBe('alice@example.com');
   });
 
   it('falls back to the context id when there is no call context', () => {
-    expect(getUserId(createRequestContext())).toBe('A2A_USER_context-1');
+    expect(getUserId(createRequestContext())).toBe('A2A_USER_test-context');
   });
 
   it('falls back to the context id when the user has no name', () => {
     const request = createRequestContext({
-      context: {user: {isAuthenticated: false, userName: ''}},
+      context: createCallContext({isAuthenticated: false, userName: ''}),
     });
 
-    expect(getUserId(request)).toBe('A2A_USER_context-1');
+    expect(getUserId(request)).toBe('A2A_USER_test-context');
   });
 });
 
@@ -52,8 +41,8 @@ describe('convertA2aRequestToAgentRunRequest', () => {
       createRequestContext(),
     );
 
-    expect(runRequest.userId).toBe('A2A_USER_context-1');
-    expect(runRequest.sessionId).toBe('context-1');
+    expect(runRequest.userId).toBe('A2A_USER_test-context');
+    expect(runRequest.sessionId).toBe('test-context');
     expect(runRequest.newMessage.role).toBe('user');
     expect(runRequest.newMessage.parts).toEqual([
       {text: 'hello', thought: false},
