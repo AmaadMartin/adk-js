@@ -1055,6 +1055,19 @@ describe('A2AAgentExecutor', () => {
       expect(mockEventBus.publish).not.toHaveBeenCalled();
     });
 
+    it('does not run a beforeAgent interceptor on a request with no message', async () => {
+      const beforeAgent = vi.fn(async (ctx: RequestContext) => ctx);
+      const executor = createExecutor({executeInterceptors: [{beforeAgent}]});
+
+      await expect(
+        executor.execute(
+          createRequestContext({userMessage: undefined}),
+          mockEventBus,
+        ),
+      ).rejects.toThrow('message not provided');
+      expect(beforeAgent).not.toHaveBeenCalled();
+    });
+
     it('rejects when a beforeAgent interceptor strips the task id', async () => {
       const executor = createExecutor({
         executeInterceptors: [
