@@ -11,13 +11,28 @@
 
 export {TaskState} from './a2a_event.js';
 export type {A2AEvent} from './a2a_event.js';
-export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a_remote_agent.js';
+export {
+  AGENT_CARD_PATH,
+  DEFAULT_A2A_TIMEOUT_MS,
+  RemoteA2AAgent,
+} from './a2a_remote_agent.js';
 export type {
   A2AStreamEventData,
   AfterA2ARequestCallback,
   BeforeA2ARequestCallback,
   RemoteA2AAgentConfig,
 } from './a2a_remote_agent.js';
+export {
+  NEW_A2A_ADK_INTEGRATION_EXTENSION,
+  newIntegrationExtensionInterceptor,
+} from './a2a_remote_agent_interceptors.js';
+export type {
+  A2ABeforeRequestResult,
+  A2ACardRequestConfig,
+  A2ACardRequestInterceptor,
+  A2ARequestInterceptor,
+  A2ARequestParameters,
+} from './a2a_remote_agent_interceptors.js';
 export {
   AgentCardResolutionError,
   getA2AAgentCard,

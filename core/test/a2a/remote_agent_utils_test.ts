@@ -10,6 +10,7 @@ import {
   getFunctionResponseCallId,
   getUserFunctionCallAt,
   isFunctionCallEvent,
+  peerRequestedCallIds,
   presentAsUserMessage,
   toMissingRemoteSessionParts,
 } from '../../src/a2a/a2a_remote_agent_utils.js';
@@ -193,6 +194,37 @@ describe('remote_agent_utils', () => {
       const result = presentAsUserMessage(mockCtx, agentEvent);
       expect(result.content?.parts![1].text).toContain('tool returned result');
       expect(result.content?.parts![1].text).toContain('{"y":2}');
+    });
+  });
+
+  describe('peerRequestedCallIds', () => {
+    /** An event carrying one function call. */
+    const callEvent = (author: string, id: string) =>
+      createEvent({
+        author,
+        content: {
+          role: 'model',
+          parts: [
+            {functionCall: {id, name: 'adk_request_credential', args: {}}},
+          ],
+        },
+      });
+
+    it("treats the peer's own request as peer-requested", () => {
+      const events = [callEvent('test-agent', 'peer-fc')];
+
+      expect([...peerRequestedCallIds(events, 'test-agent')]).toEqual([
+        'peer-fc',
+      ]);
+    });
+
+    it("never treats this agent's own transport credential as the peer's", () => {
+      // The agent raises its own credential request under its own name, so an
+      // author check alone would exempt the answer from the scrub and forward
+      // the credential to the peer.
+      const events = [callEvent('test-agent', '_adk_toolset_auth_test-agent')];
+
+      expect([...peerRequestedCallIds(events, 'test-agent')]).toEqual([]);
     });
   });
 

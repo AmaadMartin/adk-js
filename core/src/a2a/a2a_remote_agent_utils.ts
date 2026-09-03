@@ -8,12 +8,17 @@ import {Part as A2APart} from '@a2a-js/sdk';
 import {Content, Part as GenAIPart} from '@google/genai';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../agents/functions.js';
 import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
+import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from '../auth/auth_preprocessor.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
-import {toA2AParts} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2APart,
+  toA2AParts,
+} from './part_converter_utils.js';
 
 export interface UserFunctionCall {
   response: AdkEvent;
@@ -203,7 +208,12 @@ export function peerRequestedCallIds(
   for (const event of events) {
     for (const part of event.content?.parts ?? []) {
       const id = part.functionCall?.id;
-      if (!id) {
+      if (!id || id.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)) {
+        // A request this agent raised for its own transport credential is
+        // authored under this agent's name, so it would otherwise read as one
+        // the peer asked for. The peer never sees that credential: it travels
+        // as an HTTP header, and forwarding it as message content would put it
+        // in the peer's own session.
         continue;
       }
       (event.author === peerName ? peer : local).add(id);
@@ -285,12 +295,13 @@ export function toForwardableA2AParts(
   content: Content | undefined,
   longRunningToolIds: string[] | undefined,
   peerRequestedIds: ReadonlySet<string>,
+  converter: GenAIPartToA2APartConverter = toA2APart,
 ): A2APart[] {
   const scrubbed = withoutCredentialParts(content, peerRequestedIds);
   if (!scrubbed?.parts) {
     return [];
   }
-  return toA2AParts(scrubbed.parts, longRunningToolIds);
+  return toA2AParts(scrubbed.parts, longRunningToolIds, converter);
 }
 
 /**
@@ -300,11 +311,13 @@ export function toForwardableA2AParts(
  * @param ctx - The current invocation context, used to identify the remote
  *   agent's authored events.
  * @param session - The local session whose event history to diff.
+ * @param converter - Per-part conversion. Defaults to `toA2APart`.
  * @returns An object with the missing `parts` and an optional `contextId`.
  */
 export function toMissingRemoteSessionParts(
   ctx: InvocationContext,
   session: Session,
+  converter: GenAIPartToA2APartConverter = toA2APart,
 ): {parts: A2APart[]; contextId?: string} {
   const events = session.events;
   const peerName = requireAgent(ctx).name;
@@ -350,7 +363,11 @@ export function toMissingRemoteSessionParts(
       continue;
     }
 
-    const parts = toA2AParts(event.content.parts, event.longRunningToolIds);
+    const parts = toA2AParts(
+      event.content.parts,
+      event.longRunningToolIds,
+      converter,
+    );
     missingParts.push(...parts);
   }
 

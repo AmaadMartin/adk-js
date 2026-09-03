@@ -366,6 +366,7 @@ describe('A2ARemoteAgent', () => {
       expect.objectContaining({
         configuration: {acceptedOutputModes: ['custom']},
       }),
+      expect.anything(),
     );
   });
 

@@ -45,19 +45,24 @@ export type A2APartToGenAIPartConverter = (
 ) => GenAIPart | GenAIPart[] | undefined;
 
 /**
- * Converts one outbound GenAI part into an A2A part.
+ * Converts one outbound GenAI part into the A2A parts that carry it.
+ *
+ * Returning `undefined` drops the part, and returning an array expands it into
+ * several.
  */
 export type GenAIPartToA2APartConverter = (
   part: GenAIPart,
   longRunningToolIDs?: string[],
-) => A2APart;
+) => A2APart | A2APart[] | undefined;
 
 /**
  * Converts an array of GenAI Parts to A2A Parts.
  *
  * @param parts - The GenAI parts to convert. Defaults to an empty array.
  * @param longRunningToolIDs - IDs of function calls that are long-running.
- * @param partConverter - Converts a single part. Defaults to {@link toA2APart}.
+ * @param partConverter - Converts a single part. Defaults to
+ *   {@link toA2APart}. A converter may drop a part by returning `undefined`,
+ *   or expand it by returning an array.
  * @returns An array of A2A parts.
  */
 export function toA2AParts(
@@ -65,7 +70,7 @@ export function toA2AParts(
   longRunningToolIDs: string[] = [],
   partConverter: GenAIPartToA2APartConverter = toA2APart,
 ): A2APart[] {
-  return parts.map((part) => partConverter(part, longRunningToolIDs));
+  return parts.flatMap((part) => partConverter(part, longRunningToolIDs) ?? []);
 }
 
 /**
@@ -237,7 +242,7 @@ export function toGenAIContent(
  * @param partConverter - Converts a single part. Defaults to
  *   {@link toGenAIPart}. A converter may drop a part by returning `undefined`,
  *   or expand it by returning an array.
- * @returns An array of GenAI parts.
+ * @returns An array of GenAI parts, without the parts the converter dropped.
  */
 export function toGenAIParts(
   a2aParts: A2APart[],
