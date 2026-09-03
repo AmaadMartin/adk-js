@@ -67,15 +67,10 @@ export class OpenAPIToolset extends BaseToolset {
     const parsedOperations = parser.parse(spec);
 
     for (const op of parsedOperations) {
-      let toolName = op.name;
-      if (this.prefix) {
-        toolName = `${this.prefix}_${toolName}`;
-      }
-
       const tool = createRestApiTool(
-        // The toolset name carries the prefix, so it replaces the name the
-        // spec parser derived from the operation id.
-        {...op, name: toolName},
+        // The name stays the one the spec parser derived from the operation
+        // id. `getToolsWithPrefix()` on the base class applies the prefix.
+        {...op},
         {
           preservePropertyNames: options.preservePropertyNames,
           headerProvider: options.headerProvider,
@@ -102,8 +97,8 @@ export class OpenAPIToolset extends BaseToolset {
   /**
    * Returns the generated tool with this name, or `undefined`.
    *
-   * The name includes `prefix` when one is configured, because the toolset
-   * applies the prefix while it generates the tools.
+   * The name never includes `prefix`, because `getToolsWithPrefix()` on the
+   * base class applies the prefix to a copy of the tool.
    */
   @experimental
   public getTool(name: string): RestApiTool | undefined {

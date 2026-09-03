@@ -42,7 +42,7 @@ describe('MCPToolset.fromConfig (e2e, real MCP server over stdio)', () => {
       prefix: 'srv',
     });
 
-    const names = (await toolset.getTools()).map((tool) => tool.name);
+    const names = (await toolset.getToolsWithPrefix()).map((tool) => tool.name);
 
     expect(names).toEqual(['srv_echo']);
   });

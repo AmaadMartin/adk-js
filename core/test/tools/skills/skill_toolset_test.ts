@@ -8,8 +8,11 @@ import {
   BaseTool,
   BaseToolset,
   Context,
+  createSession,
   InvocationContext,
+  LlmAgent,
   LlmRequest,
+  PluginManager,
   ReadonlyContext,
   Skill,
   SkillToolset,
@@ -18,6 +21,29 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
+
+const TEST_AGENT_NAME = 'test-agent';
+
+/**
+ * A real `ReadonlyContext` whose activated-skill state is the array passed in,
+ * so a test can activate a skill after the context exists.
+ */
+function readonlyContextFor(activatedSkills: string[]): ReadonlyContext {
+  const agent = new LlmAgent({name: TEST_AGENT_NAME});
+  return new ReadonlyContext(
+    new InvocationContext({
+      invocationId: 'inv-1',
+      agent,
+      session: createSession({
+        id: 'session-1',
+        appName: 'test_app',
+        userId: 'test_user',
+        state: {[`_adk_activated_skill_${TEST_AGENT_NAME}`]: activatedSkills},
+      }),
+      pluginManager: new PluginManager([]),
+    }),
+  );
+}
 
 describe('skill_toolset', () => {
   const mockSkill: Skill = {
@@ -315,6 +341,84 @@ describe('skill_toolset', () => {
       const tools2 = await toolset.getTools(context);
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
+    });
+
+    it('applies a nested toolset prefix to the tools it contributes', async () => {
+      class NestedTool extends BaseTool {
+        constructor() {
+          super({name: 'nested_tool', description: 'Nested tool'});
+        }
+        async runAsync() {
+          return 'nested';
+        }
+      }
+
+      class NestedToolset extends BaseToolset {
+        constructor() {
+          super([], 'inner');
+        }
+        override async getTools(): Promise<BaseTool[]> {
+          return [new NestedTool()];
+        }
+      }
+
+      const skillWithTools: Skill = {
+        frontmatter: {
+          name: 'skill-with-nested',
+          description: 'desc',
+          metadata: {
+            adk_additional_tools: ['inner_nested_tool'],
+          },
+        },
+        instructions: 'instructions',
+      };
+
+      const toolset = new SkillToolset([skillWithTools], {
+        additionalTools: [new NestedToolset()],
+      });
+
+      const context = readonlyContextFor(['skill-with-nested']);
+
+      const tools = await toolset.getTools(context);
+
+      expect(tools.map((t) => t.name)).toContain('inner_nested_tool');
+    });
+
+    it('lists newly activated skill tools within one invocation', async () => {
+      const skillWithTools: Skill = {
+        frontmatter: {
+          name: 'skill-with-tools',
+          description: 'desc',
+          metadata: {
+            adk_additional_tools: ['late_tool'],
+          },
+        },
+        instructions: 'instructions',
+      };
+
+      class LateTool extends BaseTool {
+        constructor() {
+          super({name: 'late_tool', description: 'Activated mid-invocation'});
+        }
+        async runAsync() {
+          return 'late';
+        }
+      }
+
+      const toolset = new SkillToolset([skillWithTools], {
+        additionalTools: [new LateTool()],
+      });
+
+      const activated: string[] = [];
+      const context = readonlyContextFor(activated);
+
+      const before = await toolset.getToolsWithPrefix(context);
+      expect(before.map((t) => t.name)).not.toContain('late_tool');
+
+      activated.push('skill-with-tools');
+      const after = await toolset.getToolsWithPrefix(context);
+
+      expect(after.map((t) => t.name)).toContain('late_tool');
     });
   });
 

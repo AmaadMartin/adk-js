@@ -152,11 +152,24 @@ describe('OpenAPIToolset', () => {
       specDict: mockSpec,
       prefix: 'test',
     });
-    const tools = await toolset.getTools();
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools.length).toBe(2);
     expect(tools[0].name).toBe('test_get_users');
     expect(tools[1].name).toBe('test_create_user');
+  });
+
+  it('should leave getTools() names unprefixed when a prefix is set', async () => {
+    const toolset = new OpenAPIToolset({
+      specDict: mockSpec,
+      prefix: 'test',
+    });
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'get_users',
+      'create_user',
+    ]);
   });
 
   it('should apply global auth overrides', async () => {
@@ -592,11 +605,14 @@ describe('OpenAPIToolset.getTool', () => {
     expect(toolset.getTool('delete_users')).toBeUndefined();
   });
 
-  it('matches the prefixed name, not the bare one', () => {
+  // The toolset holds unprefixed tools and `getToolsWithPrefix()` applies the
+  // prefix, so the lookup matches the bare name. Same as adk-python's
+  // `OpenAPIToolset.get_tool`.
+  it('matches the bare name, not the prefixed one', () => {
     const toolset = new OpenAPIToolset({specDict: paritySpec, prefix: 'test'});
 
-    expect(toolset.getTool('test_get_users')?.name).toBe('test_get_users');
-    expect(toolset.getTool('get_users')).toBeUndefined();
+    expect(toolset.getTool('get_users')?.name).toBe('get_users');
+    expect(toolset.getTool('test_get_users')).toBeUndefined();
   });
 });
 

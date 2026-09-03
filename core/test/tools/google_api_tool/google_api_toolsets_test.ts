@@ -117,11 +117,13 @@ describe('the prebuilt Google API toolsets', () => {
 
   it('forwards the tool filter and the name prefix to the base class', async () => {
     const toolset = new CalendarToolset({
-      toolFilter: ['gcal_calendar_events_list'],
+      // The filter matches the unprefixed name, because the base class
+      // applies the prefix after the toolset has filtered.
+      toolFilter: ['calendar_events_list'],
       toolNamePrefix: 'gcal',
     });
 
-    const tools = await toolset.getTools();
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools.map((tool) => tool.name)).toEqual([
       'gcal_calendar_events_list',

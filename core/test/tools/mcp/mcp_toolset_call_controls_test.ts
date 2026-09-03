@@ -144,11 +144,13 @@ describe('MCPToolset.fromConfig', () => {
   it('applies the declared tool filter and prefix', async () => {
     const toolset = await MCPToolset.fromConfig({
       streamableHttpConnectionParams: httpParams,
-      toolFilter: ['fs_read_file'],
+      // The filter matches the name the MCP server advertised, because the
+      // base class applies the prefix after the toolset has filtered.
+      toolFilter: ['read_file'],
       prefix: 'fs',
     });
 
-    const tools = await toolset.getTools();
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools.map((tool) => tool.name)).toEqual(['fs_read_file']);
   });

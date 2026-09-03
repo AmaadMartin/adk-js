@@ -483,7 +483,7 @@ async function convertToolUnionToTools(
     return [new NodeTool(toolUnion)];
   }
   try {
-    return await toolUnion.getTools(context);
+    return await toolUnion.getToolsWithPrefix(context);
   } catch (e: unknown) {
     // The agent still runs, just without this toolset's tools, and the model
     // answers as though it never had them. That is a lost capability rather

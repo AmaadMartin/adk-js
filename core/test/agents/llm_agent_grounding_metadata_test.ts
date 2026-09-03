@@ -58,6 +58,11 @@ class StubTool extends BaseTool {
 
 /** A toolset that hands out whichever tools it currently holds. */
 class StubToolset extends BaseToolset {
+  // Its tool list changes inside one invocation, which is the case
+  // `BaseToolset` tells such a subclass to opt out of the invocation cache
+  // for.
+  protected override useInvocationCache = false;
+
   constructor(public tools: BaseTool[]) {
     super([]);
   }

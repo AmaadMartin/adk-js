@@ -196,7 +196,7 @@ describe('GoogleApiToolset', () => {
       toolNamePrefix: 'gcal',
     });
 
-    const tools = await toolset.getTools();
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools.map((tool) => tool.name)).toEqual(
       CALENDAR_TOOL_NAMES.map((name) => `gcal_${name}`),

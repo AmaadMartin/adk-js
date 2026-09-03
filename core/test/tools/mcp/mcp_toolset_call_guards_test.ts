@@ -111,7 +111,8 @@ describe('MCPToolset reserved tool names', () => {
       }),
     );
 
-    const tools = await new MCPToolset(stdioParams(), [], 'srv').getTools();
+    const toolset = new MCPToolset(stdioParams(), [], 'srv');
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools.map((tool) => tool.name)).toEqual(['srv_valid_tool']);
   });

@@ -238,10 +238,11 @@ function nameFailedOperation(operation: string, err: unknown): unknown {
  * The toolset can be configured with a filter to selectively expose a subset
  * of the tools provided by the MCP server.
  *
- * It can also be configured with a prefix. If provided, all tools discovered
- * from the MCP server will have their names prefixed with `${prefix}_`. When the
- * LLM invokes the prefixed tool, this toolset transparently strips the prefix
- * before sending the request to the underlying MCP server.
+ * It can also be configured with a prefix. `getTools()` returns the names the
+ * MCP server advertised; `getToolsWithPrefix()`, which the framework calls,
+ * prepends `${prefix}_` to each of them. A string-array `toolFilter` therefore
+ * matches the unprefixed name, and the toolset always calls the MCP server
+ * with the name the server advertised.
  *
  * Usage:
  *   import { MCPToolset } from '@google/adk';
@@ -517,7 +518,7 @@ export class MCPToolset extends BaseToolset {
     return result.contents;
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     this.toolListCache.clear();
     const sessions = this.mcpSessionManager.getActiveSessions();
     const outcomes = await Promise.allSettled(
@@ -645,13 +646,14 @@ export class MCPToolset extends BaseToolset {
     );
   }
 
-  /** Wraps one MCP tool definition, applying the prefix and the options. */
+  /**
+   * Wraps one MCP tool definition with the toolset's options.
+   *
+   * The name stays the one the MCP server advertised. `getToolsWithPrefix()`
+   * on the base class applies the prefix.
+   */
   private createTool(tool: Tool): MCPTool {
-    const toolWithPrefix = {
-      ...tool,
-      name: this.prefix ? `${this.prefix}_${tool.name}` : tool.name,
-    };
-    return new MCPTool(toolWithPrefix, this.mcpSessionManager, tool.name, {
+    return new MCPTool(tool, this.mcpSessionManager, tool.name, {
       // The toolset's own instance, so a credential the host exchanges on it
       // before calling getTools() reaches every tool call.
       authConfig: this.authConfig,
@@ -675,7 +677,8 @@ export class MCPToolset extends BaseToolset {
     if (typeof this.toolFilter === 'function') {
       return true;
     }
-    // A name filter needs no context, and an empty one selects everything.
+    // The name is the one the MCP server advertised, so a string-array filter
+    // matches the unprefixed name. An empty filter selects everything.
     return this.toolFilter.length === 0 || this.toolFilter.includes(tool.name);
   }
 

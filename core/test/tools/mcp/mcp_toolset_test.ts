@@ -98,12 +98,26 @@ describe('MCPToolset', () => {
 
   it('discovers tools with prefix applied', async () => {
     const toolset = new MCPToolset(stdioParams, [], 'myprefix');
-    const tools = await toolset.getTools();
+    const tools = await toolset.getToolsWithPrefix();
 
     expect(tools.map((tool) => tool.name)).toEqual([
       'myprefix_other-tool',
       'myprefix_test-tool',
     ]);
+  });
+
+  it('prefixes the function declaration of a discovered tool', async () => {
+    const toolset = new MCPToolset(stdioParams, [], 'myprefix');
+    const tools = await toolset.getToolsWithPrefix();
+
+    expect(tools[0]._getDeclaration()?.name).toBe('myprefix_other-tool');
+  });
+
+  it('leaves getTools() names unprefixed when a prefix is set', async () => {
+    const toolset = new MCPToolset(stdioParams, [], 'myprefix');
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['other-tool', 'test-tool']);
   });
 
   describe('toolFilter', () => {
@@ -122,13 +136,9 @@ describe('MCPToolset', () => {
       expect(tools[0].name).toBe('test-tool');
     });
 
-    it('string array filter with prefix matches prefixed names', async () => {
-      const toolset = new MCPToolset(
-        stdioParams,
-        ['myprefix_test-tool'],
-        'myprefix',
-      );
-      const tools = await toolset.getTools();
+    it('string array filter matches the unprefixed name when a prefix is set', async () => {
+      const toolset = new MCPToolset(stdioParams, ['test-tool'], 'myprefix');
+      const tools = await toolset.getToolsWithPrefix();
 
       expect(tools).toHaveLength(1);
       expect(tools[0].name).toBe('myprefix_test-tool');
@@ -841,7 +851,9 @@ describe('MCPToolset', () => {
         progressCallbackFactory,
       });
 
-      const [tool] = await toolset.getTools();
+      // The prefixed tool, because the factory names the callback after the
+      // tool the model calls.
+      const [tool] = await toolset.getToolsWithPrefix();
       vi.mocked(Client).mockImplementationOnce(() => clientStub({callTool}));
       const toolContext = createTestToolContext();
       await tool.runAsync({args: {}, toolContext});

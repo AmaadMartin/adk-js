@@ -183,5 +183,6 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ToolboxToolset](tools/toolbox_toolset/index.md) - Loading tools from an MCP
   Toolbox for Databases server, with named toolsets, bound parameters and
   authentication.
+- [Toolset tool-name prefixing](tools/base_toolset/index.md) - Giving a toolset a name prefix, what the invocation cache guarantees, and the `close`, `fromConfig` and `getAuthConfig` hooks.
 - [TransferToAgentTool](tools/transfer_to_agent_tool/index.md) - Handing off control to another agent, with the reachable agent names declared to the model.
 - [VertexRagRetrievalTool](tools/vertex_rag_retrieval/index.md) - Grounding an agent in a Vertex AI RAG corpus, server-side for Gemini and client-side for every other model.
