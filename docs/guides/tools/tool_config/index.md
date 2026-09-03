@@ -123,4 +123,26 @@ Only the top level is key-checked. `args` and everything nested inside it pass
 through untouched, and `args` is shallow-copied, so the returned config never
 aliases the object you passed in.
 
+## Custom tool configs
+
+If none of the five forms suffice, a custom tool declares its own config by
+extending `baseToolConfigSchema`. The base declares no key and rejects every
+key it was not extended with, so a custom config treats a typo the way
+`ToolConfig` does:
+
+```ts
+import {baseToolConfigSchema} from '@google/adk';
+import {z} from 'zod';
+
+const myToolConfigSchema = baseToolConfigSchema.extend({
+  threshold: z.number(),
+});
+
+myToolConfigSchema.parse({threshold: 1});
+// {threshold: 1}
+
+myToolConfigSchema.parse({threshold: 1, thresold: 2});
+// ZodError: Unrecognized key: "thresold"
+```
+
 This surface is experimental and can change.

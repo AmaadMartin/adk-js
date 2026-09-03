@@ -4,7 +4,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
+
+/**
+ * The base a custom tool's own config extends.
+ *
+ * The schema declares no key and rejects every key it was not extended with,
+ * so a config built from it treats a misspelled key as an error rather than
+ * as an extension point. A custom tool adds its keys with `.extend()`:
+ *
+ * ```ts
+ * const myToolConfigSchema = baseToolConfigSchema.extend({
+ *   threshold: z.number(),
+ * });
+ * myToolConfigSchema.parse({threshold: 1, thresold: 2}); // rejects the typo
+ * ```
+ *
+ * This is the adk-python `BaseToolConfig` extension point, which carries
+ * pydantic's `extra="forbid"` to a subclass.
+ *
+ * @experimental (Experimental, subject to change)
+ */
+export const baseToolConfigSchema = z.strictObject({});
+
+/**
+ * The config a custom tool declares by extending
+ * {@link baseToolConfigSchema}.
+ *
+ * @experimental (Experimental, subject to change)
+ */
+export type BaseToolConfig = z.infer<typeof baseToolConfigSchema>;
 
 /**
  * The declared args of one tool in a configuration file.

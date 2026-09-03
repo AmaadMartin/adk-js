@@ -5,12 +5,15 @@
  */
 
 import {
+  BaseToolConfig,
   InputValidationError,
   ToolArgsConfig,
+  baseToolConfigSchema,
   createToolConfig,
 } from '@google/adk';
 import yaml from 'js-yaml';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 
 const VERTEX_AI_SEARCH_YAML = `
 name: VertexAiSearchTool
@@ -164,5 +167,43 @@ describe('createToolConfig', () => {
     expect(() => createToolConfig({name: 'VertexAiSearchTool', args})).toThrow(
       /`args` must be an object/,
     );
+  });
+});
+
+describe('baseToolConfigSchema', () => {
+  const myToolConfigSchema = baseToolConfigSchema.extend({
+    threshold: z.number(),
+  });
+
+  it('accepts a declaration that carries no key', () => {
+    expect(baseToolConfigSchema.parse({})).toEqual({});
+  });
+
+  it('rejects a key it was not extended with', () => {
+    expect(() => baseToolConfigSchema.parse({threshold: 1})).toThrow(
+      /threshold/,
+    );
+  });
+
+  it('accepts the keys a custom tool config declares', () => {
+    expect(myToolConfigSchema.parse({threshold: 1})).toEqual({threshold: 1});
+  });
+
+  it('carries the strict-key rule into a custom tool config', () => {
+    expect(() => myToolConfigSchema.parse({threshold: 1, thresold: 2})).toThrow(
+      /thresold/,
+    );
+  });
+
+  it('rejects a declared key of the wrong type', () => {
+    expect(() => myToolConfigSchema.parse({threshold: 'high'})).toThrow(
+      /threshold/,
+    );
+  });
+
+  it('parses to a BaseToolConfig', () => {
+    const config: BaseToolConfig = baseToolConfigSchema.parse({});
+
+    expect(config).toEqual({});
   });
 });
