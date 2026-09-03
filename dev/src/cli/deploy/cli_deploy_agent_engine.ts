@@ -18,6 +18,7 @@ import {
   createPackageJson,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
+  warnIfWithUi,
 } from './deploy_utils.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
@@ -31,6 +32,8 @@ export interface DeployToAgentEngineOptions extends BaseDeployOptions {
 }
 
 export async function deployToAgentEngine(options: DeployToAgentEngineOptions) {
+  warnIfWithUi(options.withUi);
+
   const project =
     options.project || (await resolveDefaultFromGcloudConfig('project'));
   if (!project || project === '(unset)') {
