@@ -91,7 +91,7 @@ describe('resolveAgentCard', () => {
   });
 
   it('sends no headers when the caller supplied none', async () => {
-    let sent: HeadersInit | undefined;
+    let sent: unknown;
     const fetchImpl: typeof fetch = async (_input, init) => {
       sent = init?.headers;
       return jsonResponse(CARD);
