@@ -2357,7 +2357,17 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         );
 
         if (onModelErrorCallbackResponse) {
-          yield onModelErrorCallbackResponse as T;
+          // This generator yields whatever the wrapped one yields. Where that
+          // is an event, a bare LlmResponse would reach the caller without the
+          // event fields it reads, so merge it as `postprocess` does.
+          yield (
+            modelResponseEvent.actions
+              ? createEvent({
+                  ...modelResponseEvent,
+                  ...onModelErrorCallbackResponse,
+                })
+              : onModelErrorCallbackResponse
+          ) as T;
         } else {
           // If no plugins, just return the message.
           let errorCode = 'UNKNOWN_ERROR';
