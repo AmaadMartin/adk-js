@@ -8,6 +8,7 @@ import {
   BaseAgent,
   Context,
   createSession,
+  FunctionTool,
   InvocationContext,
   isFunctionTool,
   LlmRequest,
@@ -16,8 +17,8 @@ import {
   transferToAgent,
   TransferToAgentTool,
 } from '@google/adk';
-import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {FunctionDeclaration, Type} from '@google/genai';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 class MockAgent extends BaseAgent {
   constructor(name: string) {
@@ -209,5 +210,218 @@ describe('transferToAgent', () => {
     expect(() => transferToAgent({agentName: 'sub_agent'})).toThrow(
       'toolContext is required.',
     );
+  });
+
+  it('records the reason the model gave', () => {
+    const toolContext = createToolContext();
+
+    transferToAgent(
+      {agentName: 'sub_agent', transferReason: 'because'},
+      toolContext,
+    );
+
+    expect(toolContext.actions.transferReason).toBe('because');
+  });
+
+  it('records no reason when the model gives none', () => {
+    const toolContext = createToolContext();
+
+    transferToAgent({agentName: 'sub_agent'}, toolContext);
+
+    expect(toolContext.actions.transferReason).toBeUndefined();
+  });
+
+  it('treats an empty reason as no reason', () => {
+    const toolContext = createToolContext();
+
+    transferToAgent({agentName: 'sub_agent', transferReason: ''}, toolContext);
+
+    expect(toolContext.actions.transferReason).toBeUndefined();
+  });
+});
+
+describe('TransferToAgentTool without a transfer reason', () => {
+  it('keeps the reason out of the description', () => {
+    const tool = new TransferToAgentTool({agentNames: ['agent_a']});
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.description).not.toContain('transferReason');
+    expect(declaration.description).toBe(tool.description);
+  });
+
+  it('records no reason when the model calls it', async () => {
+    const tool = new TransferToAgentTool({agentNames: ['target_agent']});
+    const toolContext = createToolContext();
+
+    const result = await tool.runAsync({
+      args: {agentName: 'target_agent'},
+      toolContext,
+    });
+
+    expect(result).toBe('Transfer queued');
+    expect(toolContext.actions.transferToAgent).toBe('target_agent');
+    expect(toolContext.actions.transferReason).toBeUndefined();
+  });
+});
+
+describe('TransferToAgentTool with a transfer reason', () => {
+  it('declares the reason next to the agent name', () => {
+    const tool = new TransferToAgentTool({
+      agentNames: ['agent_a'],
+      includeTransferReason: true,
+    });
+
+    const parameters = tool._getDeclaration().parameters;
+
+    expect(Object.keys(parameters?.properties ?? {})).toEqual([
+      'agentName',
+      'transferReason',
+    ]);
+    expect(parameters?.required).toEqual(['agentName']);
+  });
+
+  it('leaves the reason unconstrained', () => {
+    const tool = new TransferToAgentTool({
+      agentNames: ['agent_a'],
+      includeTransferReason: true,
+    });
+
+    const reasonSchema =
+      tool._getDeclaration().parameters?.properties?.['transferReason'];
+
+    expect(reasonSchema?.type).toBe(Type.STRING);
+    expect(reasonSchema?.enum).toBeUndefined();
+  });
+
+  it('asks the model for the reason in the description', () => {
+    const tool = new TransferToAgentTool({
+      agentNames: ['agent_a'],
+      includeTransferReason: true,
+    });
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.description).toContain('transferReason');
+    expect(declaration.description).toBe(tool.description);
+  });
+
+  it('records the reason when the model calls it', async () => {
+    const tool = new TransferToAgentTool({
+      agentNames: ['target_agent'],
+      includeTransferReason: true,
+    });
+    const toolContext = createToolContext();
+
+    const result = await tool.runAsync({
+      args: {agentName: 'target_agent', transferReason: 'escalation'},
+      toolContext,
+    });
+
+    expect(result).toBe('Transfer queued');
+    expect(toolContext.actions.transferToAgent).toBe('target_agent');
+    expect(toolContext.actions.transferReason).toBe('escalation');
+  });
+});
+
+describe('TransferToAgentTool on a JSON-Schema declaration', () => {
+  function mockBaseDeclaration(declaration: FunctionDeclaration): void {
+    vi.spyOn(FunctionTool.prototype, '_getDeclaration').mockReturnValue(
+      declaration,
+    );
+  }
+
+  const jsonSchemaDeclaration: FunctionDeclaration = {
+    name: TRANSFER_TO_AGENT_TOOL_NAME,
+    description: 'Transfer the question to another agent.',
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        agentName: {type: 'string'},
+        transferReason: {type: 'string'},
+      },
+      required: ['agentName'],
+    },
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('constrains the agent name and drops the reason', () => {
+    mockBaseDeclaration(structuredClone(jsonSchemaDeclaration));
+    const tool = new TransferToAgentTool({agentNames: ['agent_a', 'agent_b']});
+
+    expect(tool._getDeclaration().parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {agentName: {type: 'string', enum: ['agent_a', 'agent_b']}},
+      required: ['agentName'],
+    });
+  });
+
+  it('keeps the reason when the tool asks for one', () => {
+    mockBaseDeclaration(structuredClone(jsonSchemaDeclaration));
+    const tool = new TransferToAgentTool({
+      agentNames: ['agent_a'],
+      includeTransferReason: true,
+    });
+
+    expect(tool._getDeclaration().parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {
+        agentName: {type: 'string', enum: ['agent_a']},
+        transferReason: {type: 'string'},
+      },
+      required: ['agentName'],
+    });
+  });
+
+  it('drops the reason when the schema declares no agent name', () => {
+    mockBaseDeclaration({
+      name: TRANSFER_TO_AGENT_TOOL_NAME,
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {transferReason: {type: 'string'}},
+      },
+    });
+    const tool = new TransferToAgentTool({agentNames: ['agent_a']});
+
+    expect(tool._getDeclaration().parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {},
+    });
+  });
+
+  it('leaves a declaration without JSON-Schema properties alone', () => {
+    mockBaseDeclaration({
+      name: TRANSFER_TO_AGENT_TOOL_NAME,
+      parametersJsonSchema: 'not a schema',
+    });
+    const tool = new TransferToAgentTool({agentNames: ['agent_a']});
+
+    expect(tool._getDeclaration().parametersJsonSchema).toBe('not a schema');
+
+    mockBaseDeclaration({
+      name: TRANSFER_TO_AGENT_TOOL_NAME,
+      parametersJsonSchema: {type: 'object'},
+    });
+
+    expect(
+      new TransferToAgentTool({agentNames: ['agent_a']})._getDeclaration()
+        .parametersJsonSchema,
+    ).toEqual({type: 'object'});
+  });
+
+  it('drops the reason when the parameters declare no agent name', () => {
+    mockBaseDeclaration({
+      name: TRANSFER_TO_AGENT_TOOL_NAME,
+      parameters: {
+        type: Type.OBJECT,
+        properties: {transferReason: {type: Type.STRING}},
+      },
+    });
+    const tool = new TransferToAgentTool({agentNames: ['agent_a']});
+
+    expect(tool._getDeclaration().parameters?.properties).toEqual({});
   });
 });

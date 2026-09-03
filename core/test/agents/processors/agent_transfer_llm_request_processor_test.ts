@@ -329,4 +329,33 @@ describe('AgentTransferLlmRequestProcessor', () => {
       'peer_agent',
     ]);
   });
+
+  it('should not ask the model why it transfers', async () => {
+    const agent = new LlmAgent({
+      name: 'root_agent',
+      model: 'gemini-2.5-flash',
+      subAgents: [new LlmAgent({name: 'sub_agent', model: 'gemini-2.5-flash'})],
+    });
+
+    const invocationContext = createMockInvocationContext(agent);
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of AGENT_TRANSFER_LLM_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // Do nothing
+    }
+
+    const declaration =
+      llmRequest.toolsDict['transfer_to_agent']._getDeclaration();
+    expect(Object.keys(declaration?.parameters?.properties ?? {})).toEqual([
+      'agentName',
+    ]);
+    expect(declaration?.description).not.toContain('transferReason');
+  });
 });
