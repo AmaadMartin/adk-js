@@ -5,6 +5,7 @@
  */
 
 import js from '@eslint/js';
+import n from 'eslint-plugin-n';
 import {defineConfig} from 'eslint/config';
 import globals from 'globals';
 import {builtinModules} from 'node:module';
@@ -27,7 +28,7 @@ export default defineConfig([
   tseslint.configs.recommended,
   {
     files: ['**/*.ts'],
-    plugins: {js},
+    plugins: {js, n},
     extends: ['js/recommended'],
     linterOptions: {
       reportUnusedDisableDirectives: 'error',
@@ -65,6 +66,7 @@ export default defineConfig([
           'disallowTypeAnnotations': false,
         },
       ],
+      'n/prefer-node-protocol': 'error',
     },
   },
   {

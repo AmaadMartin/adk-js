@@ -5,7 +5,7 @@
  */
 
 import {DiscoveryEngineSearchTool} from '@google/adk';
-import * as http from 'http';
+import * as http from 'node:http';
 import {afterAll, afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
 // The credential provider is the ONLY stubbed boundary: Application Default

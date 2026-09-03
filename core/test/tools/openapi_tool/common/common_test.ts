@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ApiParameter} from '@google/adk';
+import yaml from 'js-yaml';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import type {OpenAPIV3} from 'openapi-types';
+import {beforeAll, describe, expect, it} from 'vitest';
+import type {ApiParameter} from '../../../../src/index.js';
 import {
   createApiParameter,
   generateParamDoc,
@@ -13,12 +18,7 @@ import {
   OpenApiSpecParser,
   renameReservedWords,
   schemaFromOpenApi,
-} from '@google/adk';
-import * as fs from 'fs';
-import yaml from 'js-yaml';
-import type {OpenAPIV3} from 'openapi-types';
-import * as path from 'path';
-import {beforeAll, describe, expect, it} from 'vitest';
+} from '../../../../src/index.js';
 
 describe('renameReservedWords', () => {
   it.each([
