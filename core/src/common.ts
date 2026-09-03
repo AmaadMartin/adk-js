@@ -753,6 +753,12 @@ export type {
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 // `ToolArgsConfig` is exported below, from its own module `tool_configs.js`.
 export type {ToolPredicate} from './tools/base_toolset.js';
+export {
+  BIGTABLE_DEFAULT_SCOPE,
+  BIGTABLE_TOKEN_CACHE_KEY,
+  BigtableCredentialsConfig,
+} from './tools/bigtable/bigtable_credentials.js';
+export type {BigtableCredentialsConfigOptions} from './tools/bigtable/bigtable_credentials.js';
 export {createBigtableToolSettings} from './tools/bigtable/settings.js';
 export type {BigtableToolSettings} from './tools/bigtable/settings.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
@@ -806,6 +812,10 @@ export type {
 export {getUserChoiceTool} from './tools/get_user_choice_tool.js';
 export {GoogleApiTool} from './tools/google_api_tool/google_api_tool.js';
 export type {GoogleApiToolOptions} from './tools/google_api_tool/google_api_tool.js';
+// `BaseGoogleCredentialsConfig` is exported above, from
+// `_google_credentials.js`. Both modules declare a class of that name.
+export {GoogleCredentialsManager} from './tools/google_credentials.js';
+export type {BaseGoogleCredentialsConfigOptions} from './tools/google_credentials.js';
 export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
