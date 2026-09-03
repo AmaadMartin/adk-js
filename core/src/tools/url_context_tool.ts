@@ -22,7 +22,9 @@ import {BuiltInTool} from './built_in_tool.js';
  */
 export class UrlContextTool extends BuiltInTool {
   constructor() {
-    super({name: 'url_context', description: 'URL Context Tool'});
+    // The model runs this tool itself, so it reads neither the name nor the
+    // description. Both match adk-python.
+    super({name: 'url_context', description: 'url_context'});
   }
 
   protected override async applyBuiltInConfig({

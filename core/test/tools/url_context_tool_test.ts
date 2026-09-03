@@ -283,6 +283,13 @@ describe('UrlContextTool', () => {
     });
   });
 
+  it('names the tool url_context', () => {
+    const tool = new UrlContextTool();
+
+    expect(tool.name).toBe('url_context');
+    expect(tool.description).toBe('url_context');
+  });
+
   it('has a global instance URL_CONTEXT', () => {
     expect(URL_CONTEXT).toBeInstanceOf(UrlContextTool);
   });
