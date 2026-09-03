@@ -37,6 +37,12 @@ export interface EventActions {
   transferToAgent?: string;
 
   /**
+   * The reason the event transfers to the target agent, when the model states
+   * one. Mirrors Python `EventActions.transfer_reason`.
+   */
+  transferReason?: string;
+
+  /**
    * The agent is escalating to a higher level agent.
    */
   escalate?: boolean;
@@ -116,6 +122,7 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.requestedToolConfirmations) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
+    actions.transferReason === undefined &&
     actions.escalate === undefined
   );
 }
@@ -176,6 +183,9 @@ export function mergeEventActions(
     }
     if (source.transferToAgent !== undefined) {
       result.transferToAgent = source.transferToAgent;
+    }
+    if (source.transferReason !== undefined) {
+      result.transferReason = source.transferReason;
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
