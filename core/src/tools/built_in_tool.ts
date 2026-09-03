@@ -24,10 +24,10 @@ import {
  * the tool. Registering the name here keeps the call resolvable, and
  * `runAsync` answers it by telling the model the tool is not callable.
  *
- * A tool whose `applyBuiltInConfig` returns without configuring anything —
- * every one of them does when the request carries no model — still claims its
- * name. That request never reaches a model, so no function call can come back
- * for it and the registration is inert.
+ * A tool whose `applyBuiltInConfig` returns without configuring anything — as
+ * some of them do when the request carries no model — still claims its name.
+ * That request never reaches a model, so no function call can come back for it
+ * and the registration is inert.
  */
 export abstract class BuiltInTool extends BaseTool {
   /** Marks this tool as one the model runs itself. */

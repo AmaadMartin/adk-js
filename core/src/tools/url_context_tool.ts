@@ -3,15 +3,16 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
-
-import {isGemini2OrAbove, isGeminiModel} from '../utils/model_name.js';
+import {
+  isGeminiModel,
+  isGeminiModelIdCheckDisabled,
+} from '../utils/model_name.js';
 
 import {ToolProcessLlmRequest} from './base_tool.js';
 import {BuiltInTool} from './built_in_tool.js';
 
 /**
- * A built-in tool that allows Gemini 2+ models to retrieve content from URLs
+ * A built-in tool that allows Gemini models to retrieve content from URLs
  * provided in the conversation.
  *
  * This tool operates internally within the model and does not require or
@@ -19,33 +20,28 @@ import {BuiltInTool} from './built_in_tool.js';
  */
 export class UrlContextTool extends BuiltInTool {
   constructor() {
-    super({name: 'url_context', description: 'URL Context Tool'});
+    // The model runs this tool itself, so it reads neither the name nor the
+    // description. Both match adk-python.
+    super({name: 'url_context', description: 'url_context'});
   }
 
   protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    if (!llmRequest.model) {
-      return;
-    }
+    llmRequest.config = llmRequest.config || {};
+    llmRequest.config.tools = llmRequest.config.tools || [];
 
-    if (!isGeminiModel(llmRequest.model)) {
+    if (
+      !isGeminiModel(llmRequest.model ?? '') &&
+      !isGeminiModelIdCheckDisabled() &&
+      !llmRequest.isManagedAgent
+    ) {
       throw new Error(
         `URL context tool is not supported for model ${llmRequest.model}`,
       );
     }
 
-    if (!isGemini2OrAbove(llmRequest.model)) {
-      throw new Error(
-        `URL context tool requires Gemini 2 or above, but got ${llmRequest.model}`,
-      );
-    }
-
-    llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
-    llmRequest.config.tools = llmRequest.config.tools || [];
-    llmRequest.config.tools.push({
-      urlContext: {},
-    });
+    llmRequest.config.tools.push({urlContext: {}});
   }
 }
 
