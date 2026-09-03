@@ -13,7 +13,10 @@ import {Session} from '../sessions/session.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
 import {AdkMetadataKeys} from './metadata_converter_utils.js';
-import {toA2AParts} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2AParts,
+} from './part_converter_utils.js';
 
 export interface UserFunctionCall {
   response: AdkEvent;
@@ -285,12 +288,13 @@ export function toForwardableA2AParts(
   content: Content | undefined,
   longRunningToolIds: string[] | undefined,
   peerRequestedIds: ReadonlySet<string>,
+  converter?: GenAIPartToA2APartConverter,
 ): A2APart[] {
   const scrubbed = withoutCredentialParts(content, peerRequestedIds);
   if (!scrubbed?.parts) {
     return [];
   }
-  return toA2AParts(scrubbed.parts, longRunningToolIds);
+  return toA2AParts(scrubbed.parts, longRunningToolIds, converter);
 }
 
 /**
@@ -305,6 +309,7 @@ export function toForwardableA2AParts(
 export function toMissingRemoteSessionParts(
   ctx: InvocationContext,
   session: Session,
+  converter?: GenAIPartToA2APartConverter,
 ): {parts: A2APart[]; contextId?: string} {
   const events = session.events;
   const peerName = requireAgent(ctx).name;
@@ -350,7 +355,11 @@ export function toMissingRemoteSessionParts(
       continue;
     }
 
-    const parts = toA2AParts(event.content.parts, event.longRunningToolIds);
+    const parts = toA2AParts(
+      event.content.parts,
+      event.longRunningToolIds,
+      converter,
+    );
     missingParts.push(...parts);
   }
 

@@ -25,7 +25,11 @@ import {AuthHandler} from './auth_handler.js';
 import {AuthConfig} from './auth_tool.js';
 import {bindCredentialResponse} from './credential_response_binding.js';
 
-const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
+/**
+ * Prefix marking a credential request an agent or toolset raised for itself.
+ * The response is stored without resuming a function call.
+ */
+export const TOOLSET_AUTH_CREDENTIAL_ID_PREFIX = '_adk_toolset_auth_';
 
 interface RequestCredentialArgs {
   authConfig?: AuthConfig;

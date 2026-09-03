@@ -22,6 +22,7 @@ import {
   Part as GenAIPart,
   VideoMetadata,
 } from '@google/genai';
+import {logger} from '../utils/logger.js';
 import {A2AMetadataKeys} from './metadata_converter_utils.js';
 
 /**
@@ -35,17 +36,47 @@ enum DataPartType {
 }
 
 /**
+ * Converts one A2A part to a genai part. Returning `undefined` drops the part.
+ */
+export type A2APartToGenAIPartConverter = (
+  part: A2APart,
+) => GenAIPart | undefined;
+
+/**
+ * Converts one genai part to zero or more A2A parts. Returning `undefined`
+ * drops the part.
+ */
+export type GenAIPartToA2APartConverter = (
+  part: GenAIPart,
+) => A2APart | A2APart[] | undefined;
+
+/**
  * Converts an array of GenAI Parts to A2A Parts.
  *
  * @param parts - The GenAI parts to convert. Defaults to an empty array.
  * @param longRunningToolIDs - IDs of function calls that are long-running.
+ * @param converter - Converts one part. Defaults to {@link toA2APart}.
  * @returns An array of A2A parts.
  */
 export function toA2AParts(
   parts: GenAIPart[] = [],
   longRunningToolIDs: string[] = [],
+  converter: GenAIPartToA2APartConverter = (part) =>
+    toA2APart(part, longRunningToolIDs),
 ): A2APart[] {
-  return parts.map((part) => toA2APart(part, longRunningToolIDs));
+  const converted: A2APart[] = [];
+  for (const part of parts) {
+    const result = converter(part);
+    if (result === undefined) {
+      logger.warn(
+        'Failed to convert part to A2A format:',
+        JSON.stringify(part),
+      );
+      continue;
+    }
+    converted.push(...(Array.isArray(result) ? result : [result]));
+  }
+  return converted;
 }
 
 /**
@@ -209,10 +240,26 @@ export function toGenAIContent(a2aMessage: Message): GenAIContent {
  * Converts an array of A2A Parts to GenAI Parts.
  *
  * @param a2aParts - The A2A parts to convert.
- * @returns An array of GenAI parts.
+ * @param converter - Converts one part. Defaults to {@link toGenAIPart}.
+ * @returns An array of GenAI parts, without the parts the converter dropped.
  */
-export function toGenAIParts(a2aParts: A2APart[]): GenAIPart[] {
-  return a2aParts.map((a2aPart) => toGenAIPart(a2aPart));
+export function toGenAIParts(
+  a2aParts: A2APart[],
+  converter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIPart[] {
+  const converted: GenAIPart[] = [];
+  for (const a2aPart of a2aParts) {
+    const result = converter(a2aPart);
+    if (result === undefined) {
+      logger.warn(
+        'Failed to convert part to GenAI format:',
+        JSON.stringify(a2aPart),
+      );
+      continue;
+    }
+    converted.push(result);
+  }
+  return converted;
 }
 
 /**

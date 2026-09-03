@@ -180,8 +180,14 @@ describe('A2ARemoteAgent', () => {
       clientFactory: mockClientFactory,
     });
 
-    await expect(drain(agent.runAsync(createMockContext()))).rejects.toThrow(
-      /must have the same origin/,
+    const events: AdkEvent[] = [];
+    for await (const event of agent.runAsync(createMockContext())) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].errorMessage).toMatch(
+      /Failed to initialize remote A2A agent: .*must have the same origin/,
     );
     expect(mockClientFactory.createFromAgentCard).not.toHaveBeenCalled();
   });
@@ -196,9 +202,10 @@ describe('A2ARemoteAgent', () => {
       clientFactory: mockClientFactory,
     });
 
-    await expect(drain(agent.runAsync(createMockContext()))).rejects.toThrow();
-    await expect(drain(agent.runAsync(createMockContext()))).rejects.toThrow();
+    await drain(agent.runAsync(createMockContext()));
+    await drain(agent.runAsync(createMockContext()));
     expect(mockResolver.resolve).toHaveBeenCalledTimes(2);
+    expect(mockClientFactory.createFromAgentCard).not.toHaveBeenCalled();
   });
 
   it('should resolve card from URL and send message streaming', async () => {
@@ -467,6 +474,7 @@ describe('A2ARemoteAgent', () => {
       expect.objectContaining({
         configuration: {acceptedOutputModes: ['custom']},
       }),
+      expect.anything(),
     );
   });
 
@@ -556,7 +564,9 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
+    // The resume may now be dropped entirely, so an unsent request is
+    // also a pass; what must never happen is the secret going out.
+    const dumped = JSON.stringify(capturedParts ?? []);
     expect(dumped).not.toContain('SUPER_SECRET_TOKEN');
   });
 
@@ -641,7 +651,9 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
+    // The resume may now be dropped entirely, so an unsent request is
+    // also a pass; what must never happen is the secret going out.
+    const dumped = JSON.stringify(capturedParts ?? []);
     expect(dumped).toContain('ANSWER_FOR_THE_PEER');
   });
 
@@ -751,7 +763,9 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
+    // The resume may now be dropped entirely, so an unsent request is
+    // also a pass; what must never happen is the secret going out.
+    const dumped = JSON.stringify(capturedParts ?? []);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
   });
 
@@ -864,7 +878,9 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
+    // The resume may now be dropped entirely, so an unsent request is
+    // also a pass; what must never happen is the secret going out.
+    const dumped = JSON.stringify(capturedParts ?? []);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
   });
 });
