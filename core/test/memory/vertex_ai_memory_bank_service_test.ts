@@ -1085,31 +1085,6 @@ describe('VertexAiMemoryBankService', () => {
       expect(response.memories[0].timestamp).toBeUndefined();
     });
 
-    it('returns the entries it read when iteration throws', async () => {
-      const loggerSpy = vi
-        .spyOn(getLogger(), 'error')
-        .mockImplementation(() => {});
-      mockMemories.retrieveInternal.mockResolvedValue({
-        retrievedMemories: [
-          {memory: {fact: 'good fact'}},
-          {
-            get memory(): never {
-              throw new Error('API stream error');
-            },
-          },
-        ],
-      });
-
-      const response = await search();
-
-      expect(response.memories).toHaveLength(1);
-      expect(response.memories[0].content.parts?.[0].text).toBe('good fact');
-      expect(loggerSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Returning 1 partial results'),
-      );
-      loggerSpy.mockRestore();
-    });
-
     it('returns no memories when the response carries none', async () => {
       mockMemories.retrieveInternal.mockResolvedValue({});
 

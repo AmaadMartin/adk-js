@@ -158,22 +158,14 @@ function toIngestionEvent(event: Event): IngestionDirectContentsSourceEvent {
   return ingestionEvent;
 }
 
-function fromVertexMetadataValue(value: MemoryMetadataValue): unknown {
-  for (const key of VERTEX_METADATA_KEYS) {
-    if (value[key] !== undefined) {
-      return value[key];
-    }
-  }
-  return value;
-}
-
 /** Converts Vertex metadata values back to plain JavaScript values. */
 function fromVertexMetadata(
   metadata?: Record<string, MemoryMetadataValue>,
 ): Record<string, unknown> {
   const plainMetadata: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(metadata ?? {})) {
-    plainMetadata[key] = fromVertexMetadataValue(value);
+    const setKey = VERTEX_METADATA_KEYS.find((k) => value[k] !== undefined);
+    plainMetadata[key] = setKey ? value[setKey] : value;
   }
   return plainMetadata;
 }
@@ -351,29 +343,22 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     const memoryEvents: MemoryEntry[] = [];
     const retrievedMemories = retrievedMemoriesResponse.retrievedMemories || [];
 
-    try {
-      for (const retrievedMemory of retrievedMemories) {
-        const memory = retrievedMemory.memory;
-        if (!memory) {
-          logger.warn('Skipping memory entry with missing memory object.');
-          continue;
-        }
-        if (!memory.fact) {
-          logger.warn('Skipping memory entry with empty or missing fact.');
-          continue;
-        }
-        memoryEvents.push({
-          author: 'user',
-          content: createUserContent(memory.fact),
-          timestamp: memory.updateTime,
-          customMetadata: fromVertexMetadata(memory.metadata),
-        });
+    for (const retrievedMemory of retrievedMemories) {
+      const memory = retrievedMemory.memory;
+      if (!memory) {
+        logger.warn('Skipping memory entry with missing memory object.');
+        continue;
       }
-    } catch (e: unknown) {
-      logger.error(
-        `Error while iterating memory results. Returning ` +
-          `${memoryEvents.length} partial results: ${e}`,
-      );
+      if (!memory.fact) {
+        logger.warn('Skipping memory entry with empty or missing fact.');
+        continue;
+      }
+      memoryEvents.push({
+        author: 'user',
+        content: createUserContent(memory.fact),
+        timestamp: memory.updateTime,
+        customMetadata: fromVertexMetadata(memory.metadata),
+      });
     }
 
     return {memories: memoryEvents};
