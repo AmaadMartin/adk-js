@@ -78,9 +78,6 @@ export interface EvalMetric {
    * criterion literal carrying metric-specific fields type-checks here.
    */
   criterion?: BaseCriterion | LlmAsAJudgeCriterion | RubricsBasedCriterion;
-
-  /** Path to the scoring function, when this is a custom metric. */
-  customFunctionPath?: string;
 }
 
 /** The judge model an eval metric uses when its criterion names none. */

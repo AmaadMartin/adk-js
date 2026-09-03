@@ -14,11 +14,11 @@ import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {Invocation} from './eval_case.js';
 import {
-  BaseCriterion,
   CriterionParser,
   EvalMetric,
   EvalStatus,
   JudgeModelOptions,
+  LlmAsAJudgeCriterion,
   getMetricThreshold,
 } from './eval_metrics.js';
 import {RubricScore} from './eval_rubrics.js';
@@ -41,20 +41,8 @@ export interface AutoRaterScore {
   rubricScores?: RubricScore[];
 }
 
-/**
- * The shape {@link LlmAsJudge} reads off a criterion.
- *
- * adk-python restricts its type variable to `LlmAsAJudgeCriterion` and
- * `RubricsBasedCriterion`, which are siblings rather than one extending the
- * other. Both declare `judgeModelOptions`, which is all this class reads, so
- * TypeScript expresses the restriction structurally.
- */
-export interface JudgeCriterion extends BaseCriterion {
-  judgeModelOptions: JudgeModelOptions;
-}
-
 /** How a {@link LlmAsJudge} is configured. */
-export interface LlmAsJudgeOptions<CriterionT extends JudgeCriterion> {
+export interface LlmAsJudgeOptions<CriterionT extends LlmAsAJudgeCriterion> {
   evalMetric: EvalMetric;
 
   /**
@@ -98,7 +86,7 @@ interface SettledInvocation {
  * @throws {InputValidationError} When the metric carries no criterion, or one
  *   the parser rejects.
  */
-function parseMetricCriterion<CriterionT extends JudgeCriterion>(
+function parseMetricCriterion<CriterionT extends LlmAsAJudgeCriterion>(
   evalMetric: EvalMetric,
   parseCriterion: CriterionParser<CriterionT>,
 ): CriterionT {
@@ -160,7 +148,7 @@ function groupSettledSamples(
  */
 @experimental
 export abstract class LlmAsJudge<
-  CriterionT extends JudgeCriterion,
+  CriterionT extends LlmAsAJudgeCriterion,
 > implements Evaluator {
   protected readonly criterion: CriterionT;
   protected readonly judgeModelOptions: JudgeModelOptions;

@@ -39,8 +39,4 @@ export type {
   PerInvocationResult,
 } from './evaluator.js';
 export {LlmAsJudge} from './llm_as_judge.js';
-export type {
-  AutoRaterScore,
-  JudgeCriterion,
-  LlmAsJudgeOptions,
-} from './llm_as_judge.js';
+export type {AutoRaterScore, LlmAsJudgeOptions} from './llm_as_judge.js';

@@ -14,9 +14,4 @@ export interface Invocation {
   userContent: Content;
 
   finalResponse?: Content;
-
-  /**
-   * Creation time in seconds since the epoch, for debugging. Defaults to 0.
-   */
-  creationTimestamp?: number;
 }

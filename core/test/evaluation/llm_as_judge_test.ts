@@ -32,10 +32,8 @@ import {
   vi,
 } from 'vitest';
 
+import {DEFAULT_RETRY_ATTEMPTS} from '../../src/evaluation/retry_options_utils.js';
 import {logger} from '../../src/utils/logger.js';
-
-/** The attempt count `addDefaultRetryOptionsIfNotPresent` stamps on a request. */
-const DEFAULT_RETRY_ATTEMPTS = 7;
 
 const AUTO_RATER_RESPONSE: LlmResponse = {
   content: {role: 'model', parts: [{text: 'auto rater response'}]},
@@ -470,6 +468,25 @@ describe('LlmAsJudge.evaluateInvocations', () => {
     await judge.evaluateInvocations([createInvocation('id1')]);
 
     expect(judgeModel.requests[0].config?.temperature).toBe(0.2);
+  });
+
+  it('keeps a retry policy the judge model config already carries', async () => {
+    const judgeModel = new FakeJudgeModel();
+    const judge = new MockLlmAsJudge(
+      judgeOptions(
+        judgeCriterion({
+          numSamples: 1,
+          judgeModelConfig: {httpOptions: {retryOptions: {attempts: 2}}},
+        }),
+        judgeModel,
+      ),
+    );
+
+    await judge.evaluateInvocations([createInvocation('id1')]);
+
+    expect(judgeModel.requests[0].config?.httpOptions?.retryOptions).toEqual({
+      attempts: 2,
+    });
   });
 
   it('carries the rubric scores the auto-rater produced', async () => {

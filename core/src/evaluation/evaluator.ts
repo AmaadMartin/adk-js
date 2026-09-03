@@ -10,16 +10,6 @@ import type {Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
 import type {RubricScore} from './eval_rubrics.js';
 
-/**
- * The verdict a metric returns for an invocation, or for a whole eval case.
- *
- * The numeric values match the `EvalStatus` of `google/adk-python`, so a
- * serialized status is portable between the two runtimes. The enum lives in
- * `eval_metrics.ts`, and is re-exported here so that a metric reads its whole
- * contract from this module.
- */
-export {EvalStatus};
-
 /** Metric evaluation score for one invocation. */
 export interface PerInvocationResult {
   /** The invocation obtained from the agent under test. */
