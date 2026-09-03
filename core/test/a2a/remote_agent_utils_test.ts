@@ -17,7 +17,7 @@ import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
-import {Session} from '../../src/sessions/session.js';
+import {createSession} from '../../src/sessions/session.js';
 
 describe('remote_agent_utils', () => {
   const mockAgent = {
@@ -102,13 +102,17 @@ describe('remote_agent_utils', () => {
 
   describe('getUserFunctionCallAt', () => {
     it('should return undefined for invalid index', () => {
-      const session = {events: []} as unknown as Session;
+      const session = createSession({id: 's-1', appName: 'app-1', events: []});
       expect(getUserFunctionCallAt(session, 0)).toBeUndefined();
     });
 
     it('should return undefined if event author is not user', () => {
       const event = createEvent({author: 'agent'});
-      const session = {events: [event]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [event],
+      });
       expect(getUserFunctionCallAt(session, 0)).toBeUndefined();
     });
 
@@ -117,7 +121,11 @@ describe('remote_agent_utils', () => {
         author: 'user',
         content: {role: 'user', parts: [{text: 'hello'}]},
       });
-      const session = {events: [event]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [event],
+      });
       expect(getUserFunctionCallAt(session, 0)).toBeUndefined();
     });
 
@@ -142,9 +150,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [requestEvent, responseEvent],
-      } as unknown as Session;
+      });
 
       const result = getUserFunctionCallAt(session, 1);
       expect(result).toBeDefined();
@@ -202,7 +212,11 @@ describe('remote_agent_utils', () => {
         author: 'user',
         content: {role: 'user', parts: [{text: 'hello'}]},
       });
-      const session = {events: [event1]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [event1],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       expect(result.parts.length).toBe(1);
@@ -223,9 +237,11 @@ describe('remote_agent_utils', () => {
         content: {role: 'user', parts: [{text: 'new message'}]},
       });
 
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [remoteResponse, newUserMessage],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       expect(result.parts.length).toBe(1);
@@ -239,7 +255,11 @@ describe('remote_agent_utils', () => {
         content: {role: 'model', parts: [{text: 'other response'}]},
       });
 
-      const session = {events: [otherAgent]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [otherAgent],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       expect(result.parts.length).toBe(2); // "For context:" and "[other-agent] said: ..."
@@ -283,7 +303,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [credentialRequest]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [credentialRequest],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       const dumped = JSON.stringify(result.parts);
@@ -335,9 +359,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [credentialRequest, credentialResponse],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       const dumped = JSON.stringify(result.parts);
@@ -387,9 +413,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [peerCredentialRequest, answerToPeer],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       const dumped = JSON.stringify(result.parts);
@@ -426,7 +454,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [credentialRequest]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [credentialRequest],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       const dumped = JSON.stringify(result.parts);
@@ -479,9 +511,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [credentialRequest, renamedResponse],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       const dumped = JSON.stringify(result.parts);
@@ -516,7 +550,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [noIdResponse]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [noIdResponse],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       const dumped = JSON.stringify(result.parts);
@@ -543,7 +581,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [unrelatedToolCall]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [unrelatedToolCall],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       const dumped = JSON.stringify(result.parts);
@@ -576,7 +618,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [partialResponse]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [partialResponse],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
 
@@ -609,7 +655,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [wrappedResponse]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [wrappedResponse],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
 
@@ -635,7 +685,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [ordinaryCall]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [ordinaryCall],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
 
@@ -651,7 +705,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [noArgsCall]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [noArgsCall],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
 
@@ -659,7 +717,9 @@ describe('remote_agent_utils', () => {
     });
 
     it('stops at a peer reply when fullHistoryWhenStateless is off', () => {
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [
           createEvent({
             author: 'user',
@@ -671,7 +731,7 @@ describe('remote_agent_utils', () => {
             content: {role: 'user', parts: [{text: 'NEW_TURN'}]},
           }),
         ],
-      } as unknown as Session;
+      });
 
       const dumped = JSON.stringify(
         toMissingRemoteSessionParts(mockCtx, session).parts,
@@ -682,7 +742,9 @@ describe('remote_agent_utils', () => {
     });
 
     it('sends the whole session when the peer is stateless', () => {
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [
           createEvent({
             author: 'user',
@@ -694,7 +756,7 @@ describe('remote_agent_utils', () => {
             content: {role: 'user', parts: [{text: 'NEW_TURN'}]},
           }),
         ],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session, {
         fullHistoryWhenStateless: true,
@@ -707,7 +769,9 @@ describe('remote_agent_utils', () => {
     });
 
     it('sends only the unseen turns when the peer returned a context id', () => {
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [
           createEvent({
             author: 'user',
@@ -722,7 +786,7 @@ describe('remote_agent_utils', () => {
             content: {role: 'user', parts: [{text: 'NEW_TURN'}]},
           }),
         ],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session, {
         fullHistoryWhenStateless: true,
@@ -735,14 +799,16 @@ describe('remote_agent_utils', () => {
     });
 
     it('stamps parts from a user event as user input', () => {
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [
           createEvent({
             author: 'user',
             content: {role: 'user', parts: [{text: 'typed by a person'}]},
           }),
         ],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
 
@@ -750,14 +816,16 @@ describe('remote_agent_utils', () => {
     });
 
     it('does not stamp relayed agent content as user input', () => {
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [
           createEvent({
             author: 'other_agent',
             content: {role: 'model', parts: [{text: 'from another agent'}]},
           }),
         ],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
 
@@ -768,14 +836,16 @@ describe('remote_agent_utils', () => {
     });
 
     it('uses the converter the caller supplied for outbound parts', () => {
-      const session = {
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
         events: [
           createEvent({
             author: 'user',
             content: {role: 'user', parts: [{text: 'original'}]},
           }),
         ],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session, {
         converter: () => ({kind: 'text', text: 'converted'}),
@@ -803,7 +873,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {events: [plainResponse]} as unknown as Session;
+      const session = createSession({
+        id: 's-1',
+        appName: 'app-1',
+        events: [plainResponse],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
 

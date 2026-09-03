@@ -9,10 +9,13 @@ import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {
   A2ACardRequestInterceptor,
   Event as AdkEvent,
+  AuthConfig,
   AuthCredentialTypes,
   AuthScheme,
   createEvent,
+  createSession,
   InvocationContext,
+  PluginManager,
   RemoteA2AAgent,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   Session,
@@ -86,14 +89,13 @@ function createHarness(card: AgentCard = CARD): Harness {
 }
 
 function createContext(overrides: Partial<Session> = {}): InvocationContext {
-  return {
+  return new InvocationContext({
     invocationId: 'inv-1',
-    endInvocation: false,
-    session: {
+    pluginManager: new PluginManager([]),
+    session: createSession({
       id: 's-1',
       userId: 'u-1',
       appName: 'app-1',
-      state: {},
       events: [
         createEvent({
           author: 'user',
@@ -101,8 +103,8 @@ function createContext(overrides: Partial<Session> = {}): InvocationContext {
         }),
       ],
       ...overrides,
-    } as unknown as Session,
-  } as unknown as InvocationContext;
+    }),
+  });
 }
 
 async function collect(
@@ -114,6 +116,24 @@ async function collect(
     events.push(event);
   }
   return events;
+}
+
+/** The credential key inside the AuthConfig the request event carries. */
+function credentialKeyOf(event: AdkEvent): string {
+  const authConfig =
+    event.content?.parts?.[0].functionCall?.args?.['authConfig'];
+  if (!isAuthConfig(authConfig)) {
+    return expect.fail('the event carries no AuthConfig');
+  }
+  return authConfig.credentialKey;
+}
+
+function isAuthConfig(value: unknown): value is AuthConfig {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as {credentialKey?: unknown}).credentialKey === 'string'
+  );
 }
 
 describe('RemoteA2AAgent auth', () => {
@@ -341,14 +361,8 @@ describe('RemoteA2AAgent auth', () => {
     const firstEvents = await collect(first, createContext());
     const secondEvents = await collect(second, createContext());
 
-    const keyOf = (event: AdkEvent) =>
-      (
-        event.content?.parts?.[0].functionCall?.args?.[
-          'authConfig'
-        ] as unknown as {credentialKey: string}
-      ).credentialKey;
-    expect(keyOf(firstEvents[0])).toBe('adk_a2a_agent_one');
-    expect(keyOf(secondEvents[0])).toBe('adk_a2a_agent_two');
+    expect(credentialKeyOf(firstEvents[0])).toBe('adk_a2a_agent_one');
+    expect(credentialKeyOf(secondEvents[0])).toBe('adk_a2a_agent_two');
   });
 
   it('uses the credential key the caller supplied', async () => {
@@ -363,10 +377,7 @@ describe('RemoteA2AAgent auth', () => {
 
     const events = await collect(agent, createContext());
 
-    const args = events[0].content?.parts?.[0].functionCall?.args;
-    expect(
-      (args?.['authConfig'] as {credentialKey: string}).credentialKey,
-    ).toBe('shared_key');
+    expect(credentialKeyOf(events[0])).toBe('shared_key');
   });
 
   it('never writes the credential into session state', async () => {

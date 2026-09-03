@@ -10,11 +10,12 @@ import {
   A2ARequestInterceptor,
   Event as AdkEvent,
   createEvent,
+  createSession,
   DEFAULT_A2A_TIMEOUT_MS,
   InvocationContext,
+  PluginManager,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
-  Session,
   toA2APart,
 } from '@google/adk';
 import {Part as GenAIPart} from '@google/genai';
@@ -79,19 +80,19 @@ function createContext(
       content: {role: 'user', parts: [{text: 'hi'}]},
     }),
   ],
-  overrides: Partial<InvocationContext> = {},
+  abortSignal?: AbortSignal,
 ): InvocationContext {
-  return {
+  return new InvocationContext({
     invocationId: 'inv-1',
-    session: {
+    pluginManager: new PluginManager([]),
+    abortSignal,
+    session: createSession({
       id: 's-1',
       userId: 'u-1',
       appName: 'app-1',
-      state: {},
       events,
-    } as unknown as Session,
-    ...overrides,
-  } as unknown as InvocationContext;
+    }),
+  });
 }
 
 async function collect(
@@ -166,7 +167,7 @@ describe('RemoteA2AAgent lifecycle', () => {
 
     await collect(
       agentWith(harness),
-      createContext(undefined, {abortSignal: controller.signal}),
+      createContext(undefined, controller.signal),
     );
 
     expect(observed?.aborted).toBe(true);

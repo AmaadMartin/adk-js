@@ -12,16 +12,22 @@ import {
   A2AStreamEventData,
   Event as AdkEvent,
   createEvent,
+  createSession,
   executeAfterRequestInterceptors,
   executeBeforeCardRequestInterceptors,
   executeBeforeRequestInterceptors,
   InvocationContext,
   NEW_A2A_ADK_INTEGRATION_EXTENSION,
   newIntegrationExtensionInterceptor,
+  PluginManager,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
-const CTX = {invocationId: 'inv-1'} as unknown as InvocationContext;
+const CTX = new InvocationContext({
+  invocationId: 'inv-1',
+  pluginManager: new PluginManager([]),
+  session: createSession({id: 's-1', appName: 'app-1'}),
+});
 
 const RESPONSE: A2AStreamEventData = {
   kind: 'message',
