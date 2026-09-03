@@ -13,11 +13,11 @@ import {
   BaseAuthenticatedTool,
   Context,
   createSession,
+  CredentialManager,
   InMemoryCredentialService,
   InvocationContext,
   PENDING_USER_AUTHORIZATION,
   PluginManager,
-  ToolCredentialManager,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -64,19 +64,24 @@ class RecordingAuthenticatedTool extends BaseAuthenticatedTool {
     return this.result;
   }
 
-  /** Replaces the resolver, the way an embedder or a test would. */
-  useCredentialManager(manager: ToolCredentialManager): void {
+  /** Swaps in a stubbed resolver, so a test can drive the tool's branches. */
+  useCredentialManager(manager: CredentialManager): void {
     this.credentialManager = manager;
   }
 }
 
-function createFakeManager(
+/** A real manager whose two entry points are stubbed. */
+function createStubManager(
   credential: AuthCredential | undefined,
-): ToolCredentialManager {
-  return {
-    getAuthCredential: vi.fn(async () => credential),
-    requestCredential: vi.fn(async () => {}),
-  };
+): CredentialManager {
+  const manager = new CredentialManager({
+    authScheme: OAUTH2_SCHEME,
+    rawAuthCredential: OAUTH2_CREDENTIAL,
+    credentialKey: 'test_tool',
+  });
+  vi.spyOn(manager, 'getAuthCredential').mockResolvedValue(credential);
+  vi.spyOn(manager, 'requestCredential').mockResolvedValue(undefined);
+  return manager;
 }
 
 function createInvocationContext(options?: {
@@ -122,7 +127,7 @@ describe('BaseAuthenticatedTool', () => {
         credentialKey: 'test_tool',
       },
     });
-    const manager = createFakeManager({
+    const manager = createStubManager({
       authType: AuthCredentialTypes.API_KEY,
       apiKey: 'resolved',
     });
@@ -212,7 +217,7 @@ describe('BaseAuthenticatedTool', () => {
         credentialKey: 'test_tool',
       },
     });
-    const manager = createFakeManager(credential);
+    const manager = createStubManager(credential);
     tool.useCredentialManager(manager);
 
     const result = await tool.runAsync({
@@ -239,7 +244,7 @@ describe('BaseAuthenticatedTool', () => {
         credentialKey: 'test_tool',
       },
     });
-    const manager = createFakeManager(undefined);
+    const manager = createStubManager(undefined);
     tool.useCredentialManager(manager);
 
     const result = await tool.runAsync({args: {}, toolContext});
@@ -270,7 +275,7 @@ describe('BaseAuthenticatedTool', () => {
       },
       responseForAuthRequired,
     });
-    tool.useCredentialManager(createFakeManager(undefined));
+    tool.useCredentialManager(createStubManager(undefined));
 
     const result = await tool.runAsync({args: {}, toolContext});
 
@@ -289,7 +294,7 @@ describe('BaseAuthenticatedTool', () => {
       },
       responseForAuthRequired: 'Custom authentication required message',
     });
-    tool.useCredentialManager(createFakeManager(undefined));
+    tool.useCredentialManager(createStubManager(undefined));
 
     const result = await tool.runAsync({args: {}, toolContext});
 
@@ -308,7 +313,7 @@ describe('BaseAuthenticatedTool', () => {
       },
       responseForAuthRequired: '',
     });
-    tool.useCredentialManager(createFakeManager(undefined));
+    tool.useCredentialManager(createStubManager(undefined));
 
     const result = await tool.runAsync({args: {}, toolContext});
 
@@ -326,7 +331,7 @@ describe('BaseAuthenticatedTool', () => {
       },
       responseForAuthRequired: {},
     });
-    tool.useCredentialManager(createFakeManager(undefined));
+    tool.useCredentialManager(createStubManager(undefined));
 
     const result = await tool.runAsync({args: {}, toolContext});
 
@@ -345,7 +350,7 @@ describe('BaseAuthenticatedTool', () => {
     });
     tool.failure = new Error('Implementation failed');
     tool.useCredentialManager(
-      createFakeManager({
+      createStubManager({
         authType: AuthCredentialTypes.API_KEY,
         apiKey: 'resolved',
       }),
@@ -366,12 +371,11 @@ describe('BaseAuthenticatedTool', () => {
         credentialKey: 'test_tool',
       },
     });
-    tool.useCredentialManager({
-      getAuthCredential: vi.fn(async () => {
-        throw new Error('Credential service error');
-      }),
-      requestCredential: vi.fn(async () => {}),
-    });
+    const manager = createStubManager(undefined);
+    vi.spyOn(manager, 'getAuthCredential').mockRejectedValue(
+      new Error('Credential service error'),
+    );
+    tool.useCredentialManager(manager);
 
     await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
       'Credential service error',

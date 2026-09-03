@@ -324,7 +324,7 @@ describe('the declaration-less tool surface', () => {
             : undefined;
       // An abstract base holds neither side of the invariant: a concrete
       // subclass supplies the declaration, and the base is never registered.
-      if (ctor && !ABSTRACT_TOOL_BASES.has(ctor as unknown)) {
+      if (ctor && !ABSTRACT_TOOL_BASES.has(ctor)) {
         classes.set(ctor.name, ctor);
       }
     }

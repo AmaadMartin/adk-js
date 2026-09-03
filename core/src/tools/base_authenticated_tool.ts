@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../agents/context.js';
 import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {CredentialManager} from '../auth/credential_manager.js';
@@ -23,23 +22,6 @@ export interface AuthenticatedRunAsyncToolRequest extends RunAsyncToolRequest {
    * built without an auth scheme and therefore runs unauthenticated.
    */
   credential?: AuthCredential;
-}
-
-/**
- * The collaborator {@link BaseAuthenticatedTool} resolves credentials with.
- *
- * {@link CredentialManager} satisfies it, and a test or an embedder can supply
- * its own resolver instead.
- */
-export interface ToolCredentialManager {
-  /**
-   * Resolves the credential for this call, or `undefined` when the client
-   * still has to authorize one.
-   */
-  getAuthCredential(context: Context): Promise<AuthCredential | undefined>;
-
-  /** Asks the client to collect a credential. */
-  requestCredential(context: Context): Promise<void>;
 }
 
 /** Parameters for the {@link BaseAuthenticatedTool} constructor. */
@@ -62,23 +44,6 @@ export interface BaseAuthenticatedToolParams extends BaseToolParams {
 }
 
 /**
- * Picks the response for a call that is waiting on the client.
- */
-function pendingAuthorizationResponse(
-  configured: Record<string, unknown> | string | undefined,
-): Record<string, unknown> | string {
-  if (configured === undefined) {
-    return PENDING_USER_AUTHORIZATION;
-  }
-  if (typeof configured === 'string') {
-    return configured === '' ? PENDING_USER_AUTHORIZATION : configured;
-  }
-  return Object.keys(configured).length === 0
-    ? PENDING_USER_AUTHORIZATION
-    : configured;
-}
-
-/**
  * A tool that resolves an authentication credential before its own logic runs.
  *
  * A subclass implements {@link runAsyncImpl} and receives the credential ready
@@ -94,7 +59,7 @@ export abstract class BaseAuthenticatedTool extends BaseTool {
    * Undefined when the tool was built without an auth scheme, in which case
    * the tool runs unauthenticated.
    */
-  protected credentialManager?: ToolCredentialManager;
+  protected credentialManager?: CredentialManager;
 
   private readonly responseForAuthRequired?: Record<string, unknown> | string;
 
@@ -126,7 +91,12 @@ export abstract class BaseAuthenticatedTool extends BaseTool {
       await this.credentialManager.getAuthCredential(toolContext);
     if (!credential) {
       await this.credentialManager.requestCredential(toolContext);
-      return pendingAuthorizationResponse(this.responseForAuthRequired);
+      const configured = this.responseForAuthRequired;
+      const isEmpty =
+        typeof configured === 'object'
+          ? Object.keys(configured).length === 0
+          : !configured;
+      return isEmpty ? PENDING_USER_AUTHORIZATION : configured;
     }
 
     return this.runAsyncImpl({args, toolContext, credential});

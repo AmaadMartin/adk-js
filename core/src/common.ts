@@ -285,7 +285,6 @@ export {
 export type {
   AuthenticatedRunAsyncToolRequest,
   BaseAuthenticatedToolParams,
-  ToolCredentialManager,
 } from './tools/base_authenticated_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
 export type {
