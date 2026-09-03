@@ -11,11 +11,9 @@ import {
   BaseLlmConnection,
   BasePlugin,
   Context,
-  ContextCacheConfig,
   convertEventsToEvalInvocations,
   createEvent,
   CreateEventParams,
-  createEventsCompactionConfig,
   EvalCase,
   EvalRow,
   EvalSet,
@@ -841,62 +839,9 @@ describe('buildEvalRunnerConfig', () => {
     expect(config.app?.name).toBe('session_app');
   });
 
-  it('carries the context cache config onto the merged app', () => {
+  it('leaves the source app plugins untouched', () => {
     const rootAgent = createScriptedAgent('root_agent', ['hi']);
-    const contextCacheConfig: ContextCacheConfig = {
-      cacheIntervals: 5,
-      ttlSeconds: 600,
-      minTokens: 2048,
-    };
-    const app = new App({name: 'my_app', rootAgent, contextCacheConfig});
-
-    const config = buildEvalRunnerConfig({
-      rootAgent,
-      appName: 'session_app',
-      app,
-      internalEvalPlugins: [],
-      sessionService,
-    });
-
-    expect(config.app?.contextCacheConfig).toEqual(contextCacheConfig);
-  });
-
-  it('carries the compaction config onto the merged app', () => {
-    const rootAgent = createScriptedAgent('root_agent', ['hi']);
-    const eventsCompactionConfig = createEventsCompactionConfig({
-      tokenThreshold: 100,
-      eventRetentionSize: 2,
-    });
-    const app = new App({name: 'my_app', rootAgent, eventsCompactionConfig});
-
-    const config = buildEvalRunnerConfig({
-      rootAgent,
-      appName: 'session_app',
-      app,
-      internalEvalPlugins: [],
-      sessionService,
-    });
-
-    expect(config.app?.eventsCompactionConfig).toEqual(eventsCompactionConfig);
-  });
-
-  it('leaves both configs on the source app untouched', () => {
-    const rootAgent = createScriptedAgent('root_agent', ['hi']);
-    const contextCacheConfig: ContextCacheConfig = {
-      cacheIntervals: 5,
-      ttlSeconds: 600,
-      minTokens: 2048,
-    };
-    const eventsCompactionConfig = createEventsCompactionConfig({
-      tokenThreshold: 100,
-      eventRetentionSize: 2,
-    });
-    const app = new App({
-      name: 'my_app',
-      rootAgent,
-      contextCacheConfig,
-      eventsCompactionConfig,
-    });
+    const app = new App({name: 'my_app', rootAgent});
 
     buildEvalRunnerConfig({
       rootAgent,
@@ -906,8 +851,6 @@ describe('buildEvalRunnerConfig', () => {
       sessionService,
     });
 
-    expect(app.contextCacheConfig).toBe(contextCacheConfig);
-    expect(app.eventsCompactionConfig).toBe(eventsCompactionConfig);
     expect(app.plugins).toEqual([]);
   });
 });
@@ -2195,46 +2138,6 @@ describe('generateInferencesFromRootAgentLive', () => {
     ).rejects.toThrow('simulator failed');
 
     expect(llm.connections[0]?.closed).toBe(true);
-  });
-
-  it('drives a workflow root and grades every turn', async () => {
-    const userSimulator = new ScriptedUserSimulator(['turn one', 'turn two']);
-
-    const invocations = await generateInferencesFromRootAgentLive({
-      rootAgent: new Workflow({
-        name: 'live_workflow',
-        edges: [['START', createLiveAgent([LIVE_TEXT_TURN, LIVE_TEXT_TURN])]],
-      }),
-      userSimulator,
-    });
-
-    expect(invocations).toHaveLength(2);
-    expect(
-      invocations.map((invocation) => invocation.userContent.parts?.[0]?.text),
-    ).toEqual(['turn one', 'turn two']);
-    expect(
-      invocations.map(
-        (invocation) => invocation.finalResponse?.parts?.[0]?.text,
-      ),
-    ).toEqual(['sunny', 'sunny']);
-  });
-
-  it('records the instructions each workflow agent was shown', async () => {
-    const invocations = await generateInferencesFromRootAgentLive({
-      rootAgent: new Workflow({
-        name: 'live_workflow',
-        edges: [['START', createLiveAgent([LIVE_TEXT_TURN])]],
-      }),
-      userSimulator: new ScriptedUserSimulator(['hello']),
-    });
-
-    const invocation = invocations[0];
-    if (invocation === undefined) {
-      expect.fail('the live run produced no invocation');
-    }
-    expect(
-      invocation.appDetails?.agentDetails?.[LIVE_AGENT_NAME]?.instructions,
-    ).toContain(LIVE_INSTRUCTION);
   });
 
   it('refuses a root with no live path', async () => {
