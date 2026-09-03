@@ -22,6 +22,7 @@ import {
   GroundingMetadata,
   HttpOptions,
 } from '@google/genai';
+import {ApiClient} from '@google/genai/vertex_internal';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
@@ -31,7 +32,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
-  EXPRESS_MODE_UNSUPPORTED_MESSAGE,
+  createExpressModeApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 
@@ -88,6 +89,23 @@ export function isVertexAiConnectionString(uri?: string): boolean {
 export function quoteFilterLiteral(value: string): string {
   const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+/**
+ * Builds the Agent Engine `Sessions` client from an `ApiClient`.
+ *
+ * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
+ * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
+ * `ApiClient` here is a structurally distinct class (its private fields make
+ * the two nominally incompatible) from the one `Sessions` declares. The
+ * instances are interchangeable at runtime -- the mismatch is a
+ * duplicate-dependency artifact, not a real API difference -- so the cast is
+ * confined to this one boundary.
+ */
+function createAgentEngineSessions(apiClient: ApiClient): Sessions {
+  return new Sessions(
+    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
+  );
 }
 
 /**
@@ -196,22 +214,25 @@ export class VertexAiSessionService extends BaseSessionService {
     );
 
     // sessions is primarily for testing to inject a mock client.
-    if (options.sessions) {
-      this.sessions = options.sessions;
-    } else {
-      if (!this.projectId || !this.location) {
-        throw new Error(
-          this.expressModeApiKey
-            ? EXPRESS_MODE_UNSUPPORTED_MESSAGE
-            : 'Project ID and Location are required.',
-        );
-      }
+    this.sessions = options.sessions ?? this.createSessionsClient();
+  }
+
+  private createSessionsClient(): Sessions {
+    // adk-python's `_get_api_client` tries the Express Mode key first, so a
+    // process with a key and a project authenticates with the key.
+    if (this.expressModeApiKey) {
+      return createAgentEngineSessions(
+        createExpressModeApiClient(this.expressModeApiKey),
+      );
+    }
+    if (this.projectId && this.location) {
       const client = new Client({
         project: this.projectId,
         location: this.location,
       });
-      this.sessions = client.agentEnginesInternal.sessions;
+      return client.agentEnginesInternal.sessions;
     }
+    throw new Error('Project ID and Location are required.');
   }
 
   /**
