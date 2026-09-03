@@ -5,13 +5,19 @@
  */
 
 import {
+  Message,
   Part,
   Task,
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
   TextPart,
 } from '@a2a-js/sdk';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+import {
+  DefaultExecutionEventBus,
+  ExecutionEventBus,
+  RequestContext,
+  ServerCallContext,
+} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   A2AEvent,
@@ -22,12 +28,37 @@ import {
   createEventActions,
   createSession,
   ExecutorContext,
+  InMemorySessionService,
   Runner,
   RunnerConfig,
   Session,
   TaskState,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {beforeEach, describe, expect, it, MockInstance, vi} from 'vitest';
+
+const DEFAULT_USER_MESSAGE: Message = {
+  kind: 'message',
+  messageId: 'test-message',
+  role: 'user',
+  parts: [{kind: 'text', text: 'hello'}],
+};
+
+/**
+ * A request the SDK's own type forbids: `userMessage` is required there, and
+ * the guard under test exists for the context that arrives without one.
+ */
+const createMessagelessRequestContext = (): RequestContext =>
+  new RequestContext(
+    undefined as unknown as Message,
+    'test-task',
+    'test-context',
+  );
+
+/** A real session service whose lookups the tests drive. */
+class MockSessionService extends InMemorySessionService {
+  override getSession = vi.fn<BaseSessionService['getSession']>();
+  override createSession = vi.fn<BaseSessionService['createSession']>();
+}
 
 // Mock the Runner to control its async generator
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
@@ -44,57 +75,57 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
 });
 
 describe('A2AAgentExecutor', () => {
-  let mockSessionService: Mocked<BaseSessionService>;
-  let mockEventBus: Mocked<ExecutionEventBus>;
+  let mockSessionService: MockSessionService;
+  let mockEventBus: DefaultExecutionEventBus;
+  let publishSpy: MockInstance<ExecutionEventBus['publish']>;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockSessionService = {
-      getSession: vi.fn(),
-      createSession: vi.fn(),
-      getOrCreateSession: vi.fn(),
-      listSessions: vi.fn(),
-      deleteSession: vi.fn(),
-      appendEvent: vi.fn(),
-    } as unknown as Mocked<BaseSessionService>;
+    mockSessionService = new MockSessionService();
 
-    mockEventBus = {
-      publish: vi.fn(),
-    } as unknown as Mocked<ExecutionEventBus>;
+    mockEventBus = new DefaultExecutionEventBus();
+    publishSpy = vi.spyOn(mockEventBus, 'publish');
   });
 
-  const createRequestContext = (overrides = {}): RequestContext => {
-    return {
-      contextId: 'test-context',
-      taskId: 'test-task',
-      userMessage: {role: 'user', parts: [{kind: 'text', text: 'hello'}]}, // a2a UserMessage
-      ...overrides,
-    } as unknown as RequestContext;
-  };
+  const createRequestContext = ({
+    userMessage = DEFAULT_USER_MESSAGE,
+    taskId = 'test-task',
+    contextId = 'test-context',
+    task,
+    context,
+  }: {
+    userMessage?: Message;
+    taskId?: string;
+    contextId?: string;
+    task?: Task;
+    context?: ServerCallContext;
+  } = {}): RequestContext =>
+    new RequestContext(
+      userMessage,
+      taskId,
+      contextId,
+      task,
+      undefined,
+      context,
+    );
 
   it('should throw an error if no message is provided', async () => {
     const executor = new A2AAgentExecutor({
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
     });
 
-    const ctx = createRequestContext({userMessage: undefined});
+    const ctx = createMessagelessRequestContext();
     await expect(executor.execute(ctx, mockEventBus)).rejects.toThrow(
       'message not provided',
     );
   });
 
   it('should get or create a session, run the agent, and publish working and final status events', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    const mockSession = testSession();
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
     const adkEvents: AdkEvent[] = [
@@ -118,13 +149,7 @@ describe('A2AAgentExecutor', () => {
       }
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunner(mockRunAsync);
 
     let beforeExecutedCalled = false;
     let afterEventCount = 0;
@@ -134,7 +159,7 @@ describe('A2AAgentExecutor', () => {
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
       beforeExecuteCallback: async () => {
         beforeExecutedCalled = true;
       },
@@ -152,7 +177,7 @@ describe('A2AAgentExecutor', () => {
     if (afterEventCount !== 2) {
       console.error(
         'PUBLISHED EVENTS:',
-        JSON.stringify(mockEventBus.publish.mock.calls, null, 2),
+        JSON.stringify(publishSpy.mock.calls, null, 2),
       );
     }
 
@@ -162,10 +187,10 @@ describe('A2AAgentExecutor', () => {
 
     // Verify event bus payload counts
     // Task + Working + 2 task artifact updates + 1 final task status
-    expect(mockEventBus.publish).toHaveBeenCalledTimes(5);
+    expect(publishSpy).toHaveBeenCalledTimes(5);
 
     // Assert that the second published event is the "Working" event
-    expect(mockEventBus.publish).toHaveBeenNthCalledWith(
+    expect(publishSpy).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         kind: 'status-update',
@@ -174,20 +199,14 @@ describe('A2AAgentExecutor', () => {
   });
 
   it('should return early with input required event if task needs input', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    const mockSession = testSession();
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
     const executor = new A2AAgentExecutor({
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
     });
 
     const ctx = createRequestContext({
@@ -198,6 +217,8 @@ describe('A2AAgentExecutor', () => {
         status: {
           state: 'input-required',
           message: {
+            kind: 'message',
+            messageId: 'gate-message',
             role: 'agent',
             parts: [
               {
@@ -214,21 +235,14 @@ describe('A2AAgentExecutor', () => {
     await executor.execute(ctx, mockEventBus);
 
     // No runner execution should happen, just publish input required event
-    expect(mockEventBus.publish).toHaveBeenCalledTimes(1);
-    const event = mockEventBus.publish.mock
-      .calls[0][0] as TaskStatusUpdateEvent;
+    expect(publishSpy).toHaveBeenCalledTimes(1);
+    const event = publishSpy.mock.calls[0][0] as TaskStatusUpdateEvent;
     expect(event.kind).toBe('status-update');
     expect(event.status.state).toBe('input-required');
   });
 
   it('should handle unrecoverable runner errors properly', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    const mockSession = testSession();
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
     async function* mockRunAsyncWithError() {
@@ -241,35 +255,28 @@ describe('A2AAgentExecutor', () => {
       throw new Error('LLM failed');
     }
 
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsyncWithError,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunner(mockRunAsyncWithError);
 
     const executor = new A2AAgentExecutor({
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
     });
 
     const ctx = createRequestContext();
     await executor.execute(ctx, mockEventBus);
 
     // Task + Working + Artifact update (1) + Failed TaskStatusUpdate (1) = 4 calls
-    if (mockEventBus.publish.mock.calls.length < 4) {
+    if (publishSpy.mock.calls.length < 4) {
       console.error(
         'PUBLISHED EVENTS in error test:',
-        JSON.stringify(mockEventBus.publish.mock.calls, null, 2),
+        JSON.stringify(publishSpy.mock.calls, null, 2),
       );
     }
-    expect(mockEventBus.publish).toHaveBeenCalledTimes(4);
+    expect(publishSpy).toHaveBeenCalledTimes(4);
 
-    const lastCallArg = mockEventBus.publish.mock
-      .calls[3][0] as TaskStatusUpdateEvent;
+    const lastCallArg = publishSpy.mock.calls[3][0] as TaskStatusUpdateEvent;
     expect(lastCallArg.kind).toBe('status-update');
     expect(lastCallArg.status.state).toBe('failed');
     const firstPart = lastCallArg.status.message!.parts[0] as TextPart;
@@ -279,29 +286,17 @@ describe('A2AAgentExecutor', () => {
   it('marks the run as remote-delivered, preserving the configured run config', async () => {
     // A human-in-the-loop gate is not answerable by the peer on the other end
     // of the transport; the run has to know where its message came from.
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
+    const mockSession = testSession();
     mockSessionService.getSession.mockResolvedValue(mockSession);
 
     const mockRunAsync = vi.fn(async function* () {});
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
+    mockRunner(mockRunAsync);
 
     const executor = new A2AAgentExecutor({
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
       runConfig: {maxLlmCalls: 7},
     });
 
@@ -326,13 +321,15 @@ describe('A2AAgentExecutor', () => {
       abortSignal?: AbortSignal;
     }) => AsyncGenerator<AdkEvent, void, undefined>,
   ) => {
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
+    vi.mocked(Runner).mockImplementation((config: RunnerConfig) => {
+      // A Runner has far more surface than a test needs; the executor reads
+      // only these three members.
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
         runAsync,
       } as unknown as Runner;
-    }) as unknown as () => Runner);
+    });
   };
 
   const createExecutor = (config: Partial<AgentExecutorConfig> = {}) =>
@@ -340,7 +337,7 @@ describe('A2AAgentExecutor', () => {
       runner: {
         appName: 'test-app',
         sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
+      },
       ...config,
     });
 
@@ -372,8 +369,7 @@ describe('A2AAgentExecutor', () => {
     },
   });
 
-  const publishedEvents = () =>
-    mockEventBus.publish.mock.calls.map((call) => call[0]);
+  const publishedEvents = () => publishSpy.mock.calls.map((call) => call[0]);
 
   const publishedStates = () =>
     publishedEvents()
@@ -448,7 +444,7 @@ describe('A2AAgentExecutor', () => {
       await expect(executor.cancelTask('', mockEventBus)).rejects.toThrow(
         'A2A cancellation must have a task ID',
       );
-      expect(mockEventBus.publish).not.toHaveBeenCalled();
+      expect(publishSpy).not.toHaveBeenCalled();
     });
 
     it('rejects a task this executor never started', async () => {
@@ -457,7 +453,7 @@ describe('A2AAgentExecutor', () => {
       await expect(
         executor.cancelTask('unknown-task', mockEventBus),
       ).rejects.toThrow('No active A2A task unknown-task to cancel');
-      expect(mockEventBus.publish).not.toHaveBeenCalled();
+      expect(publishSpy).not.toHaveBeenCalled();
     });
 
     it('rejects a second cancellation of the same task', async () => {
@@ -956,11 +952,10 @@ describe('A2AAgentExecutor', () => {
       const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
       const executor = new A2AAgentExecutor({
-        runner: async () =>
-          ({
-            appName: 'test-app',
-            sessionService: mockSessionService,
-          }) as unknown as RunnerConfig,
+        runner: async () => ({
+          appName: 'test-app',
+          sessionService: mockSessionService,
+        }),
       });
       await executor.execute(createRequestContext(), mockEventBus);
 
@@ -977,7 +972,7 @@ describe('A2AAgentExecutor', () => {
       const executor = createExecutor();
       await executor.execute(createRequestContext(), mockEventBus);
 
-      expect(mockEventBus.publish).toHaveBeenCalledTimes(2);
+      expect(publishSpy).toHaveBeenCalledTimes(2);
       const failed = publishedEvents()[1] as TaskStatusUpdateEvent;
       expect(failed.status.state).toBe('failed');
       expect(failed.final).toBe(true);
@@ -1040,7 +1035,7 @@ describe('A2AAgentExecutor', () => {
       await expect(
         executor.execute(createRequestContext({taskId: ''}), mockEventBus),
       ).rejects.toThrow('A2A request must have a task ID');
-      expect(mockEventBus.publish).not.toHaveBeenCalled();
+      expect(publishSpy).not.toHaveBeenCalled();
     });
   });
 });
