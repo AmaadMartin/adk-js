@@ -31,10 +31,6 @@ import {
  * An exchange that fails returns the original credential with
  * `wasExchanged: false`, so a caller can degrade to an unauthenticated call.
  * Only a missing `authScheme` and a state mismatch reject.
- *
- * There is no synchronous counterpart. The Python reference offers one because
- * a coroutine cannot be called from synchronous code; JavaScript cannot block
- * on a promise, and every caller here already awaits {@link exchange}.
  */
 export class OAuth2CredentialExchanger implements BaseCredentialExchanger {
   async exchange({

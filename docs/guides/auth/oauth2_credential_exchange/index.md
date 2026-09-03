@@ -102,7 +102,4 @@ throws `CredentialExchangeError` if they differ.
 
 ## There is no synchronous exchange
 
-`exchange` returns a promise and there is no blocking variant. JavaScript cannot
-wait on a promise without an event loop, and every caller inside ADK already
-awaits. The Python SDK offers a blocking version only because a Python coroutine
-cannot be called from synchronous code at all.
+`exchange` returns a promise; there is no blocking variant.
