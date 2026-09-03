@@ -305,7 +305,7 @@ export class A2AAgentExecutor implements AgentExecutor {
     const adkEvents: AdkEvent[] = [];
     // Held per execution: two concurrent requests to one executor must not
     // append their streamed parts to each other's artifact.
-    const partialArtifactIds = new Map<string, string>();
+    const partialArtifactIds = new Map<string | undefined, string>();
     let lastAdkEvent: AdkEvent | undefined;
 
     for await (const adkEvent of runner.runAsync({
@@ -433,7 +433,7 @@ export class A2AAgentExecutor implements AgentExecutor {
   private convertAdkEvent(
     adkEvent: AdkEvent,
     executorContext: ExecutorContext,
-    partialArtifactIds: Map<string, string>,
+    partialArtifactIds: Map<string | undefined, string>,
   ): A2AEvent[] {
     const genAiPartConverter = this.config.genAiPartConverter ?? toA2APart;
     if (this.config.eventConverter) {
@@ -490,7 +490,7 @@ function convertAdkEventToArtifactUpdate(
   adkEvent: AdkEvent,
   executorContext: ExecutorContext,
   genAiPartConverter: GenAIPartToA2APartConverter,
-  partialArtifactIds: Map<string, string>,
+  partialArtifactIds: Map<string | undefined, string>,
 ): A2AEvent[] {
   const a2aParts = toA2AParts(
     adkEvent.content?.parts,
@@ -501,8 +501,7 @@ function convertAdkEventToArtifactUpdate(
     return [];
   }
 
-  const author = adkEvent.author ?? '';
-  const artifactId = partialArtifactIds.get(author) ?? randomUUID();
+  const artifactId = partialArtifactIds.get(adkEvent.author) ?? randomUUID();
 
   const a2aEvent = createTaskArtifactUpdateEvent({
     taskId: executorContext.requestContext.taskId,
@@ -515,9 +514,9 @@ function convertAdkEventToArtifactUpdate(
   });
 
   if (adkEvent.partial) {
-    partialArtifactIds.set(author, artifactId);
+    partialArtifactIds.set(adkEvent.author, artifactId);
   } else {
-    partialArtifactIds.delete(author);
+    partialArtifactIds.delete(adkEvent.author);
   }
 
   return [a2aEvent];
