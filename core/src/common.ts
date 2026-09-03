@@ -822,6 +822,25 @@ export {
   SET_MODEL_RESPONSE_TOOL_NAME,
   createSetModelResponseTool,
 } from './tools/set_model_response_tool.js';
+// `Capabilities`, `QueryResultMode` and `TableColumn` keep their upstream names
+// inside the module, but this barrel is flat: Spanner cannot claim identifiers
+// that another settings port will also want.
+export {
+  APPROXIMATE_NEAREST_NEIGHBORS,
+  EXACT_NEAREST_NEIGHBORS,
+  Capabilities as SpannerCapabilities,
+  QueryResultMode as SpannerQueryResultMode,
+  createSpannerToolSettings,
+  createSpannerVectorStoreSettings,
+  createVectorSearchIndexSettings,
+} from './tools/spanner/settings.js';
+export type {
+  NearestNeighborsAlgorithm,
+  TableColumn as SpannerTableColumn,
+  SpannerToolSettings,
+  SpannerVectorStoreSettings,
+  VectorSearchIndexSettings,
+} from './tools/spanner/settings.js';
 export {runWithSyncCallableRunner} from './tools/sync_callable_runner.js';
 export type {SyncCallableRunner} from './tools/sync_callable_runner.js';
 export {

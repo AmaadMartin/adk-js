@@ -206,6 +206,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [preload_memory](tools/preload_memory_tool/index.md) - Recalling earlier conversations automatically, without a tool call.
 - [RestApiTool](tools/rest_api_tool/index.md) - Calling one REST endpoint from a model, and configuring it from JSON text.
 - [RestApiTool request timeouts](tools/rest_api_tool_timeouts/index.md) - Bounding one REST API call, and the error a timeout returns to the model.
+- [Spanner tool settings](tools/spanner_tool_settings/index.md) - Configuring what the Spanner tools may do, how they shape query results, and the vector store they search.
 - [ToolboxToolset](tools/toolbox_toolset/index.md) - Loading tools from an MCP
   Toolbox for Databases server, with named toolsets, bound parameters and
   authentication.

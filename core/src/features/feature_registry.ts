@@ -25,6 +25,8 @@ export enum FeatureName {
    * behaviour.
    */
   MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
+  /** Configuration surface for the Spanner tools. */
+  SPANNER_TOOL_SETTINGS = 'SPANNER_TOOL_SETTINGS',
 }
 
 /**
@@ -59,6 +61,10 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
     defaultOn: false,
   },
   [FeatureName.MCP_GRACEFUL_ERROR_HANDLING]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
+  [FeatureName.SPANNER_TOOL_SETTINGS]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },
