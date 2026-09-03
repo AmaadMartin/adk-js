@@ -91,14 +91,21 @@ describe('ToolConfirmation.fromResponseDict', () => {
   });
 
   it.each([
-    ['a number', 123],
-    ['an object', {confirmed: true}],
-    ['null', null],
-  ])('refuses an envelope carrying %s instead of a JSON string', (_, value) => {
-    expect(() => ToolConfirmation.fromResponseDict({response: value})).toThrow(
-      'ToolConfirmation envelope must carry a JSON string.',
-    );
-  });
+    ['a number', 123, 'ToolConfirmation envelope must decode to an object.'],
+    [
+      'an object',
+      {confirmed: true},
+      'ToolConfirmation envelope is not valid JSON.',
+    ],
+    ['null', null, 'ToolConfirmation envelope must decode to an object.'],
+  ])(
+    'refuses an envelope carrying %s instead of a JSON string',
+    (_, value, message) => {
+      expect(() =>
+        ToolConfirmation.fromResponseDict({response: value}),
+      ).toThrow(message);
+    },
+  );
 
   it.each([
     ['a string', '"just a string"'],

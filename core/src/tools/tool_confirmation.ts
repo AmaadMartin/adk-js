@@ -6,6 +6,7 @@
 
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
+import {isRecord} from '../utils/object_utils.js';
 
 /**
  * Represents a tool confirmation configuration.
@@ -107,14 +108,9 @@ export function unwrapConfirmationResponse(
 }
 
 function decodeConfirmationEnvelope(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'string') {
-    throw new InputValidationError(
-      'ToolConfirmation envelope must carry a JSON string.',
-    );
-  }
   let decoded: unknown;
   try {
-    decoded = JSON.parse(value);
+    decoded = JSON.parse(String(value));
   } catch (e: unknown) {
     throw new InputValidationError(
       'ToolConfirmation envelope is not valid JSON.',
@@ -127,10 +123,6 @@ function decodeConfirmationEnvelope(value: unknown): Record<string, unknown> {
     );
   }
   return decoded;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
