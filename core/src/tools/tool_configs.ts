@@ -5,12 +5,7 @@
  */
 
 import {z} from 'zod';
-import {InputValidationError} from '../errors/input_validation_error.js';
-import {camelCaseKeys} from '../utils/case_utils.js';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+import {isPlainObject} from '../utils/object_utils.js';
 
 /**
  * Schema every custom tool config extends.
@@ -27,31 +22,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * });
  * ```
  *
- * The base is a plain object schema, not a preprocessed one, because only a
- * plain object schema has `.extend()`. An author whose document is snake_case
- * wraps their own extension in `z.preprocess(camelCaseKeys, ...)`.
+ * The base is a plain object schema, so an author who needs one may wrap their
+ * own extension in `z.preprocess`; only a plain object schema has `.extend()`.
  *
  * @experimental  (Experimental, subject to change)
  */
 export const baseToolConfigSchema = z.strictObject({});
-
-/**
- * Schema of the free key-value bag that holds a tool's constructor arguments.
- *
- * The accepted keys belong to the tool, not to ADK, so every key is kept. Keys
- * are camelCased before validation, at every depth.
- *
- * An agent config document camelCases its whole body, `tools[].args` included,
- * so this is the schema a caller applies to a bag it holds on its own.
- * {@link toolConfigSchema} keeps the bag verbatim instead, because the
- * declarative loader hands it to a factory the document names.
- *
- * @experimental  (Experimental, subject to change)
- */
-export const toolArgsConfigSchema = z.preprocess(
-  camelCaseKeys,
-  z.looseObject({}),
-);
 
 /**
  * The declared args of one tool in a configuration file.
@@ -132,15 +108,14 @@ export type ToolArgsConfig = object;
  *
  * `args` is validated as an object and nothing more, mirroring adk-python's
  * `extra='allow'`: the keys belong to the tool, not to ADK, and they reach the
- * constructor or the factory exactly as the document writes them. A document
- * that wants them camelCased runs them through {@link toolArgsConfigSchema}.
+ * constructor or the factory exactly as the document writes them.
  *
  * @experimental  (Experimental, subject to change)
  */
 export const toolConfigSchema = z.strictObject({
   name: z.string().min(1),
   args: z
-    .custom<ToolArgsConfig>(isRecord, {error: 'Expected an object.'})
+    .custom<ToolArgsConfig>(isPlainObject, {error: 'Expected an object.'})
     .optional(),
 });
 
@@ -150,53 +125,3 @@ export const toolConfigSchema = z.strictObject({
  * @experimental  (Experimental, subject to change)
  */
 export type ToolConfig = z.infer<typeof toolConfigSchema>;
-
-/**
- * Validates a parsed tool declaration and returns it as a {@link ToolConfig}.
- *
- * The input is whatever a YAML or JSON parse produced, so it is typed
- * `unknown` and every field is checked. A declaration comes from outside the
- * type system, so an undeclared key is a typo rather than an extension point,
- * and it is rejected instead of dropped in silence. `args` is shallow-copied,
- * so the returned config never aliases the caller's object.
- *
- * This checks one standalone declaration. {@link toolConfigSchema} checks the
- * same entry inside an agent config document, where the loader has already
- * normalized the document.
- *
- * @param value - The parsed tool declaration.
- * @returns A validated {@link ToolConfig}.
- * @throws {InputValidationError} When the declaration is not an object, when
- *   it carries a key {@link ToolConfig} does not declare, when `name` is
- *   missing or is not a string, or when `args` is not an object.
- *
- * @experimental  (Experimental, subject to change)
- */
-export function createToolConfig(value: unknown): ToolConfig {
-  if (!isRecord(value)) {
-    throw new InputValidationError('ToolConfig must be a non-null object.');
-  }
-  const unknownKeys = Object.keys(value).filter(
-    (key) => key !== 'name' && key !== 'args',
-  );
-  if (unknownKeys.length > 0) {
-    throw new InputValidationError(
-      `ToolConfig received unknown key(s): ${unknownKeys.join(', ')}.`,
-    );
-  }
-
-  const {name, args} = value;
-  if (name === undefined) {
-    throw new InputValidationError('ToolConfig `name` is required.');
-  }
-  if (typeof name !== 'string') {
-    throw new InputValidationError('ToolConfig `name` must be a string.');
-  }
-  if (args === undefined || args === null) {
-    return {name};
-  }
-  if (!isRecord(args)) {
-    throw new InputValidationError('ToolConfig `args` must be an object.');
-  }
-  return {name, args: {...args}};
-}
