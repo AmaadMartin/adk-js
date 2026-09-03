@@ -326,20 +326,23 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
+// `Capabilities`, `QueryResultMode` and `TableColumn` keep their upstream names
+// inside the module, but this barrel is flat: Spanner cannot claim identifiers
+// that another settings port will also want.
 export {
   APPROXIMATE_NEAREST_NEIGHBORS,
-  Capabilities,
   EXACT_NEAREST_NEIGHBORS,
-  QueryResultMode,
+  Capabilities as SpannerCapabilities,
+  QueryResultMode as SpannerQueryResultMode,
   createSpannerToolSettings,
   createSpannerVectorStoreSettings,
   createVectorSearchIndexSettings,
 } from './tools/spanner/settings.js';
 export type {
   NearestNeighborsAlgorithm,
+  TableColumn as SpannerTableColumn,
   SpannerToolSettings,
   SpannerVectorStoreSettings,
-  TableColumn,
   VectorSearchIndexSettings,
 } from './tools/spanner/settings.js';
 export {

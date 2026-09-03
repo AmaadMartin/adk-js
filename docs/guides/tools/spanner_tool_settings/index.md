@@ -12,10 +12,10 @@ result, and the optional vector store a similarity search runs against. The
 settings hold data only. They open no connection and read no credentials.
 
 The capability list is the important part. It defaults to
-`[Capabilities.DATA_READ]`, so a tool that reads the settings performs read
-operations only. This default may change in future versions. A Spanner admin
-toolset does not consult this field; constructing it exposes its instance and
-database creation tools whatever is set here.
+`[SpannerCapabilities.DATA_READ]`, so a tool that reads the settings performs
+read operations only. This default may change in future versions. A Spanner
+admin toolset does not consult this field; constructing it exposes its instance
+and database creation tools whatever is set here.
 
 You build the settings with factory functions rather than object literals. A
 factory applies the defaults and runs the validation, so the object you get back
@@ -23,12 +23,16 @@ is complete. `createSpannerToolSettings` also checks the
 `SPANNER_TOOL_SETTINGS` feature flag, which is experimental and on by default.
 Disabling the flag makes the factory throw.
 
+The `@google/adk` barrel is flat, so three names carry a `Spanner` prefix there:
+`SpannerCapabilities`, `SpannerQueryResultMode` and `SpannerTableColumn`. The
+module itself keeps the adk-python names.
+
 ## Get started
 
 ```ts
 import {
-  Capabilities,
-  QueryResultMode,
+  SpannerCapabilities,
+  SpannerQueryResultMode,
   createSpannerToolSettings,
 } from '@google/adk';
 
@@ -36,15 +40,15 @@ import {
 const settings = createSpannerToolSettings();
 
 const custom = createSpannerToolSettings({
-  capabilities: [Capabilities.DATA_READ],
+  capabilities: [SpannerCapabilities.DATA_READ],
   maxExecutedQueryResultRows: 100,
-  queryResultMode: QueryResultMode.DICT_LIST,
+  queryResultMode: SpannerQueryResultMode.DICT_LIST,
   databaseRole: 'analyst',
 });
 ```
 
-`QueryResultMode.DEFAULT` returns each row as a list of values.
-`QueryResultMode.DICT_LIST` returns each row as an object keyed by column name.
+`SpannerQueryResultMode.DEFAULT` returns each row as a list of values.
+`SpannerQueryResultMode.DICT_LIST` returns each row as an object keyed by column name.
 
 ## Vector store settings
 

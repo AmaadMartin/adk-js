@@ -6,11 +6,11 @@
 
 import {
   APPROXIMATE_NEAREST_NEIGHBORS,
-  Capabilities,
   EXACT_NEAREST_NEIGHBORS,
   FeatureName,
   FeatureStage,
-  QueryResultMode,
+  SpannerCapabilities,
+  SpannerQueryResultMode,
   SpannerToolSettings,
   SpannerVectorStoreSettings,
   createSpannerToolSettings,
@@ -87,32 +87,32 @@ describe('Spanner tool settings', () => {
       name: string;
       params: SpannerToolSettings;
       expectedRows: number;
-      expectedMode: QueryResultMode;
+      expectedMode: SpannerQueryResultMode;
       expectedRole: string | undefined;
     }> = [
       {
         name: 'no arguments',
         params: {},
         expectedRows: 50,
-        expectedMode: QueryResultMode.DEFAULT,
+        expectedMode: SpannerQueryResultMode.DEFAULT,
         expectedRole: undefined,
       },
       {
         name: 'explicit capabilities, rows and result mode',
         params: {
-          capabilities: [Capabilities.DATA_READ],
+          capabilities: [SpannerCapabilities.DATA_READ],
           maxExecutedQueryResultRows: 100,
-          queryResultMode: QueryResultMode.DICT_LIST,
+          queryResultMode: SpannerQueryResultMode.DICT_LIST,
         },
         expectedRows: 100,
-        expectedMode: QueryResultMode.DICT_LIST,
+        expectedMode: SpannerQueryResultMode.DICT_LIST,
         expectedRole: undefined,
       },
       {
         name: 'a database role',
         params: {databaseRole: 'test-role'},
         expectedRows: 50,
-        expectedMode: QueryResultMode.DEFAULT,
+        expectedMode: SpannerQueryResultMode.DEFAULT,
         expectedRole: 'test-role',
       },
     ];
@@ -122,7 +122,7 @@ describe('Spanner tool settings', () => {
       ({params, expectedRows, expectedMode, expectedRole}) => {
         const settings = createSpannerToolSettings(params);
 
-        expect(settings.capabilities).toEqual([Capabilities.DATA_READ]);
+        expect(settings.capabilities).toEqual([SpannerCapabilities.DATA_READ]);
         expect(settings.maxExecutedQueryResultRows).toBe(expectedRows);
         expect(settings.queryResultMode).toBe(expectedMode);
         expect(settings.databaseRole).toBe(expectedRole);
