@@ -110,15 +110,25 @@ Three things can end a live run, and each is accounted for:
 - **The root finishes.** The event queue is closed, whatever is left in it
   drains, and the generator ends.
 - **The caller stops reading** — a `break` out of the `for await`. The runner
-  stops the root and waits for it to unwind, so no driver outlives the run. A
-  node root logs a warning naming the node. Nothing is thrown.
+  asks the root to stop, and nothing is thrown. A node root logs a warning
+  naming the node.
 - **The root fails.** The events it already produced are delivered first, then
   the failure is thrown to the caller. A node root logs the failure before
   rethrowing it.
 
-A live agent root that is waiting on a silent model connection only notices the
-caller has stopped once the connection produces something. Pass an
-`abortSignal` when you need to end such a run yourself:
+`runLive` returns to you straight away in every case. When the root is torn down
+does depend on which event you stopped on. Stopping after an event the root
+produced tears it down before `runLive` returns. Stopping after an event that
+came from the event queue cannot: the root is mid-step, since that step is what
+the code producing the queued event runs inside. The stop then takes effect when
+the root next produces.
+
+One consequence is worth knowing. A live agent root sitting in
+`connection.receive()` on a model that has gone quiet does not produce again, so
+its connection stays open until the model or the transport closes it. An
+`abortSignal` does not shorten that wait — the live flow reads the signal when a
+response arrives — but pass one anyway, because it stops every step that does
+get to run:
 
 ```ts
 const controller = new AbortController();

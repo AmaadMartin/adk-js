@@ -32,16 +32,27 @@ const APP_NAME = 'live_queue_app';
 const USER_ID = 'u';
 const SESSION_ID = 's';
 
+/** Options for {@link ScriptedLiveLlm}. */
+interface ScriptedLiveLlmOptions {
+  /**
+   * Keep the connection open once the script is exhausted, so the live root
+   * stays waiting in `receive()` instead of finishing.
+   */
+  stayOpen?: boolean;
+}
+
 /** A live connection that replays a fixed script and then ends. */
 class ScriptedConnection implements BaseLlmConnection {
   closed = false;
   private readonly queue = new AsyncQueue<LlmResponse | Error>();
 
-  constructor(responses: Array<LlmResponse | Error>) {
+  constructor(responses: Array<LlmResponse | Error>, stayOpen = false) {
     for (const response of responses) {
       this.queue.push(response);
     }
-    this.queue.close();
+    if (!stayOpen) {
+      this.queue.close();
+    }
   }
 
   async sendHistory(): Promise<void> {}
@@ -64,7 +75,10 @@ class ScriptedConnection implements BaseLlmConnection {
 }
 
 class ScriptedLiveLlm extends BaseLlm {
-  constructor(private readonly responses: Array<LlmResponse | Error>) {
+  constructor(
+    private readonly responses: Array<LlmResponse | Error>,
+    private readonly options: ScriptedLiveLlmOptions = {},
+  ) {
     super({model: 'scripted-live-llm'});
   }
 
@@ -73,7 +87,7 @@ class ScriptedLiveLlm extends BaseLlm {
   }
 
   override async connect(_: LlmRequest): Promise<BaseLlmConnection> {
-    return new ScriptedConnection(this.responses);
+    return new ScriptedConnection(this.responses, this.options.stayOpen);
   }
 }
 
@@ -98,6 +112,41 @@ class QueueEmittingTool extends BaseTool {
     for (const event of this.emitted) {
       ic.eventQueue.push(event);
     }
+    return {ok: true};
+  }
+}
+
+/**
+ * Pushes an event onto the queue and then blocks, so the root stays mid-`next()`
+ * while the caller receives that event. This is the shape a streaming tool has:
+ * it reports progress before it has a result.
+ */
+class BlockingEmittingTool extends BaseTool {
+  private release?: () => void;
+  readonly blocked = new Promise<void>((resolve) => {
+    this.release = resolve;
+  });
+
+  constructor(private readonly emitted: Event) {
+    super({name: 'emitter', description: 'Emits, then blocks.'});
+  }
+
+  override _getDeclaration(): FunctionDeclaration | undefined {
+    return {name: this.name, description: this.description};
+  }
+
+  /** Lets the tool finish, so the live root can produce again. */
+  unblock(): void {
+    this.release!();
+  }
+
+  override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
+    const ic: InvocationContext = request.toolContext.invocationContext;
+    if (!ic.eventQueue) {
+      throw new Error(`Tool '${this.name}' requires an invocation event queue`);
+    }
+    ic.eventQueue.push(this.emitted);
+    await this.blocked;
     return {ok: true};
   }
 }
@@ -345,5 +394,50 @@ describe('Runner.runLive event queue', () => {
 
     expect(capture.seenQueue).toBeDefined();
     expect(capture.context!.eventQueue).toBeUndefined();
+  });
+
+  it('returns to a caller that stops on a queued event while the model is quiet', async () => {
+    const capture = new ContextCapturingPlugin();
+    const tool = new BlockingEmittingTool(queuedEvent('tool progress'));
+    const agent = new LlmAgent({
+      name: 'host',
+      // The connection stays open after the tool call and produces nothing
+      // more, so the live root sits in `connection.receive()`.
+      model: new ScriptedLiveLlm([{content: TOOL_CALL} as LlmResponse], {
+        stayOpen: true,
+      }),
+      tools: [tool],
+    });
+    const runner = new Runner({
+      appName: APP_NAME,
+      agent,
+      sessionService,
+      plugins: [capture],
+    });
+
+    const controller = new AbortController();
+    const seen: Event[] = [];
+    for await (const event of runner.runLive({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      liveRequestQueue: new LiveRequestQueue(),
+      abortSignal: controller.signal,
+    })) {
+      seen.push(event);
+      if (event.content?.parts?.[0]?.text === 'tool progress') {
+        controller.abort();
+        break;
+      }
+    }
+
+    // Reaching here at all is the assertion: before the teardown fix the loop
+    // above never returned, because the stop request sat behind the live root's
+    // pending pull.
+    expect(seen.map((e) => e.content?.parts?.[0]?.text)).toContain(
+      'tool progress',
+    );
+    expect(capture.context!.eventQueue).toBeUndefined();
+
+    tool.unblock();
   });
 });

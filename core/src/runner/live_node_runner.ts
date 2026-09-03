@@ -72,12 +72,18 @@ async function pull(
  * reaches the caller as soon as it is produced.
  *
  * Ports `google/adk-python` `runners.py::Runner._merge_live_event_streams`.
- * adk-python pumps both streams into a third queue; racing them instead is what
- * keeps this from holding an outstanding `next()` on an idle root. A held pull
- * would queue `return()` behind it, and a live root waiting on a silent model
- * connection would never see the caller stop. The per-event post-processing
- * that adk-python splits between `_exec_with_plugin` and `_consume_event_queue`
- * is a single loop in the caller here, so no event is handled twice.
+ * adk-python pumps both streams into a third queue; racing them instead holds a
+ * pull on the root only while the caller wants an event, so the ordinary stop —
+ * the caller breaking after a root event — tears the root down at once. The
+ * per-event post-processing that adk-python splits between `_exec_with_plugin`
+ * and `_consume_event_queue` is a single loop in the caller here, so no event
+ * is handled twice.
+ *
+ * Stopping right after a *queued* event is the one case where the root cannot
+ * be torn down at once: a pull on it is necessarily in flight, because that
+ * pull is what the code producing the queued event runs inside. The stop is
+ * requested and takes effect when the root next produces. Returning to the
+ * caller is never delayed by it.
  */
 export async function* mergeLiveEventStreams(
   eventQueue: AsyncQueue<Event>,
@@ -118,10 +124,26 @@ export async function* mergeLiveEventStreams(
     }
   } finally {
     eventQueue.close();
-    // The caller stopped before this pull resolved, so nothing reads its
-    // outcome. Marking it handled keeps a late root failure from surfacing as
-    // an unhandled rejection.
-    rootPull?.catch(() => {});
-    await rootEvents.return();
+    const stopped = rootEvents.return();
+    if (rootPull) {
+      // A pull is still in flight, which is the case whenever the caller stops
+      // right after an event that came from the queue. An async generator
+      // queues the stop request behind a pending `next()`, so awaiting it here
+      // would hold the caller for as long as the root stays idle, and a live
+      // root waiting on a silent model connection never resolves it. The stop
+      // still runs, as soon as that pull resolves. Nothing reads either outcome
+      // now, so both are marked handled to keep a late root failure from
+      // surfacing as an unhandled rejection.
+      rootPull.catch(ignoreOutcomeAfterStop);
+      stopped.catch(ignoreOutcomeAfterStop);
+    } else {
+      await stopped;
+    }
   }
 }
+
+/**
+ * Discards the outcome of a root pull or stop request that no longer has a
+ * reader, so the discard reads as deliberate rather than as a swallowed error.
+ */
+function ignoreOutcomeAfterStop(): void {}

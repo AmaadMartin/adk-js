@@ -11,7 +11,7 @@
  * directly here.
  */
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {LiveRequestQueue} from '../../src/agents/live_request_queue.js';
 import {createEvent, Event} from '../../src/events/event.js';
 import {mergeLiveEventStreams} from '../../src/runner/live_node_runner.js';
@@ -260,6 +260,58 @@ describe('mergeLiveEventStreams', () => {
     }
 
     expect(unwound).toBe(true);
+    expect(queue.isClosed).toBe(true);
+  });
+
+  it('returns to a caller that stops after a queued event, with the root idle', async () => {
+    const queue = new AsyncQueue<Event>();
+    const gate = new AsyncQueue<Event>();
+    let unwound = false;
+    async function* idleRoot(): AsyncGenerator<Event, void, void> {
+      try {
+        for await (const event of gate) {
+          yield event;
+        }
+      } finally {
+        unwound = true;
+      }
+    }
+    queue.push(testEvent('queued'));
+
+    // A pull on the root is necessarily in flight while a queued event is
+    // delivered, so the stop request cannot run yet. The caller must not be
+    // made to wait for it.
+    const seen: Event[] = [];
+    for await (const event of mergeLiveEventStreams(queue, idleRoot())) {
+      seen.push(event);
+      break;
+    }
+
+    expect(seen.map((e) => e.author)).toEqual(['queued']);
+    expect(unwound).toBe(false);
+
+    // The stop takes effect as soon as the root produces again.
+    gate.push(testEvent('late'));
+    await vi.waitFor(() => {
+      expect(unwound).toBe(true);
+    });
+  });
+
+  it('returns to a caller that stops after a queued event when the queue then fails', async () => {
+    const queue = new AsyncQueue<Event>();
+    const gate = new AsyncQueue<Event>();
+    async function* idleRoot(): AsyncGenerator<Event, void, void> {
+      for await (const event of gate) {
+        yield event;
+      }
+    }
+    queue.push(testEvent('queued'));
+
+    for await (const _ of mergeLiveEventStreams(queue, idleRoot())) {
+      queue.fail(new Error('queue failed after the caller stopped'));
+      break;
+    }
+
     expect(queue.isClosed).toBe(true);
   });
 });
