@@ -454,8 +454,11 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts ?? []);
-    expect(dumped).not.toContain('SUPER_SECRET_TOKEN');
+    // Every part carried credential material, so the scrub emptied the message
+    // and the agent sent nothing at all. Stronger than checking the forwarded
+    // parts: the credential never left the process.
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
+    expect(capturedParts).toBeUndefined();
   });
 
   it('forwards a credential response the remote peer itself requested, as the final event', async () => {
@@ -539,7 +542,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts ?? []);
+    const dumped = JSON.stringify(capturedParts);
     expect(dumped).toContain('ANSWER_FOR_THE_PEER');
   });
 
@@ -649,8 +652,10 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts ?? []);
-    expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
+    // As above: every part carried credential material, so nothing was
+    // forwarded at all.
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
+    expect(capturedParts).toBeUndefined();
   });
 
   it('does not let a peer event reusing a local request id relabel it as peer-requested (toMissingRemoteSessionParts path)', async () => {
@@ -764,6 +769,52 @@ describe('A2ARemoteAgent', () => {
 
     const dumped = JSON.stringify(capturedParts);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
+  });
+
+  it('sends nothing when the scrub leaves no parts to forward', async () => {
+    let capturedParts: unknown;
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: {
+        name: 'Remote',
+        description: 'test',
+        protocolVersion: '1.0',
+        defaultInputModes: [],
+        defaultOutputModes: [],
+        capabilities: {streaming: true},
+        skills: [],
+        url: 'https://example.com',
+        version: '1.0',
+      } as AgentCard,
+      clientFactory: mockClientFactory,
+      beforeRequestCallbacks: [
+        (_ctx, params) => {
+          capturedParts = params.message.parts;
+        },
+      ],
+    });
+    vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+      (async function* () {})(),
+    );
+
+    const context = createMockContext({
+      session: {
+        id: 'test-session',
+        userId: 'test-user',
+        appName: 'test-app',
+        events: [createEvent({author: 'user'})],
+        state: {},
+      } as unknown as Session,
+    });
+    const events: AdkEvent[] = [];
+    for await (const event of agent.runAsync(context)) {
+      events.push(event);
+    }
+
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
+    expect(capturedParts).toBeUndefined();
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toEqual({});
   });
 
   describe('agent card adoption and validation', () => {
