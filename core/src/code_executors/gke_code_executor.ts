@@ -7,16 +7,15 @@
 import {randomUUID} from 'node:crypto';
 
 import type {
-  ApiException,
   BatchV1Api,
   ConfigurationOptions,
   CoreV1Api,
   V1ConfigMap,
   V1Job,
   V1OwnerReference,
-  V1Pod,
 } from '@kubernetes/client-node';
 
+import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
@@ -25,7 +24,20 @@ import {defaultSandboxClientFactory} from './agent_sandbox_client.js';
 import {BaseCodeExecutor, ExecuteCodeParams} from './base_code_executor.js';
 import {CodeExecutionResult} from './code_execution_utils.js';
 import {
+  buildJobManifest,
+  CODE_FILE_NAME,
+  getPodOutput,
+  readJobOutcome,
+  type JobOutcome,
+} from './gke_job.js';
+import {
+  getApiErrorReason,
+  isApiException,
+  isWatchHttpError,
+} from './k8s_error_utils.js';
+import {
   DEFAULT_SANDBOX_TEMPLATE,
+  isAbortTimeout,
   SandboxClient,
   SandboxClientFactory,
   SandboxInfrastructureError,
@@ -39,19 +51,6 @@ const DEFAULT_CPU_REQUESTED = '200m';
 const DEFAULT_MEM_REQUESTED = '256Mi';
 const DEFAULT_CPU_LIMIT = '500m';
 const DEFAULT_MEM_LIMIT = '512Mi';
-
-const JOB_TTL_SECONDS = 600;
-const RUN_AS_USER = 1001;
-const GVISOR_RUNTIME_CLASS = 'gvisor';
-const CODE_MOUNT_PATH = '/app';
-const CODE_FILE_NAME = 'code.py';
-/**
- * Name of the Job container that runs the code, and so the one whose
- * termination status is the status of the execution.
- */
-const CODE_CONTAINER_NAME = 'code-runner';
-const VOLUME_NAME = 'code-volume';
-const INVOCATION_ID_ANNOTATION = 'adk.agent.google.com/invocation-id';
 
 /** File the generated code is written to inside a sandbox. */
 const SCRIPT_FILENAME = 'script.py';
@@ -143,214 +142,15 @@ export interface GkeCodeExecutorOptions {
   apiClients?: GkeApiClients;
 }
 
-/** Container resource sizing used to build the Job manifest. */
-interface JobResourceConfig {
-  image: string;
-  cpuRequested: string;
-  memRequested: string;
-  cpuLimit: string;
-  memLimit: string;
-}
-
 /** Everything one job-mode execution needs from `@kubernetes/client-node`. */
 interface ResolvedClients extends GkeApiClients {
   /** Makes `patchNamespacedConfigMap` send a strategic merge patch. */
   strategicMergePatch: ConfigurationOptions;
 }
 
-/** A Job's terminal state, or `'timeout'` when the deadline passed first. */
-type JobOutcome = 'succeeded' | 'failed' | 'timeout';
-
-/** The Pod's log together with the status its code container exited with. */
-interface PodOutput {
-  logs: string;
-  exitCode?: number;
-}
-
-/**
- * Returns whether `error` is a Kubernetes API error.
- *
- * Matched structurally rather than with `instanceof`, so the check still holds
- * when the caller and the client library resolve different copies of
- * `@kubernetes/client-node`.
- */
-function isApiException(error: unknown): error is ApiException<unknown> {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    typeof error.code === 'number' &&
-    'body' in error &&
-    'headers' in error
-  );
-}
-
-/**
- * Returns whether `error` is a non-200 response reported by `Watch`, which
- * raises a plain `Error` carrying the status code instead of an
- * {@link ApiException}. Its message is already the reason, e.g. `'Forbidden'`.
- */
-function isWatchHttpError(
-  error: unknown,
-): error is Error & {statusCode: number} {
-  return (
-    error instanceof Error &&
-    'statusCode' in error &&
-    typeof error.statusCode === 'number'
-  );
-}
-
-/**
- * Extracts a human-readable reason from a Kubernetes API error.
- *
- * `ApiException` carries no `reason` of its own, unlike Python's client. The
- * reason lives in `body`, which is a parsed object for a JSON response and a
- * string otherwise, so the parse is guarded.
- */
-function getApiErrorReason(err: ApiException<unknown>): string {
-  try {
-    const body: unknown =
-      typeof err.body === 'string' ? JSON.parse(err.body) : err.body;
-    if (body && typeof body === 'object') {
-      const {reason, message} = body as {reason?: string; message?: string};
-      if (reason) {
-        return reason;
-      }
-      if (message) {
-        return message;
-      }
-    }
-  } catch {
-    // Body was not JSON; fall back to the exception message below.
-  }
-  return err.message || 'Unknown error';
-}
-
-/**
- * Builds the hardened {@link V1Job} manifest that runs the code in a
- * gVisor-sandboxed Pod.
- */
-function buildJobManifest(
-  jobName: string,
-  configmapName: string,
-  invocationId: string,
-  config: JobResourceConfig,
-): V1Job {
-  return {
-    apiVersion: 'batch/v1',
-    kind: 'Job',
-    metadata: {
-      name: jobName,
-      annotations: {[INVOCATION_ID_ANNOTATION]: invocationId},
-    },
-    spec: {
-      // Do not retry the Job on failure.
-      backoffLimit: 0,
-      // Let the Kubernetes TTL controller garbage-collect the Job and its Pod.
-      ttlSecondsAfterFinished: JOB_TTL_SECONDS,
-      template: {
-        spec: {
-          restartPolicy: 'Never',
-          // The Pod runs model-generated code, so it must not receive a
-          // credential for the cluster it is running in.
-          automountServiceAccountToken: false,
-          // Request the gVisor runtime for kernel-level sandboxing.
-          runtimeClassName: GVISOR_RUNTIME_CLASS,
-          tolerations: [
-            {
-              key: 'sandbox.gke.io/runtime',
-              operator: 'Equal',
-              value: GVISOR_RUNTIME_CLASS,
-              effect: 'NoSchedule',
-            },
-          ],
-          volumes: [{name: VOLUME_NAME, configMap: {name: configmapName}}],
-          containers: [
-            {
-              name: CODE_CONTAINER_NAME,
-              image: config.image,
-              command: ['python3', `${CODE_MOUNT_PATH}/${CODE_FILE_NAME}`],
-              volumeMounts: [{name: VOLUME_NAME, mountPath: CODE_MOUNT_PATH}],
-              securityContext: {
-                runAsNonRoot: true,
-                runAsUser: RUN_AS_USER,
-                allowPrivilegeEscalation: false,
-                readOnlyRootFilesystem: true,
-                capabilities: {drop: ['ALL']},
-              },
-              resources: {
-                requests: {
-                  cpu: config.cpuRequested,
-                  memory: config.memRequested,
-                },
-                limits: {cpu: config.cpuLimit, memory: config.memLimit},
-              },
-            },
-          ],
-        },
-      },
-    },
-  };
-}
-
-/** Reads the terminal state a Job reports, if it has reached one. */
-function readJobOutcome(job: V1Job): JobOutcome | undefined {
-  if (job.status?.succeeded) {
-    return 'succeeded';
-  }
-  if (job.status?.failed) {
-    return 'failed';
-  }
-  return undefined;
-}
-
 /** Whole seconds left until `deadline`, rounded up. */
 function secondsUntil(deadline: number): number {
   return Math.ceil((deadline - Date.now()) / 1000);
-}
-
-/**
- * Reads the status the code container of `pod` exited with.
- *
- * @return The exit status, or undefined when the container is absent from the
- *   Pod's status or has not reached a terminated state.
- */
-function getContainerExitCode(pod: V1Pod): number | undefined {
-  for (const status of pod.status?.containerStatuses ?? []) {
-    if (status.name !== CODE_CONTAINER_NAME) {
-      continue;
-    }
-    return status.state?.terminated?.exitCode;
-  }
-  return undefined;
-}
-
-/**
- * Retrieves the log and exit status of the Pod created by the given Job.
- *
- * Both come from a single Pod lookup, because the status a container
- * terminated with is only available for as long as the Pod its log comes from.
- *
- * @throws Error if no Pod can be found for the Job.
- */
-async function getPodOutput(
-  pods: GkePodsApi,
-  namespace: string,
-  jobName: string,
-): Promise<PodOutput> {
-  const podList = await pods.listNamespacedPod({
-    namespace,
-    labelSelector: `job-name=${jobName}`,
-    limit: 1,
-  });
-  const pod = podList.items[0];
-  const podName = pod?.metadata?.name;
-  if (!podName) {
-    throw new Error(
-      `Could not find Pod for Job '${jobName}' to retrieve logs.`,
-    );
-  }
-  const logs = await pods.readNamespacedPodLog({name: podName, namespace});
-  return {logs, exitCode: getContainerExitCode(pod)};
 }
 
 /**
@@ -437,10 +237,7 @@ function errorResult(stderr: string): CodeExecutionResult {
  * `'TimeoutError'`. `Watch` reports its own connection cap as the latter.
  */
 function isTimeoutError(error: unknown): error is Error {
-  return (
-    error instanceof SandboxTimeoutError ||
-    (error instanceof Error && error.name === 'TimeoutError')
-  );
+  return error instanceof SandboxTimeoutError || isAbortTimeout(error);
 }
 
 /**
@@ -613,8 +410,9 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
       if (isWatchHttpError(err)) {
         return errorResult(`Kubernetes API error: ${err.message}`);
       }
-      const message = err instanceof Error ? err.message : String(err);
-      return errorResult(`An unexpected executor error occurred: ${message}`);
+      return errorResult(
+        `An unexpected executor error occurred: ${formatError(err)}`,
+      );
     }
   }
 
@@ -769,7 +567,6 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
       });
       await sandbox.write(SCRIPT_FILENAME, code);
       const result = await sandbox.run(RUN_COMMAND);
-      await closeSandboxQuietly(sandbox);
       return {
         stdout: result.stdout,
         stderr: result.stderr ?? '',
@@ -777,7 +574,6 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
         exitCode: result.exitCode,
       };
     } catch (err) {
-      await closeSandboxQuietly(sandbox);
       if (isTimeoutError(err)) {
         logger.error('Sandbox timed out', err);
         // Returning a result instead of throwing lets the agent handle the
@@ -792,6 +588,8 @@ export class GkeCodeExecutor extends BaseCodeExecutor {
       }
       logger.error('Sandbox execution failed', err);
       throw err;
+    } finally {
+      await closeSandboxQuietly(sandbox);
     }
   }
 }

@@ -9,12 +9,15 @@ import {isIP} from 'node:net';
 
 import type {CustomObjectsApi} from '@kubernetes/client-node';
 
+import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
+import {isNotFoundError} from './k8s_error_utils.js';
 import {
   DEFAULT_SANDBOX_TEMPLATE,
+  isAbortTimeout,
   SandboxClient,
   SandboxClientFactory,
   SandboxClientOptions,
@@ -67,7 +70,6 @@ const BASE_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 8000;
 const POLL_INTERVAL_MS = 1000;
 const RETRYABLE_STATUS_CODES = new Set([500, 502, 503, 504]);
-const NOT_FOUND_STATUS = 404;
 const HOSTNAME_LABEL_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
 const MAX_HOSTNAME_LENGTH = 253;
 
@@ -92,8 +94,6 @@ export interface AgentSandboxClientOptions extends SandboxClientOptions {
   customObjectsApi?: SandboxObjectsApi;
   /** `fetch` implementation for router calls. Injected in tests. */
   fetchFn?: typeof fetch;
-  /** Direct router base URL, bypassing Gateway discovery. */
-  apiUrl?: string;
 }
 
 /** Router connection details discovered during provisioning. */
@@ -138,7 +138,6 @@ export class AgentSandboxClient implements SandboxClient {
   private readonly gatewayName?: string;
   private readonly serverPort: number;
   private readonly timeoutSeconds: number;
-  private readonly apiUrl?: string;
   private readonly injectedApi?: SandboxObjectsApi;
   private readonly fetchFn: typeof fetch;
 
@@ -152,7 +151,6 @@ export class AgentSandboxClient implements SandboxClient {
     this.gatewayName = options.gatewayName;
     this.serverPort = options.serverPort ?? DEFAULT_SERVER_PORT;
     this.timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
-    this.apiUrl = options.apiUrl;
     this.injectedApi = options.customObjectsApi;
     this.fetchFn = options.fetchFn ?? fetch;
   }
@@ -257,7 +255,7 @@ export class AgentSandboxClient implements SandboxClient {
       });
     } catch (error) {
       throw new SandboxInfrastructureError(
-        `Failed to get SandboxTemplate "${this.templateName}": ${errorMessage(error)}`,
+        `Failed to get SandboxTemplate "${this.templateName}": ${formatError(error)}`,
       );
     }
   }
@@ -281,7 +279,7 @@ export class AgentSandboxClient implements SandboxClient {
       return name;
     } catch (error) {
       throw new SandboxInfrastructureError(
-        `Failed to create Sandbox: ${errorMessage(error)}`,
+        `Failed to create Sandbox: ${formatError(error)}`,
       );
     }
   }
@@ -308,7 +306,7 @@ export class AgentSandboxClient implements SandboxClient {
           );
         }
         throw new SandboxInfrastructureError(
-          `Failed to read Sandbox "${sandboxName}": ${errorMessage(error)}`,
+          `Failed to read Sandbox "${sandboxName}": ${formatError(error)}`,
         );
       }
       if (isSandboxReady(sandbox)) {
@@ -326,9 +324,6 @@ export class AgentSandboxClient implements SandboxClient {
     sandboxName: string,
     deadline: number,
   ): Promise<string> {
-    if (this.apiUrl) {
-      return this.apiUrl;
-    }
     if (this.gatewayName) {
       return this.discoverGatewayUrl(api, this.gatewayName, deadline);
     }
@@ -371,7 +366,7 @@ export class AgentSandboxClient implements SandboxClient {
     }
     if (!seenGateway) {
       throw new SandboxInfrastructureError(
-        `Gateway "${gatewayName}" not found in namespace "${this.namespace}": ${errorMessage(lastError)}`,
+        `Gateway "${gatewayName}" not found in namespace "${this.namespace}": ${formatError(lastError)}`,
       );
     }
     throw new SandboxTimeoutError(
@@ -439,7 +434,7 @@ export class AgentSandboxClient implements SandboxClient {
     }
 
     throw new SandboxInfrastructureError(
-      `Sandbox request to "${endpoint}" failed after ${maxAttempts} attempts: ${errorMessage(lastError)}`,
+      `Sandbox request to "${endpoint}" failed after ${maxAttempts} attempts: ${formatError(lastError)}`,
     );
   }
 }
@@ -448,20 +443,15 @@ export class AgentSandboxClient implements SandboxClient {
 export const defaultSandboxClientFactory: SandboxClientFactory = (options) =>
   new AgentSandboxClient(options);
 
-/** Loads `@kubernetes/client-node`, ADK's optional peer for GKE execution. */
-function loadKubernetes() {
-  return loadOptionalPeer(
-    {packageName: '@kubernetes/client-node', feature: 'AgentSandboxClient'},
-    () => import('@kubernetes/client-node'),
-  );
-}
-
 /**
  * Builds a custom-objects client from the in-cluster config, falling back to
  * the local kubeconfig.
  */
 async function loadCustomObjectsApi(): Promise<SandboxObjectsApi> {
-  const {CustomObjectsApi: CustomObjects, KubeConfig} = await loadKubernetes();
+  const {CustomObjectsApi: CustomObjects, KubeConfig} = await loadOptionalPeer(
+    {packageName: '@kubernetes/client-node', feature: 'AgentSandboxClient'},
+    () => import('@kubernetes/client-node'),
+  );
   const kubeConfig = new KubeConfig();
   try {
     kubeConfig.loadFromCluster();
@@ -476,7 +466,7 @@ async function loadCustomObjectsApi(): Promise<SandboxObjectsApi> {
     kubeConfig.loadFromDefault();
   } catch (defaultError) {
     throw new SandboxInfrastructureError(
-      `Failed to load Kubernetes configuration: ${errorMessage(defaultError)}`,
+      `Failed to load Kubernetes configuration: ${formatError(defaultError)}`,
     );
   }
   return kubeConfig.makeApiClient(CustomObjects);
@@ -587,31 +577,13 @@ function assertPlainFilename(path: string): void {
   }
 }
 
-/** Returns whether a fetch response is an HTTP redirect. */
+/**
+ * Returns whether a fetch response is an HTTP redirect. With
+ * `redirect: 'manual'` Node hands back the real 3xx response, not the browser's
+ * opaque-redirect placeholder, so the status is the only thing to read.
+ */
 function isRedirect(response: Response): boolean {
-  return (
-    response.type === 'opaqueredirect' ||
-    (response.status >= 300 && response.status < 400)
-  );
-}
-
-/** Returns whether an error is an `AbortSignal.timeout` expiry. */
-function isAbortTimeout(error: unknown): boolean {
-  return error instanceof Error && error.name === 'TimeoutError';
-}
-
-/** Returns whether a Kubernetes API error is a 404 Not Found. */
-function isNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === NOT_FOUND_STATUS
-  );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return response.status >= 300 && response.status < 400;
 }
 
 function sleep(ms: number): Promise<void> {

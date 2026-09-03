@@ -65,17 +65,17 @@ function gatewayWith(address: string | undefined) {
   return {status: {addresses: address ? [{value: address}] : []}};
 }
 
-/** Builds a router response. `opaqueRedirect` is not constructible otherwise. */
+/** Builds an error shaped like the `ApiException` the API clients throw. */
+function apiError(code: number, message: string): Error {
+  return Object.assign(new Error(message), {code, body: {}, headers: {}});
+}
+
+/** Builds a router response. */
 function routerResponse({
   status = 200,
   body = {stdout: 'ok', stderr: ''},
-  opaqueRedirect = false,
-}: {status?: number; body?: unknown; opaqueRedirect?: boolean} = {}): Response {
-  const response = new Response(JSON.stringify(body), {status});
-  if (opaqueRedirect) {
-    Object.defineProperty(response, 'type', {value: 'opaqueredirect'});
-  }
-  return response;
+}: {status?: number; body?: unknown} = {}): Response {
+  return new Response(JSON.stringify(body), {status});
 }
 
 function okFetch(): Mock<typeof fetch> {
@@ -286,13 +286,10 @@ describe('AgentSandboxClient.write', () => {
     );
   });
 
-  it.each([
-    ['a 3xx status', {status: 302}],
-    ['an opaque redirect', {opaqueRedirect: true}],
-  ])('rejects %s as an infrastructure error', async (_label, response) => {
+  it('rejects a 3xx status as an infrastructure error', async () => {
     const fetchFn = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(routerResponse(response));
+      .mockResolvedValue(routerResponse({status: 302}));
     const {client} = setup({fetchFn});
 
     await expect(client.write('script.py', 'code')).rejects.toThrow(
@@ -491,7 +488,7 @@ describe('AgentSandboxClient readiness', () => {
     api.getNamespacedCustomObject.mockImplementation(({plural}) =>
       plural === 'sandboxtemplates'
         ? Promise.resolve(TEMPLATE)
-        : Promise.reject(Object.assign(new Error('gone'), {code: 404})),
+        : Promise.reject(apiError(404, 'gone')),
     );
     const {client} = setup({api});
 
@@ -505,7 +502,7 @@ describe('AgentSandboxClient readiness', () => {
     api.getNamespacedCustomObject.mockImplementation(({plural}) =>
       plural === 'sandboxtemplates'
         ? Promise.resolve(TEMPLATE)
-        : Promise.reject(Object.assign(new Error('boom'), {code: 500})),
+        : Promise.reject(apiError(500, 'boom')),
     );
     const {client} = setup({api});
 
@@ -616,7 +613,7 @@ describe('AgentSandboxClient endpoint discovery', () => {
       if (plural === 'sandboxes') {
         return Promise.resolve(readySandbox());
       }
-      return Promise.reject(Object.assign(new Error('nope'), {code: 404}));
+      return Promise.reject(apiError(404, 'nope'));
     });
     const {client} = setup({api, timeoutSeconds: 1});
 
@@ -625,23 +622,6 @@ describe('AgentSandboxClient endpoint discovery', () => {
         'Gateway "my-gateway" not found',
       ),
     );
-  });
-
-  it('uses an explicit apiUrl and skips gateway discovery', async () => {
-    const {client, api, fetchFn} = setup({
-      gatewayName: undefined,
-      apiUrl: 'https://router.example:9000',
-    });
-
-    await client.write('script.py', 'x');
-
-    expect(requestUrl(fetchFn.mock.calls[0])).toBe(
-      'https://router.example:9000/upload',
-    );
-    const gatewayReads = api.getNamespacedCustomObject.mock.calls.filter(
-      ([arg]) => arg.plural === 'gateways',
-    );
-    expect(gatewayReads).toHaveLength(0);
   });
 
   it('falls back to the in-cluster service address', async () => {
@@ -680,9 +660,7 @@ describe('AgentSandboxClient.close', () => {
 
   it('treats a 404 on delete as success', async () => {
     const api = happyApi();
-    api.deleteNamespacedCustomObject.mockRejectedValue(
-      Object.assign(new Error('gone'), {code: 404}),
-    );
+    api.deleteNamespacedCustomObject.mockRejectedValue(apiError(404, 'gone'));
     const {client} = setup({api});
 
     await client.write('script.py', 'x');

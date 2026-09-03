@@ -83,3 +83,11 @@ export class SandboxTimeoutError extends Error {
     this.name = 'SandboxTimeoutError';
   }
 }
+
+/**
+ * Returns whether `error` is an `AbortSignal.timeout` expiry, which Node
+ * reports as an error named `'TimeoutError'`.
+ */
+export function isAbortTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError';
+}
