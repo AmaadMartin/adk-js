@@ -787,6 +787,12 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       );
       return undefined;
     }
+    const wrapperKey = this.finishTaskTool?.wrapperKey;
+    // A remote that answered with the object itself rather than the wrapper
+    // key still produced output; the reference takes the args whole.
+    if (wrapperKey && !(wrapperKey in args)) {
+      return args;
+    }
     return this.finishTaskTool?.extractOutput(args);
   }
 

@@ -455,9 +455,15 @@ export function toMissingRemoteSessionParts(
         converter,
         taskScope,
         remoteCallIds,
+        longRunningToolIds: event.longRunningToolIds,
       });
+      if (converted === undefined) {
+        continue;
+      }
       if (converted.length === 0) {
-        logger.warn(`Failed to convert part to A2A format: ${part}`);
+        logger.warn(
+          `Failed to convert part to A2A format: ${JSON.stringify(part)}`,
+        );
         continue;
       }
       if (isUserInput) {
@@ -532,13 +538,20 @@ interface ForwardedPartOptions {
   converter: GenAIPartToA2APartConverter;
   taskScope?: string;
   remoteCallIds: ReadonlySet<string>;
+  /** Ids of the source event's long-running calls, kept on the wire. */
+  longRunningToolIds?: string[];
 }
 
 /** Converts one GenAI part into the A2A parts that carry it to the peer. */
 function toForwardedParts(
   part: GenAIPart,
-  {converter, taskScope, remoteCallIds}: ForwardedPartOptions,
-): A2APart[] {
+  {
+    converter,
+    taskScope,
+    remoteCallIds,
+    longRunningToolIds,
+  }: ForwardedPartOptions,
+): A2APart[] | undefined {
   const callId = part.functionCall?.id;
   if (
     taskScope &&
@@ -546,8 +559,9 @@ function toForwardedParts(
     callId !== taskScope &&
     !remoteCallIds.has(callId)
   ) {
-    // A sibling call the coordinator made for another tool or agent.
-    return [];
+    // A sibling call the coordinator made for another tool or agent. Skipped
+    // deliberately, so `undefined` rather than an empty conversion.
+    return undefined;
   }
 
   const response = part.functionResponse;
@@ -563,7 +577,7 @@ function toForwardedParts(
     ];
   }
 
-  return toA2AParts([part], undefined, converter);
+  return toA2AParts([part], longRunningToolIds, converter);
 }
 
 /**

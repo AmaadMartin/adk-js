@@ -408,6 +408,27 @@ describe('RemoteA2AAgent task mode', () => {
       expect(output?.output).toEqual({summary: 'fresh'});
     });
 
+    it('takes the arguments whole when the wrapper key is absent', async () => {
+      vi.mocked(mockClient.sendMessageStream).mockReturnValue(
+        (async function* () {
+          yield finishResponse();
+        })(),
+      );
+      const context = contextFor([
+        triggerEvent(),
+        // The remote answered with the object itself, not under `result`.
+        finishCall({summary: 'sunny'}),
+      ]);
+
+      const events = await run(
+        buildAgent({outputSchema: {type: Type.STRING}}),
+        context,
+      );
+
+      const output = events.find((event) => event.output !== undefined);
+      expect(output?.output).toEqual({summary: 'sunny'});
+    });
+
     it('leaves the output unset when no finish_task call is in history', async () => {
       vi.mocked(mockClient.sendMessageStream).mockReturnValue(
         (async function* () {
