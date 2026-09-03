@@ -42,6 +42,7 @@ export enum A2AMetadataKeys {
 export enum AdkMetadataKeys {
   TASK_ID = `${A2A_METADATA_KEY_PREFIX}task_id`,
   CONTEXT_ID = `${A2A_METADATA_KEY_PREFIX}context_id`,
+  RESPONSE = `${A2A_METADATA_KEY_PREFIX}response`,
 }
 
 /**

@@ -23,6 +23,7 @@ import {createLinkedAbort} from '../utils/abort_utils.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {NodeContext} from '../workflow/node_context.js';
 import {MessageRole} from './a2a_event.js';
 import {
   buildRemoteAuthConfig,
@@ -50,7 +51,10 @@ import {
 import {adoptedCardDescription, resolveAgentCard} from './agent_card.js';
 import {validateAgentCard} from './agent_card_validation.js';
 import {toAdkEvent} from './event_converter_utils.js';
-import {getA2ASessionMetadata} from './metadata_converter_utils.js';
+import {
+  AdkMetadataKeys,
+  getA2ASessionMetadata,
+} from './metadata_converter_utils.js';
 import {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
@@ -561,11 +565,97 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     yield* processor.aggregatePartial(ctx, chunk, adkEvent);
   }
 
+  /**
+   * Runs the agent as a workflow node.
+   *
+   * Promotes the peer's textual answer to `event.output` so the scheduler
+   * propagates it downstream. Without this a `JoinNode` aggregating parallel
+   * `RemoteA2AAgent` predecessors sees `undefined` for each of them: the agent
+   * carries its answer in `event.content` and nothing sets `event.output`.
+   */
+  protected override async *runImpl(
+    ctx: NodeContext,
+    nodeInput: unknown,
+  ): AsyncGenerator<AdkEvent, void, void> {
+    let promoted = false;
+    for await (const event of super.runImpl(ctx, nodeInput)) {
+      if (!promoted && promoteResponseToOutput(event, this.name)) {
+        promoted = true;
+      }
+      yield event;
+    }
+  }
+
   protected runLiveImpl(
     _context: InvocationContext,
   ): AsyncGenerator<AdkEvent, void, void> {
     throw new Error('Live mode is not supported in A2ARemoteAgent yet.');
   }
+}
+
+/**
+ * A2A task states that carry work in progress rather than the answer. An event
+ * stamped with one of them must not become the node's output.
+ */
+const NON_FINAL_TASK_STATES: ReadonlySet<string> = new Set([
+  'submitted',
+  'working',
+  'input-required',
+  'auth-required',
+  'unknown',
+]);
+
+/**
+ * Sets `event.output` from the event's non-thought text, when it is eligible.
+ *
+ * A node produces at most one output, so the caller stops after the first
+ * event this returns `true` for. An event is skipped when it is partial, when
+ * its output is already set, when this agent did not author it, when it
+ * carries no plain text, or when the peer's task is still in progress.
+ * Streaming converters do not always mark `working` text as a thought, so the
+ * task state is checked as well.
+ *
+ * The author, not `nodeInfo.path`: the node runner stamps the path after the
+ * node yields, so it is not set yet here.
+ */
+function promoteResponseToOutput(event: AdkEvent, agentName: string): boolean {
+  if (event.partial || event.output !== undefined) {
+    return false;
+  }
+  if (event.author !== agentName) {
+    return false;
+  }
+  if (isNonFinalTaskResponse(event)) {
+    return false;
+  }
+  const text = (event.content?.parts ?? [])
+    .filter(
+      (part) =>
+        part.text &&
+        !part.thought &&
+        !part.functionCall &&
+        !part.functionResponse,
+    )
+    .map((part) => part.text)
+    .join('');
+  if (!text) {
+    return false;
+  }
+  event.output = text;
+  event.nodeInfo = {...event.nodeInfo, messageAsOutput: true};
+  return true;
+}
+
+/** Whether the A2A response metadata reports a task still in progress. */
+function isNonFinalTaskResponse(event: AdkEvent): boolean {
+  const response = event.customMetadata?.[AdkMetadataKeys.RESPONSE];
+  const status = isRecord(response) ? response['status'] : undefined;
+  const state = isRecord(status) ? status['state'] : undefined;
+  return typeof state === 'string' && NON_FINAL_TASK_STATES.has(state);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 /** Yields a single non-streaming response as a stream of one. */
