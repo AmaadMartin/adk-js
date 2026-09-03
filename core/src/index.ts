@@ -36,6 +36,9 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+// Node-only: `@google-cloud/bigtable` is an optional peer dependency, so this
+// is not re-exported from `common.ts`, which the web build also serves.
+export * from './tools/bigtable/index.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
