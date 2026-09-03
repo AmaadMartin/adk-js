@@ -3,7 +3,6 @@
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {GenerateContentConfig} from '@google/genai';
 
 import {
   isGeminiModel,
@@ -30,7 +29,7 @@ export class UrlContextTool extends BuiltInTool {
   protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+    llmRequest.config = llmRequest.config || {};
     llmRequest.config.tools = llmRequest.config.tools || [];
 
     if (
