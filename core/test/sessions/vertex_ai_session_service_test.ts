@@ -13,6 +13,7 @@ import {
 } from '@google/adk';
 import {Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
+import {ApiClient} from '@google/genai/vertex_internal';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   isFastForwardable,
@@ -31,6 +32,17 @@ vi.mock('nodejs-vertexai', () => ({
 }));
 
 const clientConstructor = vi.hoisted(() => vi.fn());
+const sessionsConstructor = vi.hoisted(() => vi.fn());
+
+// Express mode cannot use the ADC `Client`, so the service builds the Agent
+// Engine `Sessions` client itself. Capture the ApiClient it is handed.
+vi.mock('@google-cloud/vertexai/build/src/genai/sessions.js', () => ({
+  Sessions: class {
+    constructor(apiClient: unknown) {
+      sessionsConstructor(apiClient);
+    }
+  },
+}));
 
 // The service imports Client from the package root, so the mock must target
 // the root. Keep the other root exports for the rest of the module graph.
@@ -48,6 +60,7 @@ vi.mock('@google-cloud/vertexai', async (importOriginal) => ({
 afterEach(() => {
   vi.unstubAllEnvs();
   clientConstructor.mockClear();
+  sessionsConstructor.mockClear();
 });
 
 import {
@@ -176,14 +189,38 @@ describe('VertexAiSessionService', () => {
       ['an expressModeApiKey option', {expressModeApiKey: 'test-api-key'}],
       ['an API key from the environment', {}],
       ['an API key and only a project', {projectId: 'test-project'}],
-    ])('throws for %s instead of dropping the key', (_, options) => {
-      expect(() => new VertexAiSessionService(options)).toThrow(
-        'Vertex AI Express Mode',
-      );
+    ])('builds an API-key client for %s', (_, options) => {
+      expect(() => new VertexAiSessionService(options)).not.toThrow();
       expect(clientConstructor).not.toHaveBeenCalled();
     });
 
-    it('keeps using project and location when an API key is also in the environment', () => {
+    it('authenticates the sessions client with the API key', async () => {
+      new VertexAiSessionService({expressModeApiKey: 'test-api-key'});
+
+      expect(sessionsConstructor).toHaveBeenCalledTimes(1);
+      const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
+      expect(apiClient.getApiKey()).toBe('test-api-key');
+      expect(apiClient.isVertexAI()).toBe(true);
+      // The key has to reach the auth object, not just the client options, or
+      // requests go out unauthenticated. No credentials are read: NodeAuth
+      // returns the key header without constructing GoogleAuth.
+      const headers = await apiClient.getAuthHeaders();
+      expect(headers.get('x-goog-api-key')).toBe('test-api-key');
+    });
+
+    it('prefers the API key over project and location', () => {
+      new VertexAiSessionService({
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(sessionsConstructor).toHaveBeenCalledTimes(1);
+      expect(clientConstructor).not.toHaveBeenCalled();
+    });
+
+    it('builds a project client when no API key is available', () => {
+      vi.stubEnv('GOOGLE_API_KEY', undefined);
+
       new VertexAiSessionService({
         projectId: 'test-project',
         location: 'us-central1',
@@ -193,6 +230,7 @@ describe('VertexAiSessionService', () => {
         project: 'test-project',
         location: 'us-central1',
       });
+      expect(sessionsConstructor).not.toHaveBeenCalled();
     });
 
     it('never builds a client when sessions are injected', () => {
