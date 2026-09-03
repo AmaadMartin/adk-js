@@ -42,6 +42,8 @@ interface FakeApiServerOptions {
   podLog: string;
   /** Status the `code-runner` container reports, or none. */
   containerExitCode?: number;
+  /** HTTP status the watch endpoint answers with. Defaults to 200. */
+  watchStatus?: number;
 }
 
 interface RecordedRequest {
@@ -156,7 +158,14 @@ class FakeK8sApiServer {
 
   /** Streams one connection's worth of Job events, then closes it. */
   private streamWatch(res: ServerResponse): void {
-    const statuses = this.options.watchConnections[this.watchCall++] ?? [];
+    const connection = this.watchCall++;
+    const watchStatus = this.options.watchStatus ?? 200;
+    if (watchStatus !== 200) {
+      res.writeHead(watchStatus, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({kind: 'Status', reason: 'Forbidden'}));
+      return;
+    }
+    const statuses = this.options.watchConnections[connection] ?? [];
     res.writeHead(200, {'Content-Type': 'application/json'});
     for (const status of statuses) {
       res.write(`${JSON.stringify({type: 'MODIFIED', object: {status}})}\n`);
@@ -309,6 +318,28 @@ describe('GkeCodeExecutor against a real Kubernetes API client', () => {
       /^metadata\.name=adk-exec-/,
     );
     expect(query.get('timeoutSeconds')).toBe('30');
+  });
+
+  it('reports a forbidden watch once, without reopening it', async () => {
+    server = new FakeK8sApiServer({
+      watchConnections: [],
+      podLog: '',
+      watchStatus: 403,
+    });
+    const port = await server.start();
+    const executor = new GkeCodeExecutor({
+      namespace: NAMESPACE,
+      // Long enough that a watch reopened on failure would keep going well
+      // past the assertions below.
+      timeoutSeconds: 30,
+      apiClients: buildRealClients(port),
+    });
+
+    const result = await runCode(executor, 'print("nope")');
+
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('Kubernetes API error: Forbidden');
+    expect(server.watchConnectionCount).toBe(1);
   });
 
   it('reports a Kubernetes API error as stderr', async () => {
