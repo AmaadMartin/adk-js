@@ -21,6 +21,7 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   ExecutorContext,
   Runner,
   RunnerConfig,
@@ -314,14 +315,12 @@ describe('A2AAgentExecutor', () => {
     );
   });
 
-  const createSession = (): Session =>
-    ({
+  const testSession = (): Session =>
+    createSession({
       id: 'session-id',
       userId: 'test-user',
       appName: 'test-app',
-      events: [],
-      state: {},
-    }) as unknown as Session;
+    });
 
   const mockRunner = (
     runAsync: (params: unknown) => AsyncGenerator<AdkEvent, void, undefined>,
@@ -377,7 +376,7 @@ describe('A2AAgentExecutor', () => {
 
   describe('cancelTask', () => {
     it('publishes a canceled final status update for the running task', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       let releaseRun: () => void = () => {};
       const runStarted = new Promise<void>((resolveStarted) => {
         mockRunner(async function* () {
@@ -424,7 +423,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('rejects a second cancellation of the same task', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       let releaseRun: () => void = () => {};
       const runStarted = new Promise<void>((resolveStarted) => {
         mockRunner(async function* () {
@@ -475,7 +474,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('stays on the legacy path when useLegacy is set', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
       const activated: string[] = [];
       const newVersionExecutor = {
@@ -508,7 +507,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('stays on the legacy path without the extension or a flag', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
       const newVersionExecutor = {
         execute: vi.fn(async () => {}),
@@ -523,7 +522,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('falls back to the legacy path when no new executor is registered', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
       const activated: string[] = [];
 
@@ -537,7 +536,7 @@ describe('A2AAgentExecutor', () => {
 
   describe('request converter', () => {
     it('drives the user id and session id into the runner and the session lookup', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
 
@@ -565,7 +564,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('merges the run config the converter supplied under the configured one', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
 
@@ -590,7 +589,7 @@ describe('A2AAgentExecutor', () => {
 
   describe('interceptors', () => {
     it('lets beforeAgent replace the request context', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
 
       const executor = createExecutor({
@@ -608,7 +607,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('gives afterEvent the executor context, the A2A event and the ADK event', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       const adkEvent = modelEvent('hello');
       mockRunner(async function* () {
         yield adkEvent;
@@ -636,7 +635,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('publishes both events when afterEvent fans one out', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {
         yield modelEvent('hello');
       });
@@ -659,7 +658,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('publishes nothing for an event afterEvent dropped', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {
         yield modelEvent('hello');
       });
@@ -674,7 +673,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('publishes the terminal event afterAgent returned', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
       const rewritten = statusUpdate(TaskState.REJECTED);
 
@@ -689,7 +688,7 @@ describe('A2AAgentExecutor', () => {
 
   describe('aggregated task result', () => {
     it('settles the task as failed and rewrites the intermediate event to working', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {
         yield modelEvent('hello');
       });
@@ -715,7 +714,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('publishes the aggregated artifact update then completed', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {
         yield modelEvent('hello');
       });
@@ -740,7 +739,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('keeps the existing terminal event when no status update was published', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {
         yield modelEvent('hello');
       });
@@ -762,7 +761,7 @@ describe('A2AAgentExecutor', () => {
 
   describe('event metadata', () => {
     it('puts the session metadata on the working event and the event ids on the terminal one', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       const adkEvent = modelEvent('hello');
       mockRunner(async function* () {
         yield adkEvent;
@@ -796,7 +795,7 @@ describe('A2AAgentExecutor', () => {
 
   describe('submitted signal', () => {
     it('publishes a leading submitted task for a new task', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
 
       const executor = createExecutor();
@@ -808,7 +807,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('publishes no submitted task when the request already carries one', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
 
       const executor = createExecutor();
@@ -831,7 +830,7 @@ describe('A2AAgentExecutor', () => {
 
   describe('afterEventCallback', () => {
     it('gets no A2A event when the published event is not an artifact update', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {
         yield modelEvent('hello');
       });
@@ -851,15 +850,16 @@ describe('A2AAgentExecutor', () => {
 
   describe('runner resolution', () => {
     it('resolves a runner returned by an async factory', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       const runAsync = vi.fn(async function* () {});
       mockRunner(runAsync);
-      const resolved = new Runner({
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig);
-
-      const executor = new A2AAgentExecutor({runner: async () => resolved});
+      const executor = new A2AAgentExecutor({
+        runner: async () =>
+          ({
+            appName: 'test-app',
+            sessionService: mockSessionService,
+          }) as unknown as RunnerConfig,
+      });
       await executor.execute(createRequestContext(), mockEventBus);
 
       expect(runAsync).toHaveBeenCalledTimes(1);
@@ -886,7 +886,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('publishes a failed terminal event when a thrown value is not an Error', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {
         yield modelEvent('hello');
         throw 'plain string failure';
@@ -903,7 +903,7 @@ describe('A2AAgentExecutor', () => {
     });
 
     it('still publishes the terminal event when afterExecuteCallback throws', async () => {
-      mockSessionService.getSession.mockResolvedValue(createSession());
+      mockSessionService.getSession.mockResolvedValue(testSession());
       mockRunner(async function* () {});
 
       const executor = createExecutor({
