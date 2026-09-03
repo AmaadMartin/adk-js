@@ -10,6 +10,7 @@ import {
   NodeDownloader,
   NodeUploader,
 } from '@google/genai/vertex_internal';
+import {GoogleAuthOptions} from 'google-auth-library';
 
 import {isEnterpriseModeEnabled} from './env_aware_utils.js';
 
@@ -65,5 +66,29 @@ export function createExpressModeApiClient(apiKey: string): ApiClient {
     downloader: new NodeDownloader(),
     vertexai: true,
     apiKey,
+  });
+}
+
+/**
+ * Builds a Vertex AI API client that authenticates with the given credentials.
+ *
+ * The `@google-cloud/vertexai` `Client` constructor takes only a project, a
+ * location and an endpoint, so caller-supplied credentials cannot travel
+ * through it. `NodeAuth` accepts the `google-auth-library` options directly,
+ * and falls back to Application Default Credentials when `googleAuthOptions`
+ * is absent.
+ */
+export function createVertexApiClient(options: {
+  project?: string;
+  location?: string;
+  googleAuthOptions?: GoogleAuthOptions;
+}): ApiClient {
+  return new ApiClient({
+    auth: new NodeAuth({googleAuthOptions: options.googleAuthOptions}),
+    uploader: new NodeUploader(),
+    downloader: new NodeDownloader(),
+    vertexai: true,
+    project: options.project,
+    location: options.location,
   });
 }
