@@ -98,6 +98,14 @@ describe('validateAgentCard', () => {
     expect(() => validateAgentCard(cardWithUrl(url), source)).not.toThrow();
   });
 
+  it('rejects a registered name that only looks like a loopback address', () => {
+    expectRejected(
+      cardWithUrl('http://127.0.0.1.example.com/a2a'),
+      'http://127.0.0.1.example.com/card.json',
+      'must use https, or http on a loopback host',
+    );
+  });
+
   it('rejects an off-origin additionalInterfaces entry', () => {
     expectRejected(
       cardWithUrl('https://remote.example.com/a2a', [

@@ -5,6 +5,7 @@
  */
 
 import {AgentCard} from '@a2a-js/sdk';
+import {isIP} from 'node:net';
 import {AgentCardResolutionError} from './agent_card.js';
 
 /**
@@ -94,10 +95,10 @@ function parseOrigin(source: string): string {
  */
 function isLoopbackHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  return (
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host === '::1' ||
-    host.startsWith('127.')
-  );
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1') {
+    return true;
+  }
+  // Only a real IPv4 literal counts, so a registered name that merely starts
+  // with the loopback prefix -- `127.0.0.1.example.com` -- does not.
+  return isIP(host) === 4 && host.startsWith('127.');
 }
