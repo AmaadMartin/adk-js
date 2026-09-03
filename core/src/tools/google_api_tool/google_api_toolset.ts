@@ -9,6 +9,11 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {ServiceAccount} from '../../auth/auth_credential.js';
 import {OpenIdConnectWithConfig} from '../../auth/auth_schemes.js';
 import {experimental} from '../../utils/experimental.js';
+import {
+  clientCertDispatcher,
+  clientCertsToPresent,
+} from '../../utils/mtls_utils.js';
+import type {ClosableDispatcher} from '../../utils/ssl_utils.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenAPIToolset} from '../openapi_tool/openapi_toolset.js';
 import {GoogleApiTool} from './google_api_tool.js';
@@ -144,6 +149,7 @@ export class GoogleApiToolset extends BaseToolset {
   private readonly additionalScopes?: string[];
   private readonly discoveryUrl?: string;
   private openApiToolsetPromise?: Promise<OpenAPIToolset>;
+  private mtlsDispatcher?: ClosableDispatcher;
 
   constructor(options: GoogleApiToolsetOptions) {
     super(options.toolFilter ?? [], options.toolNamePrefix);
@@ -215,7 +221,15 @@ export class GoogleApiToolset extends BaseToolset {
     this.toolFilter = toolFilter;
   }
 
-  /** Closes the toolset. A toolset that was never used fetches nothing. */
+  /**
+   * Closes the toolset and releases the client certificate it presents.
+   *
+   * A toolset that presented a certificate also forgets its memoised tools,
+   * because those tools hold the dispatcher that is about to be destroyed. A
+   * toolset that presented none keeps them: a runner closes its toolsets after
+   * every invocation, so forgetting them would refetch the Discovery document
+   * once per turn.
+   */
   @experimental
   override async close(): Promise<void> {
     // A failed conversion was already reported by getTools; closing must not
@@ -223,7 +237,12 @@ export class GoogleApiToolset extends BaseToolset {
     const openApiToolset = await this.openApiToolsetPromise?.catch(
       () => undefined,
     );
+    const dispatcher = this.takeMtlsDispatcher();
+    if (dispatcher) {
+      this.openApiToolsetPromise = undefined;
+    }
     await openApiToolset?.close();
+    await dispatcher?.close();
   }
 
   private loadOpenApiToolset(): Promise<OpenAPIToolset> {
@@ -231,8 +250,9 @@ export class GoogleApiToolset extends BaseToolset {
     // share one discovery fetch. A failed load is forgotten so a later call
     // retries instead of replaying the error for the toolset's lifetime.
     this.openApiToolsetPromise ??= this.buildOpenApiToolset().catch(
-      (error: unknown) => {
+      async (error: unknown) => {
         this.openApiToolsetPromise = undefined;
+        await this.takeMtlsDispatcher()?.close();
         throw error;
       },
     );
@@ -246,12 +266,28 @@ export class GoogleApiToolset extends BaseToolset {
       {discoveryUrl: this.discoveryUrl},
     );
     const spec = await converter.convert();
+
+    const certs = await clientCertsToPresent();
+    this.mtlsDispatcher = certs ? await clientCertDispatcher(certs) : undefined;
+
     // The filter stays with this toolset: OpenAPIToolset captures its own at
     // construction, so a later setToolFilter call would not reach it.
     return new OpenAPIToolset({
       specDict: spec,
       prefix: this.prefix,
       authScheme: googleOidcAuthScheme(spec, this.additionalScopes),
+      sslVerify: this.mtlsDispatcher,
     });
+  }
+
+  /**
+   * Detaches the dispatcher that owns the client certificate, so the caller
+   * can close it. Detaching before the close leaves no window in which a
+   * second caller closes the same dispatcher.
+   */
+  private takeMtlsDispatcher(): ClosableDispatcher | undefined {
+    const dispatcher = this.mtlsDispatcher;
+    this.mtlsDispatcher = undefined;
+    return dispatcher;
   }
 }

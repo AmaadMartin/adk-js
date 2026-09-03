@@ -131,3 +131,41 @@ const calendar = new CalendarToolset({
 
 `close()` releases the toolset. It never fetches anything, so closing a toolset
 that was never used costs nothing, and it resolves even after a failed fetch.
+
+## Mutual TLS
+
+Set `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` to present a SecureConnect client
+certificate. The toolset then fetches the Discovery document from the API's
+mutual-TLS host, points the tools at the document's `mtlsRootUrl`, and presents
+the same certificate on every tool request.
+
+```bash
+GOOGLE_API_USE_CLIENT_CERTIFICATE=true node ./agent.js
+```
+
+The certificate comes from `~/.secureConnect/context_aware_metadata.json`. ADK
+runs the provider command that file names, and keeps the certificate, the
+private key and the passphrase in memory. A machine with no metadata file gets
+no certificate, and the tools connect over ordinary TLS.
+
+The tool requests need `undici`, which is an optional peer dependency. Install
+it on the machines that use a client certificate:
+
+```bash
+npm install undici
+```
+
+`globalThis.fetch` has no per-request client-certificate option, so the
+certificate travels on an `undici` `Agent` that ADK attaches to each request as
+its dispatcher. That agent owns the key material and the connection pool.
+`close()` destroys it, so close the toolset when the agent shuts down.
+
+```ts
+const calendar = new CalendarToolset({clientId, clientSecret});
+const tools = await calendar.getTools();
+// ... run the tools ...
+await calendar.close();
+```
+
+A `getTools()` call after `close()` fetches the Discovery document again and
+builds a new agent that carries the certificate.

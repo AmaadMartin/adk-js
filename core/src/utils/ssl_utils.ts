@@ -17,6 +17,14 @@ export interface HttpDispatcher {
 }
 
 /**
+ * A dispatcher that owns a connection pool, and the credentials the pool
+ * connects with, until it is closed.
+ */
+export interface ClosableDispatcher extends HttpDispatcher {
+  close(): Promise<void>;
+}
+
+/**
  * TLS certificate verification for a tool's outgoing requests.
  *
  * - `undefined` / `true`: verify against the system CA (the default).

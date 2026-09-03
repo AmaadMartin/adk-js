@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 import {
+  clientCertDispatcher,
   clientCertsToPresent,
   effectiveGoogleapisEndpoint,
   getApiEndpoint,
@@ -660,5 +661,37 @@ describe('getWithClientCert', () => {
 
     expect(error).toBeInstanceOf(Error);
     expect(error).toHaveProperty('message', 'socket hang up');
+  });
+});
+
+describe('clientCertDispatcher', () => {
+  const CERTS = {cert: CERT_PEM, key: KEY_PEM, passphrase: 'secret'};
+
+  it('builds a closable dispatcher for a passphrase-protected key', async () => {
+    const dispatcher = await clientCertDispatcher(CERTS);
+
+    expect(dispatcher.dispatch).toBeTypeOf('function');
+    expect(dispatcher.close).toBeTypeOf('function');
+    await dispatcher.close();
+  });
+
+  it('builds one for a key with no passphrase', async () => {
+    const dispatcher = await clientCertDispatcher({
+      cert: CERT_PEM,
+      key: KEY_PEM,
+    });
+
+    expect(dispatcher.dispatch).toBeTypeOf('function');
+    await dispatcher.close();
+  });
+
+  // A caller must therefore close the dispatcher once. GoogleApiToolset drops
+  // its reference before it awaits the close, so a second close() on the
+  // toolset never reaches a destroyed dispatcher.
+  it('rejects a second close, because undici destroys the client', async () => {
+    const dispatcher = await clientCertDispatcher(CERTS);
+
+    await dispatcher.close();
+    await expect(dispatcher.close()).rejects.toThrow('The client is destroyed');
   });
 });

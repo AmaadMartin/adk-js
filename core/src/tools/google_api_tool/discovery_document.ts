@@ -138,10 +138,13 @@ const DISCOVERY_REQUEST_TIMEOUT_MS = 60_000;
 /**
  * One GET, optionally presenting a client certificate.
  *
- * `globalThis.fetch` cannot present a client certificate in Node, which is why
- * this transport is `node:https` rather than fetch. A `http:` discovery URL
- * still works, so a private discovery service needs no TLS; a certificate is
- * only ever presented over `https:`.
+ * `globalThis.fetch` has no standard option for a client certificate. A tool
+ * request reaches one through Node's non-standard `dispatcher` option, which
+ * needs the optional `undici` peer dependency. This transport stays on
+ * `node:https` so that fetching a Discovery document over mutual TLS needs
+ * nothing beyond the standard library. A `http:` discovery URL still works, so
+ * a private discovery service needs no TLS; a certificate is only ever
+ * presented over `https:`.
  */
 function getJson(
   url: string,

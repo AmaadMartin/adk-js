@@ -13,6 +13,8 @@ import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {formatError} from './error_utils.js';
 import {logger} from './logger.js';
+import {loadOptionalPeer} from './optional_peer.js';
+import type {ClosableDispatcher} from './ssl_utils.js';
 
 /**
  * Resolves the regional API host to call, choosing the mutual-TLS host when
@@ -365,4 +367,32 @@ export function getWithClientCert(
     request.on('error', reject);
     request.end();
   });
+}
+
+/**
+ * Builds a fetch dispatcher that presents `certs` on every connection it
+ * opens.
+ *
+ * `globalThis.fetch` has no per-request client-certificate option, so the
+ * certificate has to travel on the dispatcher. This is the transport half of
+ * what adk-python does with an `httpx.AsyncClient` built from
+ * `cert=(cert, key, passphrase)`.
+ *
+ * The returned dispatcher owns the key material and the connection pool until
+ * it is closed.
+ *
+ * @param certs The certificate material to present.
+ * @return The dispatcher to attach to the request.
+ * @throws If `undici` is not installed.
+ */
+export async function clientCertDispatcher(
+  certs: MtlsClientCerts,
+): Promise<ClosableDispatcher> {
+  const undici = await loadOptionalPeer(
+    {packageName: 'undici', feature: 'mutual-TLS client certificates'},
+    () => import('undici'),
+  );
+  // Spreading keeps `passphrase` off the options when the provider emitted
+  // none, which is what adk-python's two-tuple `cert=(cert, key)` does.
+  return new undici.Agent({connect: {...certs}});
 }
