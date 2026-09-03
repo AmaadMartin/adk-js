@@ -220,6 +220,7 @@ export type {
   CacheMetadata,
   FingerprintCacheMetadata,
 } from './models/cache_metadata.js';
+export {GeminiContextCacheManager} from './models/gemini_context_cache_manager.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
