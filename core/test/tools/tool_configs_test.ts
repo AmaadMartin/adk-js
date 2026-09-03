@@ -101,17 +101,11 @@ describe('createToolConfig', () => {
   });
 
   it('names every unknown top-level key', () => {
-    let thrown: unknown;
-    try {
+    const declare = () =>
       createToolConfig({name: 'google_search', arg: {}, nmae: 'x'});
-    } catch (error: unknown) {
-      thrown = error;
-    }
 
-    expect(thrown).toBeInstanceOf(InputValidationError);
-    expect((thrown as InputValidationError).message).toContain(
-      'ToolConfig received unknown key(s): arg, nmae.',
-    );
+    expect(declare).toThrow(InputValidationError);
+    expect(declare).toThrow('ToolConfig received unknown key(s): arg, nmae.');
   });
 
   it('rejects a key that only Object.prototype declares', () => {
