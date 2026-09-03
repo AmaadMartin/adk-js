@@ -14,7 +14,6 @@ import {
   RequiredEntityData,
 } from '@mikro-orm/core';
 import {Event} from '../../events/event.js';
-import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {
@@ -490,11 +489,6 @@ export async function detectDatabaseSchemaVersion(
     (await selectSucceeds(orm, 'actions', EVENTS_TABLE_NAME)) &&
     !(await selectSucceeds(orm, 'event_data', EVENTS_TABLE_NAME));
   if (hasLegacyEventsTable) {
-    logger.warn(
-      'The database uses the legacy v0 session schema, which serializes ' +
-        'event actions with Python pickle. This SDK cannot read it. Migrate ' +
-        'the database with the adk-python `adk migrate session` command.',
-    );
     return SCHEMA_VERSION_0_PICKLE;
   }
 

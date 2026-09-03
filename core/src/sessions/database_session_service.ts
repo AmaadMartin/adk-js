@@ -153,7 +153,7 @@ function isMikroORM(source: MikroDBOptions | MikroORM): source is MikroORM {
  * @param error The failure MikroORM or the driver loader raised.
  * @param uri The connection string, if the caller gave one.
  */
-function describeOpenFailure(error: unknown, uri?: string): Error {
+export function describeOpenFailure(error: unknown, uri?: string): Error {
   const target =
     uri === undefined ? 'the database' : `'${redactUriPassword(uri)}'`;
   const reason = isMissingOptionalPeerError(error)
