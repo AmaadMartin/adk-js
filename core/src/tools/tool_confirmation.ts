@@ -77,9 +77,11 @@ export class ToolConfirmation {
  * The reference also configures a camelCase alias generator. That is a no-op
  * for these three single-word names — the alias equals the field name — so
  * there is no key mapping to port.
+ *
+ * `hint` declares no default because the constructor already applies one.
  */
 const confirmationFieldsSchema = z.strictObject({
-  hint: z.string().default(''),
+  hint: z.string().optional(),
   confirmed: z.boolean().default(false),
   payload: z.unknown().optional(),
 });
