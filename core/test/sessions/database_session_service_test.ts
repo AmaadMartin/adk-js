@@ -2377,9 +2377,14 @@ describe('DatabaseSessionService open failures', () => {
     const uri = `sqlite://${path.join(blocker, 'sessions.db')}`;
     const service = new DatabaseSessionService(uri);
 
+    // The message names the URL, redacted. Which spelling it lands on depends
+    // on the platform, because a Windows temp path is not a parseable URL, so
+    // describeOpenFailure's own tests pin the two forms against fixed input.
     await expect(service.init()).rejects.toThrow(
       expect.objectContaining({
-        message: `Failed to create database engine for URL '${uri}'`,
+        message: expect.stringMatching(
+          /^Failed to create database engine for URL '.+'$/,
+        ),
         cause: expect.any(Error),
       }),
     );
