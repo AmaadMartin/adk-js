@@ -123,11 +123,6 @@ export interface UnsafeLocalCodeExecutorOptions {
   optimizeDataFile?: boolean;
 }
 
-async function createTempDir(): Promise<string> {
-  // mkdtemp names the directory itself and creates it exclusively at 0o700.
-  return fs.mkdtemp(path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'));
-}
-
 async function writeScriptFile(
   tempDir: string,
   code: string,
@@ -251,12 +246,16 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
     const isPython = language === CodeExecutionLanguage.PYTHON;
     let tempDir: string | undefined;
     try {
-      tempDir = await createTempDir();
+      // mkdtemp names the directory itself and creates it exclusively at 0o700.
+      tempDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'),
+      );
 
       if (params.codeExecutionInput.inputFiles) {
         await materializeFiles(params.codeExecutionInput.inputFiles, tempDir);
       }
 
+      // JavaScript keeps this command; every other language replaces it below.
       let command = this.nodeCommandPath;
       let args: string[];
       let scriptFileName: string | undefined;
@@ -310,6 +309,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         const child = spawn(command, args, {
           cwd: tempDir,
           detached: USE_PROCESS_GROUP,
+          // Only Python gets an explicit environment; every other language
+          // keeps inheriting the parent's.
           env: isPython ? pythonChildEnv() : undefined,
         });
 

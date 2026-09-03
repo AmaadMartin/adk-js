@@ -67,6 +67,12 @@ const result = await executor.executeCode({
 // result.stdout === '42\n', result.stderr === 'a warning', result.exitCode === 0
 ```
 
+`exitCode` is the raw status, so a caller can classify a run itself instead of
+parsing `stderr`. A program that called `sys.exit(3)` reports `3`, and one
+killed on the timeout reports `-15`, the way a shell and adk-python report a
+signal death. `exitCode` is `undefined` only when no process ran, which is the
+unsupported language case.
+
 ## How Python runs
 
 The program is written to the child interpreter's stdin, not to a file, so its
