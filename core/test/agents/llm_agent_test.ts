@@ -1460,13 +1460,14 @@ describe('LlmAgent set_model_response handling', () => {
    */
   async function runWorkaround(
     turns: LlmResponse[][],
+    outputSchema: z4.ZodObject<z4.ZodRawShape> = PERSON_SCHEMA,
   ): Promise<{events: Event[]; model: CountingMockLlm}> {
     vi.stubEnv(VERTEX_ENV_VAR, undefined);
     const model = new CountingMockLlm(turns);
     const agent = new LlmAgent({
       name: 'test_agent',
       model,
-      outputSchema: PERSON_SCHEMA,
+      outputSchema,
       outputKey: 'person',
       tools: [
         new FunctionTool({
@@ -1523,6 +1524,31 @@ describe('LlmAgent set_model_response handling', () => {
       age: 25,
       tags: [],
     });
+  });
+
+  it('enforces a refinement the genai conversion cannot express', async () => {
+    // The tool must validate against the schema as supplied. The converted
+    // genai `Schema` carries the field types but not the refinement.
+    const capitalisedName = z4
+      .object({name: z4.string(), age: z4.number()})
+      .refine((person) => person.name[0] === person.name[0].toUpperCase(), {
+        message: 'name must start with a capital letter',
+      });
+
+    const {events} = await runWorkaround(
+      [
+        [setModelResponseCall({name: 'alice', age: 25})],
+        [setModelResponseCall({name: 'Alice', age: 25})],
+      ],
+      capitalisedName,
+    );
+
+    expect(getFunctionResponses(events[1])[0].response).toEqual({
+      error: expect.stringContaining('name must start with a capital letter'),
+    });
+    expect(events[4].content?.parts?.[0].text).toBe(
+      '{"name":"Alice","age":25}',
+    );
   });
 
   it('asks the model to retry an invalid call instead of answering with it', async () => {

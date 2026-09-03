@@ -162,10 +162,8 @@ export function schemaShape(schema: SchemaLike): SchemaShape {
 
 /** Whether a JSON Schema document describes an object with declared fields. */
 function describesObject(document: unknown): boolean {
-  if (document === null || typeof document !== 'object') {
-    return false;
-  }
-  const {properties, type, additionalProperties} = document as {
+  // An array schema that declares no `items` reaches this with `undefined`.
+  const {properties, type, additionalProperties} = (document ?? {}) as {
     properties?: unknown;
     type?: unknown;
     additionalProperties?: unknown;

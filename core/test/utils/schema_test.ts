@@ -210,6 +210,10 @@ describe('schemaShape', () => {
     expect(schemaShape(schema)).toBe('value');
   });
 
+  it('classifies a genai array Schema with no items as a value', () => {
+    expect(schemaShape({type: Type.ARRAY})).toBe('value');
+  });
+
   it('classifies a genai primitive Schema as a value', () => {
     expect(schemaShape({type: Type.STRING})).toBe('value');
   });
