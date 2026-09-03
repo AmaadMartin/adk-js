@@ -13,7 +13,6 @@ import {
 import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
 import {
   createFinalTaskStatusEvent,
-  createInputMissingErrorEvent,
   createTask,
   createTaskArtifactUpdateEvent,
   createTaskCompletedEvent,
@@ -539,9 +538,9 @@ describe('a2a_event', () => {
       });
     });
 
-    it('createInputMissingErrorEvent', () => {
+    it('createTaskInputRequiredEvent carries validation-error parts through', () => {
       expect(
-        createInputMissingErrorEvent({
+        createTaskInputRequiredEvent({
           parts: [
             {kind: 'text', text: 'valid input'},
             {

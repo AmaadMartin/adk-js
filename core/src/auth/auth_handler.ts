@@ -35,10 +35,17 @@ export class AuthHandler {
   /**
    * Stores the credential the client returned in `state` and returns it, so a
    * caller can also record it on the invocation it resolved for.
+   *
+   * @param state The session state to store the credential in.
+   * @throws Error: If the auth config has no credentialKey.
    */
   async parseAndStoreAuthResponse(
     state: State,
   ): Promise<AuthCredential | undefined> {
+    if (!this.authConfig.credentialKey) {
+      throw new Error('credentialKey is empty.');
+    }
+
     const credentialKey = 'temp:' + this.authConfig.credentialKey;
 
     const authSchemeType = this.authConfig.authScheme.type;
