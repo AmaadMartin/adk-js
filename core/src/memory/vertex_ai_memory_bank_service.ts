@@ -36,6 +36,7 @@ import {
 } from './base_memory_service.js';
 import {createMemoryEntry, MemoryEntry} from './memory_entry.js';
 
+/** Keys `memories.generate` accepts as config fields. */
 const GENERATE_MEMORIES_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'allowedTopics',
   'disableConsolidation',
@@ -50,6 +51,7 @@ const GENERATE_MEMORIES_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'waitForCompletion',
 ]);
 
+/** Keys `memories.create` accepts as config fields. */
 const CREATE_MEMORY_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'description',
   'disableMemoryRevisions',
@@ -57,18 +59,28 @@ const CREATE_MEMORY_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'expireTime',
   'httpOptions',
   'memoryId',
+  'metadata',
   'revisionExpireTime',
+  'revisionLabels',
   'revisionTtl',
   'topics',
   'ttl',
   'waitForCompletion',
 ]);
 
+/** Keys `memories.ingestEvents` accepts. */
 const INGEST_EVENTS_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'forceFlush',
   'generationTriggerConfig',
   'streamId',
 ]);
+
+const VERTEX_METADATA_KEYS = [
+  'boolValue',
+  'doubleValue',
+  'stringValue',
+  'timestampValue',
+] as const;
 
 const ENABLE_CONSOLIDATION_KEY = 'enable_consolidation';
 const MAX_DIRECT_MEMORIES_PER_GENERATE_CALL = 5;
@@ -116,6 +128,18 @@ function shouldUseGenerateMemories(
   );
 }
 
+/**
+ * Narrows a caller-supplied memory generation trigger configuration.
+ *
+ * Only the top level is checked. The nested rule belongs to the caller, and
+ * the Memory Bank API rejects a malformed one.
+ */
+function isGenerationTriggerConfig(
+  value: unknown,
+): value is MemoryGenerationTriggerConfig {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function toVertexMetadataValue(
   key: string,
   value: unknown,
@@ -135,10 +159,7 @@ function toVertexMetadataValue(
   if (typeof value === 'object' && value !== null) {
     const v = value as Partial<MemoryMetadataValue>;
     if (
-      v.boolValue !== undefined ||
-      v.doubleValue !== undefined ||
-      v.stringValue !== undefined ||
-      v.timestampValue !== undefined
+      VERTEX_METADATA_KEYS.some((metadataKey) => v[metadataKey] !== undefined)
     ) {
       return v as MemoryMetadataValue;
     }
@@ -310,6 +331,34 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     return {memories: memoryEvents};
   }
 
+  /**
+   * Retrieves the structured profiles for a scope, one per registered schema.
+   *
+   * Profiles are a Vertex Memory Bank capability distinct from memory search:
+   * a scope-keyed lookup rather than a semantic query. It is not part of
+   * `BaseMemoryService`.
+   */
+  async retrieveProfiles(request: {
+    appName: string;
+    userId: string;
+  }): Promise<MemoryProfile[]> {
+    const response = await this.memories.retrieveProfiles({
+      name: `reasoningEngines/${this.agentEngineId}`,
+      scope: {
+        app_name: request.appName,
+        user_id: request.userId,
+      },
+    });
+
+    const profiles = Object.values(response.profiles ?? {});
+    logger.debug(
+      profiles.length > 0
+        ? `Retrieved ${profiles.length} memory profiles.`
+        : 'Retrieved no memory profiles.',
+    );
+    return profiles;
+  }
+
   private async addEventsToMemoryFromEvents(request: {
     appName: string;
     userId: string;
@@ -348,9 +397,9 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
   /**
    * Adds events to Vertex AI Memory Bank via `memories.ingestEvents`.
    *
-   * The request is dispatched without waiting for it: the service buffers the
-   * events and generates memories according to its trigger rule, so the
-   * response carries nothing the caller acts on.
+   * The request is dispatched without being awaited. IngestEvents takes about
+   * 800 ms to trigger and its response carries nothing the caller acts on, so
+   * awaiting it would only slow the caller down. A failure is logged.
    */
   private addEventsToMemoryViaIngest(request: {
     appName: string;
@@ -370,7 +419,9 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       },
       ...ingestOptionsFromMetadata(request.customMetadata),
     };
-    // An event-less request is valid: it updates the trigger configuration.
+
+    // An event-less request is valid: it updates the trigger configuration
+    // without flushing the stream.
     if (directEvents.length > 0) {
       params.directContentsSource = {events: directEvents};
     }
@@ -379,33 +430,6 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       logger.error(`Background ingestEvents request failed: ${error}`);
     });
     logger.debug('Ingest events request triggered.');
-  }
-
-  /**
-   * Retrieves the structured profiles of the scope, one per registered schema.
-   *
-   * Profiles are a Vertex Memory Bank capability distinct from memory search:
-   * a scope-keyed lookup rather than a semantic query.
-   */
-  async retrieveProfiles(request: {
-    appName: string;
-    userId: string;
-  }): Promise<MemoryProfile[]> {
-    const response = await this.memories.retrieveProfiles({
-      name: `reasoningEngines/${this.agentEngineId}`,
-      scope: {
-        app_name: request.appName,
-        user_id: request.userId,
-      },
-    });
-
-    const profiles = Object.values(response.profiles ?? {});
-    logger.debug(
-      profiles.length > 0
-        ? `Retrieved ${profiles.length} memory profiles.`
-        : 'Retrieved no memory profiles.',
-    );
-    return profiles;
   }
 
   private async addMemoriesViaCreate(request: {
@@ -515,12 +539,9 @@ function ingestOptionsFromMetadata(
     options.config = {forceFlush};
   }
 
-  // The caller owns the shape of the trigger config; the Vertex service
-  // rejects a malformed one.
   const generationTriggerConfig = customMetadata['generationTriggerConfig'];
-  if (generationTriggerConfig && typeof generationTriggerConfig === 'object') {
-    options.generationTriggerConfig =
-      generationTriggerConfig as MemoryGenerationTriggerConfig;
+  if (isGenerationTriggerConfig(generationTriggerConfig)) {
+    options.generationTriggerConfig = generationTriggerConfig;
   }
 
   return options;
@@ -661,6 +682,11 @@ function buildCreateMemoryConfig(params: {
         ...buildVertexMetadata(metadataByKey),
       };
     }
+  }
+
+  // An explicit customMetadata["memoryId"] wins over the entry's own id.
+  if (params.memoryId !== undefined && config['memoryId'] === undefined) {
+    config['memoryId'] = params.memoryId;
   }
 
   const revisionLabels = {
