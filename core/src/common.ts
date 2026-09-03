@@ -96,6 +96,14 @@ export type {LlmAgentYamlConfig as DeclarativeLlmAgentConfig} from './agents/llm
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig, LoopAgentState} from './agents/loop_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
+// As with the LlmAgent loader above: the deprecated `agents/agent_config.ts`
+// already exports `parallelAgentYamlConfigSchema` and `ParallelAgentYamlConfig`
+// into this flat barrel, so the declarative loader takes distinct names here.
+export {
+  parallelAgentYamlConfigSchema as declarativeParallelAgentConfigSchema,
+  parseParallelAgentYamlConfig,
+} from './agents/parallel_agent_config.js';
+export type {ParallelAgentYamlConfig as DeclarativeParallelAgentConfig} from './agents/parallel_agent_config.js';
 export {AgentTransferLlmRequestProcessor} from './agents/processors/agent_transfer_llm_request_processor.js';
 export {AutoFlow} from './agents/processors/auto_flow.js';
 export {

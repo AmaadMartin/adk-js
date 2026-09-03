@@ -11,6 +11,7 @@ import {logger} from '../utils/logger.js';
  * Feature names.
  */
 export enum FeatureName {
+  /** The declarative YAML agent-config document surface. */
   AGENT_CONFIG = 'AGENT_CONFIG',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
   /**

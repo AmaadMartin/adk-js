@@ -110,6 +110,13 @@ describe('warnDeprecatedOnce', () => {
     expect(logger.warn).toHaveBeenCalledWith('OldFunction is deprecated.');
   });
 
+  it('warns separately for distinct keys', () => {
+    warnDeprecatedOnce('first', 'first is deprecated.');
+    warnDeprecatedOnce('second', 'second is deprecated.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
+
   it('warns again after the registry is reset', () => {
     warnDeprecatedOnce('OldSchema', 'OldSchema is deprecated.');
     resetDeprecationWarnings();
@@ -118,13 +125,18 @@ describe('warnDeprecatedOnce', () => {
     expect(logger.warn).toHaveBeenCalledTimes(2);
   });
 
-  it('shares its registry with the class decorator', () => {
+  it('shares its registry with the class decorator, so a reset re-arms both', () => {
     @deprecated('Shared is deprecated.')
     class Shared {}
 
     new Shared();
     warnDeprecatedOnce('Shared', 'Shared is deprecated.');
-
     expect(logger.warn).toHaveBeenCalledTimes(1);
+
+    resetDeprecationWarnings();
+    new Shared();
+    warnDeprecatedOnce('anotherKey', 'anotherKey is deprecated.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(3);
   });
 });
