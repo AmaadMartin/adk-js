@@ -32,6 +32,7 @@ export enum TaskState {
   CANCELED = 'canceled',
   REJECTED = 'rejected',
   INPUT_REQUIRED = 'input-required',
+  AUTH_REQUIRED = 'auth-required',
 }
 
 /**
@@ -249,6 +250,40 @@ export function createTaskCompletedEvent({
     final: true,
     status: {
       state: TaskState.COMPLETED,
+      timestamp: new Date().toISOString(),
+    },
+    metadata,
+  };
+}
+
+/**
+ * Creates a terminal status update carrying an arbitrary task state.
+ *
+ * The sibling factories each fix one state. Use this one where the state is
+ * decided at runtime, such as the state a task result aggregator settled on,
+ * or a cancellation.
+ */
+export function createFinalTaskStatusEvent({
+  taskId,
+  contextId,
+  state,
+  message,
+  metadata,
+}: {
+  taskId: string;
+  contextId: string;
+  state: TaskState;
+  message?: Message;
+  metadata?: Record<string, unknown>;
+}): TaskStatusUpdateEvent {
+  return {
+    kind: 'status-update',
+    taskId,
+    contextId,
+    final: true,
+    status: {
+      state,
+      message,
       timestamp: new Date().toISOString(),
     },
     metadata,

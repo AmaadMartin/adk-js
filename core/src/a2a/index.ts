@@ -9,6 +9,8 @@
  * Also re-exported from `@google/adk`.
  */
 
+export {TaskState} from './a2a_event.js';
+export type {A2AEvent} from './a2a_event.js';
 export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a_remote_agent.js';
 export type {
   A2AStreamEventData,
@@ -33,3 +35,26 @@ export {
 export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
 export type {ExecutorContext} from './executor_context.js';
+export {
+  A2A_NEW_INTEGRATION_EXTENSION,
+  activateNewVersionExtension,
+  enqueueSubmittedSignal,
+  executeAfterAgentInterceptors,
+  executeAfterEventInterceptors,
+  executeBeforeAgentInterceptors,
+  requireRequestContext,
+} from './executor_utils.js';
+export type {ExecuteInterceptor} from './executor_utils.js';
+export type {
+  A2APartToGenAIPartConverter,
+  GenAIPartToA2APartConverter,
+} from './part_converter_utils.js';
+export {
+  convertA2aRequestToAgentRunRequest,
+  getUserId,
+} from './request_converter_utils.js';
+export type {
+  A2ARequestToAgentRunRequestConverter,
+  AgentRunRequest,
+} from './request_converter_utils.js';
+export {TaskResultAggregator} from './task_result_aggregator.js';
