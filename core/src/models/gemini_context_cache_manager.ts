@@ -80,18 +80,13 @@ export interface QualifiedCacheScope extends CacheScope {
 }
 
 /**
- * Narrows a {@link ToolUnion} to its declarative arm.
+ * Returns the declarative tools of a request's tool list.
  *
- * A `CallableTool` is the only other arm and it is identified by its
- * `callTool` method, so no `instanceof` check is needed.
+ * A `CallableTool` is the only other arm of {@link ToolUnion} and it is
+ * identified by its `callTool` method, so no `instanceof` check is needed.
  */
-function isDeclarativeTool(tool: ToolUnion): tool is Tool {
-  return !('callTool' in tool);
-}
-
-/** Returns the declarative tools of a request's tool list. */
 function declarativeTools(tools: ToolUnion[] | undefined): Tool[] {
-  return (tools ?? []).filter(isDeclarativeTool);
+  return (tools ?? []).filter((tool): tool is Tool => !('callTool' in tool));
 }
 
 function requireCacheConfig(llmRequest: LlmRequest): ContextCacheConfig {
@@ -330,29 +325,22 @@ export function applyCacheToRequest(
 }
 
 /**
- * Narrows metadata to its active arm, which is the only arm that names a
- * cache. Fingerprint-only metadata records a prefix, not a live cache.
- */
-function activeCacheMetadata(
-  cacheMetadata: CacheMetadata | undefined,
-): ActiveCacheMetadata | undefined {
-  return cacheMetadata?.cacheName !== undefined ? cacheMetadata : undefined;
-}
-
-/**
  * Returns a request's cache metadata when the cache it names may still be
  * used, and `undefined` otherwise.
+ *
+ * Only the active arm of {@link CacheMetadata} names a cache; fingerprint-only
+ * metadata records a prefix, not a live cache.
  *
  * @param llmRequest The request carrying the metadata to check.
  * @param cacheScope The backend namespace that owns the cache.
  * @throws Error If the request carries no cache configuration.
  */
-async function validActiveCache(
+export async function validActiveCache(
   llmRequest: LlmRequest,
   cacheScope: QualifiedCacheScope,
 ): Promise<ActiveCacheMetadata | undefined> {
-  const cacheMetadata = activeCacheMetadata(llmRequest.cacheMetadata);
-  if (!cacheMetadata) {
+  const cacheMetadata = llmRequest.cacheMetadata;
+  if (cacheMetadata?.cacheName === undefined) {
     return undefined;
   }
   const {cacheName, expireTime, invocationsUsed} = cacheMetadata;
@@ -379,22 +367,6 @@ async function validActiveCache(
     return undefined;
   }
   return cacheMetadata;
-}
-
-/**
- * Reports whether the cache named by a request's metadata may still be used.
- *
- * @param llmRequest The request carrying the metadata to check.
- * @param cacheScope The backend namespace that owns the cache.
- * @returns True when the cache is live, within its invocation budget and
- *     still matches the request.
- * @throws Error If the request carries no cache configuration.
- */
-export async function isCacheValid(
-  llmRequest: LlmRequest,
-  cacheScope: QualifiedCacheScope,
-): Promise<boolean> {
-  return (await validActiveCache(llmRequest, cacheScope)) !== undefined;
 }
 
 /**
@@ -521,11 +493,6 @@ export class GeminiContextCacheManager {
       previousContentsCount,
       findCountOfContentsToCache(llmRequest.contents),
     );
-    const fingerprint = await generateCacheFingerprint(
-      llmRequest,
-      cacheContentsCount,
-      this.cacheScope,
-    );
     const cacheMetadata = await this.createNewCacheWithContents(
       llmRequest,
       cacheContentsCount,
@@ -540,11 +507,20 @@ export class GeminiContextCacheManager {
     }
     // Keep the largest stable prefix, so the fingerprint does not oscillate
     // while the request stays below the size that justifies a cache.
+    // Fingerprinting here rather than above keeps the created-cache path to
+    // one digest, since `createGeminiCache` computes the same one itself.
     logger.debug(
       `Cache creation skipped, preserving prefix fingerprint ` +
         `(contentsCount=${cacheContentsCount})`,
     );
-    return {fingerprint, contentsCount: cacheContentsCount};
+    return {
+      fingerprint: await generateCacheFingerprint(
+        llmRequest,
+        cacheContentsCount,
+        this.cacheScope,
+      ),
+      contentsCount: cacheContentsCount,
+    };
   }
 
   /**

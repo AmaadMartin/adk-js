@@ -40,9 +40,9 @@ import {
   estimateRequestTokens,
   findCountOfContentsToCache,
   generateCacheFingerprint,
-  isCacheValid,
   minimumCacheTokens,
   QualifiedCacheScope,
+  validActiveCache,
 } from '../../src/models/gemini_context_cache_manager.js';
 
 const GEMINI_SCOPE: QualifiedCacheScope = {backend: 'gemini'};
@@ -478,7 +478,7 @@ describe('GeminiContextCacheManager', () => {
   it('test_is_cache_valid_fingerprint_mismatch', async () => {
     const llmRequest = createLlmRequest(createCacheMetadata());
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
   });
 
   it('test_is_cache_valid_expired_cache', async () => {
@@ -488,7 +488,7 @@ describe('GeminiContextCacheManager', () => {
       llmRequest,
     );
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
   });
 
   it('test_is_cache_valid_fingerprint_only_metadata', async () => {
@@ -497,7 +497,7 @@ describe('GeminiContextCacheManager', () => {
       contentsCount: 5,
     });
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
   });
 
   it('test_is_cache_valid_cache_intervals_exceeded', async () => {
@@ -507,7 +507,7 @@ describe('GeminiContextCacheManager', () => {
       llmRequest,
     );
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
   });
 
   it('test_is_cache_valid_all_checks_pass', async () => {
@@ -517,7 +517,7 @@ describe('GeminiContextCacheManager', () => {
       llmRequest,
     );
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(true);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeDefined();
   });
 
   it('test_cleanup_cache', async () => {
@@ -1299,7 +1299,7 @@ describe('GeminiContextCacheManager paths the reference does not reach', () => {
       llmRequest,
     );
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(true);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeDefined();
   });
 
   it('drops a cache one invocation past its interval budget', async () => {
@@ -1309,7 +1309,7 @@ describe('GeminiContextCacheManager paths the reference does not reach', () => {
       llmRequest,
     );
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
   });
 
   it('keeps a cache that expires in the future', async () => {
@@ -1319,13 +1319,13 @@ describe('GeminiContextCacheManager paths the reference does not reach', () => {
       llmRequest,
     );
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(true);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeDefined();
   });
 
   it('reports no valid cache when the request carries no metadata', async () => {
     const llmRequest = createLlmRequest(undefined, 2);
 
-    expect(await isCacheValid(llmRequest, GEMINI_SCOPE)).toBe(false);
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
   });
 
   it('treats a measured zero as a measurement, not as a missing count', async () => {
