@@ -539,9 +539,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
     if (this.a2aConfig.agentCard) {
       const source = this.a2aConfig.agentCard;
-      const card =
-        typeof source === 'string' ? await this.fetchCard(source) : source;
-      if (typeof source === 'string') {
+      const isResolved = typeof source !== 'string';
+      const card = isResolved ? source : await this.fetchCard(source);
+      if (!isResolved) {
         // Validate before caching. A rejected card left on the instance reads
         // as already resolved, so the next call would skip the check and talk
         // to the origin that card named.
@@ -687,10 +687,11 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         // Either there was no function response to forward, or every part of
         // it was scrubbed (a credential-only resume). Either way the peer has
         // to be brought up to date from the session history instead.
-        const missing = this.taskScope(context)
+        const taskScope = this.taskScope(context);
+        const missing = taskScope
           ? toTaskScopeA2AParts(context, context.session, {
               peerName: this.name,
-              taskScope: this.taskScope(context) ?? '',
+              taskScope,
               fullHistoryWhenStateless: this.fullHistoryWhenStateless,
               converter: this.a2aConfig.genaiPartConverter,
             })

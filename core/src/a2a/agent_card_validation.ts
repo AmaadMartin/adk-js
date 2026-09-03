@@ -6,7 +6,7 @@
 
 import {AgentCard} from '@a2a-js/sdk';
 import {isIP} from 'node:net';
-import {AgentCardResolutionError} from './agent_card.js';
+import {AgentCardResolutionError, isRemoteCardSource} from './agent_card.js';
 
 /** Every URL a client may aim RPC traffic at, in card order. */
 function cardRpcUrls(card: AgentCard): string[] {
@@ -107,7 +107,7 @@ export function validateAgentCard(card: AgentCard, source: string): void {
       `Invalid RPC URL in agent card: ${card.url}`,
     );
   }
-  if (source.startsWith('http://') || source.startsWith('https://')) {
+  if (isRemoteCardSource(source)) {
     assertCardRpcTargetsAllowed(card, source);
   }
 }

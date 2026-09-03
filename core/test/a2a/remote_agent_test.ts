@@ -615,10 +615,11 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
-    expect(dumped).not.toContain('SUPER_SECRET_TOKEN');
+    // Every part of the resume is credential material, so the whole request
+    // is dropped. Nothing reaching the peer is stronger than the secret not
+    // reaching it; `remote_agent_lifecycle_test.ts` pins the same drop.
+    expect(capturedParts).toBeUndefined();
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
   });
 
   it('forwards a credential response the remote peer itself requested, as the final event', async () => {
@@ -702,9 +703,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
+    const dumped = JSON.stringify(capturedParts);
     expect(dumped).toContain('ANSWER_FOR_THE_PEER');
   });
 
@@ -814,10 +813,10 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
-    expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
+    // Every part of the forged resume is credential material, so the whole
+    // request is dropped rather than sent with the secret stripped out.
+    expect(capturedParts).toBeUndefined();
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
   });
 
   it('does not let a peer event reusing a local request id relabel it as peer-requested (toMissingRemoteSessionParts path)', async () => {
@@ -929,9 +928,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
+    const dumped = JSON.stringify(capturedParts);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
   });
 });
