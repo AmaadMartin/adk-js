@@ -2497,6 +2497,24 @@ describe('DatabaseSessionService read routing', () => {
     expect(connectionTypes).not.toContain('read');
   });
 
+  it('pages a bare offset through the read connection', async () => {
+    for (const sessionId of ['s1', 's2', 's3']) {
+      await service.createSession({appName: 'app', userId: 'u1', sessionId});
+    }
+
+    connectionTypes.length = 0;
+    const listed = await service.listSessions({
+      appName: 'app',
+      userId: 'u1',
+      offset: 1,
+    });
+
+    expect(listed.sessions).toHaveLength(2);
+    expect(listed.totalItems).toBe(3);
+    expect(listed.page).toBe(1);
+    expect(connectionTypes).not.toContain('write');
+  });
+
   it('reads and writes correctly with no replica configured', async () => {
     const plain = new DatabaseSessionService({
       dbName: ':memory:',

@@ -341,7 +341,7 @@ export class DatabaseSessionService extends BaseSessionService {
       await validateDatabaseSchemaVersion(orm);
     }
 
-    this.backend = databaseBackendOf(this.orm!);
+    this.backend = databaseBackendOf(this.orm!.em.getConnection());
     this.initialized = true;
   }
 

@@ -638,8 +638,22 @@ describe('operations', () => {
         pool: {min: 1, max: 1},
       });
 
-      expect(databaseBackendOf(orm)).toBe('sqlite');
-      expect(supportsRowLevelLocking(databaseBackendOf(orm))).toBe(false);
+      const backend = databaseBackendOf(orm.em.getConnection());
+
+      expect(backend).toBe('sqlite');
+      expect(supportsRowLevelLocking(backend)).toBe(false);
+    });
+
+    it('passes a non-sqlite dialect through unchanged', () => {
+      const postgres = {getKnex: () => ({client: {dialect: 'postgresql'}})};
+
+      expect(databaseBackendOf(postgres)).toBe('postgresql');
+      expect(supportsRowLevelLocking(databaseBackendOf(postgres))).toBe(true);
+    });
+
+    it('names no backend for a connection with no knex handle', () => {
+      expect(databaseBackendOf({})).toBe('');
+      expect(databaseBackendOf({getKnex: 'not a function'})).toBe('');
     });
   });
 

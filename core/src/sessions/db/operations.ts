@@ -145,12 +145,11 @@ function exposesKnex(connection: object): connection is KnexBackedConnection {
  * extends the MySQL one. Both backends take row-level locks, so the only
  * consumer of this name is unaffected.
  *
- * @param orm The MikroORM instance to inspect.
- * @returns The backend name, or an empty string for a connection that exposes
- *     no knex handle.
+ * @param connection The connection `orm.em.getConnection()` returns.
+ * @returns The backend name, or an empty string for a connection with no knex
+ *     handle, such as one belonging to a document driver.
  */
-export function databaseBackendOf(orm: MikroORM): string {
-  const connection = orm.em.getConnection();
+export function databaseBackendOf(connection: object): string {
   if (!exposesKnex(connection)) {
     return '';
   }
