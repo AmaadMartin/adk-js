@@ -10,9 +10,11 @@ import {
   Context,
   ContextFilterPlugin,
   InMemoryRunner,
+  InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  PluginManager,
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -45,10 +47,20 @@ function createLlmRequest(contents: Content[]): LlmRequest {
   return {contents, liveConnectConfig: {}, toolsDict: {}};
 }
 
-const callbackContext = {
-  agentName: 'test_agent',
-  invocationId: 'inv-1',
-} as unknown as Context;
+const callbackContext = new Context({
+  invocationContext: new InvocationContext({
+    invocationId: 'inv-1',
+    session: {
+      id: 'session-1',
+      appName: 'test-app',
+      userId: 'test-user',
+      state: {},
+      events: [],
+      lastUpdateTime: 0,
+    },
+    pluginManager: new PluginManager(),
+  }),
+});
 
 /** Three complete invocations, enough to trip the default threshold. */
 function threeInvocations(): Content[] {

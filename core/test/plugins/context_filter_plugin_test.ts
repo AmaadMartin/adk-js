@@ -7,7 +7,13 @@
 // Ported from google/adk-python
 // tests/unittests/plugins/test_context_filtering_plugin.py (main).
 
-import {Context, ContextFilterPlugin, LlmRequest} from '@google/adk';
+import {
+  Context,
+  ContextFilterPlugin,
+  InvocationContext,
+  LlmRequest,
+  PluginManager,
+} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -33,10 +39,20 @@ function createLlmRequest(contents: Content[]): LlmRequest {
   return {contents, liveConnectConfig: {}, toolsDict: {}};
 }
 
-const callbackContext = {
-  agentName: 'test_agent',
-  invocationId: 'inv-1',
-} as unknown as Context;
+const callbackContext = new Context({
+  invocationContext: new InvocationContext({
+    invocationId: 'inv-1',
+    session: {
+      id: 'session-1',
+      appName: 'test-app',
+      userId: 'test-user',
+      state: {},
+      events: [],
+      lastUpdateTime: 0,
+    },
+    pluginManager: new PluginManager(),
+  }),
+});
 
 /** Collects the text of every part of every content, in order. */
 function collectTexts(contents: Content[]): string[] {
