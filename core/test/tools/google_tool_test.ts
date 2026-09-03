@@ -328,6 +328,34 @@ describe('GoogleTool', () => {
     expect(received.settings).toBe(toolSettings);
   });
 
+  it('drops a spoofed argument the schema does not reject', async () => {
+    stubCredentials(makeCredentials());
+    let receivedKeys: string[] = [];
+    const tool = new GoogleTool({
+      name: 'passthrough_function',
+      description: 'A Google API tool with a permissive schema.',
+      parameters: z.object({city: z.string()}).passthrough(),
+      credentialsConfig: makeCredentialsConfig(),
+      toolSettings: {maxRows: 10},
+      execute: (args) => {
+        receivedKeys = Object.keys(args);
+        return {success: true};
+      },
+    });
+
+    const result = await tool.runAsync({
+      args: {
+        city: 'Paris',
+        credentials: 'spoofed_credentials',
+        settings: 'spoofed_settings',
+      },
+      toolContext: makeContext(),
+    });
+
+    expect(result).toEqual({success: true});
+    expect(receivedKeys).toEqual(['city']);
+  });
+
   it('returns a structured error when credential resolution fails', async () => {
     const tool = new GoogleTool({
       name: 'external_token_function',
