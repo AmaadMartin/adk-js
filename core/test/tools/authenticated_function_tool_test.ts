@@ -264,6 +264,26 @@ describe('AuthenticatedFunctionTool with a resolved credential', () => {
     expect(execute.mock.calls[0][0]).toEqual({city: 'Paris'});
   });
 
+  it('omits the credential from a genai schema that does not declare one', async () => {
+    const execute = vi.fn((_input: unknown) => 'ok');
+    const parameters: Schema = {
+      type: Type.OBJECT,
+      properties: {city: {type: Type.STRING}},
+      required: ['city'],
+    };
+    const tool = new AuthenticatedFunctionTool({
+      name: 'lookup',
+      description: 'Looks up the city.',
+      parameters,
+      authConfig: READY_AUTH_CONFIG,
+      execute,
+    });
+
+    await tool.runAsync({args: {city: 'Paris'}, toolContext: makeContext()});
+
+    expect(execute.mock.calls[0][0]).toEqual({city: 'Paris'});
+  });
+
   it('rejects with the message the function threw', async () => {
     const tool = new AuthenticatedFunctionTool({
       name: 'lookup',
