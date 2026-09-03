@@ -4,12 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {agentRefConfigSchema, codeConfigSchema} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
-import {
-  agentRefConfigSchema,
-  codeConfigSchema,
-} from '../../src/agents/common_configs.js';
 
 function messageOf(result: z.ZodSafeParseResult<unknown>): string {
   return result.success ? '' : z.prettifyError(result.error);

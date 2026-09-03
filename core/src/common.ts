@@ -13,8 +13,15 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
-export {parseBaseAgentYamlConfig} from './agents/base_agent_config.js';
+export {
+  baseAgentYamlConfigSchema,
+  parseBaseAgentYamlConfig,
+} from './agents/base_agent_config.js';
 export type {BaseAgentYamlConfig} from './agents/base_agent_config.js';
+export {
+  agentRefConfigSchema,
+  codeConfigSchema,
+} from './agents/common_configs.js';
 export type {AgentRefConfig, CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
