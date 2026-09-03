@@ -57,6 +57,10 @@ export interface LlmRequest {
    * are resolved into the system instruction once every tool has processed the
    * request, so a tool does not have to know where instructions ultimately go.
    * Internal request state.
+   *
+   * No tool in this package writes it yet, so `finalizeDynamicInstructions`
+   * is currently a no-op. The field and the reader are here because the eval
+   * live driver calls the reader.
    */
   dynamicInstructions?: string[];
 }
@@ -78,24 +82,6 @@ export function appendInstructions(
   } else {
     llmRequest.config.systemInstruction = newInstructions;
   }
-}
-
-/**
- * Accumulates instructions a tool contributes while the request is built.
- *
- * @param instructions The instructions to accumulate.
- */
-export function appendDynamicInstructions(
-  llmRequest: LlmRequest,
-  instructions: string[],
-): void {
-  if (!instructions.length) {
-    return;
-  }
-  if (!llmRequest.dynamicInstructions) {
-    llmRequest.dynamicInstructions = [];
-  }
-  llmRequest.dynamicInstructions.push(...instructions);
 }
 
 /**

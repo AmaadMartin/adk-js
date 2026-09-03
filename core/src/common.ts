@@ -168,10 +168,7 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
-export {
-  DEFAULT_LIVE_TIMEOUT_SECONDS,
-  MISSING_EVAL_DEPENDENCIES_MESSAGE,
-} from './evaluation/constants.js';
+export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
 export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
 export {
   getAllToolCalls,
