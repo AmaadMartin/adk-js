@@ -73,11 +73,18 @@ An absent `recordings` key parses as an empty list, matching adk-python's
 
 ## `llmResponse` and `llmResponses`
 
-adk-python records the streamed responses of one request as a list,
-`llm_responses`. adk-js records a single `llmResponse`, and `ReplayPlugin`
-returns it directly. Both fields are present on `LlmRecordingSchema` and both
-parse. adk-js recordings written to date carry the singular field. Converging
-the two needs a change to the adk-js replayer.
+adk-python records the responses streamed for one request as a list,
+`llm_responses`. adk-js records a single `llmResponse`. Both fields are present
+on `LlmRecordingSchema`, and `ReplayPlugin` reads both: it returns
+`llmResponse` when it is set, and the single entry of `llmResponses` otherwise.
+
+A `beforeModelCallback` answers one model call with one response, so adk-js
+cannot replay a recording holding several. That recording is refused by name:
+
+```
+Cannot replay a recording holding 2 llmResponses: one model call is answered
+with one response.
+```
 
 ## What strictness buys you
 

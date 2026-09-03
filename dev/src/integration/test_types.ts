@@ -41,15 +41,6 @@ export interface TestSpec {
   userMessages?: UserMessage[];
 }
 
-// The recording format is declared once, as runtime schemas, in
-// recordings_schema.ts. These are the types inferred from them.
-export type {
-  LlmRecording,
-  Recording,
-  Recordings,
-  ToolRecording,
-} from './recordings_schema.js';
-
 export interface TestInfo {
   name: string;
   spec: TestSpec;
