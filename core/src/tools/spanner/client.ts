@@ -26,7 +26,7 @@ type SpannerConstructorOptions = NonNullable<
  * `google-gax` pins.
  */
 export type SpannerAuthClient = NonNullable<
-  SpannerConstructorOptions['authClient']
+  NonNullable<ConstructorParameters<typeof Spanner>[0]>['authClient']
 >;
 
 /**
