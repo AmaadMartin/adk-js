@@ -5,7 +5,6 @@
  */
 
 import {cloneDeep} from 'lodash-es';
-import {OpenAPIV3} from 'openapi-types';
 
 import {Context} from '../agents/context.js';
 import {ServiceAccountCredentialExchanger} from '../tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
@@ -14,7 +13,7 @@ import {logger} from '../utils/logger.js';
 
 import {AuthCredential, AuthCredentialTypes} from './auth_credential.js';
 import {AuthProviderRegistry} from './auth_provider_registry.js';
-import {AuthScheme} from './auth_schemes.js';
+import {AuthScheme, ExtendedOAuth2, OAuthGrantType} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 import {BaseAuthProvider} from './base_auth_provider.js';
 import {BaseCredentialExchanger} from './exchanger/base_credential_exchanger.js';
@@ -50,25 +49,6 @@ const OAUTH2_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
   AuthCredentialTypes.OPEN_ID_CONNECT,
 ]);
 
-const CLIENT_CREDENTIALS_GRANT_TYPE = 'client_credentials';
-
-/**
- * An OAuth2 scheme that also carries the issuer URL used for RFC8414
- * auto-discovery. `AuthScheme` does not declare the field, so read it through
- * this extension rather than a cast.
- */
-interface OAuth2SchemeWithIssuer extends OpenAPIV3.OAuth2SecurityScheme {
-  issuerUrl?: string;
-}
-
-/**
- * An OpenID Connect scheme that also declares its supported grant types.
- * `OpenIdConnectWithConfig` has the field; the plain OpenAPI scheme does not.
- */
-interface OidcSchemeWithGrantTypes extends OpenAPIV3.OpenIdSecurityScheme {
-  grantTypesSupported?: string[];
-}
-
 /**
  * Reports whether a raw credential can be used without exchange or refresh.
  *
@@ -91,10 +71,10 @@ export function isClientCredentialsFlow(authScheme: AuthScheme): boolean {
     return !!authScheme.flows?.clientCredentials;
   }
   if (authScheme.type === 'openIdConnect') {
-    const oidcScheme: OidcSchemeWithGrantTypes = authScheme;
     return (
-      oidcScheme.grantTypesSupported?.includes(
-        CLIENT_CREDENTIALS_GRANT_TYPE,
+      'grantTypesSupported' in authScheme &&
+      authScheme.grantTypesSupported?.includes(
+        OAuthGrantType.CLIENT_CREDENTIALS,
       ) === true
     );
   }
@@ -136,7 +116,7 @@ export async function populateAuthScheme(
   authScheme: AuthScheme,
   discoveryManager: OAuth2DiscoveryManager,
 ): Promise<boolean> {
-  const scheme: OAuth2SchemeWithIssuer | undefined =
+  const scheme: ExtendedOAuth2 | undefined =
     authScheme.type === 'oauth2' ? authScheme : undefined;
   if (!scheme?.issuerUrl) {
     logger.warn('No issuerUrl was provided for auto-discovery.');
@@ -259,7 +239,7 @@ export class CredentialManager {
     provider: BaseAuthProvider,
   ): void {
     const existing =
-      CredentialManager.authProviderRegistry.getProviderByType(authSchemeType);
+      CredentialManager.authProviderRegistry.getProvider(authSchemeType);
     if (existing === provider) {
       return;
     }
@@ -394,12 +374,12 @@ export class CredentialManager {
   private async resolveThroughProvider(
     context: Context,
   ): Promise<AuthCredential | undefined> {
-    const schemeType = this.authConfig.authScheme.type;
+    const authScheme = this.authConfig.authScheme;
     const provider =
-      CredentialManager.authProviderRegistry.getProviderByType(schemeType);
+      CredentialManager.authProviderRegistry.getProvider(authScheme);
     if (!provider) {
       throw new Error(
-        `No auth provider registered for custom auth scheme '${schemeType}'.` +
+        `No auth provider registered for custom auth scheme '${authScheme.type}'.` +
           ' Register it using `CredentialManager.registerAuthProvider(' +
           '<schemeType>, <yourAuthProviderInstance>)`.',
       );

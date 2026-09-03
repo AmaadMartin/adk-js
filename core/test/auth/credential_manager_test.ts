@@ -15,6 +15,7 @@ import {
   Context,
   CredentialManager,
   ExchangeResult,
+  ExtendedOAuth2,
   InvocationContext,
   OAuth2DiscoveryManager,
   OpenIdConnectWithConfig,
@@ -81,13 +82,14 @@ function oidcScheme(grantTypesSupported?: string[]): OpenIdConnectWithConfig {
 }
 
 /** An OAuth2 scheme carrying an issuer URL, with both endpoints empty. */
-function discoverableScheme(): AuthScheme {
-  return customAuthScheme('oauth2', {
+function discoverableScheme(): ExtendedOAuth2 {
+  return {
+    type: 'oauth2',
     issuerUrl: 'https://auth.example.com',
     flows: {
       authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
     },
-  });
+  };
 }
 
 function flowsOf(scheme: AuthScheme): OpenAPIV3.OAuth2SecurityScheme['flows'] {
@@ -825,14 +827,15 @@ describe('populateAuthScheme', () => {
   });
 
   it('fills the implicit, password and client credentials endpoints', async () => {
-    const scheme = customAuthScheme('oauth2', {
+    const scheme: ExtendedOAuth2 = {
+      type: 'oauth2',
       issuerUrl: 'https://auth.example.com',
       flows: {
         implicit: {authorizationUrl: '', scopes: {}},
         password: {tokenUrl: '', scopes: {}},
         clientCredentials: {tokenUrl: '', scopes: {}},
       },
-    });
+    };
     const discovery = new OAuth2DiscoveryManager();
     vi.spyOn(discovery, 'discoverAuthServerMetadata').mockResolvedValue(
       serverMetadata(),
@@ -852,7 +855,8 @@ describe('populateAuthScheme', () => {
   });
 
   it('leaves an endpoint that is already set', async () => {
-    const scheme = customAuthScheme('oauth2', {
+    const scheme: ExtendedOAuth2 = {
+      type: 'oauth2',
       issuerUrl: 'https://auth.example.com',
       flows: {
         authorizationCode: {
@@ -861,7 +865,7 @@ describe('populateAuthScheme', () => {
           scopes: {},
         },
       },
-    });
+    };
     const discovery = new OAuth2DiscoveryManager();
     vi.spyOn(discovery, 'discoverAuthServerMetadata').mockResolvedValue(
       serverMetadata(),
