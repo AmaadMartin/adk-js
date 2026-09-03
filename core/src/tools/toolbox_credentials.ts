@@ -246,18 +246,16 @@ export function userIdentityAuthConfig(
 
 /** Reads the header name an API key scheme sends the key in. */
 function apiKeyHeaderName(authScheme: AuthScheme): string {
-  const name = 'name' in authScheme ? authScheme.name : undefined;
-  if (!name) {
+  if (!('name' in authScheme) || !authScheme.name) {
     throw new Error(ToolboxCredentialError.API_KEY_HEADER_NAME);
   }
-  const location = ('in' in authScheme ? authScheme.in : undefined) ?? 'header';
-  if (location.toLowerCase() !== 'header') {
+  if (authScheme.in.toLowerCase() !== 'header') {
     throw new Error(
-      `${ToolboxCredentialError.UNSUPPORTED_API_KEY_LOCATION}: ${location}. ` +
-        `Only 'header' is supported.`,
+      `${ToolboxCredentialError.UNSUPPORTED_API_KEY_LOCATION}: ` +
+        `${authScheme.in}. Only 'header' is supported.`,
     );
   }
-  return name;
+  return authScheme.name;
 }
 
 /**

@@ -334,7 +334,9 @@ export class ToolboxToolset extends BaseToolset {
       name: this.prefix ? `${this.prefix}_${name}` : name,
       description: tool.getDescription(),
       parameters: tool.getParamSchema(),
-      execute: (args, toolContext) => this.invoke(tool, args, toolContext),
+      // FunctionTool always forwards the toolContext of its RunAsyncToolRequest,
+      // where the field is required.
+      execute: (args, toolContext) => this.invoke(tool, args, toolContext!),
     });
   }
 
@@ -346,12 +348,9 @@ export class ToolboxToolset extends BaseToolset {
   private invoke(
     tool: ToolboxTool,
     args: Record<string, unknown>,
-    toolContext?: Context,
+    toolContext: Context,
   ): Promise<unknown> {
     const {credentials} = this.options;
-    if (!toolContext) {
-      return tool(args);
-    }
     if (
       credentials?.type === ToolboxCredentialType.USER_IDENTITY &&
       neededAuthServices(tool).size > 0

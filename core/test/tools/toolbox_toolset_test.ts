@@ -5,13 +5,20 @@
  */
 
 import {
+  AuthCredential,
+  AuthCredentialTypes,
+  BaseTool,
   Context,
+  InMemoryCredentialService,
   InvocationContext,
   PluginManager,
   ReadonlyContext,
+  ToolboxCredentialStrategy,
+  ToolboxHeaderValue,
   ToolboxToolset,
   createSession,
 } from '@google/adk';
+import axios from 'axios';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {logger} from '../../src/utils/logger.js';
@@ -53,6 +60,8 @@ const sdk = vi.hoisted(() => {
     invocations: [] as Array<Record<string, unknown> | undefined>,
     /** The `<service>_token` headers each invocation resolved. */
     invocationTokens: [] as Array<Record<string, string>>,
+    /** The client headers each invocation resolved. */
+    invocationHeaders: [] as Array<Record<string, string>>,
     /** Auth requirements the fake server advertises, by tool name. */
     toolAuth: {} as Record<string, FakeToolAuth>,
     /** Set to make reading `ToolboxClient` throw, as a failed load would. */
@@ -73,6 +82,7 @@ const sdk = vi.hoisted(() => {
     name: string,
     auth: FakeToolAuth = {},
     getters: Record<string, SdkTokenGetter> = {},
+    clientHeaders: Record<string, string | SdkTokenGetter> = {},
   ) {
     const requiredAuthnParams = auth.requiredAuthnParams ?? {};
     const requiredAuthzTokens = auth.requiredAuthzTokens ?? [];
@@ -81,8 +91,13 @@ const sdk = vi.hoisted(() => {
       for (const [service, getter] of Object.entries(getters)) {
         tokens[`${service}_token`] = await getter();
       }
+      const headers: Record<string, string> = {};
+      for (const [header, value] of Object.entries(clientHeaders)) {
+        headers[header] = typeof value === 'function' ? await value() : value;
+      }
       state.invocations.push(args);
       state.invocationTokens.push(tokens);
+      state.invocationHeaders.push(headers);
       if (state.invocationError) {
         throw state.invocationError;
       }
@@ -118,12 +133,14 @@ const sdk = vi.hoisted(() => {
             (service) => !(service in added),
           ),
         };
-        return fakeTool(name, remaining, {...getters, ...added});
+        return fakeTool(name, remaining, {...getters, ...added}, clientHeaders);
       },
     });
   }
 
   class FakeToolboxClient {
+    private readonly clientHeaders: Record<string, string | SdkTokenGetter>;
+
     constructor(
       url: string,
       session: unknown,
@@ -140,6 +157,10 @@ const sdk = vi.hoisted(() => {
         clientName,
         clientVersion,
       });
+      this.clientHeaders = (headers ?? {}) as Record<
+        string,
+        string | SdkTokenGetter
+      >;
     }
 
     async loadToolset(
@@ -148,10 +169,7 @@ const sdk = vi.hoisted(() => {
       boundParams?: unknown,
     ) {
       state.toolsetCalls.push({name, authTokenGetters, boundParams});
-      return [
-        fakeTool('search_hotels', state.toolAuth['search_hotels']),
-        fakeTool('book_hotel', state.toolAuth['book_hotel']),
-      ];
+      return [this.build('search_hotels'), this.build('book_hotel')];
     }
 
     async loadTool(
@@ -160,7 +178,12 @@ const sdk = vi.hoisted(() => {
       boundParams?: unknown,
     ) {
       state.toolCalls.push({name, authTokenGetters, boundParams});
-      return fakeTool(name, state.toolAuth[name]);
+      return this.build(name);
+    }
+
+    /** The SDK gives every loaded tool the client's headers. */
+    private build(name: string) {
+      return fakeTool(name, state.toolAuth[name], {}, this.clientHeaders);
     }
   }
 
@@ -207,6 +230,7 @@ beforeEach(() => {
   sdk.state.toolCalls = [];
   sdk.state.invocations = [];
   sdk.state.invocationTokens = [];
+  sdk.state.invocationHeaders = [];
   sdk.state.toolAuth = {};
   sdk.state.importError = undefined;
   sdk.state.invocationError = undefined;
@@ -522,5 +546,585 @@ describe('ToolboxToolset optional peer', () => {
     await expect(toolset.getTools()).rejects.toThrow(
       'the package itself is broken',
     );
+  });
+});
+
+/** The credential key the toolset derives from the server url. */
+const USER_IDENTITY_KEY = `toolbox_user_identity_${SERVER_URL}`;
+
+const USER_CREDENTIALS = ToolboxCredentialStrategy.userIdentity({
+  clientId: 'client',
+  clientSecret: 'secret',
+});
+
+/** A consented OAuth2 credential, as the client returns it. */
+function consented(oauth2: {
+  accessToken?: string;
+  idToken?: string;
+}): AuthCredential {
+  return {authType: AuthCredentialTypes.OAUTH2, oauth2};
+}
+
+/** A tool context that can request, load and save credentials. */
+function credentialToolContext(
+  options: {
+    credentialService?: InMemoryCredentialService;
+    sessionState?: Record<string, unknown>;
+  } = {},
+): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        state: options.sessionState,
+      }),
+      pluginManager: new PluginManager(),
+      credentialService: options.credentialService,
+    }),
+    functionCallId: 'call-1',
+  });
+}
+
+/** Resolves one header the toolset gave the client. */
+async function clientHeader(name: string): Promise<string> {
+  const headers = sdk.state.clientCalls[0].headers as Record<
+    string,
+    ToolboxHeaderValue
+  >;
+  const value = headers[name];
+  return typeof value === 'function' ? value() : value;
+}
+
+/** Loads the single tool a toolset publishes. */
+async function loadOneTool(toolset: ToolboxToolset): Promise<BaseTool> {
+  const [tool] = await toolset.getTools();
+  return tool;
+}
+
+describe('ToolboxToolset auth token getters', () => {
+  beforeEach(() => {
+    sdk.state.toolAuth = {book_hotel: {requiredAuthzTokens: ['my-auth']}};
+  });
+
+  it('passes the live tool context to the getter', async () => {
+    const seen: Context[] = [];
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      authTokenGetters: {
+        'my-auth': (toolContext) => {
+          seen.push(toolContext);
+          return String(toolContext.state.get('idToken'));
+        },
+      },
+    });
+    const context = credentialToolContext({
+      sessionState: {idToken: 'from-state'},
+    });
+
+    const tool = await loadOneTool(toolset);
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: context});
+
+    expect(seen).toEqual([context]);
+    expect(sdk.state.invocationTokens).toEqual([
+      {'my-auth_token': 'from-state'},
+    ]);
+  });
+
+  it('still accepts a getter that takes no arguments', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      authTokenGetters: {'my-auth': () => 'static-token'},
+    });
+
+    const tool = await loadOneTool(toolset);
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: toolContext()});
+
+    expect(sdk.state.invocationTokens).toEqual([
+      {'my-auth_token': 'static-token'},
+    ]);
+  });
+
+  it('awaits an asynchronous getter', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      authTokenGetters: {'my-auth': async () => 'awaited-token'},
+    });
+
+    const tool = await loadOneTool(toolset);
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: toolContext()});
+
+    expect(sdk.state.invocationTokens).toEqual([
+      {'my-auth_token': 'awaited-token'},
+    ]);
+  });
+
+  it('binds only the services the tool declares', async () => {
+    sdk.state.toolAuth = {
+      search_hotels: {requiredAuthzTokens: ['my-auth']},
+      book_hotel: {requiredAuthnParams: {userId: ['other-auth']}},
+    };
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotel-tools',
+      authTokenGetters: {
+        'my-auth': () => 'first-token',
+        'other-auth': () => 'second-token',
+      },
+    });
+
+    const tools = await toolset.getTools();
+    for (const tool of tools) {
+      await tool.runAsync({args: {city: 'Basel'}, toolContext: toolContext()});
+    }
+
+    // A getter the tool does not declare is dropped; passing it would make
+    // the SDK reject the binding.
+    expect(sdk.state.invocationTokens).toEqual([
+      {'my-auth_token': 'first-token'},
+      {'other-auth_token': 'second-token'},
+    ]);
+  });
+
+  it('gives two concurrent invocations their own token', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      authTokenGetters: {
+        'my-auth': (toolContext) => String(toolContext.state.get('idToken')),
+      },
+    });
+
+    const tool = await loadOneTool(toolset);
+    await Promise.all([
+      tool.runAsync({
+        args: {city: 'Basel'},
+        toolContext: credentialToolContext({sessionState: {idToken: 'alice'}}),
+      }),
+      tool.runAsync({
+        args: {city: 'Bern'},
+        toolContext: credentialToolContext({sessionState: {idToken: 'bob'}}),
+      }),
+    ]);
+
+    expect(sdk.state.invocationTokens).toEqual(
+      expect.arrayContaining([
+        {'my-auth_token': 'alice'},
+        {'my-auth_token': 'bob'},
+      ]),
+    );
+  });
+
+  it('runs a tool that needs no auth without binding anything', async () => {
+    sdk.state.toolAuth = {search_hotels: {requiredAuthzTokens: ['my-auth']}};
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotel-tools',
+      authTokenGetters: {'my-auth': () => 'first-token'},
+    });
+
+    const [, bookHotel] = await toolset.getTools();
+    const result = await bookHotel.runAsync({
+      args: {city: 'Basel'},
+      toolContext: toolContext(),
+    });
+
+    expect(result).toBe('book_hotel:{"city":"Basel"}');
+    expect(sdk.state.invocationTokens).toEqual([{}]);
+  });
+
+  it('propagates an error a getter throws', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      authTokenGetters: {
+        'my-auth': () => {
+          throw new Error('the token store is down');
+        },
+      },
+    });
+
+    const tool = await loadOneTool(toolset);
+
+    await expect(
+      tool.runAsync({args: {city: 'Basel'}, toolContext: toolContext()}),
+    ).rejects.toThrow('the token store is down');
+  });
+});
+
+describe('ToolboxToolset unused auth token getters', () => {
+  it('names the toolset when no loaded tool needs the getter', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotel-tools',
+      authTokenGetters: {'my-auth': () => 'token'},
+    });
+
+    await expect(toolset.getTools()).rejects.toThrow(
+      "Validation failed for toolset 'hotel-tools': unused auth tokens " +
+        'could not be applied to any tool: my-auth.',
+    );
+  });
+
+  it('names the list of tools when only toolNames is given', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      authTokenGetters: {'my-auth': () => 'token'},
+    });
+
+    await expect(toolset.getTools()).rejects.toThrow(
+      "Validation failed for list of tools 'book_hotel': unused auth tokens " +
+        'could not be applied to any tool: my-auth.',
+    );
+  });
+
+  it('names the default toolset when neither name is given', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      authTokenGetters: {'b-auth': () => 'token', 'a-auth': () => 'token'},
+    });
+
+    await expect(toolset.getTools()).rejects.toThrow(
+      "Validation failed for list of tools 'default': unused auth tokens " +
+        'could not be applied to any tool: a-auth, b-auth.',
+    );
+  });
+
+  it('accepts a getter that only the other load call needs', async () => {
+    sdk.state.toolAuth = {cancel_booking: {requiredAuthzTokens: ['my-auth']}};
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotel-tools',
+      toolNames: ['cancel_booking'],
+      authTokenGetters: {'my-auth': () => 'token'},
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'search_hotels',
+      'book_hotel',
+      'cancel_booking',
+    ]);
+  });
+
+  it('runs no validation when no getters are configured', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolsetName: 'hotel-tools',
+    });
+
+    await expect(toolset.getTools()).resolves.toHaveLength(2);
+  });
+});
+
+describe('ToolboxToolset credentials', () => {
+  it('sends a manual token in the Authorization header', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      credentials: ToolboxCredentialStrategy.manualToken('tok'),
+    });
+
+    await toolset.getTools();
+
+    expect(await clientHeader('Authorization')).toBe('Bearer tok');
+  });
+
+  it('sends an api key in its header', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      credentials: ToolboxCredentialStrategy.apiKey('key', 'X-Custom'),
+    });
+
+    await toolset.getTools();
+
+    expect(await clientHeader('X-Custom')).toBe('key');
+  });
+
+  it('sends the access token of a manual credentials source', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      credentials: ToolboxCredentialStrategy.manualCredentials({
+        getAccessToken: async () => ({token: 'from-source'}),
+      }),
+    });
+
+    await toolset.getTools();
+
+    expect(await clientHeader('Authorization')).toBe('Bearer from-source');
+  });
+
+  it('sends a workload identity token through a per-request getter', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      credentials: ToolboxCredentialStrategy.workloadIdentity('aud'),
+    });
+
+    await toolset.getTools();
+
+    const headers = sdk.state.clientCalls[0].headers as Record<string, unknown>;
+    expect(typeof headers['Authorization']).toBe('function');
+  });
+
+  it('adds no header for a toolbox identity and keeps additionalHeaders', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      additionalHeaders: {'X-Tenant': 'acme'},
+      credentials: ToolboxCredentialStrategy.toolboxIdentity(),
+    });
+
+    await toolset.getTools();
+
+    expect(sdk.state.clientCalls[0].headers).toEqual({'X-Tenant': 'acme'});
+  });
+
+  it('lets the credential win a header name collision', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      additionalHeaders: {Authorization: 'Bearer from-headers'},
+      credentials: ToolboxCredentialStrategy.manualToken('from-credential'),
+    });
+
+    await toolset.getTools();
+
+    expect(await clientHeader('Authorization')).toBe('Bearer from-credential');
+  });
+
+  it('validates the credential on the first getTools, not in the constructor', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      credentials: {type: ToolboxCredentialStrategy.manualToken('x').type},
+    });
+
+    await expect(toolset.getTools()).rejects.toThrow(
+      'token is required for MANUAL_TOKEN',
+    );
+  });
+});
+
+describe('ToolboxToolset USER_IDENTITY', () => {
+  beforeEach(() => {
+    sdk.state.toolAuth = {book_hotel: {requiredAuthzTokens: ['my-auth']}};
+  });
+
+  it('asks for consent and does not invoke the tool', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+    const context = credentialToolContext();
+
+    const tool = await loadOneTool(toolset);
+    const result = await tool.runAsync({
+      args: {city: 'Basel'},
+      toolContext: context,
+    });
+
+    expect(result).toEqual({
+      error:
+        'OAuth2 Credentials required for book_hotel. A consent link has ' +
+        'been generated for the user. Do NOT attempt to run this tool ' +
+        'again until the user confirms they have logged in.',
+    });
+    expect(Object.keys(context.eventActions.requestedAuthConfigs)).toEqual([
+      'call-1',
+    ]);
+    expect(sdk.state.invocations).toEqual([]);
+  });
+
+  it('sends the stored token as the client header and the service token', async () => {
+    const credentialService = new InMemoryCredentialService();
+    const context = credentialToolContext({credentialService});
+    await credentialService.saveCredential(
+      {
+        authScheme: {type: 'oauth2', flows: {}},
+        exchangedAuthCredential: consented({accessToken: 'user-access'}),
+        credentialKey: USER_IDENTITY_KEY,
+      },
+      context,
+    );
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+
+    const tool = await loadOneTool(toolset);
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: context});
+
+    expect(sdk.state.invocationTokens).toEqual([
+      {'my-auth_token': 'user-access'},
+    ]);
+    expect(sdk.state.invocations).toEqual([{city: 'Basel'}]);
+  });
+
+  it('sends the user access token as the client header for the invocation', async () => {
+    const credentialService = new InMemoryCredentialService();
+    const context = credentialToolContext({credentialService});
+    await credentialService.saveCredential(
+      {
+        authScheme: {type: 'oauth2', flows: {}},
+        exchangedAuthCredential: consented({
+          accessToken: 'user-access',
+          idToken: 'user-id',
+        }),
+        credentialKey: USER_IDENTITY_KEY,
+      },
+      context,
+    );
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+
+    const tool = await loadOneTool(toolset);
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: context});
+
+    // The header getter is resolved inside the invocation, so it reads the
+    // token of the user this invocation belongs to.
+    expect(sdk.state.invocationHeaders).toEqual([
+      {Authorization: 'Bearer user-access'},
+    ]);
+  });
+
+  it('sends an empty user header outside any invocation', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+
+    await toolset.getTools();
+
+    expect(await clientHeader('Authorization')).toBe('');
+  });
+
+  it('prefers the id token over the access token for the service', async () => {
+    const credentialService = new InMemoryCredentialService();
+    const context = credentialToolContext({credentialService});
+    await credentialService.saveCredential(
+      {
+        authScheme: {type: 'oauth2', flows: {}},
+        exchangedAuthCredential: consented({
+          accessToken: 'user-access',
+          idToken: 'user-id',
+        }),
+        credentialKey: USER_IDENTITY_KEY,
+      },
+      context,
+    );
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+
+    const tool = await loadOneTool(toolset);
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: context});
+
+    expect(sdk.state.invocationTokens).toEqual([{'my-auth_token': 'user-id'}]);
+  });
+
+  it('writes a credential found in the session back to the service', async () => {
+    const credentialService = new InMemoryCredentialService();
+    const context = credentialToolContext({
+      credentialService,
+      sessionState: {
+        [`temp:${USER_IDENTITY_KEY}`]: consented({accessToken: 'from-session'}),
+      },
+    });
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+
+    const tool = await loadOneTool(toolset);
+    await tool.runAsync({args: {city: 'Basel'}, toolContext: context});
+
+    const stored = await credentialService.loadCredential(
+      {
+        authScheme: {type: 'oauth2', flows: {}},
+        credentialKey: USER_IDENTITY_KEY,
+      },
+      context,
+    );
+    expect(stored?.oauth2?.accessToken).toBe('from-session');
+    expect(sdk.state.invocationTokens).toEqual([
+      {'my-auth_token': 'from-session'},
+    ]);
+  });
+
+  it('runs the tool even when saving the credential fails', async () => {
+    const credentialService = new InMemoryCredentialService();
+    vi.spyOn(credentialService, 'saveCredential').mockRejectedValue(
+      new Error('the credential store is full'),
+    );
+    const debug = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+    const context = credentialToolContext({
+      credentialService,
+      sessionState: {
+        [`temp:${USER_IDENTITY_KEY}`]: consented({accessToken: 'from-session'}),
+      },
+    });
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+
+    const tool = await loadOneTool(toolset);
+    const result = await tool.runAsync({
+      args: {city: 'Basel'},
+      toolContext: context,
+    });
+
+    expect(result).toBe('book_hotel:{"city":"Basel"}');
+    expect(debug).toHaveBeenCalledWith(
+      expect.stringContaining('the credential store is full'),
+    );
+    debug.mockRestore();
+  });
+
+  it('runs a tool that needs no auth without asking for consent', async () => {
+    sdk.state.toolAuth = {};
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: USER_CREDENTIALS,
+    });
+    const context = credentialToolContext();
+
+    const tool = await loadOneTool(toolset);
+    const result = await tool.runAsync({
+      args: {city: 'Basel'},
+      toolContext: context,
+    });
+
+    expect(result).toBe('book_hotel:{"city":"Basel"}');
+    expect(context.eventActions.requestedAuthConfigs).toEqual({});
+  });
+
+  it('rejects a user identity with no client id on a tool that needs auth', async () => {
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      toolNames: ['book_hotel'],
+      credentials: {type: USER_CREDENTIALS.type, clientSecret: 'secret'},
+    });
+
+    const tool = await loadOneTool(toolset);
+
+    await expect(
+      tool.runAsync({
+        args: {city: 'Basel'},
+        toolContext: credentialToolContext(),
+      }),
+    ).rejects.toThrow('USER_IDENTITY requires clientId and clientSecret');
+  });
+});
+
+describe('ToolboxToolset clientOptions', () => {
+  it('forwards every option to the SDK client constructor', async () => {
+    const session = axios.create();
+    const toolset = new ToolboxToolset(SERVER_URL, {
+      clientOptions: {
+        session,
+        protocol: '2025-06-18',
+        clientName: 'my-agent',
+        clientVersion: '9.9.9',
+      },
+    });
+
+    await toolset.getTools();
+
+    expect(sdk.state.clientCalls).toEqual([
+      {
+        url: SERVER_URL,
+        session,
+        headers: {},
+        protocol: '2025-06-18',
+        clientName: 'my-agent',
+        clientVersion: '9.9.9',
+      },
+    ]);
   });
 });
