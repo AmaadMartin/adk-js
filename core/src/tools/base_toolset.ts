@@ -47,7 +47,12 @@ export abstract class BaseToolset {
   readonly [BASE_TOOLSET_SIGNATURE_SYMBOL] = true;
 
   constructor(
-    readonly toolFilter: ToolPredicate | string[],
+    /**
+     * Selects the tools the toolset exposes. A subclass may replace it after
+     * construction, matching adk-python's `set_tool_filter`, as long as it
+     * reads the field on every `getTools` call.
+     */
+    public toolFilter: ToolPredicate | string[],
     readonly prefix?: string,
   ) {}
 

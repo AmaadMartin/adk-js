@@ -159,6 +159,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ConnectionsClient](tools/connections_client/index.md) - Reading Integration Connectors metadata and building the connector OpenAPI spec from it.
 - [ExampleTool.fromConfig](tools/example_tool/index.md) - Building an ExampleTool from a configuration record, and naming an example provider that user code exports.
 - [FunctionTool parameters and the sync-callable runner](tools/function_tool/index.md) - How a tool's parameter declaration is built, and how a host keeps a blocking tool body off the event loop.
+- [GoogleApiToolset](tools/google_api_toolset/index.md) - Turning a Google API Discovery document into callable tools, and the credentials they run under.
 - [GoogleSearchTool](tools/google_search/index.md) - Grounding a Gemini model's
   answers in Google Search, and the requests the tool accepts.
 - [LlamaIndexRetrievalTool](tools/llama_index_retrieval/index.md) - Grounding an agent in a LlamaIndex.TS index you already built, without adding the dependency to ADK.

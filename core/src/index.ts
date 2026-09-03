@@ -117,6 +117,20 @@ export type {
 } from './tools/application_integration_tool/clients/connector_spec_builders.js';
 export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
 export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
+export {GoogleApiToolset} from './tools/google_api_tool/google_api_toolset.js';
+export type {
+  GoogleApiToolsetOptions,
+  GoogleApiToolsetPresetOptions,
+} from './tools/google_api_tool/google_api_toolset.js';
+export {
+  BigQueryToolset,
+  CalendarToolset,
+  DocsToolset,
+  GmailToolset,
+  SheetsToolset,
+  SlidesToolset,
+  YoutubeToolset,
+} from './tools/google_api_tool/google_api_toolsets.js';
 export {
   GoogleApiToOpenApiConverter,
   convertDiscoveryDocument,
