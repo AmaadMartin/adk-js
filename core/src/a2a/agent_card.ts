@@ -62,6 +62,8 @@ export interface ResolveAgentCardOptions {
   headers?: Record<string, string>;
   /** Aborts the card request after this many milliseconds. */
   timeoutMs?: number;
+  /** Aborts the card request when it fires, alongside {@link timeoutMs}. */
+  signal?: AbortSignal;
   /** Performs the card request. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
@@ -94,18 +96,19 @@ export function adoptedCardDescription(
  */
 function cardFetch(options: ResolveAgentCardOptions): typeof fetch {
   const baseFetch = options.fetchImpl ?? globalThis.fetch;
-  if (!options.headers && options.timeoutMs === undefined) {
+  if (!options.headers && options.timeoutMs === undefined && !options.signal) {
     return baseFetch;
   }
   return (input, init) => {
-    const signal =
+    const candidates = [
+      init?.signal,
+      options.signal,
       options.timeoutMs === undefined
-        ? init?.signal
-        : AbortSignal.any(
-            [init?.signal, AbortSignal.timeout(options.timeoutMs)].filter(
-              (candidate): candidate is AbortSignal => !!candidate,
-            ),
-          );
+        ? undefined
+        : AbortSignal.timeout(options.timeoutMs),
+    ].filter((candidate): candidate is AbortSignal => !!candidate);
+    const signal =
+      candidates.length > 0 ? AbortSignal.any(candidates) : undefined;
     return baseFetch(input, {
       ...init,
       ...(signal ? {signal} : {}),

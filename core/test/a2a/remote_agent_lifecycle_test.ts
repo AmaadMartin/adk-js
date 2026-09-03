@@ -317,6 +317,33 @@ describe('RemoteA2AAgent timeout and close', () => {
     expect(events[0].errorMessage).toMatch(/^A2A request failed: /);
   });
 
+  it('aborts an in-flight card fetch when the agent is closed', async () => {
+    const transport = new FakeTransport([REPLY]);
+    // A card server that never answers, so only an abort ends the fetch.
+    const fetchImpl: typeof fetch = (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new Error('card fetch aborted')),
+        );
+      });
+    const agent = new RemoteA2AAgent({
+      name: 'peer_agent',
+      agentCard: CARD_URL,
+      client: fakeClient(transport),
+      fetchImpl,
+    });
+
+    const run = collect(agent.runAsync(invocationContext({agent})));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    agent.close();
+
+    const events = await run;
+    expect(events[0].errorMessage).toMatch(
+      /^Failed to initialize remote A2A agent: /,
+    );
+    expect(transport.sends).toHaveLength(0);
+  });
+
   it('drops the cached card on close and keeps a caller-supplied client', async () => {
     const transport = new FakeTransport([REPLY]);
     const {fetchImpl, headers} = recordingCardFetch();

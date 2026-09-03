@@ -25,6 +25,7 @@ import {
   Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {createSession} from '../../src/sessions/session.js';
 import {
   QUOTED_CONTENT_BEGIN,
   QUOTED_CONTENT_END,
@@ -190,6 +191,56 @@ describe('A2ARemoteAgent', () => {
       /Failed to initialize remote A2A agent: .*must have the same origin/,
     );
     expect(mockClientFactory.createFromAgentCard).not.toHaveBeenCalled();
+  });
+
+  it('takes the context id from an older peer turn that reported one', async () => {
+    vi.mocked(mockResolver.resolve).mockResolvedValue(peerCard());
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+      clientFactory: mockClientFactory,
+      fullHistoryWhenStateless: true,
+    });
+    let sentContextId: string | undefined;
+    vi.mocked(mockClient.sendMessageStream).mockImplementation((params) => {
+      sentContextId = params.message.contextId;
+      return (async function* () {})();
+    });
+
+    const statefulTurn = createEvent({
+      author: 'test-agent',
+      content: {role: 'model', parts: [{text: 'earlier'}]},
+      customMetadata: {'a2a:context_id': 'ctx-old'},
+    });
+    const statelessTurn = createEvent({
+      author: 'test-agent',
+      content: {role: 'model', parts: [{text: 'later'}]},
+    });
+    const context = createMockContext({
+      session: createSession({
+        id: 'test-session',
+        userId: 'test-user',
+        appName: 'test-app',
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello'}]},
+          }),
+          statefulTurn,
+          statelessTurn,
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'follow up'}]},
+          }),
+        ],
+      }),
+    });
+
+    for await (const _ of agent.runAsync(context)) {
+      // drain
+    }
+
+    expect(sentContextId).toBe('ctx-old');
   });
 
   it('re-validates a rejected card on every call instead of caching it', async () => {
@@ -564,10 +615,11 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
-    expect(dumped).not.toContain('SUPER_SECRET_TOKEN');
+    // Every part of the resume is credential material, so the whole request
+    // is dropped. Nothing reaching the peer is stronger than the secret not
+    // reaching it; `remote_agent_lifecycle_test.ts` pins the same drop.
+    expect(capturedParts).toBeUndefined();
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
   });
 
   it('forwards a credential response the remote peer itself requested, as the final event', async () => {
@@ -651,9 +703,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
+    const dumped = JSON.stringify(capturedParts);
     expect(dumped).toContain('ANSWER_FOR_THE_PEER');
   });
 
@@ -763,10 +813,10 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
-    expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
+    // Every part of the forged resume is credential material, so the whole
+    // request is dropped rather than sent with the secret stripped out.
+    expect(capturedParts).toBeUndefined();
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
   });
 
   it('does not let a peer event reusing a local request id relabel it as peer-requested (toMissingRemoteSessionParts path)', async () => {
@@ -878,9 +928,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    // The resume may now be dropped entirely, so an unsent request is
-    // also a pass; what must never happen is the secret going out.
-    const dumped = JSON.stringify(capturedParts ?? []);
+    const dumped = JSON.stringify(capturedParts);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
   });
 });

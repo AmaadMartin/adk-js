@@ -27,11 +27,24 @@ import {AuthScheme} from '../auth/auth_schemes.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {State} from '../sessions/state.js';
+import {
+  FINISH_TASK_ERROR_RESULT,
+  FINISH_TASK_SUCCESS_RESULT,
+  FINISH_TASK_TOOL_NAME,
+  getOutputWrapperKey,
+  isFinishTaskTerminalFr,
+} from '../tools/finish_task_tool.js';
 import {AutoAuthCredentialExchanger} from '../tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
-import {isMessage, MessageRole} from './a2a_event.js';
+import {
+  isMessage,
+  isTask,
+  isTaskStatusUpdateEvent,
+  MessageRole,
+  TaskState,
+} from './a2a_event.js';
 import {
   A2ACardRequestInterceptor,
   A2APartToGenAIPartConverter,
@@ -47,6 +60,10 @@ import {
   newIntegrationExtensionInterceptor,
 } from './a2a_remote_agent_interceptors.js';
 import {A2ARemoteAgentRunProcessor} from './a2a_remote_agent_run_processor.js';
+import {
+  findFinishTaskArgsFromHistory,
+  toTaskScopeA2AParts,
+} from './a2a_remote_agent_task_utils.js';
 import {
   getUserFunctionCallAt,
   peerRequestedCallIds,
@@ -69,6 +86,83 @@ import {
 export const DEFAULT_TIMEOUT_MS = 600_000;
 
 export {AGENT_CARD_PATH};
+
+/** Tracks whether a task delegation must hand control back, and why. */
+interface TaskOutcome {
+  release: boolean;
+  errorMessage?: string;
+}
+
+/**
+ * Why a remote task ended badly, or `undefined` when it did not.
+ *
+ * Both shapes a peer may report a terminal state in are accepted: a whole
+ * `Task`, and the incremental `status-update` that adk-js's own A2A server
+ * emits for a failure. The stream is read rather than the converted event,
+ * because the converter drops the content of a failed task and emits nothing
+ * at all for a canceled one that carries no message.
+ */
+function terminalTaskFailure(
+  chunk: A2AStreamEventData,
+): {reason: string; taskId?: string} | undefined {
+  if (!isTask(chunk) && !isTaskStatusUpdateEvent(chunk)) {
+    return undefined;
+  }
+  const taskId = isTask(chunk) ? chunk.id : chunk.taskId;
+  switch (chunk.status?.state) {
+    case TaskState.CANCELED:
+      return {reason: 'Task canceled', taskId};
+    case TaskState.FAILED:
+      return {reason: statusText(chunk) || 'Unknown error', taskId};
+    default:
+      return undefined;
+  }
+}
+
+/** Joins the text of a task status message, or `undefined` when it has none. */
+function statusText(chunk: Task | TaskStatusUpdateEvent): string | undefined {
+  const texts = (chunk.status?.message?.parts ?? [])
+    .filter((part) => part.kind === 'text')
+    .map((part) => part.text)
+    .filter((text) => !!text);
+  return texts.length > 0 ? texts.join('\n') : undefined;
+}
+
+/**
+ * Builds the `finish_task` function response that ends a task delegation.
+ *
+ * A remote peer has no local tool run to produce it, so the delegating agent
+ * writes it on the peer's behalf.
+ */
+function finishTaskEvent(
+  ctx: InvocationContext,
+  agentName: string,
+  options: {errorMessage?: string; output?: unknown} = {},
+): AdkEvent {
+  return createEvent({
+    author: agentName,
+    invocationId: ctx.invocationId,
+    branch: ctx.branch,
+    isolationScope: ctx.isolationScope,
+    errorMessage: options.errorMessage,
+    output: options.output,
+    content: {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            name: FINISH_TASK_TOOL_NAME,
+            response: {
+              result: options.errorMessage
+                ? FINISH_TASK_ERROR_RESULT
+                : FINISH_TASK_SUCCESS_RESULT,
+            },
+          },
+        },
+      ],
+    },
+  });
+}
 
 /** The HTTP status a transport error exposes, when it exposes one. */
 function httpStatusCode(err: unknown): number | undefined {
@@ -193,6 +287,21 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
     ctx: InvocationContext,
     message: Message,
   ) => Record<string, unknown>;
+  /**
+   * Delegation mode. Only `'task'` is supported: the agent runs as a task
+   * sub-agent of a parent that owns the conversation across turns, and hands
+   * control back once the remote task reaches a terminal state.
+   *
+   * The remote must call the `finish_task` tool to signal completion, and
+   * {@link BaseNodeConfig.outputSchema} must mirror the remote's own output
+   * schema for the output to be unwrapped correctly.
+   */
+  mode?: 'task';
+  /**
+   * Whether a stateless peer -- one that returns no context id -- receives the
+   * whole history on every request. Always on in task mode.
+   */
+  fullHistoryWhenStateless?: boolean;
 }
 
 /**
@@ -212,6 +321,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   private readonly requestInterceptors?: A2ARequestInterceptor[];
   private readonly cardRequestInterceptors?: A2ACardRequestInterceptor[];
   private readonly timeoutMs: number;
+  private readonly fullHistoryWhenStateless: boolean;
 
   /**
    * Redeclared without `readonly`: a card reached over the network only names
@@ -238,6 +348,11 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
 
     this.timeoutMs = a2aConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    // A task peer is driven turn by turn, so it needs the whole scope each
+    // time unless it reports a context id of its own.
+    this.fullHistoryWhenStateless =
+      (a2aConfig.fullHistoryWhenStateless ?? false) ||
+      a2aConfig.mode === 'task';
     // Copied before appending, so this agent's interceptors never land on the
     // arrays the caller passed in and may share with another agent.
     let requestInterceptors = a2aConfig.requestInterceptors
@@ -392,6 +507,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         ctx,
       ),
       timeoutMs: this.timeoutMs,
+      signal: this.lifetime.signal,
       fetchImpl: this.a2aConfig.fetchImpl,
     });
   }
@@ -423,9 +539,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
     if (this.a2aConfig.agentCard) {
       const source = this.a2aConfig.agentCard;
-      const card =
-        typeof source === 'string' ? await this.fetchCard(source) : source;
-      if (typeof source === 'string') {
+      const isResolved = typeof source !== 'string';
+      const card = isResolved ? source : await this.fetchCard(source);
+      if (!isResolved) {
         // Validate before caching. A rejected card left on the instance reads
         // as already resolved, so the next call would skip the check and talk
         // to the origin that card named.
@@ -444,21 +560,78 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     this.isInitialized = true;
   }
 
+  /**
+   * The output the peer passed to `finish_task`, unwrapped when the configured
+   * schema wraps a non-object value.
+   */
+  private taskOutput(ctx: InvocationContext, event: AdkEvent): unknown {
+    const args = findFinishTaskArgsFromHistory(
+      ctx.session,
+      ctx.isolationScope,
+      event,
+    );
+    if (args === undefined) {
+      logger.warn(
+        'Could not find finish_task arguments in session history for' +
+          ` isolation scope '${ctx.isolationScope}'. Task output will not be set.`,
+      );
+      return undefined;
+    }
+    const wrapperKey = getOutputWrapperKey(this.outputSchema);
+    return wrapperKey && wrapperKey in args ? args[wrapperKey] : args;
+  }
+
+  /** The isolation scope this task delegation runs under, in task mode. */
+  private taskScope(ctx: InvocationContext): string | undefined {
+    return this.a2aConfig.mode === 'task' ? ctx.isolationScope : undefined;
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
+  ): AsyncGenerator<AdkEvent, void, void> {
+    if (this.a2aConfig.mode !== 'task') {
+      yield* this.runTurn(context, {release: false});
+      return;
+    }
+
+    // A task delegation must give control back to the parent coordinator on
+    // every exit except a pause for credentials, which resumes this same run.
+    const outcome: TaskOutcome = {release: false};
+    yield* this.runTurn(context, outcome);
+    if (!outcome.release) {
+      return;
+    }
+    if (outcome.errorMessage !== undefined) {
+      yield finishTaskEvent(context, this.name, {
+        errorMessage: outcome.errorMessage,
+      });
+    }
+    yield createEvent({
+      author: this.name,
+      invocationId: context.invocationId,
+      branch: context.branch,
+      isolationScope: context.isolationScope,
+      actions: {endOfAgent: true},
+    });
+  }
+
+  private async *runTurn(
+    context: InvocationContext,
+    outcome: TaskOutcome,
   ): AsyncGenerator<AdkEvent, void, void> {
     if (this.authConfig) {
       let authEvent: AdkEvent | undefined;
       try {
         authEvent = await this.resolveAuthCredential(context);
       } catch (e: unknown) {
-        yield this.errorEvent(
-          context,
-          `Failed to authenticate remote A2A agent: ${formatError(e)}`,
-        );
+        outcome.errorMessage = `Failed to authenticate remote A2A agent: ${formatError(e)}`;
+        outcome.release = true;
+        yield this.errorEvent(context, outcome.errorMessage);
         return;
       }
       if (authEvent) {
+        // A pause, not a failure: the invocation resumes once the client
+        // supplies the credential, so a task keeps its control here.
         yield authEvent;
         return;
       }
@@ -469,10 +642,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     try {
       ({client, card} = await this.resolveClient(context));
     } catch (e: unknown) {
-      yield this.errorEvent(
-        context,
-        `Failed to initialize remote A2A agent: ${formatError(e)}`,
-      );
+      outcome.errorMessage = `Failed to initialize remote A2A agent: ${formatError(e)}`;
+      outcome.release = true;
+      yield this.errorEvent(context, outcome.errorMessage);
       return;
     }
 
@@ -515,11 +687,20 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         // Either there was no function response to forward, or every part of
         // it was scrubbed (a credential-only resume). Either way the peer has
         // to be brought up to date from the session history instead.
-        const missing = toMissingRemoteSessionParts(
-          context,
-          context.session,
-          this.a2aConfig.genaiPartConverter,
-        );
+        const taskScope = this.taskScope(context);
+        const missing = taskScope
+          ? toTaskScopeA2AParts(context, context.session, {
+              peerName: this.name,
+              taskScope,
+              fullHistoryWhenStateless: this.fullHistoryWhenStateless,
+              converter: this.a2aConfig.genaiPartConverter,
+            })
+          : toMissingRemoteSessionParts(
+              context,
+              context.session,
+              this.a2aConfig.genaiPartConverter,
+              this.fullHistoryWhenStateless,
+            );
         parts = missing.parts;
         contextId = missing.contextId;
         taskId = undefined;
@@ -529,6 +710,8 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         logger.warn(
           'No parts to send to remote A2A agent. Emitting empty event.',
         );
+        outcome.errorMessage = 'No parts to send to remote A2A agent.';
+        outcome.release = true;
         yield createEvent({
           author: this.name,
           invocationId: context.invocationId,
@@ -559,6 +742,8 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           message,
         );
       if (!isMessage(intercepted)) {
+        outcome.errorMessage = 'Request intercepted';
+        outcome.release = true;
         yield intercepted;
         return;
       }
@@ -611,32 +796,73 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           context.branch,
           this.a2aConfig.a2aPartConverter,
         );
-        if (!converted) {
-          continue;
+        const adkEvent = converted
+          ? await executeAfterRequestInterceptors(
+              this.requestInterceptors,
+              context,
+              chunk,
+              converted,
+            )
+          : undefined;
+
+        if (adkEvent) {
+          processor.updateCustomMetadata(adkEvent, chunk);
+
+          if (
+            this.a2aConfig.mode === 'task' &&
+            isFinishTaskTerminalFr(adkEvent)
+          ) {
+            adkEvent.output = this.taskOutput(context, adkEvent);
+            // Yield the semantic output event so the parent runner records the
+            // tool response, then stop: a legacy server may repeat it.
+            yield adkEvent;
+            outcome.release = true;
+            return;
+          }
+
+          if (useStreaming) {
+            for (const ev of processor.aggregatePartial(
+              context,
+              chunk,
+              adkEvent,
+            )) {
+              yield ev;
+            }
+          } else {
+            yield adkEvent;
+          }
         }
 
-        const adkEvent = await executeAfterRequestInterceptors(
-          this.requestInterceptors,
-          context,
-          chunk,
-          converted,
-        );
-        if (!adkEvent) {
-          continue;
-        }
-
-        processor.updateCustomMetadata(adkEvent, chunk);
-        if (!useStreaming) {
-          yield adkEvent;
-          continue;
-        }
-        for (const ev of processor.aggregatePartial(context, chunk, adkEvent)) {
-          yield ev;
+        const failure =
+          this.a2aConfig.mode === 'task'
+            ? terminalTaskFailure(chunk)
+            : undefined;
+        if (failure) {
+          const message = `Remote A2A task failed: ${failure.reason}`;
+          logger.warn(message);
+          yield createEvent({
+            author: this.name,
+            invocationId: context.invocationId,
+            branch: context.branch,
+            isolationScope: context.isolationScope,
+            errorMessage: message,
+            customMetadata: {
+              [AdkMetadataKeys.ERROR]: message,
+              ...(failure.taskId
+                ? {[AdkMetadataKeys.TASK_ID]: failure.taskId}
+                : {}),
+            },
+          });
+          yield finishTaskEvent(context, this.name, {errorMessage: message});
+          outcome.release = true;
+          return;
         }
       }
     } catch (e: unknown) {
       const message = `A2A request failed: ${formatError(e)}`;
       logger.error(`A2ARemoteAgent ${this.name} failed:`, message);
+      outcome.errorMessage = message;
+      outcome.release = true;
 
       const statusCode = httpStatusCode(e);
       yield createEvent({

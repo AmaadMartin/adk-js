@@ -240,7 +240,7 @@ export function peerRequestedCallIds(
  * either to a remote A2A peer would leak that credential material outside
  * the trust boundary it was issued within.
  */
-function withoutCredentialParts(
+export function withoutCredentialParts(
   content: Content | undefined,
   peerRequestedIds: ReadonlySet<string>,
 ): Content | undefined {
@@ -304,12 +304,17 @@ export function toForwardableA2AParts(
  * @param ctx - The current invocation context, used to identify the remote
  *   agent's authored events.
  * @param session - The local session whose event history to diff.
+ * @param converter - Converts one genai part. Defaults to the standard one.
+ * @param fullHistoryWhenStateless - Whether a peer that reports no context id
+ *   receives the whole history rather than only what it has not seen. Only a
+ *   stateful peer can be expected to hold earlier turns in its own session.
  * @returns An object with the missing `parts` and an optional `contextId`.
  */
 export function toMissingRemoteSessionParts(
   ctx: InvocationContext,
   session: Session,
   converter?: GenAIPartToA2APartConverter,
+  fullHistoryWhenStateless = false,
 ): {parts: A2APart[]; contextId?: string} {
   const events = session.events;
   const peerName = requireAgent(ctx).name;
@@ -318,12 +323,17 @@ export function toMissingRemoteSessionParts(
 
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event.author === peerName) {
+    if (event.author !== peerName) {
+      continue;
+    }
+    const metadata = event.customMetadata || {};
+    contextId = metadata[AdkMetadataKeys.CONTEXT_ID] as string | undefined;
+    if (!fullHistoryWhenStateless || contextId) {
       lastRemoteResponseIndex = i;
-      const metadata = event.customMetadata || {};
-      contextId = metadata[AdkMetadataKeys.CONTEXT_ID] as string;
       break;
     }
+    // The peer reported no context id for this turn, so it may not hold the
+    // history. An older turn of its own may still have reported one.
   }
 
   const peerRequestedIds = peerRequestedCallIds(events, peerName);
