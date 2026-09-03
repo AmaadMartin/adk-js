@@ -594,7 +594,9 @@ describe('RemoteA2AAgent authentication and interceptors', () => {
       await run(agent);
 
       const params = vi.mocked(mockClient.sendMessageStream).mock.calls[0][0];
-      expect(params.message.parts).toEqual([{kind: 'text', text: 'rewritten'}]);
+      expect(params.message.parts).toEqual([
+        {kind: 'text', text: 'rewritten', metadata: {is_user_input: true}},
+      ]);
     });
 
     it('uses a caller-supplied incoming part converter', async () => {

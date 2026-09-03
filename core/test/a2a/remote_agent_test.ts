@@ -454,7 +454,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
+    const dumped = JSON.stringify(capturedParts ?? []);
     expect(dumped).not.toContain('SUPER_SECRET_TOKEN');
   });
 
@@ -539,7 +539,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
+    const dumped = JSON.stringify(capturedParts ?? []);
     expect(dumped).toContain('ANSWER_FOR_THE_PEER');
   });
 
@@ -649,7 +649,7 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
+    const dumped = JSON.stringify(capturedParts ?? []);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
   });
 

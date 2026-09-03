@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
 
+import {Event, getFunctionResponses} from '../events/event.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {
   BaseTool,
@@ -22,6 +23,36 @@ export const FINISH_TASK_TOOL_NAME = 'finish_task';
  * validation-error retry signal.
  */
 export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
+
+/**
+ * The result a `finish_task` response carries when the task ended in failure.
+ * A remote task agent reports a failed task this way, so the delegating agent
+ * can hand control back to its coordinator.
+ */
+export const FINISH_TASK_ERROR_RESULT = 'Task failed.';
+
+/**
+ * Whether an event carries a terminal `finish_task` function response: one
+ * reporting either success or failure.
+ *
+ * A response carrying anything else (a validation error, say) is not terminal,
+ * so the caller keeps iterating and the agent gets a chance to retry.
+ *
+ * @param event The event to inspect.
+ * @return `true` when the task has finished, either way.
+ */
+export function isFinishTaskTerminalResponse(event: Event): boolean {
+  return getFunctionResponses(event).some((fr) => {
+    if (fr.name !== FINISH_TASK_TOOL_NAME) {
+      return false;
+    }
+    const {result} = (fr.response ?? {}) as {result?: unknown};
+    return (
+      result === FINISH_TASK_SUCCESS_RESULT ||
+      result === FINISH_TASK_ERROR_RESULT
+    );
+  });
+}
 
 /** The default output schema when the task agent declares none. */
 const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
