@@ -168,29 +168,19 @@ function buildCardFetch(
     return fetchImpl;
   }
   const baseFetch = fetchImpl ?? fetch;
-  return (input, init) => {
-    const merged = new Headers(init?.headers);
+  return (input, init = {}) => {
+    const merged = new Headers(init.headers);
     for (const [name, value] of Object.entries(headers ?? {})) {
       merged.set(name, value);
     }
     return baseFetch(input, {
       ...init,
       headers: merged,
-      signal: withTimeout(init?.signal, timeoutMs),
+      ...(timeoutMs === undefined
+        ? {}
+        : {signal: AbortSignal.timeout(timeoutMs)}),
     });
   };
-}
-
-/** Combines a caller-supplied abort signal with a timeout, if either exists. */
-function withTimeout(
-  signal: AbortSignal | null | undefined,
-  timeoutMs?: number,
-): AbortSignal | undefined {
-  if (timeoutMs === undefined) {
-    return signal ?? undefined;
-  }
-  const timeout = AbortSignal.timeout(timeoutMs);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 /**

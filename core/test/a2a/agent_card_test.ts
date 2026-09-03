@@ -355,6 +355,58 @@ describe('Agent Card', () => {
       expect(init?.signal).toBeInstanceOf(AbortSignal);
     });
 
+    it('leaves the card fetch unbounded when no timeout is set', async () => {
+      const card = {name: 'remote', url: 'https://remote.example.com/a2a'};
+      const fetchImpl = vi.fn<typeof fetch>(
+        async () =>
+          new Response(JSON.stringify(card), {
+            headers: {'Content-Type': 'application/json'},
+          }),
+      );
+
+      await resolveAgentCard(
+        'https://remote.example.com/.well-known/agent-card.json',
+        {fetchImpl, headers: {Authorization: 'Bearer tok'}},
+      );
+
+      expect(fetchImpl.mock.calls[0][1]?.signal).toBeUndefined();
+    });
+
+    it('bounds the card fetch when only a timeout is set', async () => {
+      const card = {name: 'remote', url: 'https://remote.example.com/a2a'};
+      const fetchImpl = vi.fn<typeof fetch>(
+        async () =>
+          new Response(JSON.stringify(card), {
+            headers: {'Content-Type': 'application/json'},
+          }),
+      );
+
+      await resolveAgentCard(
+        'https://remote.example.com/.well-known/agent-card.json',
+        {fetchImpl, timeoutMs: 5000},
+      );
+
+      expect(fetchImpl.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('falls back to the global fetch', async () => {
+      const card = {name: 'remote', url: 'https://remote.example.com/a2a'};
+      const globalFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify(card), {
+          headers: {'Content-Type': 'application/json'},
+        }),
+      );
+
+      const resolved = await resolveAgentCard(
+        'https://remote.example.com/.well-known/agent-card.json',
+        {headers: {Authorization: 'Bearer tok'}},
+      );
+
+      expect(resolved.name).toBe('remote');
+      expect(globalFetch).toHaveBeenCalled();
+      globalFetch.mockRestore();
+    });
+
     it('uses the caller fetch unchanged when nothing is added', async () => {
       const card = {name: 'remote', url: 'https://remote.example.com/a2a'};
       const fetchImpl = vi.fn<typeof fetch>(

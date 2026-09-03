@@ -146,8 +146,8 @@ function withAdoptedCardDescription(
 export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   /**
    * Redeclared as mutable: `BaseNode` fixes the description at construction,
-   * but a card fetched from a URL or a file only supplies one once
-   * {@link init} has resolved it.
+   * but a card fetched from a URL or a file only supplies one once the agent
+   * has resolved it, on the first run.
    */
   declare description: string;
 
