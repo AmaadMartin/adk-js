@@ -38,7 +38,13 @@ import {AutoAuthCredentialExchanger} from '../tools/openapi_tool/auth/credential
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
-import {isMessage, isTask, MessageRole, TaskState} from './a2a_event.js';
+import {
+  isMessage,
+  isTask,
+  isTaskStatusUpdateEvent,
+  MessageRole,
+  TaskState,
+} from './a2a_event.js';
 import {
   A2ACardRequestInterceptor,
   A2APartToGenAIPartConverter,
@@ -88,27 +94,34 @@ interface TaskOutcome {
 }
 
 /**
- * The reason a remote task ended badly, or `undefined` when it did not.
+ * Why a remote task ended badly, or `undefined` when it did not.
  *
- * A canceled task reports a fixed reason; a failed one reports whatever text
- * its status message carries. The task is read rather than the converted
- * event, because the converter drops the content of a failed task and emits
- * nothing at all for a canceled one that carries no message.
+ * Both shapes a peer may report a terminal state in are accepted: a whole
+ * `Task`, and the incremental `status-update` that adk-js's own A2A server
+ * emits for a failure. The stream is read rather than the converted event,
+ * because the converter drops the content of a failed task and emits nothing
+ * at all for a canceled one that carries no message.
  */
-function terminalTaskFailure(task: Task): string | undefined {
-  switch (task.status?.state) {
+function terminalTaskFailure(
+  chunk: A2AStreamEventData,
+): {reason: string; taskId?: string} | undefined {
+  if (!isTask(chunk) && !isTaskStatusUpdateEvent(chunk)) {
+    return undefined;
+  }
+  const taskId = isTask(chunk) ? chunk.id : chunk.taskId;
+  switch (chunk.status?.state) {
     case TaskState.CANCELED:
-      return 'Task canceled';
+      return {reason: 'Task canceled', taskId};
     case TaskState.FAILED:
-      return statusText(task) || 'Unknown error';
+      return {reason: statusText(chunk) || 'Unknown error', taskId};
     default:
       return undefined;
   }
 }
 
 /** Joins the text of a task status message, or `undefined` when it has none. */
-function statusText(task: Task): string | undefined {
-  const texts = (task.status?.message?.parts ?? [])
+function statusText(chunk: Task | TaskStatusUpdateEvent): string | undefined {
+  const texts = (chunk.status?.message?.parts ?? [])
     .filter((part) => part.kind === 'text')
     .map((part) => part.text)
     .filter((text) => !!text);
@@ -819,11 +832,11 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
         }
 
         const failure =
-          this.a2aConfig.mode === 'task' && isTask(chunk)
+          this.a2aConfig.mode === 'task'
             ? terminalTaskFailure(chunk)
             : undefined;
         if (failure) {
-          const message = `Remote A2A task failed: ${failure}`;
+          const message = `Remote A2A task failed: ${failure.reason}`;
           logger.warn(message);
           yield createEvent({
             author: this.name,
@@ -833,7 +846,9 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
             errorMessage: message,
             customMetadata: {
               [AdkMetadataKeys.ERROR]: message,
-              [AdkMetadataKeys.TASK_ID]: (chunk as Task).id,
+              ...(failure.taskId
+                ? {[AdkMetadataKeys.TASK_ID]: failure.taskId}
+                : {}),
             },
           });
           yield finishTaskEvent(context, this.name, {errorMessage: message});

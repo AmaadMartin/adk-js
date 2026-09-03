@@ -7,7 +7,7 @@
 import {Message, Task} from '@a2a-js/sdk';
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {TaskState} from '../../src/a2a/a2a_event.js';
+import {createTaskFailedEvent, TaskState} from '../../src/a2a/a2a_event.js';
 import {RemoteA2AAgent} from '../../src/a2a/a2a_remote_agent.js';
 import {findFinishTaskArgsFromHistory} from '../../src/a2a/a2a_remote_agent_task_utils.js';
 import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
@@ -20,8 +20,8 @@ import {
 import {SchemaLike} from '../../src/utils/schema.js';
 import {
   A2AChunk,
-  FakeTransport,
   fakeClient,
+  FakeTransport,
   invocationContext,
   peerAgentCard,
 } from './test_helpers.js';
@@ -70,6 +70,29 @@ function finishTaskReply(id?: string): A2AChunk {
         metadata: {adk_type: 'function_response'},
       },
     ],
+  };
+}
+
+/** The failure shape adk-js's own A2A server emits: an incremental update. */
+function failedStatusUpdate(state: TaskState, text?: string): A2AChunk {
+  return {
+    kind: 'status-update',
+    taskId: 'task-1',
+    contextId: 'ctx-1',
+    final: true,
+    status: {
+      state,
+      ...(text
+        ? {
+            message: {
+              kind: 'message',
+              messageId: 'm-status',
+              role: 'agent',
+              parts: [{kind: 'text', text}],
+            },
+          }
+        : {}),
+    },
   };
 }
 
@@ -438,6 +461,99 @@ describe('RemoteA2AAgent task-mode completion', () => {
           event.errorMessage === 'Remote A2A task failed: Task canceled',
       ),
     ).toBe(true);
+  });
+
+  it('releases control for a failure sent as a status update', async () => {
+    const transport = new FakeTransport([
+      failedStatusUpdate(TaskState.FAILED, 'oops'),
+    ]);
+    const agent = taskAgent(transport);
+    const ctx = invocationContext({
+      agent,
+      isolationScope: SCOPE,
+      events: [triggerEvent()],
+    });
+
+    const events = await collect(agent.runAsync(ctx));
+
+    const error = events.find((event) =>
+      event.errorMessage?.startsWith('Remote A2A task failed:'),
+    );
+    expect(error?.errorMessage).toBe('Remote A2A task failed: oops');
+    expect(error?.customMetadata?.[AdkMetadataKeys.TASK_ID]).toBe('task-1');
+    expect(
+      events.find((event) => event.content?.parts?.[0].functionResponse)
+        ?.content?.parts?.[0].functionResponse?.response,
+    ).toEqual({result: 'Task failed.'});
+    expect(events[events.length - 1].actions.endOfAgent).toBe(true);
+  });
+
+  it('releases control for a cancellation sent as a status update', async () => {
+    const transport = new FakeTransport([
+      failedStatusUpdate(TaskState.CANCELED),
+    ]);
+    const agent = taskAgent(transport);
+    const ctx = invocationContext({
+      agent,
+      isolationScope: SCOPE,
+      events: [triggerEvent()],
+    });
+
+    const events = await collect(agent.runAsync(ctx));
+
+    expect(
+      events.some(
+        (event) =>
+          event.errorMessage === 'Remote A2A task failed: Task canceled',
+      ),
+    ).toBe(true);
+    expect(events[events.length - 1].actions.endOfAgent).toBe(true);
+  });
+
+  it('releases control for the event the ADK A2A server emits on failure', async () => {
+    const transport = new FakeTransport([
+      createTaskFailedEvent({
+        taskId: 'task-1',
+        contextId: 'ctx-1',
+        error: new Error('remote blew up'),
+      }),
+    ]);
+    const agent = taskAgent(transport);
+    const ctx = invocationContext({
+      agent,
+      isolationScope: SCOPE,
+      events: [triggerEvent()],
+    });
+
+    const events = await collect(agent.runAsync(ctx));
+
+    expect(
+      events.some(
+        (event) =>
+          event.errorMessage === 'Remote A2A task failed: remote blew up',
+      ),
+    ).toBe(true);
+    expect(events[events.length - 1].actions.endOfAgent).toBe(true);
+  });
+
+  it('does not release control for a non-terminal status update', async () => {
+    const transport = new FakeTransport([
+      failedStatusUpdate(TaskState.WORKING, 'still going'),
+    ]);
+    const agent = taskAgent(transport);
+    const ctx = invocationContext({
+      agent,
+      isolationScope: SCOPE,
+      events: [triggerEvent()],
+    });
+
+    const events = await collect(agent.runAsync(ctx));
+
+    expect(
+      events.some((event) =>
+        event.errorMessage?.startsWith('Remote A2A task failed:'),
+      ),
+    ).toBe(false);
   });
 
   it('reports Unknown error when a failed task carries no text', async () => {
