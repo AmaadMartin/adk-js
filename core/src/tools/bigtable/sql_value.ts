@@ -89,11 +89,9 @@ export function toJsonValue(value: unknown): JsonValue {
   if (value === null || value === undefined) {
     return null;
   }
-  if (typeof value === 'bigint') {
-    // JSON has no 64-bit integer, and rounding one into a double loses digits.
-    return value.toString();
-  }
   if (typeof value !== 'object') {
+    // A 64-bit integer arrives as a `bigint`, which JSON cannot carry and
+    // which loses digits as a double, so it keeps its digits as a string.
     return typeof value === 'string' ||
       typeof value === 'number' ||
       typeof value === 'boolean'
