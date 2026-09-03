@@ -9,6 +9,7 @@ import {
   Message,
   Task,
   TaskArtifactUpdateEvent,
+  TaskStatus,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
 import {randomUUID} from '../utils/env_aware_utils.js';
@@ -272,7 +273,7 @@ export function createFinalTaskStatusEvent({
 }: {
   taskId: string;
   contextId: string;
-  state: TaskState;
+  state: TaskStatus['state'];
   message?: Message;
   metadata?: Record<string, unknown>;
 }): TaskStatusUpdateEvent {

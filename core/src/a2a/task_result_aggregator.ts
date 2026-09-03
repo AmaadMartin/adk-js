@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Message} from '@a2a-js/sdk';
+import {Message, TaskStatus} from '@a2a-js/sdk';
 import {A2AEvent, isTaskStatusUpdateEvent, TaskState} from './a2a_event.js';
 
 /**
@@ -12,7 +12,7 @@ import {A2AEvent, isTaskStatusUpdateEvent, TaskState} from './a2a_event.js';
  * this list, such as `completed`, never settles the task: the executor decides
  * the terminal state once the run is over.
  */
-const SETTLING_STATES: readonly TaskState[] = [
+const SETTLING_STATES: ReadonlyArray<TaskStatus['state']> = [
   TaskState.FAILED,
   TaskState.AUTH_REQUIRED,
   TaskState.INPUT_REQUIRED,
@@ -20,7 +20,7 @@ const SETTLING_STATES: readonly TaskState[] = [
 
 const UNSETTLED = SETTLING_STATES.length;
 
-function severityOf(state: TaskState): number {
+function severityOf(state: TaskStatus['state']): number {
   const index = SETTLING_STATES.indexOf(state);
 
   return index === -1 ? UNSETTLED : index;
@@ -35,11 +35,11 @@ function severityOf(state: TaskState): number {
  * task, the latest status message wins and the state stays `working`.
  */
 export class TaskResultAggregator {
-  private state = TaskState.WORKING;
+  private state: TaskStatus['state'] = TaskState.WORKING;
   private statusMessage?: Message;
 
   /** The state the task settled on, or `working` if nothing settled it. */
-  get taskState(): TaskState {
+  get taskState(): TaskStatus['state'] {
     return this.state;
   }
 
@@ -61,9 +61,9 @@ export class TaskResultAggregator {
       return;
     }
 
-    const incoming = severityOf(event.status.state as TaskState);
+    const incoming = severityOf(event.status.state);
     if (incoming < UNSETTLED && incoming <= severityOf(this.state)) {
-      this.state = event.status.state as TaskState;
+      this.state = event.status.state;
       this.statusMessage = event.status.message;
     } else if (this.state === TaskState.WORKING) {
       this.statusMessage = event.status.message;

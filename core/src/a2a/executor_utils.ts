@@ -4,18 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Message, TaskStatusUpdateEvent} from '@a2a-js/sdk';
+import {TaskStatusUpdateEvent} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {Event as AdkEvent} from '../events/event.js';
 import {A2AEvent, createTask} from './a2a_event.js';
 import {ExecutorContext} from './executor_context.js';
-
-/**
- * The extension a client requests to be served by the new ADK A2A integration
- * rather than the legacy executor.
- */
-export const A2A_NEW_INTEGRATION_EXTENSION =
-  'https://google.github.io/adk-docs/a2a/a2a-extension/';
 
 /**
  * Hooks that can observe and rewrite what an execution publishes.
@@ -57,7 +50,6 @@ export interface ExecuteInterceptor {
  * @throws {Error} When the request carries no message, task id or context id.
  */
 export function requireRequestContext(ctx: RequestContext): {
-  message: Message;
   taskId: string;
   contextId: string;
 } {
@@ -71,11 +63,7 @@ export function requireRequestContext(ctx: RequestContext): {
     throw new Error('A2A request must have a context ID');
   }
 
-  return {
-    message: ctx.userMessage,
-    taskId: ctx.taskId,
-    contextId: ctx.contextId,
-  };
+  return {taskId: ctx.taskId, contextId: ctx.contextId};
 }
 
 /**
@@ -103,24 +91,6 @@ export function enqueueSubmittedSignal(
       message: ctx.userMessage,
     }),
   );
-}
-
-/**
- * Activates the new-integration extension when the caller requested it.
- *
- * Activation is echoed to the client through the server call context, so a
- * caller can tell which implementation served the request.
- */
-export function activateNewVersionExtension(ctx: RequestContext): boolean {
-  const callContext = ctx.context;
-  if (
-    !callContext?.requestedExtensions?.includes(A2A_NEW_INTEGRATION_EXTENSION)
-  ) {
-    return false;
-  }
-  callContext.addActivatedExtension(A2A_NEW_INTEGRATION_EXTENSION);
-
-  return true;
 }
 
 /**

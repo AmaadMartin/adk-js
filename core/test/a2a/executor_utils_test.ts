@@ -7,21 +7,22 @@
 import {Task, TaskStatusUpdateEvent} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
-  A2A_NEW_INTEGRATION_EXTENSION,
   A2AEvent,
-  activateNewVersionExtension,
   createEvent,
   createEventActions,
+  createSession,
+  TaskState,
+} from '@google/adk';
+import {describe, expect, it, Mocked, vi} from 'vitest';
+import {createExecutorContext} from '../../src/a2a/executor_context.js';
+import {
   enqueueSubmittedSignal,
   executeAfterAgentInterceptors,
   executeAfterEventInterceptors,
   executeBeforeAgentInterceptors,
   ExecuteInterceptor,
-  ExecutorContext,
   requireRequestContext,
-  TaskState,
-} from '@google/adk';
-import {describe, expect, it, Mocked, vi} from 'vitest';
+} from '../../src/a2a/executor_utils.js';
 
 const adkEvent = createEvent({
   author: 'model',
@@ -29,15 +30,11 @@ const adkEvent = createEvent({
   actions: createEventActions(),
 });
 
-const executorContext = {
-  userId: 'user-1',
-  sessionId: 'session-1',
-  appName: 'app-1',
-  readonlyState: {},
-  events: [],
+const executorContext = createExecutorContext({
+  session: createSession({id: 'session-1', appName: 'app-1', userId: 'user-1'}),
   userContent: {role: 'user', parts: [{text: 'hello'}]},
-  requestContext: {contextId: 'context-1'} as RequestContext,
-} as ExecutorContext;
+  requestContext: createRequestContext(),
+});
 
 function createRequestContext(overrides = {}): RequestContext {
   return {
@@ -68,11 +65,8 @@ function createStatusUpdate(state: TaskState): TaskStatusUpdateEvent {
 }
 
 describe('requireRequestContext', () => {
-  it('returns the message, task id and context id', () => {
-    const ctx = createRequestContext();
-
-    expect(requireRequestContext(ctx)).toEqual({
-      message: ctx.userMessage,
+  it('returns the task id and context id', () => {
+    expect(requireRequestContext(createRequestContext())).toEqual({
       taskId: 'task-1',
       contextId: 'context-1',
     });
@@ -121,40 +115,6 @@ describe('enqueueSubmittedSignal', () => {
     enqueueSubmittedSignal(ctx, eventBus);
 
     expect(eventBus.publish).not.toHaveBeenCalled();
-  });
-});
-
-describe('activateNewVersionExtension', () => {
-  it('activates the extension when the caller requested it', () => {
-    const addActivatedExtension = vi.fn();
-    const ctx = createRequestContext({
-      context: {
-        requestedExtensions: [A2A_NEW_INTEGRATION_EXTENSION],
-        addActivatedExtension,
-      },
-    });
-
-    expect(activateNewVersionExtension(ctx)).toBe(true);
-    expect(addActivatedExtension).toHaveBeenCalledWith(
-      A2A_NEW_INTEGRATION_EXTENSION,
-    );
-  });
-
-  it('does nothing when another extension was requested', () => {
-    const addActivatedExtension = vi.fn();
-    const ctx = createRequestContext({
-      context: {
-        requestedExtensions: ['https://example.com/other'],
-        addActivatedExtension,
-      },
-    });
-
-    expect(activateNewVersionExtension(ctx)).toBe(false);
-    expect(addActivatedExtension).not.toHaveBeenCalled();
-  });
-
-  it('does nothing when there is no call context', () => {
-    expect(activateNewVersionExtension(createRequestContext())).toBe(false);
   });
 });
 

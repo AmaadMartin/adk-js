@@ -36,13 +36,9 @@ export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
 export type {ExecutorContext} from './executor_context.js';
 export {
-  A2A_NEW_INTEGRATION_EXTENSION,
-  activateNewVersionExtension,
-  enqueueSubmittedSignal,
   executeAfterAgentInterceptors,
   executeAfterEventInterceptors,
   executeBeforeAgentInterceptors,
-  requireRequestContext,
 } from './executor_utils.js';
 export type {ExecuteInterceptor} from './executor_utils.js';
 export type {
