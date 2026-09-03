@@ -71,6 +71,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [EvaluationGenerator](evaluation/evaluation_generator/index.md) - Driving an
   agent through a simulated conversation and recording it as gradable
   invocations.
+- [Evaluator](evaluation/evaluator/index.md) - The contract an evaluation metric implements, its result shapes, and the criterion type it validates against.
 - [Live eval inference](evaluation/live_inference/index.md) - Driving that same
   simulated conversation over a bidirectional audio connection, for an agent or
   a workflow root, and grading the transcript it produces.

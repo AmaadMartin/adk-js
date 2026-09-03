@@ -14,6 +14,8 @@ import {
 
 import {AppDetails} from './app_details.js';
 
+export type {ConversationScenario} from './conversation_scenarios.js';
+
 /**
  * Intermediate data an agent produces on its way to a final answer.
  */
