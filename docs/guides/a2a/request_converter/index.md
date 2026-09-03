@@ -41,9 +41,8 @@ async function run(runner: Runner, requestContext: RequestContext) {
 }
 ```
 
-Every field of `AgentRunRequest` is optional, so a custom converter can fill
-only the slots it needs. `runAsync` requires `userId`, `sessionId` and
-`newMessage`, which is why the caller narrows them.
+Every field of `AgentRunRequest` is optional, while `runAsync` requires
+`userId`, `sessionId` and `newMessage`. That is why the caller narrows them.
 
 ## What the default converter sets
 
@@ -56,36 +55,28 @@ only the slots it needs. `runAsync` requires `userId`, `sessionId` and
 
 The role is always `user`, whatever role the A2A message carries. One A2A part
 can produce zero, one or several GenAI parts, and the order of the parts
-survives. `invocationId`, `stateDelta` and `runConfig` stay empty; they exist
-for a custom converter to fill.
+survives.
 
-## Supplying your own converter
+## Converting the parts yourself
 
-`A2ARequestToAgentRunRequestConverter` is the substitution seam. An
-implementation takes the request and a part converter, and returns the same
-`AgentRunRequest` shape:
+The second parameter converts one A2A part. It defaults to `toGenAIPart`, and
+your own `A2APartToGenAIPartConverter` may return one part, an array of parts,
+or nothing for a part it does not handle:
 
 ```ts
 import {
   A2APartToGenAIPartConverter,
-  A2ARequestToAgentRunRequestConverter,
-  AgentRunRequest,
   convertA2aRequestToAgentRunRequest,
 } from '@google/adk';
 import {RequestContext} from '@a2a-js/sdk/server';
 
-const tenantScoped: A2ARequestToAgentRunRequestConverter = (
-  request: RequestContext,
-  partConverter: A2APartToGenAIPartConverter,
-): AgentRunRequest => {
-  const runRequest = convertA2aRequestToAgentRunRequest(request, partConverter);
-  return {...runRequest, userId: `acme:${runRequest.userId}`};
-};
-```
+const dropFiles: A2APartToGenAIPartConverter = (a2aPart) =>
+  a2aPart.kind === 'text' ? {text: a2aPart.text} : undefined;
 
-The second parameter converts one A2A part. It defaults to `toGenAIPart`, and a
-custom implementation may return one part, an array of parts, or nothing for a
-part it does not handle.
+function convert(requestContext: RequestContext) {
+  return convertA2aRequestToAgentRunRequest(requestContext, dropFiles);
+}
+```
 
 ## Failure modes
 

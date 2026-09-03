@@ -38,7 +38,4 @@ export {
   A2A_METADATA_KEY,
   convertA2aRequestToAgentRunRequest,
 } from './request_converter_utils.js';
-export type {
-  A2ARequestToAgentRunRequestConverter,
-  AgentRunRequest,
-} from './request_converter_utils.js';
+export type {AgentRunRequest} from './request_converter_utils.js';

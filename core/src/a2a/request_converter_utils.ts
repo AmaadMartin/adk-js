@@ -6,7 +6,6 @@
 
 import {RequestContext} from '@a2a-js/sdk/server';
 import {Content as GenAIContent, Part as GenAIPart} from '@google/genai';
-import {RunConfig} from '../agents/run_config.js';
 import {
   A2APartToGenAIPartConverter,
   toGenAIPart,
@@ -24,32 +23,13 @@ export const A2A_METADATA_KEY = 'a2a_metadata';
 
 /**
  * The arguments for one `Runner.runAsync` call.
- *
- * Every field is optional, so a custom converter can fill only the slots it
- * cares about. `convertA2aRequestToAgentRunRequest` sets `userId`,
- * `sessionId`, `newMessage` and `customMetadata`.
  */
 export interface AgentRunRequest {
   userId?: string;
   sessionId?: string;
-  invocationId?: string;
   newMessage?: GenAIContent;
-  stateDelta?: Record<string, unknown>;
-  runConfig?: RunConfig;
   customMetadata?: Record<string, unknown>;
 }
-
-/**
- * Converts an A2A request context into the ADK runner arguments.
- *
- * An application supplies its own implementation to change how a request maps
- * onto a run, for example to scope the user id to a tenant. The default
- * implementation is `convertA2aRequestToAgentRunRequest`.
- */
-export type A2ARequestToAgentRunRequestConverter = (
-  request: RequestContext,
-  partConverter: A2APartToGenAIPartConverter,
-) => AgentRunRequest;
 
 /**
  * Resolves the ADK user id for an A2A request.
