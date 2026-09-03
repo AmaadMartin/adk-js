@@ -1,0 +1,158 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {ReadonlyContext} from '../../agents/readonly_context.js';
+import {experimental} from '../../utils/experimental.js';
+import {logger} from '../../utils/logger.js';
+import {BaseTool} from '../base_tool.js';
+import {BaseToolset, ToolPredicate} from '../base_toolset.js';
+import {
+  getTableSchemaTool,
+  listNamedSchemasTool,
+  listTableIndexColumnsTool,
+  listTableIndexesTool,
+  listTableNamesTool,
+} from './metadata_tool.js';
+import {getExecuteSqlTool} from './query_tool.js';
+import {
+  getVectorStoreSimilaritySearchTool,
+  similaritySearchTool,
+} from './search_tool.js';
+import {
+  Capabilities,
+  resolveVectorStoreSettings,
+  SpannerToolSettings,
+} from './settings.js';
+import {
+  SpannerCredentialsConfig,
+  SpannerCredentialsManager,
+  validateSpannerCredentialsConfig,
+} from './spanner_credentials.js';
+import {createSpannerTool, SPANNER_TOOL_NAME_PREFIX} from './spanner_tool.js';
+
+/** Options for {@link SpannerToolset}. */
+export interface SpannerToolsetOptions {
+  /**
+   * How the tools authenticate. Required: Spanner rejects an unauthenticated
+   * call, so there is no working default.
+   */
+  credentialsConfig: SpannerCredentialsConfig;
+  /**
+   * What the tools may do, how many rows a query returns, and which vector
+   * store to search. Defaults to read-only data access with no vector store.
+   */
+  spannerToolSettings?: SpannerToolSettings;
+  /**
+   * Names of the tools to expose, or a predicate over them. Both see the tool
+   * under its prefixed name.
+   */
+  toolFilter?: ToolPredicate | string[];
+}
+
+/**
+ * Tools for reading Spanner data, schemas and indexes.
+ *
+ * The tool names are:
+ *   - `spanner_list_table_names`
+ *   - `spanner_list_table_indexes`
+ *   - `spanner_list_table_index_columns`
+ *   - `spanner_list_named_schemas`
+ *   - `spanner_get_table_schema`
+ *   - `spanner_execute_sql` (needs `Capabilities.DATA_READ`)
+ *   - `spanner_similarity_search` (needs `Capabilities.DATA_READ`)
+ *   - `spanner_vector_store_similarity_search` (needs `Capabilities.DATA_READ`
+ *     and `vectorStoreSettings`)
+ *
+ * Every tool answers with a `SpannerToolResult` and never throws. Nothing
+ * writes: each statement runs in a read-only snapshot.
+ *
+ * Requires the optional peer dependency `@google-cloud/spanner`, which is
+ * loaded on the first tool call. Install it with
+ * `npm install @google-cloud/spanner`.
+ *
+ * One identity for every end user, from Application Default Credentials:
+ *
+ * ```ts
+ * const authClient = await new GoogleAuth({
+ *   scopes: [...SPANNER_DEFAULT_SCOPES],
+ * }).getClient();
+ * const toolset = new SpannerToolset({credentialsConfig: {authClient}});
+ * ```
+ *
+ * A `toolFilter` given as a string array matches the prefixed name, as it does
+ * for `MCPToolset` and `OpenAPIToolset`. adk-python filters on the bare name,
+ * so a filter ported from Python needs the prefix added:
+ * `tool_filter=['execute_sql']` becomes
+ * `toolFilter: ['spanner_execute_sql']`.
+ */
+@experimental
+export class SpannerToolset extends BaseToolset {
+  private readonly tools: BaseTool[];
+
+  /**
+   * @throws Error if `credentialsConfig` names no credential source or more
+   *   than one, or if `vectorStoreSettings` is not usable.
+   */
+  constructor(options: SpannerToolsetOptions) {
+    super(options.toolFilter ?? [], SPANNER_TOOL_NAME_PREFIX);
+    validateSpannerCredentialsConfig(options.credentialsConfig);
+    const settings = options.spannerToolSettings ?? {};
+    if (settings.vectorStoreSettings) {
+      resolveVectorStoreSettings(settings.vectorStoreSettings);
+    }
+    const credentials = new SpannerCredentialsManager(
+      options.credentialsConfig,
+    );
+
+    this.tools = [
+      createSpannerTool(credentials, listTableNamesTool),
+      createSpannerTool(credentials, listTableIndexesTool),
+      createSpannerTool(credentials, listTableIndexColumnsTool),
+      createSpannerTool(credentials, listNamedSchemasTool),
+      createSpannerTool(credentials, getTableSchemaTool),
+    ];
+    const capabilities = settings.capabilities ?? [Capabilities.DATA_READ];
+    if (capabilities.includes(Capabilities.DATA_READ)) {
+      this.tools.push(
+        createSpannerTool(credentials, getExecuteSqlTool(settings)),
+        createSpannerTool(credentials, similaritySearchTool),
+      );
+      if (settings.vectorStoreSettings) {
+        this.tools.push(
+          createSpannerTool(
+            credentials,
+            getVectorStoreSimilaritySearchTool(settings),
+          ),
+        );
+      }
+    }
+  }
+
+  override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
+    if (context) {
+      return this.tools.filter((tool) => this.isToolSelected(tool, context));
+    }
+    const names = this.toolFilter;
+    if (Array.isArray(names)) {
+      return names.length > 0
+        ? this.tools.filter((tool) => names.includes(tool.name))
+        : this.tools;
+    }
+    logger.warn(
+      'SpannerToolset: a ToolPredicate toolFilter was provided but getTools()' +
+        ' was called without a ReadonlyContext. The filter will not be' +
+        ' applied.',
+    );
+    return this.tools;
+  }
+
+  /**
+   * A no-op, matching adk-python. Each tool call owns its Spanner client for
+   * the length of that call and closes it before it resolves, so the toolset
+   * holds no resource to release.
+   */
+  override async close(): Promise<void> {}
+}
