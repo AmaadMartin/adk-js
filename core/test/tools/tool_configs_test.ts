@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {BaseToolConfig} from '@google/adk';
-import {
-  InputValidationError,
-  createToolConfig,
-  validateToolConfigKeys,
-} from '@google/adk';
+import {InputValidationError, createToolConfig} from '@google/adk';
 import yaml from 'js-yaml';
 import {describe, expect, it} from 'vitest';
 
@@ -149,28 +144,5 @@ describe('createToolConfig', () => {
     expect(() => createToolConfig({name: 'VertexAiSearchTool', args})).toThrow(
       /`args` must be an object/,
     );
-  });
-});
-
-/** A custom tool config that extends {@link BaseToolConfig}. */
-type MyToolConfig = BaseToolConfig & {endpoint: string};
-
-const MY_TOOL_CONFIG_KEYS: Record<keyof MyToolConfig, true> = {endpoint: true};
-
-describe('validateToolConfigKeys', () => {
-  it('accepts a custom config that declares every key it carries', () => {
-    const config: MyToolConfig = {endpoint: 'https://example.test'};
-
-    expect(() =>
-      validateToolConfigKeys(config, MY_TOOL_CONFIG_KEYS, 'MyToolConfig'),
-    ).not.toThrow();
-  });
-
-  it('rejects an undeclared key on a custom config', () => {
-    const declared = {endpoint: 'https://example.test', typo: 1};
-
-    expect(() =>
-      validateToolConfigKeys(declared, MY_TOOL_CONFIG_KEYS, 'MyToolConfig'),
-    ).toThrow(/MyToolConfig received unknown key\(s\): typo\./);
   });
 });

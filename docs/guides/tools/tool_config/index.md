@@ -15,8 +15,6 @@ silence gives the author a tool that runs with the wrong settings and no error.
 The module splits the declaration in two. The top level is strict: only `name`
 and `args` are allowed. The `args` bag is free: its shape is whatever the
 tool's own constructor accepts, so no key is rejected and no key is renamed.
-`BaseToolConfig` and `validateToolConfigKeys` expose the strict half, so a
-custom config type gets the same key checking.
 
 adk-js has no configuration-file loader yet. `createToolConfig` validates the
 declaration and carries `name` verbatim; the host that consumes the config
@@ -49,9 +47,10 @@ createToolConfig({name: 'google_search', arg: {}});
 
 ## Tool reference forms
 
-`name` addresses the tool. An ADK built-in tool uses its bare name; a
-user-defined tool uses the fully qualified path to the instance, the class, a
-function that returns a tool, or a function tool.
+`name` addresses the tool. There are five supported forms.
+
+1. An ADK built-in tool instance or class, referenced by its bare name and
+   optionally with `args`.
 
 ```yaml
 tools:
@@ -60,10 +59,49 @@ tools:
     args:
       agent: ./another_agent.yaml
       skipSummarization: true
+```
+
+2. A user-defined tool instance. `name` is the fully qualified path to the
+   instance.
+
+```yaml
+tools:
   - name: my_package.my_module.myTool
+```
+
+3. A user-defined tool class. `name` is the fully qualified path to the class,
+   and `args` are the arguments for the tool.
+
+```yaml
+tools:
   - name: my_package.my_module.MyToolClass
     args:
       myToolArg1: value1
+      myToolArg2: value2
+```
+
+4. A user-defined function that returns a tool instance. `name` is the fully
+   qualified path to the function, and `args` are passed to it.
+
+```yaml
+tools:
+  - name: my_package.my_module.myToolFunction
+    args:
+      myFunctionArg1: value1
+```
+
+The function must have this signature:
+
+```ts
+(args: ToolArgsConfig) => BaseTool | Promise<BaseTool>;
+```
+
+5. A user-defined function tool. `name` is the fully qualified path to the
+   function.
+
+```yaml
+tools:
+  - name: my_package.my_module.myFunctionTool
 ```
 
 The arg keys are camelCase, because `args` reaches an adk-js constructor.
@@ -84,27 +122,5 @@ The arg keys are camelCase, because `args` reaches an adk-js constructor.
 Only the top level is key-checked. `args` and everything nested inside it pass
 through untouched, and `args` is shallow-copied, so the returned config never
 aliases the object you passed in.
-
-## Custom tool configs
-
-When the five reference forms do not suffice, declare your own config type and
-reuse the same key checking. Type the allowlist as
-`Record<keyof MyToolConfig, true>` so a new field fails to compile until it is
-listed.
-
-```ts
-import {validateToolConfigKeys} from '@google/adk';
-import type {BaseToolConfig} from '@google/adk';
-
-type MyToolConfig = BaseToolConfig & {endpoint: string};
-
-const MY_TOOL_CONFIG_KEYS: Record<keyof MyToolConfig, true> = {endpoint: true};
-
-const config: MyToolConfig = {endpoint: 'https://example.test'};
-validateToolConfigKeys(config, MY_TOOL_CONFIG_KEYS, 'MyToolConfig');
-
-validateToolConfigKeys({typo: 1}, MY_TOOL_CONFIG_KEYS, 'MyToolConfig');
-// InputValidationError: MyToolConfig received unknown key(s): typo.
-```
 
 This surface is experimental and can change.
