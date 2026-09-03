@@ -26,8 +26,23 @@ interface LoadCall {
 /** One recorded `ToolboxClient` construction. */
 interface ClientCall {
   url: string;
+  session: unknown;
   headers: unknown;
+  protocol: unknown;
+  clientName: unknown;
+  clientVersion: unknown;
 }
+
+/** The auth services a tool the fake server publishes still needs. */
+interface FakeToolAuth {
+  /** Auth-gated parameter name to the services that can satisfy it. */
+  requiredAuthnParams?: Record<string, string[]>;
+  /** Services the invocation itself needs. */
+  requiredAuthzTokens?: string[];
+}
+
+/** A zero-argument token getter, as `@toolbox-sdk/core` calls them. */
+type SdkTokenGetter = () => string | Promise<string>;
 
 const sdk = vi.hoisted(() => {
   /** Recorded calls, and the tools the fake server publishes. */
@@ -36,6 +51,10 @@ const sdk = vi.hoisted(() => {
     toolsetCalls: [] as LoadCall[],
     toolCalls: [] as LoadCall[],
     invocations: [] as Array<Record<string, unknown> | undefined>,
+    /** The `<service>_token` headers each invocation resolved. */
+    invocationTokens: [] as Array<Record<string, string>>,
+    /** Auth requirements the fake server advertises, by tool name. */
+    toolAuth: {} as Record<string, FakeToolAuth>,
     /** Set to make reading `ToolboxClient` throw, as a failed load would. */
     importError: undefined as Error | undefined,
     /** Set to make the next tool invocation reject. */
@@ -43,12 +62,27 @@ const sdk = vi.hoisted(() => {
   };
 
   /**
-   * A fake `ToolboxTool`: a callable carrying the three accessors the toolset
-   * reads. The real SDK tool is a function object too.
+   * A fake `ToolboxTool`, reproducing the contract the toolset relies on: the
+   * three accessors, the auth requirements, and an `addAuthTokenGetters` that
+   * returns a new tool, drops the services it satisfied, and rejects a getter
+   * the tool does not need. The real SDK tool is a callable function object
+   * too, and it resolves every getter into a `<service>_token` header when it
+   * is invoked.
    */
-  function fakeTool(name: string) {
+  function fakeTool(
+    name: string,
+    auth: FakeToolAuth = {},
+    getters: Record<string, SdkTokenGetter> = {},
+  ) {
+    const requiredAuthnParams = auth.requiredAuthnParams ?? {};
+    const requiredAuthzTokens = auth.requiredAuthzTokens ?? [];
     const call = async (args?: Record<string, unknown>) => {
+      const tokens: Record<string, string> = {};
+      for (const [service, getter] of Object.entries(getters)) {
+        tokens[`${service}_token`] = await getter();
+      }
       state.invocations.push(args);
+      state.invocationTokens.push(tokens);
       if (state.invocationError) {
         throw state.invocationError;
       }
@@ -58,12 +92,54 @@ const sdk = vi.hoisted(() => {
       getName: () => name,
       getDescription: () => `description of ${name}`,
       getParamSchema: () => z.object({city: z.string()}),
+      requiredAuthnParams,
+      requiredAuthzTokens,
+      addAuthTokenGetters(added: Record<string, SdkTokenGetter>) {
+        const needed = new Set([
+          ...requiredAuthzTokens,
+          ...Object.values(requiredAuthnParams).flat(),
+        ]);
+        const unused = Object.keys(added).filter(
+          (service) => !needed.has(service),
+        );
+        if (unused.length > 0) {
+          throw new Error(
+            `Authentication source(s) \`${unused.join(', ')}\` unused by ` +
+              `tool \`${name}\`.`,
+          );
+        }
+        const remaining: FakeToolAuth = {
+          requiredAuthnParams: Object.fromEntries(
+            Object.entries(requiredAuthnParams).filter(
+              ([, services]) => !services.some((service) => service in added),
+            ),
+          ),
+          requiredAuthzTokens: requiredAuthzTokens.filter(
+            (service) => !(service in added),
+          ),
+        };
+        return fakeTool(name, remaining, {...getters, ...added});
+      },
     });
   }
 
   class FakeToolboxClient {
-    constructor(url: string, _session: unknown, headers: unknown) {
-      state.clientCalls.push({url, headers});
+    constructor(
+      url: string,
+      session: unknown,
+      headers: unknown,
+      protocol?: unknown,
+      clientName?: unknown,
+      clientVersion?: unknown,
+    ) {
+      state.clientCalls.push({
+        url,
+        session,
+        headers,
+        protocol,
+        clientName,
+        clientVersion,
+      });
     }
 
     async loadToolset(
@@ -72,7 +148,10 @@ const sdk = vi.hoisted(() => {
       boundParams?: unknown,
     ) {
       state.toolsetCalls.push({name, authTokenGetters, boundParams});
-      return [fakeTool('search_hotels'), fakeTool('book_hotel')];
+      return [
+        fakeTool('search_hotels', state.toolAuth['search_hotels']),
+        fakeTool('book_hotel', state.toolAuth['book_hotel']),
+      ];
     }
 
     async loadTool(
@@ -81,7 +160,7 @@ const sdk = vi.hoisted(() => {
       boundParams?: unknown,
     ) {
       state.toolCalls.push({name, authTokenGetters, boundParams});
-      return fakeTool(name);
+      return fakeTool(name, state.toolAuth[name]);
     }
   }
 
@@ -127,6 +206,8 @@ beforeEach(() => {
   sdk.state.toolsetCalls = [];
   sdk.state.toolCalls = [];
   sdk.state.invocations = [];
+  sdk.state.invocationTokens = [];
+  sdk.state.toolAuth = {};
   sdk.state.importError = undefined;
   sdk.state.invocationError = undefined;
 });
@@ -140,7 +221,18 @@ describe('ToolboxToolset client', () => {
 
     await toolset.getTools();
 
-    expect(sdk.state.clientCalls).toEqual([{url: SERVER_URL, headers}]);
+    // With no clientOptions the SDK gets `null` for its session and
+    // `undefined` for the rest, so its own defaults apply.
+    expect(sdk.state.clientCalls).toEqual([
+      {
+        url: SERVER_URL,
+        session: null,
+        headers,
+        protocol: undefined,
+        clientName: undefined,
+        clientVersion: undefined,
+      },
+    ]);
   });
 
   it('loads nothing until getTools is called', () => {
@@ -263,9 +355,10 @@ describe('ToolboxToolset tool selection', () => {
     ]);
   });
 
-  it('forwards authTokenGetters and boundParams to both load calls', async () => {
+  it('forwards boundParams to both load calls and no getters', async () => {
     const authTokenGetters = {'my-auth': () => 'token'};
     const boundParams = {tenantId: 'acme'};
+    sdk.state.toolAuth = {book_hotel: {requiredAuthzTokens: ['my-auth']}};
     const toolset = new ToolboxToolset(SERVER_URL, {
       toolsetName: 'hotel-tools',
       toolNames: ['book_hotel'],
@@ -275,11 +368,13 @@ describe('ToolboxToolset tool selection', () => {
 
     await toolset.getTools();
 
+    // The getters are bound per invocation instead, so the load calls carry
+    // none. See 'ToolboxToolset auth token getters'.
     expect(sdk.state.toolsetCalls).toEqual([
-      {name: 'hotel-tools', authTokenGetters, boundParams},
+      {name: 'hotel-tools', authTokenGetters: undefined, boundParams},
     ]);
     expect(sdk.state.toolCalls).toEqual([
-      {name: 'book_hotel', authTokenGetters, boundParams},
+      {name: 'book_hotel', authTokenGetters: undefined, boundParams},
     ]);
   });
 });
