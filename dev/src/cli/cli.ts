@@ -137,6 +137,8 @@ function getApiServerOptions(
     a2a: getBoolean(options['a2a']),
     a2aAuthToken: options['a2a_auth_token'],
     reloadAgents: getBoolean(options['reload_agents']),
+    urlPrefix: options['url_prefix'],
+    autoCreateSession: getBoolean(options['auto_create_session']),
   };
 }
 
@@ -221,6 +223,17 @@ const A2A_AUTH_TOKEN_DEPLOY_OPTION = new Option(
   '--a2a_auth_token <string>',
   'Optional. Shared bearer token used to authenticate the deployed A2A surface. Callers must send "Authorization: Bearer <token>". It is sent to Cloud Run as the ADK_A2A_AUTH_TOKEN environment variable and is never written into the image. If unset, the deployed A2A surface is served WITHOUT authentication.',
 );
+const URL_PREFIX_OPTION = new Option(
+  '--url_prefix <string>',
+  'Optional. URL path prefix when the application is mounted behind a ' +
+    "reverse proxy or API gateway (e.g. '/api/v1', '/adk'). Routes stay at " +
+    'the root; the prefix is applied to the redirects the server generates.',
+);
+const AUTO_CREATE_SESSION_OPTION = new Option(
+  '--auto_create_session [boolean]',
+  "Optional. Automatically create a session if it doesn't exist when " +
+    'calling /run or /run_sse, instead of answering 404. Default: false',
+).default(false);
 const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
@@ -274,6 +287,11 @@ interface ServerCommandOptions {
   /** Whether to serve the developer UI alongside the API. */
   serveDebugUI: boolean;
   startFailureMessage: string;
+  /**
+   * Whether the command accepts `--auto_create_session`. adk-python declares
+   * that option on `api_server` only, so `web` must reject it.
+   */
+  autoCreateSession?: boolean;
 }
 
 /**
@@ -287,7 +305,7 @@ function addServerCommand(
   logger: AdkLogger,
   server: ServerCommandOptions,
 ): void {
-  program
+  const serverCommand = program
     .command(server.name)
     .description(server.description)
     .addArgument(AGENT_DIR_ARGUMENT)
@@ -306,32 +324,38 @@ function addServerCommand(
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(URL_PREFIX_OPTION)
     .addOption(ENABLE_FEATURES_OPTION)
     .addOption(DISABLE_FEATURES_OPTION)
     .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(USE_LOCAL_STORAGE_OPTION)
-    .addOption(NO_USE_LOCAL_STORAGE_OPTION)
-    .action(
-      async (
-        agentsDir: string,
-        options: Record<string, string>,
-        command: Command,
-      ) => {
-        applyFeatureOverrides(command);
-        const logLevel = getLogLevelFromOptions(options);
-        setAdkCoreLogLevel(logLevel);
+    .addOption(NO_USE_LOCAL_STORAGE_OPTION);
 
-        try {
-          await createApiServer({
-            ...getApiServerOptions(agentsDir, logLevel, options, command),
-            web: server.serveDebugUI,
-          }).start();
-        } catch (error) {
-          logger.error(server.startFailureMessage, toMessage(error));
-          process.exit(1);
-        }
-      },
-    );
+  if (server.autoCreateSession) {
+    serverCommand.addOption(AUTO_CREATE_SESSION_OPTION);
+  }
+
+  serverCommand.action(
+    async (
+      agentsDir: string,
+      options: Record<string, string>,
+      command: Command,
+    ) => {
+      applyFeatureOverrides(command);
+      const logLevel = getLogLevelFromOptions(options);
+      setAdkCoreLogLevel(logLevel);
+
+      try {
+        await createApiServer({
+          ...getApiServerOptions(agentsDir, logLevel, options, command),
+          web: server.serveDebugUI,
+        }).start();
+      } catch (error) {
+        logger.error(server.startFailureMessage, toMessage(error));
+        process.exit(1);
+      }
+    },
+  );
 }
 
 /**
@@ -370,6 +394,7 @@ export function createProgram(): Command {
     description: 'Start ADK API server',
     serveDebugUI: false,
     startFailureMessage: 'Error starting API server:',
+    autoCreateSession: true,
   });
 
   applyHelpfulCommand(program.command('create'))

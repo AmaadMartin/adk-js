@@ -92,6 +92,17 @@ export interface ApiServerOptions {
   otelToCloud?: boolean;
   /** Watch the agent files and reload an agent that changes. */
   reloadAgents?: boolean;
+  /**
+   * Path the server is reached under when it sits behind a reverse proxy,
+   * e.g. `/adk`. Routes stay at the root -- the proxy strips the prefix --
+   * but redirects the server generates are built with it.
+   */
+  urlPrefix?: string;
+  /**
+   * Create the session named by a `/run` or `/run_sse` request when it does
+   * not exist, instead of answering 404. Defaults to false.
+   */
+  autoCreateSession?: boolean;
   /** Logger the server and the factory log through. */
   logger?: Logger;
   /** Level the logger reports at. Defaults to `LogLevel.INFO`. */
@@ -137,6 +148,8 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     port: options.port ?? DEFAULT_PORT,
     otelToCloud: resolveOtelToCloud(options, agentsDir, logger),
     reloadAgents: options.reloadAgents ?? false,
+    urlPrefix: options.urlPrefix,
+    autoCreateSession: options.autoCreateSession,
     logger,
     logLevel: options.logLevel,
   });

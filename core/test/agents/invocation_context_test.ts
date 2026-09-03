@@ -2016,3 +2016,39 @@ describe('InvocationContext credential service', () => {
     expect(child.credentialService).toBe(credentialService);
   });
 });
+
+describe('InvocationContext credential service', () => {
+  it('keeps the credential service it was constructed with', () => {
+    const credentialService = new InMemoryCredentialService();
+
+    const context = new InvocationContext({
+      invocationId: 'inv-credential',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      runConfig: {},
+      credentialService,
+    });
+
+    expect(context.credentialService).toBe(credentialService);
+  });
+
+  it('carries the credential service onto a child context', () => {
+    const credentialService = new InMemoryCredentialService();
+
+    const root = new InvocationContext({
+      invocationId: 'inv-credential',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      runConfig: {},
+      credentialService,
+    });
+    const child = new InvocationContext({
+      ...root,
+      agent: new LoopAgent({name: 'sub'}),
+    });
+
+    expect(child.credentialService).toBe(credentialService);
+  });
+});

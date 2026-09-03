@@ -123,6 +123,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Starting a run](runner/starting_a_run/index.md) - How the runner finds or
   creates a run's session, and how to give it its root.
 
+### Server
+
+- [Configuring the ADK API server](server/api_server_configuration/index.md) - The credential service, automatic session creation and URL prefix options of `AdkApiServer`.
+
 ### Sessions
 
 - [DatabaseSessionService](sessions/database_session_service/index.md) -
