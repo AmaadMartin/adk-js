@@ -471,6 +471,26 @@ describe('TestMajorityVotePerInvocationResultsAggregator', () => {
     ]);
   });
 
+  it('ignores a sample that assessed no rubric at all', () => {
+    const scored = createPerInvocationResult([{rubricId: '1', score: 1.0}]);
+    const unscored: PerInvocationResult = {
+      actualInvocation: scored.actualInvocation,
+      evalStatus: EvalStatus.NOT_EVALUATED,
+    };
+
+    const result = new MajorityVotePerInvocationResultsAggregator().aggregate(
+      [unscored, scored],
+      0.5,
+    );
+
+    expect(result.score).toBe(1.0);
+    expect(result.rubricScores).toEqual([{rubricId: '1', score: 1.0}]);
+    expect(
+      new MeanInvocationResultsSummarizer().summarize([unscored], 0.5)
+        .overallScore,
+    ).toBeUndefined();
+  });
+
   it('carries the invocations of the first sample', () => {
     const samples = [
       createPerInvocationResult([{rubricId: '1', score: 1.0}]),
@@ -973,6 +993,21 @@ describe('TestRubricBasedEvaluator', () => {
     );
 
     expect(rubricIds(autoRaterScore.rubricScores)).toEqual(['1']);
+  });
+
+  it('drops a verdict that names neither an id nor a property', () => {
+    const parser = new FixedResponseParser([
+      {rationale: 'no property at all', score: 1.0},
+    ]);
+    const evaluator = createEvaluator({autoRaterResponseParser: parser});
+    evaluator.createEffectiveRubricsList();
+
+    const {result: autoRaterScore, warnings} = recordWarnings(() =>
+      evaluator.convertAutoRaterResponseToScore(createLlmResponse('ignored')),
+    );
+
+    expect(autoRaterScore.rubricScores).toEqual([]);
+    expect(warnings.join('\n')).toContain('not found in the rubrics');
   });
 });
 

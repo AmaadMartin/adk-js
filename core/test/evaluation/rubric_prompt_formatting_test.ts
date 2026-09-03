@@ -35,6 +35,7 @@ function createEvaluator(
     rubrics?: Rubric[];
     numSamples?: number;
     parallelismLimit?: number;
+    includeIntermediateResponsesInFinal?: boolean;
   } = {},
 ): RubricBasedFinalResponseQualityV1Evaluator {
   const evalMetric: EvalMetric = {
@@ -42,6 +43,8 @@ function createEvaluator(
     criterion: {
       threshold: 0.5,
       rubrics: options.rubrics ?? RUBRICS,
+      includeIntermediateResponsesInFinal:
+        options.includeIntermediateResponsesInFinal,
       judgeModelOptions: {
         numSamples: options.numSamples ?? 3,
         parallelismLimit: options.parallelismLimit,
@@ -116,6 +119,64 @@ describe('the rendered auto-rater prompt', () => {
     expect(prompt).not.toMatch(/\{[a-z_]+\}/);
     expect(prompt).not.toContain('{{');
     expect(prompt).not.toContain('}}');
+  });
+
+  it('judges the final response alone by default', () => {
+    const prompt = createEvaluator().formatAutoRaterPrompt({
+      ...createInvocation(),
+      intermediateData: {
+        invocationEvents: [
+          {author: 'agent', content: {parts: [{text: 'Let me look it up.'}]}},
+        ],
+      },
+    });
+
+    expect(prompt).toContain('It is 24C and sunny.');
+    expect(prompt).not.toContain('Let me look it up.');
+  });
+
+  it('judges the intermediate answers too when the criterion asks', () => {
+    const prompt = createEvaluator({
+      includeIntermediateResponsesInFinal: true,
+    }).formatAutoRaterPrompt({
+      ...createInvocation(),
+      intermediateData: {
+        invocationEvents: [
+          {author: 'agent', content: {parts: [{text: 'Let me look it up.'}]}},
+        ],
+      },
+    });
+
+    expect(prompt).toContain(
+      '<final_answer>\n  Let me look it up.\nIt is 24C and sunny.\n  </final_answer>',
+    );
+  });
+
+  it('judges a recorded trajectory of intermediate answers', () => {
+    const prompt = createEvaluator({
+      includeIntermediateResponsesInFinal: true,
+    }).formatAutoRaterPrompt({
+      ...createInvocation(),
+      intermediateData: {
+        toolUses: [],
+        toolResponses: [],
+        intermediateResponses: [['agent', [{text: 'Checking the forecast.'}]]],
+      },
+    });
+
+    expect(prompt).toContain(
+      '<final_answer>\n  Checking the forecast.\nIt is 24C and sunny.\n  </final_answer>',
+    );
+  });
+
+  it('judges the final response when the agent recorded no step', () => {
+    const prompt = createEvaluator({
+      includeIntermediateResponsesInFinal: true,
+    }).formatAutoRaterPrompt(createInvocation());
+
+    expect(prompt).toContain(
+      '<final_answer>\n  It is 24C and sunny.\n  </final_answer>',
+    );
   });
 
   it('keeps a rubric containing a replacement pattern intact', () => {
