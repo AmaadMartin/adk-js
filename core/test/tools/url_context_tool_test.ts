@@ -146,9 +146,14 @@ describe('UrlContextTool', () => {
       ).rejects.toThrow('URL context tool is not supported for model gpt-4');
     });
 
-    it('leaves the request normalised when it throws', async () => {
+    it('creates config and tools before it throws', async () => {
       const tool = new UrlContextTool();
-      const req = makeRequest('claude-3-sonnet');
+      const req: LlmRequest = {
+        model: 'claude-3-sonnet',
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+      };
       await expect(
         tool.processLlmRequest({
           llmRequest: req,
