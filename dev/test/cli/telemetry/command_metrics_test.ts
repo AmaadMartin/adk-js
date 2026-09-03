@@ -200,6 +200,18 @@ describe('instrumentCommandMetrics', () => {
     expect(fs.existsSync(queueFile)).toBe(false);
   });
 
+  it.each([
+    ['a leaf command', ['create', '-h']],
+    ['a nested command', ['deploy', 'cloud_run', '-h']],
+    ['a command group', ['deploy', '-h']],
+  ])('records nothing when -h asks for help on %s', (_name, argv) => {
+    instrument(argv);
+    events.emit('exit', 0);
+
+    expect(events.eventNames()).toEqual([]);
+    expect(fs.existsSync(queueFile)).toBe(false);
+  });
+
   it('still records when -h means --host', () => {
     run(['web', '-h', '0.0.0.0']);
 
