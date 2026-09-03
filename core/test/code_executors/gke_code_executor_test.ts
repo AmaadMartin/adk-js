@@ -706,21 +706,6 @@ describe('GkeCodeExecutor', () => {
     });
   });
 
-  describe('client resolution', () => {
-    it('resolves the Kubernetes clients once across executions', async () => {
-      const executor = newExecutor();
-
-      await executeWith(executor);
-      watcher.watch.mockClear();
-      watcher = makeWatcher([[SUCCEEDED_JOB]]);
-      await executeWith(executor);
-
-      // The second execution reused the memoized clients, so it kept talking
-      // to the watcher resolved on the first one.
-      expect(jobs.createNamespacedJob).toHaveBeenCalledTimes(2);
-    });
-  });
-
   describe('kubeconfig resolution', () => {
     let loadFromFile: MockInstance<KubeConfig['loadFromFile']>;
     let setCurrentContext: MockInstance<KubeConfig['setCurrentContext']>;
@@ -796,6 +781,15 @@ describe('GkeCodeExecutor', () => {
       await resolveClients();
 
       expect(loadFromDefault).toHaveBeenCalledOnce();
+    });
+
+    it('resolves the clients once across executions', async () => {
+      const executor = new GkeCodeExecutor();
+
+      await executeWith(executor);
+      await executeWith(executor);
+
+      expect(loadFromCluster).toHaveBeenCalledOnce();
     });
 
     it('reports that no configuration could be found', async () => {
