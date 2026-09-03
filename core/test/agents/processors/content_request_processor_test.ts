@@ -22,6 +22,7 @@ import {
   LlmRequest,
   LlmResponse,
   PluginManager,
+  RoutedLlm,
   RunConfig,
   Runner,
   Session,
@@ -64,6 +65,8 @@ function createCompactedEvent(
   };
 }
 
+const TEST_API_KEY = 'test-api-key';
+
 function createMockInvocationContext(
   events: Event[],
   options: {runConfig?: RunConfig; userContent?: Content} = {},
@@ -75,9 +78,11 @@ function createMockInvocationContext(
     userId: 'test-user',
   } as unknown as Session;
 
+  // The processor resolves the model to read its id-pairing policy, so the
+  // fixture supplies a key rather than relying on the ambient environment.
   const agent = new LlmAgent({
     name: 'test_agent',
-    model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
+    model: new Gemini({model: 'gemini-2.5-flash', apiKey: TEST_API_KEY}),
   });
 
   return new InvocationContext({
@@ -289,6 +294,243 @@ describe('ContentRequestProcessor — function call ids', () => {
     );
 
     expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
+  });
+});
+
+/** A provider that leaves the base id-pairing default alone. */
+class StubLlm extends BaseLlm {
+  generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+    throw new Error('Not implemented');
+  }
+  connect(): Promise<BaseLlmConnection> {
+    throw new Error('Not implemented');
+  }
+}
+
+/**
+ * A provider that pairs a tool call with its result by id, as `AnthropicLlm`
+ * and `LiteLlm` will when they land.
+ */
+class IdPairingLlm extends StubLlm {
+  override get pairsToolCallsById(): boolean {
+    return true;
+  }
+}
+
+function createCallEvent(ids: string[], timestamp: number): Event {
+  return createEvent({
+    author: 'test_agent',
+    timestamp,
+    content: {
+      role: 'model',
+      parts: ids.map((id) => ({
+        functionCall: {id, name: 'roll_die', args: {sides: 6}},
+      })),
+    },
+  });
+}
+
+function createResponseEvent(id: string, timestamp: number): Event {
+  return createEvent({
+    author: 'user',
+    timestamp,
+    content: {
+      role: 'user',
+      parts: [
+        {functionResponse: {id, name: 'roll_die', response: {result: 'four'}}},
+      ],
+    },
+  });
+}
+
+function createContextForAgent(
+  events: Event[],
+  agent: LlmAgent,
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    agent: agent as BaseAgent,
+    session: createSession({
+      id: 'test-session',
+      appName: 'test-app',
+      userId: 'test-user',
+      events,
+    }),
+    pluginManager: new PluginManager([]),
+  });
+}
+
+async function contentsFrom(
+  invocationContext: InvocationContext,
+): Promise<LlmRequest['contents']> {
+  const llmRequest = emptyRequest();
+  await runProcessor(invocationContext, llmRequest);
+  return llmRequest.contents;
+}
+
+async function buildContents(
+  events: Event[],
+  model: BaseLlm,
+): Promise<LlmRequest['contents']> {
+  return contentsFrom(
+    createContextForAgent(events, new LlmAgent({name: 'test_agent', model})),
+  );
+}
+
+describe('ContentRequestProcessor function call ids', () => {
+  const toolEvents = [
+    createCallEvent(['adk-1'], 1000),
+    createResponseEvent('adk-1', 2000),
+  ];
+
+  it('strips the ids for a plain Gemini model', async () => {
+    const contents = await buildContents(
+      toolEvents,
+      new Gemini({model: 'gemini-2.5-flash', apiKey: TEST_API_KEY}),
+    );
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  it('keeps the ids for a Gemini model on the Interactions API', async () => {
+    const contents = await buildContents(
+      toolEvents,
+      new Gemini({
+        model: 'gemini-2.5-flash',
+        apiKey: TEST_API_KEY,
+        useInteractionsApi: true,
+      }),
+    );
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
+  });
+
+  it('strips the ids for a provider that does not pair by id', async () => {
+    const contents = await buildContents(
+      toolEvents,
+      new StubLlm({model: 'stub-provider'}),
+    );
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  // Stands in for adk-python's test_adk_function_call_ids_preserved_for_
+  // anthropic_model, ..._lite_llm_model and ..._openai_responses_model. None of
+  // those provider classes exists on this branch.
+  it('keeps the ids for a provider that pairs by id', async () => {
+    const contents = await buildContents(
+      toolEvents,
+      new IdPairingLlm({model: 'id-pairing-provider'}),
+    );
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
+  });
+
+  it('strips the ids when one routed model does not pair by id', async () => {
+    const routed = new RoutedLlm({
+      models: [
+        new IdPairingLlm({model: 'id-pairing-provider'}),
+        new StubLlm({model: 'stub-provider'}),
+      ],
+      router: () => 'id-pairing-provider',
+    });
+
+    const contents = await buildContents(toolEvents, routed);
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  it('keeps the ids when every routed model pairs by id', async () => {
+    const routed = new RoutedLlm({
+      models: [
+        new IdPairingLlm({model: 'pairing-a'}),
+        new IdPairingLlm({model: 'pairing-b'}),
+      ],
+      router: () => 'pairing-a',
+    });
+
+    const contents = await buildContents(toolEvents, routed);
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
+  });
+
+  it('reports an agent that resolves to no model', async () => {
+    await expect(
+      contentsFrom(
+        createContextForAgent(toolEvents, new LlmAgent({name: 'test_agent'})),
+      ),
+    ).rejects.toThrow('No model found for test_agent.');
+  });
+
+  it('keeps the ids on the current-turn-only path', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: new IdPairingLlm({model: 'id-pairing-provider'}),
+      includeContents: 'none',
+    });
+
+    const contents = await contentsFrom(
+      createContextForAgent(
+        [
+          createEvent({
+            author: 'user',
+            timestamp: 500,
+            content: {role: 'user', parts: [{text: 'roll a die'}]},
+          }),
+          ...toolEvents,
+        ],
+        agent,
+      ),
+    );
+
+    // The window opens at the user turn that started the call, so the call and
+    // its response follow it.
+    expect(contents[1].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(contents[2].parts?.[0].functionResponse?.id).toBe('adk-1');
+  });
+});
+
+describe('ContentRequestProcessor compacted call recovery', () => {
+  it('recovers a call the summary elided and keeps it before its response', async () => {
+    const events = [
+      createCallEvent(['adk-lr1'], 1000),
+      createCompactedEvent('c1', 1500, 1000, 1200, 'Summary of the call'),
+      createResponseEvent('adk-lr1', 3000),
+    ];
+
+    const contents = await buildContents(
+      events,
+      new Gemini({model: 'gemini-2.5-flash', apiKey: TEST_API_KEY}),
+    );
+
+    expect(contents).toHaveLength(3);
+    expect(contents[0].parts?.[0].text).toContain('Summary of the call');
+    expect(contents[1].parts?.[0].functionCall?.name).toBe('roll_die');
+    expect(contents[2].parts?.[0].functionResponse?.name).toBe('roll_die');
+  });
+
+  it('drops an orphaned response the source cannot explain', async () => {
+    const events = [
+      createCompactedEvent('c1', 1500, 1000, 1200, 'Summary of the call'),
+      createResponseEvent('adk-gone', 3000),
+    ];
+
+    // Recovery finds no call to re-inject, so the response stays orphaned and
+    // the build prunes it. This branch prunes such a response instead of
+    // throwing, as adk-python does.
+    const contents = await buildContents(
+      events,
+      new Gemini({model: 'gemini-2.5-flash', apiKey: TEST_API_KEY}),
+    );
+
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts?.[0].text).toContain('Summary of the call');
   });
 });
 

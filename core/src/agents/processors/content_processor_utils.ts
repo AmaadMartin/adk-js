@@ -214,6 +214,33 @@ export function insertModelInputContext(
 }
 
 /**
+ * Whether a live event is a model media event carrying inline data (audio,
+ * video, or image).
+ *
+ * Such events are deliberately not persisted to the session to avoid storing
+ * large raw blobs. Media referenced via `fileData` (e.g. saved as artifacts)
+ * and all non-media events (transcriptions, tool calls, usage) are persisted
+ * as in `runAsync`.
+ */
+export function isLiveModelMediaEventWithInlineData(
+  event: Event,
+): event is Event & {content: Content} {
+  const parts = event.content?.parts;
+  if (!parts?.length) {
+    return false;
+  }
+  return parts.some((part) => {
+    const mimeType = part.inlineData?.mimeType?.toLowerCase();
+    return (
+      mimeType !== undefined &&
+      (mimeType.startsWith('audio/') ||
+        mimeType.startsWith('video/') ||
+        mimeType.startsWith('image/'))
+    );
+  });
+}
+
+/**
  * Whether an event may appear in an LLM request at all: it carries content,
  * belongs to the current branch and isolation scope, and is not an internal
  * auth/confirmation event.

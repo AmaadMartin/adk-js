@@ -19,6 +19,7 @@ import {
 } from '../agents/invocation_context.js';
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
+import {isLiveModelMediaEventWithInlineData} from '../agents/processors/content_processor_utils.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
 import {App} from '../apps/app.js';
 import {runSlidingWindowCompaction} from '../apps/compaction.js';
@@ -1387,33 +1388,6 @@ export class Runner {
       span.end();
     }
   }
-}
-
-/**
- * Whether a live event is a model media event carrying inline data (audio,
- * video, or image).
- *
- * Such events are deliberately not persisted to the session to avoid storing
- * large raw blobs. Media referenced via `fileData` (e.g. saved as artifacts)
- * and all non-media events (transcriptions, tool calls, usage) are persisted
- * as in `runAsync`.
- */
-function isLiveModelMediaEventWithInlineData(
-  event: Event,
-): event is Event & {content: Content} {
-  const parts = event.content?.parts;
-  if (!parts?.length) {
-    return false;
-  }
-  return parts.some((part) => {
-    const mimeType = part.inlineData?.mimeType?.toLowerCase();
-    return (
-      mimeType !== undefined &&
-      (mimeType.startsWith('audio/') ||
-        mimeType.startsWith('video/') ||
-        mimeType.startsWith('image/'))
-    );
-  });
 }
 
 /**

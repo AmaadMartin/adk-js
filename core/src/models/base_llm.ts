@@ -114,6 +114,19 @@ export abstract class BaseLlm {
   static readonly supportedModels: Array<string | RegExp> = [];
 
   /**
+   * Whether the provider pairs a tool call with its result by id.
+   *
+   * A provider that does so needs the `adk-` fallback ids to survive replay,
+   * because it matches a result to its call by id and by nothing else.
+   * Anthropic's `tool_use`/`tool_result` blocks and the OpenAI-compatible
+   * `tool_call_id` field both work that way. Override this to `true` in such a
+   * model.
+   */
+  get pairsToolCallsById(): boolean {
+    return false;
+  }
+
+  /**
    * Generates one content from the given contents and tools.
    *
    * @param llmRequest  LlmRequest, the request to send to the LLM.

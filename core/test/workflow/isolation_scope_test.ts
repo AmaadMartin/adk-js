@@ -157,6 +157,8 @@ describe('isolation scope — end to end through the content processor', () => {
       invocationId: 'inv-1',
       agent: new LlmAgent({
         name: 'reviewer',
+        // The processor resolves the model to read its id-pairing policy, so
+        // the fixture supplies a key rather than relying on the environment.
         model: new Gemini({model: 'gemini-2.5-flash', apiKey: 'test-api-key'}),
       }),
       session,

@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getActiveEvents} from '../../context/compaction_utils.js';
+import {
+  getActiveEvents,
+  recoverCompactedFunctionCalls,
+} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
-import {isGemini} from '../../models/google_llm.js';
 import {
   insertTransientUserContent,
   LlmRequest,
@@ -48,10 +50,14 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       return;
     }
 
-    const events = getActiveEvents(invocationContext.session.events);
+    const allEvents = invocationContext.session.events;
+    const events = recoverCompactedFunctionCalls(
+      getActiveEvents(allEvents),
+      allEvents,
+    );
     const model = agent.canonicalModel;
     const options: GetContentsOptions = {
-      preserveFunctionCallIds: isGemini(model) && model.useInteractionsApi,
+      preserveFunctionCallIds: model.pairsToolCallsById,
       isSingleTurn: agent.mode === 'single_turn',
       userContent: invocationContext.userContent,
     };
