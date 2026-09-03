@@ -38,10 +38,6 @@ export type CallbackFunction = (...args: never[]) => unknown;
 /** A function a configuration document names to build a tool. */
 type ToolFactory = (args: ToolArgsConfig) => unknown;
 
-function isCallbackFunction(value: unknown): value is CallbackFunction {
-  return typeof value === 'function';
-}
-
 function isToolFactory(value: unknown): value is ToolFactory {
   return typeof value === 'function';
 }
@@ -54,29 +50,6 @@ function isGenaiSchema(value: unknown): value is Schema {
   return (
     typeof value === 'object' && value !== null && value.constructor === Object
   );
-}
-
-/**
- * Resolves a code reference to the value it names.
- *
- * The import runs the named module's top-level code, so a caller trusts the
- * configuration document exactly as far as it trusts the code that document
- * can name.
- *
- * @experimental (Experimental, subject to change.)
- *
- * @param config The reference to resolve.
- * @param baseFilePath Absolute path of the configuration file the reference
- *   came from. A `./`-relative name needs it; a bare or absolute name does
- *   not.
- * @return The named value, for the caller to narrow.
- * @throws {InputValidationError} When the name does not resolve.
- */
-export async function resolveCodeReference(
-  config: CodeConfig,
-  baseFilePath?: string,
-): Promise<unknown> {
-  return resolveFullyQualifiedName(config.name, baseFilePath);
 }
 
 /**
@@ -101,8 +74,8 @@ export async function resolveCallbacks<
 >(configs: CodeConfig[] | undefined, baseFilePath?: string): Promise<T[]> {
   const callbacks: T[] = [];
   for (const config of configs ?? []) {
-    const resolved = await resolveCodeReference(config, baseFilePath);
-    if (!isCallbackFunction(resolved)) {
+    const resolved = await resolveFullyQualifiedName(config.name, baseFilePath);
+    if (typeof resolved !== 'function') {
       throw new InputValidationError(
         `The callback \`${config.name}\` is not a function.`,
       );
@@ -144,7 +117,7 @@ async function resolveTool(
   config: ToolConfig,
   baseFilePath?: string,
 ): Promise<ToolUnion> {
-  const resolved = await resolveCodeReference(config, baseFilePath);
+  const resolved = await resolveFullyQualifiedName(config.name, baseFilePath);
   if (isBaseTool(resolved) || isBaseToolset(resolved)) {
     if (config.args !== undefined) {
       throw new InputValidationError(
@@ -192,7 +165,7 @@ async function resolveSchema(
   config: CodeConfig,
   baseFilePath?: string,
 ): Promise<LlmAgentSchema> {
-  const resolved = await resolveCodeReference(config, baseFilePath);
+  const resolved = await resolveFullyQualifiedName(config.name, baseFilePath);
   if (isZodObject(resolved) || isGenaiSchema(resolved)) {
     return resolved;
   }
@@ -203,7 +176,7 @@ async function resolveSchema(
 }
 
 async function resolveModel(config: CodeConfig, baseFilePath?: string) {
-  const resolved = await resolveCodeReference(config, baseFilePath);
+  const resolved = await resolveFullyQualifiedName(config.name, baseFilePath);
   if (!isBaseLlm(resolved)) {
     throw new InputValidationError(
       `The model \`${config.name}\` is not a BaseLlm.`,
@@ -236,7 +209,7 @@ async function resolveSubAgent(
         `instead.`,
     );
   }
-  const resolved = await resolveCodeReference({name: ref.code}, baseFilePath);
+  const resolved = await resolveFullyQualifiedName(ref.code, baseFilePath);
   if (!isBaseAgent(resolved)) {
     throw new InputValidationError(
       `The sub-agent \`${ref.code}\` is not an agent.`,
@@ -273,26 +246,21 @@ export async function llmAgentFromConfig(
     includeContents: config.includeContents,
     tools: await resolveTools(config.tools, baseFilePath),
     subAgents: await resolveSubAgents(config.subAgents, baseFilePath),
-    ...(config.model !== undefined && {model: config.model}),
-    ...(config.modelCode !== undefined && {
-      model: await resolveModel(config.modelCode, baseFilePath),
-    }),
-    ...(config.inputSchema !== undefined && {
-      inputSchema: await resolveSchema(config.inputSchema, baseFilePath),
-    }),
-    ...(config.outputSchema !== undefined && {
-      outputSchema: await resolveSchema(config.outputSchema, baseFilePath),
-    }),
-    ...(config.outputKey !== undefined && {outputKey: config.outputKey}),
-    ...(config.disallowTransferToParent !== undefined && {
-      disallowTransferToParent: config.disallowTransferToParent,
-    }),
-    ...(config.disallowTransferToPeers !== undefined && {
-      disallowTransferToPeers: config.disallowTransferToPeers,
-    }),
-    ...(config.generateContentConfig !== undefined && {
-      generateContentConfig: config.generateContentConfig,
-    }),
+    model: config.modelCode
+      ? await resolveModel(config.modelCode, baseFilePath)
+      : config.model,
+    inputSchema: config.inputSchema
+      ? await resolveSchema(config.inputSchema, baseFilePath)
+      : undefined,
+    outputSchema: config.outputSchema
+      ? await resolveSchema(config.outputSchema, baseFilePath)
+      : undefined,
+    outputKey: config.outputKey,
+    disallowTransferToParent: config.disallowTransferToParent,
+    disallowTransferToPeers: config.disallowTransferToPeers,
+    generateContentConfig: config.generateContentConfig,
+    // A resolved callback list is `[]` when the document declares none, which
+    // is not what an absent option means, so these stay conditional.
     ...(config.beforeAgentCallbacks !== undefined && {
       beforeAgentCallback: await resolveCallbacks<SingleAgentCallback>(
         config.beforeAgentCallbacks,

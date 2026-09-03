@@ -4,77 +4,109 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  InputValidationError,
-  parseAgentRefConfig,
-  parseCodeConfig,
-} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
-describe('parseCodeConfig', () => {
+import {
+  agentRefConfigSchema,
+  codeConfigSchema,
+  requireExactlyOneSource,
+} from '../../src/agents/common_configs.js';
+
+/** Validates an agent reference the way the agent config schema does. */
+function parseRef(raw: unknown) {
+  return requireExactlyOneSource(agentRefConfigSchema.parse(raw));
+}
+
+describe('codeConfigSchema', () => {
   it('keeps the name of a valid reference', () => {
-    expect(parseCodeConfig({name: './my_tools.js#searchTool'})).toEqual({
+    expect(codeConfigSchema.parse({name: './my_tools.js#searchTool'})).toEqual({
       name: './my_tools.js#searchTool',
     });
   });
 
   it('rejects an unknown key', () => {
-    expect(() =>
-      parseCodeConfig({name: './my_tools.js#searchTool', args: {a: 1}}),
-    ).toThrow(InputValidationError);
+    expect(
+      codeConfigSchema.safeParse({name: './my_tools.js#t', args: {a: 1}})
+        .success,
+    ).toBe(false);
   });
 
   it('rejects an empty name', () => {
-    expect(() => parseCodeConfig({name: ''})).toThrow(
-      'A code reference must be an object with a `name` and no other key.',
-    );
+    expect(codeConfigSchema.safeParse({name: ''}).success).toBe(false);
   });
 
   it('rejects a missing name', () => {
-    expect(() => parseCodeConfig({})).toThrow(InputValidationError);
+    expect(codeConfigSchema.safeParse({}).success).toBe(false);
   });
 
-  it('keeps the schema failure as the error cause', () => {
-    try {
-      parseCodeConfig({name: 42});
-      expect.fail('expected the call to throw');
-    } catch (error: unknown) {
-      expect(error).toHaveProperty('cause.issues');
-    }
+  it('rejects a name that is not a string', () => {
+    expect(codeConfigSchema.safeParse({name: 42}).success).toBe(false);
   });
 });
 
-describe('parseAgentRefConfig', () => {
+describe('agentRefConfigSchema', () => {
   it('accepts a code reference', () => {
-    expect(parseAgentRefConfig({code: './agents.js#helper'})).toEqual({
+    expect(parseRef({code: './agents.js#helper'})).toEqual({
       code: './agents.js#helper',
       configPath: undefined,
     });
   });
 
   it('accepts a config path', () => {
-    expect(parseAgentRefConfig({configPath: './helper.yaml'})).toEqual({
+    expect(parseRef({configPath: './helper.yaml'})).toEqual({
       code: undefined,
       configPath: './helper.yaml',
     });
   });
 
   it('accepts the config_path spelling adk-python writes', () => {
-    expect(parseAgentRefConfig({'config_path': './helper.yaml'})).toEqual({
+    expect(parseRef({'config_path': './helper.yaml'})).toEqual({
       code: undefined,
       configPath: './helper.yaml',
     });
   });
 
   it('treats an explicit null as absent', () => {
-    expect(
-      parseAgentRefConfig({code: './agents.js#helper', configPath: null}),
-    ).toEqual({code: './agents.js#helper', configPath: undefined});
+    expect(parseRef({code: './agents.js#helper', configPath: null})).toEqual({
+      code: './agents.js#helper',
+      configPath: undefined,
+    });
   });
 
+  it('rejects an unknown key', () => {
+    expect(
+      agentRefConfigSchema.safeParse({
+        code: './agents.js#helper',
+        name: 'helper',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('keeps both spellings when a document writes both, and rejects it', () => {
+    expect(
+      agentRefConfigSchema.safeParse({
+        'configPath': './a.yaml',
+        'config_path': './b.yaml',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a reference that is not an object', () => {
+    expect(agentRefConfigSchema.safeParse('./helper.yaml').success).toBe(false);
+    expect(
+      agentRefConfigSchema.safeParse([{code: './agents.js#helper'}]).success,
+    ).toBe(false);
+    expect(agentRefConfigSchema.safeParse(null).success).toBe(false);
+  });
+});
+
+describe('requireExactlyOneSource', () => {
   it('rejects a reference that sets both sources', () => {
     expect(() =>
-      parseAgentRefConfig({code: './agents.js#helper', configPath: './h.yaml'}),
+      requireExactlyOneSource({
+        code: './agents.js#helper',
+        configPath: './h.yaml',
+      }),
     ).toThrow(
       'An agent reference sets both `code` and `configPath`; exactly one of ' +
         '`code` and `configPath` must be set.',
@@ -82,34 +114,9 @@ describe('parseAgentRefConfig', () => {
   });
 
   it('rejects a reference that sets neither source', () => {
-    expect(() => parseAgentRefConfig({})).toThrow(
+    expect(() => requireExactlyOneSource({})).toThrow(
       'An agent reference sets neither `code` nor `configPath`; exactly one ' +
         'of `code` and `configPath` must be set.',
     );
-  });
-
-  it('rejects an unknown key', () => {
-    expect(() =>
-      parseAgentRefConfig({code: './agents.js#helper', name: 'helper'}),
-    ).toThrow(InputValidationError);
-  });
-
-  it('rejects a reference that is not an object', () => {
-    expect(() => parseAgentRefConfig('./helper.yaml')).toThrow(
-      InputValidationError,
-    );
-    expect(() => parseAgentRefConfig([{code: './agents.js#helper'}])).toThrow(
-      InputValidationError,
-    );
-    expect(() => parseAgentRefConfig(null)).toThrow(InputValidationError);
-  });
-
-  it('keeps both spellings when a document writes both, and rejects it', () => {
-    expect(() =>
-      parseAgentRefConfig({
-        'configPath': './a.yaml',
-        'config_path': './b.yaml',
-      }),
-    ).toThrow(InputValidationError);
   });
 });

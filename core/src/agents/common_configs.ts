@@ -49,10 +49,6 @@ export interface AgentRefConfig {
   code?: string;
 }
 
-/** Reported when a code reference does not have the shape of one. */
-export const CODE_CONFIG_SHAPE_MESSAGE =
-  'A code reference must be an object with a `name` and no other key.';
-
 /** Schema of a {@link CodeConfig}. Used by the agent config schemas. */
 export const codeConfigSchema = z.strictObject({name: z.string().min(1)});
 
@@ -89,59 +85,6 @@ export const agentRefConfigSchema = z.preprocess(
   normalizeAgentRefKeys,
   z.strictObject({configPath: agentRefSource, code: agentRefSource}),
 );
-
-/**
- * Parses one config document. The message summarizes the rule the document
- * broke, and the `ZodError` is kept as the cause, because that is what names
- * the offending key.
- */
-export function parseConfig<T>(
-  schema: z.ZodType<T>,
-  raw: unknown,
-  message: string,
-): T {
-  const result = schema.safeParse(raw);
-  if (!result.success) {
-    throw new InputValidationError(message, {cause: result.error});
-  }
-  return result.data;
-}
-
-/**
- * Validates a {@link CodeConfig} taken from a parsed configuration document.
- * An unknown key is rejected, and so is a missing or empty `name`.
- *
- * @experimental (Experimental, subject to change.)
- *
- * @param raw The value read from the configuration document.
- * @return The validated config, holding only the declared property.
- * @throws {InputValidationError} When the value is not a valid `CodeConfig`.
- */
-export function parseCodeConfig(raw: unknown): CodeConfig {
-  return parseConfig(codeConfigSchema, raw, CODE_CONFIG_SHAPE_MESSAGE);
-}
-
-/**
- * Validates an {@link AgentRefConfig} taken from a parsed configuration
- * document. An unknown key is rejected, `config_path` is accepted as an alias
- * of `configPath`, and exactly one of `code` and `configPath` must be set.
- *
- * @experimental (Experimental, subject to change.)
- *
- * @param raw The value read from the configuration document.
- * @return The validated config, holding only the declared properties.
- * @throws {InputValidationError} When the value is not a valid
- *   `AgentRefConfig`.
- */
-export function parseAgentRefConfig(raw: unknown): AgentRefConfig {
-  const ref = parseConfig(
-    agentRefConfigSchema,
-    raw,
-    'An agent reference must be an object with `code` or `configPath` and ' +
-      'no other key.',
-  );
-  return requireExactlyOneSource(ref);
-}
 
 /**
  * Enforces `AgentRefConfig.validate_exactly_one_field`. Both set and neither

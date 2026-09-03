@@ -117,14 +117,6 @@ export function secondCallback(_params: {
   return undefined;
 }
 
-/** Skips the model call, so a callback's effect is observable in a run. */
-export function shortCircuitCallback(_params: {
-  context: Context;
-  request: LlmRequest;
-}): LlmResponse {
-  return {content: {role: 'model', parts: [{text: 'from the callback'}]}};
-}
-
 export function beforeAgentCallback(_context: Context): Content | undefined {
   callOrder.push('before agent');
   return undefined;

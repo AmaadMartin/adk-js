@@ -7,17 +7,11 @@
 import type {GenerateContentConfig} from '@google/genai';
 import {z} from 'zod';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {toolConfigSchema} from '../tools/tool_configs.js';
-import {camelCaseKeys, camelCaseTopLevelKeys} from '../utils/case_utils.js';
-import {
-  agentRefConfigSchema,
-  codeConfigSchema,
-  parseConfig,
-} from './common_configs.js';
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+import {toCamelCase} from '../utils/object_notation_utils.js';
+import {isPlainObject} from '../utils/object_utils.js';
+import {agentRefConfigSchema, codeConfigSchema} from './common_configs.js';
 
 /**
  * The interior of a `GenerateContentConfig` belongs to `@google/genai`, so
@@ -29,50 +23,16 @@ const generateContentConfigSchema = z.custom<GenerateContentConfig>(
   {error: 'Expected an object.'},
 );
 
-/** Keys whose values hold a nested config this schema also owns. */
-const NESTED_CONFIG_KEYS = [
-  'modelCode',
-  'inputSchema',
-  'outputSchema',
-  'subAgents',
-  'tools',
-  'beforeAgentCallbacks',
-  'afterAgentCallbacks',
-  'beforeModelCallbacks',
-  'afterModelCallbacks',
-  'beforeToolCallbacks',
-  'afterToolCallbacks',
-] as const;
-
 /**
- * Renames the snake_case keys a Python-authored document writes, one level at
- * a time, so that only the keys this schema owns are renamed.
- *
- * A tool's `args` are the tool's own, so they survive verbatim: a blanket deep
- * rename would turn a `corpus_id` arg into `corpusId` and break the tool. A
- * `generateContentConfig` is renamed all the way down, because it is a
- * `@google/genai` value whose JS spelling is camelCase throughout.
+ * The one path whose keys the rename must not touch. A tool's `args` are the
+ * tool's own, so a blanket rename would turn a `corpus_id` arg into `corpusId`
+ * and break the tool.
  */
+const PRESERVED_KEY_PATHS = ['tools.args'];
+
+/** Renames the snake_case keys a Python-authored document writes. */
 function normalizeConfigKeys(raw: unknown): unknown {
-  if (!isPlainObject(raw)) {
-    return raw;
-  }
-  const config = camelCaseTopLevelKeys(raw) as Record<string, unknown>;
-  for (const key of NESTED_CONFIG_KEYS) {
-    const value = config[key];
-    if (value === undefined) {
-      continue;
-    }
-    config[key] = Array.isArray(value)
-      ? value.map(camelCaseTopLevelKeys)
-      : camelCaseTopLevelKeys(value);
-  }
-  if (config['generateContentConfig'] !== undefined) {
-    config['generateContentConfig'] = camelCaseKeys(
-      config['generateContentConfig'],
-    );
-  }
-  return config;
+  return toCamelCase(raw, PRESERVED_KEY_PATHS);
 }
 
 /** Wording taken from adk-python, so both SDKs report the same rule. */
@@ -91,9 +51,6 @@ function bothModelSourcesMessage(model: string, modelCode: unknown): string {
  * reported instead of silently doing nothing.
  *
  * @experimental (Experimental, subject to change.)
- * @deprecated adk-python loads config by reflection, so a separate config
- *   shape is on its way out. It is ported here for parity with the documents
- *   adk-python accepts today.
  */
 export const llmAgentYamlConfigSchema = z.preprocess(
   normalizeConfigKeys,
@@ -154,9 +111,6 @@ export const llmAgentYamlConfigSchema = z.preprocess(
  * A validated declarative `LlmAgent` configuration document.
  *
  * @experimental (Experimental, subject to change.)
- * @deprecated adk-python loads config by reflection, so a separate config
- *   shape is on its way out. It is ported here for parity with the documents
- *   adk-python accepts today.
  */
 export type LlmAgentYamlConfig = z.infer<typeof llmAgentYamlConfigSchema>;
 
@@ -173,9 +127,12 @@ export type LlmAgentYamlConfig = z.infer<typeof llmAgentYamlConfigSchema>;
  *   `ZodError` naming the offending key rides on the error's `cause`.
  */
 export function parseLlmAgentConfig(raw: unknown): LlmAgentYamlConfig {
-  return parseConfig(
-    llmAgentYamlConfigSchema,
-    raw,
-    'The agent config document is not a valid LlmAgent config.',
-  );
+  const result = llmAgentYamlConfigSchema.safeParse(raw);
+  if (!result.success) {
+    throw new InputValidationError(
+      'The agent config document is not a valid LlmAgent config.',
+      {cause: result.error},
+    );
+  }
+  return result.data;
 }

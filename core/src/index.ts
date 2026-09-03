@@ -12,7 +12,6 @@ export * from './a2a/index.js';
 export {
   llmAgentFromConfig,
   resolveCallbacks,
-  resolveCodeReference,
   resolveTools,
 } from './agents/config_agent_utils.js';
 export type {CallbackFunction} from './agents/config_agent_utils.js';

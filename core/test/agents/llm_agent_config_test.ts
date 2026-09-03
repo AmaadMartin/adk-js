@@ -15,11 +15,7 @@ import yaml from 'js-yaml';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 
-import {
-  callOrder,
-  preconfiguredModel,
-  ScriptedLlm,
-} from './fixtures/config_code_refs.js';
+import {callOrder, preconfiguredModel} from './fixtures/config_code_refs.js';
 
 /** A config file beside the fixture module its `./` references name. */
 const CONFIG_PATH = fileURLToPath(
@@ -194,10 +190,8 @@ before_model_callbacks:
     expect(texts).toContain('a scripted reply');
     expect(callOrder).toEqual(['first', 'second']);
 
-    const model = agent.model;
-    expect(model).toBe(preconfiguredModel);
-    expect(model).toBeInstanceOf(ScriptedLlm);
-    const request = (model as ScriptedLlm).seen.at(-1);
+    expect(agent.model).toBe(preconfiguredModel);
+    const request = preconfiguredModel.seen.at(-1);
     expect(request?.config?.systemInstruction).toContain(
       "Answer the user's question.",
     );

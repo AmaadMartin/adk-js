@@ -6,6 +6,8 @@
 
 import {z} from 'zod';
 
+import {isPlainObject} from '../utils/object_utils.js';
+
 /**
  * The declared args of one tool in a configuration file.
  *
@@ -51,7 +53,3 @@ export const toolConfigSchema = z.strictObject({
     .custom<ToolArgsConfig>(isPlainObject, {error: 'Expected an object.'})
     .optional(),
 });
-
-function isPlainObject(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

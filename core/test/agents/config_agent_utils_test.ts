@@ -10,7 +10,6 @@ import {
   llmAgentFromConfig,
   parseLlmAgentConfig,
   resolveCallbacks,
-  resolveCodeReference,
   resolveTools,
 } from '@google/adk';
 import {fileURLToPath} from 'node:url';
@@ -57,16 +56,15 @@ async function rejectionOf(call: Promise<unknown>): Promise<unknown> {
   );
 }
 
-describe('resolveCodeReference', () => {
-  it('returns the value the reference names', async () => {
-    await expect(
-      resolveCodeReference({name: ref('searchTool')}, CONFIG_PATH),
-    ).resolves.toBe(searchTool);
+describe('resolveCallbacks', () => {
+  it('returns an empty list for no configs', async () => {
+    await expect(resolveCallbacks(undefined)).resolves.toEqual([]);
+    await expect(resolveCallbacks([])).resolves.toEqual([]);
   });
 
   it('rejects a name that does not resolve, keeping the cause', async () => {
     const error = await rejectionOf(
-      resolveCodeReference({name: ref('noSuchExport')}, CONFIG_PATH),
+      resolveCallbacks([{name: ref('noSuchExport')}], CONFIG_PATH),
     );
 
     expect(error).toBeInstanceOf(InputValidationError);
@@ -75,13 +73,6 @@ describe('resolveCodeReference', () => {
       `Invalid fully qualified name: ${ref('noSuchExport')}`,
     );
     expect(error).toHaveProperty('cause');
-  });
-});
-
-describe('resolveCallbacks', () => {
-  it('returns an empty list for no configs', async () => {
-    await expect(resolveCallbacks(undefined)).resolves.toEqual([]);
-    await expect(resolveCallbacks([])).resolves.toEqual([]);
   });
 
   it('preserves the order the document lists', async () => {
