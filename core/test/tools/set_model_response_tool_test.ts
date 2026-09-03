@@ -7,7 +7,6 @@
 import {
   Context,
   createSession,
-  createSetModelResponseTool,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -15,6 +14,7 @@ import {
 import {Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v4';
+import {createSetModelResponseTool} from '../../src/tools/set_model_response_tool.js';
 
 const OUTPUT_SCHEMA: Schema = {
   type: Type.OBJECT,

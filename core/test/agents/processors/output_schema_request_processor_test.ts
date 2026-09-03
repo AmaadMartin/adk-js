@@ -9,7 +9,6 @@ import {
   BaseLlm,
   BaseLlmConnection,
   createEvent,
-  createFinalModelResponseEvent,
   createSession,
   Event,
   FunctionTool,
@@ -21,10 +20,13 @@ import {
   LlmResponse,
   OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   PluginManager,
-  SET_MODEL_RESPONSE_INSTRUCTION,
 } from '@google/adk';
 import {Schema, Type} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {
+  createFinalModelResponseEvent,
+  SET_MODEL_RESPONSE_INSTRUCTION,
+} from '../../../src/agents/processors/output_schema_request_processor.js';
 
 const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
 

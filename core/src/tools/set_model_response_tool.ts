@@ -18,12 +18,6 @@ const VALIDATION_ERROR_ADVICE =
   'Recall the set_model_response function correctly, fix the errors, and call it again with all required fields using the correct types.';
 
 /**
- * Checks a candidate final answer against the agent's output schema, returning
- * the validated value and throwing when the value does not satisfy the schema.
- */
-export type OutputValidator = (value: unknown) => unknown;
-
-/**
  * Creates the tool an agent uses to return structured output on a model that
  * cannot accept an output schema and tools in the same request.
  *
@@ -38,19 +32,25 @@ export type OutputValidator = (value: unknown) => unknown;
  * itself.
  *
  * @param outputSchema - The agent's output schema, used as the parameters.
- * @param validateOutput - Validates the arguments against the schema as the
- *   caller declared it, which may hold constraints the genai form cannot.
+ * @param validateOutput - Returns the validated arguments, and throws when they
+ *   do not satisfy the schema as the caller declared it, which may hold
+ *   constraints the genai form cannot.
  * @return The tool, ready to append to a request.
  */
 export function createSetModelResponseTool(
   outputSchema: Schema,
-  validateOutput: OutputValidator,
+  validateOutput: (value: unknown) => unknown,
 ): FunctionTool<Schema> {
   return new FunctionTool({
     name: SET_MODEL_RESPONSE_TOOL_NAME,
     description: SET_MODEL_RESPONSE_TOOL_DESCRIPTION,
     parameters: outputSchema,
     execute: async (args, toolContext) => {
+      if (!toolContext) {
+        throw new Error(
+          `Tool '${SET_MODEL_RESPONSE_TOOL_NAME}' requires a tool context.`,
+        );
+      }
       let result: unknown;
       try {
         result = validateOutput(args);
@@ -60,8 +60,7 @@ export function createSetModelResponseTool(
           error: `Validation Error found:\n${message}\n${VALIDATION_ERROR_ADVICE}`,
         };
       }
-      // `BaseTool.runAsync` requires a context, so `execute` always has one.
-      toolContext!.actions.setModelResponse = result;
+      toolContext.actions.setModelResponse = result;
       return result;
     },
   });
