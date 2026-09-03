@@ -42,7 +42,7 @@ A typo fails at load time rather than at run time:
 
 ```ts
 createToolConfig({name: 'google_search', arg: {}});
-// InputValidationError: ToolConfig received unknown key(s): arg.
+// InputValidationError: ToolConfig: Unrecognized key: "arg"
 ```
 
 ## Tool reference forms
@@ -108,19 +108,43 @@ The arg keys are camelCase, because `args` reaches an adk-js constructor.
 
 ## Validation rules
 
-| Declaration                       | Result                                 |
-| --------------------------------- | -------------------------------------- |
-| not an object, or `null`          | throws, `must be a non-null object`    |
-| a key other than `name` or `args` | throws, naming every offending key     |
-| `name` missing                    | throws, `` `name` is required ``       |
-| `name` not a string               | throws, `` `name` must be a string ``  |
-| `name: ''`                        | accepted                               |
-| `args` omitted, or `args: null`   | `args` is `undefined`                  |
-| `args: {}`                        | `args` is `{}`                         |
-| `args` not an object              | throws, `` `args` must be an object `` |
+| Declaration                       | Result                              |
+| --------------------------------- | ----------------------------------- |
+| not an object, or `null`          | throws, `expected object, received` |
+| a key other than `name` or `args` | throws, naming every offending key  |
+| `name` missing, or not a string   | throws, `expected string, received` |
+| `name: ''`                        | accepted                            |
+| `args` omitted, or `args: null`   | `args` is `undefined`               |
+| `args: {}`                        | `args` is `{}`                      |
+| `args` not an object              | throws, `expected object, received` |
+
+The error names the offending key and the expected type. It never echoes the
+offending value, because a tool's args can carry credentials.
 
 Only the top level is key-checked. `args` and everything nested inside it pass
-through untouched, and `args` is shallow-copied, so the returned config never
-aliases the object you passed in.
+through untouched, and `args` is copied, so the returned config never aliases
+the object you passed in.
+
+## Custom tool configs
+
+If none of the five forms suffice, a custom tool declares its own config by
+extending `baseToolConfigSchema`. The base declares no key and rejects every
+key it was not extended with, so a custom config treats a typo the way
+`ToolConfig` does:
+
+```ts
+import {baseToolConfigSchema} from '@google/adk';
+import {z} from 'zod';
+
+const myToolConfigSchema = baseToolConfigSchema.extend({
+  threshold: z.number(),
+});
+
+myToolConfigSchema.parse({threshold: 1});
+// {threshold: 1}
+
+myToolConfigSchema.parse({threshold: 1, thresold: 2});
+// ZodError: Unrecognized key: "thresold"
+```
 
 This surface is experimental and can change.

@@ -4,9 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError, createToolConfig} from '@google/adk';
+import {
+  BaseToolConfig,
+  InputValidationError,
+  ToolArgsConfig,
+  baseToolConfigSchema,
+  createToolConfig,
+} from '@google/adk';
 import yaml from 'js-yaml';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 
 const VERTEX_AI_SEARCH_YAML = `
 name: VertexAiSearchTool
@@ -21,7 +28,23 @@ args:
   searchEngineId: projects/my-project/locations/us-central1/collections/my-collection/engines/my-engine
 `;
 
+/** The args a tool declares for itself, as a tool narrows them. */
+interface SearchToolArgsConfig {
+  searchEngineId: string;
+}
+
 describe('createToolConfig', () => {
+  it('accepts a tool-specific args interface', () => {
+    const searchArgs: SearchToolArgsConfig = {searchEngineId: 'engines/e'};
+    // An interface is not assignable to an index-signature type, so this
+    // annotation stops ToolArgsConfig from growing one.
+    const args: ToolArgsConfig = searchArgs;
+
+    const config = createToolConfig({name: 'VertexAiSearchTool', args});
+
+    expect(config.args).toEqual({searchEngineId: 'engines/e'});
+  });
+
   it('round-trips a YAML tool declaration with nested args', () => {
     const config = createToolConfig(yaml.load(VERTEX_AI_SEARCH_YAML));
 
@@ -91,7 +114,7 @@ describe('createToolConfig', () => {
 
   it('rejects an unknown top-level key', () => {
     expect(() => createToolConfig({name: 'google_search', arg: {}})).toThrow(
-      /unknown key\(s\): arg\./,
+      /ToolConfig: Unrecognized key: "arg"/,
     );
   });
 
@@ -100,24 +123,26 @@ describe('createToolConfig', () => {
       createToolConfig({name: 'google_search', arg: {}, nmae: 'x'});
 
     expect(declare).toThrow(InputValidationError);
-    expect(declare).toThrow('ToolConfig received unknown key(s): arg, nmae.');
+    expect(declare).toThrow('ToolConfig: Unrecognized keys: "arg", "nmae"');
   });
 
   it('rejects a key that only Object.prototype declares', () => {
     const declared = JSON.parse('{"name": "google_search", "toString": 1}');
 
     expect(() => createToolConfig(declared)).toThrow(
-      /unknown key\(s\): toString\./,
+      /ToolConfig: Unrecognized key: "toString"/,
     );
   });
 
   it('rejects a declaration without a name', () => {
-    expect(() => createToolConfig({args: {}})).toThrow(/`name` is required/);
+    expect(() => createToolConfig({args: {}})).toThrow(
+      /name: Invalid input: expected string, received undefined/,
+    );
   });
 
   it('rejects a name that is not a string', () => {
     expect(() => createToolConfig({name: 123})).toThrow(
-      /`name` must be a string/,
+      /name: Invalid input: expected string, received number/,
     );
   });
 
@@ -133,7 +158,7 @@ describe('createToolConfig', () => {
     ['a function', () => 'google_search'],
   ])('rejects %s as a declaration', (_label, declared) => {
     expect(() => createToolConfig(declared)).toThrow(
-      /ToolConfig must be a non-null object/,
+      /ToolConfig: Invalid input: expected object, received/,
     );
   });
 
@@ -142,7 +167,45 @@ describe('createToolConfig', () => {
     ['an array', []],
   ])('rejects %s as args', (_label, args) => {
     expect(() => createToolConfig({name: 'VertexAiSearchTool', args})).toThrow(
-      /`args` must be an object/,
+      /args: Invalid input: expected object, received/,
     );
+  });
+});
+
+describe('baseToolConfigSchema', () => {
+  const myToolConfigSchema = baseToolConfigSchema.extend({
+    threshold: z.number(),
+  });
+
+  it('accepts a declaration that carries no key', () => {
+    expect(baseToolConfigSchema.parse({})).toEqual({});
+  });
+
+  it('rejects a key it was not extended with', () => {
+    expect(() => baseToolConfigSchema.parse({threshold: 1})).toThrow(
+      /threshold/,
+    );
+  });
+
+  it('accepts the keys a custom tool config declares', () => {
+    expect(myToolConfigSchema.parse({threshold: 1})).toEqual({threshold: 1});
+  });
+
+  it('carries the strict-key rule into a custom tool config', () => {
+    expect(() => myToolConfigSchema.parse({threshold: 1, thresold: 2})).toThrow(
+      /thresold/,
+    );
+  });
+
+  it('rejects a declared key of the wrong type', () => {
+    expect(() => myToolConfigSchema.parse({threshold: 'high'})).toThrow(
+      /threshold/,
+    );
+  });
+
+  it('parses to a BaseToolConfig', () => {
+    const config: BaseToolConfig = baseToolConfigSchema.parse({});
+
+    expect(config).toEqual({});
   });
 });
