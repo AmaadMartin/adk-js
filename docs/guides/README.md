@@ -71,6 +71,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [EvalCase](evaluation/eval_case/index.md) - The gradable unit of an
   evaluation: a recorded conversation or a scenario, and the accessors that
   read a turn's tool trajectory.
+- [Eval metrics](evaluation/eval_metrics/index.md) - The vocabulary an eval
+  config speaks: metric names, criteria, judge model options, thresholds and
+  metric results.
 - [EvaluationGenerator](evaluation/evaluation_generator/index.md) - Driving an
   agent through a simulated conversation and recording it as gradable
   invocations.

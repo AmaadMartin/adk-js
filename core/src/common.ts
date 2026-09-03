@@ -301,19 +301,42 @@ export type {
   LiveModelConfig,
 } from './evaluation/eval_config.js';
 export {
+  DEFAULT_JUDGE_MODEL,
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
   PrebuiltMetrics,
   ToolTrajectoryMatchType,
   getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+  resolveJudgeModelOptions,
 } from './evaluation/eval_metrics.js';
 export type {
   BaseCriterion,
   EvalMetric,
+  EvalMetricCriterion,
   EvalMetricResult,
+  EvalMetricResultDetails,
   EvalMetricResultPerInvocation,
+  HallucinationsCriterion,
+  Interval,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+  ResolvedJudgeModelOptions,
+  RubricsBasedCriterion,
   ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
 export type {EvalCaseResult} from './evaluation/eval_result.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
 export {getEvalRuntime, setEvalRuntime} from './evaluation/eval_runtime.js';
 export type {
   EvalRuntime,
