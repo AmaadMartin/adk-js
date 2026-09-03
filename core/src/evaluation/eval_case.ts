@@ -15,7 +15,10 @@ import {
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {AppDetails} from './app_details.js';
 import {ConversationScenario} from './conversation_scenarios.js';
-import {Rubric} from './eval_rubrics.js';
+// Type-only: `eval_rubrics.ts` imports `EvalCase` and `Invocation` from here,
+// and erasing both directions keeps the two modules out of a runtime import
+// cycle.
+import type {Rubric} from './eval_rubrics.js';
 
 export type {ConversationScenario} from './conversation_scenarios.js';
 

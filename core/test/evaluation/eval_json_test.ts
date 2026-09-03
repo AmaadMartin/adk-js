@@ -216,3 +216,95 @@ describe('serializeEvalSet', () => {
     );
   });
 });
+
+/** An eval set carrying rubrics at both levels adk-python writes them at. */
+const ON_DISK_WITH_RUBRICS = {
+  eval_set_id: 'graded',
+  creation_timestamp: 1,
+  eval_cases: [
+    {
+      eval_id: 'graded_case',
+      creation_timestamp: 2,
+      rubrics: [
+        {
+          rubric_id: 'case_rubric',
+          rubric_content: {text_property: 'The agent stays on topic.'},
+          description: 'Case level.',
+          type: 'FINAL_RESPONSE_QUALITY',
+        },
+      ],
+      conversation: [
+        {
+          invocation_id: 'inv-1',
+          user_content: {parts: [{text: 'Hi'}], role: 'user'},
+          creation_timestamp: 3,
+          rubrics: [
+            {
+              rubric_id: 'turn_rubric',
+              rubric_content: {text_property: 'The agent greets back.'},
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+describe('parseEvalSet with rubrics', () => {
+  it('reads rubrics on an eval case and on an invocation', () => {
+    const evalCase = parseEvalSet(ON_DISK_WITH_RUBRICS).evalCases[0];
+
+    expect(evalCase.rubrics).toEqual([
+      {
+        rubricId: 'case_rubric',
+        rubricContent: {textProperty: 'The agent stays on topic.'},
+        description: 'Case level.',
+        type: 'FINAL_RESPONSE_QUALITY',
+      },
+    ]);
+    expect(evalCase.conversation?.[0].rubrics).toEqual([
+      {
+        rubricId: 'turn_rubric',
+        rubricContent: {textProperty: 'The agent greets back.'},
+        description: undefined,
+        type: undefined,
+      },
+    ]);
+  });
+
+  it('drops a rubric that carries no id', () => {
+    const evalSet = parseEvalSet({
+      eval_set_id: 'graded',
+      eval_cases: [
+        {
+          eval_id: 'graded_case',
+          rubrics: [
+            {rubric_content: {text_property: 'No id.'}},
+            'not an object',
+          ],
+        },
+      ],
+    });
+
+    expect(evalSet.evalCases[0].rubrics).toEqual([]);
+  });
+
+  it('reads a rubric whose content is missing as an empty criterion', () => {
+    const evalSet = parseEvalSet({
+      eval_set_id: 'graded',
+      eval_cases: [{eval_id: 'graded_case', rubrics: [{rubric_id: 'bare'}]}],
+    });
+
+    expect(evalSet.evalCases[0].rubrics?.[0].rubricContent).toEqual({
+      textProperty: undefined,
+    });
+  });
+});
+
+describe('serializeEvalSet with rubrics', () => {
+  it('writes rubrics back to snake_case', () => {
+    const evalSet = parseEvalSet(ON_DISK_WITH_RUBRICS);
+
+    expect(JSON.parse(serializeEvalSet(evalSet))).toEqual(ON_DISK_WITH_RUBRICS);
+  });
+});

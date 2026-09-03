@@ -389,6 +389,14 @@ export type {
 export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
 export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
+export {LocalEvalRuntime} from './evaluation/local_eval_runtime.js';
+export {LocalEvalService} from './evaluation/local_eval_service.js';
+export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
+export {
+  MetricEvaluatorRegistry,
+  defaultMetricEvaluatorRegistry,
+} from './evaluation/metric_evaluator_registry.js';
+export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   UserSimulatorStatus,
@@ -800,7 +808,11 @@ export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export type {VertexRagRetrievalToolParams} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {snakeToLowerCamel} from './utils/case_utils.js';
-export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {
+  EVAL_CLIENT_LABEL,
+  getClientLabels,
+  runWithClientLabel,
+} from './utils/client_labels.js';
 export {getBooleanEnvVar} from './utils/env_aware_utils.js';
 export {getHttpDebugInfo} from './utils/http_debug_utils.js';
 export type {HttpDebugRecord, HttpExchange} from './utils/http_debug_utils.js';

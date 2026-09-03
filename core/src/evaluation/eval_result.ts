@@ -41,7 +41,11 @@ export interface EvalCaseResult {
 
   evalMetricResultPerInvocation: EvalMetricResultPerInvocation[];
 
-  /** The id of the session the inference stage of the eval produced. */
+  /**
+   * The id of the session the inference stage of the eval produced, empty when
+   * there was none. adk-python makes the field required and the two SDKs read
+   * each other's result files, so an eval service always sets it.
+   */
   sessionId: string;
 
   /** The session itself, when the eval service recorded it. */
