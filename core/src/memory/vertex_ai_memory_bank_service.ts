@@ -61,6 +61,12 @@ const CREATE_MEMORY_KNOWN_FIELDS = [
 const ENABLE_CONSOLIDATION_KEY = 'enable_consolidation';
 const MAX_DIRECT_MEMORIES_PER_GENERATE_CALL = 5;
 
+const EXPRESS_MODE_PARTIAL_PROJECT_MESSAGE =
+  'Vertex AI Express Mode (expressModeApiKey / GOOGLE_API_KEY) cannot be ' +
+  'combined with a partial project configuration: the key addresses the ' +
+  'project it belongs to, which would silently replace the one you named. ' +
+  'Provide both projectId and location, or neither.';
+
 function shouldFilterOutEvent(content?: Content): boolean {
   return !(content?.parts || []).some(
     (p) => p.text || p.inlineData || p.fileData,
@@ -358,10 +364,14 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 /**
  * Builds the Agent Engine `Memories` client for the configured credentials.
  *
- * A project and location win over an Express Mode key, so an ambient
+ * A complete project and location win over an Express Mode key, so an ambient
  * `GOOGLE_API_KEY` never switches a configured caller to key authentication.
  * Python prefers the key; this divergence is shared with
  * `VertexAiSessionService`.
+ *
+ * @throws if an Express Mode key meets a half-configured project, because
+ *     using the key there would silently address the project the key belongs
+ *     to instead of the one the caller named.
  */
 function createMemoriesClient(options: {
   projectId?: string;
@@ -369,24 +379,34 @@ function createMemoriesClient(options: {
   expressModeApiKey?: string;
   credentials?: GoogleAuthOptions;
 }): Memories {
-  if (options.credentials && options.projectId && options.location) {
+  const {
+    projectId: project,
+    location,
+    expressModeApiKey,
+    credentials,
+  } = options;
+
+  if (expressModeApiKey && !project && !location) {
+    return createAgentEngineMemories(
+      createExpressModeApiClient(expressModeApiKey),
+    );
+  }
+
+  if (expressModeApiKey && !(project && location)) {
+    throw new Error(EXPRESS_MODE_PARTIAL_PROJECT_MESSAGE);
+  }
+
+  if (credentials) {
     return createAgentEngineMemories(
       createVertexApiClient({
-        project: options.projectId,
-        location: options.location,
-        googleAuthOptions: options.credentials,
+        project,
+        location,
+        googleAuthOptions: credentials,
       }),
     );
   }
 
-  if (options.expressModeApiKey && !(options.projectId && options.location)) {
-    return createAgentEngineMemories(
-      createExpressModeApiClient(options.expressModeApiKey),
-    );
-  }
-
-  return new Client({project: options.projectId, location: options.location})
-    .agentEnginesInternal.memories;
+  return new Client({project, location}).agentEnginesInternal.memories;
 }
 
 /**

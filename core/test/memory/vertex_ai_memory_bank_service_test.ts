@@ -142,16 +142,6 @@ describe('VertexAiMemoryBankService', () => {
         'test-api-key',
       ],
       ['an API key from the environment', {}, 'env-api-key'],
-      [
-        'an API key and only a project',
-        {projectId: 'test-project'},
-        'env-api-key',
-      ],
-      [
-        'an API key and only a location',
-        {location: 'us-central1'},
-        'env-api-key',
-      ],
     ])('authenticates with %s', (_, options, expectedKey) => {
       new VertexAiMemoryBankService({
         agentEngineId: 'test-engine-id',
@@ -163,6 +153,24 @@ describe('VertexAiMemoryBankService', () => {
       );
       expect(clientConstructor).not.toHaveBeenCalled();
     });
+
+    it.each<[string, {projectId?: string; location?: string}]>([
+      ['a project', {projectId: 'test-project'}],
+      ['a location', {location: 'us-central1'}],
+    ])(
+      'throws for an API key and only %s, rather than addressing the key owner project',
+      (_, options) => {
+        expect(
+          () =>
+            new VertexAiMemoryBankService({
+              agentEngineId: 'test-engine-id',
+              ...options,
+            }),
+        ).toThrow('cannot be combined with a partial project configuration');
+        expect(apiClientOptions).not.toHaveBeenCalled();
+        expect(clientConstructor).not.toHaveBeenCalled();
+      },
+    );
 
     it('keeps using project and location when an API key is also in the environment', () => {
       new VertexAiMemoryBankService({
@@ -240,22 +248,28 @@ describe('VertexAiMemoryBankService', () => {
       expect(apiClientOptions).not.toHaveBeenCalled();
     });
 
-    it.each<[string, {projectId?: string; location?: string}]>([
-      ['neither a project nor a location', {}],
-      ['only a project', {projectId: 'test-project'}],
-      ['only a location', {location: 'us-central1'}],
-    ])('ignores credentials given with %s', (_, options) => {
+    it('honours credentials given with only a project', () => {
       new VertexAiMemoryBankService({
         agentEngineId: 'test-engine-id',
+        projectId: 'test-project',
         credentials: {authClient: new OAuth2Client()},
-        ...options,
       });
 
-      expect(clientConstructor).toHaveBeenCalledWith({
-        project: options.projectId,
-        location: options.location,
-      });
-      expect(apiClientOptions).not.toHaveBeenCalled();
+      expect(apiClientOptions).toHaveBeenCalledWith(
+        expect.objectContaining({project: 'test-project', vertexai: true}),
+      );
+      expect(clientConstructor).not.toHaveBeenCalled();
+    });
+
+    it('reports the missing project instead of falling back to the host identity', () => {
+      expect(
+        () =>
+          new VertexAiMemoryBankService({
+            agentEngineId: 'test-engine-id',
+            credentials: {authClient: new OAuth2Client()},
+          }),
+      ).toThrow('Authentication is not set up');
+      expect(clientConstructor).not.toHaveBeenCalled();
     });
   });
 
