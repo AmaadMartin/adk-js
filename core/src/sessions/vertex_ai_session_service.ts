@@ -10,7 +10,10 @@ import {
   EventActions as ApiEventActions,
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
+  CreateAgentEngineSessionConfig,
   EventMetadata,
+  ListAgentEngineSessionEventsConfig,
+  ListAgentEngineSessionEventsResponse,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -18,7 +21,9 @@ import {
   Content,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
+  HttpOptions,
 } from '@google/genai';
+import {ApiClient} from '@google/genai/vertex_internal';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
@@ -28,7 +33,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
 import {
-  EXPRESS_MODE_UNSUPPORTED_MESSAGE,
+  createExpressModeApiClient,
   getExpressModeApiKey,
 } from '../utils/vertex_ai_utils.js';
 
@@ -49,6 +54,9 @@ const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
+const HTTP_TOO_MANY_REQUESTS = 429;
+const APPEND_MAX_ATTEMPTS = 2;
+const RATE_LIMIT_RETRY_DELAY_MS = 1000;
 
 /**
  * `eventMetadata.customMetadata` key carrying the workflow fields of an
@@ -83,6 +91,23 @@ export function quoteFilterLiteral(value: string): string {
   return `"${escaped}"`;
 }
 
+/**
+ * Builds the Agent Engine `Sessions` client from an `ApiClient`.
+ *
+ * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
+ * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
+ * `ApiClient` here is a structurally distinct class (its private fields make
+ * the two nominally incompatible) from the one `Sessions` declares. The
+ * instances are interchangeable at runtime -- the mismatch is a
+ * duplicate-dependency artifact, not a real API difference -- so the cast is
+ * confined to this one boundary.
+ */
+function createAgentEngineSessions(apiClient: ApiClient): Sessions {
+  return new Sessions(
+    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
+  );
+}
+
 export interface VertexAiSessionServiceOptions {
   projectId?: string;
   location?: string;
@@ -103,6 +128,13 @@ export interface VertexAiCreateSessionRequest extends CreateSessionRequest {
   ttl?: string;
   /** Absolute RFC 3339 UTC expiration, e.g. `'2025-10-01T00:00:00Z'`. */
   expireTime?: string;
+  /**
+   * Extra Agent Engine create-session config, merged into the request last so
+   * it overrides the fields above. This is adk-python's `**kwargs`, and it
+   * reaches config the named fields do not cover, such as `waitForCompletion`
+   * and `displayName`.
+   */
+  config?: Partial<CreateAgentEngineSessionConfig>;
 }
 
 /**
@@ -128,22 +160,43 @@ export class VertexAiSessionService extends BaseSessionService {
     );
 
     // sessions is primarily for testing to inject a mock client.
-    if (options.sessions) {
-      this.sessions = options.sessions;
-    } else {
-      if (!this.projectId || !this.location) {
-        throw new Error(
-          this.expressModeApiKey
-            ? EXPRESS_MODE_UNSUPPORTED_MESSAGE
-            : 'Project ID and Location are required.',
-        );
-      }
+    this.sessions = options.sessions ?? this.createSessionsClient();
+  }
+
+  private createSessionsClient(): Sessions {
+    // An Express Mode key wins over project and location, as it does in
+    // adk-python's `_get_api_client`.
+    if (this.expressModeApiKey) {
+      return createAgentEngineSessions(
+        createExpressModeApiClient(
+          this.expressModeApiKey,
+          this.apiClientHttpOptionsOverride(),
+        ),
+      );
+    }
+    if (this.projectId && this.location) {
       const client = new Client({
         project: this.projectId,
         location: this.location,
       });
-      this.sessions = client.agentEnginesInternal.sessions;
+      return client.agentEnginesInternal.sessions;
     }
+    throw new Error('Project ID and Location are required.');
+  }
+
+  /**
+   * Returns HTTP options applied to every Agent Engine request this service
+   * issues. Subclasses override it to set a custom endpoint, API version,
+   * timeout or header. Returns `undefined` by default.
+   *
+   * adk-python attaches the override when it builds the client. The
+   * `@google-cloud/vertexai` `Client` constructor accepts no `httpOptions`, so
+   * the enterprise path attaches them per request instead. The SDK applies
+   * client-level and per-request options to the same request, so the two
+   * placements are observably equivalent.
+   */
+  protected apiClientHttpOptionsOverride(): HttpOptions | undefined {
+    return undefined;
   }
 
   private getReasoningEngineId(appName: string): string {
@@ -176,6 +229,7 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
     ttl,
     expireTime,
+    config,
   }: VertexAiCreateSessionRequest): Promise<Session> {
     // The API rejects both together; fail before the RPC.
     if (ttl != null && expireTime != null) {
@@ -184,6 +238,7 @@ export class VertexAiSessionService extends BaseSessionService {
       );
     }
 
+    const httpOptions = this.apiClientHttpOptionsOverride();
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const filteredState = state ? trimTempState(state) : undefined;
     let apiResponse = await this.sessions.createInternal({
@@ -194,6 +249,8 @@ export class VertexAiSessionService extends BaseSessionService {
         ...(sessionId ? {sessionId} : {}),
         ...(ttl != null ? {ttl} : {}),
         ...(expireTime != null ? {expireTime} : {}),
+        ...(httpOptions ? {httpOptions} : {}),
+        ...config,
       },
     });
 
@@ -204,6 +261,7 @@ export class VertexAiSessionService extends BaseSessionService {
       const [nextResponse] = await Promise.all([
         this.sessions.getSessionOperationInternal({
           operationName: operationName,
+          ...(httpOptions ? {config: {httpOptions}} : {}),
         }),
         new Promise((resolve) => setTimeout(resolve, 1000)),
       ]);
@@ -238,6 +296,7 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
+    const httpOptions = this.apiClientHttpOptionsOverride();
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
 
@@ -248,9 +307,12 @@ export class VertexAiSessionService extends BaseSessionService {
       if (config && config.numRecentEvents === 0) {
         getSessionResponse = (await this.sessions.get({
           name: sessionResourceName,
+          ...(httpOptions ? {config: {httpOptions}} : {}),
         })) as VertexAiSession;
       } else {
-        const listConfig: Record<string, string> = {};
+        const listConfig: ListAgentEngineSessionEventsConfig = {
+          ...(httpOptions ? {httpOptions} : {}),
+        };
         if (config && config.afterTimestamp) {
           listConfig.filter = `timestamp>="${new Date(
             config.afterTimestamp,
@@ -258,16 +320,25 @@ export class VertexAiSessionService extends BaseSessionService {
         }
 
         const [sessionRes, eventsRes] = await Promise.all([
-          this.sessions.get({name: sessionResourceName}),
+          this.sessions.get({
+            name: sessionResourceName,
+            ...(httpOptions ? {config: {httpOptions}} : {}),
+          }),
           this.sessions.events.listInternal({
             name: sessionResourceName,
             config: listConfig,
           }),
         ]);
         getSessionResponse = sessionRes as VertexAiSession;
-        eventsIterator =
-          (eventsRes as {sessionEvents?: VertexAiSessionEvent[]})
-            .sessionEvents || [];
+        eventsIterator = [
+          ...(eventsRes.sessionEvents || []),
+          ...(await listRemainingSessionEvents(
+            this.sessions,
+            sessionResourceName,
+            listConfig,
+            eventsRes,
+          )),
+        ];
       }
 
       const sessionObj = getSessionResponse!;
@@ -325,6 +396,7 @@ export class VertexAiSessionService extends BaseSessionService {
     page,
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
+    const httpOptions = this.apiClientHttpOptionsOverride();
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const adkSessions: Session[] = [];
     let pageToken: string | undefined = undefined;
@@ -335,6 +407,7 @@ export class VertexAiSessionService extends BaseSessionService {
         config: {
           ...(userId ? {filter: `user_id=${quoteFilterLiteral(userId)}`} : {}),
           ...(pageToken ? {pageToken} : {}),
+          ...(httpOptions ? {httpOptions} : {}),
         },
       });
 
@@ -426,8 +499,10 @@ export class VertexAiSessionService extends BaseSessionService {
       return;
     }
 
+    const httpOptions = this.apiClientHttpOptionsOverride();
     await this.sessions.delete({
       name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
+      ...(httpOptions ? {config: {httpOptions}} : {}),
     });
   }
 
@@ -461,6 +536,10 @@ export class VertexAiSessionService extends BaseSessionService {
       'errorMessage',
     ]);
     config.actions = toApiActions(event.actions);
+    const httpOptions = this.apiClientHttpOptionsOverride();
+    if (httpOptions) {
+      config.httpOptions = httpOptions;
+    }
 
     // Strip Part fields the Sessions API rejects (e.g. `partMetadata`) from
     // both the wire content and the `rawEvent` blob it is stored under, so the
@@ -495,11 +574,13 @@ export class VertexAiSessionService extends BaseSessionService {
     };
 
     try {
-      await this.sessions.events.append(params);
+      await appendWithRateLimitRetry(this.sessions, params);
     } catch (error) {
       // Only a rejected payload (400) is safe to retry without `rawEvent`. Any
       // other failure may already have persisted the event, so re-appending
-      // would duplicate it; let it propagate.
+      // would duplicate it; let it propagate. A 429 is the exception the
+      // retry helper handles: the service rejected the append outright, so
+      // nothing was persisted.
       if (!isInvalidArgumentError(error)) {
         throw error;
       }
@@ -510,7 +591,7 @@ export class VertexAiSessionService extends BaseSessionService {
         error,
       );
       delete config.rawEvent;
-      await this.sessions.events.append(params);
+      await appendWithRateLimitRetry(this.sessions, params);
     }
 
     return event;
@@ -626,6 +707,72 @@ function dropUnsupportedPartFields(
  */
 function isInvalidArgumentError(error: unknown): boolean {
   return (error as {status?: number} | null)?.status === HTTP_BAD_REQUEST;
+}
+
+/**
+ * True when the service rejected the request for rate limiting. Matched
+ * structurally on `status`/`code` for the reason given in getSession's catch.
+ */
+function isRateLimitError(error: unknown): boolean {
+  const err = error as {status?: number; code?: number} | null;
+  return (
+    err?.status === HTTP_TOO_MANY_REQUESTS ||
+    err?.code === HTTP_TOO_MANY_REQUESTS
+  );
+}
+
+/**
+ * Appends an event, retrying once after a pause when the service answered
+ * 429. A rate-limited request never reached the session, so re-sending it
+ * cannot duplicate the event. Every other failure propagates on its first
+ * occurrence, and a successful append waits for nothing.
+ */
+async function appendWithRateLimitRetry(
+  sessions: Sessions,
+  params: AppendAgentEngineSessionEventRequestParameters,
+): Promise<void> {
+  for (let attempt = 0; attempt < APPEND_MAX_ATTEMPTS; attempt++) {
+    try {
+      await sessions.events.append(params);
+      return;
+    } catch (error) {
+      if (!isRateLimitError(error) || attempt === APPEND_MAX_ATTEMPTS - 1) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS),
+      );
+    }
+  }
+}
+
+/**
+ * Reads every event page after the first, following `nextPageToken`.
+ *
+ * The Agent Engine API returns one page per call, so a session with more
+ * events than a page holds loses its tail unless the caller walks the rest.
+ * The result is bounded by the session's own event count, as it is in
+ * adk-python: a page cap here would truncate history.
+ */
+async function listRemainingSessionEvents(
+  sessions: Sessions,
+  name: string,
+  config: ListAgentEngineSessionEventsConfig,
+  firstResponse: ListAgentEngineSessionEventsResponse,
+): Promise<VertexAiSessionEvent[]> {
+  const events: VertexAiSessionEvent[] = [];
+  let pageToken = firstResponse.nextPageToken;
+
+  while (pageToken) {
+    const response = await sessions.events.listInternal({
+      name,
+      config: {...config, pageToken},
+    });
+    events.push(...(response.sessionEvents || []));
+    pageToken = response.nextPageToken;
+  }
+
+  return events;
 }
 
 interface ExtendedEventActions extends EventActions {
