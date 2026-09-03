@@ -53,8 +53,7 @@ function adjustSplitIndexToAvoidOrphanedFunctionResponses(
 
 /** Returns whether a content contains function responses. */
 function isFunctionResponseContent(content: Content): boolean {
-  const parts = content.parts;
-  return parts != null && parts.some((part) => part.functionResponse != null);
+  return content.parts?.some((part) => part.functionResponse != null) ?? false;
 }
 
 /** Returns whether a content represents user input (not tool output). */
