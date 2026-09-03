@@ -812,9 +812,20 @@ describe('SaveFilesAsArtifactsPlugin', () => {
       );
     });
 
-    it('ignores a stash that is not an object', async () => {
+    it('clears a stash that is not an object', async () => {
       const {plugin, agent, invocationContext} = harness;
       invocationContext.session.state[PENDING_DELTA_KEY] = 'not a delta';
+      const callbackContext = new Context({invocationContext});
+
+      await plugin.beforeAgentCallback({agent, callbackContext});
+
+      expect(callbackContext.actions.artifactDelta).toEqual({});
+      expect(invocationContext.session.state[PENDING_DELTA_KEY]).toEqual({});
+    });
+
+    it('leaves an already-empty stash alone rather than rewriting it', async () => {
+      const {plugin, agent, invocationContext} = harness;
+      invocationContext.session.state[PENDING_DELTA_KEY] = {};
       const callbackContext = new Context({invocationContext});
 
       await plugin.beforeAgentCallback({agent, callbackContext});

@@ -16,10 +16,8 @@ import {
   PluginManager,
   Runner,
   SaveFilesAsArtifactsPlugin,
-  SessionArtifactService,
-  SessionLoadArtifactRequest,
-  SessionSaveArtifactRequest,
 } from '@google/adk';
+import {ScopedArtifactService} from '@google/adk/artifacts/scoped_artifact_service.js';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -46,43 +44,6 @@ class SimulatedGcsArtifactService extends InMemoryArtifactService {
       ...versionMeta,
       canonicalUri: `gs://simulated-bucket/${request.filename}/v${versionMeta.version}`,
     };
-  }
-}
-
-/** Binds a composite-keyed artifact service to this test's single session. */
-class SessionScopedArtifactService implements SessionArtifactService {
-  constructor(private readonly delegate: InMemoryArtifactService) {}
-
-  private get key() {
-    return {appName: APP_NAME, userId: USER_ID, sessionId: SESSION_ID};
-  }
-
-  saveArtifact(request: SessionSaveArtifactRequest) {
-    return this.delegate.saveArtifact({...this.key, ...request});
-  }
-
-  loadArtifact(request: SessionLoadArtifactRequest) {
-    return this.delegate.loadArtifact({...this.key, ...request});
-  }
-
-  listArtifactKeys() {
-    return this.delegate.listArtifactKeys(this.key);
-  }
-
-  deleteArtifact(filename: string) {
-    return this.delegate.deleteArtifact({...this.key, filename});
-  }
-
-  listVersions(filename: string) {
-    return this.delegate.listVersions({...this.key, filename});
-  }
-
-  listArtifactVersions(filename: string) {
-    return this.delegate.listArtifactVersions({...this.key, filename});
-  }
-
-  getArtifactVersion(request: SessionLoadArtifactRequest) {
-    return this.delegate.getArtifactVersion({...this.key, ...request});
   }
 }
 
@@ -211,7 +172,12 @@ describe('Integration: SaveFilesAsArtifactsPlugin', () => {
       sessionId: SESSION_ID,
     });
     const invocationContext = new InvocationContext({
-      artifactService: new SessionScopedArtifactService(artifactService),
+      artifactService: new ScopedArtifactService(
+        artifactService,
+        APP_NAME,
+        USER_ID,
+        SESSION_ID,
+      ),
       invocationId: 'reporting_invocation',
       agent,
       session,

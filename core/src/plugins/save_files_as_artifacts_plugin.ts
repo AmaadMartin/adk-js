@@ -64,18 +64,6 @@ function isArtifactDelta(value: unknown): value is Record<string, number> {
   );
 }
 
-/**
- * Number of bytes a base64 string decodes to.
- *
- * `@google/genai` types `Blob.data` as base64 text, while adk-python holds raw
- * bytes. Converting here keeps the size limit meaning the same thing in both
- * SDKs.
- */
-function base64DecodedByteLength(data: string): number {
-  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
-  return Math.floor((data.length * 3) / 4) - padding;
-}
-
 /** True when a model connector can read the file at `uri` directly. */
 function isModelAccessibleUri(uri: string): boolean {
   let parsed: URL;
@@ -84,9 +72,7 @@ function isModelAccessibleUri(uri: string): boolean {
   } catch {
     return false;
   }
-  return MODEL_ACCESSIBLE_URI_SCHEMES.has(
-    parsed.protocol.slice(0, -1).toLowerCase(),
-  );
+  return MODEL_ACCESSIBLE_URI_SCHEMES.has(parsed.protocol.slice(0, -1));
 }
 
 /**
@@ -98,9 +84,8 @@ async function buildFileReferencePart(params: {
   filename: string;
   version: number;
   mimeType?: string;
-  displayName: string;
 }): Promise<Part | undefined> {
-  const {artifactService, filename, version, mimeType, displayName} = params;
+  const {artifactService, filename, version, mimeType} = params;
 
   let artifactVersion: ArtifactVersion | undefined;
   try {
@@ -125,7 +110,7 @@ async function buildFileReferencePart(params: {
       fileUri: canonicalUri,
       // The blob's own mime type wins, matching adk-python.
       mimeType: mimeType || artifactVersion?.mimeType,
-      displayName,
+      displayName: filename,
     },
   };
 }
@@ -200,7 +185,10 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
       }
 
       try {
-        const fileSize = base64DecodedByteLength(inlineData.data ?? '');
+        // `@google/genai` types `Blob.data` as base64 text while adk-python
+        // holds raw bytes, so decode the length to keep the limit meaning the
+        // same thing in both SDKs.
+        const fileSize = Buffer.byteLength(inlineData.data ?? '', 'base64');
 
         let fileName = inlineData.displayName;
         if (!fileName) {
@@ -237,7 +225,6 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
             filename: fileName,
             version,
             mimeType: inlineData.mimeType,
-            displayName: fileName,
           });
           if (fileReferencePart) {
             newParts.push(fileReferencePart);
@@ -280,23 +267,24 @@ export class SaveFilesAsArtifactsPlugin extends BasePlugin {
   }): Promise<Content | undefined> {
     const key = this.pendingDeltaKey;
     const stashed = callbackContext.state.get<unknown>(key);
-    if (
-      typeof stashed !== 'object' ||
-      stashed === null ||
-      Object.keys(stashed).length === 0
-    ) {
+
+    if (!isArtifactDelta(stashed)) {
+      if (stashed !== undefined) {
+        logger.warn(
+          `Discarding a malformed pending artifact delta under state key` +
+            ` "${key}".`,
+        );
+        callbackContext.state.set(key, {});
+      }
       return undefined;
     }
 
-    if (isArtifactDelta(stashed)) {
+    // An empty stash is left alone: clearing it would write a state delta, and
+    // the agent turns any delta into an extra event.
+    if (Object.keys(stashed).length > 0) {
       Object.assign(callbackContext.actions.artifactDelta, stashed);
-    } else {
-      logger.warn(
-        `Discarding a malformed pending artifact delta under state key` +
-          ` "${key}".`,
-      );
+      callbackContext.state.set(key, {});
     }
-    callbackContext.state.set(key, {});
     return undefined;
   }
 }
