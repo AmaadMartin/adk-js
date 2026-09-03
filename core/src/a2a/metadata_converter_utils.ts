@@ -19,6 +19,7 @@ export enum A2AMetadataKeys {
   USER_ID = `${ADK_METADATA_KEY_PREFIX}user_id`,
   SESSION_ID = `${ADK_METADATA_KEY_PREFIX}session_id`,
   INVOCATION_ID = `${ADK_METADATA_KEY_PREFIX}invocation_id`,
+  EVENT_ID = `${ADK_METADATA_KEY_PREFIX}event_id`,
   AUTHOR = `${ADK_METADATA_KEY_PREFIX}author`,
   BRANCH = `${ADK_METADATA_KEY_PREFIX}branch`,
   DATA_PART_TYPE = `${ADK_METADATA_KEY_PREFIX}type`,
