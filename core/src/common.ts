@@ -173,13 +173,9 @@ export type {
   UserSimulatorConfig,
 } from './evaluation/eval_config.js';
 export {
-  DEFAULT_JUDGE_NUM_SAMPLES,
-  DEFAULT_JUDGE_PARALLELISM_LIMIT,
-  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   PrebuiltMetrics,
   ToolTrajectoryMatchType,
   getConfigCustomFunctionPath,
-  normalizeToolTrajectoryMatchType,
   parseMetricInfo,
   setConfigCustomFunctionPath,
 } from './evaluation/eval_metrics.js';

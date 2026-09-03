@@ -457,7 +457,18 @@ describe('parseEvalConfig, beyond the reference tests', () => {
           },
         },
       }),
-    ).toThrowError(InputValidationError);
+    ).toThrowError(/metricName/);
+  });
+
+  it('rejects a metricInfo that is not an object', () => {
+    expect(() =>
+      parseEvalConfig({
+        criteria: {},
+        customMetrics: {
+          my_metric: {codeConfig: {name: 'x'}, metricInfo: 'not-an-object'},
+        },
+      }),
+    ).toThrowError(/Invalid MetricInfo: .*expected object/);
   });
 
   it.each([

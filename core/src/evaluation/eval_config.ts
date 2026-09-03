@@ -9,8 +9,8 @@ import {z} from 'zod';
 import {CodeConfig, codeConfigSchema} from '../agents/common_configs.js';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
+import {isRecord, toCamelCase} from '../utils/object_notation_utils.js';
 import {DEFAULT_LIVE_TIMEOUT_SECONDS} from './constants.js';
-import {isRecord, toCamelKeys} from './eval_json.js';
 import {
   BaseCriterion,
   EvalMetric,
@@ -132,6 +132,23 @@ function readField(
   alias: string,
 ): unknown {
   return key in raw ? raw[key] : raw[alias];
+}
+
+/**
+ * Keys whose values are opaque user data, such as the arguments a tool was
+ * called with. Their contents keep the exact keys they were written with.
+ */
+const OPAQUE_KEYS: ReadonlySet<string> = new Set([
+  'args',
+  'response',
+  'state',
+  'final_session_state',
+  'finalSessionState',
+]);
+
+/** Rewrites snake_case keys to camelCase, leaving opaque values untouched. */
+function toCamelKeys(value: unknown): unknown {
+  return toCamelCase(value, [], OPAQUE_KEYS);
 }
 
 /** Converts each value of a map, leaving the map's own keys untouched. */
