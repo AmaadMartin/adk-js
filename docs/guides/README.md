@@ -15,7 +15,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   request prefix across turns, and what the request carries to make that
   decision.
 - [Function call ids in request contents](agents/function_call_ids/index.md) - How a replayed tool call keeps or loses its id, and how a compacted call is recovered.
-- [InvocationContext](agents/invocation_context/index.md) - The per-run context: event selection by branch, resumability, the event queue, and the LLM-call limit.
+- [InvocationContext](agents/invocation_context/index.md) - The per-run context: event selection by branch, resumability, the event queue, the LLM-call limit, and the state one run carries — its credential service and its state schema.
 - [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
   LangGraph state graph as an ADK agent.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) - Exposing a sub-agent to its parent as a callable tool that runs inline.

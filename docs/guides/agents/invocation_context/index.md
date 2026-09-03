@@ -14,7 +14,7 @@ fields, so scalars decouple and objects stay shared — which is why the LLM-cal
 counter, the agent-state records and the session are the same for the whole
 invocation.
 
-Three groups of behaviour live here rather than in the agents:
+Four groups of behaviour live here rather than in the agents:
 
 - **Event selection.** `getEvents()` answers "which of the session's events are
   mine?", by invocation, by branch, or both. Parallel sub-agents share one
@@ -25,6 +25,9 @@ Three groups of behaviour live here rather than in the agents:
   session history when the run restarts.
 - **Limits.** `incrementLlmCallCount()` enforces `runConfig.maxLlmCalls` across
   the whole invocation, not per agent.
+- **Run-wide state.** `credentialService` is the service a tool resolves a
+  credential against. `stateSchema` declares which session-state keys the run
+  may write, and their types.
 
 You rarely construct one. The runner does that, and hands it to your agent's
 `runAsyncImpl`, to callbacks, and to tools through `ToolContext`.
@@ -165,3 +168,90 @@ function countCall(ctx: InvocationContext): boolean {
 Use `isLlmCallsLimitExceededError` rather than `instanceof`: two copies of
 adk-js in one runtime hold two different classes, and `instanceof` returns
 false between them.
+
+## The credential service
+
+`credentialService` is the service the `Runner` was built with. A tool that
+exchanges a credential reads it from the invocation rather than taking its own.
+The field reaches a cloned context, so a sub-agent resolves credentials against
+the same service as its parent.
+
+## The state schema
+
+`stateSchema` declares which session-state keys the run may write, and their
+types. `Context` hands it to the `State` it builds, so an undeclared write
+raises `StateSchemaError` instead of landing silently. Declare a schema on the
+invocation and every state write in the run is checked against it.
+
+```ts
+import {
+  Context,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
+  createSession,
+  isStateSchemaError,
+} from '@google/adk';
+import {z} from 'zod/v4';
+
+const invocationContext = new InvocationContext({
+  invocationId: 'inv-1',
+  agent: new LlmAgent({name: 'agent', model: 'gemini-2.0-flash'}),
+  session: createSession({
+    id: 's1',
+    appName: 'app',
+    userId: 'u',
+    lastUpdateTime: Date.now(),
+  }),
+  pluginManager: new PluginManager(),
+  stateSchema: z.object({counter: z.number()}),
+});
+
+const context = new Context({invocationContext});
+
+context.state.set('counter', 1); // Declared, and the type matches.
+
+try {
+  context.state.set('countr', 1); // A typo the schema does not declare.
+} catch (err: unknown) {
+  isStateSchemaError(err); // true
+}
+```
+
+With no `stateSchema`, nothing is checked and any key is accepted. That is the
+default, so adding a schema is opt-in.
+
+### What the schema checks
+
+A write is rejected when the key is not declared, and when the value does not
+match the declared type. The error is a `StateSchemaError`, and its message
+names the declared fields so the fix is visible.
+
+Keys carrying a namespace prefix — `app:`, `user:`, `temp:`, or any other
+`name:` form — are exempt. They belong to a scope wider than this session's
+state, so the invocation's schema has no authority over them.
+
+A workflow node that declares its own `stateSchema` uses that one. The
+invocation's schema applies where no node declares one, which is every ordinary
+agent, callback and tool.
+
+`ReadonlyContext` carries the schema onto the read-only view it hands out, so a
+holder that inspects the view sees the same schema. The view rejects every write
+with a `ReadonlyStateError` first, so the schema never has to reject one. See
+[ReadonlyContext](../readonly_context/index.md).
+
+### Cloning and lifetime
+
+Both fields reach a cloned context, so a sub-agent resolves credentials against
+the same service and writes under the same schema as its parent.
+
+```ts
+const child = invocationContext.clone({agent: subAgent});
+
+child.credentialService === invocationContext.credentialService; // true
+child.stateSchema === invocationContext.stateSchema; // true
+```
+
+Both mirror `InvocationContext` in
+[google/adk-python](https://github.com/google/adk-python), where the schema is
+the private `_state_schema`.

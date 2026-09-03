@@ -12,6 +12,7 @@ import {
   Event,
   InvocationContext,
   InvocationContextParams,
+  LlmAgent,
   PluginManager,
   ReadonlyContext,
   ReadonlyState,
@@ -22,6 +23,7 @@ import {
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod/v4';
 
 class NoopAgent extends BaseAgent {
   protected async *runAsyncImpl(
@@ -228,5 +230,61 @@ describe('ReadonlyContext.state as a read-only view', () => {
     });
     expect(context.state.has('key1')).toBe(true);
     expect(context.state.has('missing')).toBe(false);
+  });
+});
+
+describe('ReadonlyContext.state schema', () => {
+  const schema = z.object({counter: z.number()});
+
+  function makeSchemaContext(): ReadonlyContext {
+    return new ReadonlyContext(
+      new InvocationContext({
+        invocationId: 'inv-readonly-schema',
+        agent: new LlmAgent({name: 'agent', model: 'gemini-2.0-flash'}),
+        session: createSession({
+          id: 's1',
+          appName: 'app',
+          userId: 'u',
+          lastUpdateTime: Date.now(),
+        }),
+        pluginManager: new PluginManager(),
+        stateSchema: schema,
+      }),
+    );
+  }
+
+  /**
+   * The declared view type hides the schema and the mutators; a JavaScript
+   * caller still reaches them, which is what these cases exercise. The schema
+   * checks themselves run on the writable `Context`, in `context_test.ts`.
+   */
+  function viewOf(context: ReadonlyContext): ReadonlyState {
+    const view = context.state;
+    if (!(view instanceof ReadonlyState)) {
+      expect.fail('ReadonlyContext.state did not return a read-only view');
+    }
+    return view;
+  }
+
+  it('carries the schema the invocation declared', () => {
+    expect(viewOf(makeSchemaContext()).schema).toBe(schema);
+  });
+
+  it('carries no schema when the invocation declares none', () => {
+    expect(viewOf(new ReadonlyContext(makeContext())).schema).toBeUndefined();
+  });
+
+  it('rejects a key the invocation schema does not declare', () => {
+    expect(() => viewOf(makeSchemaContext()).set('typo', 1)).toThrow(
+      ReadonlyStateError,
+    );
+  });
+
+  it('rejects a declared key with a matching value as well', () => {
+    // The view refuses the write before the schema can accept it, so a
+    // schema-valid key is no way through a read-only view.
+    expect(() => viewOf(makeSchemaContext()).set('counter', 7)).toThrow(
+      ReadonlyStateError,
+    );
   });
 });

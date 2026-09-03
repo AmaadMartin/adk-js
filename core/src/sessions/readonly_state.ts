@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {SchemaLike} from '../utils/schema.js';
+
 import {State} from './state.js';
 
 /**
@@ -46,8 +48,17 @@ export type ReadonlyStateView = Pick<State, 'get' | 'has' | 'toRecord'>;
  * mutable.
  */
 export class ReadonlyState extends State {
-  constructor(value: Record<string, unknown>) {
-    super(value, {});
+  constructor(
+    value: Record<string, unknown>,
+    /**
+     * The state schema the invocation declared. The view rejects every write
+     * before it validates one, so the schema is here to be read, not to
+     * enforce: a holder that inspects the view sees the same schema the
+     * writable {@link Context} enforces.
+     */
+    schema?: SchemaLike,
+  ) {
+    super(value, {}, schema);
   }
 
   override set(key: string, _value: unknown): never {

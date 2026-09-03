@@ -26,6 +26,7 @@ import {
   isLlmCallsLimitExceededError,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod/v4';
 
 function makeSession(): Session {
   return {
@@ -2050,5 +2051,58 @@ describe('InvocationContext credential service', () => {
     });
 
     expect(child.credentialService).toBe(credentialService);
+  });
+});
+
+describe('InvocationContext.credentialService', () => {
+  const credentialService = new InMemoryCredentialService();
+
+  it('is undefined when the caller passes none', () => {
+    expect(makeContext().credentialService).toBeUndefined();
+  });
+
+  it('is the service the caller passed', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-credential-service',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    expect(context.credentialService).toBe(credentialService);
+  });
+
+  it('reaches a cloned context', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-credential-service-clone',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+
+    expect(context.clone().credentialService).toBe(credentialService);
+  });
+});
+
+describe('InvocationContext.stateSchema', () => {
+  const schema = z.object({counter: z.number()});
+
+  it('is undefined when the caller declares none', () => {
+    expect(makeContext().stateSchema).toBeUndefined();
+  });
+
+  it('is the schema the caller declared, and reaches a cloned context', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-state-schema',
+      agent: new LoopAgent({name: 'root'}),
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      stateSchema: schema,
+    });
+
+    expect(context.stateSchema).toBe(schema);
+    expect(context.clone().stateSchema).toBe(schema);
   });
 });

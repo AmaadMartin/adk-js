@@ -61,9 +61,16 @@ export class ReadonlyContext {
    * Reads are live: a value a writer commits to the session after this view
    * was taken is visible through it. A write through the view throws
    * {@link ReadonlyStateError}.
+   *
+   * The view carries the invocation's state schema, like the writable
+   * {@link Context} does, so a holder that inspects the schema sees the same
+   * one the run enforces.
    */
   get state(): ReadonlyStateView {
-    return new ReadonlyState(this.invocationContext.session.state);
+    return new ReadonlyState(
+      this.invocationContext.session.state,
+      this.invocationContext.stateSchema,
+    );
   }
 
   /**
