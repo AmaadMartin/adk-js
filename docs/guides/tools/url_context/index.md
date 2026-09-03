@@ -19,15 +19,13 @@ creates `config` and `config.tools` first if the request lacks them. For a model
 that does not support the tool it throws instead, rather than sending a request
 the model rejects.
 
-Three conditions open that gate:
+Two conditions open that gate:
 
 - The request names a Gemini model. Any id that resolves to `gemini-*` counts,
   including a Vertex AI path such as
   `projects/<project>/locations/<location>/publishers/google/models/gemini-2.5-flash`.
 - The `ADK_DISABLE_GEMINI_MODEL_ID_CHECK` environment variable is enabled. Use
   it when your Gemini deployment does not follow the public `gemini-*` naming.
-- The request carries `isManagedAgent: true`. See
-  [Managed-agent requests](#managed-agent-requests).
 
 ## Get started
 
@@ -46,30 +44,9 @@ export const rootAgent = new LlmAgent({
 });
 ```
 
-## Managed-agent requests
-
-A managed agent resolves its tools server-side, so the request it builds carries
-no model at all. `LlmRequest.isManagedAgent` marks such a request, and the tool
-enables itself on it without a model check:
-
-```typescript
-import {LlmRequest} from '@google/adk';
-
-const llmRequest: LlmRequest = {
-  contents: [],
-  config: {},
-  toolsDict: {},
-  liveConnectConfig: {},
-  isManagedAgent: true,
-};
-```
-
-`URL_CONTEXT.processLlmRequest` appends `{urlContext: {}}` to
-`llmRequest.config.tools` for that request, even though it names no model.
-
 ## Failure modes
 
-The tool throws an `Error` when none of the three conditions holds:
+The tool throws an `Error` when neither condition holds:
 
 ```
 URL context tool is not supported for model claude-3-sonnet

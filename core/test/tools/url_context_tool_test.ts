@@ -23,18 +23,13 @@ const EXISTING_TOOL: Tool = {
   functionDeclarations: [{name: 'test_function', description: 'test'}],
 };
 
-function makeRequest(
-  model?: string,
-  tools: Tool[] = [],
-  isManagedAgent?: boolean,
-): LlmRequest {
+function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
   return {
     model,
     config: {tools},
     contents: [],
     toolsDict: {},
     liveConnectConfig: {},
-    isManagedAgent,
   };
 }
 
@@ -253,59 +248,11 @@ describe('UrlContextTool', () => {
     });
   });
 
-  describe('managed-agent requests', () => {
-    it('adds urlContext when the request carries no model', async () => {
-      const tool = new UrlContextTool();
-      const req = makeRequest(undefined, [], true);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: makeToolContext(),
-      });
-
-      expect(req.config!.tools).toEqual([{urlContext: {}}]);
-    });
-
-    it('adds urlContext for a non-Gemini model', async () => {
-      const tool = new UrlContextTool();
-      const req = makeRequest('claude-3-sonnet', [], true);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: makeToolContext(),
-      });
-
-      expect(req.config!.tools).toEqual([{urlContext: {}}]);
-    });
-
-    it('appends urlContext after an existing tool', async () => {
-      const tool = new UrlContextTool();
-      const req = makeRequest(undefined, [EXISTING_TOOL], true);
-      await tool.processLlmRequest({
-        llmRequest: req,
-        toolContext: makeToolContext(),
-      });
-
-      expect(req.config!.tools).toEqual([EXISTING_TOOL, {urlContext: {}}]);
-    });
-
-    it('throws for a non-Gemini model when the flag is false', async () => {
-      const tool = new UrlContextTool();
-      const req = makeRequest('claude-3-sonnet', [], false);
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: makeToolContext(),
-        }),
-      ).rejects.toThrow(
-        'URL context tool is not supported for model claude-3-sonnet',
-      );
-    });
-  });
-
   describe('config normalisation', () => {
-    it('creates config when it is absent', async () => {
+    it('initializes config.tools when config is absent', async () => {
       const tool = new UrlContextTool();
       const req: LlmRequest = {
-        model: 'gemini-2.5-flash',
+        model: 'gemini-2.0-flash',
         contents: [],
         toolsDict: {},
         liveConnectConfig: {},

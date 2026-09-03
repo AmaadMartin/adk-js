@@ -28,24 +28,19 @@ export class UrlContextTool extends BuiltInTool {
   protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    const modelCheckDisabled = isGeminiModelIdCheckDisabled();
-    const model = llmRequest.model ?? '';
-
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];
 
     if (
-      isGeminiModel(model) ||
-      modelCheckDisabled ||
-      llmRequest.isManagedAgent
+      !isGeminiModel(llmRequest.model ?? '') &&
+      !isGeminiModelIdCheckDisabled()
     ) {
-      llmRequest.config.tools.push({urlContext: {}});
-      return;
+      throw new Error(
+        `URL context tool is not supported for model ${llmRequest.model}`,
+      );
     }
 
-    throw new Error(
-      `URL context tool is not supported for model ${llmRequest.model}`,
-    );
+    llmRequest.config.tools.push({urlContext: {}});
   }
 }
 

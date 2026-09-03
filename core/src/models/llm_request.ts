@@ -48,13 +48,6 @@ export interface LlmRequest {
   allowedTools?: string[];
 
   /**
-   * Whether a managed agent built the request. A managed agent resolves its
-   * tools server-side, so the request carries no model. Built-in tools read
-   * this flag to enable themselves on such a request. Internal request state.
-   */
-  isManagedAgent?: boolean;
-
-  /**
    * The interaction ID from the previous turn, if any.
    */
   previousInteractionId?: string;
