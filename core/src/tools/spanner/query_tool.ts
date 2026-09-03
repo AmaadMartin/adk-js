@@ -6,11 +6,11 @@
 
 import {z} from 'zod';
 import {
+  databaseParameters,
   databaseTarget,
   rejectPostgresql,
   withSpannerDatabase,
 } from './client.js';
-import {databaseParameters} from './metadata_tool.js';
 import {rowObject, rowValues, toSerializable} from './result_rows.js';
 import {
   DEFAULT_MAX_EXECUTED_QUERY_RESULT_ROWS,

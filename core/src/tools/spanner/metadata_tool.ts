@@ -7,6 +7,7 @@
 import type {Database} from '@google-cloud/spanner';
 import {z} from 'zod';
 import {
+  databaseParameters,
   databaseTarget,
   rejectPostgresql,
   withSpannerDatabase,
@@ -23,13 +24,6 @@ import {
  * string; `_default` is the alias adk-python's Spanner client accepts for it.
  */
 const DEFAULT_SCHEMA_ALIAS = '_default';
-
-/** The parameters identifying a Spanner database, as the model supplies them. */
-export const databaseParameters = {
-  project_id: z.string().describe('The Google Cloud project id.'),
-  instance_id: z.string().describe('The Spanner instance id.'),
-  database_id: z.string().describe('The Spanner database id.'),
-};
 
 const namedSchemaParameter = z
   .string()

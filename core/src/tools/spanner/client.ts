@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Database, Spanner, SpannerOptions} from '@google-cloud/spanner';
+import type {Database, SpannerOptions} from '@google-cloud/spanner';
 import type {AuthClient} from 'google-auth-library';
+import {z} from 'zod';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 import {version} from '../../version.js';
@@ -24,10 +25,7 @@ export const SPANNER_PEER: OptionalPeer = {
  * produce `adk-spanner-tool google-adk/<version>`, the same string
  * adk-python sends.
  */
-export const SPANNER_USER_AGENT_LIB_NAME = 'adk-spanner-tool google-adk';
-
-/** The full user agent, for callers that only need to read it. */
-export const USER_AGENT = `${SPANNER_USER_AGENT_LIB_NAME}/${version}`;
+const USER_AGENT_LIB_NAME = 'adk-spanner-tool google-adk';
 
 /**
  * `libName` and `libVersion` are honoured by the Spanner client at runtime —
@@ -39,6 +37,18 @@ interface SpannerClientOptions extends SpannerOptions {
   libVersion?: string;
 }
 
+/** The database parameters every per-database Spanner tool declares. */
+export const databaseParameters = {
+  project_id: z.string().describe('The Google Cloud project id.'),
+  instance_id: z.string().describe('The Spanner instance id.'),
+  database_id: z.string().describe('The Spanner database id.'),
+};
+
+/** The database arguments a tool call carries, as {@link databaseParameters} declares them. */
+export type SpannerDatabaseArgs = z.infer<
+  z.ZodObject<typeof databaseParameters>
+>;
+
 /** Which Spanner database a tool call runs against, and as whom. */
 export interface SpannerDatabaseTarget {
   projectId: string;
@@ -48,6 +58,21 @@ export interface SpannerDatabaseTarget {
   credentials?: AuthClient;
   /** The database role the session runs as. */
   databaseRole?: string;
+}
+
+/** Turns a tool call's database arguments into the target it connects to. */
+export function databaseTarget(
+  args: SpannerDatabaseArgs,
+  credentials: AuthClient | undefined,
+  databaseRole?: string,
+): SpannerDatabaseTarget {
+  return {
+    projectId: args.project_id,
+    instanceId: args.instance_id,
+    databaseId: args.database_id,
+    credentials,
+    databaseRole,
+  };
 }
 
 /**
@@ -72,7 +97,7 @@ export async function withSpannerDatabase<T>(
   const options: SpannerClientOptions = {
     projectId: target.projectId,
     authClient: target.credentials,
-    libName: SPANNER_USER_AGENT_LIB_NAME,
+    libName: USER_AGENT_LIB_NAME,
     libVersion: version,
   };
   const client = new Spanner(options);
@@ -83,28 +108,14 @@ export async function withSpannerDatabase<T>(
       .database(target.databaseId, undefined, undefined, target.databaseRole);
     return await use(database);
   } finally {
-    await closeSpannerResources(client, database);
+    // An error raised while releasing a resource would replace the result
+    // about to be returned, so every failure here is logged instead.
+    const opened = database;
+    if (opened) {
+      await closeQuietly('database', () => opened.close());
+    }
+    await closeQuietly('client', () => client.close());
   }
-}
-
-/**
- * Releases the session pool the database holds and then the client itself.
- *
- * Callers run this from a `finally` block, where an error raised while
- * releasing a resource would replace the result they are about to return, so
- * every failure is logged instead of thrown.
- *
- * @param client The Spanner client the operation created.
- * @param database The database the operation opened, if it got that far.
- */
-export async function closeSpannerResources(
-  client: Spanner,
-  database?: Database,
-): Promise<void> {
-  if (database) {
-    await closeQuietly('database', () => database.close());
-  }
-  await closeQuietly('client', () => client.close());
 }
 
 /** Closes one resource, logging instead of raising when cleanup fails. */
@@ -119,36 +130,11 @@ async function closeQuietly(
   }
 }
 
-/** The database parameters every per-database Spanner tool declares. */
-export interface SpannerDatabaseArgs {
-  project_id: string;
-  instance_id: string;
-  database_id: string;
-}
-
-/** Turns a tool call's database arguments into the target it connects to. */
-export function databaseTarget(
-  args: SpannerDatabaseArgs,
-  credentials: AuthClient | undefined,
-  databaseRole?: string,
-): SpannerDatabaseTarget {
-  return {
-    projectId: args.project_id,
-    instanceId: args.instance_id,
-    databaseId: args.database_id,
-    credentials,
-    databaseRole,
-  };
-}
-
 /** The dialect value `Database.getDatabaseDialect` reports for GoogleSQL. */
 export const GOOGLE_STANDARD_SQL_DIALECT = 'GOOGLE_STANDARD_SQL';
 
 /** The dialect value `Database.getDatabaseDialect` reports for PostgreSQL. */
 export const POSTGRESQL_DIALECT = 'POSTGRESQL';
-
-/** The rejection the GoogleSQL-only tools return for a PostgreSQL database. */
-export const POSTGRESQL_UNSUPPORTED = 'PostgreSQL dialect is not supported.';
 
 /**
  * Rejects a PostgreSQL database, whose `INFORMATION_SCHEMA` layout and query
@@ -166,6 +152,6 @@ export async function rejectPostgresql(
   }
   return {
     status: SpannerToolStatus.ERROR,
-    error_details: POSTGRESQL_UNSUPPORTED,
+    error_details: 'PostgreSQL dialect is not supported.',
   };
 }

@@ -9,7 +9,6 @@ import {OAuth2Client} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   SPANNER_PEER,
-  USER_AGENT,
   withSpannerDatabase,
 } from '../../../src/tools/spanner/client.js';
 import {loadOptionalPeer} from '../../../src/utils/optional_peer.js';
@@ -40,7 +39,6 @@ describe('withSpannerDatabase', () => {
       libName: 'adk-spanner-tool google-adk',
       libVersion: version,
     });
-    expect(USER_AGENT).toBe(`adk-spanner-tool google-adk/${version}`);
   });
 
   it('passes the auth client and the database role through', async () => {

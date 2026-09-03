@@ -10,12 +10,22 @@ import type {AuthClient} from 'google-auth-library';
 import {z} from 'zod';
 import {geminiInitParams} from '../../models/google_llm.js';
 import {
+  databaseParameters,
   GOOGLE_STANDARD_SQL_DIALECT,
   POSTGRESQL_DIALECT,
   withSpannerDatabase,
 } from './client.js';
-import {databaseParameters} from './metadata_tool.js';
 import {rowValues, toSerializable} from './result_rows.js';
+import {
+  generateSqlForAnn,
+  generateSqlForKnn,
+  GOOGLESQL_EMBEDDING_PARAMETER,
+  GOOGLESQL_TEXT_QUERY_PARAMETER,
+  POSTGRESQL_EMBEDDING_PARAMETER,
+  POSTGRESQL_TEXT_QUERY_PARAMETER,
+  ResolvedSearchOptions,
+  SearchQuery,
+} from './search_sql.js';
 import {
   APPROXIMATE_NEAREST_NEIGHBORS,
   EXACT_NEAREST_NEIGHBORS,
@@ -50,45 +60,9 @@ const DISTANCE_TYPE = 'distance_type';
 const NEAREST_NEIGHBORS_ALGORITHM = 'nearest_neighbors_algorithm';
 const NUM_LEAVES_TO_SEARCH = 'num_leaves_to_search';
 
-const DISTANCE_ALIAS = 'distance';
-const GOOGLESQL_TEXT_QUERY_PARAMETER = 'query';
-const POSTGRESQL_TEXT_QUERY_PARAMETER = '1';
-const GOOGLESQL_EMBEDDING_PARAMETER = 'embedding';
-const POSTGRESQL_EMBEDDING_PARAMETER = '1';
-
 const DEFAULT_DISTANCE_TYPE = 'COSINE';
 const DEFAULT_TOP_K = 4;
 const DEFAULT_NUM_LEAVES_TO_SEARCH = 1000;
-
-const POSTGRESQL_DISTANCE_FUNCTIONS: Record<string, string> = {
-  COSINE: 'spanner.cosine_distance',
-  EUCLIDEAN: 'spanner.euclidean_distance',
-  DOT_PRODUCT: 'spanner.dot_product',
-};
-
-const GOOGLESQL_DISTANCE_FUNCTIONS: Record<string, string> = {
-  COSINE: 'COSINE_DISTANCE',
-  EUCLIDEAN: 'EUCLIDEAN_DISTANCE',
-  DOT_PRODUCT: 'DOT_PRODUCT',
-};
-
-const GOOGLESQL_APPROXIMATE_DISTANCE_FUNCTIONS: Record<string, string> = {
-  COSINE: 'APPROX_COSINE_DISTANCE',
-  EUCLIDEAN: 'APPROX_EUCLIDEAN_DISTANCE',
-  DOT_PRODUCT: 'APPROX_DOT_PRODUCT',
-};
-
-/** Looks up a distance function, naming the unsupported metric on failure. */
-function distanceFunction(
-  functions: Record<string, string>,
-  distanceType: string,
-): string {
-  const name = functions[distanceType];
-  if (!name) {
-    throw new Error(`Unsupported distance type: ${distanceType}.`);
-  }
-  return name;
-}
 
 /** Reads an option that must be a string. */
 function optionalString(
@@ -278,14 +252,6 @@ async function embedQueryWithVertexAi(
   }
 }
 
-/** How the search is parameterized once the options have been read. */
-interface ResolvedSearchOptions {
-  distanceType: string;
-  topK: number;
-  algorithm: string;
-  numLeavesToSearch: number;
-}
-
 /** Reads and defaults the search options a caller supplied. */
 function resolveSearchOptions(
   options: Record<string, unknown>,
@@ -310,74 +276,6 @@ function resolveSearchOptions(
       optionalInteger(options, NUM_LEAVES_TO_SEARCH) ??
       DEFAULT_NUM_LEAVES_TO_SEARCH,
   };
-}
-
-/** The shape of a generated vector search query. */
-interface SearchQuery {
-  tableName: string;
-  embeddingColumn: string;
-  columns: string[];
-  additionalFilter?: string;
-}
-
-/** Generates the SQL for an exhaustive (kNN) vector search. */
-function generateSqlForKnn(
-  dialect: string,
-  query: SearchQuery,
-  options: ResolvedSearchOptions,
-): string {
-  const isPostgresql = dialect === POSTGRESQL_DIALECT;
-  const distance = distanceFunction(
-    isPostgresql ? POSTGRESQL_DISTANCE_FUNCTIONS : GOOGLESQL_DISTANCE_FUNCTIONS,
-    options.distanceType,
-  );
-  const parameter = isPostgresql
-    ? `$${POSTGRESQL_EMBEDDING_PARAMETER}`
-    : `@${GOOGLESQL_EMBEDDING_PARAMETER}`;
-  const columns = [
-    ...query.columns,
-    `${distance}(${query.embeddingColumn}, ${parameter}) AS ${DISTANCE_ALIAS}`,
-  ].join(', ');
-  const limit = options.topK > 0 ? `\n    LIMIT ${options.topK}` : '';
-  return `
-    SELECT ${columns}
-    FROM ${query.tableName}
-    WHERE ${query.additionalFilter ?? '1=1'}
-    ORDER BY ${DISTANCE_ALIAS}${limit}
-  `;
-}
-
-/** Generates the SQL for an approximate (ANN) vector search. */
-function generateSqlForAnn(
-  dialect: string,
-  query: SearchQuery,
-  options: ResolvedSearchOptions,
-): string {
-  if (dialect === POSTGRESQL_DIALECT) {
-    throw new Error(
-      `${APPROXIMATE_NEAREST_NEIGHBORS} is not supported for PostgreSQL dialect.`,
-    );
-  }
-  const distance = distanceFunction(
-    GOOGLESQL_APPROXIMATE_DISTANCE_FUNCTIONS,
-    options.distanceType,
-  );
-  const searchOptions = `JSON '{"num_leaves_to_search": ${options.numLeavesToSearch}}'`;
-  const columns = [
-    ...query.columns,
-    `${distance}(${query.embeddingColumn}, @${GOOGLESQL_EMBEDDING_PARAMETER},` +
-      ` options => ${searchOptions}) AS ${DISTANCE_ALIAS}`,
-  ].join(', ');
-  const filter = query.additionalFilter
-    ? `${query.embeddingColumn} IS NOT NULL AND ${query.additionalFilter}`
-    : `${query.embeddingColumn} IS NOT NULL`;
-  return `
-    SELECT ${columns}
-    FROM ${query.tableName}
-    WHERE ${filter}
-    ORDER BY ${DISTANCE_ALIAS}
-    LIMIT ${options.topK}
-  `;
 }
 
 /** Everything a vector search needs, from either of the two entry points. */

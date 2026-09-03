@@ -32,77 +32,6 @@ export enum QueryResultMode {
 /** The row cap `execute_sql` falls back to. */
 export const DEFAULT_MAX_EXECUTED_QUERY_RESULT_ROWS = 50;
 
-/** Constructor options for {@link TableColumn}. */
-export interface TableColumnOptions {
-  /** The name of the column. */
-  name: string;
-  /**
-   * The type of the column, in the dialect of the target database. For
-   * example `STRING(MAX)` or `INT64` in GoogleSQL, `text` or `int8` in
-   * PostgreSQL.
-   */
-  type: string;
-  /** Whether the column is nullable. Defaults to `true`. */
-  isNullable?: boolean;
-}
-
-/**
- * A supplemental column of a vector store table.
- *
- * Only `name` is read today: it is what `SpannerVectorStoreSettings`
- * validates `primaryKeyColumns` against. The remaining fields describe the
- * column for the table-setup step, which adk-js does not port yet.
- */
-export class TableColumn {
-  readonly name: string;
-  readonly type: string;
-  readonly isNullable: boolean;
-
-  constructor(options: TableColumnOptions) {
-    this.name = options.name;
-    this.type = options.type;
-    this.isNullable = options.isNullable ?? true;
-  }
-}
-
-/** Constructor options for {@link VectorSearchIndexSettings}. */
-export interface VectorSearchIndexSettingsOptions {
-  /** The name of the vector similarity search index. */
-  indexName: string;
-  /** Additional key columns placed after the embedding column in the index. */
-  additionalKeyColumns?: string[];
-  /** Columns stored in the index so filtering can drop rows early. */
-  additionalStoringColumns?: string[];
-  /** The tree depth, either 2 or 3. Defaults to `2`. */
-  treeDepth?: number;
-  /** The number of leaves the vector data is partitioned into. Defaults to `1000`. */
-  numLeaves?: number;
-  /** The number of branches, for a tree of depth 3. */
-  numBranches?: number;
-}
-
-/**
- * Settings for the vector index an Approximate Nearest Neighbor (ANN) search
- * uses.
- */
-export class VectorSearchIndexSettings {
-  readonly indexName: string;
-  readonly additionalKeyColumns?: string[];
-  readonly additionalStoringColumns?: string[];
-  readonly treeDepth: number;
-  readonly numLeaves: number;
-  readonly numBranches?: number;
-
-  constructor(options: VectorSearchIndexSettingsOptions) {
-    this.indexName = options.indexName;
-    this.additionalKeyColumns = options.additionalKeyColumns;
-    this.additionalStoringColumns = options.additionalStoringColumns;
-    this.treeDepth = options.treeDepth ?? 2;
-    this.numLeaves = options.numLeaves ?? 1000;
-    this.numBranches = options.numBranches;
-  }
-}
-
 /** Constructor options for {@link SpannerVectorStoreSettings}. */
 export interface SpannerVectorStoreSettingsOptions {
   /** The Google Cloud project id the Spanner database lives in. */
@@ -143,16 +72,6 @@ export interface SpannerVectorStoreSettingsOptions {
   numLeavesToSearch?: number;
   /** A filter added to the `WHERE` clause of the search query. */
   additionalFilter?: string;
-  /** The vector index settings, required for an ANN search. */
-  vectorSearchIndexSettings?: VectorSearchIndexSettings;
-  /** Supplemental columns of the vector store table. */
-  additionalColumnsToSetup?: TableColumn[];
-  /**
-   * The primary key columns of the vector store table. Every entry must be
-   * the content column, the embedding column, or one of
-   * {@link additionalColumnsToSetup}.
-   */
-  primaryKeyColumns?: string[];
 }
 
 /**
@@ -174,9 +93,6 @@ export class SpannerVectorStoreSettings {
   readonly distanceType: string;
   readonly numLeavesToSearch?: number;
   readonly additionalFilter?: string;
-  readonly vectorSearchIndexSettings?: VectorSearchIndexSettings;
-  readonly additionalColumnsToSetup?: TableColumn[];
-  readonly primaryKeyColumns?: string[];
 
   constructor(options: SpannerVectorStoreSettingsOptions) {
     if (!options.vectorLength || options.vectorLength <= 0) {
@@ -202,34 +118,6 @@ export class SpannerVectorStoreSettings {
     this.distanceType = options.distanceType ?? 'COSINE';
     this.numLeavesToSearch = options.numLeavesToSearch;
     this.additionalFilter = options.additionalFilter;
-    this.vectorSearchIndexSettings = options.vectorSearchIndexSettings;
-    this.additionalColumnsToSetup = options.additionalColumnsToSetup;
-    this.primaryKeyColumns = options.primaryKeyColumns;
-
-    assertPrimaryKeysAreDefined(this);
-  }
-}
-
-/**
- * Checks that every primary key column of a vector store table is one of the
- * columns the settings define.
- */
-function assertPrimaryKeysAreDefined(
-  settings: SpannerVectorStoreSettings,
-): void {
-  if (!settings.primaryKeyColumns) {
-    return;
-  }
-  const defined = new Set([settings.contentColumn, settings.embeddingColumn]);
-  for (const column of settings.additionalColumnsToSetup ?? []) {
-    defined.add(column.name);
-  }
-  for (const primaryKey of settings.primaryKeyColumns) {
-    if (!defined.has(primaryKey)) {
-      throw new Error(
-        `Primary key column '${primaryKey}' not found in column definitions.`,
-      );
-    }
   }
 }
 

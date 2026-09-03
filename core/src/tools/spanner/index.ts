@@ -32,15 +32,11 @@ export {
   QueryResultMode,
   SpannerToolSettings,
   SpannerVectorStoreSettings,
-  TableColumn,
-  VectorSearchIndexSettings,
 } from './settings.js';
 export type {
   NearestNeighborsAlgorithm,
   SpannerToolSettingsOptions,
   SpannerVectorStoreSettingsOptions,
-  TableColumnOptions,
-  VectorSearchIndexSettingsOptions,
 } from './settings.js';
 export {
   SPANNER_DEFAULT_SCOPES,

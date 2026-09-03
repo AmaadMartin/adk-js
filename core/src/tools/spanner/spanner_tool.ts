@@ -185,7 +185,7 @@ export function toErrorDetails(err: unknown): string {
 }
 
 /** Builds the error envelope every Spanner tool failure returns. */
-export function errorResult(err: unknown): SpannerErrorResult {
+function errorResult(err: unknown): SpannerErrorResult {
   return {
     status: SpannerToolStatus.ERROR,
     error_details: toErrorDetails(err),
