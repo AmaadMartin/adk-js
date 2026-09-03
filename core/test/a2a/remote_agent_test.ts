@@ -364,6 +364,9 @@ describe('A2ARemoteAgent', () => {
       expect.objectContaining({
         configuration: {acceptedOutputModes: ['custom']},
       }),
+      // The agent now passes RequestOptions (the deadline signal, and any
+      // credential headers) as a second argument.
+      expect.anything(),
     );
   });
 
@@ -453,8 +456,12 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
-    expect(dumped).not.toContain('SUPER_SECRET_TOKEN');
+    // Every part was a credential and was dropped, so there is nothing left
+    // to send: the agent emits an empty event instead of calling the peer.
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
+    expect(JSON.stringify(capturedParts ?? null)).not.toContain(
+      'SUPER_SECRET_TOKEN',
+    );
   });
 
   it('forwards a credential response the remote peer itself requested, as the final event', async () => {
@@ -648,8 +655,10 @@ describe('A2ARemoteAgent', () => {
       // empty
     }
 
-    const dumped = JSON.stringify(capturedParts);
-    expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
+    expect(mockClient.sendMessageStream).not.toHaveBeenCalled();
+    expect(JSON.stringify(capturedParts ?? null)).not.toContain(
+      'SUPER_SECRET_DO_NOT_LEAK',
+    );
   });
 
   it('does not let a peer event reusing a local request id relabel it as peer-requested (toMissingRemoteSessionParts path)', async () => {

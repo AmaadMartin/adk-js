@@ -22,6 +22,7 @@ import {
   Part as GenAIPart,
   VideoMetadata,
 } from '@google/genai';
+import {logger} from '../utils/logger.js';
 import {A2AMetadataKeys} from './metadata_converter_utils.js';
 
 /**
@@ -35,17 +36,59 @@ enum DataPartType {
 }
 
 /**
+ * Converts one GenAI part to the A2A parts that carry it.
+ *
+ * Returning `undefined` (or an empty array) drops the part: the caller logs a
+ * warning and sends the rest. {@link toA2APart} is the default.
+ */
+export type GenAIPartToA2APartConverter = (
+  part: GenAIPart,
+  longRunningToolIDs?: string[],
+) => A2APart | A2APart[] | undefined;
+
+/**
+ * Converts one A2A part to the GenAI part that carries it.
+ *
+ * Returning `undefined` drops the part. {@link toGenAIPart} is the default.
+ */
+export type A2APartToGenAIPartConverter = (
+  a2aPart: A2APart,
+) => GenAIPart | undefined;
+
+/**
  * Converts an array of GenAI Parts to A2A Parts.
  *
  * @param parts - The GenAI parts to convert. Defaults to an empty array.
  * @param longRunningToolIDs - IDs of function calls that are long-running.
- * @returns An array of A2A parts.
+ * @param converter - Converter for a single part. Defaults to
+ *   {@link toA2APart}.
+ * @returns An array of A2A parts. A part the converter drops is omitted.
  */
 export function toA2AParts(
   parts: GenAIPart[] = [],
   longRunningToolIDs: string[] = [],
+  converter: GenAIPartToA2APartConverter = toA2APart,
 ): A2APart[] {
-  return parts.map((part) => toA2APart(part, longRunningToolIDs));
+  const a2aParts: A2APart[] = [];
+  for (const part of parts) {
+    const converted = converter(part, longRunningToolIDs);
+    const asArray = toArray(converted);
+    if (asArray.length === 0) {
+      logger.warn(
+        `Failed to convert part to A2A format: ${JSON.stringify(part)}`,
+      );
+      continue;
+    }
+    a2aParts.push(...asArray);
+  }
+  return a2aParts;
+}
+
+function toArray(value: A2APart | A2APart[] | undefined): A2APart[] {
+  if (value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
 }
 
 /**
@@ -209,10 +252,26 @@ export function toGenAIContent(a2aMessage: Message): GenAIContent {
  * Converts an array of A2A Parts to GenAI Parts.
  *
  * @param a2aParts - The A2A parts to convert.
- * @returns An array of GenAI parts.
+ * @param converter - Converter for a single part. Defaults to
+ *   {@link toGenAIPart}.
+ * @returns An array of GenAI parts. A part the converter drops is omitted.
  */
-export function toGenAIParts(a2aParts: A2APart[]): GenAIPart[] {
-  return a2aParts.map((a2aPart) => toGenAIPart(a2aPart));
+export function toGenAIParts(
+  a2aParts: A2APart[],
+  converter: A2APartToGenAIPartConverter = toGenAIPart,
+): GenAIPart[] {
+  const parts: GenAIPart[] = [];
+  for (const a2aPart of a2aParts) {
+    const converted = converter(a2aPart);
+    if (converted === undefined) {
+      logger.warn(
+        `Failed to convert part to GenAI format: ${JSON.stringify(a2aPart)}`,
+      );
+      continue;
+    }
+    parts.push(converted);
+  }
+  return parts;
 }
 
 /**
