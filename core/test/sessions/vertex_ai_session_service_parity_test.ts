@@ -15,7 +15,7 @@
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
 import {createEvent, VertexAiSessionService} from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
+import {createSession, Session} from '@google/adk/sessions/session.js';
 import {logger} from '@google/adk/utils/logger.js';
 import {ApiError, HttpOptions} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -63,14 +63,12 @@ function createMockSessions(): MockSessions {
 
 /** Builds the session fixture appendEvent writes to. */
 function appendSession(): Session {
-  return {
+  return createSession({
     id: 'append-session',
     appName: '123',
     userId: 'user',
-    events: [],
-    state: {},
     lastUpdateTime: 1734005533000,
-  } as unknown as Session;
+  });
 }
 
 /** Builds `count` API events numbered from `start`, as the reference does. */

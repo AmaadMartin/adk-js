@@ -11,7 +11,7 @@ import {
   State,
   VertexAiSessionService,
 } from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
+import {createSession, Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
 import {ApiClient} from '@google/genai/vertex_internal';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -1839,12 +1839,11 @@ describe('VertexAiSessionService', () => {
     });
 
     it('sends the options on the appendEvent request', async () => {
-      const session = {
+      const session = createSession({
         id: 'override-session',
         appName: '12345',
         userId: 'testUser',
-        events: [],
-      } as unknown as Session;
+      });
       const event = createEvent({
         timestamp: 1620000000000,
         content: {role: 'user', parts: [{text: 'hello'}]},
