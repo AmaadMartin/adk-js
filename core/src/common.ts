@@ -275,6 +275,8 @@ export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
+export {BaseGoogleCredentialsConfig} from './tools/_google_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/_google_credentials.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
@@ -364,6 +366,11 @@ export {
 } from './skills/loader.js';
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
+export {
+  BIGTABLE_DEFAULT_SCOPE,
+  BIGTABLE_TOKEN_CACHE_KEY,
+  BigtableCredentialsConfig,
+} from './tools/bigtable/bigtable_credentials.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
