@@ -21,6 +21,13 @@ import {
   UNKNOWN_MIME_TYPE,
 } from '../utils/file_extension_utils.js';
 import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
+import {
+  isJsonObject,
+  JsonObject,
+  toJsonObject,
+  toJsonText,
+  toJsonValue,
+} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {extractSystemInstruction} from './interactions_utils.js';
@@ -38,8 +45,6 @@ import {
   ChatMessage,
   ContentObject,
   GenerationParams,
-  JsonObject,
-  JsonValue,
   MessageContent,
   MessageRole,
   ToolCall,
@@ -89,50 +94,6 @@ export interface CompletionInputs {
   responseFormat?: JsonObject;
   generationParams?: GenerationParams;
   toolChoice?: ToolChoice;
-}
-
-/** Returns true when the value is a plain JSON object. */
-export function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Deep-copies a value into JSON, dropping anything JSON cannot represent.
- *
- * This is how a genai object becomes a plain data object, and it guarantees
- * the caller's value is never mutated downstream. A member of an array that
- * JSON cannot represent becomes `null`, which is what `JSON.stringify` does.
- *
- * @throws TypeError When the value contains a cycle.
- */
-export function toJsonValue(value: unknown): JsonValue | undefined {
-  const json = JSON.stringify(value);
-  if (json === undefined) {
-    return undefined;
-  }
-  const parsed: JsonValue = JSON.parse(json);
-  return parsed;
-}
-
-/**
- * Deep-copies an object into JSON. Unlike {@link toJsonValue} this cannot
- * return undefined, because an object always survives the round trip.
- */
-export function toJsonObject(value: object): JsonObject {
-  const parsed = toJsonValue(value);
-  return isJsonObject(parsed) ? parsed : {};
-}
-
-/**
- * Serializes a value to JSON, falling back to its string form when JSON cannot
- * represent it (a circular structure, a `BigInt`).
- */
-export function safeJsonSerialize(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? String(value);
-  } catch {
-    return String(value);
-  }
 }
 
 /** Returns true when the part carries something the model can read. */
@@ -393,7 +354,7 @@ function toToolCalls(parts: Part[]): ToolCall[] {
       id: functionCall.id ?? '',
       function: {
         name: functionCall.name,
-        arguments: safeJsonSerialize(functionCall.args),
+        arguments: toJsonText(functionCall.args),
       },
     };
     // LiteLLM's Gemini prompt conversion reads provider_specific_fields, while
@@ -485,7 +446,7 @@ export function contentToMessageParam(
     toolMessages.push({
       role: toolRole,
       tool_call_id: functionResponse.id ?? '',
-      content: safeJsonSerialize(functionResponse.response),
+      content: toJsonText(functionResponse.response),
     });
     // A tool message carries text only, so attached media follows it as its
     // own message.

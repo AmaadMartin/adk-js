@@ -226,8 +226,8 @@ export class LiteLlm extends BaseLlm {
   /**
    * LiteLLM reconciles tools and `response_format` per provider: a provider
    * with native support gets both passed through, and the rest are converted
-   * to a JSON tool call with `tool_choice` enforcement. So the pairing works
-   * whatever the endpoint routes to.
+   * to a JSON tool call with `tool_choice` enforcement. Every route therefore
+   * honours an output schema alongside tools, whatever the model name says.
    *
    * @return A fresh snapshot of the resolved capabilities.
    */
@@ -296,12 +296,14 @@ export class LiteLlm extends BaseLlm {
     }
 
     // Vertex AI and Gemini endpoints attribute the call to ADK. Every other
-    // provider is sent nothing. This runs last, so a caller's own header value
-    // is present to de-duplicate against.
+    // provider is sent nothing. This is the `headers` request parameter, which
+    // LiteLLM passes to the provider; `extra_headers` would stop at the
+    // endpoint this request is sent to. It runs last, so a caller's own header
+    // value is present to de-duplicate against.
     if (isLiteLlmVertexModel(model) || isLiteLlmGeminiModel(model)) {
-      args.extra_headers = mergeTrackingHeaders({
+      args.headers = mergeTrackingHeaders({
         ...this.headers,
-        ...args.extra_headers,
+        ...args.headers,
       });
     }
     return args;

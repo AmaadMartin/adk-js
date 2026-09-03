@@ -10,9 +10,9 @@
  *
  * Gemini caches by creating a server-side resource. Claude instead caches
  * whatever prefix the request marks, and a model reached through a proxy
- * inherits whichever of the two its provider implements. The parts of the
- * configuration that mean the same thing for every prefix-marking model live
- * here, so those callers cannot drift apart on what one configuration means.
+ * inherits whichever of the two its provider implements. This module reads the
+ * parts of the configuration that decide whether to mark a prefix and for how
+ * long.
  */
 
 import {ContextCacheConfig} from '../agents/context_cache_config.js';

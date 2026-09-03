@@ -490,13 +490,12 @@ export type {
   FileContentObject,
   FileUrlObject,
   ImageContentObject,
-  JsonObject,
-  JsonValue,
   MessageContent,
   MessageRole,
   ModelResponse,
   ModelResponseStream,
   PromptTokensDetails,
+  RawUsage,
   StreamChoice,
   TextContentObject,
   ToolCall,
@@ -743,6 +742,7 @@ export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {getBooleanEnvVar} from './utils/env_aware_utils.js';
 export {getHttpDebugInfo} from './utils/http_debug_utils.js';
 export type {HttpDebugRecord, HttpExchange} from './utils/http_debug_utils.js';
+export type {JsonObject, JsonValue} from './utils/json_utils.js';
 export {
   LogLevel,
   getLogger,

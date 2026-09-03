@@ -23,22 +23,20 @@ import {
   functionDeclarationToToolParam,
   getCompletionInputs,
   getContent,
-  isJsonObject,
   mergeReasoningTexts,
   partHasPayload,
   ProviderOptions,
-  safeJsonSerialize,
-  toJsonObject,
-  toJsonValue,
   toLiteLlmResponseFormat,
   toLiteLlmRole,
 } from '../../src/models/lite_llm_request_converters.js';
+import {messageToGenerateContentResponse} from '../../src/models/lite_llm_response_converters.js';
+import {ChatMessage} from '../../src/models/lite_llm_types.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
 import {
-  ChatMessage,
+  isJsonObject,
   JsonObject,
   JsonValue,
-} from '../../src/models/lite_llm_types.js';
-import {LlmRequest} from '../../src/models/llm_request.js';
+} from '../../src/utils/json_utils.js';
 
 const OPENAI: ProviderOptions = {provider: 'openai', model: 'openai/gpt-4o'};
 const GROQ: ProviderOptions = {provider: 'groq', model: 'groq/llama3'};
@@ -82,57 +80,6 @@ function singleMessage(
   }
   return converted;
 }
-
-describe('safeJsonSerialize', () => {
-  it('serializes a plain value', () => {
-    expect(safeJsonSerialize({a: 1})).toBe('{"a":1}');
-  });
-
-  it('falls back to the string form for a circular structure', () => {
-    const circular: Record<string, unknown> = {};
-    circular['self'] = circular;
-    expect(safeJsonSerialize(circular)).toBe('[object Object]');
-  });
-
-  it('falls back to the string form for a bigint', () => {
-    expect(safeJsonSerialize(7n)).toBe('7');
-  });
-
-  it('falls back to the string form for undefined', () => {
-    expect(safeJsonSerialize(undefined)).toBe('undefined');
-  });
-});
-
-describe('toJsonValue', () => {
-  it('copies nested structures', () => {
-    expect(toJsonValue({a: [1, 'b', true], c: {d: null}})).toEqual({
-      a: [1, 'b', true],
-      c: {d: null},
-    });
-  });
-
-  it('drops object fields JSON cannot represent', () => {
-    expect(toJsonValue({a: undefined, b: () => 1, c: 1})).toEqual({c: 1});
-    expect(toJsonValue(undefined)).toBeUndefined();
-  });
-
-  it('renders an unrepresentable array member as null', () => {
-    expect(toJsonValue([undefined, 1])).toEqual([null, 1]);
-  });
-
-  it('rejects a circular structure', () => {
-    const circular: Record<string, unknown> = {};
-    circular['self'] = circular;
-    expect(() => toJsonValue(circular)).toThrow(TypeError);
-  });
-
-  it('recognises plain objects', () => {
-    expect(isJsonObject({})).toBe(true);
-    expect(isJsonObject([])).toBe(false);
-    expect(isJsonObject(null)).toBe(false);
-    expect(isJsonObject('a')).toBe(false);
-  });
-});
 
 describe('partHasPayload', () => {
   it.each([
@@ -489,6 +436,57 @@ describe('contentToMessageParam', () => {
     ]);
   });
 
+  it('sends a thought signature on both provider channels', () => {
+    const message = singleMessage(
+      contentToMessageParam(
+        {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {id: 'c1', name: 'add', args: {a: 1}},
+              thoughtSignature: 'Y2Fs',
+            },
+          ],
+        },
+        GROQ,
+      ),
+    );
+    expect(message.tool_calls).toEqual([
+      {
+        type: 'function',
+        id: 'c1',
+        function: {name: 'add', arguments: '{"a":1}'},
+        provider_specific_fields: {thought_signature: 'Y2Fs'},
+        extra_content: {google: {thought_signature: 'Y2Fs'}},
+      },
+    ]);
+  });
+
+  it('carries a signature from a provider message back out', () => {
+    const response = messageToGenerateContentResponse({
+      role: 'assistant',
+      tool_calls: [
+        {
+          type: 'function',
+          id: 'c1',
+          function: {name: 'add', arguments: '{"a":1}'},
+          extra_content: {google: {thought_signature: 'Y2Fs'}},
+        },
+      ],
+    });
+    const modelTurn = response.content;
+    if (!modelTurn) {
+      expect.fail('the provider message produced no content');
+    }
+
+    const message = singleMessage(contentToMessageParam(modelTurn, GROQ));
+
+    expect(message.tool_calls?.[0]).toMatchObject({
+      provider_specific_fields: {thought_signature: 'Y2Fs'},
+      extra_content: {google: {thought_signature: 'Y2Fs'}},
+    });
+  });
+
   it('rejects a function call with no name', () => {
     expect(() =>
       contentToMessageParam(
@@ -804,24 +802,6 @@ describe('ensureToolResults', () => {
     ];
 
     expect(ensureToolResults(messages, 'ollama/gemma4:e2b')).toEqual(messages);
-  });
-});
-
-describe('toJsonObject', () => {
-  it('deep-copies an object into JSON', () => {
-    const source = {a: [1, 'b'], c: {d: null}};
-    const copy = toJsonObject(source);
-    expect(copy).toEqual(source);
-    expect(copy['c']).not.toBe(source.c);
-  });
-
-  it('drops values JSON cannot represent', () => {
-    expect(toJsonObject({a: undefined, b: () => 1, c: 1})).toEqual({c: 1});
-  });
-
-  it('returns an empty object for a value that is not one', () => {
-    expect(toJsonObject([1, 2])).toEqual({});
-    expect(toJsonObject(new Date(0))).toEqual({});
   });
 });
 

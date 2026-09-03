@@ -72,14 +72,11 @@ export function getScriptLanguageByExtension(
   );
 }
 
-/** The MIME type {@link getMimeTypeAndEncoding} returns for an unknown one. */
+/**
+ * The MIME type that names no format. {@link getMimeTypeAndEncoding} returns it
+ * for an unknown extension, and providers reject it.
+ */
 export const UNKNOWN_MIME_TYPE = 'application/octet-stream';
-
-/** Major MIME types that name a kind of media. */
-const MEDIA_KIND_BY_MAJOR_MIME_TYPE: Record<string, 'image' | 'video'> = {
-  image: 'image',
-  video: 'video',
-};
 
 /** Drops parameters and casing from a MIME type so it can be compared. */
 export function normalizeMimeType(mimeType: string): string {
@@ -94,9 +91,8 @@ export function normalizeMimeType(mimeType: string): string {
 export function mediaKindFromMimeType(
   mimeType: string,
 ): 'image' | 'video' | undefined {
-  return MEDIA_KIND_BY_MAJOR_MIME_TYPE[
-    normalizeMimeType(mimeType).split('/', 1)[0]
-  ];
+  const major = normalizeMimeType(mimeType).split('/', 1)[0];
+  return major === 'image' || major === 'video' ? major : undefined;
 }
 
 /**

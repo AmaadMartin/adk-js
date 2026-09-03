@@ -13,19 +13,7 @@
  * the wire.
  */
 
-/** Any value that survives a JSON round trip. */
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | JsonObject;
-
-/** A JSON object, used for payloads whose shape the provider defines. */
-export interface JsonObject {
-  [key: string]: JsonValue;
-}
+import {JsonObject} from '../utils/json_utils.js';
 
 /**
  * The roles an OpenAI-compatible chat message can carry.
@@ -188,11 +176,17 @@ export interface StreamChoice {
   finish_reason?: string | null;
 }
 
+/**
+ * The `usage` block as it arrives. Some providers serialize it to a JSON
+ * string instead of sending an object, so both shapes are declared.
+ */
+export type RawUsage = Usage | string;
+
 /** A non-streaming chat-completions response. */
 export interface ModelResponse {
   model?: string;
   choices?: Choice[];
-  usage?: Usage;
+  usage?: RawUsage;
   vertex_ai_grounding_metadata?: unknown;
 }
 
@@ -200,7 +194,7 @@ export interface ModelResponse {
 export interface ModelResponseStream {
   model?: string;
   choices?: StreamChoice[];
-  usage?: Usage;
+  usage?: RawUsage;
   vertex_ai_grounding_metadata?: unknown;
 }
 
@@ -258,6 +252,15 @@ export interface CompletionArgs extends GenerationParams {
   tool_choice?: ToolChoice;
   stream?: boolean;
   stream_options?: {include_usage: boolean};
+  /**
+   * Headers LiteLLM adds to the call it makes to the provider.
+   *
+   * This is a request parameter, not a header of the request that carries it.
+   * A LiteLLM Proxy does not forward the headers a client sent it, so this is
+   * the only channel that reaches the provider. Use `extra_headers` for the
+   * headers of the hop to the endpoint itself.
+   */
+  headers?: Record<string, string>;
   extra_headers?: Record<string, string>;
   extra_body?: Record<string, unknown>;
   cache_control_injection_points?: CacheControlInjectionPoint[];

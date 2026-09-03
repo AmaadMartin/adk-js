@@ -332,7 +332,7 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
     expect(endpoint.requests[0]['stream']).toBe(true);
   });
 
-  it('puts the cache breakpoints in the body and the tracking headers on the wire', async () => {
+  it('puts the cache breakpoints and the tracking headers in the body', async () => {
     endpoint = await startEndpoint([textReply('Cached.')]);
 
     const model = new LiteLlm({
@@ -367,8 +367,61 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
         control: {type: 'ephemeral', ttl: '1h'},
       },
     ]);
-    expect(endpoint.headers[0]['x-goog-api-client']).toContain('google-adk/');
-    expect(endpoint.headers[0]['user-agent']).toContain('gl-typescript/');
+    // The tracking headers travel as a request parameter, because a LiteLLM
+    // Proxy passes that to the provider and does not forward its own headers.
+    const headers = endpoint.requests[0]['headers'] as Record<string, string>;
+    expect(headers['x-goog-api-client']).toContain('google-adk/');
+    expect(headers['user-agent']).toContain('gl-typescript/');
+    expect(endpoint.headers[0]['x-goog-api-client']).toBeUndefined();
+  });
+
+  it('reads token counts from a usage block sent as a JSON string', async () => {
+    endpoint = await startEndpoint([
+      {
+        kind: 'json',
+        body: {
+          model: 'gpt-4o',
+          choices: [
+            {
+              index: 0,
+              message: {role: 'assistant', content: 'hi'},
+              finish_reason: 'stop',
+            },
+          ],
+          usage: JSON.stringify({
+            prompt_tokens: 10,
+            completion_tokens: 4,
+            total_tokens: 14,
+            cached_tokens: 3,
+            cache_creation_input_tokens: 2,
+            completion_tokens_details: {reasoning_tokens: 5},
+          }),
+        },
+      },
+    ]);
+
+    const model = new LiteLlm({
+      model: 'openai/gpt-4o',
+      apiBase: endpoint.apiBase,
+    });
+    const llmRequest: LlmRequest = {
+      contents: [{role: 'user', parts: [{text: 'hi'}]}],
+      liveConnectConfig: {},
+      toolsDict: {},
+    };
+
+    const responses: LlmResponse[] = [];
+    for await (const response of model.generateContentAsync(llmRequest)) {
+      responses.push(response);
+    }
+
+    expect(responses[0].usageMetadata).toMatchObject({
+      promptTokenCount: 10,
+      candidatesTokenCount: 4,
+      totalTokenCount: 14,
+      cachedContentTokenCount: 3,
+      thoughtsTokenCount: 5,
+    });
   });
 
   it('sends a Gemma 4 tool result under the tool_responses role', async () => {
@@ -474,7 +527,7 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
     );
   });
 
-  it('sends the tracking headers as HTTP headers to a vertex model', async () => {
+  it('sends the tracking headers to a vertex model', async () => {
     endpoint = await startEndpoint([textReply('Hi.')]);
 
     const model = new LiteLlm({
@@ -484,7 +537,8 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
 
     await collectResponses(model, textRequest('Say hi.'));
 
-    expect(endpoint.headers[0]['x-goog-api-client']).toContain('google-adk/');
+    const headers = endpoint.requests[0]['headers'] as Record<string, string>;
+    expect(headers['x-goog-api-client']).toContain('google-adk/');
     expect(endpoint.requests[0]).not.toHaveProperty('extra_headers');
   });
 
@@ -498,6 +552,7 @@ describe('LiteLlm against a local chat-completions endpoint', () => {
 
     await collectResponses(model, textRequest('Say hi.'));
 
+    expect(endpoint.requests[0]).not.toHaveProperty('headers');
     expect(endpoint.headers[0]['x-goog-api-client']).toBeUndefined();
   });
 

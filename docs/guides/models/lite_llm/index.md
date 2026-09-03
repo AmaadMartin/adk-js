@@ -187,6 +187,10 @@ A request to a Vertex AI or Gemini model carries `x-goog-api-client` and
 `vertex_ai/…`, `gemini/gemini-…`, and either of those behind a `litellm_proxy/`
 prefix. No other provider gets them.
 
+They travel as the `headers` request parameter, which LiteLLM passes on to the
+provider. The `extra_headers` that `config.httpOptions` fills reach only the
+endpoint this request is sent to, so a LiteLLM Proxy would absorb them.
+
 Your own value for one of those headers survives. The ADK labels come first and
 yours is appended, with no label repeated. The `headers` you pass to the
 constructor join the same merge, so a Vertex AI or Gemini request carries them
