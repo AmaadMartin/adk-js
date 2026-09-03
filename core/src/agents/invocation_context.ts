@@ -24,8 +24,6 @@ import {RealtimeCacheEntry} from './realtime_cache_entry.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
-export type {RealtimeCacheEntry} from './realtime_cache_entry.js';
-
 /**
  * Workflow: data exposed to `{Class.field}` and `<Class.field from source_node>`
  * instruction placeholders when an LlmAgent runs as a workflow node. Populated by
@@ -67,12 +65,7 @@ export interface InvocationContextParams {
   activeNonBlockingToolTasks?: Record<string, Task<void>>;
   inputRealtimeCache?: RealtimeCacheEntry[];
   outputRealtimeCache?: RealtimeCacheEntry[];
-  /**
-   * Seeds {@link InvocationContext.customMetadata}. Child contexts pass the
-   * parent's record through here so the whole invocation shares one object;
-   * a fresh invocation leaves it unset and the constructor seeds from
-   * {@link RunConfig.customMetadata} instead.
-   */
+  /** Seeds {@link InvocationContext.customMetadata}; child contexts pass the parent's record through. */
   customMetadata?: Record<string, unknown>;
   /**
    * Request-level metadata passed from an incoming A2A request or caller.
@@ -278,9 +271,9 @@ export class InvocationContext {
 
   /**
    * The running non-blocking tool tasks of this invocation (live only), keyed
-   * by `<toolName>_<functionCallId>`. Holding the task here keeps a strong
-   * reference to it while it runs, and lets the live flow cancel it when the
-   * agent run ends.
+   * by `<toolName>_<functionCallId>`. The registry a live flow cancels from
+   * when the agent run ends, so a background tool does not outlive it. No
+   * `adk-js` flow writes to it yet; it is the storage that path needs.
    */
   activeNonBlockingToolTasks?: Record<string, Task<void>>;
 

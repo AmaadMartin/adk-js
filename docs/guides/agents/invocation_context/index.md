@@ -24,7 +24,7 @@ because it persists past the run.
 The other two slots exist for the live path. `inputRealtimeCache` and
 `outputRealtimeCache` buffer audio chunks before a flush to the session and
 artifact services. `activeNonBlockingToolTasks` holds the background tool tasks
-a live run started, which keeps a strong reference to each task while it runs.
+a live run started, so the flow can cancel them when the run ends.
 Nothing in `adk-js` writes to these two yet; they are the storage the live flow
 needs, and they match the shape `adk-python` uses.
 
