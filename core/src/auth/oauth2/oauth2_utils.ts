@@ -155,6 +155,16 @@ export async function fetchOAuth2Tokens(
 }
 
 /**
+ * Drops a single trailing '#' from an authorization response URI.
+ *
+ * Some providers append an empty fragment to the redirect. It carries no
+ * information, and it breaks a parser that treats a fragment as meaningful.
+ */
+export function normalizeAuthUri(uri?: string): string | undefined {
+  return uri?.endsWith('#') ? uri.slice(0, -1) : uri;
+}
+
+/**
  * Parses the authorization code from an authorization response URI.
  */
 export function parseAuthorizationCode(uri: string): string | undefined {
