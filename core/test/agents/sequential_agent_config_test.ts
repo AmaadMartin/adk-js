@@ -8,10 +8,10 @@ import {
   FeatureName,
   InputValidationError,
   parseSequentialAgentYamlConfig,
-  sequentialAgentYamlConfigSchema,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {sequentialAgentYamlConfigSchema} from '../../src/agents/sequential_agent_config.js';
 import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 

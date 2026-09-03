@@ -10,9 +10,6 @@ import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {warnDeprecatedOnce} from '../utils/deprecated.js';
 
-/** Identifies the deprecation, so it warns at most once per process. */
-const DEPRECATION_KEY = 'SequentialAgentConfig';
-
 /** Wording taken from the `@deprecated` decorator on the Python class. */
 const DEPRECATION_MESSAGE =
   'SequentialAgentConfig is deprecated and will be removed in future ' +
@@ -37,17 +34,13 @@ const agentRefSchema = z
   .check((ctx) => {
     const hasCode = ctx.value.code !== undefined;
     const hasConfigPath = ctx.value.configPath !== undefined;
-    if (hasCode && hasConfigPath) {
+    if (hasCode === hasConfigPath) {
       ctx.issues.push({
         code: 'custom',
         input: ctx.value,
-        message: 'Only one of `code` or `config_path` should be provided',
-      });
-    } else if (!hasCode && !hasConfigPath) {
-      ctx.issues.push({
-        code: 'custom',
-        input: ctx.value,
-        message: 'Exactly one of `code` or `config_path` must be provided',
+        message: hasCode
+          ? 'Only one of `code` or `config_path` should be provided'
+          : 'Exactly one of `code` or `config_path` must be provided',
       });
     }
   });
@@ -63,13 +56,6 @@ const agentRefSchema = z
  * A document may spell its keys in the on-disk snake_case form or in
  * camelCase; both validate to the same camelCase config. Unknown keys are
  * rejected, which is what adk-python's `extra="forbid"` does.
- *
- * Use this directly for `safeParse` semantics;
- * {@link parseSequentialAgentYamlConfig} is the throwing entry point.
- *
- * @experimental
- * @deprecated Config is now loaded via reflection, so the separate config
- *   schema is no longer needed.
  */
 export const sequentialAgentYamlConfigSchema = z.preprocess(
   camelCaseKeys,
@@ -90,9 +76,14 @@ export const sequentialAgentYamlConfigSchema = z.preprocess(
  * @deprecated Config is now loaded via reflection, so the separate config
  *   schema is no longer needed.
  */
-export type SequentialAgentYamlConfig = z.infer<
-  typeof sequentialAgentYamlConfigSchema
->;
+export interface SequentialAgentYamlConfig {
+  agentClass: string;
+  name: string;
+  description: string;
+  subAgents?: Array<{configPath?: string; code?: string}>;
+  beforeAgentCallbacks?: Array<{name: string}>;
+  afterAgentCallbacks?: Array<{name: string}>;
+}
 
 /**
  * Validates an already-parsed `SequentialAgent` config document.
@@ -112,7 +103,7 @@ export type SequentialAgentYamlConfig = z.infer<
 export function parseSequentialAgentYamlConfig(
   document: unknown,
 ): SequentialAgentYamlConfig {
-  warnDeprecatedOnce(DEPRECATION_KEY, DEPRECATION_MESSAGE);
+  warnDeprecatedOnce('SequentialAgentConfig', DEPRECATION_MESSAGE);
 
   if (!isFeatureEnabled(FeatureName.AGENT_CONFIG)) {
     throw new Error(`Feature ${FeatureName.AGENT_CONFIG} is not enabled.`);

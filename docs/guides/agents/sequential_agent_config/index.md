@@ -89,21 +89,6 @@ document does not satisfy the schema. The message starts with
 An empty document loads as `undefined` or `null`, depending on the YAML loader.
 Both are rejected, and so are a string, an array and a number.
 
-For a caller that prefers a result over an exception, the schema is exported
-too:
-
-```ts
-import {sequentialAgentYamlConfigSchema} from '@google/adk';
-
-const result = sequentialAgentYamlConfigSchema.safeParse(document);
-if (!result.success) {
-  // result.error lists every failing field.
-}
-```
-
-The schema alone skips the deprecation warning and the feature gate described
-below.
-
 ## Deprecation and the feature gate
 
 adk-python marks `SequentialAgentConfig` deprecated: it loads config by
