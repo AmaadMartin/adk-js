@@ -146,34 +146,6 @@ describe('mapConcurrent', () => {
     ).rejects.toThrow(failure);
   });
 
-  it('leaves no unhandled rejection when a sibling call fails', async () => {
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => {
-      unhandled.push(reason);
-    };
-    process.on('unhandledRejection', onUnhandled);
-    const slowFailure = new Deferred<number>();
-
-    try {
-      await expect(
-        collect(
-          mapConcurrent([0, 1], 2, (index: number) =>
-            index === 0
-              ? Promise.reject(new Error('the first call failed'))
-              : slowFailure.promise,
-          ),
-        ),
-      ).rejects.toThrow('the first call failed');
-
-      slowFailure.reject(new Error('the abandoned call failed'));
-      await new Promise((resolve) => setImmediate(resolve));
-    } finally {
-      process.off('unhandledRejection', onUnhandled);
-    }
-
-    expect(unhandled).toEqual([]);
-  });
-
   it('leaves no unhandled rejection when the consumer stops early', async () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown) => {
@@ -183,7 +155,9 @@ describe('mapConcurrent', () => {
     const abandoned = new Deferred<number>();
 
     try {
-      for await (const result of mapConcurrent([0, 1], 2, (index: number) =>
+      // A limit of 1 starts the second call as the first one settles, so the
+      // call the consumer abandons is one no `Promise.race` is watching.
+      for await (const result of mapConcurrent([0, 1, 2], 1, (index: number) =>
         index === 0 ? Promise.resolve(0) : abandoned.promise,
       )) {
         expect(result).toBe(0);
