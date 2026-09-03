@@ -81,13 +81,14 @@ Every failure is an `InputValidationError`, so one `catch` covers the parser and
 the resolver. The underlying failure, such as the import error behind an
 unknown module, is attached as the error's `cause`.
 
-| Condition                                   | Message                                                             |
-| ------------------------------------------- | ------------------------------------------------------------------- |
-| Unknown key, or a bad field type            | `Invalid CodeConfig: <issues>` / `Invalid AgentRefConfig: <issues>` |
-| Both `code` and `configPath`                | ``Only one of `code` or `configPath` should be provided``           |
-| Neither `code` nor `configPath`             | ``Exactly one of `code` or `configPath` must be provided``          |
-| Empty `name` at resolution                  | `Invalid CodeConfig.`                                               |
-| Built-in, unknown module, or missing export | `Invalid fully qualified name: <name>`                              |
+| Condition                                            | Message                                                                                                          |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Bad `CodeConfig` shape, unknown key, or empty `name` | ``A code reference must be an object with a `name` and no other key.``                                           |
+| Bad `AgentRefConfig` shape, unknown key, empty field | ``An agent reference must be an object with `code` or `configPath` and no other key.``                           |
+| Both `code` and `configPath`                         | ``An agent reference sets both `code` and `configPath`; exactly one of `code` and `configPath` must be set.``    |
+| Neither `code` nor `configPath`                      | ``An agent reference sets neither `code` nor `configPath`; exactly one of `code` and `configPath` must be set.`` |
+| Built-in, unknown module, or missing export          | `Invalid fully qualified name: <name>`                                                                           |
 
-An empty `name` is a valid document. `parseCodeConfig({name: ''})` succeeds and
-`resolveCodeReference` is what rejects it, matching adk-python.
+The message states the rule the document broke. The `ZodError` on `cause` is
+what names the offending key, so read `cause` to report a precise location back
+to the author of the config file.

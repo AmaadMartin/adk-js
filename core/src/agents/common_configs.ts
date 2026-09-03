@@ -50,15 +50,26 @@ export interface AgentRefConfig {
   code?: string;
 }
 
+/** Reported when a code reference does not have the shape of one. */
+const CODE_CONFIG_SHAPE_MESSAGE =
+  'A code reference must be an object with a `name` and no other key.';
+
+/** Reported when an agent reference does not have the shape of one. */
+const AGENT_REF_SHAPE_MESSAGE =
+  'An agent reference must be an object with `code` or `configPath` and no ' +
+  'other key.';
+
 /** Reported when an agent reference names both of its two sources. */
 const BOTH_SOURCES_MESSAGE =
-  'Only one of `code` or `configPath` should be provided';
+  'An agent reference sets both `code` and `configPath`; exactly one of ' +
+  '`code` and `configPath` must be set.';
 
 /** Reported when an agent reference names neither of its two sources. */
 const NO_SOURCE_MESSAGE =
-  'Exactly one of `code` or `configPath` must be provided';
+  'An agent reference sets neither `code` nor `configPath`; exactly one of ' +
+  '`code` and `configPath` must be set.';
 
-const codeConfigSchema = z.strictObject({name: z.string()});
+const codeConfigSchema = z.strictObject({name: z.string().min(1)});
 
 /**
  * Accepts the `config_path` spelling adk-python writes, and treats an explicit
@@ -83,63 +94,43 @@ function normalizeAgentRefKeys(raw: unknown): unknown {
   return normalized;
 }
 
-const agentRefConfigSchema = z
-  .preprocess(
-    normalizeAgentRefKeys,
-    z.strictObject({
-      configPath: z.string().optional(),
-      code: z.string().optional(),
-    }),
-  )
-  .superRefine((ref, ctx) => {
-    const hasCode = ref.code !== undefined;
-    const hasConfigPath = ref.configPath !== undefined;
-    if (hasCode && hasConfigPath) {
-      ctx.addIssue({code: 'custom', message: BOTH_SOURCES_MESSAGE});
-    } else if (!hasCode && !hasConfigPath) {
-      ctx.addIssue({code: 'custom', message: NO_SOURCE_MESSAGE});
-    }
-  });
+const agentRefConfigSchema = z.preprocess(
+  normalizeAgentRefKeys,
+  z.strictObject({
+    configPath: z.string().min(1).optional(),
+    code: z.string().min(1).optional(),
+  }),
+);
 
-/** Joins the issues of a failed parse into one message. */
-function describeIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const path = issue.path.join('.');
-      return path ? `${path}: ${issue.message}` : issue.message;
-    })
-    .join('; ');
-}
-
-/** Parses one config document, reporting every failure the same way. */
+/**
+ * Parses one config document. The message summarizes the rule the document
+ * broke, and the `ZodError` is kept as the cause, because that is what names
+ * the offending key.
+ */
 function parseConfig<T>(
   schema: z.ZodType<T>,
   raw: unknown,
-  configName: string,
+  message: string,
 ): T {
   const result = schema.safeParse(raw);
   if (!result.success) {
-    throw new InputValidationError(
-      `Invalid ${configName}: ${describeIssues(result.error)}`,
-      {cause: result.error},
-    );
+    throw new InputValidationError(message, {cause: result.error});
   }
   return result.data;
 }
 
 /**
  * Validates a {@link CodeConfig} taken from a parsed configuration document.
- * An unknown key is rejected. An empty `name` is a valid document and fails
- * later, at {@link resolveCodeReference}.
+ * An unknown key is rejected, and so is a missing or empty `name`.
  *
  * @experimental (Experimental, subject to change.)
  *
  * @param raw The value read from the configuration document.
- * @return The validated config.
+ * @return The validated config, holding only the declared property.
  * @throws {InputValidationError} When the value is not a valid `CodeConfig`.
  */
 export function parseCodeConfig(raw: unknown): CodeConfig {
-  return parseConfig(codeConfigSchema, raw, 'CodeConfig');
+  return parseConfig(codeConfigSchema, raw, CODE_CONFIG_SHAPE_MESSAGE);
 }
 
 /**
@@ -155,7 +146,14 @@ export function parseCodeConfig(raw: unknown): CodeConfig {
  *   `AgentRefConfig`.
  */
 export function parseAgentRefConfig(raw: unknown): AgentRefConfig {
-  return parseConfig(agentRefConfigSchema, raw, 'AgentRefConfig');
+  const ref = parseConfig(agentRefConfigSchema, raw, AGENT_REF_SHAPE_MESSAGE);
+  if (ref.code !== undefined && ref.configPath !== undefined) {
+    throw new InputValidationError(BOTH_SOURCES_MESSAGE);
+  }
+  if (ref.code === undefined && ref.configPath === undefined) {
+    throw new InputValidationError(NO_SOURCE_MESSAGE);
+  }
+  return ref;
 }
 
 /**
@@ -171,15 +169,15 @@ export function parseAgentRefConfig(raw: unknown): AgentRefConfig {
  *   came from. A `./`-relative name needs it; a bare or absolute name does
  *   not.
  * @return The named value, for the caller to narrow.
- * @throws {InputValidationError} When the config is empty, or the name does
- *   not resolve.
+ * @throws {InputValidationError} When the `name` is empty, or does not
+ *   resolve.
  */
 export async function resolveCodeReference(
   config: CodeConfig,
   baseFilePath?: string,
 ): Promise<unknown> {
   if (!config.name) {
-    throw new InputValidationError('Invalid CodeConfig.');
+    throw new InputValidationError(CODE_CONFIG_SHAPE_MESSAGE);
   }
   return resolveFullyQualifiedName(config.name, baseFilePath);
 }

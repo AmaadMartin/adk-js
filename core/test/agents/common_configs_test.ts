@@ -15,6 +15,19 @@ import {describe, expect, it} from 'vitest';
 
 import {staticProvider} from './fixtures/example_code_refs.js';
 
+/**
+ * The messages below are spelled out rather than imported, so that a test
+ * fails when a user-visible message changes.
+ */
+const CODE_CONFIG_SHAPE_MESSAGE =
+  'A code reference must be an object with a `name` and no other key.';
+const AGENT_REF_SHAPE_MESSAGE =
+  'An agent reference must be an object with `code` or `configPath` and no other key.';
+const BOTH_SOURCES_MESSAGE =
+  'An agent reference sets both `code` and `configPath`; exactly one of `code` and `configPath` must be set.';
+const NO_SOURCE_MESSAGE =
+  'An agent reference sets neither `code` nor `configPath`; exactly one of `code` and `configPath` must be set.';
+
 /** Absolute path of the module the code references below name. */
 const FIXTURE_PATH = fileURLToPath(
   new URL('./fixtures/example_code_refs.ts', import.meta.url),
@@ -42,7 +55,7 @@ describe('parseCodeConfig', () => {
 
   it('rejects an unknown key', () => {
     expect(() => parseCodeConfig({name: 'x', args: {}})).toThrow(
-      /^Invalid CodeConfig: .*args/,
+      CODE_CONFIG_SHAPE_MESSAGE,
     );
     expect(() => parseCodeConfig({name: 'x', args: {}})).toThrow(
       InputValidationError,
@@ -50,17 +63,38 @@ describe('parseCodeConfig', () => {
   });
 
   it('rejects a missing name', () => {
-    expect(() => parseCodeConfig({})).toThrow(/^Invalid CodeConfig: name: /);
+    expect(() => parseCodeConfig({})).toThrow(CODE_CONFIG_SHAPE_MESSAGE);
   });
 
   it('rejects a non-string name', () => {
-    expect(() => parseCodeConfig({name: 7})).toThrow(
-      /^Invalid CodeConfig: name: /,
+    expect(() => parseCodeConfig({name: 7})).toThrow(CODE_CONFIG_SHAPE_MESSAGE);
+  });
+
+  it('rejects an empty name', () => {
+    expect(() => parseCodeConfig({name: ''})).toThrow(
+      CODE_CONFIG_SHAPE_MESSAGE,
     );
   });
 
-  it('accepts an empty name, which fails at resolution instead', () => {
-    expect(parseCodeConfig({name: ''})).toEqual({name: ''});
+  it('rejects a value that is not an object', () => {
+    for (const raw of ['mod.js#thing', null, [{name: 'x'}]]) {
+      expect(() => parseCodeConfig(raw)).toThrow(CODE_CONFIG_SHAPE_MESSAGE);
+    }
+  });
+
+  it('keeps the validation failure as the cause', () => {
+    let caught: unknown;
+    try {
+      parseCodeConfig({});
+    } catch (err: unknown) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(InputValidationError);
+    if (!(caught instanceof InputValidationError)) {
+      expect.fail('expected an InputValidationError');
+    }
+    expect(caught.cause).toBeDefined();
   });
 });
 
@@ -88,43 +122,47 @@ describe('parseAgentRefConfig', () => {
   it('rejects both spellings of the config path at once', () => {
     expect(() =>
       parseAgentRefConfig({config_path: 'a.yaml', configPath: 'b.yaml'}),
-    ).toThrow(/^Invalid AgentRefConfig: .*config_path/);
+    ).toThrow(AGENT_REF_SHAPE_MESSAGE);
   });
 
   it('rejects both code and configPath', () => {
     expect(() =>
       parseAgentRefConfig({code: './agents.js#root', configPath: 'a.yaml'}),
-    ).toThrow(
-      'Invalid AgentRefConfig: Only one of `code` or `configPath` should be provided',
-    );
+    ).toThrow(BOTH_SOURCES_MESSAGE);
   });
 
   it('rejects a reference that names neither source', () => {
-    expect(() => parseAgentRefConfig({})).toThrow(
-      'Invalid AgentRefConfig: Exactly one of `code` or `configPath` must be provided',
-    );
+    expect(() => parseAgentRefConfig({})).toThrow(NO_SOURCE_MESSAGE);
   });
 
   it('treats an explicit null as not provided', () => {
     expect(parseAgentRefConfig({code: null, configPath: 'a.yaml'})).toEqual({
       configPath: 'a.yaml',
     });
-    expect(() => parseAgentRefConfig({code: null})).toThrow(
-      'Invalid AgentRefConfig: Exactly one of `code` or `configPath` must be provided',
-    );
+    expect(() => parseAgentRefConfig({code: null})).toThrow(NO_SOURCE_MESSAGE);
   });
 
   it('rejects an unknown key', () => {
     expect(() =>
       parseAgentRefConfig({code: './agents.js#root', name: 'root'}),
-    ).toThrow(/^Invalid AgentRefConfig: .*name/);
+    ).toThrow(AGENT_REF_SHAPE_MESSAGE);
+  });
+
+  it('rejects an empty field value', () => {
+    expect(() => parseAgentRefConfig({code: ''})).toThrow(
+      AGENT_REF_SHAPE_MESSAGE,
+    );
+  });
+
+  it('rejects a non-string field value', () => {
+    expect(() => parseAgentRefConfig({code: 42})).toThrow(
+      AGENT_REF_SHAPE_MESSAGE,
+    );
   });
 
   it('rejects a value that is not an object', () => {
     for (const raw of ['./agents.js#root', null, ['./agents.js#root']]) {
-      expect(() => parseAgentRefConfig(raw)).toThrow(
-        /^Invalid AgentRefConfig: /,
-      );
+      expect(() => parseAgentRefConfig(raw)).toThrow(AGENT_REF_SHAPE_MESSAGE);
     }
   });
 });
@@ -155,7 +193,7 @@ describe('resolveCodeReference', () => {
     const error = await rejectionOf(resolveCodeReference({name: ''}));
 
     expect(error).toBeInstanceOf(InputValidationError);
-    expect(error).toHaveProperty('message', 'Invalid CodeConfig.');
+    expect(error).toHaveProperty('message', CODE_CONFIG_SHAPE_MESSAGE);
   });
 
   it('rejects a Node built-in named with the node: prefix', async () => {

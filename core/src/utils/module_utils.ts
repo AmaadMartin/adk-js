@@ -26,19 +26,21 @@ function splitQualifiedName(name: string): [string, string] {
   return [name.slice(0, separatorIndex), exportName || DEFAULT_EXPORT];
 }
 
-/** Returns true when the specifier is resolved against a base file. */
-function isRelative(specifier: string): boolean {
-  return specifier.startsWith('./') || specifier.startsWith('../');
-}
+/** Matches a specifier that opens with a URL scheme, such as `data:`. */
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 
 /**
  * Turns a module specifier into one `import()` resolves the same way on every
  * platform. A filesystem path becomes a `file:` URL, because Windows reads the
  * drive letter in `C:\dir\mod.js` as a URL scheme. A bare specifier passes
  * through, so an installed package resolves the way Node normally resolves it.
+ *
+ * A specifier carrying any other URL scheme is refused. `import()` accepts a
+ * `data:` URL, which carries its own source, so without this a configuration
+ * file could supply the module body it wanted to run.
  */
 function toImportSpecifier(specifier: string, baseFilePath?: string): string {
-  if (isRelative(specifier)) {
+  if (specifier.startsWith('./') || specifier.startsWith('../')) {
     if (baseFilePath === undefined) {
       throw new Error(
         `Relative specifier "${specifier}" needs the path of the file that ` +
@@ -47,7 +49,17 @@ function toImportSpecifier(specifier: string, baseFilePath?: string): string {
     }
     return new URL(specifier, pathToFileURL(baseFilePath)).href;
   }
-  return isAbsolute(specifier) ? pathToFileURL(specifier).href : specifier;
+  if (isAbsolute(specifier)) {
+    return pathToFileURL(specifier).href;
+  }
+  const scheme = URL_SCHEME_PATTERN.exec(specifier)?.[0];
+  if (scheme !== undefined) {
+    throw new Error(
+      `Module specifier "${specifier}" uses the "${scheme}" URL scheme. A ` +
+        `configuration file can name a file path or a package, nothing else.`,
+    );
+  }
+  return specifier;
 }
 
 /** Builds the error every failure mode of the resolver reports. */
