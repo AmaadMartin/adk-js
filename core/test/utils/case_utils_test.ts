@@ -5,7 +5,10 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {camelCaseKeys} from '../../src/utils/case_utils.js';
+import {
+  camelCaseKeys,
+  camelCaseTopLevelKeys,
+} from '../../src/utils/case_utils.js';
 
 describe('case_utils', () => {
   describe('camelCaseKeys', () => {
@@ -89,6 +92,44 @@ describe('case_utils', () => {
       expect(camelCaseKeys(123)).toBe(123);
       expect(camelCaseKeys('hello')).toBe('hello');
       expect(camelCaseKeys(true)).toBe(true);
+    });
+  });
+
+  describe('camelCaseTopLevelKeys', () => {
+    it('converts the object own keys', () => {
+      expect(camelCaseTopLevelKeys({'foo_bar': 'value', 'baz': 123})).toEqual({
+        fooBar: 'value',
+        baz: 123,
+      });
+    });
+
+    it('leaves the keys of a nested object alone', () => {
+      const input = {'tool_args': {'corpus_id': 'docs-prod'}};
+
+      expect(camelCaseTopLevelKeys(input)).toEqual({
+        toolArgs: {'corpus_id': 'docs-prod'},
+      });
+    });
+
+    it('leaves the objects inside an array alone', () => {
+      const input = {'tool_list': [{'nested_key': 'value'}]};
+
+      expect(camelCaseTopLevelKeys(input)).toEqual({
+        toolList: [{'nested_key': 'value'}],
+      });
+    });
+
+    it('returns a non-plain object unchanged', () => {
+      const date = new Date();
+
+      expect(camelCaseTopLevelKeys(date)).toBe(date);
+      expect(camelCaseTopLevelKeys([{'foo_bar': 1}])).toEqual([{'foo_bar': 1}]);
+    });
+
+    it('returns null, undefined and primitives unchanged', () => {
+      expect(camelCaseTopLevelKeys(null)).toBeNull();
+      expect(camelCaseTopLevelKeys(undefined)).toBeUndefined();
+      expect(camelCaseTopLevelKeys('hello')).toBe('hello');
     });
   });
 });
