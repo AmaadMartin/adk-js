@@ -150,12 +150,14 @@ async function appendWithRateLimitRetry(
   sessions: Sessions,
   params: AppendAgentEngineSessionEventRequestParameters,
 ): Promise<void> {
-  for (let attempt = 1; attempt <= APPEND_MAX_ATTEMPTS; attempt++) {
+  // The attempt cap lives only in the guard below, so the loop has one bound
+  // rather than two that can disagree and let it end by swallowing the error.
+  for (let attempt = 1; ; attempt++) {
     try {
       await sessions.events.append(params);
       return;
     } catch (error: unknown) {
-      if (!isRateLimitError(error) || attempt === APPEND_MAX_ATTEMPTS) {
+      if (!isRateLimitError(error) || attempt >= APPEND_MAX_ATTEMPTS) {
         throw error;
       }
       await delay(APPEND_RETRY_DELAY_MS);
