@@ -278,7 +278,7 @@ export const ToolboxCredentialStrategy = Object.freeze({
     return {type: ToolboxCredentialType.WORKLOAD_IDENTITY, targetAudience};
   },
 
-  /** Alias of {@link ToolboxCredentialStrategy.workloadIdentity}. */
+  /** Alias of `workloadIdentity`. */
   applicationDefaultCredentials(
     targetAudience: string,
   ): ToolboxCredentialConfig {
