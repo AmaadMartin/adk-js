@@ -25,7 +25,7 @@ three authentication modes and rejects any combination of them.
 separate from a token another Google toolset resolved, so one toolset cannot
 serve a request with another toolset's narrower or broader grant.
 
-This mirrors `SpannerCredentialsConfig`, and it is a port of adk-python's
+The class is a port of adk-python's
 `google.adk.tools.bigtable.bigtable_credentials`. The two SDKs use the same
 cache key and the same scope list, so a session one writes stays readable by
 the other.
@@ -89,8 +89,11 @@ const config = new BigtableCredentialsConfig({
 });
 ```
 
-Each config owns its scope array. Mutating `config.scopes` cannot change
-`BIGTABLE_DEFAULT_SCOPE` or another config's scopes.
+A config that takes the defaults gets its own copy, so mutating `config.scopes`
+cannot change `BIGTABLE_DEFAULT_SCOPE` or another config's scopes. A `scopes`
+array you pass in is stored by reference, as the other options are, so two
+configs built from one options object share that array. Pass a fresh array to
+each config if you intend to mutate it later.
 
 Scopes are read-only in one case. When `credentials` is an authorized-user
 client that already carries a grant, the base class adopts that client's OAuth

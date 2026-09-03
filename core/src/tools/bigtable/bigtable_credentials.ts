@@ -31,7 +31,7 @@ export class BigtableCredentialsConfig extends BaseGoogleCredentialsConfig {
   constructor(options: GoogleCredentialsConfigOptions = {}) {
     super(options);
     if (!this.scopes?.length) {
-      // Copied, so that two configs never share one mutable array.
+      // Copied, so that no config can mutate the module-level default.
       this.scopes = [...BIGTABLE_DEFAULT_SCOPE];
     }
     this.tokenCacheKey = BIGTABLE_TOKEN_CACHE_KEY;
