@@ -51,11 +51,15 @@ async function createClient(
     BigtableTableAdminClient: BIGTABLE_CLIENT_INFO,
   };
   if (credentials) {
-    // @ts-expect-error `authClient` is typed against the google-auth-library
-    // copy nested under google-gax, while adk resolves its own copy, so the
-    // two `AuthClient` declarations are nominally distinct. The object is the
-    // one the SDK calls `getRequestHeaders()` on.
-    options.authClient = credentials;
+    // The suppression covers the value alone: `authClient` is typed against
+    // the google-auth-library copy nested under google-gax, while adk
+    // resolves its own copy, so the two `AuthClient` declarations are
+    // nominally distinct although this is the object the SDK calls
+    // `getRequestHeaders()` on. The assignment below stays type-checked, so
+    // renaming or removing the option still fails the build.
+    // @ts-expect-error two nominally distinct google-auth-library copies
+    const authClient: BigtableOptions['authClient'] = credentials;
+    options.authClient = authClient;
   }
   return new BigtableClient(options);
 }

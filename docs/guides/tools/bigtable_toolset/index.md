@@ -76,14 +76,14 @@ session state under `bigtable_token_cache`, and the default scopes are
 
 ## Capping a query result
 
-`BigtableToolSettings` sets how many rows `bigtable_execute_sql` returns. The
+`bigtableToolSettings` sets how many rows `bigtable_execute_sql` returns. The
 read stops at the cap, so a query matching a million rows never buffers them.
 
 ```ts
-import {BigtableToolSettings, BigtableToolset} from '@google/adk';
+import {BigtableToolset} from '@google/adk';
 
 const toolset = new BigtableToolset({
-  bigtableToolSettings: new BigtableToolSettings({maxQueryResultRows: 20}),
+  bigtableToolSettings: {maxQueryResultRows: 20},
 });
 ```
 

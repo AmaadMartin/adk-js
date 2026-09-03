@@ -37,49 +37,40 @@ export interface GoogleToolError {
  * Everything a Google API tool's implementation receives besides the
  * arguments the model supplied.
  */
-export interface GoogleToolCall<TSettings> {
+export interface GoogleToolCall {
   /**
    * The resolved credentials, or `undefined` when the tool was built without
    * a credentials config and the Google client falls back to application
    * default credentials.
    */
   credentials?: AuthClient;
-  /** The toolset-supplied settings, such as a result-row cap. */
-  settings?: TSettings;
   /** The context of this tool call. */
   toolContext: Context;
 }
 
 /** The implementation a {@link GoogleTool} runs once credentials resolve. */
-export type GoogleToolExecuteFunction<
-  TParameters extends ToolInputParameters,
-  TSettings,
-> = (
-  input: ToolExecuteArgument<TParameters>,
-  call: GoogleToolCall<TSettings>,
-) => Promise<unknown> | unknown;
+export type GoogleToolExecuteFunction<TParameters extends ToolInputParameters> =
+  (
+    input: ToolExecuteArgument<TParameters>,
+    call: GoogleToolCall,
+  ) => Promise<unknown> | unknown;
 
 /** The configuration for creating a {@link GoogleTool}. */
-export interface GoogleToolOptions<
-  TParameters extends ToolInputParameters,
-  TSettings,
-> {
+export interface GoogleToolOptions<TParameters extends ToolInputParameters> {
   name: string;
   description: string;
   /**
-   * The schema of the arguments the model supplies. Credentials and settings
-   * are never part of it: they reach {@link execute} through its
-   * {@link GoogleToolCall}, so the model can neither see nor set them.
+   * The schema of the arguments the model supplies. Credentials are never
+   * part of it: they reach {@link execute} through its {@link GoogleToolCall},
+   * so the model can neither see nor set them.
    */
   parameters?: TParameters;
-  execute: GoogleToolExecuteFunction<TParameters, TSettings>;
+  execute: GoogleToolExecuteFunction<TParameters>;
   /**
    * How to obtain Google credentials. Leave it unset and the tool runs
    * without credentials, letting the Google client find its own.
    */
   credentialsConfig?: BaseGoogleCredentialsConfig;
-  /** Tool-specific settings, supplied by the toolset that builds the tool. */
-  toolSettings?: TSettings;
 }
 
 /**
@@ -106,16 +97,11 @@ export function authorizationRequiredMessage(toolName: string): string {
 @experimental
 export class GoogleTool<
   TParameters extends ToolInputParameters = undefined,
-  TSettings = unknown,
 > extends FunctionTool<TParameters> {
   private readonly credentialsManager?: GoogleCredentialsManager;
-  private readonly toolSettings?: TSettings;
-  private readonly googleExecute: GoogleToolExecuteFunction<
-    TParameters,
-    TSettings
-  >;
+  private readonly googleExecute: GoogleToolExecuteFunction<TParameters>;
 
-  constructor(options: GoogleToolOptions<TParameters, TSettings>) {
+  constructor(options: GoogleToolOptions<TParameters>) {
     super({
       name: options.name,
       description: options.description,
@@ -129,7 +115,6 @@ export class GoogleTool<
     this.credentialsManager = options.credentialsConfig
       ? new GoogleCredentialsManager(options.credentialsConfig)
       : undefined;
-    this.toolSettings = options.toolSettings;
   }
 
   /**
@@ -155,18 +140,14 @@ export class GoogleTool<
     input: ToolExecuteArgument<TParameters>,
     toolContext: Context,
   ): Promise<unknown> {
-    const call: GoogleToolCall<TSettings> = {
-      settings: this.toolSettings,
-      toolContext,
-    };
     if (!this.credentialsManager) {
-      return this.googleExecute(input, call);
+      return this.googleExecute(input, {toolContext});
     }
     const credentials =
       await this.credentialsManager.getValidCredentials(toolContext);
     if (!credentials) {
       return authorizationRequiredMessage(this.name);
     }
-    return this.googleExecute(input, {...call, credentials});
+    return this.googleExecute(input, {credentials, toolContext});
   }
 }

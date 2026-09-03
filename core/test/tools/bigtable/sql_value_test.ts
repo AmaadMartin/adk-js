@@ -66,6 +66,29 @@ describe('toJsonValue', () => {
     expect(toJsonValue(map)).toEqual({a: '1', '2': 'b'});
   });
 
+  it('converts a map value that implements Map without extending it', () => {
+    // The SDK returns a map column as `EncodedKeyMap`, which wraps a private
+    // `Map` rather than extending it, so `instanceof Map` is false for it.
+    const encodedKeyMap = {
+      inner: new Map<unknown, unknown>([['user', 1n]]),
+      entries() {
+        return this.inner.entries();
+      },
+    };
+
+    expect(encodedKeyMap instanceof Map).toBe(false);
+    expect(toJsonValue(encodedKeyMap)).toEqual({user: '1'});
+  });
+
+  it('converts a timestamp subclass the SDK returns', () => {
+    // The SDK returns a timestamp column as `PreciseDate`, a `Date` subclass.
+    class PreciseDateStub extends Date {}
+
+    expect(toJsonValue(new PreciseDateStub('2026-01-02T03:04:05.000Z'))).toBe(
+      '2026-01-02T03:04:05.000Z',
+    );
+  });
+
   it('converts a struct into an object of its named fields', () => {
     expect(
       toJsonValue(

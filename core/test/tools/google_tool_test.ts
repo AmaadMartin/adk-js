@@ -27,10 +27,6 @@ const CLIENT_SECRET = 'test-client-secret';
 const FUNCTION_CALL_ID = 'test-function-call-id';
 const HOUR_MS = 3600000;
 
-interface TestSettings {
-  maxRows: number;
-}
-
 const PARAMETERS = z.object({greeting: z.string()});
 
 function createToolContext(state: Record<string, unknown> = {}): Context {
@@ -61,12 +57,9 @@ function createValidCredentials(): OAuth2Client {
 
 /** A tool that echoes everything its implementation was handed. */
 function createEchoTool(
-  options: {
-    credentialsConfig?: BaseGoogleCredentialsConfig;
-    toolSettings?: TestSettings;
-  } = {},
+  options: {credentialsConfig?: BaseGoogleCredentialsConfig} = {},
 ) {
-  return new GoogleTool<typeof PARAMETERS, TestSettings>({
+  return new GoogleTool<typeof PARAMETERS>({
     name: 'echo',
     description: 'Echoes its call.',
     parameters: PARAMETERS,
@@ -74,8 +67,7 @@ function createEchoTool(
       status: GoogleToolStatus.SUCCESS,
       greeting: input.greeting,
       accessToken: call.credentials?.credentials.access_token,
-      maxRows: call.settings?.maxRows,
-      userId: call.toolContext?.userId,
+      userId: call.toolContext.userId,
     }),
     ...options,
   });
@@ -83,7 +75,7 @@ function createEchoTool(
 
 describe('GoogleTool', () => {
   it('runs the implementation without credentials when none are configured', async () => {
-    const tool = createEchoTool({toolSettings: {maxRows: 7}});
+    const tool = createEchoTool();
 
     const result = await tool.runAsync({
       args: {greeting: 'hello'},
@@ -94,7 +86,6 @@ describe('GoogleTool', () => {
       status: GoogleToolStatus.SUCCESS,
       greeting: 'hello',
       accessToken: undefined,
-      maxRows: 7,
       userId: 'test-user',
     });
   });
@@ -104,7 +95,6 @@ describe('GoogleTool', () => {
       credentialsConfig: new BaseGoogleCredentialsConfig({
         credentials: createValidCredentials(),
       }),
-      toolSettings: {maxRows: 3},
     });
 
     const result = await tool.runAsync({
@@ -115,7 +105,6 @@ describe('GoogleTool', () => {
     expect(result).toMatchObject({
       status: GoogleToolStatus.SUCCESS,
       accessToken: 'access-token',
-      maxRows: 3,
     });
   });
 
@@ -168,12 +157,11 @@ describe('GoogleTool', () => {
     expect(result).toMatchObject({status: GoogleToolStatus.ERROR});
   });
 
-  it('keeps credentials and settings out of the declaration', () => {
+  it('keeps credentials out of the declaration', () => {
     const tool = createEchoTool({
       credentialsConfig: new BaseGoogleCredentialsConfig({
         credentials: createValidCredentials(),
       }),
-      toolSettings: {maxRows: 1},
     });
 
     const properties = tool._getDeclaration().parameters?.properties;
@@ -181,12 +169,11 @@ describe('GoogleTool', () => {
     expect(Object.keys(properties ?? {})).toEqual(['greeting']);
   });
 
-  it('passes the settings type through to the implementation', async () => {
-    let seen: GoogleToolCall<TestSettings> | undefined;
-    const tool = new GoogleTool<undefined, TestSettings>({
+  it('hands the implementation the context of the call', async () => {
+    let seen: GoogleToolCall | undefined;
+    const tool = new GoogleTool({
       name: 'inspect',
       description: 'Records its call.',
-      toolSettings: {maxRows: 11},
       execute: (_input, call) => {
         seen = call;
         return {status: GoogleToolStatus.SUCCESS};
@@ -195,6 +182,6 @@ describe('GoogleTool', () => {
 
     await tool.runAsync({args: {}, toolContext: createToolContext()});
 
-    expect(seen?.settings).toEqual({maxRows: 11});
+    expect(seen?.toolContext.userId).toBe('test-user');
   });
 });

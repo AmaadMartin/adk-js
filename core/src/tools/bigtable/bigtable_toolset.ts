@@ -24,7 +24,10 @@ import {
   listTables,
 } from './metadata_tool.js';
 import {SQL_PARAMETER_TYPE_NAMES, executeSql} from './query_tool.js';
-import {BigtableToolSettings} from './settings.js';
+import {
+  BigtableToolSettings,
+  DEFAULT_MAX_QUERY_RESULT_ROWS,
+} from './settings.js';
 
 /** The prefix the toolset gives every tool name it exposes to the model. */
 export const DEFAULT_BIGTABLE_TOOL_NAME_PREFIX = 'bigtable';
@@ -80,6 +83,9 @@ export interface BigtableToolsetOptions {
   bigtableToolSettings?: BigtableToolSettings;
 }
 
+/** The filter a toolset built without one uses: every tool is admitted. */
+const passAll: ToolPredicate = () => true;
+
 /** One Bigtable operation: the tool, plus the name a filter matches. */
 interface BigtableToolEntry {
   operation: string;
@@ -103,25 +109,16 @@ interface BigtableToolEntry {
 @experimental
 export class BigtableToolset extends BaseToolset {
   private readonly credentialsConfig?: BigtableCredentialsConfig;
-  private readonly toolSettings: BigtableToolSettings;
+  private readonly toolSettings?: BigtableToolSettings;
   private readonly clients = new BigtableClientPool();
-  /**
-   * The filter as the developer wrote it.
-   *
-   * `BaseToolset.isToolSelected` reads an empty list as "no filter" and
-   * returns every tool, where adk-python reads it as a membership test that
-   * nothing satisfies. The original value is kept here so that `getTools`
-   * can apply adk-python's reading without changing the base class, which
-   * other toolsets depend on.
-   */
-  private readonly filter?: ToolPredicate | string[];
 
   constructor(options: BigtableToolsetOptions = {}) {
-    super(options.toolFilter ?? [], DEFAULT_BIGTABLE_TOOL_NAME_PREFIX);
-    this.filter = options.toolFilter;
+    // An unset filter becomes a pass-all predicate rather than `[]`, because
+    // the base class reads `[]` as no filter while adk-python reads it as a
+    // membership test that nothing satisfies.
+    super(options.toolFilter ?? passAll, DEFAULT_BIGTABLE_TOOL_NAME_PREFIX);
     this.credentialsConfig = options.credentialsConfig;
-    this.toolSettings =
-      options.bigtableToolSettings ?? new BigtableToolSettings();
+    this.toolSettings = options.bigtableToolSettings;
   }
 
   /**
@@ -145,23 +142,17 @@ export class BigtableToolset extends BaseToolset {
   /**
    * Whether the filter admits an operation.
    *
-   * Unset admits everything; a list is a membership test, so an empty list
-   * admits nothing; a predicate decides. This is adk-python's reading, not
-   * the base class's, which reads an empty list as no filter at all. A
-   * predicate with no context to read admits the tool, as `OpenApiToolset`
-   * does.
+   * A list is a membership test, so an empty list admits nothing. A predicate
+   * with no context to read admits the tool, as `OpenApiToolset` does.
    */
   private isSelected(
     entry: BigtableToolEntry,
     context?: ReadonlyContext,
   ): boolean {
-    if (this.filter === undefined) {
-      return true;
+    if (typeof this.toolFilter === 'function') {
+      return context === undefined || this.toolFilter(entry.tool, context);
     }
-    if (typeof this.filter === 'function') {
-      return context === undefined || this.filter(entry.tool, context);
-    }
-    return this.filter.includes(entry.operation);
+    return this.toolFilter.includes(entry.operation);
   }
 
   /** Builds the tool for one Bigtable operation. */
@@ -169,7 +160,7 @@ export class BigtableToolset extends BaseToolset {
     operation: string,
     description: string,
     parameters: TParameters,
-    execute: GoogleToolExecuteFunction<TParameters, BigtableToolSettings>,
+    execute: GoogleToolExecuteFunction<TParameters>,
   ): BigtableToolEntry {
     return {
       operation,
@@ -179,7 +170,6 @@ export class BigtableToolset extends BaseToolset {
         parameters,
         execute,
         credentialsConfig: this.credentialsConfig,
-        toolSettings: this.toolSettings,
       }),
     };
   }
@@ -266,7 +256,9 @@ export class BigtableToolset extends BaseToolset {
             query: input.query,
             parameters: input.parameters,
             parameterTypes: input.parameterTypes,
-            maxRows: this.toolSettings.maxQueryResultRows,
+            maxRows:
+              this.toolSettings?.maxQueryResultRows ??
+              DEFAULT_MAX_QUERY_RESULT_ROWS,
           }),
       ),
     ];

@@ -7,7 +7,6 @@
 import {
   BaseTool,
   BigtableCredentialsConfig,
-  BigtableToolSettings,
   BigtableToolset,
   Context,
   DEFAULT_BIGTABLE_TOOL_NAME_PREFIX,
@@ -114,6 +113,14 @@ describe('BigtableToolset', () => {
     expect(await toolNames(new BigtableToolset({}))).toEqual(ALL_TOOL_NAMES);
   });
 
+  it('exposes every tool to an invocation that supplies a context', async () => {
+    const tools = await new BigtableToolset().getTools(
+      new ReadonlyContext(createInvocationContext()),
+    );
+
+    expect(tools.map((tool) => tool.name)).toEqual(ALL_TOOL_NAMES);
+  });
+
   it('exposes no tool when the filter list is empty', async () => {
     expect(await toolNames(new BigtableToolset({toolFilter: []}))).toEqual([]);
   });
@@ -198,7 +205,7 @@ describe('BigtableToolset', () => {
         clientId: 'abc',
         clientSecret: 'def',
       }),
-      bigtableToolSettings: new BigtableToolSettings({maxQueryResultRows: 20}),
+      bigtableToolSettings: {maxQueryResultRows: 20},
     });
 
     for (const tool of await toolset.getTools()) {
@@ -292,7 +299,7 @@ describe('BigtableToolset', () => {
     });
     const [executeSqlTool] = await new BigtableToolset({
       toolFilter: ['execute_sql'],
-      bigtableToolSettings: new BigtableToolSettings({maxQueryResultRows: 1}),
+      bigtableToolSettings: {maxQueryResultRows: 1},
     }).getTools();
 
     const result = await executeSqlTool.runAsync({

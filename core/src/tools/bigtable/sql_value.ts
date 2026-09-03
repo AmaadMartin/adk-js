@@ -43,14 +43,15 @@ export function isNamedValues(value: unknown): value is NamedValues {
   );
 }
 
-/** Whether the value behaves like a `Map`, as the SDK's map value does. */
+/**
+ * Whether the value behaves like a `Map`.
+ *
+ * `instanceof Map` is wrong here: the SDK returns a map column as
+ * `EncodedKeyMap`, which *implements* `Map` around a private field rather than
+ * extending it, so `instanceof` reports false and the entries would be lost.
+ */
 function isMapLike(value: object): value is Map<unknown, unknown> {
   return typeof (value as Map<unknown, unknown>).entries === 'function';
-}
-
-/** Whether the value behaves like a `Date`, as a Bigtable timestamp does. */
-function isDateLike(value: object): value is Date {
-  return typeof (value as Date).toISOString === 'function';
 }
 
 /**
@@ -108,7 +109,8 @@ export function toJsonValue(value: unknown): JsonValue {
       value.byteLength,
     ).toString('base64');
   }
-  if (isDateLike(value)) {
+  // The SDK returns a timestamp column as `PreciseDate`, which extends `Date`.
+  if (value instanceof Date) {
     return value.toISOString();
   }
   if (isNamedValues(value)) {

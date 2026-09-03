@@ -25,7 +25,6 @@ export {
   type BigtableToolsetOptions,
 } from './bigtable_toolset.js';
 export {
-  BigtableToolSettings,
   DEFAULT_MAX_QUERY_RESULT_ROWS,
-  type BigtableToolSettingsOptions,
+  type BigtableToolSettings,
 } from './settings.js';
