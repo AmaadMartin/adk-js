@@ -21,6 +21,7 @@ export type {
 export {getA2AAgentCard} from './agent_card.js';
 export {A2AAgentExecutor} from './agent_executor.js';
 export type {
+  AdkEventToA2AEventsConverter,
   AfterEventCallback,
   AfterExecuteCallback,
   AgentExecutorConfig,
@@ -41,6 +42,7 @@ export {
   executeBeforeAgentInterceptors,
 } from './executor_utils.js';
 export type {ExecuteInterceptor} from './executor_utils.js';
+export {toGenAIContent, toGenAIPart} from './part_converter_utils.js';
 export type {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
