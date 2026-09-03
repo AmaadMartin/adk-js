@@ -426,6 +426,25 @@ describe('ComputerUseToolset navigate url guard', () => {
     expect(lookupMock).not.toHaveBeenCalled();
   });
 
+  it('refuses a backslash even when its own parser reads a public host', async () => {
+    // The WHATWG parser ends the authority at the backslash and reads
+    // example.com, which is public. A parser that does not -- the driver's, a
+    // proxy's -- reads 169.254.169.254 and visits the metadata endpoint. The
+    // two answers disagree, so the guard refuses instead of vetting either.
+    const toolset = new ComputerUseToolset({computer});
+
+    expect(
+      await runAction(toolset, 'navigate', {
+        url: 'http://example.com\\@169.254.169.254/',
+      }),
+    ).toEqual({
+      error: URL_REFUSED_ERROR,
+      url: 'https://example.com/current',
+    });
+    expect(computer.methodNames()).not.toContain('navigate');
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
   it('refuses a url that is not a string', async () => {
     const toolset = new ComputerUseToolset({computer});
 
