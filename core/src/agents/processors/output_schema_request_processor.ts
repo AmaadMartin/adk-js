@@ -11,10 +11,7 @@ import {
   LlmRequest,
 } from '../../models/llm_request.js';
 import {getFunctionResponses} from '../../models/llm_response.js';
-import {
-  createSetModelResponseTool,
-  SET_MODEL_RESPONSE_TOOL_NAME,
-} from '../../tools/set_model_response_tool.js';
+import {SET_MODEL_RESPONSE_TOOL_NAME} from '../../tools/set_model_response_tool.js';
 import {InvocationContext, requireAgent} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
@@ -40,6 +37,10 @@ export const SET_MODEL_RESPONSE_INSTRUCTION =
  * cannot accept a response schema and tools in the same request needs the
  * prompt-based workaround instead: the schema becomes a tool, and the tool call
  * carries the answer.
+ *
+ * The tool is the agent's {@link LlmAgent.setModelResponseTool}, so a list or a
+ * record schema is carried under a wrapper parameter, which the GenAI API needs
+ * because it only accepts object-typed parameters.
  *
  * `LlmAgent` reads the answer back off the function-response event with
  * {@link getStructuredModelResponse} and promotes it. Both the async path and
@@ -72,11 +73,7 @@ export class OutputSchemaRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    appendTools(llmRequest, [
-      createSetModelResponseTool(agent.outputSchema, (value) =>
-        agent.validateOutput(value),
-      ),
-    ]);
+    appendTools(llmRequest, [agent.setModelResponseTool]);
     appendInstructions(llmRequest, [SET_MODEL_RESPONSE_INSTRUCTION]);
   }
 }

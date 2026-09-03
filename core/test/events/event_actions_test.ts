@@ -293,12 +293,28 @@ describe('mergeEventActions', () => {
     expect(result.escalate).toBe(true);
   });
 
+  it('carries setModelResponse through the merge', () => {
+    const result = mergeEventActions([
+      createEventActions(),
+      createEventActions({setModelResponse: {answer: 42}}),
+    ]);
+    expect(result.setModelResponse).toEqual({answer: 42});
+  });
+
   it('uses last-writer-wins for setModelResponse', () => {
     const result = mergeEventActions([
       createEventActions({setModelResponse: {answer: 'first'}}),
       createEventActions({setModelResponse: {answer: 'second'}}),
     ]);
     expect(result.setModelResponse).toEqual({answer: 'second'});
+  });
+
+  it('keeps an earlier setModelResponse when a later source omits it', () => {
+    const result = mergeEventActions([
+      createEventActions({setModelResponse: {v: 1}}),
+      createEventActions(),
+    ]);
+    expect(result.setModelResponse).toEqual({v: 1});
   });
 
   it('applies target as the base before merging sources', () => {

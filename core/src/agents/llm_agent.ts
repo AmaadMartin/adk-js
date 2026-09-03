@@ -14,6 +14,10 @@ import {
 import {context, trace} from '@opentelemetry/api';
 import {SingleTurnAgentTool, TaskAgentTool} from '../tools/agent_tool.js';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
+import {
+  SET_MODEL_RESPONSE_TOOL_NAME,
+  SetModelResponseTool,
+} from '../tools/set_model_response_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
@@ -660,6 +664,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   readonly outputSchemaSource?: SchemaLike;
   outputKey?: string;
   private _finishTaskTool?: FinishTaskTool;
+  private _setModelResponseTool?: SetModelResponseTool;
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
   beforeToolCallback?: BeforeToolCallback;
@@ -835,6 +840,28 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       this._finishTaskTool = new FinishTaskTool(this.outputSchema);
     }
     return this._finishTaskTool;
+  }
+
+  /**
+   * The `set_model_response` tool for this agent, which
+   * {@link OutputSchemaRequestProcessor} declares when the model cannot take an
+   * output schema and tools in one request. Lazily created and cached so its
+   * declaration is stable across turns.
+   *
+   * It is built from the schema as supplied, because the converted genai form
+   * loses the refinements and defaults the model's arguments are checked
+   * against.
+   */
+  get setModelResponseTool(): SetModelResponseTool {
+    const outputSchema = this.outputSchemaSource ?? this.outputSchema;
+    if (!outputSchema) {
+      throw new Error(
+        `Agent '${this.name}' declares no output schema, so it has no ` +
+          `'${SET_MODEL_RESPONSE_TOOL_NAME}' tool.`,
+      );
+    }
+    this._setModelResponseTool ??= new SetModelResponseTool(outputSchema);
+    return this._setModelResponseTool;
   }
 
   /**

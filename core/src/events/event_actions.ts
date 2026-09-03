@@ -300,8 +300,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
- *    `rewindBeforeInvocationId`, `compaction`) — last-writer-wins: the value
- *    from the last source that sets the field is kept.
+ *    `setModelResponse`, `rewindBeforeInvocationId`, `compaction`) —
+ *    last-writer-wins: the value from the last source that sets the field is
+ *    kept.
  * 3. **List fields** (`renderUiWidgets`) — the widgets of every source are
  *    concatenated in source order. A source that sets nothing contributes
  *    nothing, so the result stays `undefined` when no source sets it.

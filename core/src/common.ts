@@ -856,6 +856,7 @@ export type {
 } from './tools/retrieval/retriever_tool.js';
 export {
   SET_MODEL_RESPONSE_TOOL_NAME,
+  SetModelResponseTool,
   createSetModelResponseTool,
 } from './tools/set_model_response_tool.js';
 // `Capabilities`, `QueryResultMode` and `TableColumn` keep their upstream names
