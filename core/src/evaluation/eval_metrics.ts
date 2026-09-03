@@ -493,6 +493,21 @@ const toolTrajectoryCriterionModel: EvalModel<ToolTrajectoryCriterion> =
   );
 
 /**
+ * A function that validates a criterion read from a config file, and applies
+ * its defaults.
+ *
+ * {@link LlmAsJudge} takes one of these so that it can name the criterion type
+ * its metric expects when the criterion does not fit. It is the callable form
+ * of {@link CriterionType}, which an evaluator class declares instead.
+ */
+export interface CriterionParser<CriterionT extends BaseCriterion> {
+  (raw: unknown): CriterionT;
+
+  /** The name of the criterion type, for error messages. */
+  readonly criterionName: string;
+}
+
+/**
  * Validates a base criterion payload, keeping any metric-specific keys.
  *
  * @throws {InputValidationError} When the payload names no threshold.
@@ -500,6 +515,7 @@ const toolTrajectoryCriterionModel: EvalModel<ToolTrajectoryCriterion> =
 export function parseBaseCriterion(raw: unknown): BaseCriterion {
   return baseCriterionModel.parse(raw);
 }
+parseBaseCriterion.criterionName = 'BaseCriterion';
 
 /**
  * Validates a judge-backed criterion payload.
@@ -509,6 +525,7 @@ export function parseBaseCriterion(raw: unknown): BaseCriterion {
 export function parseLlmAsAJudgeCriterion(raw: unknown): LlmAsAJudgeCriterion {
   return llmAsAJudgeCriterionModel.parse(raw);
 }
+parseLlmAsAJudgeCriterion.criterionName = 'LlmAsAJudgeCriterion';
 
 /**
  * Validates a rubric-backed criterion payload.
@@ -521,6 +538,7 @@ export function parseRubricsBasedCriterion(
 ): RubricsBasedCriterion {
   return rubricsBasedCriterionModel.parse(raw);
 }
+parseRubricsBasedCriterion.criterionName = 'RubricsBasedCriterion';
 
 /**
  * Validates a hallucinations criterion payload.

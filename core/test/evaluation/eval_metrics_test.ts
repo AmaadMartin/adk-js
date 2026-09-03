@@ -533,11 +533,29 @@ describe('parseLlmAsAJudgeCriterion', () => {
       }),
     ).toThrow(/judgeModelOptions.parallelismLimit: /);
   });
+
+  it('rejects a value that is not an object', () => {
+    expect(() => parseLlmAsAJudgeCriterion('0.5')).toThrow(
+      InputValidationError,
+    );
+  });
+
+  it('names the criterion type it parses', () => {
+    expect(parseLlmAsAJudgeCriterion.criterionName).toBe(
+      'LlmAsAJudgeCriterion',
+    );
+  });
 });
 
 describe('parseRubricsBasedCriterion', () => {
   it('defaults the rubrics to an empty list', () => {
     expect(parseRubricsBasedCriterion({threshold: 0.5}).rubrics).toEqual([]);
+  });
+
+  it('names the criterion type it parses', () => {
+    expect(parseRubricsBasedCriterion.criterionName).toBe(
+      'RubricsBasedCriterion',
+    );
   });
 
   it('gives each parsed criterion its own rubrics array', () => {

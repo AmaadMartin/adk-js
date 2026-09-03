@@ -8,7 +8,8 @@
  * The ADK evaluation module (a parity port of `google/adk-python`'s
  * `google/adk/evaluation`). It currently covers the eval case data model, the
  * accessors that read a recorded trajectory, the contract every metric
- * evaluator implements, and the `ResponseEvaluator` that stands on it.
+ * evaluator implements, and the `ResponseEvaluator` and `LlmAsJudge`
+ * evaluators that stand on it.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
@@ -34,11 +35,22 @@ export type {
   ToolCallAndResponse,
 } from './eval_case.js';
 export {
+  DEFAULT_JUDGE_MODEL,
   EvalStatus,
   PrebuiltMetrics,
   getMetricThreshold,
+  parseLlmAsAJudgeCriterion,
+  parseRubricsBasedCriterion,
 } from './eval_metrics.js';
-export type {BaseCriterion, EvalMetric} from './eval_metrics.js';
+export type {
+  BaseCriterion,
+  CriterionParser,
+  EvalMetric,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  ResolvedJudgeModelOptions,
+  RubricsBasedCriterion,
+} from './eval_metrics.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export {
   BASE_CRITERION_TYPE,
@@ -57,6 +69,8 @@ export type {
   PerInvocationResult,
 } from './evaluator.js';
 export {RougeEvaluator} from './final_response_match_v1.js';
+export {LlmAsJudge} from './llm_as_judge.js';
+export type {AutoRaterScore, LlmAsJudgeOptions} from './llm_as_judge.js';
 export {ResponseEvaluator} from './response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';

@@ -83,6 +83,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Live eval inference](evaluation/live_inference/index.md) - Driving that same
   simulated conversation over a bidirectional audio connection, for an agent or
   a workflow root, and grading the transcript it produces.
+- [LlmAsJudge](evaluation/llm_as_judge/index.md) - Grading an agent's
+  invocations with a judge model, and how sampling, parallelism and a failed
+  sample are handled.
 - [ResponseEvaluator](evaluation/response_evaluator/index.md) - Scoring an agent's final answer against a golden answer, or against the Vertex AI coherence metric.
 - [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
   calls an agent made against a golden trajectory.
