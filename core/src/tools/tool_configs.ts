@@ -7,12 +7,18 @@
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
+import {isPlainObject} from '../utils/object_utils.js';
 
 /**
  * Schema of the free key-value bag that holds a tool's constructor arguments.
  *
  * The accepted keys belong to the tool, not to ADK, so every key is kept. Keys
  * are camelCased before validation, at every depth.
+ *
+ * An agent config document camelCases its whole body, `tools[].args` included,
+ * so this is the schema a caller applies to a bag it holds on its own.
+ * {@link toolConfigSchema} keeps the bag verbatim instead, because the
+ * declarative loader hands it to a factory the document names.
  *
  * @experimental
  */
@@ -25,14 +31,15 @@ export const toolArgsConfigSchema = z.preprocess(
  * The declared args of one tool in a configuration file.
  *
  * A config comes from outside the type system, so the shape is whatever the
- * tool's own constructor accepts. `BaseTool.fromConfig` checks the entries it
- * reads and passes the rest through. {@link toolArgsConfigSchema} validates a
- * declaration and returns a value of this type.
+ * tool's own constructor, or the factory the tool names, accepts.
+ * `BaseTool.fromConfig` checks the entries it reads and passes the rest
+ * through.
  *
  * Structural (`object`) rather than an index signature on purpose: a subclass
- * that narrows {@link BaseTool.fromConfig} to its own config interface must
- * stay assignable to this type, and a TypeScript interface is not assignable
- * to an index-signature type.
+ * that narrows {@link BaseTool.fromConfig} to its own config interface, or a
+ * factory that narrows its parameter the same way, must stay assignable to
+ * this type, and a TypeScript interface is not assignable to an
+ * index-signature type.
  */
 export type ToolArgsConfig = object;
 
@@ -40,19 +47,25 @@ export type ToolArgsConfig = object;
  * Schema of one tool entry in a config document.
  *
  * `name` addresses the tool: a bare name for an ADK built-in tool such as
- * `google_search`, or a fully qualified name such as
- * `my_package.my_module.my_tool` for a user-defined one. `args` carries the
- * arguments for a tool that is built from a class or a factory function.
+ * `google_search`, a fully qualified name such as
+ * `my_package.my_module.my_tool` for a user-defined one, or the
+ * `<module specifier>#<export>` form the declarative loader resolves, such as
+ * `./my_tools.js#searchTool`. `args` carries the arguments for a tool that is
+ * built from a class or a factory function.
+ *
+ * `args` is validated as an object and nothing more, mirroring adk-python's
+ * `extra='allow'`: the keys belong to the tool, not to ADK, and they reach the
+ * constructor or the factory exactly as the document writes them. A document
+ * that wants them camelCased runs them through {@link toolArgsConfigSchema}.
  *
  * @experimental
  */
-export const toolConfigSchema = z.preprocess(
-  camelCaseKeys,
-  z.strictObject({
-    name: z.string(),
-    args: toolArgsConfigSchema.optional(),
-  }),
-);
+export const toolConfigSchema = z.strictObject({
+  name: z.string().min(1),
+  args: z
+    .custom<ToolArgsConfig>(isPlainObject, {error: 'Expected an object.'})
+    .optional(),
+});
 
 /**
  * One tool entry in a config document.
@@ -60,9 +73,6 @@ export const toolConfigSchema = z.preprocess(
  * `name` addresses the tool and `args` carries its settings. The five
  * supported ways to reference a tool, with examples, are in
  * `docs/guides/tools/tool_config/index.md`.
- *
- * adk-js has no configuration-file loader yet, so `name` is carried verbatim
- * and the consuming loader resolves it.
  *
  * @experimental
  */
@@ -81,9 +91,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * and it is rejected instead of dropped in silence. `args` is shallow-copied,
  * so the returned config never aliases the caller's object.
  *
- * This checks one standalone declaration and keeps every `args` key verbatim.
- * {@link toolConfigSchema} checks the same entry inside an agent config
- * document, where {@link toolArgsConfigSchema} camelCases the keys first.
+ * This checks one standalone declaration. {@link toolConfigSchema} checks the
+ * same entry inside an agent config document.
  *
  * @param value - The parsed tool declaration.
  * @returns A validated {@link ToolConfig}.

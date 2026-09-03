@@ -31,11 +31,18 @@ function isRelative(specifier: string): boolean {
   return specifier.startsWith('./') || specifier.startsWith('../');
 }
 
+/** Captures the URL scheme a specifier opens with, such as `data:`. */
+const URL_SCHEME_PATTERN = /^([a-zA-Z][a-zA-Z\d+\-.]*:)/;
+
 /**
  * Turns a module specifier into one `import()` resolves the same way on every
  * platform. A filesystem path becomes a `file:` URL, because Windows reads the
  * drive letter in `C:\dir\mod.js` as a URL scheme. A bare specifier passes
  * through, so an installed package resolves the way Node normally resolves it.
+ *
+ * A specifier that still carries a scheme of its own is refused: `import()`
+ * runs a `data:` URL that carries its own source, so a configuration file
+ * could ship code instead of naming it.
  */
 function toImportSpecifier(specifier: string, baseFilePath?: string): string {
   if (isRelative(specifier)) {
@@ -47,7 +54,17 @@ function toImportSpecifier(specifier: string, baseFilePath?: string): string {
     }
     return new URL(specifier, pathToFileURL(baseFilePath)).href;
   }
-  return isAbsolute(specifier) ? pathToFileURL(specifier).href : specifier;
+  if (isAbsolute(specifier)) {
+    return pathToFileURL(specifier).href;
+  }
+  const scheme = URL_SCHEME_PATTERN.exec(specifier);
+  if (scheme) {
+    throw new Error(
+      `Module specifier "${specifier}" uses the "${scheme[1]}" URL scheme. A ` +
+        'configuration file can name a file path or a package, nothing else.',
+    );
+  }
+  return specifier;
 }
 
 /** Builds the error every failure mode of the resolver reports. */
@@ -65,7 +82,7 @@ function invalidName(name: string, cause: unknown): InputValidationError {
  * The import runs the named module's top-level code, so a caller must trust
  * `name` as far as it trusts the configuration file the name came from. Node
  * built-ins are refused so that a configuration file cannot reach
- * `node:child_process`.
+ * `node:child_process`, and so is a specifier carrying a URL scheme.
  *
  * Unlike `optional_peer.ts`, which keeps its specifiers literal so that
  * bundlers can see them, the specifier here is user configuration and is known
@@ -76,8 +93,8 @@ function invalidName(name: string, cause: unknown): InputValidationError {
  *   specifier resolves against its directory and needs it. Bare and absolute
  *   specifiers ignore it.
  * @return The exported value.
- * @throws {InputValidationError} When the specifier names a built-in, the
- *   module fails to load, or the module has no such export. The underlying
+ * @throws {InputValidationError} When the specifier names a built-in, carries
+ *   a URL scheme, fails to load, or names no such export. The underlying
  *   failure is attached as the error's `cause`.
  */
 export async function resolveFullyQualifiedName(

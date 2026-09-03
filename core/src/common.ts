@@ -84,6 +84,15 @@ export type {
   SingleBeforeToolCallback,
   ToolUnion,
 } from './agents/llm_agent.js';
+// The deprecated `agents/agent_config.ts` already exports
+// `llmAgentYamlConfigSchema` and `LlmAgentYamlConfig`, and this barrel is
+// flat. The declarative loader keeps its own names inside its module and takes
+// distinct ones here.
+export {
+  llmAgentYamlConfigSchema as declarativeLlmAgentConfigSchema,
+  parseLlmAgentConfig,
+} from './agents/llm_agent_config.js';
+export type {LlmAgentYamlConfig as DeclarativeLlmAgentConfig} from './agents/llm_agent_config.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig, LoopAgentState} from './agents/loop_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';

@@ -18,6 +18,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Context caching](agents/context_caching/index.md) - Reusing a processed
   request prefix across turns, and what the request carries to make that
   decision.
+- [Declarative LlmAgent configuration](agents/agent_config/index.md) - Describing an agent in a YAML or JSON document, and the references that name code from it.
 - [Function call ids in request contents](agents/function_call_ids/index.md) - How a replayed tool call keeps or loses its id, and how a compacted call is recovered.
 - [InvocationContext](agents/invocation_context/index.md) - The per-run context: event selection by branch, resumability, the event queue, the LLM-call limit, and the state one run carries — its credential service and its state schema.
 - [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
