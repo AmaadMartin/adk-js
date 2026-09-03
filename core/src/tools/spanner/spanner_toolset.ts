@@ -47,10 +47,20 @@ export interface SpannerToolsetOptions {
   spannerToolSettings?: SpannerToolSettings;
   /**
    * Names of the tools to expose, or a predicate over them. Both see the tool
-   * under its prefixed name.
+   * under its prefixed name. An empty array exposes nothing; omit the option
+   * to expose everything.
    */
   toolFilter?: ToolPredicate | string[];
 }
+
+/**
+ * The filter a toolset created without a `toolFilter` carries.
+ *
+ * `BaseToolset` requires a filter, so an absent one needs a stand-in. A
+ * predicate keeps "no filter" distinct from the empty array, which adk-python
+ * reads as "expose nothing".
+ */
+const SELECT_EVERY_TOOL: ToolPredicate = () => true;
 
 /**
  * Tools for reading Spanner data, schemas and indexes.
@@ -87,6 +97,11 @@ export interface SpannerToolsetOptions {
  * so a filter ported from Python needs the prefix added:
  * `tool_filter=['execute_sql']` becomes
  * `toolFilter: ['spanner_execute_sql']`.
+ *
+ * An empty array exposes no tools, which follows adk-python and not
+ * `BaseToolset.isToolSelected`. The base class reads an empty array as "no
+ * filter"; this toolset reads an absent option as "no filter" instead, so both
+ * intentions stay expressible.
  */
 @experimental
 export class SpannerToolset extends BaseToolset {
@@ -97,7 +112,7 @@ export class SpannerToolset extends BaseToolset {
    *   than one, or if `vectorStoreSettings` is not usable.
    */
   constructor(options: SpannerToolsetOptions) {
-    super(options.toolFilter ?? [], SPANNER_TOOL_NAME_PREFIX);
+    super(options.toolFilter ?? SELECT_EVERY_TOOL, SPANNER_TOOL_NAME_PREFIX);
     validateSpannerCredentialsConfig(options.credentialsConfig);
     const settings = options.spannerToolSettings ?? {};
     if (settings.vectorStoreSettings) {
@@ -131,21 +146,37 @@ export class SpannerToolset extends BaseToolset {
     }
   }
 
+  /**
+   * Selects a tool the way adk-python's `SpannerToolset._is_tool_selected`
+   * does: a name the list carries selects the tool, and an empty list selects
+   * none. The inherited version reads an empty list as "no filter" and would
+   * expose every tool instead.
+   */
+  protected override isToolSelected(
+    tool: BaseTool,
+    context: ReadonlyContext,
+  ): boolean {
+    const filter = this.toolFilter;
+    return Array.isArray(filter)
+      ? filter.includes(tool.name)
+      : filter(tool, context);
+  }
+
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     if (context) {
       return this.tools.filter((tool) => this.isToolSelected(tool, context));
     }
-    const names = this.toolFilter;
-    if (Array.isArray(names)) {
-      return names.length > 0
-        ? this.tools.filter((tool) => names.includes(tool.name))
-        : this.tools;
+    const filter = this.toolFilter;
+    if (Array.isArray(filter)) {
+      return this.tools.filter((tool) => filter.includes(tool.name));
     }
-    logger.warn(
-      'SpannerToolset: a ToolPredicate toolFilter was provided but getTools()' +
-        ' was called without a ReadonlyContext. The filter will not be' +
-        ' applied.',
-    );
+    if (filter !== SELECT_EVERY_TOOL) {
+      logger.warn(
+        'SpannerToolset: a ToolPredicate toolFilter was provided but' +
+          ' getTools() was called without a ReadonlyContext. The filter will' +
+          ' not be applied.',
+      );
+    }
     return this.tools;
   }
 

@@ -214,8 +214,10 @@ new SpannerToolset({
 
 This differs from adk-python, which filters on the bare name, so a filter
 ported from Python needs the `spanner_` prefix added. It matches `MCPToolset`
-and `OpenAPIToolset` in this package. An empty filter exposes every tool, and a
-name no tool carries is ignored.
+and `OpenAPIToolset` in this package. A name no tool carries is ignored.
+
+An empty list exposes no tools, as it does in adk-python. Omit `toolFilter` to
+expose every tool.
 
 ## Resources
 

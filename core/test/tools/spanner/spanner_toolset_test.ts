@@ -136,8 +136,25 @@ describe('SpannerToolset', () => {
   });
 
   describe('the tool filter', () => {
-    it('returns every tool when it is empty', async () => {
-      expect(await toolNames(makeToolset({toolFilter: []}))).toHaveLength(7);
+    it('returns no tool when it is empty, as adk-python does', async () => {
+      expect(await toolNames(makeToolset({toolFilter: []}))).toEqual([]);
+    });
+
+    it('returns no tool when it is empty and a context is given', async () => {
+      expect(
+        await toolNames(makeToolset({toolFilter: []}), makeToolContext()),
+      ).toEqual([]);
+    });
+
+    it('returns every tool when the option is absent', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      expect(await toolNames(makeToolset())).toHaveLength(7);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('returns every tool when the option is absent and a context is given', async () => {
+      expect(await toolNames(makeToolset(), makeToolContext())).toHaveLength(7);
     });
 
     it('keeps only the prefixed names it lists', async () => {
