@@ -110,42 +110,22 @@ function validateAuthConfig(authConfig: AuthConfig): void {
   }
 }
 
-/** The exchanger for a credential type, when the type needs one. */
-function exchangerFor(
-  authType: AuthCredentialTypes,
-): BaseCredentialExchanger | undefined {
-  switch (authType) {
-    case AuthCredentialTypes.OAUTH2:
-    case AuthCredentialTypes.OPEN_ID_CONNECT:
-      return new OAuth2CredentialExchanger();
-    case AuthCredentialTypes.SERVICE_ACCOUNT:
-      return new ServiceAccountCredentialExchanger();
-    default:
-      return undefined;
-  }
-}
-
-/** The refresher for a credential type, when the type can expire. */
-function refresherFor(
-  authType: AuthCredentialTypes,
-): BaseCredentialRefresher | undefined {
-  switch (authType) {
-    case AuthCredentialTypes.OAUTH2:
-    case AuthCredentialTypes.OPEN_ID_CONNECT:
-      return new OAuth2CredentialRefresher();
-    default:
-      return undefined;
-  }
-}
-
 /** Turns a raw credential into a usable one, when the type needs it. */
 async function exchangeCredential(
   credential: AuthCredential,
   authScheme: AuthScheme,
 ): Promise<CredentialStep> {
-  const exchanger = exchangerFor(credential.authType);
-  if (!exchanger) {
-    return {credential, changed: false};
+  let exchanger: BaseCredentialExchanger;
+  switch (credential.authType) {
+    case AuthCredentialTypes.OAUTH2:
+    case AuthCredentialTypes.OPEN_ID_CONNECT:
+      exchanger = new OAuth2CredentialExchanger();
+      break;
+    case AuthCredentialTypes.SERVICE_ACCOUNT:
+      exchanger = new ServiceAccountCredentialExchanger();
+      break;
+    default:
+      return {credential, changed: false};
   }
   const result = await exchanger.exchange({
     authCredential: credential,
@@ -159,11 +139,16 @@ async function refreshCredential(
   credential: AuthCredential,
   authScheme: AuthScheme,
 ): Promise<CredentialStep> {
-  const refresher = refresherFor(credential.authType);
   if (
-    !refresher ||
-    !(await refresher.isRefreshNeeded(credential, authScheme))
+    credential.authType !== AuthCredentialTypes.OAUTH2 &&
+    credential.authType !== AuthCredentialTypes.OPEN_ID_CONNECT
   ) {
+    return {credential, changed: false};
+  }
+  // Typed as the interface, so both calls pass the scheme the contract
+  // declares rather than binding to what this refresher happens to read.
+  const refresher: BaseCredentialRefresher = new OAuth2CredentialRefresher();
+  if (!(await refresher.isRefreshNeeded(credential, authScheme))) {
     return {credential, changed: false};
   }
   return {
