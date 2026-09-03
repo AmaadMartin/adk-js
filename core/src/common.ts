@@ -207,7 +207,15 @@ export type {
   LlmBackedUserSimulatorConfig,
   LlmUserSimulatorFields,
 } from './evaluation/simulation/llm_backed_user_simulator.js';
-export type {BaseUserSimulatorConfig} from './evaluation/simulation/user_simulator.js';
+export {
+  UserSimulatorStatus,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  BaseUserSimulatorConfig,
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
