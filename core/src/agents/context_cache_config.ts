@@ -15,10 +15,14 @@ const DEFAULT_MIN_TOKENS = 0;
 const MIN_CACHE_INTERVALS = 1;
 const MAX_CACHE_INTERVALS = 100;
 
+const DEFAULTS = {
+  cacheIntervals: DEFAULT_CACHE_INTERVALS,
+  ttlSeconds: DEFAULT_TTL_SECONDS,
+  minTokens: DEFAULT_MIN_TOKENS,
+};
+
 const CONTEXT_CACHE_CONFIG_KEYS: ReadonlySet<string> = new Set([
-  'cacheIntervals',
-  'ttlSeconds',
-  'minTokens',
+  ...Object.keys(DEFAULTS),
   'createHttpOptions',
 ]);
 
@@ -56,16 +60,6 @@ export interface ContextCacheConfig {
   createHttpOptions?: HttpOptions;
 }
 
-/** Bounds an integer field must satisfy. */
-interface IntegerRange {
-  /** Inclusive lower bound. */
-  min?: number;
-  /** Inclusive upper bound. */
-  max?: number;
-  /** Exclusive lower bound. */
-  exclusiveMin?: number;
-}
-
 /**
  * Creates a {@link ContextCacheConfig} with the defaults adk-python applies.
  *
@@ -84,19 +78,8 @@ export function createContextCacheConfig(
 ): ContextCacheConfig {
   rejectUnknownKeys(params);
 
-  const config: ContextCacheConfig = {
-    cacheIntervals: DEFAULT_CACHE_INTERVALS,
-    ttlSeconds: DEFAULT_TTL_SECONDS,
-    minTokens: DEFAULT_MIN_TOKENS,
-    ...params,
-  };
-
-  requireIntegerInRange('cacheIntervals', config.cacheIntervals, {
-    min: MIN_CACHE_INTERVALS,
-    max: MAX_CACHE_INTERVALS,
-  });
-  requireIntegerInRange('ttlSeconds', config.ttlSeconds, {exclusiveMin: 0});
-  requireIntegerInRange('minTokens', config.minTokens, {min: 0});
+  const config: ContextCacheConfig = {...DEFAULTS, ...params};
+  validateContextCacheConfig(config);
 
   return config;
 }
@@ -130,6 +113,13 @@ export function formatContextCacheConfig(config: ContextCacheConfig): string {
   );
 }
 
+/**
+ * Ports adk-python's `extra="forbid"`.
+ *
+ * TypeScript's excess-property check only fires on a fresh object literal, so
+ * a config that arrives as a variable, a parsed JSON payload or an agent
+ * config file reaches this factory with its extra keys intact.
+ */
 function rejectUnknownKeys(params: Partial<ContextCacheConfig>): void {
   const unknownKeys = Object.keys(params).filter(
     (key) => !CONTEXT_CACHE_CONFIG_KEYS.has(key),
@@ -142,27 +132,35 @@ function rejectUnknownKeys(params: Partial<ContextCacheConfig>): void {
   }
 }
 
-function requireIntegerInRange(
-  name: string,
-  value: number,
-  range: IntegerRange,
-): void {
+function validateContextCacheConfig(config: ContextCacheConfig): void {
+  requireInteger('cacheIntervals', config.cacheIntervals);
+  requireInteger('ttlSeconds', config.ttlSeconds);
+  requireInteger('minTokens', config.minTokens);
+
+  if (config.cacheIntervals < MIN_CACHE_INTERVALS) {
+    throw new Error(
+      `cacheIntervals must be an integer greater than or equal to ${MIN_CACHE_INTERVALS}; got ${config.cacheIntervals}.`,
+    );
+  }
+  if (config.cacheIntervals > MAX_CACHE_INTERVALS) {
+    throw new Error(
+      `cacheIntervals must be an integer less than or equal to ${MAX_CACHE_INTERVALS}; got ${config.cacheIntervals}.`,
+    );
+  }
+  if (config.ttlSeconds <= 0) {
+    throw new Error(
+      `ttlSeconds must be an integer greater than 0; got ${config.ttlSeconds}.`,
+    );
+  }
+  if (config.minTokens < 0) {
+    throw new Error(
+      `minTokens must be an integer greater than or equal to 0; got ${config.minTokens}.`,
+    );
+  }
+}
+
+function requireInteger(name: string, value: number): void {
   if (!Number.isInteger(value)) {
     throw new Error(`${name} must be an integer; got ${value}.`);
-  }
-  if (range.min !== undefined && value < range.min) {
-    throw new Error(
-      `${name} must be an integer greater than or equal to ${range.min}; got ${value}.`,
-    );
-  }
-  if (range.max !== undefined && value > range.max) {
-    throw new Error(
-      `${name} must be an integer less than or equal to ${range.max}; got ${value}.`,
-    );
-  }
-  if (range.exclusiveMin !== undefined && value <= range.exclusiveMin) {
-    throw new Error(
-      `${name} must be an integer greater than ${range.exclusiveMin}; got ${value}.`,
-    );
   }
 }
