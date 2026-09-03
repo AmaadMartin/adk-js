@@ -413,6 +413,14 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    */
   mode?: 'single_turn' | 'task';
 
+  /**
+   * Runs the agent once per item of its node input when it is a workflow node.
+   *
+   * `buildNode` wraps such an agent in a parallel worker. Mirrors Python's
+   * `Agent(parallel_worker=...)`.
+   */
+  parallelWorker?: boolean;
+
   /** The input schema when agent is used as a tool. */
   inputSchema?: LlmAgentSchema;
 
@@ -647,6 +655,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   readonly includeContentsExplicit: boolean;
   mode?: 'single_turn' | 'task';
+  /** See {@link LlmAgentConfig.parallelWorker}. */
+  parallelWorker?: boolean;
   inputSchema?: Schema;
   outputSchema?: Schema;
   /**
@@ -707,6 +717,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       ? zodObjectToSchema(config.outputSchema)
       : config.outputSchema;
     this.mode = config.mode;
+    this.parallelWorker = config.parallelWorker;
     this.outputKey = config.outputKey;
     this.beforeModelCallback = config.beforeModelCallback;
     this.afterModelCallback = config.afterModelCallback;

@@ -99,6 +99,7 @@ const LLM_AGENT_CONFIG_KEY_FLAGS = {
   onToolErrorCallback: true,
   outputKey: true,
   outputSchema: true,
+  parallelWorker: true,
   parentAgent: true,
   requestProcessors: true,
   rerunOnResume: true,
