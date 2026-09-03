@@ -1,0 +1,42 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import * as fs from 'node:fs';
+import {AdkLogger} from '../../utils/logger.js';
+
+const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
+
+/**
+ * Reads a JSON object from disk.
+ *
+ * Returns `undefined` when the file is missing, unreadable, not valid JSON, or
+ * holds anything other than a JSON object. Telemetry must never fail because
+ * of a bad file on disk, so no caller has to handle an error here.
+ */
+export function readJsonObject(
+  file: string,
+): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    return isRecord(parsed) ? parsed : undefined;
+  } catch (error: unknown) {
+    logger.debug(`Failed to read ${file}: ${String(error)}`);
+    return undefined;
+  }
+}
+
+/** Removes a path, ignoring any failure. */
+export function removeQuietly(target: string): void {
+  try {
+    fs.rmSync(target, {force: true});
+  } catch (error: unknown) {
+    logger.debug(`Failed to remove ${target}: ${String(error)}`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
