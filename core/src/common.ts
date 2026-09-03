@@ -8,7 +8,6 @@ export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
 export {
   agentConfigDiscriminator,
-  baseAgentYamlConfigSchema,
   llmAgentYamlConfigSchema,
   loopAgentYamlConfigSchema,
   parallelAgentYamlConfigSchema,
@@ -18,7 +17,6 @@ export {
 export type {
   AgentConfig,
   AgentConfigTag,
-  BaseAgentYamlConfig,
   LlmAgentYamlConfig,
   LoopAgentYamlConfig,
   ParallelAgentYamlConfig,
@@ -34,6 +32,11 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {
+  baseAgentYamlConfigSchema,
+  parseBaseAgentYamlConfig,
+} from './agents/base_agent_config.js';
+export type {BaseAgentYamlConfig} from './agents/base_agent_config.js';
 export {canonicalToolsFor} from './agents/canonical_tools.js';
 export {
   agentRefConfigSchema,

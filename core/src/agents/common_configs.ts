@@ -11,7 +11,8 @@ import {camelCaseKeys} from '../utils/case_utils.js';
  * Schema of a code reference to a variable, a function, or a class.
  *
  * The schema accepts either key casing: keys are camelCased before validation,
- * so the snake_case spelling of an on-disk config file also validates.
+ * so a document written in the snake_case spelling adk-python uses also
+ * validates. An unknown key is an error.
  *
  * @experimental
  */
@@ -21,9 +22,10 @@ export const codeConfigSchema = z.preprocess(
     /**
      * The fully qualified name of the variable, function, or class, such as
      * `google_search` for a built-in tool or `my_library.my_tools.my_tool` for
-     * a user-defined one.
+     * a user-defined one. A callback names a function, such as
+     * `my_library.my_callbacks.my_callback`.
      */
-    name: z.string(),
+    name: z.string().min(1),
   }),
 );
 
@@ -38,10 +40,22 @@ export const codeConfigSchema = z.preprocess(
 export type CodeConfig = z.infer<typeof codeConfigSchema>;
 
 /**
+ * One source of an agent reference. An explicit `null` counts as "not
+ * provided", the way `Optional[str] = None` does, because a key written in a
+ * YAML document with no value parses to `null`.
+ */
+const agentRefSource = z
+  .string()
+  .min(1)
+  .nullish()
+  .transform((value) => value ?? undefined);
+
+/**
  * Schema of a reference to another agent.
  *
- * Exactly one of `code` or `config_path` is required. The schema accepts either
- * key casing, so `config_path` and `configPath` both validate.
+ * Exactly one of `code` or `configPath` is required. The schema accepts either
+ * key casing, so `config_path` and `configPath` both validate. An unknown key
+ * is an error.
  *
  * @experimental
  */
@@ -49,16 +63,22 @@ export const agentRefConfigSchema = z.preprocess(
   camelCaseKeys,
   z
     .strictObject({
-      /** The config file path of the sub-agent, such as `search_agent.yaml`. */
-      configPath: z.string().optional(),
-      /** The fully qualified name of an agent instance defined in code. */
-      code: z.string().optional(),
+      /**
+       * The config file of the sub-agent, such as `search_agent.yaml`, or
+       * `my_library/my_custom_agent.yaml`.
+       */
+      configPath: agentRefSource,
+      /**
+       * The fully qualified name of an agent instance defined in code, such as
+       * `my_library.custom_agents.my_custom_agent`.
+       */
+      code: agentRefSource,
     })
     .refine((ref) => ref.code === undefined || ref.configPath === undefined, {
-      error: 'Only one of `code` or `config_path` should be provided',
+      error: 'Only one of `code` or `configPath` should be provided',
     })
     .refine((ref) => ref.code !== undefined || ref.configPath !== undefined, {
-      error: 'Exactly one of `code` or `config_path` must be provided',
+      error: 'Exactly one of `code` or `configPath` must be provided',
     }),
 );
 

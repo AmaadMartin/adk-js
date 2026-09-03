@@ -10,6 +10,8 @@ import {InputValidationError} from '../errors/input_validation_error.js';
 import {toolConfigSchema} from '../tools/tool_configs.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {warnDeprecatedOnce} from '../utils/deprecated.js';
+import type {BaseAgentYamlConfig} from './base_agent_config.js';
+import {baseAgentYamlConfigSchema} from './base_agent_config.js';
 import {agentRefConfigSchema, codeConfigSchema} from './common_configs.js';
 
 const AGENT_CONFIG_DEPRECATION =
@@ -68,31 +70,6 @@ const baseAgentFields = {
   /** Callbacks run after the agent, in config order. */
   afterAgentCallbacks: z.array(codeConfigSchema).optional(),
 };
-
-/**
- * Schema of the config of an agent class ADK does not own.
- *
- * This is the open shape: it keeps the keys it does not know, so a custom agent
- * class can read its own fields off the parsed config.
- *
- * @experimental
- * @deprecated Config is now loaded via reflection, not via a config class.
- */
-export const baseAgentYamlConfigSchema = z.preprocess(
-  camelCaseKeys,
-  z.looseObject({
-    ...baseAgentFields,
-    agentClass: z.string().default('BaseAgent'),
-  }),
-);
-
-/**
- * The config of an agent class ADK does not own.
- *
- * @experimental
- * @deprecated Config is now loaded via reflection, not via a config class.
- */
-export type BaseAgentYamlConfig = z.infer<typeof baseAgentYamlConfigSchema>;
 
 /**
  * Schema of an `LlmAgent` config.
