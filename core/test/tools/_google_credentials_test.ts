@@ -4,13 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseGoogleCredentialsConfig,
-  InputValidationError,
-  isOAuth2UserClient,
-} from '@google/adk';
+import {BaseGoogleCredentialsConfig, InputValidationError} from '@google/adk';
 import {Compute, OAuth2Client} from 'google-auth-library';
 import {describe, expect, it} from 'vitest';
+import {isOAuth2UserClient} from '../../src/tools/_google_credentials.js';
 
 const CREDENTIALS_CONFLICT =
   'If credentials are provided, externalAccessTokenKey, clientId,' +

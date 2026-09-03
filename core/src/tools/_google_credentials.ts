@@ -97,16 +97,11 @@ function validateAuthenticationMode(
  * does not repeat its client id, secret and scopes.
  */
 @experimental
-export class BaseGoogleCredentialsConfig {
-  /** The auth client to use for every end user. */
+export class BaseGoogleCredentialsConfig implements GoogleCredentialsConfigOptions {
   credentials?: AuthClient;
-  /** Key that holds an access token in tool context state. */
   externalAccessTokenKey?: string;
-  /** The OAuth client id to run the authorization flow with. */
   clientId?: string;
-  /** The OAuth client secret to run the authorization flow with. */
   clientSecret?: string;
-  /** The OAuth scopes to request. */
   scopes?: string[];
   /**
    * Key under which a resolved token is cached in tool context state. A
@@ -116,11 +111,7 @@ export class BaseGoogleCredentialsConfig {
 
   constructor(options: GoogleCredentialsConfigOptions = {}) {
     validateAuthenticationMode(options);
-    this.credentials = options.credentials;
-    this.externalAccessTokenKey = options.externalAccessTokenKey;
-    this.clientId = options.clientId;
-    this.clientSecret = options.clientSecret;
-    this.scopes = options.scopes;
+    Object.assign(this, options);
 
     if (this.credentials && isOAuth2UserClient(this.credentials)) {
       this.clientId = this.credentials._clientId;
