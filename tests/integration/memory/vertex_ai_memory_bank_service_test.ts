@@ -21,6 +21,8 @@ describe('VertexAiMemoryBankService Integration', () => {
   let mockMemories: {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
+    ingestEventsInternal: ReturnType<typeof vi.fn>;
+    retrieveProfiles: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
   };
 
@@ -32,6 +34,17 @@ describe('VertexAiMemoryBankService Integration', () => {
       generateInternal: vi
         .fn()
         .mockResolvedValue({name: 'operations/generate-op', done: true}),
+      ingestEventsInternal: vi
+        .fn()
+        .mockResolvedValue({name: 'operations/ingest-op', done: true}),
+      retrieveProfiles: vi.fn().mockResolvedValue({
+        profiles: {
+          'user-preferences': {
+            schemaId: 'user-preferences',
+            profile: {favouriteColour: 'green'},
+          },
+        },
+      }),
       retrieveInternal: vi.fn().mockResolvedValue({
         retrievedMemories: [
           {
@@ -116,7 +129,7 @@ describe('VertexAiMemoryBankService Integration', () => {
 
     await runner.memoryService!.addSessionToMemory(memorySession);
 
-    expect(mockMemories.generateInternal).toHaveBeenCalled();
+    expect(mockMemories.ingestEventsInternal).toHaveBeenCalled();
 
     const session = await runner.sessionService.createSession({
       appName: 'test_memory_app',
@@ -155,5 +168,30 @@ describe('VertexAiMemoryBankService Integration', () => {
         },
       }),
     );
+  });
+
+  it('should retrieve the structured profiles of a scope', async () => {
+    const mockClient = {
+      agentEnginesInternal: {
+        memories: mockMemories,
+      },
+    };
+    const memoryService = new VertexAiMemoryBankService({
+      agentEngineId: 'test-engine-id',
+      client: mockClient as unknown as Client,
+    });
+
+    const profiles = await memoryService.retrieveProfiles({
+      appName: 'test_memory_app',
+      userId: 'test_user',
+    });
+
+    expect(mockMemories.retrieveProfiles).toHaveBeenCalledWith({
+      name: 'reasoningEngines/test-engine-id',
+      scope: {app_name: 'test_memory_app', user_id: 'test_user'},
+    });
+    expect(profiles).toEqual([
+      {schemaId: 'user-preferences', profile: {favouriteColour: 'green'}},
+    ]);
   });
 });

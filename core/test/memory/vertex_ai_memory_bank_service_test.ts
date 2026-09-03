@@ -14,8 +14,10 @@ import {
   VertexAiMemoryBankService,
   VertexAiMemoryBankServiceOptions,
 } from '@google/adk';
-import {Content, Part} from '@google/genai';
+import {Content, Language, Outcome, Part} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+const TEXT_EVENT = {content: {parts: [{text: 'event 1'}]} as Content} as Event;
 
 const clientConstructor = vi.hoisted(() => vi.fn());
 
@@ -40,6 +42,8 @@ describe('VertexAiMemoryBankService', () => {
   let mockMemories: {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
+    ingestEventsInternal: ReturnType<typeof vi.fn>;
+    retrieveProfiles: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
   };
 
@@ -51,6 +55,10 @@ describe('VertexAiMemoryBankService', () => {
       generateInternal: vi
         .fn()
         .mockResolvedValue({name: 'operations/generate-op', done: true}),
+      ingestEventsInternal: vi
+        .fn()
+        .mockResolvedValue({name: 'operations/ingest-op', done: true}),
+      retrieveProfiles: vi.fn().mockResolvedValue({profiles: {}}),
       retrieveInternal: vi.fn().mockResolvedValue({
         retrievedMemories: [
           {
@@ -154,7 +162,7 @@ describe('VertexAiMemoryBankService', () => {
   });
 
   describe('addSessionToMemory', () => {
-    it('calls generateInternal with events', async () => {
+    it('calls ingestEventsInternal with events', async () => {
       const session = createSession({
         id: 'test-session-id',
         appName: 'test-app',
@@ -172,12 +180,14 @@ describe('VertexAiMemoryBankService', () => {
 
       await service.addSessionToMemory(session);
 
-      expect(mockMemories.generateInternal).toHaveBeenCalledWith(
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'reasoningEngines/test-engine-id',
           scope: {app_name: 'test-app', user_id: 'test-user'},
           directContentsSource: {
-            events: [{content: {parts: [{text: 'event 1'}]}}],
+            events: [
+              expect.objectContaining({content: {parts: [{text: 'event 1'}]}}),
+            ],
           },
         }),
       );
@@ -202,6 +212,9 @@ describe('VertexAiMemoryBankService', () => {
       await service.addSessionToMemory(session);
 
       expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+        expect.not.objectContaining({directContentsSource: expect.anything()}),
+      );
     });
   });
 
@@ -227,6 +240,319 @@ describe('VertexAiMemoryBankService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('addEventsToMemory via ingestEvents', () => {
+    it('sends the events, the stream id, the flush flag and the trigger rule', async () => {
+      const events = [
+        createEvent({
+          id: 'event-1',
+          author: 'user',
+          content: {parts: [{text: 'event 1'}]},
+          timestamp: Date.parse('2026-04-21T12:00:00Z'),
+        }),
+      ];
+
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events,
+        customMetadata: {
+          streamId: 'stream-123',
+          forceFlush: true,
+          generationTriggerConfig: {generationRule: {idleDuration: '60s'}},
+        },
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/test-engine-id',
+        scope: {app_name: 'test-app', user_id: 'test-user'},
+        streamId: 'stream-123',
+        config: {forceFlush: true},
+        generationTriggerConfig: {generationRule: {idleDuration: '60s'}},
+        directContentsSource: {
+          events: [
+            {
+              content: {parts: [{text: 'event 1'}]},
+              eventId: 'event-1',
+              eventTime: '2026-04-21T12:00:00.000Z',
+            },
+          ],
+        },
+      });
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+    });
+
+    it('sends an event-less request that only updates the trigger rule', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        customMetadata: {
+          generationTriggerConfig: {generationRule: {eventCount: 10}},
+        },
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/test-engine-id',
+        scope: {app_name: 'test-app', user_id: 'test-user'},
+        generationTriggerConfig: {generationRule: {eventCount: 10}},
+      });
+    });
+
+    it('omits the event time when the event has no timestamp', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [TEXT_EVENT],
+      });
+
+      const [params] = mockMemories.ingestEventsInternal.mock.calls[0];
+      expect(params.directContentsSource.events[0]).not.toHaveProperty(
+        'eventTime',
+      );
+    });
+
+    it('resolves before the ingest request completes', async () => {
+      mockMemories.ingestEventsInternal.mockReturnValue(
+        new Promise(() => {
+          // Never settles: the caller must not wait for the ingest request.
+        }),
+      );
+
+      await expect(
+        service.addEventsToMemory({
+          appName: 'test-app',
+          userId: 'test-user',
+          events: [TEXT_EVENT],
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('logs a rejected ingest request without rejecting the caller', async () => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'error')
+        .mockImplementation(() => {});
+      mockMemories.ingestEventsInternal.mockRejectedValue(
+        new Error('ingest boom'),
+      );
+
+      await expect(
+        service.addEventsToMemory({
+          appName: 'test-app',
+          userId: 'test-user',
+          events: [TEXT_EVENT],
+        }),
+      ).resolves.toBeUndefined();
+
+      await vi.waitFor(() =>
+        expect(loggerSpy).toHaveBeenCalledWith(
+          expect.stringContaining(
+            'Background ingestEvents request failed: Error: ingest boom',
+          ),
+        ),
+      );
+      loggerSpy.mockRestore();
+    });
+
+    it('ingests a session, dropping only the event without content', async () => {
+      const session = createSession({
+        id: 'test-session-id',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        lastUpdateTime: Date.now(),
+      });
+      session.events.push(
+        createEvent({
+          id: 'event-text',
+          author: 'user',
+          content: {parts: [{text: 'event 1'}]},
+          timestamp: Date.parse('2026-04-21T12:00:00Z'),
+        }),
+        createEvent({id: 'event-empty', author: 'user'}),
+        createEvent({
+          id: 'event-call',
+          author: 'model',
+          content: {parts: [{functionCall: {name: 'get_weather', args: {}}}]},
+          timestamp: Date.parse('2026-04-21T12:00:01Z'),
+        }),
+      );
+
+      await service.addSessionToMemory(session);
+
+      const [params] = mockMemories.ingestEventsInternal.mock.calls[0];
+      expect(params.directContentsSource.events).toEqual([
+        {
+          content: {parts: [{text: 'event 1'}]},
+          eventId: 'event-text',
+          eventTime: '2026-04-21T12:00:00.000Z',
+        },
+        {
+          content: {parts: [{functionCall: {name: 'get_weather', args: {}}}]},
+          eventId: 'event-call',
+          eventTime: '2026-04-21T12:00:01.000Z',
+        },
+      ]);
+    });
+
+    it('ingests an event-less session', async () => {
+      const session = createSession({
+        id: 'test-session-id',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [],
+        lastUpdateTime: Date.now(),
+      });
+
+      await service.addSessionToMemory(session);
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/test-engine-id',
+        scope: {app_name: 'test-app', user_id: 'test-user'},
+      });
+    });
+  });
+
+  describe('write path routing', () => {
+    it.each([
+      ['a stream id', {streamId: 'stream-123'}],
+      ['an unrecognised key', {source: 'agent'}],
+    ])('routes %s to ingestEvents', async (_, customMetadata) => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [TEXT_EVENT],
+        customMetadata,
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalled();
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+    });
+
+    it('routes allowedTopics to generate', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [TEXT_EVENT],
+        customMetadata: {allowedTopics: ['USER_PREFERENCES']},
+      });
+
+      expect(mockMemories.generateInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            allowedTopics: ['USER_PREFERENCES'],
+          }),
+        }),
+      );
+      expect(mockMemories.ingestEventsInternal).not.toHaveBeenCalled();
+    });
+
+    it('issues no request when the generate path has no event left', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [
+          createEvent({author: 'user', content: {parts: [{thought: true}]}}),
+        ],
+        customMetadata: {revisionTtl: '3600s'},
+      });
+
+      expect(mockMemories.generateInternal).not.toHaveBeenCalled();
+      expect(mockMemories.ingestEventsInternal).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('event content filter', () => {
+    it.each([
+      ['a functionCall', {functionCall: {name: 'get_weather', args: {}}}],
+      [
+        'a functionResponse',
+        {functionResponse: {name: 'get_weather', response: {}}},
+      ],
+      [
+        'executableCode',
+        {executableCode: {code: 'print(1)', language: Language.PYTHON}},
+      ],
+      [
+        'a codeExecutionResult',
+        {codeExecutionResult: {outcome: Outcome.OUTCOME_OK, output: '1'}},
+      ],
+      ['a toolCall', {toolCall: {id: 'call-1', args: {}}}],
+      ['a toolResponse', {toolResponse: {id: 'call-1', response: {}}}],
+    ])('keeps an event whose only part is %s', async (_, part: Part) => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [createEvent({author: 'user', content: {parts: [part]}})],
+      });
+
+      const [params] = mockMemories.ingestEventsInternal.mock.calls[0];
+      expect(params.directContentsSource.events).toEqual([
+        expect.objectContaining({content: {parts: [part]}}),
+      ]);
+    });
+
+    it('drops an event whose part carries no recognised field', async () => {
+      await service.addEventsToMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [
+          createEvent({author: 'user', content: {parts: [{thought: true}]}}),
+        ],
+      });
+
+      expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+        expect.not.objectContaining({directContentsSource: expect.anything()}),
+      );
+    });
+  });
+
+  describe('retrieveProfiles', () => {
+    it('returns the profiles of the scope', async () => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'debug')
+        .mockImplementation(() => {});
+      mockMemories.retrieveProfiles.mockResolvedValue({
+        profiles: {
+          'user-preferences': {
+            schemaId: 'user-preferences',
+            profile: {favouriteColour: 'blue'},
+          },
+        },
+      });
+
+      const profiles = await service.retrieveProfiles({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(mockMemories.retrieveProfiles).toHaveBeenCalledWith({
+        name: 'reasoningEngines/test-engine-id',
+        scope: {app_name: 'test-app', user_id: 'test-user'},
+      });
+      expect(profiles).toEqual([
+        {schemaId: 'user-preferences', profile: {favouriteColour: 'blue'}},
+      ]);
+      expect(loggerSpy).toHaveBeenCalledWith('Retrieved 1 memory profiles.');
+      loggerSpy.mockRestore();
+    });
+
+    it('returns an empty list when the scope has no profile', async () => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'debug')
+        .mockImplementation(() => {});
+      mockMemories.retrieveProfiles.mockResolvedValue({});
+
+      const profiles = await service.retrieveProfiles({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(profiles).toEqual([]);
+      expect(loggerSpy).toHaveBeenCalledWith('Retrieved no memory profiles.');
+      loggerSpy.mockRestore();
     });
   });
 
@@ -322,6 +648,19 @@ describe('VertexAiMemoryBankService', () => {
       expect(config).not.toHaveProperty('memoryId');
     });
 
+    it.each([
+      ['a number', 123],
+      ['a bare Content', {parts: [{text: 'fact 1'}]}],
+    ])('throws if the entry is %s', async (_, entry) => {
+      await expect(
+        service.addMemory({
+          appName: 'test-app',
+          userId: 'test-user',
+          memories: [entry as unknown as MemoryEntry],
+        }),
+      ).rejects.toThrow('memories[0] must be a MemoryEntry.');
+    });
+
     it('throws error if memories list is empty', async () => {
       await expect(
         service.addMemory({
@@ -391,6 +730,131 @@ describe('VertexAiMemoryBankService', () => {
       expect(response.memories[0].content.parts?.[0].text).toBe(
         'user likes blue',
       );
+      expect(response.memories[0].customMetadata).toEqual({});
+    });
+
+    it('converts every metadata value kind back to a plain value', async () => {
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [
+          {
+            memory: {
+              fact: 'user likes blue',
+              updateTime: '2026-04-21T12:00:00Z',
+              metadata: {
+                flag: {boolValue: true},
+                score: {doubleValue: 1.5},
+                label: {stringValue: 'blue'},
+                seenAt: {timestampValue: '2026-04-21T12:00:00Z'},
+                unknownKind: {someFutureValue: 'kept'},
+              },
+            },
+          },
+        ],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories[0].customMetadata).toEqual({
+        flag: true,
+        score: 1.5,
+        label: 'blue',
+        seenAt: '2026-04-21T12:00:00Z',
+        unknownKind: {someFutureValue: 'kept'},
+      });
+    });
+
+    it('skips an entry with no memory object', async () => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'warn')
+        .mockImplementation(() => {});
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [{}, {memory: {fact: 'user likes blue'}}],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories).toHaveLength(1);
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Skipping memory entry with missing memory object.',
+      );
+      loggerSpy.mockRestore();
+    });
+
+    it.each([
+      ['a missing fact', {}],
+      ['an empty fact', {fact: ''}],
+    ])('skips an entry with %s', async (_, memory) => {
+      const loggerSpy = vi
+        .spyOn(getLogger(), 'warn')
+        .mockImplementation(() => {});
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [{memory}],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories).toEqual([]);
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Skipping memory entry with empty or missing fact.',
+      );
+      loggerSpy.mockRestore();
+    });
+
+    it('leaves the timestamp unset when the memory has no update time', async () => {
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [{memory: {fact: 'user likes blue'}}],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories[0].timestamp).toBeUndefined();
+    });
+
+    it('keeps a null metadata value instead of throwing on it', async () => {
+      mockMemories.retrieveInternal.mockResolvedValue({
+        retrievedMemories: [
+          {memory: {fact: 'user likes blue', metadata: {broken: null}}},
+        ],
+      });
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories[0].customMetadata).toEqual({broken: null});
+    });
+
+    it.each([
+      ['an empty result list', {retrievedMemories: []}],
+      ['no result list at all', {}],
+    ])('returns an empty list for %s', async (_, retrieveResponse) => {
+      mockMemories.retrieveInternal.mockResolvedValue(retrieveResponse);
+
+      const response = await service.searchMemory({
+        appName: 'test-app',
+        userId: 'test-user',
+        query: 'find blue',
+      });
+
+      expect(response.memories).toEqual([]);
     });
 
     it('defaults customMetadata to {} when the memory has no metadata', async () => {
@@ -501,6 +965,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // revisionTtl routes this write to memories.generate.
+          revisionTtl: '3600s',
           myBool: true,
           myNumber: 42,
           myString: 'hello',
@@ -550,6 +1016,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // revisionTtl routes this write to memories.generate.
+          revisionTtl: '3600s',
           myPreFormatted: {stringValue: 'already converted'},
         },
       });
@@ -588,6 +1056,8 @@ describe('VertexAiMemoryBankService', () => {
         userId: 'test-user',
         events,
         customMetadata: {
+          // revisionTtl routes this write to memories.generate.
+          revisionTtl: '3600s',
           mySymbol: mySymbol,
         },
       });

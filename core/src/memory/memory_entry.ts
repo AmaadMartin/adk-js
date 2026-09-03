@@ -25,7 +25,11 @@ export interface MemoryEntry {
    */
   customMetadata?: Record<string, unknown>;
 
-  /** The unique identifier of the memory. */
+  /**
+   * The unique identifier of the memory. Services that support it use this as
+   * the last component of the created memory's resource name, instead of
+   * letting the service generate one.
+   */
   id?: string;
 
   /**
