@@ -8,6 +8,7 @@ import {Part as A2APart} from '@a2a-js/sdk';
 import {Content, Part as GenAIPart} from '@google/genai';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../agents/functions.js';
 import {InvocationContext, requireAgent} from '../agents/invocation_context.js';
+import {TOOLSET_AUTH_CREDENTIAL_ID_PREFIX} from '../auth/auth_preprocessor.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
@@ -207,7 +208,12 @@ export function peerRequestedCallIds(
   for (const event of events) {
     for (const part of event.content?.parts ?? []) {
       const id = part.functionCall?.id;
-      if (!id) {
+      if (!id || id.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)) {
+        // A request this agent raised for its own transport credential is
+        // authored under this agent's name, so it would otherwise read as one
+        // the peer asked for. The peer never sees that credential: it travels
+        // as an HTTP header, and forwarding it as message content would put it
+        // in the peer's own session.
         continue;
       }
       (event.author === peerName ? peer : local).add(id);

@@ -6,11 +6,13 @@
 
 import {AgentCard} from '@a2a-js/sdk';
 import {
+  Event as AdkEvent,
   AuthConfig,
   AuthCredential,
   AuthCredentialTypes,
   AuthScheme,
   BaseCredentialService,
+  createEvent,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   Session,
 } from '@google/adk';
@@ -324,6 +326,112 @@ describe('resolveAuthCredential', () => {
     await resolveAuthCredential(context, config, 'remote_agent');
 
     expect(config.exchangedAuthCredential).toBeUndefined();
+  });
+});
+
+describe('resolveAuthCredential credential round trip', () => {
+  const REQUEST_ID = '_adk_toolset_auth_remote_agent';
+
+  /** The event the client appends to answer the agent's credential request. */
+  function answerEvent(credential: AuthCredential, id = REQUEST_ID): AdkEvent {
+    return createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id,
+              name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+              response: {
+                authScheme: API_KEY_SCHEME,
+                credentialKey: 'test-key',
+                exchangedAuthCredential: credential,
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  it('raises the request under the agent name', async () => {
+    const context = contextWith();
+
+    const event = await resolveAuthCredential(
+      context,
+      authConfigFor(),
+      'remote_agent',
+    );
+
+    expect(event?.author).toBe('remote_agent');
+  });
+
+  it('reads back the credential the client supplied', async () => {
+    const context = contextWith();
+    const first = await resolveAuthCredential(
+      context,
+      authConfigFor(),
+      'remote_agent',
+    );
+    expect(first).toBeDefined();
+
+    // The client answers the long-running call the agent just raised.
+    context.session.events.push(answerEvent(API_KEY_CREDENTIAL));
+    const second = await resolveAuthCredential(
+      context,
+      authConfigFor(),
+      'remote_agent',
+    );
+
+    expect(second).toBeUndefined();
+    expect(context.credentialByKey['test-key']).toEqual(API_KEY_CREDENTIAL);
+  });
+
+  it('ignores an answer to a different request', async () => {
+    const context = contextWith();
+    context.session.events.push(
+      answerEvent(API_KEY_CREDENTIAL, '_adk_toolset_auth_other_agent'),
+    );
+
+    const event = await resolveAuthCredential(
+      context,
+      authConfigFor(),
+      'remote_agent',
+    );
+
+    expect(event).toBeDefined();
+    expect(context.credentialByKey['test-key']).toBeUndefined();
+  });
+
+  it('asks again when the answer carries no credential', async () => {
+    const context = contextWith();
+    context.session.events.push(
+      createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: REQUEST_ID,
+                name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+                response: {},
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    const event = await resolveAuthCredential(
+      context,
+      authConfigFor(),
+      'remote_agent',
+    );
+
+    expect(event).toBeDefined();
+    expect(context.credentialByKey['test-key']).toBeUndefined();
   });
 });
 
