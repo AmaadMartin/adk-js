@@ -5,13 +5,16 @@
  */
 import {GenerateContentConfig} from '@google/genai';
 
-import {isGemini2OrAbove, isGeminiModel} from '../utils/model_name.js';
+import {
+  isGeminiModel,
+  isGeminiModelIdCheckDisabled,
+} from '../utils/model_name.js';
 
 import {ToolProcessLlmRequest} from './base_tool.js';
 import {BuiltInTool} from './built_in_tool.js';
 
 /**
- * A built-in tool that allows Gemini 2+ models to retrieve content from URLs
+ * A built-in tool that allows Gemini models to retrieve content from URLs
  * provided in the conversation.
  *
  * This tool operates internally within the model and does not require or
@@ -25,27 +28,24 @@ export class UrlContextTool extends BuiltInTool {
   protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
-    if (!llmRequest.model) {
-      return;
-    }
-
-    if (!isGeminiModel(llmRequest.model)) {
-      throw new Error(
-        `URL context tool is not supported for model ${llmRequest.model}`,
-      );
-    }
-
-    if (!isGemini2OrAbove(llmRequest.model)) {
-      throw new Error(
-        `URL context tool requires Gemini 2 or above, but got ${llmRequest.model}`,
-      );
-    }
+    const modelCheckDisabled = isGeminiModelIdCheckDisabled();
+    const model = llmRequest.model ?? '';
 
     llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
     llmRequest.config.tools = llmRequest.config.tools || [];
-    llmRequest.config.tools.push({
-      urlContext: {},
-    });
+
+    if (
+      isGeminiModel(model) ||
+      modelCheckDisabled ||
+      llmRequest.isManagedAgent
+    ) {
+      llmRequest.config.tools.push({urlContext: {}});
+      return;
+    }
+
+    throw new Error(
+      `URL context tool is not supported for model ${llmRequest.model}`,
+    );
   }
 }
 
