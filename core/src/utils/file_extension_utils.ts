@@ -39,6 +39,7 @@ const EXTENSION_TO_LANGUAGE: Record<string, CodeExecutionLanguage> = {
   '.cmd': CodeExecutionLanguage.WINDOWS_CMD,
   '.ps1': CodeExecutionLanguage.POWERSHELL,
   '.sh': CodeExecutionLanguage.SHELL,
+  '.bash': CodeExecutionLanguage.SHELL,
 };
 
 /**

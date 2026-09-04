@@ -14,6 +14,11 @@ import {
   ToolProcessLlmRequest,
 } from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
+import {detectSkillToolError} from './skill_error_detection.js';
+import {
+  countInvocationFailure,
+  RESOURCE_NOT_FOUND_COUNTER_PREFIX,
+} from './skill_failure_counter.js';
 import {LOAD_SKILL_RESOURCE_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
@@ -119,6 +124,21 @@ export class LoadSkillResourceTool extends BaseTool {
     }
 
     if (content === undefined) {
+      // Counts every miss in the invocation, not misses of this path, so the
+      // guard still fires when the model invents a fresh path each retry.
+      const failCount = countInvocationFailure(
+        toolContext,
+        RESOURCE_NOT_FOUND_COUNTER_PREFIX,
+      );
+      if (failCount > 1) {
+        return {
+          error:
+            `Resource '${resourcePath}' not found in skill '${skillName}'.` +
+            ` This is resource lookup failure #${failCount} this invocation.` +
+            ' Do not retry any path — report the error to the user and stop.',
+          error_code: SkillErrorCode.RESOURCE_NOT_FOUND_FATAL,
+        };
+      }
       return {
         error: `Resource '${resourcePath}' not found in skill '${skillName}'.`,
         error_code: SkillErrorCode.RESOURCE_NOT_FOUND,
@@ -138,6 +158,10 @@ export class LoadSkillResourceTool extends BaseTool {
       path: resourcePath,
       content,
     };
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return detectSkillToolError(response);
   }
 
   override async processLlmRequest(

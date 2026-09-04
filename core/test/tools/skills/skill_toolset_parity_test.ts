@@ -13,10 +13,12 @@ import {
   BaseTool,
   BaseToolset,
   buildSkillSystemInstruction,
+  CodeExecutionInput,
   CodeExecutionResult,
   Context,
   createSession,
   DEFAULT_SKILL_SYSTEM_INSTRUCTION,
+  ExecuteCodeParams,
   Frontmatter,
   InMemorySessionService,
   InvocationContext,
@@ -39,6 +41,28 @@ import {FakeEnvironment} from './fake_environment.js';
 class StubCodeExecutor extends BaseCodeExecutor {
   override async executeCode(): Promise<CodeExecutionResult> {
     return {stdout: '', stderr: '', outputFiles: []};
+  }
+}
+
+class RecordingCodeExecutor extends BaseCodeExecutor {
+  lastInput?: CodeExecutionInput;
+  calls = 0;
+
+  constructor(private readonly result: Partial<CodeExecutionResult> = {}) {
+    super();
+  }
+
+  override async executeCode(
+    params: ExecuteCodeParams,
+  ): Promise<CodeExecutionResult> {
+    this.calls++;
+    this.lastInput = params.codeExecutionInput;
+    return {
+      stdout: '',
+      stderr: '',
+      outputFiles: [],
+      ...this.result,
+    };
   }
 }
 
@@ -70,12 +94,13 @@ function createSkill(name: string, metadata?: Record<string, unknown>): Skill {
 function createInvocationContext(options: {
   agent?: LlmAgent | SequentialAgent;
   state?: Record<string, unknown>;
+  invocationId?: string;
 }): InvocationContext {
   const agent =
     options.agent ??
     new LlmAgent({name: 'test_agent', model: 'gemini-2.0-flash'});
   return new InvocationContext({
-    invocationId: 'test_invocation',
+    invocationId: options.invocationId ?? 'test_invocation',
     agent,
     session: createSession({
       id: 'session-1',
@@ -92,6 +117,7 @@ function createContext(
   options: {
     agent?: LlmAgent | SequentialAgent;
     state?: Record<string, unknown>;
+    invocationId?: string;
   } = {},
 ): Context {
   return new Context({invocationContext: createInvocationContext(options)});
@@ -766,5 +792,457 @@ describe('skill_toolset parity: environment', () => {
     await toolset.close();
 
     expect(env.closeCount).toBe(1);
+  });
+});
+
+describe('skill_toolset parity: script arguments and status', () => {
+  const scriptSkill: Skill = {
+    frontmatter: {name: 'skill1', description: 'A test skill'},
+    instructions: 'Test instructions',
+    resources: {
+      scripts: {
+        'run.py': {src: "print('hi')"},
+        'run.sh': {src: 'echo hi'},
+        'build.rb': {src: 'puts 1'},
+        noext: {src: 'echo hi'},
+      },
+    },
+  };
+
+  function runScript(
+    executor: RecordingCodeExecutor,
+    args: Record<string, unknown>,
+  ) {
+    const toolset = new SkillToolset([scriptSkill], {codeExecutor: executor});
+    return new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', ...args},
+      toolContext: createContext(),
+    });
+  }
+
+  it('test_execute_script_with_input_args_python', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'done\n'});
+
+    const result = (await runScript(executor, {
+      script_path: 'run.py',
+      args: {verbose: true, count: '3'},
+    })) as {status: string};
+
+    expect(result.status).toBe('success');
+    expect(executor.lastInput?.args).toEqual([
+      '--verbose',
+      'true',
+      '--count',
+      '3',
+    ]);
+  });
+
+  it('test_execute_script_with_input_args_shell', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'done\n'});
+
+    await runScript(executor, {
+      script_path: 'run.sh',
+      args: {verbose: true},
+      short_options: {n: 5},
+      positional_args: ['input.csv'],
+    });
+
+    expect(executor.lastInput?.args).toEqual([
+      '--verbose',
+      'true',
+      '-n',
+      '5',
+      '--',
+      'input.csv',
+    ]);
+  });
+
+  it('test_execute_script_with_list_args_python', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'done\n'});
+
+    const result = (await runScript(executor, {
+      script_path: 'run.py',
+      args: ['--verbose', 'True', '-n', '5', 'input.txt'],
+    })) as {status: string};
+
+    expect(result.status).toBe('success');
+    expect(executor.lastInput?.args).toEqual([
+      '--verbose',
+      'True',
+      '-n',
+      '5',
+      'input.txt',
+    ]);
+  });
+
+  it('test_execute_script_with_list_args_rejects_others_python', async () => {
+    const executor = new RecordingCodeExecutor();
+
+    const result = (await runScript(executor, {
+      script_path: 'run.py',
+      args: ['arg1', 'arg2'],
+      short_options: {v: true},
+      positional_args: ['pos1'],
+    })) as {error: string; errorCode: string};
+
+    expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+    expect(result.error).toContain(
+      "Cannot specify 'short_options' or 'positional_args'",
+    );
+    expect(executor.calls).toBe(0);
+  });
+
+  it('test_execute_script_invalid_args_type', async () => {
+    for (const badArgs of ['not a dict', 42, true]) {
+      const executor = new RecordingCodeExecutor();
+
+      const result = (await runScript(executor, {
+        script_path: 'run.py',
+        args: badArgs,
+      })) as {errorCode: string};
+
+      expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+      expect(executor.calls).toBe(0);
+    }
+  });
+
+  it('test_execute_script_invalid_short_options_type', async () => {
+    for (const badShortOptions of ['not a dict', 42, true, ['list']]) {
+      const executor = new RecordingCodeExecutor();
+
+      const result = (await runScript(executor, {
+        script_path: 'run.py',
+        short_options: badShortOptions,
+      })) as {errorCode: string};
+
+      expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+      expect(executor.calls).toBe(0);
+    }
+  });
+
+  it('test_execute_script_invalid_positional_args_type', async () => {
+    for (const badPositionalArgs of ['not a list', 42, true, {dict: 1}]) {
+      const executor = new RecordingCodeExecutor();
+
+      const result = (await runScript(executor, {
+        script_path: 'run.py',
+        positional_args: badPositionalArgs,
+      })) as {errorCode: string};
+
+      expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+      expect(executor.calls).toBe(0);
+    }
+  });
+
+  it('test_execute_script_stderr_only_sets_error_status', async () => {
+    const executor = new RecordingCodeExecutor({stderr: 'fatal error\n'});
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+      stderr: string;
+    };
+
+    expect(result.status).toBe('error');
+    expect(result.stderr).toBe('fatal error\n');
+  });
+
+  it('test_execute_script_stderr_with_stdout_sets_warning', async () => {
+    const executor = new RecordingCodeExecutor({
+      stdout: 'output\n',
+      stderr: 'deprecation\n',
+    });
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+    };
+
+    expect(result.status).toBe('warning');
+  });
+
+  it('test_executor_exit_code_is_not_overridden_by_stderr', async () => {
+    const executor = new RecordingCodeExecutor({
+      stderr: 'a warning\n',
+      exitCode: 0,
+    });
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+      exitCode?: number | null;
+    };
+
+    expect(result.status).toBe('error');
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('test_missing_executor_exit_code_falls_back_to_stderr', async () => {
+    const executor = new RecordingCodeExecutor({stderr: 'fatal error\n'});
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+    };
+
+    expect(result.status).toBe('error');
+  });
+
+  it('reports a non-zero exit code as an error whatever the streams say', async () => {
+    const executor = new RecordingCodeExecutor({
+      stdout: 'partial\n',
+      exitCode: 3,
+    });
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+    };
+
+    expect(result.status).toBe('error');
+  });
+
+  it('test_execute_script_unsupported_type', async () => {
+    const executor = new RecordingCodeExecutor();
+
+    const result = (await runScript(executor, {
+      script_path: 'build.rb',
+    })) as {error: string; errorCode: string};
+
+    expect(result.errorCode).toBe('UNSUPPORTED_SCRIPT_TYPE');
+    expect(result.error).toContain("Unsupported script type '.rb'");
+    expect(executor.calls).toBe(0);
+  });
+
+  it('test_execute_script_extensionless_unsupported', async () => {
+    const executor = new RecordingCodeExecutor();
+
+    const result = (await runScript(executor, {script_path: 'noext'})) as {
+      error: string;
+      errorCode: string;
+    };
+
+    expect(result.errorCode).toBe('UNSUPPORTED_SCRIPT_TYPE');
+    expect(result.error).toContain('Unsupported script type (no extension)');
+  });
+
+  it('names the skill and the script in the response', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'ok'});
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      skill_name: string;
+      script_path: string;
+    };
+
+    expect(result.skill_name).toBe('skill1');
+    expect(result.script_path).toBe('run.py');
+  });
+});
+
+describe('skill_toolset parity: invocation-scoped retry guards', () => {
+  const guardSkill: Skill = {
+    frontmatter: {name: 'skill1', description: 'A test skill'},
+    instructions: 'Test instructions',
+    resources: {
+      references: {'doc.md': 'body'},
+      scripts: {'run.py': {src: 'x'}},
+    },
+  };
+
+  it('test_load_resource_first_missing_returns_soft_error', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/nope.md'},
+      toolContext: createContext(),
+    })) as {error_code: string};
+
+    expect(result.error_code).toBe('RESOURCE_NOT_FOUND');
+  });
+
+  it('test_load_resource_repeated_failure_escalates_to_fatal', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const context = createContext();
+    const args = {skill_name: 'skill1', path: 'references/nope.md'};
+
+    const first = (await tool.runAsync({args, toolContext: context})) as {
+      error_code: string;
+    };
+    const second = (await tool.runAsync({args, toolContext: context})) as {
+      error: string;
+      error_code: string;
+    };
+
+    expect(first.error_code).toBe('RESOURCE_NOT_FOUND');
+    expect(second.error_code).toBe('RESOURCE_NOT_FOUND_FATAL');
+    expect(second.error).toContain('Do not retry');
+    expect(second.error).toContain('failure #2');
+    expect(second.error).toContain('stop');
+  });
+
+  it('test_load_resource_different_path_also_escalates_to_fatal', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/one.md'},
+      toolContext: context,
+    });
+    const second = (await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/two.md'},
+      toolContext: context,
+    })) as {error_code: string};
+
+    expect(second.error_code).toBe('RESOURCE_NOT_FOUND_FATAL');
+  });
+
+  it('test_load_resource_failures_isolated_per_invocation', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const args = {skill_name: 'skill1', path: 'references/nope.md'};
+
+    const first = (await tool.runAsync({
+      args,
+      toolContext: createContext(),
+    })) as {error_code: string};
+    const second = (await tool.runAsync({
+      args,
+      toolContext: createContext({invocationId: 'other_invocation'}),
+    })) as {error_code: string};
+
+    expect(first.error_code).toBe('RESOURCE_NOT_FOUND');
+    expect(second.error_code).toBe('RESOURCE_NOT_FOUND');
+  });
+
+  it('test_load_resource_counter_uses_temp_prefix', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/nope.md'},
+      toolContext: context,
+    });
+
+    const guardKeys = Object.keys(context.eventActions.stateDelta).filter((k) =>
+      k.includes('skill_resource_not_found_count'),
+    );
+    expect(guardKeys).toHaveLength(1);
+    expect(guardKeys[0].startsWith('temp:')).toBe(true);
+  });
+
+  it('test_execute_script_repeated_failure_escalates_to_fatal', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const context = createContext();
+    const args = {skill_name: 'skill1', script_path: 'scripts/nope.py'};
+
+    const first = (await tool.runAsync({args, toolContext: context})) as {
+      errorCode: string;
+    };
+    const second = (await tool.runAsync({args, toolContext: context})) as {
+      error: string;
+      errorCode: string;
+    };
+
+    expect(first.errorCode).toBe('SCRIPT_NOT_FOUND');
+    expect(second.errorCode).toBe('SCRIPT_NOT_FOUND_FATAL');
+    expect(second.error).toContain('Do not retry any script path');
+    expect(second.error).toContain('failure #2');
+  });
+
+  it('test_execute_script_different_path_also_escalates_to_fatal', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'one.py'},
+      toolContext: context,
+    });
+    const second = (await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'two.py'},
+      toolContext: context,
+    })) as {errorCode: string};
+
+    expect(second.errorCode).toBe('SCRIPT_NOT_FOUND_FATAL');
+  });
+
+  it('test_execute_script_failures_isolated_per_invocation', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const args = {skill_name: 'skill1', script_path: 'nope.py'};
+
+    const first = (await tool.runAsync({
+      args,
+      toolContext: createContext(),
+    })) as {errorCode: string};
+    const second = (await tool.runAsync({
+      args,
+      toolContext: createContext({invocationId: 'other_invocation'}),
+    })) as {errorCode: string};
+
+    expect(first.errorCode).toBe('SCRIPT_NOT_FOUND');
+    expect(second.errorCode).toBe('SCRIPT_NOT_FOUND');
+  });
+
+  it('test_execute_script_counter_uses_temp_prefix', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'nope.py'},
+      toolContext: context,
+    });
+
+    const guardKeys = Object.keys(context.eventActions.stateDelta).filter((k) =>
+      k.includes('skill_script_not_found_count'),
+    );
+    expect(guardKeys).toHaveLength(1);
+    expect(guardKeys[0].startsWith('temp:')).toBe(true);
+  });
+});
+
+describe('skill_toolset parity: session-state injection', () => {
+  function stateSkill(metadata?: Record<string, unknown>): Skill {
+    return {
+      frontmatter: {name: 'skill1', description: 'desc', metadata},
+      instructions: 'Hello {user_name}!',
+    };
+  }
+
+  it('test_load_skill_run_async_injects_state_when_opt_in', async () => {
+    const tool = new LoadSkillTool(
+      new SkillToolset([stateSkill({adk_inject_state: true})]),
+    );
+
+    const result = (await tool.runAsync({
+      args: {name: 'skill1'},
+      toolContext: createContext({state: {user_name: 'Alice'}}),
+    })) as {instructions: string};
+
+    expect(result.instructions).toBe('Hello Alice!');
+  });
+
+  it('test_load_skill_run_async_skips_injection_when_opt_out', async () => {
+    const tool = new LoadSkillTool(
+      new SkillToolset([stateSkill({adk_inject_state: false})]),
+    );
+
+    const result = (await tool.runAsync({
+      args: {name: 'skill1'},
+      toolContext: createContext({state: {user_name: 'Alice'}}),
+    })) as {instructions: string};
+
+    expect(result.instructions).toBe('Hello {user_name}!');
+  });
+
+  it('test_load_skill_run_async_skips_injection_when_metadata_absent', async () => {
+    const tool = new LoadSkillTool(new SkillToolset([stateSkill()]));
+
+    const result = (await tool.runAsync({
+      args: {name: 'skill1'},
+      toolContext: createContext({state: {user_name: 'Alice'}}),
+    })) as {instructions: string};
+
+    expect(result.instructions).toBe('Hello {user_name}!');
   });
 });
