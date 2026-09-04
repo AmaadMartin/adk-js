@@ -36,7 +36,10 @@ export function dynamicJsonColumnType(platform: Platform): string {
   if (platform.getDefaultCharset() === 'utf8mb4') {
     return 'longtext';
   }
-  return platform.getTextTypeDeclarationSQL({});
+  // adk-python falls back to `TEXT` here because SQLAlchemy has no portable
+  // JSON type. MikroORM has one, so a backend keeps the declaration it already
+  // uses: `json` on SQLite and Unicode `nvarchar(max)` on SQL Server.
+  return declared;
 }
 
 /** The SQL type a microsecond-precision timestamp column takes. */
@@ -51,7 +54,7 @@ export function preciseTimestampColumnType(platform: Platform): string {
  *
  * PostgreSQL keeps the object in `jsonb`. MySQL and MariaDB use `longtext`,
  * which adk-python picked so a large session state does not overflow a
- * `TEXT` column. Every other backend stores JSON text.
+ * `TEXT` column. Every other backend keeps its own JSON declaration.
  */
 export class DynamicJsonType extends JsonType {
   override getColumnType(_prop: EntityProperty, platform: Platform): string {
@@ -96,10 +99,11 @@ export class PreciseTimestampType extends Type<
     value: string | number | Date | null,
     platform: Platform,
   ): Date | null {
-    // A driver hands back a POSIX-seconds epoch for a column adk-python
-    // wrote. Seconds, not milliseconds.
+    // MikroORM counts an epoch in milliseconds, not the POSIX seconds
+    // adk-python reads: `BaseSqlitePlatform.processDateProperty` stores a
+    // `Date` as `+value`, and `Platform.parseDate` reads it as `new Date(value)`.
     if (typeof value === 'number') {
-      return new Date(value * 1000);
+      return new Date(value);
     }
     if (typeof value === 'string') {
       return platform.parseDate(value);
