@@ -41,7 +41,9 @@ export interface RestrictedPickleOptions {
 }
 
 /**
- * Globals admitted by exact `module.name`.
+ * Globals admitted by exact `module.name`. Every name a payload mentions is
+ * checked against this set, {@link ALLOWED_MODULES} and
+ * {@link ALLOWED_MODULE_PREFIXES}, and refused if none admits it.
  *
  * The `builtins` scalar types have no reconstructor of their own: they appear
  * as a bare `GLOBAL` (a `collections.defaultdict` records its factory that
@@ -355,23 +357,31 @@ function refusalMessage(module: string, name: string): string {
   );
 }
 
-function isAllowed(module: string, name: string): boolean {
+function isAllowed(module: string, key: string): boolean {
   return (
-    ALLOWED_GLOBALS.has(`${module}.${name}`) ||
+    ALLOWED_GLOBALS.has(key) ||
     ALLOWED_MODULES.has(module) ||
     ALLOWED_MODULE_PREFIXES.some((prefix) => module.startsWith(prefix))
   );
 }
 
-/** Builds the resolver `loadPickle` consults for every name in the payload. */
+/**
+ * Builds the resolver `loadPickle` consults for every name in the payload.
+ *
+ * The allowlist is the only gate. A name is admitted or refused first, and
+ * only then does {@link RECONSTRUCTORS} decide how to render it. Consulting
+ * the reconstructors first would make membership in either table enough to
+ * admit a name, so what a type renders as would decide whether it is safe.
+ */
 function createResolver(options: RestrictedPickleOptions): GlobalResolver {
   return (module, name) => {
-    const reconstruct = RECONSTRUCTORS.get(`${module}.${name}`);
+    const key = `${module}.${name}`;
+    if (!isAllowed(module, key) && options.allowUnsafeUnpickling !== true) {
+      throw new Error(refusalMessage(module, name));
+    }
+    const reconstruct = RECONSTRUCTORS.get(key);
     if (reconstruct !== undefined) {
       return {construct: (args) => reconstruct(args)};
-    }
-    if (!isAllowed(module, name) && options.allowUnsafeUnpickling !== true) {
-      throw new Error(refusalMessage(module, name));
     }
     return {
       construct: (args): PickledInstance => ({
