@@ -10,20 +10,6 @@ import {
   PickleObjectFactory,
 } from './pickle_utils.js';
 
-/**
- * Factories for the Python builtin and standard-library types a pickle
- * payload can name.
- *
- * A caller composes these into its own allowlist, so a payload that names
- * `datetime.datetime` gets a `Date` and a payload that names anything absent
- * from the map is refused. Every factory here builds plain data from the
- * arguments the payload supplied; none of them runs the Python callable the
- * global stands for.
- *
- * The set matches `_STATIC_ALLOWED_GLOBALS` in adk-python's
- * `src/google/adk/sessions/_restricted_pickle.py`.
- */
-
 /** Milliseconds in a day, for a `datetime.timedelta`. */
 const MS_PER_DAY = 86_400_000;
 const MS_PER_SECOND = 1_000;
@@ -131,6 +117,12 @@ const DICT_FACTORY: PickleObjectFactory = {
       : new Map(toEntries(args[0])),
 };
 
+/** Python's `list` and `tuple` both rebuild as an array. */
+const LIST_FACTORY: PickleObjectFactory = fromFirstArgument(
+  (a) => [...toIterable(a)],
+  () => [],
+);
+
 function toEntries(value: unknown): Iterable<[unknown, unknown]> {
   if (value instanceof Map) {
     return value;
@@ -168,6 +160,13 @@ const UUID_FACTORY: PickleObjectFactory = {
  * The builtin and standard-library globals a payload may name, and the plain
  * JavaScript value each one builds.
  *
+ * A caller composes these into its own allowlist, so a payload that names
+ * `datetime.datetime` gets a `Date` and a payload that names anything absent
+ * from the map is refused. Every factory here builds plain data from the
+ * arguments the payload supplied; none of them runs the Python callable the
+ * global stands for. The set matches `_STATIC_ALLOWED_GLOBALS` in adk-python's
+ * `src/google/adk/sessions/_restricted_pickle.py`.
+ *
  * | Python | JavaScript |
  * | --- | --- |
  * | `dict`, `OrderedDict`, `defaultdict` | `Map` |
@@ -190,20 +189,8 @@ export const PYTHON_STDLIB_PICKLE_FACTORIES: ReadonlyMap<
   PickleObjectFactory
 > = new Map<string, PickleObjectFactory>([
   ['builtins.dict', DICT_FACTORY],
-  [
-    'builtins.list',
-    fromFirstArgument(
-      (a) => [...toIterable(a)],
-      () => [],
-    ),
-  ],
-  [
-    'builtins.tuple',
-    fromFirstArgument(
-      (a) => [...toIterable(a)],
-      () => [],
-    ),
-  ],
+  ['builtins.list', LIST_FACTORY],
+  ['builtins.tuple', LIST_FACTORY],
   [
     'builtins.set',
     fromFirstArgument(
@@ -313,12 +300,6 @@ export const PYTHON_STDLIB_PICKLE_FACTORIES: ReadonlyMap<
  * payload names whichever module the interpreter that wrote it recorded.
  */
 function pathFactories(): Array<[string, PickleObjectFactory]> {
-  const classNames = [
-    'PurePosixPath',
-    'PureWindowsPath',
-    'PosixPath',
-    'WindowsPath',
-  ];
   const separators: Record<string, string> = {
     PurePosixPath: '/',
     PosixPath: '/',
@@ -327,12 +308,10 @@ function pathFactories(): Array<[string, PickleObjectFactory]> {
   };
   const factories: Array<[string, PickleObjectFactory]> = [];
   for (const moduleName of ['pathlib', 'pathlib._local']) {
-    for (const className of classNames) {
+    for (const [className, separator] of Object.entries(separators)) {
       factories.push([
         `${moduleName}.${className}`,
-        {
-          create: (args) => args.map(toText).join(separators[className]) || '.',
-        },
+        {create: (args) => args.map(toText).join(separator) || '.'},
       ]);
     }
   }

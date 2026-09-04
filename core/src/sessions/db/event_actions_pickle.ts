@@ -35,7 +35,7 @@ import {
  */
 
 /** The class a legacy `events.actions` payload names. */
-export const EVENT_ACTIONS_PICKLE_CLASS: PickleGlobal = {
+const EVENT_ACTIONS_PICKLE_CLASS: PickleGlobal = {
   module: 'google.adk.events.event_actions',
   name: 'EventActions',
 };
@@ -83,7 +83,7 @@ const ALLOWED_MODEL_GLOBALS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Modules whose every member is admitted as a model.
+ * The module whose every member is admitted as a model.
  *
  * `google.genai.types` is a generated module of pydantic models and enums,
  * reachable from an `EventActions` through its compacted content. Naming its
@@ -91,9 +91,7 @@ const ALLOWED_MODEL_GLOBALS: ReadonlySet<string> = new Set([
  * SDK, so the module is admitted as a whole. This is the one place the
  * allowlist is coarser than adk-python's derived set.
  */
-const ALLOWED_MODEL_MODULES: ReadonlySet<string> = new Set([
-  'google.genai.types',
-]);
+const GENAI_TYPES_MODULE = 'google.genai.types';
 
 /**
  * Builds a pydantic model or an enum member from a payload.
@@ -148,7 +146,7 @@ function resolveEventActionsGlobal(
   }
   if (
     ALLOWED_MODEL_GLOBALS.has(key) ||
-    ALLOWED_MODEL_MODULES.has(pickleGlobal.module)
+    pickleGlobal.module === GENAI_TYPES_MODULE
   ) {
     return PYDANTIC_VALUE_FACTORY;
   }
