@@ -7,15 +7,15 @@
 import {GenerateContentConfig, Part} from '@google/genai';
 import {z} from 'zod';
 
+import {InputValidationError} from '../../errors/input_validation_error.js';
 import {Event} from '../../events/event.js';
 import {BaseLlm} from '../../models/base_llm.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {LLMRegistry} from '../../models/registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {evalModel, optionalField} from '../common.js';
+import {toCamelCase} from '../../utils/object_notation_utils.js';
 import {ConversationScenario} from '../conversation_scenarios.js';
-import {DEFAULT_USER_SIMULATOR_STOP_SIGNAL} from '../eval_metrics.js';
 import {addDefaultRetryOptionsIfNotPresent} from '../retry_options_utils.js';
 import {
   REQUIRED_TEMPLATE_PARAMS,
@@ -27,6 +27,15 @@ import {
   UserSimulator,
   UserSimulatorStatus,
 } from './user_simulator.js';
+
+/**
+ * The signal a simulated user emits when the conversation is complete.
+ *
+ * adk-python keeps this module-private too. The evaluation metrics module
+ * exports the same constant for a metric criterion to default to, but that
+ * module is not part of this change.
+ */
+const DEFAULT_USER_SIMULATOR_STOP_SIGNAL = '</finished>';
 
 /** The model that plays the user when the config names none. */
 const DEFAULT_MODEL = 'gemini-2.5-flash';
@@ -52,26 +61,70 @@ const CUSTOM_INSTRUCTIONS_ERROR =
   ' placeholders using Jinja syntax: {{ stop_signal }}, {{' +
   ' conversation_plan }}, {{ conversation_history }}';
 
-/**
- * Configuration for {@link LlmBackedUserSimulator}.
- *
- * Every field has a default, which {@link parseLlmBackedUserSimulatorConfig}
- * applies.
- */
-export interface LlmBackedUserSimulatorConfig {
+const configSchema = z.strictObject({
+  /** Discriminator that selects this simulator. */
+  type: z.literal('llm_backed').default('llm_backed'),
+
+  /** The model that plays the user. */
+  model: z.string().default(DEFAULT_MODEL),
+
+  /** The configuration the model is called with. */
+  modelConfiguration: z
+    .custom<GenerateContentConfig>(
+      (value) => typeof value === 'object' && value !== null,
+      {message: 'must be a GenerateContentConfig'},
+    )
+    // A fresh object per config, so one simulator's model configuration is
+    // never the object another simulator reads.
+    .default(() => ({
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingBudget: DEFAULT_THINKING_BUDGET,
+      },
+    })),
+
   /**
-   * Discriminator that selects this simulator. Defaults to `'llm_backed'`.
+   * How many turns the simulated conversation may take, the fixed starting
+   * prompt included. It stops a run-away conversation in which the agent and
+   * the simulated user never finish. `-1` removes the limit, which is not
+   * recommended.
    */
-  type?: 'llm_backed';
+  maxAllowedInvocations: z.number().default(DEFAULT_MAX_ALLOWED_INVOCATIONS),
+
+  /** Instructions that replace the built-in ones. */
+  customInstructions: z
+    .string()
+    .refine(
+      (value) => isValidUserSimulatorTemplate(value, REQUIRED_TEMPLATE_PARAMS),
+      {message: CUSTOM_INSTRUCTIONS_ERROR},
+    )
+    // adk-python writes `null` for a field it has no value for.
+    .nullish()
+    .transform((value) => value ?? undefined),
+
+  /**
+   * Whether the conversation the model is shown includes the agent's tool
+   * calls and their results.
+   */
+  includeFunctionCalls: z.boolean().default(false),
+});
+
+/**
+ * A {@link LlmBackedUserSimulatorConfig} with every default applied, as
+ * {@link parseLlmBackedUserSimulatorConfig} returns it.
+ */
+export interface ResolvedLlmBackedUserSimulatorConfig {
+  /** Discriminator that selects this simulator. Defaults to `'llm_backed'`. */
+  type: 'llm_backed';
 
   /** The model that plays the user. Defaults to `'gemini-2.5-flash'`. */
-  model?: string;
+  model: string;
 
   /**
    * The configuration the model is called with. Defaults to a thinking budget
    * of 10240 tokens, with thoughts included.
    */
-  modelConfiguration?: GenerateContentConfig;
+  modelConfiguration: GenerateContentConfig;
 
   /**
    * How many turns the simulated conversation may take, the fixed starting
@@ -79,13 +132,13 @@ export interface LlmBackedUserSimulatorConfig {
    * the simulated user never finish. Defaults to 20. Set `-1` for no limit,
    * which is not recommended.
    */
-  maxAllowedInvocations?: number;
+  maxAllowedInvocations: number;
 
   /**
    * Instructions that replace the built-in ones. They must reference
    * `{{ stop_signal }}`, `{{ conversation_plan }}` and
-   * `{{ conversation_history }}` as Jinja placeholders, and also
-   * `{{ persona }}` when the scenario names a persona.
+   * `{{ conversation_history }}`, and also `{{ persona }}` when the scenario
+   * names a persona. Absent by default.
    */
   customInstructions?: string;
 
@@ -93,61 +146,17 @@ export interface LlmBackedUserSimulatorConfig {
    * Whether the conversation the model is shown includes the agent's tool
    * calls and their results. Defaults to false.
    */
-  includeFunctionCalls?: boolean;
-}
-
-/** A {@link LlmBackedUserSimulatorConfig} with every default applied. */
-export interface ResolvedLlmBackedUserSimulatorConfig {
-  /** Discriminator that selects this simulator. */
-  type: 'llm_backed';
-
-  /** The model that plays the user. */
-  model: string;
-
-  /** The configuration the model is called with. */
-  modelConfiguration: GenerateContentConfig;
-
-  /** How many turns the simulated conversation may take. */
-  maxAllowedInvocations: number;
-
-  /** Instructions that replace the built-in ones. */
-  customInstructions?: string;
-
-  /** Whether the conversation shown to the model includes tool calls. */
   includeFunctionCalls: boolean;
 }
 
-const configModel = evalModel(
-  {
-    type: z.literal('llm_backed').default('llm_backed'),
-    model: z.string().default(DEFAULT_MODEL),
-    modelConfiguration: z
-      .custom<GenerateContentConfig>(
-        (value) => typeof value === 'object' && value !== null,
-        {message: 'must be a GenerateContentConfig'},
-      )
-      // A fresh object per config, so one simulator's model configuration is
-      // never the object another simulator reads.
-      .default(() => ({
-        thinkingConfig: {
-          includeThoughts: true,
-          thinkingBudget: DEFAULT_THINKING_BUDGET,
-        },
-      })),
-    maxAllowedInvocations: z.number().default(DEFAULT_MAX_ALLOWED_INVOCATIONS),
-    customInstructions: optionalField(
-      z
-        .string()
-        .refine(
-          (value) =>
-            isValidUserSimulatorTemplate(value, REQUIRED_TEMPLATE_PARAMS),
-          {message: CUSTOM_INSTRUCTIONS_ERROR},
-        ),
-    ),
-    includeFunctionCalls: z.boolean().default(false),
-  },
-  {name: 'LlmBackedUserSimulatorConfig'},
-);
+/**
+ * Configuration for {@link LlmBackedUserSimulator}.
+ *
+ * Every field has a default, which {@link parseLlmBackedUserSimulatorConfig}
+ * applies.
+ */
+export type LlmBackedUserSimulatorConfig =
+  Partial<ResolvedLlmBackedUserSimulatorConfig>;
 
 /**
  * Validates a user simulator config and applies its defaults.
@@ -162,7 +171,13 @@ const configModel = evalModel(
 export function parseLlmBackedUserSimulatorConfig(
   raw: unknown,
 ): ResolvedLlmBackedUserSimulatorConfig {
-  return configModel.parse(raw);
+  const result = configSchema.safeParse(toCamelCase(raw));
+  if (!result.success) {
+    throw new InputValidationError(
+      `Invalid LlmBackedUserSimulatorConfig: ${z.prettifyError(result.error)}`,
+    );
+  }
+  return result.data;
 }
 
 /**
