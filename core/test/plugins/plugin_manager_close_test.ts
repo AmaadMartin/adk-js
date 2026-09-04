@@ -76,7 +76,10 @@ describe('PluginManager.close', () => {
 
     expect(error).toBeInstanceOf(AggregateError);
     const aggregate = error as AggregateError;
-    expect(aggregate.message).toBe("Failed to close plugins: 'alpha', 'beta'");
+    expect(aggregate.message).toBe(
+      "Failed to close plugins: 'alpha': alpha could not release its socket, " +
+        "'beta': beta could not release its socket",
+    );
     expect(aggregate.errors).toHaveLength(2);
     expect(aggregate.errors[0].message).toContain(
       'alpha could not release its socket',

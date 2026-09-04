@@ -81,9 +81,9 @@ try {
   await pluginManager.close();
 } catch (error: unknown) {
   if (error instanceof AggregateError) {
-    // error.message: Failed to close plugins: 'metrics'
+    // error.message: Failed to close plugins: 'metrics': socket still busy
     for (const cause of error.errors) {
-      // cause.message: Error closing plugin 'metrics': socket still busy
+      // cause.message: socket still busy
     }
   }
 }

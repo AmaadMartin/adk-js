@@ -8,7 +8,7 @@ Most plugin callbacks can change what happens next. `onModelErrorCallback` may r
 
 `onRunErrorCallback` is different. It reports an error that has already happened and that the caller is about to propagate, so there is nothing left to decide. The manager therefore ignores what the plugin returns, notifies every plugin, and never rejects. A plugin that fails while reporting the error is logged and skipped, because a broken reporter must not replace the error being reported.
 
-Use `onRunErrorCallback` for the whole run. Use `onAgentErrorCallback` when you need the failing agent, and `onToolErrorCallback` or `onModelErrorCallback` when you want to recover rather than observe.
+Use `onRunErrorCallback` to observe a failed run. Use `onToolErrorCallback` or `onModelErrorCallback` when you want to recover from a narrower failure rather than observe it.
 
 ## Get started
 

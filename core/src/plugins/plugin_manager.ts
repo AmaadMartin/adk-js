@@ -115,10 +115,12 @@ export class PluginManager {
       }
     }
     if (failures.length > 0) {
-      const names = failures.map((f) => `'${f.name}'`).join(', ');
+      const reasons = failures
+        .map((f) => `'${f.name}': ${f.error.message}`)
+        .join(', ');
       throw new AggregateError(
         failures.map((f) => f.error),
-        `Failed to close plugins: ${names}`,
+        `Failed to close plugins: ${reasons}`,
       );
     }
   }
@@ -485,32 +487,6 @@ export class PluginManager {
   }
 
   /**
-   * Runs the `onRunErrorCallback` for all plugins.
-   *
-   * Unlike the other callbacks this one never exits early and never re-throws:
-   * a plugin that fails is logged and the next one still runs. The
-   * notification reports an error that already happened, so a failure here
-   * must not replace the error the caller is about to propagate.
-   */
-  async runOnRunErrorCallback({
-    invocationContext,
-    error,
-  }: {
-    invocationContext: InvocationContext;
-    error: Error;
-  }): Promise<void> {
-    for (const plugin of this.plugins) {
-      try {
-        await plugin.onRunErrorCallback({invocationContext, error});
-      } catch (e: unknown) {
-        logger.error(
-          `Error in plugin '${plugin.name}' during 'onRunErrorCallback' callback: ${formatError(e)}`,
-        );
-      }
-    }
-  }
-
-  /**
    * Runs the `onToolErrorCallback` for all plugins.
    */
   async runOnToolErrorCallback({
@@ -530,6 +506,55 @@ export class PluginManager {
         plugin.onToolErrorCallback({tool, toolArgs, toolContext, error}),
       'onToolErrorCallback',
     )) as Record<string, unknown> | undefined;
+  }
+
+  /**
+   * Runs the `onRunErrorCallback` for all plugins.
+   *
+   * Unlike the other callbacks this one never exits early and never re-throws:
+   * a plugin that fails is logged and the next one still runs. The
+   * notification reports an error that already happened, so a failure here
+   * must not replace the error the caller is about to propagate.
+   */
+  async runOnRunErrorCallback({
+    invocationContext,
+    error,
+  }: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    await this.runNotificationCallbacks(
+      (plugin: BasePlugin) =>
+        plugin.onRunErrorCallback({invocationContext, error}),
+      'onRunErrorCallback',
+    );
+  }
+
+  /**
+   * Runs a notification-only callback for every registered plugin.
+   *
+   * Unlike {@link runCallbacks} this method never exits early and never
+   * re-throws: a plugin that fails is logged and the next one still runs. A
+   * notification reports an error that already happened, so a failure here must
+   * not replace the error the caller is about to propagate.
+   *
+   * @param callback A closure containing the callback method to run on each
+   *     plugin.
+   * @param callbackName The name of the callback, used for logging.
+   */
+  private async runNotificationCallbacks(
+    callback: (plugin: BasePlugin) => Promise<void>,
+    callbackName: string,
+  ): Promise<void> {
+    for (const plugin of this.plugins) {
+      try {
+        await callback(plugin);
+      } catch (e: unknown) {
+        logger.error(
+          `Error in plugin '${plugin.name}' during '${callbackName}' callback: ${formatError(e)}`,
+        );
+      }
+    }
   }
 }
 
@@ -555,8 +580,7 @@ async function closePlugin(
       `Closing plugin '${plugin.name}' timed out after ${timeoutSeconds}s.`,
     );
   } catch (e: unknown) {
-    const message = `Error closing plugin '${plugin.name}': ${formatError(e)}`;
-    logger.error(message);
-    return new Error(message, {cause: e});
+    logger.error(`Error closing plugin '${plugin.name}'.`, e);
+    return new Error(formatError(e), {cause: e});
   }
 }
