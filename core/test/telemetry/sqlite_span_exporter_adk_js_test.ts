@@ -127,6 +127,116 @@ class RecordingLogger implements Logger {
   setLogLevel(): void {}
 }
 
+/**
+ * The data definition from `sqlite_span_exporter.py` in `google/adk-python`,
+ * reproduced verbatim so these tests read a file adk-python could have written.
+ */
+const PYTHON_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS spans (
+     span_id TEXT PRIMARY KEY,
+     trace_id TEXT NOT NULL,
+     parent_span_id TEXT,
+     name TEXT NOT NULL,
+     start_time_unix_nano INTEGER,
+     end_time_unix_nano INTEGER,
+     session_id TEXT,
+     invocation_id TEXT,
+     attributes_json TEXT
+   )`,
+  'CREATE INDEX IF NOT EXISTS spans_session_id_idx ON spans(session_id)',
+  'CREATE INDEX IF NOT EXISTS spans_trace_id_idx ON spans(trace_id)',
+];
+
+/** A wall-clock epoch nanosecond value, far above `Number.MAX_SAFE_INTEGER`. */
+const PYTHON_START_NANOS = '1788563807232000000';
+
+interface PythonSpanRow {
+  spanId: string;
+  traceId: string;
+  name: string;
+  startTimeUnixNano: string;
+  sessionId: string;
+  attributesJson: string;
+}
+
+/** Runs a callback against `dbPath` using the driver directly, never the entity. */
+async function withRawDatabase<T>(
+  dbPath: string,
+  run: (
+    execute: (sql: string, params?: unknown[]) => Promise<unknown>,
+  ) => Promise<T>,
+): Promise<T> {
+  const orm = await MikroORM.init({
+    dbName: dbPath,
+    driver: SqliteDriver,
+    entities: [],
+    discovery: {warnWhenNoEntities: false},
+  });
+  try {
+    const connection = orm.em.getConnection();
+    return await run((sql, params) => connection.execute(sql, params));
+  } finally {
+    await orm.close();
+  }
+}
+
+/** Creates the adk-python table at `dbPath` and inserts one span row into it. */
+async function seedPythonDatabase(
+  dbPath: string,
+  row: PythonSpanRow,
+): Promise<void> {
+  await withRawDatabase(dbPath, async (execute) => {
+    for (const statement of PYTHON_SCHEMA_SQL) {
+      await execute(statement);
+    }
+    await execute(
+      `INSERT OR REPLACE INTO spans (span_id, trace_id, parent_span_id, name,
+         start_time_unix_nano, end_time_unix_nano, session_id, invocation_id,
+         attributes_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.spanId,
+        row.traceId,
+        null,
+        row.name,
+        row.startTimeUnixNano,
+        row.startTimeUnixNano,
+        row.sessionId,
+        null,
+        row.attributesJson,
+      ],
+    );
+  });
+}
+
+/**
+ * Reads the stored spans the way adk-python does, oldest first.
+ *
+ * The timestamp is cast to text because the driver rounds an integer column to
+ * a JavaScript double, which cannot hold epoch nanoseconds.
+ */
+async function readPythonDatabase(
+  dbPath: string,
+): Promise<Array<{spanId: string; startTimeUnixNano: string}>> {
+  return withRawDatabase(dbPath, async (execute) => {
+    const rows = await execute(
+      `SELECT span_id, cast(start_time_unix_nano as text) AS nanos
+         FROM spans ORDER BY span_id`,
+    );
+    if (!Array.isArray(rows)) {
+      expect.fail('expected the raw query to return rows');
+    }
+    return rows.map((row) => {
+      const {span_id: spanId, nanos} = row as {span_id: string; nanos: string};
+      return {spanId, startTimeUnixNano: nanos};
+    });
+  });
+}
+
+/** Converts an OpenTelemetry `HrTime` to epoch nanoseconds. */
+function hrTimeToNanos(hrTime: HrTime): bigint {
+  return BigInt(hrTime[0]) * 1_000_000_000n + BigInt(hrTime[1]);
+}
+
 describe('SqliteSpanExporter', () => {
   let tempDir: string;
   let dbPath: string;
@@ -697,6 +807,59 @@ describe('SqliteSpanExporter', () => {
       const second = createExporter();
       const retrieved = await second.getAllSpansForSession('session-restart');
       expect(retrieved.map((span) => span.name)).toEqual(['persisted']);
+    });
+  });
+
+  describe('adk-python database compatibility', () => {
+    it('reads a table created by the adk-python data definition', async () => {
+      await seedPythonDatabase(dbPath, {
+        spanId: '00000000000abc12',
+        traceId: '000000000000000000000000000def45',
+        name: 'call_llm',
+        startTimeUnixNano: PYTHON_START_NANOS,
+        sessionId: 'py-session',
+        attributesJson: JSON.stringify({[SESSION_ID_ATTRIBUTE]: 'py-session'}),
+      });
+
+      const [span] = await createExporter().getAllSpansForSession('py-session');
+      if (!span) {
+        expect.fail('the adk-python row was not returned');
+      }
+      expect(span.name).toBe('call_llm');
+      expect(span.spanContext().spanId).toBe('00000000000abc12');
+      expect(hrTimeToNanos(span.startTime)).toBe(BigInt(PYTHON_START_NANOS));
+      expect(span.attributes).toEqual({[SESSION_ID_ATTRIBUTE]: 'py-session'});
+    });
+
+    it('leaves a row written by adk-python readable after adopting the file', async () => {
+      await seedPythonDatabase(dbPath, {
+        spanId: '00000000000abc12',
+        traceId: '000000000000000000000000000def45',
+        name: 'py_span',
+        startTimeUnixNano: PYTHON_START_NANOS,
+        sessionId: 'shared-session',
+        attributesJson: JSON.stringify({
+          [SESSION_ID_ATTRIBUTE]: 'shared-session',
+        }),
+      });
+
+      const exporter = createExporter();
+      await exportSpans(exporter, [
+        createTestSpan({
+          spanId: '00000000000abc34',
+          traceId: '000000000000000000000000000def45',
+          name: 'js_span',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'shared-session'},
+          startTime: [1788563807, 232000123],
+        }),
+      ]);
+      await exporter.shutdown();
+
+      const rows = await readPythonDatabase(dbPath);
+      expect(rows).toEqual([
+        {spanId: '00000000000abc12', startTimeUnixNano: PYTHON_START_NANOS},
+        {spanId: '00000000000abc34', startTimeUnixNano: '1788563807232000123'},
+      ]);
     });
   });
 
