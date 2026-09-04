@@ -806,6 +806,7 @@ export {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
   FinishTaskTool,
+  isFinishTaskTerminalResponse,
 } from './tools/finish_task_tool.js';
 export {FunctionTool, isFunctionTool} from './tools/function_tool.js';
 export type {

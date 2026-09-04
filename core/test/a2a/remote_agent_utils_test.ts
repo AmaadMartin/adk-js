@@ -7,6 +7,7 @@
 import {TextPart} from '@a2a-js/sdk';
 import {describe, expect, it} from 'vitest';
 import {
+  findFinishTaskArgsFromHistory,
   getFunctionResponseCallId,
   getUserFunctionCallAt,
   isFunctionCallEvent,
@@ -582,6 +583,163 @@ describe('remote_agent_utils', () => {
 
       expect(dumped).toContain('get_weather');
       expect(dumped).toContain('Pimpri');
+    });
+  });
+
+  describe('fullHistoryWhenStateless', () => {
+    const userTurn = (text: string) =>
+      createEvent({author: 'user', content: {role: 'user', parts: [{text}]}});
+
+    const statelessReply = createEvent({
+      author: 'test-agent',
+      content: {role: 'model', parts: [{text: 'reply'}]},
+    });
+
+    const statefulReply = createEvent({
+      author: 'test-agent',
+      content: {role: 'model', parts: [{text: 'reply'}]},
+      customMetadata: {[AdkMetadataKeys.CONTEXT_ID]: 'ctx-1'},
+    });
+
+    it('stops at the last remote reply by default', () => {
+      const session = {
+        events: [userTurn('first'), statelessReply, userTurn('second')],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session);
+
+      const dumped = JSON.stringify(result.parts);
+      expect(dumped).toContain('second');
+      expect(dumped).not.toContain('first');
+    });
+
+    it('sends the whole session to a peer with no context id', () => {
+      const session = {
+        events: [userTurn('first'), statelessReply, userTurn('second')],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session, {
+        fullHistoryWhenStateless: true,
+      });
+
+      const dumped = JSON.stringify(result.parts);
+      expect(dumped).toContain('first');
+      expect(dumped).toContain('second');
+    });
+
+    it('still stops at the last reply once a context id appears', () => {
+      const session = {
+        events: [userTurn('first'), statefulReply, userTurn('second')],
+      } as unknown as Session;
+
+      const result = toMissingRemoteSessionParts(mockCtx, session, {
+        fullHistoryWhenStateless: true,
+      });
+
+      const dumped = JSON.stringify(result.parts);
+      expect(result.contextId).toBe('ctx-1');
+      expect(dumped).toContain('second');
+      expect(dumped).not.toContain('first');
+    });
+  });
+
+  describe('findFinishTaskArgsFromHistory', () => {
+    const finishCall = (
+      args: Record<string, unknown>,
+      id: string,
+      isolationScope?: string,
+    ) => ({
+      ...createEvent({
+        author: 'test-agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id, name: 'finish_task', args}}],
+        },
+      }),
+      isolationScope,
+    });
+
+    it('returns undefined when there is no finish_task call', () => {
+      const session = {events: []} as unknown as Session;
+
+      expect(findFinishTaskArgsFromHistory(session)).toBeUndefined();
+    });
+
+    it('returns the latest call arguments', () => {
+      const session = {
+        events: [finishCall({v: 1}, 'a'), finishCall({v: 2}, 'b')],
+      } as unknown as Session;
+
+      expect(findFinishTaskArgsFromHistory(session)).toEqual({v: 2});
+    });
+
+    it('ignores calls outside the isolation scope', () => {
+      const session = {
+        events: [
+          finishCall({v: 1}, 'a', 'scope-1'),
+          finishCall({v: 2}, 'b', 'scope-2'),
+        ],
+      } as unknown as Session;
+
+      expect(findFinishTaskArgsFromHistory(session, 'scope-1')).toEqual({v: 1});
+    });
+
+    it('ignores a call with no arguments', () => {
+      const session = {
+        events: [
+          {
+            ...createEvent({
+              author: 'test-agent',
+              content: {
+                role: 'model',
+                parts: [{functionCall: {id: 'a', name: 'finish_task'}}],
+              },
+            }),
+          },
+        ],
+      } as unknown as Session;
+
+      expect(findFinishTaskArgsFromHistory(session)).toEqual({});
+    });
+
+    it('picks the call the completed response names', () => {
+      const completed = createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                id: 'a',
+                name: 'finish_task',
+                response: {result: 'Task completed.'},
+              },
+            },
+          ],
+        },
+      });
+      const session = {
+        events: [finishCall({v: 1}, 'a'), finishCall({v: 2}, 'b')],
+      } as unknown as Session;
+
+      expect(
+        findFinishTaskArgsFromHistory(session, undefined, completed),
+      ).toEqual({v: 1});
+    });
+
+    it('skips a function call for another tool', () => {
+      const other = createEvent({
+        author: 'test-agent',
+        content: {
+          role: 'model',
+          parts: [{functionCall: {id: 'x', name: 'other_tool', args: {v: 9}}}],
+        },
+      });
+      const session = {
+        events: [finishCall({v: 1}, 'a'), other],
+      } as unknown as Session;
+
+      expect(findFinishTaskArgsFromHistory(session)).toEqual({v: 1});
     });
   });
 });

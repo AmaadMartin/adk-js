@@ -6,7 +6,9 @@
 
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
 
+import {Event} from '../events/event.js';
 import {appendInstructions} from '../models/llm_request.js';
+import {getFunctionResponses} from '../models/llm_response.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -27,16 +29,41 @@ export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
  * The terminal failure counterpart of {@link FINISH_TASK_SUCCESS_RESULT}.
  *
  * A task that reports this has finished: it will not read another user reply,
- * so its isolation scope closes just as it does on success.
+ * so its isolation scope closes just as it does on success. A remote task agent
+ * reports a failed task this way, so the delegating agent can hand control back
+ * to its coordinator.
  *
- * No adk-js code path writes it, and neither does adk-python's tool. Both SDKs
- * recognise it on read, because a session is shared storage: adk-python's
+ * The tool itself never writes it, and neither does adk-python's tool. Both
+ * SDKs recognise it on read, because a session is shared storage: adk-python's
  * `_finish_task_tool.py::is_finish_task_terminal_fr` accepts it, and a session
  * adk-python wrote can be read back here through the same session service. A
  * reader that did not recognise it would treat the finished task's isolation
  * scope as open and capture every later user turn into it.
  */
 export const FINISH_TASK_ERROR_RESULT = 'Task failed.';
+
+/**
+ * Whether an event carries a terminal `finish_task` function response: one
+ * reporting either success or failure.
+ *
+ * A response carrying anything else (a validation error, say) is not terminal,
+ * so the caller keeps iterating and the agent gets a chance to retry.
+ *
+ * @param event The event to inspect.
+ * @return `true` when the task has finished, either way.
+ */
+export function isFinishTaskTerminalResponse(event: Event): boolean {
+  return getFunctionResponses(event).some((fr) => {
+    if (fr.name !== FINISH_TASK_TOOL_NAME) {
+      return false;
+    }
+    const {result} = (fr.response ?? {}) as {result?: unknown};
+    return (
+      result === FINISH_TASK_SUCCESS_RESULT ||
+      result === FINISH_TASK_ERROR_RESULT
+    );
+  });
+}
 
 /** The default output schema when the task agent declares none. */
 const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {

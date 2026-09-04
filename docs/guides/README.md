@@ -34,6 +34,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ParallelAgent config documents](agents/parallel_agent_config/index.md) - Validating a ParallelAgent configuration document, with the same verdict ADK Python gives.
 - [Per-run request configuration](agents/request_config/index.md) - How `RunConfig` and the agent's own `generateContentConfig` combine into one model request.
 - [ReadonlyContext](agents/readonly_context/index.md) - The read-only view of an invocation given to instruction providers, toolsets and plugins.
+- [RemoteA2AAgent](agents/remote_a2a_agent/index.md) - Running a remote agent over the A2A protocol, with authentication, card validation and task delegation.
 - [SequentialAgent config documents](agents/sequential_agent_config/index.md) -
   Validating a `SequentialAgent` configuration document before it reaches your
   code.
