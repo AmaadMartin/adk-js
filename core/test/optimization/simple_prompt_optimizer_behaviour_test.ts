@@ -164,6 +164,30 @@ describe('SimplePromptOptimizer behaviour', () => {
     }
   });
 
+  it('does not carry a clamped batch size into a later optimize call', async () => {
+    installFakeLlm();
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const optimizer = new SimplePromptOptimizer({
+      numIterations: 1,
+      batchSize: 4,
+    });
+
+    const smallSampler = new FakeSampler({trainIds: ['1', '2']});
+    await optimizer.optimize({
+      initialAgent: newInitialAgent(),
+      sampler: smallSampler,
+    });
+    const largeSampler = new FakeSampler({trainIds: ['1', '2', '3', '4', '5']});
+    await optimizer.optimize({
+      initialAgent: newInitialAgent(),
+      sampler: largeSampler,
+    });
+
+    expect(smallSampler.calls[0].batch).toHaveLength(2);
+    // The first run clamped to 2. The second must still use the configured 4.
+    expect(largeSampler.calls[0].batch).toHaveLength(4);
+  });
+
   it('scores an empty validation result as 0 rather than NaN', async () => {
     installFakeLlm();
 

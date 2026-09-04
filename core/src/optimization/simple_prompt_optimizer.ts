@@ -92,8 +92,8 @@ function requireStringInstruction(agent: LlmAgent): string {
 /**
  * Draws `k` distinct items, matching Python's `random.sample`.
  *
- * Callers must pass `k <= items.length`; {@link SimplePromptOptimizer.optimize}
- * guarantees it by clamping the batch size to the training set.
+ * Callers must pass `k <= items.length`; {@link SimplePromptOptimizer} keeps to
+ * that by taking `Math.min` of the batch size and the set it draws from.
  */
 function randomSample<T>(items: readonly T[], k: number): T[] {
   const pool = [...items];
@@ -148,7 +148,7 @@ export class SimplePromptOptimizer extends AgentOptimizer<
   private readonly optimizerModel: string;
   private readonly modelConfiguration: GenerateContentConfig;
   private readonly numIterations: number;
-  private batchSize: number;
+  private readonly batchSize: number;
 
   constructor(config: SimplePromptOptimizerConfig = {}) {
     super();
@@ -179,7 +179,6 @@ export class SimplePromptOptimizer extends AgentOptimizer<
           `examples (${trainExampleIds.length}). Using all training examples ` +
           `for each evaluation.`,
       );
-      this.batchSize = trainExampleIds.length;
     }
 
     const bestAgent = await this.runOptimizationIterations(
@@ -271,7 +270,10 @@ export class SimplePromptOptimizer extends AgentOptimizer<
     sampler: Sampler<UnstructuredSamplingResult>,
     exampleIds: string[],
   ): Promise<number> {
-    const evalBatch = randomSample(exampleIds, this.batchSize);
+    const evalBatch = randomSample(
+      exampleIds,
+      Math.min(this.batchSize, exampleIds.length),
+    );
     const results = await sampler.sampleAndScore({
       candidate: agent,
       exampleSet: Sampler.TRAIN_SET,
