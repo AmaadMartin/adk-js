@@ -315,7 +315,8 @@ export function estimateCacheablePrefixTokens(
  *     the server therefore stays authoritative.
  */
 export function minimumCacheTokens(model?: string): number | undefined {
-  const modelName = (model ?? '').split('/').pop() ?? '';
+  const segments = (model ?? '').split('/');
+  const modelName = segments[segments.length - 1];
   if (modelName.startsWith('gemini-2.5-')) {
     return GEMINI_2_5_MIN_CACHE_TOKENS;
   }
@@ -376,11 +377,11 @@ export async function validActiveCache(
   const cacheConfig = requireCacheConfig(llmRequest);
 
   if (nowInSeconds() >= activeMetadata.expireTime) {
-    logger.info(`Cache expired: ${activeMetadata.cacheName}`);
+    logger.debug(`Cache expired: ${activeMetadata.cacheName}`);
     return undefined;
   }
   if (activeMetadata.invocationsUsed > cacheConfig.cacheIntervals) {
-    logger.info(
+    logger.debug(
       `Cache exceeded cache intervals: ${activeMetadata.cacheName} ` +
         `(${activeMetadata.invocationsUsed} > ${cacheConfig.cacheIntervals} ` +
         'intervals)',
@@ -539,7 +540,7 @@ export class GeminiContextCacheManager {
   async cleanupCache(cacheName: string): Promise<void> {
     try {
       await this.genaiClient.caches.delete({name: cacheName});
-      logger.info(`Cache cleaned up: ${cacheName}`);
+      logger.debug(`Cache cleaned up: ${cacheName}`);
     } catch (error: unknown) {
       logger.warn(
         `Failed to clean up cache ${cacheName}: ${formatError(error)}`,
@@ -582,14 +583,14 @@ export class GeminiContextCacheManager {
 
     const measuredTokens = llmRequest.cacheableContentsTokenCount;
     if (measuredTokens === undefined) {
-      logger.info(
+      logger.debug(
         'No previous token count available, skipping cache creation for the ' +
           'initial request',
       );
       return undefined;
     }
     if (measuredTokens < cacheConfig.minTokens) {
-      logger.info(
+      logger.debug(
         `Previous request too small for caching (${measuredTokens} < ` +
           `${cacheConfig.minTokens} tokens)`,
       );
@@ -602,7 +603,7 @@ export class GeminiContextCacheManager {
     );
     const floor = minimumCacheTokens(llmRequest.model);
     if (floor !== undefined && prefixTokens < floor) {
-      logger.info(
+      logger.debug(
         `Cacheable prefix below the Gemini minimum cache size ` +
           `(${prefixTokens} < ${floor} tokens)`,
       );
@@ -652,7 +653,7 @@ export class GeminiContextCacheManager {
         if (!cacheName) {
           throw new Error('The cache service returned no cache name.');
         }
-        logger.info(`Cache created successfully: ${cacheName}`);
+        logger.debug(`Cache created successfully: ${cacheName}`);
         span.setAttribute('cache_name', cacheName);
 
         return {
