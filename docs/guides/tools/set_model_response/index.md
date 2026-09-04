@@ -20,48 +20,43 @@ bad fields rather than throwing. The model reads that error as an ordinary
 function response and calls again, so a malformed answer costs one extra turn
 instead of ending the turn with bad data.
 
-The tool publishes a validated answer on `event.actions.setModelResponse`. No
-agent in this package reads that field yet, so you wire the tool up yourself:
-add it to an agent's tools and read the field off the resulting event.
-`LlmAgent` still builds its own inline `set_model_response` function tool for
-the same situation, and this class does not replace it.
+You do not construct the tool. `LlmAgent` adds it whenever the agent has both
+an `outputSchema` and at least one tool, and the model cannot take the two
+together. The tool publishes the validated answer on
+`event.actions.setModelResponse`, and the agent promotes that value into its
+final model event, which is also what fills `outputKey`.
 
 ## Get started
 
-Construct the tool from a schema and call it the way the framework would.
+Give the agent an output schema and a tool. Nothing else is needed.
 
 ```ts
-import {
-  Context,
-  InvocationContext,
-  PluginManager,
-  SetModelResponseTool,
-  createSession,
-} from '@google/adk';
+import {FunctionTool, LlmAgent} from '@google/adk';
 import {z} from 'zod/v4';
 
-const tool = new SetModelResponseTool(
-  z.object({
+const lookupTool = new FunctionTool({
+  name: 'lookup',
+  description: 'Looks a person up by name.',
+  execute: () => ({age: 25, city: 'Seattle'}),
+});
+
+const agent = new LlmAgent({
+  name: 'extractor',
+  model: 'gemini-1.5-pro',
+  tools: [lookupTool],
+  outputKey: 'person',
+  outputSchema: z.object({
     name: z.string().describe("A person's name"),
     age: z.number().describe("A person's age"),
-  }),
-);
-
-const toolContext = new Context({
-  invocationContext: new InvocationContext({
-    invocationId: 'demo',
-    session: createSession({id: 'demo-session', appName: 'demo'}),
-    pluginManager: new PluginManager([]),
+    tags: z.array(z.string()).default([]),
   }),
 });
-
-const result = await tool.runAsync({
-  args: {name: 'Alice', age: 25},
-  toolContext,
-});
-// result === {name: 'Alice', age: 25}
-// toolContext.actions.setModelResponse === result
 ```
+
+The model calls `lookup`, then calls `set_model_response({name, age})`. The
+agent's last event carries the validated object as JSON text, and `outputKey`
+receives the validated value. `tags` may be absent, because a field with a
+default is not advertised to the model as required.
 
 ## What the model sees
 
@@ -106,6 +101,9 @@ On failure the tool publishes nothing and returns an error payload:
 Each line before the retry sentence is one failing field, written as
 `path: message`. A failure inside an array element keeps its index, so the first
 element's `id` field reads `0.id`.
+
+Because the value is published only on success, a failed call leaves the agent
+loop running and the model gets another turn.
 
 ## Limits
 

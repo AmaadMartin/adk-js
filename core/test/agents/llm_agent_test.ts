@@ -18,6 +18,7 @@ import {
   createEvent,
   createSession,
   Event,
+  EventType,
   FunctionTool,
   InMemorySessionService,
   InvocationContext,
@@ -30,6 +31,7 @@ import {
   Runner,
   Session,
   ToolProcessLlmRequest,
+  toStructuredEvents,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
 import {
@@ -1555,6 +1557,20 @@ describe('LlmAgent set_model_response flow', () => {
       name: 'Alice',
       nickname: 'Al',
     });
+  });
+
+  it('reports the turn as finished exactly once', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const {events} = await runAgent([
+      setModelResponseCall({name: 'Alice', nickname: null}),
+    ]);
+
+    // Marking the function response final as well would finish the turn twice.
+    const finished = events
+      .flatMap((event) => toStructuredEvents(event))
+      .filter((structured) => structured.type === EventType.FINISHED);
+    expect(finished).toHaveLength(1);
   });
 
   it('gives the model another turn when the call fails validation', async () => {

@@ -198,9 +198,6 @@ export class SetModelResponseTool extends BaseTool {
       }
     }
     toolContext.actions.setModelResponse = result;
-    // The published value is the answer, so the agent promotes it instead of
-    // asking the model to summarize the call.
-    toolContext.actions.skipSummarization = true;
     return result;
   }
 }
