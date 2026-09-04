@@ -33,3 +33,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Sessions
+
+- [DatabaseSessionService](sessions/database_session_service/index.md) - Which backends take a row-level lock, how a timestamp is stored, and how to release the connection.
