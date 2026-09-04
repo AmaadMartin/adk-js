@@ -8,7 +8,7 @@ import {FunctionDeclaration, Type} from '@google/genai';
 import {formatSkillsAsXml} from '../../skills/prompt.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {LIST_SKILLS_TOOL_NAME} from './skill_system_instruction.js';
+import {LIST_SKILLS_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental

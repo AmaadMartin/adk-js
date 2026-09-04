@@ -9,7 +9,7 @@ import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
-import {SEARCH_SKILLS_TOOL_NAME} from './skill_system_instruction.js';
+import {SEARCH_SKILLS_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
