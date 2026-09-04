@@ -172,10 +172,13 @@ Three fields say what happened during the run.
   child keeps that child's path as it travels up, so an ancestor reports where
   the run really broke rather than reporting itself. Both are cleared before a
   retry.
-- `eventAuthor` — the author stamped on events the node leaves unattributed. A
-  `Workflow` sets it to its own name, and child contexts inherit it, so a reader
-  grouping events by author sees one workflow. An event the node authored itself
-  keeps its own author.
+- `eventAuthor` — the author stamped on events the node leaves unattributed. An
+  agent run as a node records its own author here, so a later event it emits
+  without one is still attributed to the agent rather than to the node it was
+  registered under. Child contexts inherit the value. An event that already
+  carries an author keeps it. adk-python also has `Workflow` set this to its own
+  name; adk-js does not, because it attributes events to the node that emitted
+  them.
 - `telemetryContext` — the OTel context active when the node started, plus the
   ids of the events the node yielded, in order. The list lives and dies with the
   node context.
