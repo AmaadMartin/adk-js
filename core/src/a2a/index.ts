@@ -15,6 +15,7 @@ export {
   AGENT_CARD_PATH,
   DEFAULT_A2A_TIMEOUT_MS,
   RemoteA2AAgent,
+  isRemoteA2AAgent,
 } from './a2a_remote_agent.js';
 export type {
   A2AStreamEventData,

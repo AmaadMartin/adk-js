@@ -364,6 +364,26 @@ function toProgressCallback(callback: McpProgressCallback): ProgressCallback {
 }
 
 /**
+ * A unique symbol to identify ADK MCP tool classes.
+ * Defined once and shared by all MCPTool instances.
+ */
+const MCP_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.mcpTool');
+
+/**
+ * Type guard to check if an object is an instance of MCPTool.
+ * @param obj The object to check.
+ * @returns True if the object is an instance of MCPTool, false otherwise.
+ */
+export function isMCPTool(obj: unknown): obj is MCPTool {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    MCP_TOOL_SIGNATURE_SYMBOL in obj &&
+    obj[MCP_TOOL_SIGNATURE_SYMBOL] === true
+  );
+}
+
+/**
  * Represents a tool exposed via the Model Context Protocol (MCP).
  *
  * This class acts as a wrapper around a tool definition received from an MCP
@@ -392,6 +412,9 @@ function toProgressCallback(callback: McpProgressCallback): ProgressCallback {
  * as it did before those options existed.
  */
 export class MCPTool extends BaseTool {
+  /** A unique symbol to identify ADK MCP tool class. */
+  readonly [MCP_TOOL_SIGNATURE_SYMBOL] = true;
+
   private readonly mcpTool: Tool;
   private readonly mcpSessionManager: MCPSessionManager;
   private readonly originalName: string;

@@ -72,6 +72,16 @@ export {
 } from './evaluation/local_eval_sets_manager.js';
 export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
 export {getMemoryServiceFromUri} from './memory/registry.js';
+export {BigQueryAgentAnalyticsPlugin} from './plugins/bigquery_agent_analytics_plugin.js';
+export type {
+  AnalyticsContentFormatter,
+  AnalyticsRetryConfig,
+  BigQueryAgentAnalyticsPluginOptions,
+  BigQueryLoggerConfig,
+} from './plugins/bigquery_analytics_config.js';
+export {AnalyticsEventType} from './plugins/bigquery_analytics_schema.js';
+export {AnalyticsDropReason} from './plugins/bigquery_analytics_writer.js';
+export type {BigQueryCredentials} from './plugins/bigquery_analytics_writer.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {ENTITIES as SESSION_STORAGE_ENTITIES} from './sessions/db/schema.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';

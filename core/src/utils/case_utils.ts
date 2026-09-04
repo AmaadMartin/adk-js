@@ -105,6 +105,28 @@ export function snakeToLowerCamel(value: string): string {
 }
 
 /**
+ * Converts one property name to snake_case, keeping every other character.
+ *
+ * Splits camel humps, folds case, and treats `-` as a word separator, so
+ * `topP`, `X-Api-Key` and `api_key` all reach the form a wire field uses.
+ * Unlike {@link snakeCase}, it leaves any other punctuation alone, so a
+ * namespaced key such as `temp:oauth_state` keeps its colon and stays
+ * recognisable to a caller that matches on the prefix.
+ *
+ * This converts one name. `toSnakeCase` in `object_notation_utils.ts`
+ * rewrites the keys of a whole object and escapes differently.
+ *
+ * @param name The property name to convert.
+ * @returns The snake_case form of the name.
+ */
+export function toSnakeCasePropertyName(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replaceAll('-', '_');
+}
+
+/**
  * Recursively converts snake_case keys of an object to camelCase.
  *
  * @param val The value to convert.

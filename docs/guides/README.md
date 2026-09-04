@@ -159,6 +159,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Plugins
 
+- [BigQueryAgentAnalyticsPlugin](plugins/bigquery_agent_analytics_plugin/index.md) - Streaming agent lifecycle events into a BigQuery table so behaviour, cost and failures can be queried in SQL.
 - [Plugin agent callbacks](plugins/agent_callbacks/index.md) - The agent lifecycle hooks a plugin gets, their precedence over an agent's own callbacks, and the agent error notification.
 - [Plugin close lifecycle](plugins/plugin_close_lifecycle/index.md) - Releasing
   the resources a plugin holds, and the timeout that bounds each shutdown.
