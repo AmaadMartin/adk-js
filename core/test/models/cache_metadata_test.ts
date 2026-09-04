@@ -46,6 +46,15 @@ function activeMetadata(expireTime: number): CacheMetadata {
   };
 }
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW_SECONDS * 1000);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('CacheMetadata narrowing', () => {
   it('exposes the active fields once cacheName is known to be set', () => {
     const metadata = activeMetadata(NOW_SECONDS + 60);
@@ -72,15 +81,6 @@ describe('CacheMetadata narrowing', () => {
  * JSON schema that this module has no counterpart for.
  */
 describe('cache_metadata parity with adk-python', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(NOW_SECONDS * 1000);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it('test_required_fields', () => {
     const metadata = parseCacheMetadata(activeInput());
 
@@ -295,5 +295,148 @@ describe('cache_metadata parity with adk-python', () => {
     for (const partial of partials) {
       expect(() => parseCacheMetadata(partial)).toThrowError(/must all be set/);
     }
+  });
+});
+
+describe('expireSoon at the buffer boundary', () => {
+  it('reports false for fingerprint-only metadata', () => {
+    const metadata = parseCacheMetadata({
+      fingerprint: 'abcdef0123456789',
+      contentsCount: 3,
+    });
+
+    expect(expireSoon(metadata)).toBe(false);
+  });
+
+  it('reports false one second outside the buffer', () => {
+    const metadata = parseCacheMetadata(
+      activeInput({expireTime: NOW_SECONDS + 121}),
+    );
+
+    expect(expireSoon(metadata)).toBe(false);
+  });
+
+  it('reports true one second inside the buffer', () => {
+    const metadata = parseCacheMetadata(
+      activeInput({expireTime: NOW_SECONDS + 119}),
+    );
+
+    expect(expireSoon(metadata)).toBe(true);
+  });
+});
+
+describe('formatCacheMetadata rendering', () => {
+  it('truncates the fingerprint to eight characters', () => {
+    const metadata = parseCacheMetadata({
+      fingerprint: 'abcdef0123456789',
+      contentsCount: 3,
+    });
+
+    expect(formatCacheMetadata(metadata)).toBe(
+      'Fingerprint-only: 3 contents, fingerprint=abcdef01...',
+    );
+  });
+
+  it('renders a fingerprint shorter than eight characters whole', () => {
+    const metadata = parseCacheMetadata({
+      fingerprint: 'abc',
+      contentsCount: 1,
+    });
+
+    expect(formatCacheMetadata(metadata)).toBe(
+      'Fingerprint-only: 1 contents, fingerprint=abc...',
+    );
+  });
+
+  it('renders a cache name that has no slash as itself', () => {
+    const metadata = parseCacheMetadata(
+      activeInput({cacheName: 'bare-name', expireTime: NOW_SECONDS + 1800}),
+    );
+
+    expect(formatCacheMetadata(metadata)).toBe(
+      'Cache bare-name: used 5 invocations, cached 3 contents, ' +
+        'expires in 30.0min',
+    );
+  });
+
+  it('renders a negative minute count for an expired cache', () => {
+    const metadata = parseCacheMetadata(
+      activeInput({expireTime: NOW_SECONDS - 192}),
+    );
+
+    expect(formatCacheMetadata(metadata)).toBe(
+      'Cache 456: used 5 invocations, cached 3 contents, expires in -3.2min',
+    );
+  });
+});
+
+describe('parseCacheMetadata rejections', () => {
+  it('rejects a fractional contentsCount', () => {
+    expect(() =>
+      parseCacheMetadata(activeInput({contentsCount: 1.5})),
+    ).toThrowError(
+      new InputValidationError('contentsCount must be a non-negative integer.'),
+    );
+  });
+
+  it('rejects a fractional invocationsUsed', () => {
+    expect(() =>
+      parseCacheMetadata(activeInput({invocationsUsed: 2.5})),
+    ).toThrowError(
+      new InputValidationError(
+        'invocationsUsed must be a non-negative integer.',
+      ),
+    );
+  });
+
+  it('names the offending field on a wrong type', () => {
+    expect(() =>
+      parseCacheMetadata(activeInput({fingerprint: 42})),
+    ).toThrowError(new InputValidationError('fingerprint must be a string.'));
+  });
+
+  it.each([
+    ['null', null],
+    ['a string', 'x'],
+    ['an array', []],
+    ['undefined', undefined],
+  ])('rejects %s with InputValidationError', (_label, value) => {
+    expect(() => parseCacheMetadata(value)).toThrowError(InputValidationError);
+  });
+
+  it('rejects every partial combination of the active fields', () => {
+    const base = {fingerprint: 'abcdef0123456789', contentsCount: 3};
+    const active: Record<string, unknown> = {
+      cacheName: CACHE_NAME,
+      expireTime: NOW_SECONDS + 1800,
+      invocationsUsed: 5,
+    };
+    const names = Object.keys(active);
+
+    // Every non-empty proper subset of the three active fields.
+    for (let mask = 1; mask < 7; mask++) {
+      const partial: Record<string, unknown> = {...base};
+      names.forEach((name, index) => {
+        if ((mask & (1 << index)) !== 0) {
+          partial[name] = active[name];
+        }
+      });
+      expect(() => parseCacheMetadata(partial)).toThrowError(/must all be set/);
+    }
+  });
+
+  it('drops nothing from an accepted record', () => {
+    const metadata = parseCacheMetadata(
+      activeInput({createdAt: NOW_SECONDS - 60}),
+    );
+
+    expect(Object.keys(metadata).sort()).toEqual([
+      'cacheName',
+      'contentsCount',
+      'createdAt',
+      'expireTime',
+      'fingerprint',
+      'invocationsUsed',
+    ]);
   });
 });

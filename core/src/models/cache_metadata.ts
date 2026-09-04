@@ -76,43 +76,23 @@ const ACTIVE_STATE_ERROR =
   'cacheName, expireTime and invocationsUsed must all be set (active cache) ' +
   'or all be undefined (fingerprint-only state).';
 
-/** Tail of the message for a count field that holds an unusable value. */
-const NON_NEGATIVE_INTEGER_ERROR = 'must be a non-negative integer.';
-
-/** Fields that {@link NON_NEGATIVE_INTEGER_ERROR} describes. */
-const COUNT_FIELDS: ReadonlySet<string> = new Set([
-  'contentsCount',
-  'invocationsUsed',
-]);
+/** A count field, with one message for every way it can be wrong. */
+function nonNegativeInteger(field: string) {
+  const error = `${field} must be a non-negative integer.`;
+  return z.number({error}).int({error}).nonnegative({error});
+}
 
 const cacheMetadataSchema = z.strictObject({
-  fingerprint: z.string(),
-  contentsCount: z.number().int().nonnegative(),
-  cacheName: z.string().optional(),
-  expireTime: z.number().optional(),
-  invocationsUsed: z.number().int().nonnegative().optional(),
-  createdAt: z.number().optional(),
+  fingerprint: z.string({error: 'fingerprint must be a string.'}),
+  contentsCount: nonNegativeInteger('contentsCount'),
+  cacheName: z.string({error: 'cacheName must be a string.'}).optional(),
+  expireTime: z.number({error: 'expireTime must be a number.'}).optional(),
+  invocationsUsed: nonNegativeInteger('invocationsUsed').optional(),
+  createdAt: z.number({error: 'createdAt must be a number.'}).optional(),
 });
 
 function nowSeconds(): number {
   return Date.now() / 1000;
-}
-
-/**
- * Turns one schema violation into a message that names the offending field.
- *
- * @param field Dotted path of the field, empty for a whole-value violation.
- * @param message The validator's own description of the violation.
- * @returns The message to carry on the thrown error.
- */
-function describeIssue(field: string, message: string): string {
-  if (COUNT_FIELDS.has(field)) {
-    return `${field} ${NON_NEGATIVE_INTEGER_ERROR}`;
-  }
-  if (field === '') {
-    return message;
-  }
-  return `${field}: ${message}`;
 }
 
 /**
@@ -169,10 +149,7 @@ export function formatCacheMetadata(metadata: CacheMetadata): string {
 export function parseCacheMetadata(value: unknown): CacheMetadata {
   const parsed = cacheMetadataSchema.safeParse(value);
   if (!parsed.success) {
-    const [issue] = parsed.error.issues;
-    throw new InputValidationError(
-      describeIssue(issue.path.join('.'), issue.message),
-    );
+    throw new InputValidationError(parsed.error.issues[0].message);
   }
 
   const {cacheName, expireTime, invocationsUsed, ...rest} = parsed.data;
