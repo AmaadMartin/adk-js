@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Evaluation
+
+- [User simulator personas](evaluation/user_simulator_personas/index.md) - Describing how a simulated user behaves, and naming each persona from an eval case.
+
 ### Tools
 
 #### Retrieval
