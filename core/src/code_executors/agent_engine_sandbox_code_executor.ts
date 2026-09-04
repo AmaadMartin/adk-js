@@ -316,13 +316,13 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
             name: sandboxName,
           });
         // adk-js binds a sandbox to one language, so a cached sandbox that
-        // declares a different one cannot serve this request.
+        // does not declare the requested one cannot serve this request.
         const cachedLanguage =
           sandbox?.spec?.codeExecutionEnvironment?.codeLanguage;
         if (
           !sandbox ||
           sandbox.state !== 'STATE_RUNNING' ||
-          (cachedLanguage !== undefined && cachedLanguage !== language)
+          cachedLanguage !== language
         ) {
           createNewSandbox = true;
         }
