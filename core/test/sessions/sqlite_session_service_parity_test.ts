@@ -119,7 +119,7 @@ describe('SqliteSessionService parity', () => {
     expect(stored?.id).toBe(sessionId);
   });
 
-  it('deletes a session and its events together, with the pragma on', async () => {
+  it('deletes a session and its events together', async () => {
     const service = open(`sqlite://${join(tempDir, 'cascade.db')}`);
     const session = await service.createSession({
       appName: 'app',
