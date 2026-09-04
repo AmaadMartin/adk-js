@@ -17,6 +17,13 @@ import {
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
 
+// A `'__proto__': value` pair in an object literal invokes the prototype
+// setter instead of creating an own key, so it cannot express what an attacker
+// actually sends. `JSON.parse` is what the dev server does with a request
+// body, and it does produce an own `__proto__` key.
+const parseBody = (json: string): Record<string, unknown> =>
+  JSON.parse(json) as Record<string, unknown>;
+
 describe('isInMemoryConnectionString', () => {
   it('returns true for memory://', () => {
     expect(isInMemoryConnectionString('memory://')).toBe(true);
@@ -807,13 +814,6 @@ describe('InMemorySessionService', () => {
     beforeEach(clearPollution);
     afterEach(clearPollution);
 
-    // A `'__proto__': value` pair in an object literal invokes the prototype
-    // setter instead of creating an own key, so it cannot express what an
-    // attacker actually sends. `JSON.parse` is what the dev server does with a
-    // request body, and it does produce an own `__proto__` key.
-    const parseBody = (json: string): Record<string, unknown> =>
-      JSON.parse(json) as Record<string, unknown>;
-
     it('does not pollute Object.prototype via appName', async () => {
       await service.createSession({
         appName: '__proto__',
@@ -1193,9 +1193,7 @@ describe('InMemorySessionService', () => {
         event: createEvent({
           timestamp: Date.now(),
           actions: createEventActions({
-            stateDelta: JSON.parse(
-              '{"__proto__": {"isAdmin": true}}',
-            ) as Record<string, unknown>,
+            stateDelta: parseBody('{"__proto__": {"isAdmin": true}}'),
           }),
         }),
       });
