@@ -17,6 +17,7 @@ import {
   convertLlmResponseToScore,
   DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
+  evaluateFirstTurn,
   formatConversationHistory,
   InputValidationError,
   Label,
@@ -431,6 +432,36 @@ describe('parseIsValidLabel edge cases', () => {
 describe('convertLlmResponseToScore edge cases', () => {
   it('reads no score out of a response with no content', () => {
     expect(convertLlmResponseToScore({})).toEqual({});
+  });
+});
+
+describe('evaluateFirstTurn whitespace handling', () => {
+  it('accepts a starting prompt that differs only in surrounding whitespace', () => {
+    const result = evaluateFirstTurn(
+      {
+        invocationId: '1',
+        userContent: {role: 'user', parts: [{text: `  ${STARTING_PROMPT}\n`}]},
+      },
+      {startingPrompt: `\n${STARTING_PROMPT}  `, conversationPlan: 'plan'},
+      1.0,
+    );
+
+    expect(result.score).toBe(1);
+    expect(result.evalStatus).toBe(EvalStatus.PASSED);
+  });
+
+  it('rejects a starting prompt that differs inside the text', () => {
+    const result = evaluateFirstTurn(
+      {
+        invocationId: '1',
+        userContent: {role: 'user', parts: [{text: 'first  user prompt.'}]},
+      },
+      SCENARIO,
+      1.0,
+    );
+
+    expect(result.score).toBe(0);
+    expect(result.evalStatus).toBe(EvalStatus.FAILED);
   });
 });
 
