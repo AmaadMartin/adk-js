@@ -848,7 +848,26 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     expect(attributes).toMatchObject({
       model: 'gemini-2.0-flash',
       llm_config: {temperature: 0.5, top_p: 0.9, max_output_tokens: 128},
-      tools: ['lookup_weather'],
+    });
+  });
+
+  it('writes a tool declaration, not a bare name, on an LLM_REQUEST row', async () => {
+    const plugin = makePlugin();
+    await plugin.beforeModelCallback({
+      callbackContext: makeContext(makeInvocationContext()),
+      llmRequest: makeLlmRequest({
+        toolsDict: {lookup_weather: makeTool()},
+      }),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      tools: [
+        {
+          name: 'lookup_weather',
+          description: 'Looks up the weather.',
+          parameters: {type: 'OBJECT', properties: {}},
+        },
+      ],
     });
   });
 

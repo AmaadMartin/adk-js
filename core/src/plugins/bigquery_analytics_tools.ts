@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {FunctionDeclaration} from '@google/genai';
 import {isRemoteA2AAgent} from '../a2a/a2a_remote_agent.js';
 import {BaseAgent} from '../agents/base_agent.js';
 import {isAgentTool} from '../tools/agent_tool.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {isFunctionTool} from '../tools/function_tool.js';
 import {isMCPTool} from '../tools/mcp/mcp_tool.js';
+import {formatError} from '../utils/error_utils.js';
+import {logger} from '../utils/logger.js';
 
 /**
  * Where a tool call runs, written to the `tool_origin` key of a tool row's
@@ -137,4 +140,90 @@ export function getToolOrigin(
     return ToolOrigin.LOCAL;
   }
   return ToolOrigin.UNKNOWN;
+}
+
+/**
+ * One entry of the `tools` key of an `LLM_REQUEST` row's `attributes`.
+ *
+ * `parameters` is the tool's parameter schema, which a tool supplies either as
+ * a `Schema` or as a raw JSON Schema, so it stays unshaped here and is written
+ * to BigQuery as JSON.
+ */
+export interface AnalyticsToolDeclaration {
+  name: string;
+  description?: string;
+  parameters?: unknown;
+}
+
+/**
+ * Reads the tool's declaration, or nothing when the tool cannot produce one.
+ *
+ * A built-in tool may have no declaration, and a tool that builds one lazily
+ * may throw while doing so. Neither is worth losing the other tools over.
+ */
+function toolFunctionDeclaration(
+  name: string,
+  tool: BaseTool,
+): FunctionDeclaration | undefined {
+  try {
+    return tool._getDeclaration();
+  } catch (err: unknown) {
+    logger.debug(
+      `BigQuery analytics could not read the declaration of tool ${name}: ` +
+        formatError(err),
+    );
+    return undefined;
+  }
+}
+
+/** The structured entry one tool contributes to `attributes.tools`. */
+function toolDeclaration(
+  key: string,
+  tool: BaseTool,
+): AnalyticsToolDeclaration {
+  // The dict key is the name the model was given, so it stands in for a tool
+  // that reports none.
+  const entry: AnalyticsToolDeclaration = {name: tool.name || key};
+  if (tool.description) {
+    entry.description = tool.description;
+  }
+  const declaration = toolFunctionDeclaration(key, tool);
+  if (declaration === undefined) {
+    return entry;
+  }
+  if (entry.description === undefined && declaration.description) {
+    entry.description = declaration.description;
+  }
+  // A declaration carries its parameters either as a raw JSON Schema or as a
+  // `Schema`. MCP, OpenAPI and node tools populate only the former, and the
+  // model adapters prefer it, so prefer it here too.
+  const parameters = declaration.parametersJsonSchema ?? declaration.parameters;
+  if (parameters !== undefined) {
+    entry.parameters = parameters;
+  }
+  return entry;
+}
+
+/**
+ * Describes every tool an `LlmRequest` offered the model, for the `tools` key
+ * of an `LLM_REQUEST` row's `attributes`.
+ *
+ * The description and the parameter schema are part of the row because a
+ * consumer judging whether the model picked the right tool needs to see what
+ * the model was told each tool does. adk-python's
+ * `_extract_tool_declarations` writes the same shape, and the shared dataset
+ * is why the bare name list it replaced is not enough.
+ *
+ * Extraction is per tool and best-effort: a tool whose declaration cannot be
+ * read still contributes its name, so one tool never empties the list.
+ *
+ * @param toolsDict The request's tools, keyed by the name the model sees.
+ * @return One entry per tool, in the order the request holds them.
+ */
+export function extractToolDeclarations(
+  toolsDict: Record<string, BaseTool>,
+): AnalyticsToolDeclaration[] {
+  return Object.entries(toolsDict).map(([key, tool]) =>
+    toolDeclaration(key, tool),
+  );
 }

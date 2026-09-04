@@ -29,7 +29,10 @@ import {
   parseNodeRunIds,
 } from './bigquery_analytics_schema.js';
 import {ambientOtelIds} from './bigquery_analytics_spans.js';
-import {getToolOrigin} from './bigquery_analytics_tools.js';
+import {
+  extractToolDeclarations,
+  getToolOrigin,
+} from './bigquery_analytics_tools.js';
 
 /**
  * Turns the values a runner callback carries into the `content`,
@@ -136,7 +139,7 @@ export function requestAttributes(
       attributes['labels'] = config.labels;
     }
   }
-  const tools = Object.keys(llmRequest.toolsDict);
+  const tools = extractToolDeclarations(llmRequest.toolsDict);
   if (tools.length > 0) {
     attributes['tools'] = tools;
   }
