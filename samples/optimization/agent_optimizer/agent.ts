@@ -50,9 +50,6 @@ const EXPECTED_PHRASES: Record<string, string[]> = {
 
 function scoreInstruction(instruction: string, exampleId: string): number {
   const phrases = EXPECTED_PHRASES[exampleId];
-  if (!phrases) {
-    throw new Error(`No expected phrases for example id: ${exampleId}`);
-  }
   const text = instruction.toLowerCase();
   const hits = phrases.filter((phrase) => text.includes(phrase)).length;
   return hits / phrases.length;

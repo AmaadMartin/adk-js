@@ -85,7 +85,13 @@ class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
       (exampleSet === Sampler.TRAIN_SET
         ? this.getTrainExampleIds()
         : this.getValidationExampleIds());
-    const instruction = String(candidate.instruction).toLowerCase();
+    // `instruction` is `string | InstructionProvider`. Score only the string
+    // form: `String(fn)` returns the function's source text, which would match
+    // phrases by accident.
+    const instruction =
+      typeof candidate.instruction === 'string'
+        ? candidate.instruction.toLowerCase()
+        : '';
     return {
       scores: Object.fromEntries(
         ids.map((id) => [
@@ -164,9 +170,10 @@ const [best] = result.optimizedAgents;
 // best.overallScore is 1, best.optimizedAgent.instruction is the rewrite.
 ```
 
-`samples/optimization/agent_optimizer/agent.ts` runs this same optimizer and
-sampler. It wraps them in a `Workflow` node so that `npm run sample` reports the
-winning instruction, and it needs no credentials.
+`samples/optimization/agent_optimizer/agent.ts` runs an optimizer and a sampler
+of this same shape, over five examples instead of three. It wraps them in a
+`Workflow` node so that `npm run sample` reports the winning instruction, and it
+needs no credentials.
 
 ## Capturing full evaluation data
 
