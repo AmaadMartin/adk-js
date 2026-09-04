@@ -6,14 +6,16 @@
 
 import {FileArtifactService} from '@google/adk';
 import * as fs from 'fs/promises';
+import {pathToFileURL} from 'node:url';
 import * as os from 'os';
 import * as path from 'path';
-import {describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   assertInsideRoot,
   getAppRoot,
   getSessionArtifactsDir,
   getUserRoot,
+  reserveVersionDir,
 } from '../../src/artifacts/file_artifact_service.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
@@ -189,6 +191,135 @@ describe('FileArtifactService', () => {
           assertInsideRoot('/tmp/root/users/alice', '/tmp/root', 'test'),
         ).not.toThrow();
       });
+    });
+  });
+
+  describe('degraded on-disk states', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+    let root: string;
+    let service: FileArtifactService;
+
+    beforeEach(async () => {
+      root = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-edge-'));
+      service = new FileArtifactService(root);
+    });
+
+    afterEach(async () => {
+      await fs.rm(root, {recursive: true, force: true});
+    });
+
+    /** Builds the app-scoped session artifact directory for a filename. */
+    function artifactDir(...segments: string[]): string {
+      return path.join(
+        getSessionArtifactsDir(
+          getUserRoot(getAppRoot(root, appName), userId),
+          sessionId,
+        ),
+        ...segments,
+      );
+    }
+
+    it('accepts a file:// root URI', async () => {
+      const uriService = new FileArtifactService(
+        pathToFileURL(root).toString(),
+      );
+      const scope = {appName, userId, sessionId, filename: 'uri.txt'};
+
+      await uriService.saveArtifact({...scope, artifact: {text: 'from-uri'}});
+
+      expect((await service.loadArtifact(scope))?.text).toBe('from-uri');
+    });
+
+    it('rejects a file:// root URI naming a remote host', () => {
+      expect(() => new FileArtifactService('file://remote-host/share')).toThrow(
+        'Invalid root directory',
+      );
+    });
+
+    it('stores an artifact whose name resolves to the scope root itself', async () => {
+      const scope = {appName, userId, sessionId, filename: '.'};
+
+      await service.saveArtifact({...scope, artifact: {text: 'fallback'}});
+
+      expect((await service.loadArtifact(scope))?.text).toBe('fallback');
+      await expect(fs.stat(artifactDir('artifact'))).resolves.toBeDefined();
+    });
+
+    it('defaults the mimeType when inlineData omits it', async () => {
+      const scope = {appName, userId, sessionId, filename: 'blob.bin'};
+
+      await service.saveArtifact({
+        ...scope,
+        artifact: {inlineData: {data: Buffer.from('x').toString('base64')}},
+      });
+
+      const version = await service.getArtifactVersion(scope);
+      expect(version?.mimeType).toBe('application/octet-stream');
+    });
+
+    it('rejects fileData that carries no fileUri', async () => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'pointer.pdf',
+          artifact: {fileData: {mimeType: 'application/pdf'}},
+        }),
+      ).rejects.toThrow('fileData must have a fileUri');
+    });
+
+    it('propagates a reservation failure that is not a version collision', async () => {
+      await expect(
+        reserveVersionDir(path.join(root, 'missing', 'versions'), 0),
+      ).rejects.toThrow(/ENOENT/);
+    });
+
+    it('returns undefined when the payload path is a directory', async () => {
+      const versionDir = artifactDir('doc.bin', 'versions', '0');
+      await fs.mkdir(path.join(versionDir, 'doc.bin'), {recursive: true});
+      await fs.writeFile(
+        path.join(versionDir, 'metadata.json'),
+        JSON.stringify({
+          fileName: 'doc.bin',
+          mimeType: 'image/png',
+          version: 0,
+        }),
+        'utf-8',
+      );
+
+      await expect(
+        service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'doc.bin',
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('reports no versions when the versions path is a file', async () => {
+      await fs.mkdir(artifactDir('broken.txt'), {recursive: true});
+      await fs.writeFile(artifactDir('broken.txt', 'versions'), '', 'utf-8');
+
+      await expect(
+        service.listVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: 'broken.txt',
+        }),
+      ).resolves.toEqual([]);
+    });
+
+    it('lists an artifact whose versions directory holds nothing', async () => {
+      await fs.mkdir(artifactDir('ghost', 'versions'), {recursive: true});
+
+      await expect(
+        service.listArtifactKeys({appName, userId, sessionId}),
+      ).resolves.toEqual(['ghost']);
     });
   });
 });
