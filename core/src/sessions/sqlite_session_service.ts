@@ -14,7 +14,6 @@ import {
 } from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {formatError} from '../utils/error_utils.js';
-import {logger} from '../utils/logger.js';
 import {
   AppendEventRequest,
   BaseSessionService,
@@ -29,6 +28,11 @@ import {
 } from './base_session_service.js';
 import {CompositeSessionKey, createSession, Session} from './session.js';
 import {
+  extractJsonSafeStateDelta,
+  makeDeltaJsonSafe,
+  ScopedStateDelta,
+} from './session_state_utils.js';
+import {
   isConstraintViolation,
   mergeStateSql,
   SqliteConnection,
@@ -42,13 +46,6 @@ export interface GetUserStateRequest {
   appName: string;
   /** The ID of the user. */
   userId: string;
-}
-
-/** A state delta split by the scope each key is stored in. */
-interface ScopedStateDelta {
-  app: Record<string, unknown>;
-  user: Record<string, unknown>;
-  session: Record<string, unknown>;
 }
 
 /** A row of the `sessions` table, as `listSessions` selects it. */
@@ -127,81 +124,7 @@ export function decodeState(
   }
 
   const state: Record<string, unknown> = Object.create(null);
-  for (const [key, item] of Object.entries(decoded)) {
-    if (typeof key !== 'string') {
-      throw new Error('Persisted session state keys must be strings.');
-    }
-    state[key] = item;
-  }
-  return state;
-}
-
-/** Returns whether a JSON column can hold `value` as it stands. */
-function isJsonSafe(value: unknown): boolean {
-  try {
-    // `undefined` means JSON dropped the value outright: a function, a
-    // symbol, or `undefined` itself. A BigInt or a cycle throws instead.
-    return JSON.stringify(value) !== undefined;
-  } catch {
-    return false;
-  }
-}
-
-/** Coerces one delta value into a form a JSON column can hold. */
-function toJsonSafe(key: string, value: unknown): unknown {
-  if (isJsonSafe(value)) {
-    return value;
-  }
-  logger.warn(
-    `Session state key "${key}" is not JSON-serializable; persisting its` +
-      ' string representation instead.',
-  );
-  return String(value);
-}
-
-/**
- * Splits a state delta into its app, user and session scopes, coercing every
- * value into a JSON-serializable form.
- *
- * A value a JSON column cannot hold is replaced with its string
- * representation rather than failing the whole write, so a lossy write is
- * diagnosable instead of fatal.
- */
-function extractJsonSafeStateDelta(
-  state: Record<string, unknown>,
-): ScopedStateDelta {
-  // Null-prototype maps: `state` can arrive straight off a request body, and
-  // assigning a `__proto__` key to a plain object literal invokes the
-  // inherited setter, which re-parents the map instead of storing the entry.
-  const deltas: ScopedStateDelta = {
-    app: Object.create(null),
-    user: Object.create(null),
-    session: Object.create(null),
-  };
-  for (const [key, value] of Object.entries(state)) {
-    if (key.startsWith(State.APP_PREFIX)) {
-      deltas.app[key.slice(State.APP_PREFIX.length)] = toJsonSafe(key, value);
-    } else if (key.startsWith(State.USER_PREFIX)) {
-      deltas.user[key.slice(State.USER_PREFIX.length)] = toJsonSafe(key, value);
-    } else if (!key.startsWith(State.TEMP_PREFIX)) {
-      deltas.session[key] = toJsonSafe(key, value);
-    }
-  }
-  return deltas;
-}
-
-/**
- * Coerces the event's state delta in place, so one value a JSON column cannot
- * hold cannot fail the whole append.
- *
- * `trimTempDeltaState` has already rebuilt the delta map by the time this
- * runs, so the caller's own delta object keeps its values.
- */
-function makeDeltaJsonSafe(event: Event): void {
-  const stateDelta = event.actions.stateDelta;
-  for (const [key, value] of Object.entries(stateDelta)) {
-    stateDelta[key] = toJsonSafe(key, value);
-  }
+  return Object.assign(state, decoded);
 }
 
 /**
@@ -244,10 +167,9 @@ async function readState(
   connection: SqliteConnection,
   sql: string,
   params: readonly unknown[],
-  context?: string,
 ): Promise<Record<string, unknown>> {
   const row = await connection.get<{state: string}>(sql, params);
-  return row ? decodeState(row.state, context) : {};
+  return row ? decodeState(row.state) : {};
 }
 
 function readAppState(
@@ -325,31 +247,13 @@ function upsertUserState(
   ]);
 }
 
-function updateSessionState(
-  connection: SqliteConnection,
-  key: CompositeSessionKey,
-  delta: Record<string, unknown>,
-  updateTime: number,
-): Promise<void> {
-  const encoded = JSON.stringify(delta);
-  return connection.run(SESSION_STATE_UPDATE, [
-    encoded,
-    encoded,
-    updateTime,
-    key.appName,
-    key.userId,
-    key.sessionId,
-  ]);
-}
-
-/** Writes the scopes of `delta` that have entries. Returns whether the
- * session's own state column was written. */
-async function writeStateDelta(
+/** Writes the app and user scopes of `delta` that have entries. */
+async function upsertSharedStates(
   connection: SqliteConnection,
   key: CompositeSessionKey,
   delta: ScopedStateDelta,
   updateTime: number,
-): Promise<boolean> {
+): Promise<void> {
   if (Object.keys(delta.app).length > 0) {
     await upsertAppState(connection, key.appName, delta.app, updateTime);
   }
@@ -362,10 +266,29 @@ async function writeStateDelta(
       updateTime,
     );
   }
+}
+
+/** Writes the scopes of `delta` that have entries. Returns whether the
+ * session's own state column was written. */
+async function writeStateDelta(
+  connection: SqliteConnection,
+  key: CompositeSessionKey,
+  delta: ScopedStateDelta,
+  updateTime: number,
+): Promise<boolean> {
+  await upsertSharedStates(connection, key, delta, updateTime);
   if (Object.keys(delta.session).length === 0) {
     return false;
   }
-  await updateSessionState(connection, key, delta.session, updateTime);
+  const encoded = JSON.stringify(delta.session);
+  await connection.run(SESSION_STATE_UPDATE, [
+    encoded,
+    encoded,
+    updateTime,
+    key.appName,
+    key.userId,
+    key.sessionId,
+  ]);
   return true;
 }
 
@@ -646,18 +569,7 @@ export class SqliteSessionService extends BaseSessionService {
     deltas: ScopedStateDelta,
     updateTime: number,
   ): Promise<[Record<string, unknown>, Record<string, unknown>]> {
-    if (Object.keys(deltas.app).length > 0) {
-      await upsertAppState(connection, key.appName, deltas.app, updateTime);
-    }
-    if (Object.keys(deltas.user).length > 0) {
-      await upsertUserState(
-        connection,
-        key.appName,
-        key.userId,
-        deltas.user,
-        updateTime,
-      );
-    }
+    await upsertSharedStates(connection, key, deltas, updateTime);
 
     const appState = await readAppState(connection, key.appName);
     const userState = await readUserState(connection, key.appName, key.userId);
