@@ -15,7 +15,7 @@ import {
   truncateText,
 } from '../utils/sanitize_utils.js';
 import {sanitizeExternalUri} from '../utils/uri_sanitize_utils.js';
-import type {GcsOffloader} from './bigquery_analytics_offloader.js';
+import type {ContentOffloader} from './bigquery_analytics_offloader.js';
 import {
   AnalyticsContentPart,
   AnalyticsObjectRef,
@@ -100,7 +100,7 @@ const EXTENSION_BY_MIME_TYPE: ReadonlyMap<string, string> = new Map([
 /** The Cloud Storage destination one parse call writes to. */
 export interface AnalyticsOffload {
   /** Uploads the content and returns the URI naming it. */
-  offloader: GcsOffloader;
+  offloader: ContentOffloader;
   /** The trace the calling event belongs to. */
   traceId: string;
   /** The span the calling event belongs to. */
@@ -180,7 +180,7 @@ function isLlmRequest(value: unknown): value is LlmRequest {
 }
 
 /** Returns whether `value` is a genai `Content` carrying parts. */
-function isContent(value: unknown): value is Content {
+function isContent(value: unknown): value is Content & {parts: Part[]} {
   return isRecord(value) && Array.isArray(value['parts']);
 }
 
@@ -479,7 +479,7 @@ export function formatContentSummary(content: Content | undefined): string {
 /** The parts of `content`, whatever `ContentUnion` member it is. */
 function unpackParts(content: unknown): Part[] {
   if (isContent(content)) {
-    return content.parts ?? [];
+    return content.parts;
   }
   const members: unknown[] = Array.isArray(content) ? content : [content];
   return members.map((member) => (isPart(member) ? member : {}));
@@ -543,7 +543,11 @@ async function parseLlmRequest(
     });
     parts.push(...parsed.parts);
     truncated = truncated || parsed.truncated;
-    messages.push({role: content.role ?? 'unknown', content: parsed.summary});
+    // The role is caller-supplied text like any other, so it is sanitized
+    // rather than copied into the row verbatim.
+    const role = sanitizeErrorText(content.role ?? 'unknown', maxLength);
+    truncated = truncated || role.truncated;
+    messages.push({role: role.text, content: parsed.summary});
   }
   if (messages.length > 0) {
     payload['prompt'] = messages;

@@ -26,6 +26,18 @@ export interface OffloadStorage {
   bucket(name: string): OffloadBucket;
 }
 
+/**
+ * Stores content too large to inline and names where it went.
+ * {@link GcsOffloader} is the Cloud Storage implementation.
+ */
+export interface ContentOffloader {
+  uploadContent(
+    data: Buffer | string,
+    contentType: string,
+    path: string,
+  ): Promise<string>;
+}
+
 /** What {@link GcsOffloader} needs to reach a bucket. */
 export interface GcsOffloaderOptions {
   /** Cloud project owning the bucket. */
@@ -43,7 +55,7 @@ export interface GcsOffloaderOptions {
  * `@google-cloud/storage` peer is loaded once and reused by every upload.
  * Callers get back a `gs://` URI and put that in the row instead of the bytes.
  */
-export class GcsOffloader {
+export class GcsOffloader implements ContentOffloader {
   private readonly bucketName: string;
   private readonly storageOptions: StorageOptions;
   private readonly storage?: OffloadStorage;
