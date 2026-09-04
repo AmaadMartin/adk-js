@@ -14,7 +14,7 @@ fields, so scalars decouple and objects stay shared — which is why the LLM-cal
 counter, the agent-state records and the session are the same for the whole
 invocation.
 
-Four groups of behaviour live here rather than in the agents:
+Five groups of behaviour live here rather than in the agents:
 
 - **Event selection.** `getEvents()` answers "which of the session's events are
   mine?", by invocation, by branch, or both. Parallel sub-agents share one
@@ -28,6 +28,9 @@ Four groups of behaviour live here rather than in the agents:
 - **Run-wide state.** `credentialService` is the service a tool resolves a
   credential against. `stateSchema` declares which session-state keys the run
   may write, and their types.
+- **Shared slots.** `customMetadata` carries request-scoped values for tools and
+  services. `inputRealtimeCache`, `outputRealtimeCache` and
+  `activeNonBlockingToolTasks` hold what a live run buffers and cancels.
 
 You rarely construct one. The runner does that, and hands it to your agent's
 `runAsyncImpl`, to callbacks, and to tools through `ToolContext`.
@@ -255,3 +258,116 @@ child.stateSchema === invocationContext.stateSchema; // true
 Both mirror `InvocationContext` in
 [google/adk-python](https://github.com/google/adk-python), where the schema is
 the private `_state_schema`.
+
+## Invocation-scoped shared slots
+
+Three more slots hold state that every context of one invocation shares: the
+custom metadata record, the realtime audio caches, and the background tool-task
+registry. Children are copies, so a field only survives the whole run if the
+constructor carries it over by reference. These three do exactly that: a write
+through any context of the invocation is visible on every other one.
+
+### Custom metadata
+
+`customMetadata` is the slot a host application reaches for. Set
+`RunConfig.customMetadata` on the run, and the context exposes a mutable copy
+of it that tools and services can read and extend. Use it for values that
+belong to the request rather than to the conversation — a tenant id, a trace
+correlation id, a debug flag. Session state is the wrong place for those,
+because it persists past the run.
+
+Pass metadata in through the run config, then read it from any context of the
+run:
+
+```ts
+import {InvocationContext, PluginManager} from '@google/adk';
+
+const context = new InvocationContext({
+  invocationId: 'inv-1',
+  session,
+  pluginManager: new PluginManager(),
+  runConfig: {customMetadata: {tenant: 'acme'}},
+});
+
+context.customMetadata['requestStart'] = Date.now();
+```
+
+A tool running under a sub-agent writes to the same record:
+
+```ts
+protected async *runAsyncImpl(
+  context: InvocationContext,
+): AsyncGenerator<Event, void, void> {
+  context.customMetadata['stage'] = 'retrieval';
+  // The parent context sees this write.
+}
+```
+
+`customMetadata` is always an object, so no null check is needed before a
+write. The constructor seeds it with a shallow copy of
+`RunConfig.customMetadata`, so a write never reaches the caller's run config:
+
+```ts
+const runConfig = {customMetadata: {tenant: 'acme'}};
+const context = new InvocationContext({/* … */ runConfig});
+
+context.customMetadata['extra'] = 1;
+// runConfig.customMetadata is still {tenant: 'acme'}.
+```
+
+Seeding happens once, for a fresh invocation. A copy keeps the record it was
+given rather than reseeding from a new run config:
+
+```ts
+const clone = context.clone({runConfig: {customMetadata: {tenant: 'other'}}});
+clone.customMetadata === context.customMetadata; // true
+```
+
+That is what makes a sub-agent's write visible to the parent, and it is why the
+new run config's keys are ignored. Set the metadata on the run config that
+starts the invocation.
+
+### Realtime audio caches
+
+`inputRealtimeCache` and `outputRealtimeCache` buffer audio chunks before a
+flush to the session and artifact services. Nothing in `adk-js` writes to them
+yet; they are the storage the live flow needs, and they match the shape
+`adk-python` uses.
+
+Both caches are `undefined` until something assigns an array, matching
+`adk-python`, whose audio cache manager assigns `[]` lazily and reassigns `[]`
+on each flush. A `RealtimeCacheEntry` needs all three of its fields:
+
+```ts
+import {RealtimeCacheEntry} from '@google/adk';
+
+const entry: RealtimeCacheEntry = {
+  role: 'user',
+  data: {mimeType: 'audio/pcm', data: audioBase64},
+  timestamp: Date.now() / 1000,
+};
+
+context.inputRealtimeCache ??= [];
+context.inputRealtimeCache.push(entry);
+```
+
+`timestamp` is seconds since the Unix epoch, not milliseconds. It matches
+`adk-python`'s `time.time()`, so a value written by either SDK means the same
+thing. Produce it as `Date.now() / 1000`.
+
+### Background tool tasks
+
+A live run starts a non-blocking tool as a detached `Task` and registers it
+under `<toolName>_<functionCallId>`, so the flow can cancel it when the run
+ends:
+
+```ts
+import {Task} from '@google/adk';
+
+context.activeNonBlockingToolTasks ??= {};
+context.activeNonBlockingToolTasks[`${tool.name}_${functionCall.id}`] = task;
+```
+
+The registry is shared by every context of the invocation, so the task can
+delete its own key when it finishes while the flow still holds the map. Call
+`task.cancel()` to stop a task that is still running.

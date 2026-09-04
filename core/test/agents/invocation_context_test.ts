@@ -19,7 +19,9 @@ import {
   LoopAgent,
   PluginManager,
   QueuedInvocationEvent,
+  RealtimeCacheEntry,
   Session,
+  Task,
   createEvent,
   createResumabilityConfig,
   createSession,
@@ -2156,5 +2158,194 @@ describe('InvocationContext credential service', () => {
     });
 
     expect(context.credentialService).toBe(credentialService);
+  });
+});
+
+/** A sub-agent that stamps a key onto the invocation's custom metadata. */
+class MetadataWritingAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    context.customMetadata['writtenBySubAgent'] = true;
+    yield createEvent({
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'ok'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for this test.
+  }
+}
+
+function makeMetadataContext(
+  overrides: Partial<InvocationContextParams> = {},
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'inv-metadata',
+    session: makeSession(),
+    pluginManager: new PluginManager(),
+    ...overrides,
+  });
+}
+
+describe('InvocationContext customMetadata', () => {
+  it('seeds from runConfig.customMetadata', () => {
+    const context = makeMetadataContext({
+      runConfig: {customMetadata: {testKey: 'testValue'}},
+    });
+
+    expect(context.customMetadata).toEqual({testKey: 'testValue'});
+  });
+
+  it('defaults to an empty object when there is no runConfig', () => {
+    expect(makeMetadataContext().customMetadata).toEqual({});
+  });
+
+  it('defaults to an empty object when the runConfig omits it', () => {
+    const context = makeMetadataContext({runConfig: {maxLlmCalls: 3}});
+
+    expect(context.customMetadata).toEqual({});
+  });
+
+  it('copies rather than aliases the runConfig record', () => {
+    const runConfig = {customMetadata: {tenant: 'acme'}};
+    const context = makeMetadataContext({runConfig});
+
+    context.customMetadata['addedLater'] = 1;
+
+    expect(context.customMetadata).not.toBe(runConfig.customMetadata);
+    expect(runConfig.customMetadata).toEqual({tenant: 'acme'});
+  });
+
+  it('shares one record with its clones', () => {
+    const context = makeMetadataContext({
+      runConfig: {customMetadata: {tenant: 'acme'}},
+    });
+    const clone = context.clone();
+
+    clone.customMetadata['writtenByClone'] = true;
+
+    expect(clone.customMetadata).toBe(context.customMetadata);
+    expect(context.customMetadata['writtenByClone']).toBe(true);
+  });
+
+  it('keeps the original record when a clone overrides the runConfig', () => {
+    const context = makeMetadataContext({
+      runConfig: {customMetadata: {tenant: 'acme'}},
+    });
+
+    const clone = context.clone({
+      runConfig: {customMetadata: {tenant: 'other', extra: 'ignored'}},
+    });
+
+    expect(clone.customMetadata).toBe(context.customMetadata);
+    expect(clone.customMetadata).toEqual({tenant: 'acme'});
+  });
+
+  it('carries a sub-agent write back to the parent context', async () => {
+    const agent = new MetadataWritingAgent({name: 'writer'});
+    const context = makeMetadataContext({
+      agent,
+      runConfig: {customMetadata: {tenant: 'acme'}},
+    });
+
+    for await (const _event of agent.runAsync(context)) {
+      // Drain the stream; the assertion is on the shared record.
+    }
+
+    expect(context.customMetadata).toEqual({
+      tenant: 'acme',
+      writtenBySubAgent: true,
+    });
+  });
+});
+
+describe('InvocationContext realtime audio caches', () => {
+  const entry: RealtimeCacheEntry = {
+    role: 'user',
+    data: {mimeType: 'audio/pcm', data: 'AAAA'},
+    timestamp: 1.5,
+  };
+
+  it('leaves both caches undefined by default', () => {
+    const context = makeMetadataContext();
+
+    expect(context.inputRealtimeCache).toBeUndefined();
+    expect(context.outputRealtimeCache).toBeUndefined();
+  });
+
+  it('round-trips a cached entry unchanged', () => {
+    const context = makeMetadataContext({inputRealtimeCache: [entry]});
+
+    expect(context.inputRealtimeCache).toEqual([
+      {
+        role: 'user',
+        data: {mimeType: 'audio/pcm', data: 'AAAA'},
+        timestamp: 1.5,
+      },
+    ]);
+  });
+
+  it('carries both caches by reference through clone()', () => {
+    const context = makeMetadataContext({
+      inputRealtimeCache: [],
+      outputRealtimeCache: [],
+    });
+    const clone = context.clone();
+
+    clone.inputRealtimeCache!.push(entry);
+    clone.outputRealtimeCache!.push({...entry, role: 'model'});
+
+    expect(context.inputRealtimeCache).toEqual([entry]);
+    expect(context.outputRealtimeCache).toEqual([{...entry, role: 'model'}]);
+  });
+
+  it('replaces only the cache a clone overrides', () => {
+    const context = makeMetadataContext({
+      inputRealtimeCache: [entry],
+      outputRealtimeCache: [entry],
+    });
+
+    const clone = context.clone({outputRealtimeCache: []});
+
+    expect(clone.inputRealtimeCache).toBe(context.inputRealtimeCache);
+    expect(clone.outputRealtimeCache).toEqual([]);
+    expect(context.outputRealtimeCache).toEqual([entry]);
+  });
+});
+
+describe('InvocationContext activeNonBlockingToolTasks', () => {
+  it('is undefined by default', () => {
+    expect(makeMetadataContext().activeNonBlockingToolTasks).toBeUndefined();
+  });
+
+  it('carries the task registry by reference through clone()', async () => {
+    const task = new Task(async () => {});
+    const context = makeMetadataContext({activeNonBlockingToolTasks: {}});
+
+    const clone = context.clone();
+    clone.activeNonBlockingToolTasks!['myTool_call-1'] = task;
+
+    expect(context.activeNonBlockingToolTasks).toBe(
+      clone.activeNonBlockingToolTasks,
+    );
+    expect(context.activeNonBlockingToolTasks!['myTool_call-1']).toBe(task);
+    await task.promise;
+  });
+
+  it('shows a deletion made through the clone on the original', async () => {
+    const task = new Task(async () => {});
+    const context = makeMetadataContext({
+      activeNonBlockingToolTasks: {'myTool_call-1': task},
+    });
+
+    const clone = context.clone();
+    delete clone.activeNonBlockingToolTasks!['myTool_call-1'];
+
+    expect(context.activeNonBlockingToolTasks).toEqual({});
+    await task.promise;
   });
 });

@@ -20,7 +20,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   decision.
 - [Declarative LlmAgent configuration](agents/agent_config/index.md) - Describing an agent in a YAML or JSON document, and the references that name code from it.
 - [Function call ids in request contents](agents/function_call_ids/index.md) - How a replayed tool call keeps or loses its id, and how a compacted call is recovered.
-- [InvocationContext](agents/invocation_context/index.md) - The per-run context: event selection by branch, resumability, the event queue, the LLM-call limit, and the state one run carries — its credential service and its state schema.
+- [InvocationContext](agents/invocation_context/index.md) - The per-run context: event selection by branch, resumability, the event queue, the LLM-call limit, and the state one run shares — its credential service, its state schema, the custom metadata, the realtime audio caches and the background tool-task registry.
 - [LangGraphAgent](agents/langgraph_agent/index.md) - Running a compiled
   LangGraph state graph as an ADK agent.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) - Exposing a sub-agent to its parent as a callable tool that runs inline.

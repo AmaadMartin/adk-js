@@ -223,6 +223,10 @@ export interface RunConfig {
   /**
    * Custom metadata for the current invocation. The runner merges it onto every
    * event of the run. A key the event already carries keeps the event's value.
+   *
+   * `InvocationContext` also copies it into `InvocationContext.customMetadata`
+   * at construction, where tools and services read and extend it for the life
+   * of the run.
    */
   customMetadata?: Record<string, unknown>;
 

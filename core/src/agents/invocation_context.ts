@@ -28,12 +28,14 @@ import type {BaseTool} from '../tools/base_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import type {SchemaLike} from '../utils/schema.js';
+import {Task} from '../utils/task.js';
 import {branchPathFromString} from '../workflow/branch_path.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent, BaseAgentState} from './base_agent.js';
 import {ContextCacheConfig} from './context_cache_config.js';
 import {LiveRequestQueue} from './live_request_queue.js';
+import {RealtimeCacheEntry} from './realtime_cache_entry.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -114,16 +116,20 @@ export interface InvocationContextParams {
   nodeToolDepth?: number;
   liveRequestQueue?: LiveRequestQueue;
   liveSessionResumptionHandle?: string;
+  activeNonBlockingToolTasks?: Record<string, Task<void>>;
+  inputRealtimeCache?: RealtimeCacheEntry[];
+  outputRealtimeCache?: RealtimeCacheEntry[];
+  /**
+   * Seeds {@link InvocationContext.customMetadata}, which tools and services
+   * then accumulate into over one invocation. A clone and a child context pass
+   * the same record through, so a sub-agent's tool writes into the store its
+   * parent reads.
+   */
+  customMetadata?: Record<string, unknown>;
   /**
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
-  /**
-   * Free-form metadata accumulated by tools and services over one invocation.
-   * A clone reuses the same object, so a sub-agent's tool writes into the
-   * store its parent reads.
-   */
-  customMetadata?: Record<string, unknown>;
   /**
    * Credentials already resolved for this invocation, keyed by credential key.
    */
@@ -371,22 +377,42 @@ export class InvocationContext {
   liveSessionResumptionHandle?: string;
 
   /**
-   * Request-level metadata passed from an incoming A2A request or caller.
+   * The running non-blocking tool tasks of this invocation (live only), keyed
+   * by `<toolName>_<functionCallId>`. The registry a live flow cancels from
+   * when the agent run ends, so a background tool does not outlive it. No
+   * `adk-js` flow writes to it yet; it is the storage that path needs.
    */
-  readonly a2aMetadata?: Record<string, unknown>;
+  activeNonBlockingToolTasks?: Record<string, Task<void>>;
+
+  /**
+   * Caches input audio chunks before flushing to session and artifact
+   * services.
+   */
+  inputRealtimeCache?: RealtimeCacheEntry[];
+
+  /**
+   * Caches output audio chunks before flushing to session and artifact
+   * services.
+   */
+  outputRealtimeCache?: RealtimeCacheEntry[];
 
   /**
    * Free-form metadata accumulated by tools and services during this
-   * invocation, reached through {@link Context.customMetadata}. Mirrors Python
-   * `InvocationContext._custom_metadata`. Starts empty and is written to as
-   * the invocation runs.
+   * invocation, reached through {@link Context.customMetadata}. Mirrors
+   * `InvocationContext._custom_metadata` in `google/adk-python`.
    *
-   * The object is shared with every copy of this context: {@link clone} and
-   * `BaseAgent.createInvocationContext` carry it over by reference, so a
-   * sub-agent writes into the same record the parent reads. `adk-js` has no
-   * `RunConfig.customMetadata`, so unlike adk-python nothing seeds it.
+   * Seeded at construction from {@link RunConfig.customMetadata} as a shallow
+   * copy, so writes here never reach the caller's run config. Always an
+   * object, so a caller can write into it without a null check. Every context
+   * of one invocation shares the same record: {@link clone} and
+   * `BaseAgent.createInvocationContext` pass it through, rather than reseeding.
    */
   readonly customMetadata: Record<string, unknown>;
+
+  /**
+   * Request-level metadata passed from an incoming A2A request or caller.
+   */
+  readonly a2aMetadata?: Record<string, unknown>;
 
   /**
    * The resumption checkpoint of each agent in this invocation, keyed by the
@@ -495,7 +521,9 @@ export class InvocationContext {
     this.tokenCompactionChecked = params.tokenCompactionChecked ?? false;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
-    this.customMetadata = params.customMetadata ?? {};
+    this.customMetadata = params.customMetadata ?? {
+      ...params.runConfig?.customMetadata,
+    };
     this.credentialByKey = params.credentialByKey ?? Object.create(null);
     this.contextCacheConfig = params.contextCacheConfig;
     // Inherit the parent invocation's cost manager when one is available.
@@ -510,6 +538,9 @@ export class InvocationContext {
         .invocationCostManager ?? new InvocationCostManager();
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    this.activeNonBlockingToolTasks = params.activeNonBlockingToolTasks;
+    this.inputRealtimeCache = params.inputRealtimeCache;
+    this.outputRealtimeCache = params.outputRealtimeCache;
     // Read from params for the same reason as the cost manager above: a child
     // context must share the parent's records, so one agent's checkpoint is
     // recorded once for the whole invocation.
