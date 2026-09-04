@@ -362,6 +362,17 @@ export {
   loadSkillFromZipBuffer,
   validateSkillDir,
 } from './skills/loader.js';
+export {
+  getAsset,
+  getReference,
+  getScript,
+  getSkillDescription,
+  getSkillName,
+  listAssets,
+  listReferences,
+  listScripts,
+  scriptToString,
+} from './skills/skill.js';
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
