@@ -42,6 +42,27 @@ import {
 } from '../../src/cli/service_registry.js';
 import {AdkLogger} from '../../src/utils/logger.js';
 
+/**
+ * Stands in for the RAG memory service `@google/adk` exports.
+ *
+ * `rag://` looks the class up by name at call time, so the test package does
+ * not have to export it. The stub records the corpus resource name it is
+ * built with and implements the memory service methods the factory checks for.
+ */
+const ragStub = vi.hoisted(() => {
+  const corpora: string[] = [];
+  class StubRagMemoryService {
+    constructor(options: {ragCorpus: string}) {
+      corpora.push(options.ragCorpus);
+    }
+    async addSessionToMemory(): Promise<void> {}
+    async searchMemory(): Promise<{memories: []}> {
+      return {memories: []};
+    }
+  }
+  return {corpora, StubRagMemoryService};
+});
+
 vi.mock('@google/adk', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/adk')>();
   return {
@@ -51,6 +72,7 @@ vi.mock('@google/adk', async (importOriginal) => {
     GcsArtifactService: vi.fn(),
     VertexAiMemoryBankService: vi.fn(),
     VertexAiSessionService: vi.fn(),
+    VertexAiRagMemoryService: ragStub.StubRagMemoryService,
   };
 });
 
@@ -85,20 +107,20 @@ function recordingFactory<T>(service: T) {
  * agent engine id), so the registry must hand over the whole string rather
  * than the scheme-stripped remainder.
  */
-function assertRoutesFullUri<T>(
+async function assertRoutesFullUri<T>(
   service: T,
   register: (registry: ServiceRegistry, factory: ServiceFactory<T>) => void,
   create: (
     registry: ServiceRegistry,
     uri: string,
     options?: ServiceFactoryOptions,
-  ) => T | undefined,
-): void {
+  ) => Promise<T | undefined>,
+): Promise<void> {
   const registry = new ServiceRegistry();
   const {factory, calls} = recordingFactory(service);
   register(registry, factory);
 
-  const created = create(registry, 'custom://host/path?flag=1', {
+  const created = await create(registry, 'custom://host/path?flag=1', {
     agentsDir: '/agents',
   });
 
@@ -106,7 +128,7 @@ function assertRoutesFullUri<T>(
   expect(calls).toEqual([
     ['custom://host/path?flag=1', {agentsDir: '/agents'}],
   ]);
-  expect(create(registry, 'other://host')).toBeUndefined();
+  expect(await create(registry, 'other://host')).toBeUndefined();
   expect(calls).toHaveLength(1);
 }
 
@@ -115,6 +137,7 @@ describe('ServiceRegistry', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    ragStub.corpora.length = 0;
     warn = vi.spyOn(AdkLogger.prototype, 'warn').mockImplementation(() => {});
     delete process.env['GOOGLE_CLOUD_PROJECT'];
     delete process.env['GOOGLE_CLOUD_LOCATION'];
@@ -127,16 +150,16 @@ describe('ServiceRegistry', () => {
   });
 
   describe('session services', () => {
-    it('test_create_session_service_sqlite', () => {
+    it('test_create_session_service_sqlite', async () => {
       const service =
-        builtinRegistry().createSessionService('sqlite:///test.db');
+        await builtinRegistry().createSessionService('sqlite:///test.db');
 
       expect(service).toBeInstanceOf(DatabaseSessionService);
       expect(mockedDatabaseSession).toHaveBeenCalledWith('sqlite:///test.db');
     });
 
-    it('test_create_session_service_sqlite_ignores_unsupported_kwargs', () => {
-      builtinRegistry().createSessionService('sqlite:///test.db', {
+    it('test_create_session_service_sqlite_ignores_unsupported_kwargs', async () => {
+      await builtinRegistry().createSessionService('sqlite:///test.db', {
         agentsDir: 'foo',
         extra: {poolSize: 10},
       });
@@ -150,15 +173,15 @@ describe('ServiceRegistry', () => {
       expect(message).not.toContain('agentsDir');
     });
 
-    it('builds an in-memory session service for sqlite:// with no path', () => {
+    it('builds an in-memory session service for sqlite:// with no path', async () => {
       expect(
-        builtinRegistry().createSessionService('sqlite://'),
+        await builtinRegistry().createSessionService('sqlite://'),
       ).toBeInstanceOf(InMemorySessionService);
       expect(warn).not.toHaveBeenCalled();
     });
 
-    it('test_create_session_service_postgresql', () => {
-      const service = builtinRegistry().createSessionService(
+    it('test_create_session_service_postgresql', async () => {
+      const service = await builtinRegistry().createSessionService(
         'postgresql://user:pass@host/db',
       );
 
@@ -168,17 +191,29 @@ describe('ServiceRegistry', () => {
       );
     });
 
-    it('builds a database session service for mysql://', () => {
-      builtinRegistry().createSessionService('mysql://u:p@h/d');
+    it('builds a database session service for mysql://', async () => {
+      await builtinRegistry().createSessionService('mysql://u:p@h/d');
 
       expect(mockedDatabaseSession).toHaveBeenCalledWith('mysql://u:p@h/d');
     });
 
-    it('test_create_session_service_agentengine_short', () => {
+    it.each(['postgres', 'mariadb', 'mssql'])(
+      'claims the %s scheme that isDatabaseConnectionString accepts',
+      async (scheme) => {
+        const uri = `${scheme}://u:p@h/d`;
+
+        const service = await builtinRegistry().createSessionService(uri);
+
+        expect(service).toBeInstanceOf(DatabaseSessionService);
+        expect(mockedDatabaseSession).toHaveBeenCalledWith(uri);
+      },
+    );
+
+    it('test_create_session_service_agentengine_short', async () => {
       process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
       process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
 
-      builtinRegistry().createSessionService('agentengine://123', {
+      await builtinRegistry().createSessionService('agentengine://123', {
         agentsDir: AGENTS_DIR,
       });
 
@@ -189,8 +224,8 @@ describe('ServiceRegistry', () => {
       });
     });
 
-    it('test_create_session_service_agentengine_full', () => {
-      builtinRegistry().createSessionService(
+    it('test_create_session_service_agentengine_full', async () => {
+      await builtinRegistry().createSessionService(
         'agentengine://projects/p/locations/l/reasoningEngines/123',
         {agentsDir: AGENTS_DIR},
       );
@@ -202,57 +237,62 @@ describe('ServiceRegistry', () => {
       });
     });
 
-    it('rejects an empty agent engine resource', () => {
-      expect(() =>
+    it('rejects an empty agent engine resource', async () => {
+      await expect(
         builtinRegistry().createSessionService('agentengine://'),
-      ).toThrowError(
+      ).rejects.toThrowError(
         'Agent engine resource name or resource id cannot be empty.',
       );
     });
 
-    it('rejects a mal-formatted agent engine resource name', () => {
-      expect(() =>
+    it('rejects a mal-formatted agent engine resource name', async () => {
+      await expect(
         builtinRegistry().createSessionService(
           'agentengine://projects/p/foo/l',
         ),
-      ).toThrowError('Agent engine resource name is mal-formatted.');
+      ).rejects.toThrowError('Agent engine resource name is mal-formatted.');
     });
 
-    it('requires agentsDir for a short-form agent engine id', () => {
-      expect(() =>
+    it('requires agentsDir for a short-form agent engine id', async () => {
+      await expect(
         builtinRegistry().createSessionService('agentengine://123'),
-      ).toThrowError(
+      ).rejects.toThrowError(
         'agentsDir must be provided for short-form agent engine IDs',
       );
     });
 
-    it('requires the Google Cloud project and location to be set', () => {
-      expect(() =>
+    it('requires the Google Cloud project and location to be set', async () => {
+      await expect(
         builtinRegistry().createSessionService('agentengine://123', {
           agentsDir: AGENTS_DIR,
         }),
-      ).toThrowError('GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION not set.');
-    });
-
-    it('builds an in-memory session service for an authority-less sqlite URI', () => {
-      expect(builtinRegistry().createSessionService('sqlite:')).toBeInstanceOf(
-        InMemorySessionService,
+      ).rejects.toThrowError(
+        'GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION not set.',
       );
     });
 
-    it('builds an in-memory session service for memory://', () => {
+    it('builds an in-memory session service for an authority-less sqlite URI', async () => {
       expect(
-        builtinRegistry().createSessionService('memory://'),
+        await builtinRegistry().createSessionService('sqlite:'),
+      ).toBeInstanceOf(InMemorySessionService);
+    });
+
+    it('builds an in-memory session service for memory://', async () => {
+      expect(
+        await builtinRegistry().createSessionService('memory://'),
       ).toBeInstanceOf(InMemorySessionService);
     });
   });
 
   describe('artifact services', () => {
-    it('test_create_artifact_service_gcs', () => {
-      builtinRegistry().createArtifactService('gs://my-bucket/path/prefix', {
-        agentsDir: 'foo',
-        extra: {otherOption: 'bar'},
-      });
+    it('test_create_artifact_service_gcs', async () => {
+      await builtinRegistry().createArtifactService(
+        'gs://my-bucket/path/prefix',
+        {
+          agentsDir: 'foo',
+          extra: {otherOption: 'bar'},
+        },
+      );
 
       expect(mockedGcsArtifact).toHaveBeenCalledWith('my-bucket');
       const message = String(warn.mock.calls[0]?.[0]);
@@ -263,17 +303,19 @@ describe('ServiceRegistry', () => {
       expect(message).not.toContain('agentsDir');
     });
 
-    it('builds an in-memory artifact service for memory://', () => {
+    it('builds an in-memory artifact service for memory://', async () => {
       expect(
-        builtinRegistry().createArtifactService('memory://'),
+        await builtinRegistry().createArtifactService('memory://'),
       ).toBeInstanceOf(InMemoryArtifactService);
     });
 
-    it('test_file_artifact_factory_normalizes_windows_file_uri', () => {
+    it('test_file_artifact_factory_normalizes_windows_file_uri', async () => {
       // Only the percent-decoding half of the reference test ports. Node's
       // `fileURLToPath` is platform-bound, and CI also runs Linux, so there is
       // no equivalent of monkeypatching `os.name` for the drive-letter half.
-      builtinRegistry().createArtifactService('file:///tmp/adk%20artifacts');
+      await builtinRegistry().createArtifactService(
+        'file:///tmp/adk%20artifacts',
+      );
 
       expect(mockedFileArtifact).toHaveBeenCalledWith(
         expect.stringContaining('adk artifacts'),
@@ -283,46 +325,81 @@ describe('ServiceRegistry', () => {
       );
     });
 
-    it('test_file_artifact_factory_rejects_non_local_authority', () => {
-      expect(() =>
+    it('test_file_artifact_factory_rejects_non_local_authority', async () => {
+      await expect(
         builtinRegistry().createArtifactService(
           'file://example.com/tmp/adk_artifacts',
         ),
-      ).toThrowError('local filesystem');
+      ).rejects.toThrowError('local filesystem');
       expect(mockedFileArtifact).not.toHaveBeenCalled();
     });
 
-    it('accepts a localhost file URI', () => {
-      builtinRegistry().createArtifactService('file://localhost/tmp/artifacts');
+    it('accepts a localhost file URI', async () => {
+      await builtinRegistry().createArtifactService(
+        'file://localhost/tmp/artifacts',
+      );
 
       expect(mockedFileArtifact).toHaveBeenCalledWith(
         expect.stringContaining('artifacts'),
       );
     });
 
-    it('rejects a file URI with no path component', () => {
-      expect(() =>
+    it('rejects a file URI with no path component', async () => {
+      await expect(
         builtinRegistry().createArtifactService('file://'),
-      ).toThrowError('file:// artifact URIs must include a path component.');
+      ).rejects.toThrowError(
+        'file:// artifact URIs must include a path component.',
+      );
     });
   });
 
   describe('memory services', () => {
-    it('test_create_memory_service_rag', () => {
-      // Not portable: adk-js has no `VertexAiRagMemoryService`, so `rag://`
-      // stays unregistered. This assertion pins the gap.
-      expect(
-        builtinRegistry().createMemoryService('rag://corpus-123', {
-          agentsDir: AGENTS_DIR,
-        }),
-      ).toBeUndefined();
-    });
-
-    it('test_create_memory_service_agentengine_short', () => {
+    it('test_create_memory_service_rag', async () => {
       process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
       process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
 
-      builtinRegistry().createMemoryService('agentengine://456', {
+      const service = await builtinRegistry().createMemoryService(
+        'rag://corpus-123',
+        {agentsDir: AGENTS_DIR},
+      );
+
+      expect(service).toBeInstanceOf(ragStub.StubRagMemoryService);
+      expect(ragStub.corpora).toEqual([
+        'projects/test-project/locations/us-central1/ragCorpora/corpus-123',
+      ]);
+    });
+
+    it('rejects a rag URI with no corpus', async () => {
+      await expect(
+        builtinRegistry().createMemoryService('rag://', {
+          agentsDir: AGENTS_DIR,
+        }),
+      ).rejects.toThrowError('Rag corpus can not be empty.');
+    });
+
+    it('requires the Google Cloud project and location for a rag corpus', async () => {
+      await expect(
+        builtinRegistry().createMemoryService('rag://corpus-123', {
+          agentsDir: AGENTS_DIR,
+        }),
+      ).rejects.toThrowError(
+        'GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION not set.',
+      );
+    });
+
+    it('requires agentsDir for a rag corpus', async () => {
+      await expect(
+        builtinRegistry().createMemoryService('rag://corpus-123'),
+      ).rejects.toThrowError(
+        'agentsDir must be provided for RAG memory service',
+      );
+    });
+
+    it('test_create_memory_service_agentengine_short', async () => {
+      process.env['GOOGLE_CLOUD_PROJECT'] = 'test-project';
+      process.env['GOOGLE_CLOUD_LOCATION'] = 'us-central1';
+
+      await builtinRegistry().createMemoryService('agentengine://456', {
         agentsDir: AGENTS_DIR,
       });
 
@@ -333,8 +410,8 @@ describe('ServiceRegistry', () => {
       });
     });
 
-    it('test_create_memory_service_agentengine_full', () => {
-      builtinRegistry().createMemoryService(
+    it('test_create_memory_service_agentengine_full', async () => {
+      await builtinRegistry().createMemoryService(
         'agentengine://projects/p/locations/l/reasoningEngines/456',
         {agentsDir: AGENTS_DIR},
       );
@@ -346,82 +423,95 @@ describe('ServiceRegistry', () => {
       });
     });
 
-    it('test_create_memory_service_memory', () => {
-      expect(builtinRegistry().createMemoryService('memory://')).toBeInstanceOf(
-        InMemoryMemoryService,
-      );
+    it('test_create_memory_service_memory', async () => {
+      expect(
+        await builtinRegistry().createMemoryService('memory://'),
+      ).toBeInstanceOf(InMemoryMemoryService);
     });
   });
 
   describe('task stores', () => {
-    it('test_create_task_store_memory', () => {
+    it('test_create_task_store_memory', async () => {
       expect(
-        builtinRegistry().createTaskStoreService('memory://'),
+        await builtinRegistry().createTaskStoreService('memory://'),
       ).toBeInstanceOf(InMemoryTaskStore);
     });
 
-    it('test_create_task_store_postgresql', () => {
+    it('test_create_task_store_postgresql', async () => {
       // Not portable: `@a2a-js/sdk` ships no `DatabaseTaskStore`, so the
       // driver-suffixed schemes stay unregistered.
-      expect(() =>
+      await expect(
         builtinRegistry().createTaskStoreService(
           'postgresql+asyncpg://user:pass@host/db',
         ),
-      ).toThrowError(
+      ).rejects.toThrowError(
         "Unsupported A2A task store URI scheme: 'postgresql+asyncpg'. Supported schemes: memory",
       );
     });
 
-    it('names an empty scheme when the task store URI has none', () => {
-      expect(() =>
+    it('names an empty scheme when the task store URI has none', async () => {
+      await expect(
         builtinRegistry().createTaskStoreService('no-scheme'),
-      ).toThrowError("Unsupported A2A task store URI scheme: ''.");
+      ).rejects.toThrowError("Unsupported A2A task store URI scheme: ''.");
     });
 
-    it('lists the supported task store schemes in sorted order', () => {
+    it('lists the supported task store schemes in sorted order', async () => {
       const registry = builtinRegistry();
       registry.registerTaskStoreService('alpha', () => new InMemoryTaskStore());
 
-      expect(() => registry.createTaskStoreService('nope://x')).toThrowError(
-        'Supported schemes: alpha, memory',
-      );
+      await expect(
+        registry.createTaskStoreService('nope://x'),
+      ).rejects.toThrowError('Supported schemes: alpha, memory');
     });
   });
 
   describe('scheme routing', () => {
-    it('test_unsupported_scheme', () => {
+    it('test_unsupported_scheme', async () => {
       const registry = builtinRegistry();
 
       expect(
-        registry.createSessionService('unsupported://foo'),
+        await registry.createSessionService('unsupported://foo'),
       ).toBeUndefined();
       expect(
-        registry.createArtifactService('unsupported://foo'),
+        await registry.createArtifactService('unsupported://foo'),
       ).toBeUndefined();
-      expect(registry.createMemoryService('unsupported://foo')).toBeUndefined();
-      expect(() =>
+      expect(
+        await registry.createMemoryService('unsupported://foo'),
+      ).toBeUndefined();
+      await expect(
         registry.createTaskStoreService('unsupported://foo'),
-      ).toThrowError('Unsupported A2A task store URI scheme');
+      ).rejects.toThrowError('Unsupported A2A task store URI scheme');
       expect(mockedDatabaseSession).not.toHaveBeenCalled();
       expect(mockedVertexSession).not.toHaveBeenCalled();
       expect(mockedGcsArtifact).not.toHaveBeenCalled();
       expect(mockedMemoryBank).not.toHaveBeenCalled();
     });
 
-    it('returns undefined for a string that carries no scheme', () => {
+    it('returns undefined for a string that carries no scheme', async () => {
       expect(
-        builtinRegistry().createSessionService('not-a-uri'),
+        await builtinRegistry().createSessionService('not-a-uri'),
       ).toBeUndefined();
     });
 
-    it('matches a scheme case-insensitively', () => {
+    it('matches a scheme case-insensitively', async () => {
       expect(
-        builtinRegistry().createSessionService('MEMORY://'),
+        await builtinRegistry().createSessionService('MEMORY://'),
       ).toBeInstanceOf(InMemorySessionService);
     });
 
-    it('test_register_service_routes_matching_scheme_with_full_uri (session)', () => {
-      assertRoutesFullUri<BaseSessionService>(
+    it('awaits a factory that initializes the service asynchronously', async () => {
+      const registry = new ServiceRegistry();
+      const service = new InMemorySessionService();
+      registry.registerSessionService('async', async () => {
+        await Promise.resolve();
+        return service;
+      });
+
+      expect(await registry.createSessionService('async://x')).toBe(service);
+    });
+
+    it('test_register_service_routes_matching_scheme_with_full_uri (session)', async () => {
+      await assertRoutesFullUri<BaseSessionService>(
         new InMemorySessionService(),
         (registry, factory) =>
           registry.registerSessionService('custom', factory),
@@ -429,8 +519,8 @@ describe('ServiceRegistry', () => {
       );
     });
 
-    it('test_register_service_routes_matching_scheme_with_full_uri (artifact)', () => {
-      assertRoutesFullUri<BaseArtifactService>(
+    it('test_register_service_routes_matching_scheme_with_full_uri (artifact)', async () => {
+      await assertRoutesFullUri<BaseArtifactService>(
         new InMemoryArtifactService(),
         (registry, factory) =>
           registry.registerArtifactService('custom', factory),
@@ -439,8 +529,8 @@ describe('ServiceRegistry', () => {
       );
     });
 
-    it('test_register_service_routes_matching_scheme_with_full_uri (memory)', () => {
-      assertRoutesFullUri<BaseMemoryService>(
+    it('test_register_service_routes_matching_scheme_with_full_uri (memory)', async () => {
+      await assertRoutesFullUri<BaseMemoryService>(
         new InMemoryMemoryService(),
         (registry, factory) =>
           registry.registerMemoryService('custom', factory),
@@ -448,7 +538,7 @@ describe('ServiceRegistry', () => {
       );
     });
 
-    it('test_register_session_service_last_registration_wins', () => {
+    it('test_register_session_service_last_registration_wins', async () => {
       const registry = new ServiceRegistry();
       const scriptService = new InMemorySessionService();
       const fromYaml = recordingFactory(new InMemorySessionService());
@@ -457,24 +547,30 @@ describe('ServiceRegistry', () => {
       registry.registerSessionService('dup', fromYaml.factory);
       registry.registerSessionService('dup', fromScript.factory);
 
-      expect(registry.createSessionService('dup://x')).toBe(scriptService);
+      expect(await registry.createSessionService('dup://x')).toBe(
+        scriptService,
+      );
       expect(fromYaml.calls).toEqual([]);
     });
 
-    it('test_register_service_schemes_are_namespaced_per_service_type', () => {
+    it('test_register_service_schemes_are_namespaced_per_service_type', async () => {
       const registry = new ServiceRegistry();
       const sessionService = new InMemorySessionService();
       const {factory, calls} = recordingFactory(sessionService);
 
       registry.registerSessionService('shared', factory);
 
-      expect(registry.createArtifactService('shared://x')).toBeUndefined();
-      expect(registry.createMemoryService('shared://x')).toBeUndefined();
-      expect(() => registry.createTaskStoreService('shared://x')).toThrowError(
-        'Unsupported A2A task store URI scheme',
-      );
+      expect(
+        await registry.createArtifactService('shared://x'),
+      ).toBeUndefined();
+      expect(await registry.createMemoryService('shared://x')).toBeUndefined();
+      await expect(
+        registry.createTaskStoreService('shared://x'),
+      ).rejects.toThrowError('Unsupported A2A task store URI scheme');
       expect(calls).toEqual([]);
-      expect(registry.createSessionService('shared://x')).toBe(sessionService);
+      expect(await registry.createSessionService('shared://x')).toBe(
+        sessionService,
+      );
     });
   });
 });

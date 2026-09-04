@@ -54,29 +54,29 @@ function getLogLevelFromOptions(options: {
   return LogLevel.INFO;
 }
 
-function getSessionServiceFromOptions(
+async function getSessionServiceFromOptions(
   options: {
     session_service_uri?: string;
   },
   agentsDir?: string,
-): BaseSessionService {
+): Promise<BaseSessionService> {
   const uri =
     options['session_service_uri'] || process.env.DATABASE_URL || 'memory://';
   return (
-    getServiceRegistry().createSessionService(uri, {agentsDir}) ??
+    (await getServiceRegistry().createSessionService(uri, {agentsDir})) ??
     getSessionServiceFromUri(uri)
   );
 }
 
-function getArtifactServiceFromOptions(
+async function getArtifactServiceFromOptions(
   options: {
     artifact_service_uri?: string;
   },
   agentsDir?: string,
-): BaseArtifactService | undefined {
+): Promise<BaseArtifactService | undefined> {
   const uri = options['artifact_service_uri'] || 'memory://';
   return (
-    getServiceRegistry().createArtifactService(uri, {agentsDir}) ??
+    (await getServiceRegistry().createArtifactService(uri, {agentsDir})) ??
     getArtifactServiceFromUri(uri)
   );
 }
@@ -279,11 +279,11 @@ export function createProgram(): Command {
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(
+          sessionService: await getSessionServiceFromOptions(
             options,
             resolvedAgentsDir,
           ),
-          artifactService: getArtifactServiceFromOptions(
+          artifactService: await getArtifactServiceFromOptions(
             options,
             resolvedAgentsDir,
           ),
@@ -335,11 +335,11 @@ export function createProgram(): Command {
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(
+          sessionService: await getSessionServiceFromOptions(
             options,
             resolvedAgentsDir,
           ),
-          artifactService: getArtifactServiceFromOptions(
+          artifactService: await getArtifactServiceFromOptions(
             options,
             resolvedAgentsDir,
           ),
@@ -436,8 +436,14 @@ export function createProgram(): Command {
           savedSessionFile: options['resume'],
           saveSession: getBoolean(options['save_session']),
           sessionId: options['session_id'],
-          sessionService: getSessionServiceFromOptions(options, agentsDir),
-          artifactService: getArtifactServiceFromOptions(options, agentsDir),
+          sessionService: await getSessionServiceFromOptions(
+            options,
+            agentsDir,
+          ),
+          artifactService: await getArtifactServiceFromOptions(
+            options,
+            agentsDir,
+          ),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           reloadAgents: getBoolean(options['reload_agents']),
