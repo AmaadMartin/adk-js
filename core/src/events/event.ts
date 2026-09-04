@@ -435,3 +435,42 @@ export function transformToSnakeCaseEvent(
     unknown
   >;
 }
+
+/**
+ * Transforms a snake_cased actions object to an {@link EventActions}.
+ *
+ * The legacy v0 schema stores the actions on their own, in a pickled blob
+ * rather than inside the event JSON, so they cross the naming boundary with no
+ * event around them. The preserved subtrees are the ones
+ * {@link transformToCamelCaseEvent} preserves, so both schemas read a
+ * `stateDelta` the same way. The actions are wrapped and unwrapped here
+ * because those preserved paths are written relative to the event.
+ *
+ * @param actions The snake_cased actions object.
+ * @returns The camelCased actions object.
+ */
+export function transformToCamelCaseActions(
+  actions: Record<string, unknown>,
+): EventActions {
+  const event = toCamelCase({actions}, PRESERVE_KEYS_SNAKE_CASE) as {
+    actions: EventActions;
+  };
+  return event.actions;
+}
+
+/**
+ * Transforms an {@link EventActions} to its snake_cased form.
+ *
+ * The inverse of {@link transformToCamelCaseActions}.
+ *
+ * @param actions The camelCased actions object.
+ * @returns The snake_cased actions object.
+ */
+export function transformToSnakeCaseActions(
+  actions: EventActions,
+): Record<string, unknown> {
+  const event = toSnakeCase({actions}, PRESERVE_KEYS_CAMEL_CASE) as {
+    actions: Record<string, unknown>;
+  };
+  return event.actions;
+}
