@@ -107,6 +107,8 @@ WHERE event_type IN ('TOOL_COMPLETED', 'TOOL_ERROR')
 GROUP BY origin;
 ```
 
+An `LLM_REQUEST` row lists what the model was allowed to call in `attributes.tools`, one entry per tool carrying `name`, `description` and the `parameters` schema. A tool that cannot describe itself contributes its name alone, so one failing tool never costs you the others. adk-python writes the same three keys, and prefers a declaration's `parametersJsonSchema` over its `parameters` in the same way.
+
 A workflow node that succeeds produces `NODE_OUTPUT`. A node that throws produces `NODE_ERROR`, with `status` of `ERROR` and the failure in `error_message`. `AGENT_STATE_CHECKPOINT` carries a resumable workflow's saved state, and an agent that ends without saving state still writes one with `end_of_agent` true.
 
 Four members are declared so the enum matches the Python one and a query written for a shared dataset compiles. This SDK writes none of them. adk-js `BasePlugin` has no `onAgentErrorCallback` and no `onRunErrorCallback`, so nothing reports `AGENT_ERROR` or `INVOCATION_ERROR`. adk-js `EventActions` has no `compaction` field, so nothing reports `EVENT_COMPACTION`. Agent-to-agent capture is out of scope, so nothing reports `A2A_INTERACTION`. A model failure still produces `LLM_ERROR`, a tool failure still produces `TOOL_ERROR`, and a node failure still produces `NODE_ERROR`.
@@ -145,6 +147,7 @@ Span state is keyed by invocation id, so two invocations running at once never m
 
 - The duration options carry an `Ms` suffix and take milliseconds. adk-python's equivalents take float seconds; the rename exists so that `batchFlushIntervalMs: 1000` cannot silently mean sixteen minutes.
 - Redaction is deliberately not configurable. It is a fixed set of credential names, matched after folding case, `-`/`_` and camel humps together, plus every key beginning `temp:`.
+- `tableId` appears twice: on the constructor and on the config. The constructor's wins, matching adk-python. Set either one.
 - `batchSize` and `queueMaxSize` count whole rows and must be integers of at least 1. The duration options take any finite number greater than zero, so a fractional millisecond is accepted, matching adk-python's float seconds. `NaN` and `Infinity` are rejected explicitly, because an ordered comparison alone lets `NaN` past every range check.
 - The constructor throws on an out-of-range value rather than dropping every row later.
 
