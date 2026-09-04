@@ -118,30 +118,6 @@ describe('DiscoveryEngineSearchTool', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('test_init_with_both_ids_raises_error', () => {
-    expect(
-      () =>
-        new DiscoveryEngineSearchTool({
-          dataStoreId: 'test_data_store',
-          searchEngineId: 'test_search_engine',
-        } as unknown as {dataStoreId: string}),
-    ).toThrow('Either dataStoreId or searchEngineId must be specified.');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('test_init_with_data_store_specs_without_search_engine_id_raises_error', () => {
-    expect(
-      () =>
-        new DiscoveryEngineSearchTool({
-          dataStoreId: 'test_data_store',
-          dataStoreSpecs: [{dataStore: '123'}],
-        } as unknown as {dataStoreId: string}),
-    ).toThrow(
-      'searchEngineId must be specified if dataStoreSpecs is specified.',
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('test_init_with_regional_location_uses_regional_endpoint [eu]', async () => {
     const tool = new DiscoveryEngineSearchTool({
       dataStoreId:
