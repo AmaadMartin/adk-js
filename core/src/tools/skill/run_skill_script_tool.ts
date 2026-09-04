@@ -11,16 +11,7 @@ import {
   CodeExecutionLanguage,
   File,
 } from '../../code_executors/code_execution_utils.js';
-import {
-  getAsset,
-  getReference,
-  getScript,
-  listAssets,
-  listReferences,
-  listScripts,
-  scriptToString,
-  Skill,
-} from '../../skills/skill.js';
+import {getScript, Skill} from '../../skills/skill.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -192,20 +183,16 @@ function buildWrapperCode(
 }
 
 export function getSkillResourceFiles(skill: Skill): File[] {
-  const {resources} = skill;
-  // The keys come from the same maps the getters read, so no getter can miss.
+  const {references = {}, assets = {}, scripts = {}} = skill.resources ?? {};
   return [
-    ...listReferences(resources).map((name) =>
-      toResourceFile(`references/${name}`, getReference(resources, name)!),
+    ...Object.entries(references).map(([name, content]) =>
+      toResourceFile(`references/${name}`, content),
     ),
-    ...listAssets(resources).map((name) =>
-      toResourceFile(`assets/${name}`, getAsset(resources, name)!),
+    ...Object.entries(assets).map(([name, content]) =>
+      toResourceFile(`assets/${name}`, content),
     ),
-    ...listScripts(resources).map((name) =>
-      toResourceFile(
-        `scripts/${name}`,
-        scriptToString(getScript(resources, name)!),
-      ),
+    ...Object.entries(scripts).map(([name, script]) =>
+      toResourceFile(`scripts/${name}`, script.src),
     ),
   ];
 }

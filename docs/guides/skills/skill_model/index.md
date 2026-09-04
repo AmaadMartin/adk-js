@@ -94,13 +94,12 @@ import {
   listAssets,
   listReferences,
   listScripts,
-  scriptToString,
 } from '@google/adk';
 
 const schema = getAsset(skill.resources, 'db-schema.sql');
 const doc = getReference(skill.resources, 'workflow.md');
 const script = getScript(skill.resources, 'render.js');
-const source = script ? scriptToString(script) : undefined;
+const source = script?.src;
 
 const names = [
   ...listReferences(skill.resources),
@@ -111,10 +110,7 @@ const names = [
 
 A reference or asset is a `string` when the file is UTF-8 and a `Buffer` when it
 is not, so narrow with `Buffer.isBuffer` before you treat it as text. A script
-is a `Script`, and `scriptToString` returns its source.
-
-`getSkillName(skill)` and `getSkillDescription(skill)` read the two frontmatter
-fields a caller needs most often.
+is a `Script`, and its source is `script.src`.
 
 ## Where a skill came from
 
