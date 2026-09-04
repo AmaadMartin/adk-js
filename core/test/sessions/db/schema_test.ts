@@ -363,7 +363,7 @@ describe('schema DDL', () => {
     const sql = await orm.schema.getCreateSchemaSQL();
 
     expect(sql).not.toContain('datetime not null');
-    expect(sql.match(/datetime\(3\) not null/g)).toHaveLength(5);
+    expect(sql.match(/datetime\(6\) not null/g)).toHaveLength(5);
     expect(sql).toContain(
       'foreign key (`session_id`, `app_name`, `user_id`) references ' +
         '`sessions` (`id`, `app_name`, `user_id`) on update cascade ' +

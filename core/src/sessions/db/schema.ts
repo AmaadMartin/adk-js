@@ -10,12 +10,10 @@ import {
   Index,
   JsonType,
   ManyToOne,
-  Platform,
   PrimaryKey,
   Property,
   Ref,
   RequiredEntityData,
-  TransformContext,
 } from '@mikro-orm/core';
 import {
   Event,
@@ -28,6 +26,11 @@ import {
 } from '../../events/event_actions.js';
 import {isRecord, safeJsonLoads} from '../../utils/json_utils.js';
 import {createSession, Session} from '../session.js';
+import {
+  DEFAULT_MAX_VARCHAR_LENGTH,
+  DynamicJsonType,
+  PreciseTimestampType,
+} from './shared.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
 /**
@@ -39,15 +42,6 @@ export const SCHEMA_VERSION_1_JSON = '1';
 export const METADATA_TABLE_NAME = 'adk_internal_metadata';
 export const EVENTS_TABLE_NAME = 'events';
 export const STORAGE_KEY_COLUMN_LENGTH = 191;
-/**
- * Fractional-second digits every stored timestamp column keeps.
- *
- * MySQL and MariaDB default a `DATETIME` column to whole seconds, which would
- * round away the millisecond an `Event.timestamp` carries. The stale-session
- * marker and the event ordering both compare those values, so the column has
- * to hold what the caller wrote.
- */
-export const DATETIME_FRACTIONAL_DIGITS = 3;
 
 /** The events column only the current layout has. */
 export const EVENT_DATA_COLUMN_NAME = 'event_data';
@@ -102,8 +96,11 @@ class CamelCaseToSnakeCaseJsonType extends JsonType {
  * This is adk-python's `sqlite_session_service._decode_state`. Python rejects
  * a non-string key as well; a `JSON.parse` result can only have string keys,
  * so that branch has no counterpart here.
+ *
+ * It extends {@link DynamicJsonType}, so the column keeps the widest
+ * JSON-capable declaration each backend supports.
  */
-class StateJsonType extends JsonType {
+class StateJsonType extends DynamicJsonType {
   /**
    * @param context The column's role, for example `'session state'`, named in
    *   both error messages.
@@ -112,15 +109,13 @@ class StateJsonType extends JsonType {
     super();
   }
 
-  override convertToJSValue(
-    value: unknown,
-    platform: Platform,
-    context?: TransformContext,
-  ): Record<string, unknown> {
+  override convertToJSValue(value: unknown): Record<string, unknown> {
+    // `DynamicJsonType` reports a parse failure against a fixed
+    // `'session state'`. Each column names its own role instead.
     const decoded =
       typeof value === 'string'
         ? safeJsonLoads(value, this.context)
-        : super.convertToJSValue(value, platform, context);
+        : super.convertToJSValue(value);
 
     if (!isRecord(decoded)) {
       throw new Error(`Persisted ${this.context} must be a JSON object.`);
@@ -134,7 +129,7 @@ export class StorageMetadata {
   @PrimaryKey({type: 'string'})
   key!: string;
 
-  @Property({type: 'string'})
+  @Property({type: 'string', length: DEFAULT_MAX_VARCHAR_LENGTH})
   value!: string;
 }
 
@@ -151,8 +146,7 @@ export class StorageAppState {
   state!: Record<string, unknown>;
 
   @Property({
-    type: 'datetime',
-    length: DATETIME_FRACTIONAL_DIGITS,
+    type: PreciseTimestampType,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -180,8 +174,7 @@ export class StorageUserState {
   state!: Record<string, unknown>;
 
   @Property({
-    type: 'datetime',
-    length: DATETIME_FRACTIONAL_DIGITS,
+    type: PreciseTimestampType,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -214,16 +207,14 @@ export class StorageSession {
   state!: Record<string, unknown>;
 
   @Property({
-    type: 'datetime',
-    length: DATETIME_FRACTIONAL_DIGITS,
+    type: PreciseTimestampType,
     fieldName: 'create_time',
     onCreate: () => new Date(),
   })
   createTime: Date = new Date();
 
   @Property({
-    type: 'datetime',
-    length: DATETIME_FRACTIONAL_DIGITS,
+    type: PreciseTimestampType,
     fieldName: 'update_time',
     onCreate: () => new Date(),
   })
@@ -274,7 +265,7 @@ export class StorageEvent {
   @Property({type: 'string', fieldName: 'invocation_id'})
   invocationId!: string;
 
-  @Property({type: 'datetime', length: DATETIME_FRACTIONAL_DIGITS})
+  @Property({type: PreciseTimestampType})
   timestamp!: Date;
 
   /**

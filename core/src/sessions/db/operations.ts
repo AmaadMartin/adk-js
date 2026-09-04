@@ -387,7 +387,16 @@ export async function ensureDatabaseCreated(orm: MikroORM): Promise<void> {
   // creates tables if they don't exist. Safe mode prevents dropping columns or tables.
   const sql = await orm.schema.getUpdateSchemaSQL({safe: true});
 
-  for (const statement of sql.split('\n').filter((line) => line.trim())) {
+  // sqlite rebuilds a table whose column type changed, and puts the closing
+  // `pragma foreign_keys = on;` in front of the statement that follows it. The
+  // break after every terminator gives that statement its own line, so it runs
+  // instead of being dropped as the tail of the pragma.
+  const statements = sql
+    .replaceAll(';', ';\n')
+    .split('\n')
+    .filter((line) => line.trim());
+
+  for (const statement of statements) {
     if (ADD_FOREIGN_KEY.test(statement)) {
       await addForeignKeyIfAccepted(orm, statement);
     } else {

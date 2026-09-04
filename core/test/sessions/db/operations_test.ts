@@ -38,6 +38,7 @@ import {
   StorageUserState,
 } from '../../../src/sessions/db/schema.js';
 import {ENTITIES_V0} from '../../../src/sessions/db/schema_v0.js';
+import {PreciseTimestampType} from '../../../src/sessions/db/shared.js';
 import {resetLogger} from '../../../src/utils/logger.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
@@ -94,10 +95,11 @@ describe('operations', () => {
         entities: ENTITIES,
       });
 
-      // MySQL and MariaDB emit `datetime` with no fractional digits unless the
-      // property declares a length, and the whole-second value that column
-      // holds would round away the millisecond the revision marker and the
-      // event ordering both compare.
+      // MySQL and MariaDB emit `datetime` with no fractional digits unless
+      // something declares them, and the whole-second value that column holds
+      // would round away the millisecond the revision marker and the event
+      // ordering both compare. `PreciseTimestampType` declares the digits per
+      // backend, so every timestamp column has to be bound to it.
       const timestampColumns: Array<[string, string]> = [
         [StorageSession.name, 'createTime'],
         [StorageSession.name, 'updateTime'],
@@ -109,11 +111,11 @@ describe('operations', () => {
       for (const [entity, property] of timestampColumns) {
         const properties = orm.getMetadata().get(entity).properties as Record<
           string,
-          {length?: number}
+          {customType?: unknown}
         >;
-        // Asserted against the literal, not the constant, so that lowering the
-        // constant fails here instead of moving both sides together.
-        expect(properties[property].length).toBe(3);
+        expect(properties[property].customType).toBeInstanceOf(
+          PreciseTimestampType,
+        );
       }
     });
 
