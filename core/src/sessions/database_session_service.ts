@@ -18,7 +18,6 @@ import {StaleSessionError} from '../errors/stale_session_error.js';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {KeyedMutex} from '../utils/keyed_mutex.js';
-import {logger} from '../utils/logger.js';
 import {
   AppendEventRequest,
   applyTempState,
@@ -64,7 +63,9 @@ import {
 import {
   ENTITIES_V0,
   StorageEventV0,
+  storageEventV0FromEvent,
   storageEventV0ToEvent,
+  updateStorageEventV0,
 } from './db/schema_v0.js';
 import {CompositeSessionKey, Session} from './session.js';
 import {extractJsonSafeStateDelta} from './session_util.js';
@@ -76,18 +77,6 @@ import {extractJsonSafeStateDelta} from './session_util.js';
 const STALE_SESSION_ERROR_MESSAGE =
   'The session has been modified in storage since it was loaded. ' +
   'Please reload the session before appending more events.';
-
-/**
- * The message a write to a legacy database is refused with.
- *
- * It names the migration command, because that is the only way to make such a
- * database writable from here.
- */
-const LEGACY_SCHEMA_READ_ONLY_MESSAGE =
-  'This database uses the legacy v0 session schema, which stores event ' +
-  'actions as a Python pickle. adk-js can read such a database but cannot ' +
-  'write to it. Migrate it with the adk-python `adk migrate session` ' +
-  'command first.';
 
 /** Newest event first, with the id breaking a timestamp tie. */
 const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
@@ -185,23 +174,91 @@ function applyScopedDelta(
   }
 }
 
+/** The event entity registered for the layout the open database holds. */
+type StorageEventEntity = typeof StorageEvent | typeof StorageEventV0;
+
 /**
  * Reports whether a marker-less session still matches the stored history.
  *
  * A session built by hand carries no revision marker, so the newest stored
  * event stands in for one: the caller is current when it holds that event, or
  * when both it and storage hold none.
+ *
+ * @param eventEntity The event entity the open database registers. A legacy
+ *     database registers `StorageEventV0`, and reading `StorageEvent` there
+ *     fails because MikroORM does not know it.
  */
 async function sessionMatchesStorageRevision(
   em: EntityManager,
+  eventEntity: StorageEventEntity,
   session: Session,
 ): Promise<boolean> {
   const newestStored = await em.findOne(
-    StorageEvent,
+    eventEntity,
     {appName: session.appName, userId: session.userId, sessionId: session.id},
     {orderBy: NEWEST_EVENT_FIRST},
   );
   return newestStored?.id === session.events.at(-1)?.id;
+}
+
+/**
+ * Stores one event in a v1 database, replacing the row it already holds.
+ *
+ * @param txEm The entity manager of the open write transaction.
+ * @param storageSession The stored session row the event belongs to.
+ * @param event The event to store.
+ */
+async function persistEventRow(
+  txEm: EntityManager,
+  storageSession: StorageSession,
+  event: Event,
+): Promise<void> {
+  const existing = await txEm.findOne(StorageEvent, {
+    id: event.id,
+    appName: storageSession.appName,
+    userId: storageSession.userId,
+    sessionId: storageSession.id,
+  });
+
+  if (existing) {
+    existing.eventData = event;
+    existing.timestamp = new Date(event.timestamp);
+    return;
+  }
+  txEm.persist(
+    txEm.create(StorageEvent, storageEventFromEvent(storageSession, event)),
+  );
+}
+
+/**
+ * Stores one event in a legacy v0 database, replacing the row it already
+ * holds.
+ *
+ * The `actions` column receives the Python pickle adk-python's restricted
+ * unpickler reads back, so a row written here stays loadable from Python.
+ *
+ * @param txEm The entity manager of the open write transaction.
+ * @param session The session the event belongs to.
+ * @param event The event to store.
+ * @throws If the event's actions hold a value with no Python counterpart.
+ */
+async function persistLegacyEventRow(
+  txEm: EntityManager,
+  session: Session,
+  event: Event,
+): Promise<void> {
+  const existing = await txEm.findOne(StorageEventV0, {
+    id: event.id,
+    appName: session.appName,
+    userId: session.userId,
+    sessionId: session.id,
+  });
+
+  if (existing) {
+    updateStorageEventV0(existing, session, event);
+    return;
+  }
+  txEm.persist(storageEventV0FromEvent(session, event));
 }
 
 /**
@@ -217,7 +274,6 @@ export class DatabaseSessionService extends BaseSessionService {
   private readonly ownsOrm: boolean;
   private readonly sessionLocks = new KeyedMutex();
   private legacySchema = false;
-  private warnedAboutLegacyActions = false;
 
   /**
    * @param source A connection string, a MikroORM options object, or a
@@ -283,8 +339,9 @@ export class DatabaseSessionService extends BaseSessionService {
    * during startup to pay the cost upfront. It is safe to call more than once
    * and safe to call concurrently, and a failed attempt can be retried.
    *
-   * A database holding the legacy v0 schema is opened for reading only, and
-   * neither its tables nor its rows are altered.
+   * A database holding the legacy v0 schema keeps that layout: a missing v0
+   * table or index is created, and no v1 table, column or metadata row is
+   * added to it.
    *
    * @throws Error if the database holds the legacy v0 session schema and the
    *     caller supplied the MikroORM instance.
@@ -314,6 +371,12 @@ export class DatabaseSessionService extends BaseSessionService {
     const version = await detectDatabaseSchemaVersion(orm);
     if (version === SCHEMA_VERSION_0_PICKLE) {
       await this.reopenWithLegacyEntities();
+      // `ENTITIES_V0` carries no `StorageMetadata`, so this creates a missing
+      // v0 table and a missing events index without adding
+      // `adk_internal_metadata`. `validateDatabaseSchemaVersion` stays off
+      // this path: it writes a `schema_version = '1'` row, and adk-python's
+      // `prepare_tables` writes that row only for the latest version.
+      await ensureDatabaseCreated(this.orm!);
       this.initialized = true;
       return;
     }
@@ -359,9 +422,9 @@ export class DatabaseSessionService extends BaseSessionService {
   /**
    * Swaps the current entity set for the legacy one.
    *
-   * Neither the tables nor the metadata row is written: doing so would turn a
-   * readable legacy database into one that reports itself as current while its
-   * events read back empty.
+   * The metadata row stays unwritten: claiming the latest version for a
+   * database that still holds pickled actions would send the next reader to
+   * the wrong entity set.
    *
    * @throws Error if the caller supplied the MikroORM instance, because the
    *     service cannot change the entity set of a connection it did not open.
@@ -390,30 +453,9 @@ export class DatabaseSessionService extends BaseSessionService {
     this.legacySchema = true;
   }
 
-  /**
-   * Throws when the open database is one this service must not write to.
-   *
-   * A v0 database stores event actions as a Python pickle. TypeScript cannot
-   * produce a pickle that adk-python's restricted unpickler reads back, so an
-   * event written here would break the Python reader.
-   */
-  private assertWritable(): void {
-    if (this.legacySchema) {
-      throw new Error(LEGACY_SCHEMA_READ_ONLY_MESSAGE);
-    }
-  }
-
-  private warnAboutLegacyActionsOnce(): void {
-    if (this.warnedAboutLegacyActions) {
-      return;
-    }
-    this.warnedAboutLegacyActions = true;
-    logger.warn(
-      'Event actions read from a legacy v0 database come back empty, because' +
-        ' they are stored as a Python pickle that adk-js cannot decode.' +
-        ' Migrate the database with the adk-python `adk migrate session`' +
-        ' command.',
-    );
+  /** The event entity registered for the layout the open database holds. */
+  private eventEntity(): StorageEventEntity {
+    return this.legacySchema ? StorageEventV0 : StorageEvent;
   }
 
   async createSession({
@@ -423,7 +465,6 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
     await this.init();
-    this.assertWritable();
     const em = forkForWrite(this.orm!);
 
     const id = sessionId?.trim() || randomUUID();
@@ -586,7 +627,6 @@ export class DatabaseSessionService extends BaseSessionService {
     };
 
     if (this.legacySchema) {
-      this.warnAboutLegacyActionsOnce();
       const legacyEvents = await em.find(StorageEventV0, where, options);
       return legacyEvents.reverse().map(storageEventV0ToEvent);
     }
@@ -714,7 +754,6 @@ export class DatabaseSessionService extends BaseSessionService {
     event,
   }: AppendEventRequest): Promise<Event> {
     await this.init();
-    this.assertWritable();
 
     if (event.partial) {
       return event;
@@ -805,23 +844,10 @@ export class DatabaseSessionService extends BaseSessionService {
       applyScopedDelta(storageUserState, delta.user);
       applyScopedDelta(storageSession, delta.session);
 
-      const existingStorageEvent = await txEm.findOne(StorageEvent, {
-        id: event.id,
-        appName: session.appName,
-        userId: session.userId,
-        sessionId: session.id,
-      });
-
-      if (existingStorageEvent) {
-        existingStorageEvent.eventData = event;
-        existingStorageEvent.timestamp = new Date(event.timestamp);
+      if (this.legacySchema) {
+        await persistLegacyEventRow(txEm, session, event);
       } else {
-        txEm.persist(
-          txEm.create(
-            StorageEvent,
-            storageEventFromEvent(storageSession, event),
-          ),
-        );
+        await persistEventRow(txEm, storageSession, event);
       }
 
       storageSession.updateTime = new Date(event.timestamp);
@@ -858,7 +884,13 @@ export class DatabaseSessionService extends BaseSessionService {
       }
       session.lastUpdateTime = storageUpdateTime;
     } else if (storageUpdateTime !== session.lastUpdateTime) {
-      if (!(await sessionMatchesStorageRevision(txEm, session))) {
+      if (
+        !(await sessionMatchesStorageRevision(
+          txEm,
+          this.eventEntity(),
+          session,
+        ))
+      ) {
         throw new StaleSessionError(STALE_SESSION_ERROR_MESSAGE);
       }
       session.lastUpdateTime = storageUpdateTime;
