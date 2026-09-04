@@ -18,6 +18,8 @@ import {
 import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
+import {AuthCredential} from '../auth/auth_credential.js';
+import {AuthScheme} from '../auth/auth_schemes.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
@@ -111,6 +113,10 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
    * If omitted, defaults to `context.a2aMetadata` from the current invocation context.
    */
   metadata?: Record<string, unknown>;
+  /** Scheme used to authenticate calls to the remote agent. */
+  authScheme?: AuthScheme;
+  /** Credential for {@link authScheme}. Ignored when no scheme is set. */
+  authCredential?: AuthCredential;
 }
 
 /**
