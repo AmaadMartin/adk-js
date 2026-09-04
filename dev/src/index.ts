@@ -11,7 +11,6 @@ export {
   registerBuiltinServices,
 } from './cli/service_registry.js';
 export type {
-  DeclaredServiceConstructor,
   DeclaredServiceOptions,
   ServiceFactory,
   ServiceFactoryOptions,

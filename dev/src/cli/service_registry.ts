@@ -109,7 +109,7 @@ export interface DeclaredServiceOptions extends ServiceFactoryOptions {
 }
 
 /** A class a `services.yaml` entry may name. */
-export type DeclaredServiceConstructor = new (
+type DeclaredServiceConstructor = new (
   options: DeclaredServiceOptions,
 ) => unknown;
 

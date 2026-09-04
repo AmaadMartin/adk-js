@@ -239,7 +239,7 @@ describe('CLI Entrypoint', () => {
         'wired://x',
       ]);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.sessionService).toBeDefined();
       const recorded: unknown = JSON.parse(
         fs.readFileSync(recordPath, 'utf-8'),
@@ -255,7 +255,7 @@ describe('CLI Entrypoint', () => {
         'memory://',
       ]);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.sessionService).toBeInstanceOf(InMemorySessionService);
     });
 
@@ -269,7 +269,7 @@ describe('CLI Entrypoint', () => {
         'postgres://user:pass@host/db',
       ]);
 
-      const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
     });
   });
