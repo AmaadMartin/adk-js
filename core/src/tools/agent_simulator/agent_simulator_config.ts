@@ -14,11 +14,6 @@ import {
 const MODULE_DEPRECATION_KEY =
   '@google/adk/tools/agent_simulator/agent_simulator_config';
 
-const TRACING_PATH_DEPRECATION_KEY = `${MODULE_DEPRECATION_KEY}#tracingPath`;
-
-const TRACING_PATH_MESSAGE =
-  '`tracingPath` is deprecated. Use `tracing` instead.';
-
 // This module is a deprecation shim, so it warns as soon as it is evaluated,
 // the way adk-python warns on import. That is also why it stays out of the
 // `@google/adk` barrel: only a caller who imports this path deliberately
@@ -87,7 +82,10 @@ export function createAgentSimulatorConfig(
   if (tracingPath === undefined) {
     return createEnvironmentSimulationConfig(rest);
   }
-  warnDeprecatedOnce(TRACING_PATH_DEPRECATION_KEY, TRACING_PATH_MESSAGE);
+  warnDeprecatedOnce(
+    `${MODULE_DEPRECATION_KEY}#tracingPath`,
+    '`tracingPath` is deprecated. Use `tracing` instead.',
+  );
   if (rest.tracing !== undefined) {
     return createEnvironmentSimulationConfig(rest);
   }
