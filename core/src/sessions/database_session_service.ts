@@ -24,9 +24,11 @@ import {
   mergeStates,
   trimTempDeltaState,
 } from './base_session_service.js';
+import {supportsRowLevelLocking} from './db/dialect.js';
 import {
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  getDatabaseBackend,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
@@ -78,9 +80,12 @@ export class DatabaseSessionService extends BaseSessionService {
         throw new Error('Driver is required when passing options object.');
       }
 
+      // Every backend adk-js supports drops the zone on a datetime column, so
+      // UTC is the default here as it is for a URI. A caller's value wins.
       this.options = {
         ...connectionStringOrOptions,
         entities: ENTITIES,
+        forceUtcTimezone: connectionStringOrOptions.forceUtcTimezone ?? true,
       };
     }
   }
@@ -98,6 +103,26 @@ export class DatabaseSessionService extends BaseSessionService {
     await ensureDatabaseCreated(this.orm!);
     await validateDatabaseSchemaVersion(this.orm!);
     this.initialized = true;
+  }
+
+  /**
+   * Releases the database connections this service opened.
+   *
+   * The sqlite driver holds its file open until the pool closes, so a caller
+   * that has finished with a database has no other way to let go of it.
+   * Calling this before `init`, or twice, does nothing. A later `init` reopens
+   * the database.
+   */
+  async close(): Promise<void> {
+    this.initialized = false;
+    const orm = this.orm;
+    this.orm = undefined;
+    await orm?.close();
+  }
+
+  /** Closes the service, so that `await using` releases the database. */
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
   }
 
   async createSession({
@@ -379,6 +404,13 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const trimmedEvent = trimTempDeltaState(event);
 
+    // sqlite compiles `FOR UPDATE` away and mssql turns it into a table hint
+    // adk-python never takes, so only the backends adk-python locks are asked
+    // for a row-level lock.
+    const lockMode = supportsRowLevelLocking(getDatabaseBackend(this.orm!))
+      ? LockMode.PESSIMISTIC_WRITE
+      : undefined;
+
     await em.transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
         StorageSession,
@@ -387,7 +419,7 @@ export class DatabaseSessionService extends BaseSessionService {
           userId: session.userId,
           id: session.id,
         },
-        {lockMode: LockMode.PESSIMISTIC_WRITE},
+        {lockMode},
       );
 
       if (!storageSession) {
