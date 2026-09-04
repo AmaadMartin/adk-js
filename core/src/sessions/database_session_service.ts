@@ -46,6 +46,7 @@ import {
 } from './db/operations.js';
 import {
   ENTITIES,
+  getUpdateTimestamp,
   SCHEMA_VERSION_0_PICKLE,
   StorageAppState,
   StorageEvent,
@@ -159,7 +160,7 @@ async function readRevision(
   await em.flush();
   const stored = (await em.refresh(storageSession)) ?? storageSession;
   return {
-    lastUpdateTime: stored.updateTime.getTime(),
+    lastUpdateTime: getUpdateTimestamp(stored),
     marker: updateMarkerOf(stored),
   };
 }
@@ -801,10 +802,17 @@ export class DatabaseSessionService extends BaseSessionService {
   }
 
   /**
-   * Throws when the in-memory session is behind the stored revision.
+   * Throws when the in-memory session no longer matches the stored revision.
    *
-   * Also pulls the session's timestamp up to the stored one, so that a
-   * round-trip that rounded the value does not read as stale next time.
+   * Also pulls the session's timestamp to the stored one, so that a round-trip
+   * that rounded the value does not read as stale next time.
+   *
+   * A marker-less session compares the stored time for any difference, not
+   * just a later stored time: another writer can leave `update_time` BEHIND
+   * the reader's own, because `appendEvent` sets the column to its event's
+   * timestamp. The stored history then decides whether the session is really
+   * stale, so a backend that rounds the column — MySQL and MariaDB round a
+   * `DATETIME` to whole seconds — costs one extra event read and no error.
    */
   private async rejectStaleWrite(
     txEm: EntityManager,
@@ -812,14 +820,14 @@ export class DatabaseSessionService extends BaseSessionService {
     storageSession: StorageSession,
   ): Promise<void> {
     const storageMarker = updateMarkerOf(storageSession);
-    const storageUpdateTime = storageSession.updateTime.getTime();
+    const storageUpdateTime = getUpdateTimestamp(storageSession);
 
     if (session.storageUpdateMarker !== undefined) {
       if (session.storageUpdateMarker !== storageMarker) {
         throw new StaleSessionError(STALE_SESSION_ERROR_MESSAGE);
       }
       session.lastUpdateTime = storageUpdateTime;
-    } else if (storageUpdateTime > session.lastUpdateTime) {
+    } else if (storageUpdateTime !== session.lastUpdateTime) {
       if (!(await sessionMatchesStorageRevision(txEm, session))) {
         throw new StaleSessionError(STALE_SESSION_ERROR_MESSAGE);
       }

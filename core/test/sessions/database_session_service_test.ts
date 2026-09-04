@@ -1178,6 +1178,122 @@ describe('DatabaseSessionService', () => {
     });
   });
 
+  describe('Stale Writer Detection', () => {
+    /** The update time a fresh read of the same session reports. */
+    async function reloadedUpdateTime(sessionId: string): Promise<number> {
+      const reloaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId,
+      });
+      if (!reloaded) {
+        return expect.fail(`session ${sessionId} was not stored`);
+      }
+      return reloaded.lastUpdateTime;
+    }
+
+    it('should report the stored update time on a created session', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-created',
+      });
+
+      expect(session.lastUpdateTime).toBeGreaterThan(0);
+      expect(await reloadedUpdateTime('s-created')).toBe(
+        session.lastUpdateTime,
+      );
+    });
+
+    it('should move the update time to the appended event', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-appended',
+      });
+      const created = session.lastUpdateTime;
+
+      await service.appendEvent({
+        session,
+        event: createEvent({id: 'e1', timestamp: 1234567890000}),
+      });
+
+      expect(session.lastUpdateTime).not.toBe(created);
+      expect(await reloadedUpdateTime('s-appended')).toBe(1234567890000);
+    });
+
+    // These two cases arrived asserting that `appendEvent` reloads a session
+    // storage moved under. On this branch it throws StaleSessionError instead,
+    // because the stale-session PR replaced the reload with an explicit error.
+    // The scenarios below are the ones this pull request added, and they still
+    // prove what it set out to prove: the service sees an update time that
+    // moved either way. The outcome they assert is the one this branch now has.
+    it('should detect a stored update time that moved backwards', async () => {
+      const writer = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-backwards',
+      });
+      const reader = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-backwards',
+      });
+      if (!reader) {
+        return expect.fail('the session was not found');
+      }
+
+      // appendEvent sets update_time to the event's timestamp, so the writer
+      // leaves it BEHIND the reader's own. A later-than comparison misses it.
+      await service.appendEvent({
+        session: writer,
+        event: createEvent({
+          id: 'e1',
+          timestamp: 1000,
+          actions: createEventActions({stateDelta: {'written': 'by-writer'}}),
+        }),
+      });
+      expect(writer.lastUpdateTime).toBeLessThan(reader.lastUpdateTime);
+
+      await expect(
+        service.appendEvent({
+          session: reader,
+          event: createEvent({id: 'e2', timestamp: 2000}),
+        }),
+      ).rejects.toBeInstanceOf(StaleSessionError);
+    });
+
+    it('should accept a hand-built session that has no update time', async () => {
+      await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-hand-built',
+        state: {'stored': 'value'},
+      });
+      const handWritten = createSession({
+        id: 's-hand-built',
+        appName: 'test-app',
+        userId: 'test-user',
+        lastUpdateTime: 0,
+      });
+
+      await service.appendEvent({
+        session: handWritten,
+        event: createEvent({id: 'e1', timestamp: 2000}),
+      });
+
+      expect(handWritten.lastUpdateTime).toBe(2000);
+      // The write keeps the state the session row already held.
+      const reloaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-hand-built',
+      });
+      expect(reloaded?.state['stored']).toBe('value');
+      expect(reloaded?.events.map((e) => e.id)).toEqual(['e1']);
+    });
+  });
+
   describe('non-serializable session state', () => {
     it('persists an event whose stateDelta holds a function', async () => {
       const session = await service.createSession({
