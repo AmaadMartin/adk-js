@@ -95,14 +95,27 @@ const userPersonaModel: EvalModel<UserPersona> = evalModel(
 );
 
 /**
- * Accepts a persona id or a persona, and yields the persona.
+ * Reads a persona id as the persona the default registry holds for it.
+ *
+ * The decoded side is `z.custom` because the registry only ever returns a
+ * persona it was given, so re-validating one would report a schema failure for
+ * a value no document supplied.
  *
  * @throws {NotFoundError} If the id names no persona in the default registry.
  */
-const userPersonaField = z.union([
-  z.string().transform((id) => getDefaultPersonaRegistry().getPersona(id)),
-  userPersonaModel.schema,
-]);
+const personaIdCodec = z.codec(z.string(), z.custom<UserPersona>(), {
+  decode: (personaId) => getDefaultPersonaRegistry().getPersona(personaId),
+  encode: (persona) => persona.id,
+});
+
+/**
+ * Accepts a persona or a persona id, and yields the persona.
+ *
+ * The persona comes first so that rendering a scenario writes the whole
+ * persona, which is what adk-python writes, rather than collapsing it back to
+ * an id the reader may not know.
+ */
+const userPersonaField = z.union([userPersonaModel.schema, personaIdCodec]);
 
 /** Validates a {@link ConversationScenario} payload. */
 export const conversationScenarioModel: EvalModel<ConversationScenario> =
