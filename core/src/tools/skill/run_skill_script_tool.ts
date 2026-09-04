@@ -11,7 +11,7 @@ import {
   CodeExecutionLanguage,
   File,
 } from '../../code_executors/code_execution_utils.js';
-import {getScript, Skill} from '../../skills/skill.js';
+import {getScript, scriptToString, Skill} from '../../skills/skill.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -192,7 +192,7 @@ export function getSkillResourceFiles(skill: Skill): File[] {
       toResourceFile(`assets/${name}`, content),
     ),
     ...Object.entries(scripts).map(([name, script]) =>
-      toResourceFile(`scripts/${name}`, script.src),
+      toResourceFile(`scripts/${name}`, scriptToString(script)),
     ),
   ];
 }

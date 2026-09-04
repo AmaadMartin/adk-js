@@ -369,6 +369,9 @@ export {
   listAssets,
   listReferences,
   listScripts,
+  scriptToString,
+  skillDescription,
+  skillName,
 } from './skills/skill.js';
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';

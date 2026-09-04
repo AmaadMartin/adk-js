@@ -17,6 +17,7 @@ import {
   Resources,
   Script,
   Skill,
+  skillName,
 } from './skill.js';
 
 const ALLOWED_FRONTMATTER_KEYS = new Set([
@@ -370,7 +371,7 @@ export async function loadAllSkillsInDir(
     if (isSkillDir) {
       try {
         const skill = await loadSkillFromDir(currentDir);
-        skills[skill.frontmatter.name] = skill;
+        skills[skillName(skill)] = skill;
       } catch (e) {
         logger.warn(`Skipping invalid skill in '${currentDir}':`, e);
       }

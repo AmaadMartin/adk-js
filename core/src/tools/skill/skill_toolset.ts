@@ -12,7 +12,7 @@ import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {BaseCodeExecutor} from '../../code_executors/base_code_executor.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {formatSkillsAsXml} from '../../skills/prompt.js';
-import {Skill} from '../../skills/skill.js';
+import {Skill, skillName} from '../../skills/skill.js';
 import {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
@@ -86,7 +86,7 @@ export class SkillToolset extends BaseToolset {
   ) {
     super([], 'adk_skill_toolset');
     this.skills = Array.isArray(skills)
-      ? Object.fromEntries(skills.map((s) => [s.frontmatter.name, s]))
+      ? Object.fromEntries(skills.map((s) => [skillName(s), s]))
       : skills;
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];

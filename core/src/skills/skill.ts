@@ -235,3 +235,32 @@ export function listAssets(resources: Resources | undefined): string[] {
 export function listScripts(resources: Resources | undefined): string[] {
   return Object.keys(resources?.scripts ?? {});
 }
+
+/**
+ * Returns the source of a script.
+ *
+ * A caller that puts a script into a prompt, or writes it to the file system,
+ * uses this instead of reading the field. Counterpart of `Script.__str__` in
+ * adk-python.
+ */
+export function scriptToString(script: Script): string {
+  return script.src;
+}
+
+/**
+ * Returns the name of a skill.
+ *
+ * Counterpart of the `Skill.name` property in adk-python.
+ */
+export function skillName(skill: Skill): string {
+  return skill.frontmatter.name;
+}
+
+/**
+ * Returns the description of a skill.
+ *
+ * Counterpart of the `Skill.description` property in adk-python.
+ */
+export function skillDescription(skill: Skill): string {
+  return skill.frontmatter.description;
+}
