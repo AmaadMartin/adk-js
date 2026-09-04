@@ -147,6 +147,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Models
 
+- [CacheMetadata](models/cache_metadata/index.md) - Describing the context cache that served a response, and deciding when to refresh it.
 - [gemini_llm_connection](models/gemini_llm_connection/index.md) - Driving a Gemini Live session: replaying history, sending turns and realtime input, and reading responses.
 - [Gemini request and response logging](models/gemini_logging/index.md) - Reading the debug dump of a Gemini call, and what it keeps out of the log.
 - [Interactions API conversation chaining](models/interactions_api/index.md) - Chaining a turn onto the previous one by id, and how branch scoping decides which events the scan can see.

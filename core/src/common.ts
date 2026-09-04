@@ -588,6 +588,11 @@ export type {
   RealtimeInput,
   SendContentOptions,
 } from './models/base_llm_connection.js';
+export {
+  expireSoon,
+  formatCacheMetadata,
+  parseCacheMetadata,
+} from './models/cache_metadata.js';
 export type {
   ActiveCacheMetadata,
   CacheMetadata,
