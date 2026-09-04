@@ -1,8 +1,8 @@
 # Choosing the user simulator
 
 `UserSimulatorProvider` picks the `UserSimulator` that plays the user for one
-eval case. Reach for it when you run an `EvalSet` and do not want to write a
-simulator factory yourself.
+eval case. Reach for it when you evaluate an agent and do not want to decide,
+case by case, which simulator drives the conversation.
 
 ## Introduction
 
@@ -23,82 +23,33 @@ lookup misses until you register one. See
 A case must carry exactly one of `conversation` and `conversationScenario`.
 Carrying neither, or both, is an `InputValidationError`.
 
-`generateResponses` uses the provider when the caller passes no
-`createUserSimulator`, which is why an eval set of static conversations runs
-with no simulator argument at all. A `createUserSimulator` that you do pass
-replaces the provider entirely, so it is also how you drive a case that has no
-static conversation today.
-
 ## Get started
 
-Run an eval set whose cases carry static conversations. No simulator argument
-is needed.
+Build a provider and ask it for the simulator of one eval case. A case with a
+static conversation needs no configuration.
 
 ```typescript
-import {EvalSet, generateResponses} from '@google/adk';
+import {UserSimulatorProvider, UserSimulatorStatus} from '@google/adk';
 
-const evalSet: EvalSet = {
-  evalSetId: 'weather',
-  creationTimestamp: 0,
-  evalCases: [
-    {
-      evalId: 'two_turns',
-      creationTimestamp: 0,
-      conversation: [
-        {userContent: {role: 'user', parts: [{text: 'what is the weather?'}]}},
-        {userContent: {role: 'user', parts: [{text: 'and the temperature?'}]}},
-      ],
-    },
+const provider = new UserSimulatorProvider();
+const simulator = provider.provide({
+  evalId: 'two_turns',
+  conversation: [
+    {userContent: {role: 'user', parts: [{text: 'what is the weather?'}]}},
+    {userContent: {role: 'user', parts: [{text: 'and the temperature?'}]}},
   ],
-};
-
-const results = await generateResponses({
-  evalSet,
-  agentModulePath: './weather_agent.js',
-  repeatNum: 1,
 });
-```
 
-Each entry of `results` holds one `Invocation` per replayed turn.
-
-## Driving a case yourself
-
-Pass `createUserSimulator` to replace the provider. This is the only way to run
-a case that carries no static conversation.
-
-```typescript
-import {
-  Event,
-  NextUserMessage,
-  UserSimulator,
-  UserSimulatorStatus,
-  generateResponses,
-} from '@google/adk';
-
-/** Asks one fixed question, then ends the conversation. */
-class OneShotSimulator implements UserSimulator {
-  private asked = false;
-
-  constructor(private readonly opening: string) {}
-
-  async getNextUserMessage(_events: Event[]): Promise<NextUserMessage> {
-    if (this.asked) {
-      return {status: UserSimulatorStatus.STOP_SIGNAL_DETECTED};
-    }
-    this.asked = true;
-    return {
-      status: UserSimulatorStatus.SUCCESS,
-      userMessage: {role: 'user', parts: [{text: this.opening}]},
-    };
-  }
+let next = await simulator.getNextUserMessage([]);
+while (next.status === UserSimulatorStatus.SUCCESS) {
+  // Send `next.userMessage` to the agent, then ask for the turn after it.
+  next = await simulator.getNextUserMessage([]);
 }
-
-await generateResponses({
-  evalSet,
-  agentModulePath: './weather_agent.js',
-  createUserSimulator: () => new OneShotSimulator('what is the weather?'),
-});
 ```
+
+The loop ends with `STOP_SIGNAL_DETECTED` once the script runs out. Call
+`provide` again for the next case, or for a second run of the same case: a
+simulator is stateful across the turns it drives, so it cannot be reused.
 
 ## Registering a simulator
 
@@ -190,11 +141,10 @@ factory. Use `unregisterUserSimulator` to undo a registration, and
   defaults to its LLM-backed simulator here; adk-js has none to default to.
 - `StaticUserSimulator.getSimulationEvaluator()` returns `undefined`. A script
   cannot deviate, so there is nothing to score.
-- One simulator per repeat. `generateResponses` calls `provide` once for every
-  run of every case, because a simulator is stateful across the turns it
-  drives. Each repeat therefore replays the conversation from its first turn.
+- `provide` returns a fresh simulator on every call, never a cached one,
+  because a simulator is stateful across the turns it drives.
 - `StaticUserSimulator` never throws. Running past the last scripted turn
-  returns `STOP_SIGNAL_DETECTED` with no message, which is how the generator
+  returns `STOP_SIGNAL_DETECTED` with no message, which is how the caller
   learns the conversation is over. An empty conversation stops on the first
   call.
 - The simulator ignores the conversation history it is given. The script is

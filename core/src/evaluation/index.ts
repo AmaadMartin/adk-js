@@ -5,13 +5,14 @@
  */
 
 /**
- * The ADK evaluation module (a parity port of `google/adk-python`'s
- * `google/adk/evaluation`). It currently covers the eval case data model, the
- * contract every metric evaluator implements, and the user simulators that
- * play the user side of an evaluated conversation.
+ * The user simulation half of the ADK evaluation module, a parity port of
+ * `google/adk-python`'s `google/adk/evaluation/simulation`.
+ *
+ * The eval case, evaluator and metric types here are the minimum the
+ * simulators name in their own signatures. The rest of the evaluation
+ * subsystem lands with the modules that use it.
  */
 
-export type {AgentDetails, AppDetails} from './app_details.js';
 export {evalModel, optionalField} from './common.js';
 export type {
   EvalDumpOptions,
@@ -20,43 +21,12 @@ export type {
   ExtraKeysPolicy,
 } from './common.js';
 export type {ConversationScenario} from './conversation_scenarios.js';
-export {
-  getAllToolCalls,
-  getAllToolCallsWithResponses,
-  getAllToolResponses,
-  isIntermediateData,
-  isInvocationEvents,
-  validateEvalCase,
-} from './eval_case.js';
-export type {
-  EvalCase,
-  IntermediateData,
-  IntermediateDataType,
-  Invocation,
-  InvocationEvent,
-  InvocationEvents,
-  SessionInput,
-  SessionState,
-  StaticConversation,
-  ToolCallAndResponse,
-} from './eval_case.js';
+export type {EvalCase, Invocation, StaticConversation} from './eval_case.js';
 export {EvalStatus} from './eval_metrics.js';
-export type {BaseCriterion} from './eval_metrics.js';
-export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
-export {
-  BASE_CRITERION_TYPE,
-  emptyEvaluationResult,
-  getCriterionType,
-  getEvalStatus,
-  getTextFromContent,
-  validateBaseCriterion,
-  validateInvocationLengths,
-} from './evaluator.js';
+export type {RubricScore} from './eval_rubrics.js';
 export type {
-  CriterionType,
   EvaluationResult,
   Evaluator,
-  EvaluatorClass,
   PerInvocationResult,
 } from './evaluator.js';
 export {StaticUserSimulator} from './simulation/static_user_simulator.js';
