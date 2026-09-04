@@ -26,9 +26,10 @@ const DEFAULT_BATCH_FLUSH_INTERVAL_MS = 1000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10000;
 const DEFAULT_QUEUE_MAX_SIZE = 10000;
 const DEFAULT_MAX_RETRIES = 3;
-const DEFAULT_INITIAL_DELAY_SECONDS = 1;
+const DEFAULT_INITIAL_DELAY_MS = 1000;
 const DEFAULT_MULTIPLIER = 2;
-const DEFAULT_MAX_DELAY_SECONDS = 10;
+const DEFAULT_MAX_DELAY_MS = 10000;
+const DEFAULT_VIEW_PREFIX = 'v';
 
 /** Suffix marking an allowlist entry as a prefix pattern rather than a key. */
 const PREFIX_WILDCARD = '*';
@@ -42,30 +43,28 @@ export type AnalyticsContentFormatter = (
 /**
  * How a failed insert is retried.
  *
- * The field names and their seconds unit come from adk-python's
- * `RetryConfig`, so a reader can compare the two one field at a time. They are
- * the one place in this configuration that is not milliseconds:
- * `batchFlushIntervalMs` and `shutdownTimeoutMs` already ship in milliseconds
- * and renaming them would break a caller. The type carries an `Analytics`
- * prefix because `RetryConfig` is already the workflow retry type.
+ * The delays are milliseconds, like every other duration in this
+ * configuration. adk-python's `RetryConfig` counts float seconds, so its
+ * `initial_delay: 1.0` is `initialDelayMs: 1000` here. The type carries an
+ * `Analytics` prefix because `RetryConfig` is already the workflow retry type.
  */
 export interface AnalyticsRetryConfig {
   /** Retries after the first attempt. Defaults to 3, so 4 attempts in all. */
   maxRetries?: number;
-  /** Seconds before the first retry. Defaults to 1. */
-  initialDelay?: number;
+  /** Milliseconds before the first retry. Defaults to 1000. */
+  initialDelayMs?: number;
   /** Factor the delay grows by after each retry. Defaults to 2. */
   multiplier?: number;
-  /** Longest delay between retries, in seconds. Defaults to 10. */
-  maxDelay?: number;
+  /** Longest delay between retries, in milliseconds. Defaults to 10000. */
+  maxDelayMs?: number;
 }
 
 /** {@link AnalyticsRetryConfig} with every default filled in. */
 export interface ResolvedAnalyticsRetryConfig {
   maxRetries: number;
-  initialDelay: number;
+  initialDelayMs: number;
   multiplier: number;
-  maxDelay: number;
+  maxDelayMs: number;
 }
 
 /** The `custom_metadata` keys to capture, split into the two match kinds. */
@@ -143,6 +142,16 @@ export interface BigQueryLoggerConfig {
    * name throws at construction.
    */
   payloadColumnDenylist?: readonly string[];
+  /**
+   * Whether one flattened view per event type is created alongside the table.
+   * Defaults to true.
+   */
+  createViews?: boolean;
+  /**
+   * The prefix each view's name starts with, so the view of `TOOL_COMPLETED`
+   * is `v_tool_completed`. Defaults to `v`. An empty prefix throws.
+   */
+  viewPrefix?: string;
 }
 
 /** Constructor parameters for `BigQueryAgentAnalyticsPlugin`. */
@@ -254,15 +263,15 @@ function requireContentLimit(limit: number | undefined): void {
  */
 function requireRetryConfig(retry: AnalyticsRetryConfig): void {
   requireCount('retryConfig.maxRetries', retry.maxRetries, 0);
-  requireFinite('retryConfig.initialDelay', retry.initialDelay, 0);
+  requireFinite('retryConfig.initialDelayMs', retry.initialDelayMs, 0);
   requireFinite('retryConfig.multiplier', retry.multiplier, 1);
-  requireFinite('retryConfig.maxDelay', retry.maxDelay, 0);
-  const initialDelay = retry.initialDelay ?? DEFAULT_INITIAL_DELAY_SECONDS;
-  const maxDelay = retry.maxDelay ?? DEFAULT_MAX_DELAY_SECONDS;
-  if (maxDelay < initialDelay) {
+  requireFinite('retryConfig.maxDelayMs', retry.maxDelayMs, 0);
+  const initialDelayMs = retry.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS;
+  const maxDelayMs = retry.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
+  if (maxDelayMs < initialDelayMs) {
     throw configError(
-      `retryConfig.maxDelay must be at least retryConfig.initialDelay, got ` +
-        `maxDelay=${maxDelay} initialDelay=${initialDelay}.`,
+      `retryConfig.maxDelayMs must be at least retryConfig.initialDelayMs, ` +
+        `got maxDelayMs=${maxDelayMs} initialDelayMs=${initialDelayMs}.`,
     );
   }
 }
@@ -277,6 +286,22 @@ function requireRetryConfig(retry: AnalyticsRetryConfig): void {
  * @param config The configuration to check.
  * @throws Error when an option is out of range or names a protected column.
  */
+function requireNonEmpty(name: string, value: string): void {
+  if (value.trim() === '') {
+    throw configError(`${name} must not be empty.`);
+  }
+}
+
+/**
+ * Rejects an empty view prefix, which would name a view after the event type
+ * alone and so let it collide with an ordinary table in the dataset.
+ */
+function requireViewPrefix(config: BigQueryLoggerConfig): void {
+  if (config.viewPrefix !== undefined && config.viewPrefix.trim() === '') {
+    throw configError('viewPrefix must not be empty.');
+  }
+}
+
 function validateConfig(config: BigQueryLoggerConfig): void {
   requireCount('batchSize', config.batchSize, 1);
   requireCount('queueMaxSize', config.queueMaxSize, 1);
@@ -284,6 +309,7 @@ function validateConfig(config: BigQueryLoggerConfig): void {
   requireFiniteAboveZero('shutdownTimeoutMs', config.shutdownTimeoutMs);
   requireContentLimit(config.maxContentLength);
   requireRetryConfig(config.retryConfig ?? {});
+  requireViewPrefix(config);
 }
 
 /**
@@ -367,9 +393,9 @@ function resolveRetryConfig(
 ): ResolvedAnalyticsRetryConfig {
   return {
     maxRetries: retry.maxRetries ?? DEFAULT_MAX_RETRIES,
-    initialDelay: retry.initialDelay ?? DEFAULT_INITIAL_DELAY_SECONDS,
+    initialDelayMs: retry.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS,
     multiplier: retry.multiplier ?? DEFAULT_MULTIPLIER,
-    maxDelay: retry.maxDelay ?? DEFAULT_MAX_DELAY_SECONDS,
+    maxDelayMs: retry.maxDelayMs ?? DEFAULT_MAX_DELAY_MS,
   };
 }
 
@@ -393,6 +419,8 @@ function resolveWriterOptions(
     queueMaxSize: config.queueMaxSize ?? DEFAULT_QUEUE_MAX_SIZE,
     retry: resolveRetryConfig(config.retryConfig ?? {}),
     autoSchemaUpgrade: config.autoSchemaUpgrade ?? true,
+    createViews: config.createViews ?? true,
+    viewPrefix: config.viewPrefix ?? DEFAULT_VIEW_PREFIX,
     deniedColumns,
   };
 }
@@ -417,6 +445,8 @@ export function resolvePluginOptions(
   options: BigQueryAgentAnalyticsPluginOptions,
 ): ResolvedPluginOptions {
   const config = options.config ?? {};
+  requireNonEmpty('projectId', options.projectId);
+  requireNonEmpty('datasetId', options.datasetId);
   validateConfig(config);
   const customMetadataAllowlist = parseCustomMetadataAllowlist(
     config.customMetadataAllowlist,

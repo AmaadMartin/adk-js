@@ -36,11 +36,13 @@ describe('resolvePluginOptions defaults', () => {
       shutdownTimeoutMs: 10000,
       queueMaxSize: 10000,
       autoSchemaUpgrade: true,
+      createViews: true,
+      viewPrefix: 'v',
       retry: {
         maxRetries: 3,
-        initialDelay: 1,
+        initialDelayMs: 1000,
         multiplier: 2,
-        maxDelay: 10,
+        maxDelayMs: 10000,
       },
     });
   });
@@ -49,17 +51,23 @@ describe('resolvePluginOptions defaults', () => {
     expect(
       resolveRetry({
         maxRetries: 5,
-        initialDelay: 0.5,
+        initialDelayMs: 500,
         multiplier: 3,
-        maxDelay: 8,
+        maxDelayMs: 8000,
       }).writer.retry,
-    ).toEqual({maxRetries: 5, initialDelay: 0.5, multiplier: 3, maxDelay: 8});
+    ).toEqual({
+      maxRetries: 5,
+      initialDelayMs: 500,
+      multiplier: 3,
+      maxDelayMs: 8000,
+    });
   });
 
   it('turns retrying off outright when every retry value is zero', () => {
     expect(
-      resolveRetry({maxRetries: 0, initialDelay: 0, maxDelay: 0}).writer.retry,
-    ).toMatchObject({maxRetries: 0, initialDelay: 0, maxDelay: 0});
+      resolveRetry({maxRetries: 0, initialDelayMs: 0, maxDelayMs: 0}).writer
+        .retry,
+    ).toMatchObject({maxRetries: 0, initialDelayMs: 0, maxDelayMs: 0});
   });
 
   it('resolves autoSchemaUpgrade false without changing anything else', () => {
@@ -136,10 +144,10 @@ describe('resolvePluginOptions retry options', () => {
   );
 
   it.each([-0.5, Number.NaN, Number.POSITIVE_INFINITY])(
-    'refuses initialDelay %s',
-    (initialDelay) => {
-      expect(() => resolveRetry({initialDelay})).toThrow(
-        'retryConfig.initialDelay must be a finite number of at least 0',
+    'refuses initialDelayMs %s',
+    (initialDelayMs) => {
+      expect(() => resolveRetry({initialDelayMs})).toThrow(
+        'retryConfig.initialDelayMs must be a finite number of at least 0',
       );
     },
   );
@@ -154,29 +162,33 @@ describe('resolvePluginOptions retry options', () => {
   );
 
   it.each([-1, Number.NaN, Number.NEGATIVE_INFINITY])(
-    'refuses maxDelay %s',
-    (maxDelay) => {
-      expect(() => resolveRetry({maxDelay})).toThrow(
-        'retryConfig.maxDelay must be a finite number of at least 0',
+    'refuses maxDelayMs %s',
+    (maxDelayMs) => {
+      expect(() => resolveRetry({maxDelayMs})).toThrow(
+        'retryConfig.maxDelayMs must be a finite number of at least 0',
       );
     },
   );
 
-  it('refuses a maxDelay below the initialDelay', () => {
-    expect(() => resolveRetry({initialDelay: 5, maxDelay: 2})).toThrow(
-      'retryConfig.maxDelay must be at least retryConfig.initialDelay, got ' +
-        'maxDelay=2 initialDelay=5.',
+  it('refuses a maxDelayMs below the initialDelayMs', () => {
+    expect(() =>
+      resolveRetry({initialDelayMs: 5000, maxDelayMs: 2000}),
+    ).toThrow(
+      'retryConfig.maxDelayMs must be at least retryConfig.initialDelayMs, ' +
+        'got maxDelayMs=2000 initialDelayMs=5000.',
     );
   });
 
-  it('compares maxDelay against the default initialDelay too', () => {
-    expect(() => resolveRetry({maxDelay: 0.5})).toThrow(
-      'maxDelay=0.5 initialDelay=1.',
+  it('compares maxDelayMs against the default initialDelayMs too', () => {
+    expect(() => resolveRetry({maxDelayMs: 500})).toThrow(
+      'maxDelayMs=500 initialDelayMs=1000.',
     );
   });
 
-  it('accepts a maxDelay equal to the initialDelay', () => {
-    expect(() => resolveRetry({initialDelay: 2, maxDelay: 2})).not.toThrow();
+  it('accepts a maxDelayMs equal to the initialDelayMs', () => {
+    expect(() =>
+      resolveRetry({initialDelayMs: 2000, maxDelayMs: 2000}),
+    ).not.toThrow();
   });
 });
 

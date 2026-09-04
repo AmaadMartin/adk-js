@@ -5,6 +5,7 @@
  */
 
 import type {
+  BigQuery,
   BigQueryOptions,
   Dataset,
   Table,
@@ -25,6 +26,7 @@ import {
   SCHEMA_VERSION,
   SCHEMA_VERSION_LABEL_KEY,
 } from './bigquery_analytics_schema.js';
+import {analyticsViewStatements} from './bigquery_analytics_views.js';
 
 /** HTTP status BigQuery returns when a table already exists. */
 const ALREADY_EXISTS_STATUS = 409;
@@ -82,9 +84,6 @@ const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([
   4, 13, 14, 429, 500, 502, 503,
 ]);
 
-/** Milliseconds in one second, because {@link ResolvedAnalyticsRetryConfig} counts seconds. */
-const MS_PER_SECOND = 1000;
-
 /**
  * Credentials for the BigQuery client, in the SDK's own option shape.
  *
@@ -107,6 +106,8 @@ export interface BigQueryRowWriterOptions {
   queueMaxSize: number;
   retry: ResolvedAnalyticsRetryConfig;
   autoSchemaUpgrade: boolean;
+  createViews: boolean;
+  viewPrefix: string;
   deniedColumns: ReadonlySet<AnalyticsPayloadColumn>;
 }
 
@@ -227,11 +228,10 @@ export function retryDelayMs(
   retry: ResolvedAnalyticsRetryConfig,
   attempt: number,
 ): number {
-  const seconds = Math.min(
-    retry.initialDelay * retry.multiplier ** attempt,
-    retry.maxDelay,
+  return Math.min(
+    retry.initialDelayMs * retry.multiplier ** attempt,
+    retry.maxDelayMs,
   );
-  return seconds * MS_PER_SECOND;
 }
 
 /** Resolves after `delayMs`, without holding the process open. */
@@ -493,12 +493,14 @@ export class BigQueryRowWriter {
       // deciding how often a failed insert is attempted.
       retryOptions: {autoRetry: false},
     };
-    const dataset = new BigQuery(clientOptions).dataset(datasetId);
+    const client = new BigQuery(clientOptions);
+    const dataset = client.dataset(datasetId);
     await ensureDataset(dataset, location);
     const table = dataset.table(tableId);
     const [exists] = await table.exists();
     if (exists) {
       await this.maybeUpgradeSchema(table);
+      await this.maybeCreateViews(client);
       return table;
     }
     const metadata: TableMetadata = {
@@ -511,6 +513,7 @@ export class BigQueryRowWriter {
     try {
       const [created] = await dataset.createTable(tableId, metadata);
       logger.debug(`BigQuery analytics created table ${this.tableName}.`);
+      await this.maybeCreateViews(client);
       return created;
     } catch (err: unknown) {
       if (!isAlreadyExists(err)) {
@@ -518,7 +521,41 @@ export class BigQueryRowWriter {
       }
       const [concurrent] = await table.get();
       await this.maybeUpgradeSchema(concurrent);
+      await this.maybeCreateViews(client);
       return concurrent;
+    }
+  }
+
+  /**
+   * Creates or replaces one flattened view per event type, unless the caller
+   * turned them off.
+   *
+   * A view is a convenience over a table that already holds every row, so a
+   * failure here is logged and setup continues. Refusing to write rows because
+   * a view could not be created would turn a reporting problem into data loss.
+   * `CREATE OR REPLACE` makes the whole pass safe to repeat.
+   */
+  private async maybeCreateViews(client: BigQuery): Promise<void> {
+    if (!this.options.createViews) {
+      return;
+    }
+    const {projectId, datasetId, tableId, viewPrefix, deniedColumns} =
+      this.options;
+    for (const {viewName, sql} of analyticsViewStatements({
+      projectId,
+      datasetId,
+      tableId,
+      viewPrefix,
+      denied: deniedColumns,
+    })) {
+      try {
+        await client.query(sql);
+      } catch (err: unknown) {
+        logger.error(
+          `BigQuery analytics could not create view ${viewName}: ` +
+            `${formatError(err)}`,
+        );
+      }
     }
   }
 

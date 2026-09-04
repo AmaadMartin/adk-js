@@ -199,7 +199,12 @@ describe('BigQueryAgentAnalyticsPlugin driven by the real Runner', () => {
 
   it('writes the same row sequence when a retry budget is configured', async () => {
     const rows = await runOneTurn({
-      retryConfig: {maxRetries: 2, initialDelay: 0, multiplier: 1, maxDelay: 0},
+      retryConfig: {
+        maxRetries: 2,
+        initialDelayMs: 0,
+        multiplier: 1,
+        maxDelayMs: 0,
+      },
     });
     expect(rows.map((row) => row.event_type)).toEqual([
       'USER_MESSAGE_RECEIVED',

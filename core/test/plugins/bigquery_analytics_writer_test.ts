@@ -119,7 +119,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
 vi.mock('@google-cloud/bigquery', () => ({BigQuery: BigQueryMock}));
 
 /** The backoff one retry test waits out, kept short so the suite stays fast. */
-const BACKOFF_SECONDS = 0.05;
+const BACKOFF_MS = 50;
 
 /** An error carrying an HTTP or gRPC status, as the client reports one. */
 function statusError(code: number, message = 'bigquery said no'): Error {
@@ -176,7 +176,12 @@ function makeWriter(options?: {
     config: {
       // An immediate retry keeps the test off the clock while still walking
       // every attempt.
-      retryConfig: {maxRetries: 2, initialDelay: 0, multiplier: 1, maxDelay: 0},
+      retryConfig: {
+        maxRetries: 2,
+        initialDelayMs: 0,
+        multiplier: 1,
+        maxDelayMs: 0,
+      },
       ...options,
     },
   });
@@ -204,9 +209,9 @@ beforeEach(() => {
 describe('retryDelayMs', () => {
   const retry: ResolvedAnalyticsRetryConfig = {
     maxRetries: 5,
-    initialDelay: 1,
+    initialDelayMs: 1000,
     multiplier: 2,
-    maxDelay: 10,
+    maxDelayMs: 10000,
   };
 
   it('grows by the multiplier on each attempt', () => {
@@ -215,7 +220,7 @@ describe('retryDelayMs', () => {
     expect(retryDelayMs(retry, 2)).toBe(4000);
   });
 
-  it('never waits longer than maxDelay', () => {
+  it('never waits longer than maxDelayMs', () => {
     expect(retryDelayMs(retry, 3)).toBe(8000);
     expect(retryDelayMs(retry, 4)).toBe(10000);
     expect(retryDelayMs(retry, 40)).toBe(10000);
@@ -224,7 +229,7 @@ describe('retryDelayMs', () => {
   it('waits nothing when every delay is zero', () => {
     expect(
       retryDelayMs(
-        {maxRetries: 3, initialDelay: 0, multiplier: 2, maxDelay: 0},
+        {maxRetries: 3, initialDelayMs: 0, multiplier: 2, maxDelayMs: 0},
         2,
       ),
     ).toBe(0);
@@ -265,7 +270,7 @@ describe('BigQueryRowWriter insert retry', () => {
   it('attempts once and gives up when maxRetries is zero', async () => {
     fake.insertErrors = [statusError(503), statusError(503)];
     const writer = makeWriter({
-      retryConfig: {maxRetries: 0, initialDelay: 0, maxDelay: 0},
+      retryConfig: {maxRetries: 0, initialDelayMs: 0, maxDelayMs: 0},
     });
     await writeOneRow(writer);
     expect(fake.insertCalls).toHaveLength(1);
@@ -287,18 +292,16 @@ describe('BigQueryRowWriter insert retry', () => {
     const writer = makeWriter({
       retryConfig: {
         maxRetries: 1,
-        initialDelay: BACKOFF_SECONDS,
+        initialDelayMs: BACKOFF_MS,
         multiplier: 2,
-        maxDelay: 1,
+        maxDelayMs: 1000,
       },
     });
     const startedAt = Date.now();
     await writeOneRow(writer);
     expect(fake.insertCalls).toHaveLength(2);
     // A timer never fires early, so the elapsed time is a sound lower bound.
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(
-      BACKOFF_SECONDS * 1000 - 1,
-    );
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(BACKOFF_MS - 1);
   });
 });
 
