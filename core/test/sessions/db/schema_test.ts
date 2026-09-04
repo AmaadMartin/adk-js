@@ -215,9 +215,11 @@ describe('schema DDL', () => {
       .find((line) => line.startsWith('create table `events`'));
 
     expect(eventsTable).toBeDefined();
+    // The two column lists follow StorageSession's primary-key order, which is
+    // `id, app_name, user_id`. See the relation's own comment.
     expect(eventsTable).toContain(
-      'foreign key(`app_name`, `user_id`, `session_id`) ' +
-        'references `sessions`(`app_name`, `user_id`, `id`) on delete cascade',
+      'foreign key(`session_id`, `app_name`, `user_id`) ' +
+        'references `sessions`(`id`, `app_name`, `user_id`) on delete cascade',
     );
     expect(eventsTable).toContain(
       'primary key (`id`, `app_name`, `user_id`, `session_id`)',
@@ -273,6 +275,37 @@ describe('schema behaviour on sqlite', () => {
     expect(event.invocationId).toBe('');
     expect(event.timestamp).toBe(FIRST_REPEATED_HOUR_EPOCH);
     expect(row.storageSession.id).toBe('s1');
+  });
+
+  it('updates an event row that already exists', async () => {
+    orm = await openOrm();
+    await orm.schema.createSchema();
+    await seedSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const em = orm.em.fork();
+    const row = await em.findOneOrFail(StorageEvent, {id: 'e1'});
+    row.timestamp = new Date(SECOND_REPEATED_HOUR_EPOCH);
+    row.invocationId = 'inv2';
+    await em.flush();
+
+    const reloaded = await orm.em
+      .fork()
+      .findOneOrFail(StorageEvent, {id: 'e1'});
+    expect(reloaded.timestamp.getTime()).toBe(SECOND_REPEATED_HOUR_EPOCH);
+    expect(reloaded.invocationId).toBe('inv2');
+  });
+
+  it('removes an event row through the entity manager', async () => {
+    orm = await openOrm();
+    await orm.schema.createSchema();
+    await seedSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const em = orm.em.fork();
+    em.remove(await em.findOneOrFail(StorageEvent, {id: 'e1'}));
+    await em.flush();
+
+    const remaining = await orm.em.fork().find(StorageEvent, {});
+    expect(remaining.map((row) => row.id)).toEqual(['e2']);
   });
 
   it('deletes a session row and its events together', async () => {

@@ -217,6 +217,13 @@ export class StorageEvent {
    * adk-python declares, so deleting a session row removes its events even when
    * the caller never goes through {@link StorageEvent}.
    *
+   * Both column lists follow {@link StorageSession}'s primary-key order, and
+   * must keep following it. MikroORM appends the relation to the WHERE clause
+   * of every UPDATE and DELETE as a tuple, and builds the right-hand side by
+   * serializing the referenced entity's primary key in its declared order. A
+   * list in any other order compares the two sides misaligned, so the
+   * statement matches no row and the write is dropped without an error.
+   *
    * A database that already exists keeps its old tables: `updateSchema({safe:
    * true})` adds the index but cannot add the constraint on sqlite, which has
    * no `ALTER TABLE ADD CONSTRAINT`. Those databases still rely on
@@ -224,8 +231,8 @@ export class StorageEvent {
    */
   @ManyToOne(() => StorageSession, {
     primary: true,
-    fieldNames: ['app_name', 'user_id', 'session_id'],
-    referencedColumnNames: ['app_name', 'user_id', 'id'],
+    fieldNames: ['session_id', 'app_name', 'user_id'],
+    referencedColumnNames: ['id', 'app_name', 'user_id'],
     deleteRule: 'cascade',
     updateRule: 'cascade',
     ref: true,
