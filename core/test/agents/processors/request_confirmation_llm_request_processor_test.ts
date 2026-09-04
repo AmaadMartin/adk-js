@@ -1436,6 +1436,20 @@ describe('RequestConfirmationLlmRequestProcessor approval lifecycle', () => {
       );
     });
 
+    it('ignores a spent gate whose pinned call is unreadable', async () => {
+      // The dedup reads the pin without validating it, so an approval the
+      // session already acted on is a no-op even when the pin names no tool.
+      await run([
+        ...pausedCallEvents({pinned: {id: 'call-1', args: {}}}),
+        approvalEvent(['gate-1']),
+        toolResponseEvent(wireTransferCall),
+        userTextEvent('Thanks!'),
+        approvalEvent(['gate-1']),
+      ]);
+
+      expect(resumedCalls).toEqual([]);
+    });
+
     it('treats an argument-free call as matching an argument-free pin', async () => {
       // Absent arguments and empty arguments are the same call, whichever side
       // spells it which way.
