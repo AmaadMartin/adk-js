@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Options as MikroORMOptions} from '@mikro-orm/core';
+import {LockMode, Options as MikroORMOptions} from '@mikro-orm/core';
 
 /**
  * Backends whose dialect implements `SELECT ... FOR UPDATE`.
@@ -47,6 +47,19 @@ const NAIVE_DATETIME_BACKENDS: ReadonlySet<string> = new Set([
  */
 export function supportsRowLevelLocking(backend: string): boolean {
   return ROW_LEVEL_LOCKING_BACKENDS.has(backend);
+}
+
+/**
+ * Returns the lock mode to read a session row with on a backend.
+ *
+ * @param backend The lowercase backend name.
+ * @returns A write lock on a backend that implements one, and no lock mode on
+ *   every other backend.
+ */
+export function sessionLockMode(backend: string): LockMode | undefined {
+  return supportsRowLevelLocking(backend)
+    ? LockMode.PESSIMISTIC_WRITE
+    : undefined;
 }
 
 /**

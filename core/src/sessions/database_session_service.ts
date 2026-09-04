@@ -6,7 +6,6 @@
 
 import {
   FilterQuery,
-  LockMode,
   Options as MikroDBOptions,
   MikroORM,
 } from '@mikro-orm/core';
@@ -24,7 +23,7 @@ import {
   mergeStates,
   trimTempDeltaState,
 } from './base_session_service.js';
-import {supportsRowLevelLocking} from './db/dialect.js';
+import {sessionLockMode} from './db/dialect.js';
 import {
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
@@ -404,12 +403,7 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const trimmedEvent = trimTempDeltaState(event);
 
-    // sqlite compiles `FOR UPDATE` away and mssql turns it into a table hint
-    // adk-python never takes, so only the backends adk-python locks are asked
-    // for a row-level lock.
-    const lockMode = supportsRowLevelLocking(getDatabaseBackend(this.orm!))
-      ? LockMode.PESSIMISTIC_WRITE
-      : undefined;
+    const lockMode = sessionLockMode(getDatabaseBackend(this.orm!));
 
     await em.transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
