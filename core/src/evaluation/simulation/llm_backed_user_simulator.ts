@@ -159,10 +159,21 @@ export type LlmBackedUserSimulatorConfig =
   Partial<ResolvedLlmBackedUserSimulatorConfig>;
 
 /**
+ * `modelConfiguration`, under either spelling, so
+ * {@link parseLlmBackedUserSimulatorConfig} hands it to the model as the
+ * caller wrote it. `toCamelCase` matches these against the key it reads, and
+ * rebuilds every object it does not preserve — which would rewrite the keys of
+ * `labels` and of a response schema, and flatten an `AbortSignal` into a plain
+ * object.
+ */
+const OPAQUE_CONFIG_KEYS = ['modelConfiguration', 'model_configuration'];
+
+/**
  * Validates a user simulator config and applies its defaults.
  *
  * Accepts the snake_case spelling adk-python writes as well as the canonical
- * camelCase one.
+ * camelCase one. `modelConfiguration` is opaque: it reaches the model exactly
+ * as given, so its own keys keep whatever spelling the caller used.
  *
  * @param raw The config document to validate.
  * @returns The config, with every default applied.
@@ -171,7 +182,7 @@ export type LlmBackedUserSimulatorConfig =
 export function parseLlmBackedUserSimulatorConfig(
   raw: unknown,
 ): ResolvedLlmBackedUserSimulatorConfig {
-  const result = configSchema.safeParse(toCamelCase(raw));
+  const result = configSchema.safeParse(toCamelCase(raw, OPAQUE_CONFIG_KEYS));
   if (!result.success) {
     throw new InputValidationError(
       `Invalid LlmBackedUserSimulatorConfig: ${z.prettifyError(result.error)}`,

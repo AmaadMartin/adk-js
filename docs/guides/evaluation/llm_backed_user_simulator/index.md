@@ -74,6 +74,11 @@ these defaults. It reads the snake_case spelling adk-python writes as well as
 the camelCase one, and throws `InputValidationError` on a document it cannot
 accept.
 
+`modelConfiguration` is opaque: it reaches the model exactly as you wrote it,
+so its own keys keep their spelling and an `AbortSignal` in it survives. Write
+them the way `@google/genai` declares them — `thinkingConfig`, not
+`thinking_config`.
+
 ## Custom instructions
 
 Custom instructions are text with `{{ placeholder }}` substitutions. They must

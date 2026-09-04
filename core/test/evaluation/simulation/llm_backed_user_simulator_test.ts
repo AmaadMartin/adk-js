@@ -22,6 +22,7 @@ import {
   parseLlmBackedUserSimulatorConfig,
   validateNextUserMessage,
 } from '@google/adk';
+import {GenerateContentConfig, Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 import {summarizeConversation} from '../../../src/evaluation/simulation/llm_backed_user_simulator.js';
@@ -215,6 +216,40 @@ describe('parseLlmBackedUserSimulatorConfig', () => {
     const second = parseLlmBackedUserSimulatorConfig({});
 
     expect(first.modelConfiguration).not.toBe(second.modelConfiguration);
+  });
+
+  it('passes the model configuration through untouched', () => {
+    const abortSignal = AbortSignal.timeout(1000);
+    const responseSchema: Schema = {
+      properties: {my_field: {type: Type.STRING}},
+    };
+    const modelConfiguration: GenerateContentConfig = {
+      labels: {my_key: 'my value'},
+      responseSchema,
+      abortSignal,
+    };
+
+    const config = parseLlmBackedUserSimulatorConfig({modelConfiguration});
+
+    // Same object, so no key inside it was rewritten and no instance was
+    // rebuilt as a plain object.
+    expect(config.modelConfiguration).toBe(modelConfiguration);
+    expect(config.modelConfiguration.labels).toEqual({my_key: 'my value'});
+    expect(config.modelConfiguration.responseSchema).toBe(responseSchema);
+    expect(config.modelConfiguration.abortSignal).toBe(abortSignal);
+  });
+
+  it('passes a snake_case model configuration through untouched', () => {
+    const modelConfiguration: GenerateContentConfig = {
+      labels: {my_key: 'my value'},
+    };
+
+    const config = parseLlmBackedUserSimulatorConfig({
+      model_configuration: modelConfiguration,
+    });
+
+    expect(config.modelConfiguration).toBe(modelConfiguration);
+    expect(config.modelConfiguration.labels).toEqual({my_key: 'my value'});
   });
 });
 
