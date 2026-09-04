@@ -286,6 +286,21 @@ describe('skill', () => {
       expect(getScript(undefined, 'x')).toBeUndefined();
     });
 
+    it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
+      'does not resolve the inherited key %s',
+      (inheritedKey) => {
+        const resources = {
+          references: {'doc.md': 'Doc content'},
+          assets: {'a.txt': 'asset content'},
+          scripts: {'run.sh': {src: 'echo hello'}},
+        };
+
+        expect(getReference(resources, inheritedKey)).toBeUndefined();
+        expect(getAsset(resources, inheritedKey)).toBeUndefined();
+        expect(getScript(resources, inheritedKey)).toBeUndefined();
+      },
+    );
+
     it('returns an empty list when the resource map is absent', () => {
       expect(listReferences({})).toEqual([]);
       expect(listAssets({})).toEqual([]);

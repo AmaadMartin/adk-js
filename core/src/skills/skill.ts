@@ -162,6 +162,18 @@ export interface Skill {
 }
 
 /**
+ * Reads one entry of a resource map. A resource id can come from a model, so
+ * the lookup is restricted to own keys: a bare index resolves inherited
+ * `Object.prototype` members and would return a function for `constructor`.
+ */
+function getOwn<T>(
+  map: Record<string, T> | undefined,
+  id: string,
+): T | undefined {
+  return map !== undefined && Object.hasOwn(map, id) ? map[id] : undefined;
+}
+
+/**
  * Gets the content of a reference file.
  *
  * @param resources The skill resources to read from.
@@ -172,7 +184,7 @@ export function getReference(
   resources: Resources | undefined,
   referenceId: string,
 ): string | Buffer | undefined {
-  return resources?.references?.[referenceId];
+  return getOwn(resources?.references, referenceId);
 }
 
 /**
@@ -186,7 +198,7 @@ export function getAsset(
   resources: Resources | undefined,
   assetId: string,
 ): string | Buffer | undefined {
-  return resources?.assets?.[assetId];
+  return getOwn(resources?.assets, assetId);
 }
 
 /**
@@ -200,7 +212,7 @@ export function getScript(
   resources: Resources | undefined,
   scriptId: string,
 ): Script | undefined {
-  return resources?.scripts?.[scriptId];
+  return getOwn(resources?.scripts, scriptId);
 }
 
 /**
