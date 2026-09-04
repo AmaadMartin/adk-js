@@ -109,4 +109,60 @@ describe('FeatureRegistry', () => {
       },
     );
   });
+
+  // PROGRESSIVE_SSE_STREAMING now defaults to true, so an override to true no
+  // longer distinguishes the overridden state from the restored one.
+  it('should restore the default after a temporary override to false', async () => {
+    await withTemporaryFeatureOverride(
+      FeatureName.PROGRESSIVE_SSE_STREAMING,
+      false,
+      () => {
+        expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(
+          false,
+        );
+      },
+    );
+
+    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(true);
+  });
+
+  it('should restore an existing override after a temporary override', async () => {
+    overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, false);
+
+    await withTemporaryFeatureOverride(
+      FeatureName.PROGRESSIVE_SSE_STREAMING,
+      true,
+      () => {
+        expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(
+          true,
+        );
+      },
+    );
+
+    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(false);
+
+    overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, undefined);
+  });
+
+  it('should restore the override state when the callback throws', async () => {
+    await expect(
+      withTemporaryFeatureOverride(
+        FeatureName.PROGRESSIVE_SSE_STREAMING,
+        false,
+        () => {
+          throw new Error('callback failed');
+        },
+      ),
+    ).rejects.toThrowError('callback failed');
+
+    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(true);
+  });
+
+  it('should throw when temporarily overriding an unregistered feature', async () => {
+    await expect(
+      withTemporaryFeatureOverride('NO_SUCH_FEATURE' as FeatureName, true, () =>
+        expect.fail('the callback must not run'),
+      ),
+    ).rejects.toThrowError(/is not registered/);
+  });
 });
