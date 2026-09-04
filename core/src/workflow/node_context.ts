@@ -24,11 +24,18 @@ import {isWorkflow} from './workflow.js';
 /**
  * Key of the engine's own output write on {@link NodeContext}.
  *
- * Deliberately not re-exported from the package entry points: engine code
- * imports it from this module, and node code outside adk-js has no way to name
- * it, so the single-output check on `ctx.output` cannot be sidestepped.
+ * Kept off the package entry points, so it is not part of the API a node body
+ * sees and the single-output check on `ctx.output` is not something a node can
+ * casually step around.
+ *
+ * Registered with `Symbol.for`, like the `google.adk.*` brands elsewhere in the
+ * workflow package, because two copies of adk-js can share one runtime: a
+ * bundled agent's `Workflow` finalizes a `NodeContext` the host copy built, and
+ * a per-module `Symbol()` would name a different key in each copy.
  */
-export const SET_ENGINE_OUTPUT = Symbol('adk.workflow.setEngineOutput');
+export const SET_ENGINE_OUTPUT = Symbol.for(
+  'google.adk.workflow.setEngineOutput',
+);
 
 /**
  * The result of running a node: the fields a caller (and the engine's

@@ -303,6 +303,31 @@ describe('NodeContext — single output', () => {
   });
 });
 
+/**
+ * Two copies of adk-js can share one runtime — a bundled agent carries its own
+ * `Workflow`, which finalizes a `NodeContext` the host copy built. The engine's
+ * output write must therefore be keyed by a registered symbol, as the
+ * `google.adk.*` brands are; a per-module `Symbol()` names a different key in
+ * each copy and the call fails with "is not a function".
+ */
+describe('NodeContext — engine output write across package copies', () => {
+  it('keys the engine write by a registered symbol', () => {
+    // Computed here rather than imported, so the test reaches the method the
+    // way a second copy of the package would.
+    const key = Symbol.for('google.adk.workflow.setEngineOutput');
+    const root = rootContext();
+    const write: unknown = Reflect.get(root, key);
+
+    if (typeof write !== 'function') {
+      expect.fail('the engine output write is not reachable by that symbol');
+    }
+    root.output = 'first';
+    write.call(root, 'second');
+
+    expect(root.output).toBe('second');
+  });
+});
+
 describe('NodeContext — use_as_output delegation', () => {
   it('refuses a second useAsOutput child', async () => {
     const first = new FnNode('first', () => 'a');
