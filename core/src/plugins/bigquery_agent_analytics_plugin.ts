@@ -103,16 +103,14 @@ interface LogEventParams {
  * failures, every credential-bearing key is redacted before a row is written,
  * and the row queue, the span bookkeeping and the sanitizer are all bounded.
  *
- * `@google-cloud/bigquery` is an optional peer dependency, loaded on the first
- * row. When it is missing the row is counted in {@link getDropStats} and the
- * run continues.
+ * `@google-cloud/bigquery` and `@google-cloud/bigquery-storage` are optional
+ * peer dependencies, loaded on the first row. When one is missing the row is
+ * counted in {@link getDropStats} and the run continues.
  *
- * Two departures from adk-python are deliberate. Rows go through
- * `tabledata.insertAll` rather than the Storage Write API, so BigQuery
- * de-duplicates a row on its insert id on a best-effort basis rather than
- * exactly. And the `AGENT_ERROR` and `INVOCATION_ERROR` event types are
- * declared but never written, because adk-js `BasePlugin` has no
- * `onAgentErrorCallback` or `onRunErrorCallback` to write them from.
+ * One departure from adk-python is deliberate: the `AGENT_ERROR` and
+ * `INVOCATION_ERROR` event types are declared but never written, because
+ * adk-js `BasePlugin` has no `onAgentErrorCallback` or `onRunErrorCallback` to
+ * write them from.
  *
  * Example:
  * ```typescript

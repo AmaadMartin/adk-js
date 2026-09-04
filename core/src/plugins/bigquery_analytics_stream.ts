@@ -6,7 +6,7 @@
 
 import type {managedwriter} from '@google-cloud/bigquery-storage';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
-import type {BigQueryCredentials} from './bigquery_analytics_writer.js';
+import type {BigQueryCredentials} from './bigquery_analytics_config.js';
 
 /**
  * The row list `JSONWriter.appendRows` accepts.
@@ -114,8 +114,17 @@ export class AnalyticsRowStream {
         // The schema only comes back on the full view.
         view: protos.google.cloud.bigquery.storage.v1.WriteStreamView.FULL,
       });
+      const {tableSchema} = stream;
+      if (tableSchema === null || tableSchema === undefined) {
+        // Fail at the boundary rather than inside the SDK's converter, so the
+        // writer's setup handler can report a cause a reader can act on.
+        throw new Error(
+          `the BigQuery Storage Write API returned no schema for ` +
+            `${destinationTable}; the full stream view should carry one`,
+        );
+      }
       const protoDescriptor = adapt.convertStorageSchemaToProto2Descriptor(
-        stream.tableSchema!,
+        tableSchema,
         'root',
       );
       const connection = await client.createStreamConnection({

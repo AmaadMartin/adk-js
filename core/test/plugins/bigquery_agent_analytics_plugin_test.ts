@@ -70,12 +70,18 @@ const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
     datasetCreateError?: Error;
     insertError?: unknown;
     insertStatus?: {code: number; message: string; rowErrors: unknown[]};
+    /** The event ids each append attempt carried, failed attempts included. */
+    appendAttempts: string[][];
+    /** How many leading attempts fail with a retryable gRPC status. */
+    transientAppendFailures: number;
     insertGate?: Promise<void>;
   }
 
   const fake: FakeBigQuery = {
     clientOptions: [],
     streamOptions: [],
+    appendAttempts: [],
+    transientAppendFailures: 0,
     inserted: [],
     insertIds: [],
     insertCalls: 0,
@@ -172,11 +178,20 @@ const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
       getResult: () => Promise<{error?: unknown}>;
     } {
       fake.insertCalls += 1;
+      fake.appendAttempts.push(rows.map((row) => row.event_id));
       const gate = fake.insertGate;
+      const transient = fake.transientAppendFailures > 0;
+      if (transient) {
+        fake.transientAppendFailures -= 1;
+      }
       return {
         getResult: async () => {
           if (gate !== undefined) {
             await gate;
+          }
+          if (transient) {
+            // gRPC UNAVAILABLE, which the writer retries.
+            throw Object.assign(new Error('unavailable'), {code: 14});
           }
           if (fake.insertError !== undefined) {
             throw fake.insertError;
@@ -439,6 +454,8 @@ beforeEach(() => {
   fake.datasetCreateError = undefined;
   fake.insertError = undefined;
   fake.insertStatus = undefined;
+  fake.appendAttempts = [];
+  fake.transientAppendFailures = 0;
   fake.insertGate = undefined;
 });
 
@@ -522,7 +539,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     ]);
   });
 
-  it('describes event_id by the de-duplication this transport gives', async () => {
+  it("describes event_id in adk-python's words, not its own", async () => {
     const plugin = makePlugin();
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
@@ -533,11 +550,13 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
       expect.fail('the created table carries no field list');
     }
     const eventId = schema.find((field) => field.name === 'event_id');
-    // A table holds rows from both SDKs, and whichever one creates it writes
-    // this description. It must not promise the Storage Write API guarantees
-    // that `tabledata.insertAll` does not give.
-    expect(eventId?.description).toContain('insert id');
-    expect(eventId?.description).not.toContain('Storage Write API');
+    // A table holds rows from both SDKs and whichever one creates it writes
+    // this description, so the two must not disagree.
+    expect(eventId?.description).toBe(
+      'A unique identifier assigned before enqueue. Storage Write API ' +
+        'retries preserve this value so duplicate rows can be identified ' +
+        'reliably.',
+    );
   });
 
   it('reuses an existing table without creating one', async () => {
@@ -772,13 +791,20 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     expect(row.event_id).toMatch(/^[0-9a-f]{32}$/);
   });
 
-  it('uses the row event id as the BigQuery insert id', async () => {
-    const plugin = makePlugin();
+  it('re-sends the same event id when a retried append repeats a row', async () => {
+    // The default stream delivers at least once, so a reader de-duplicates on
+    // event_id. That only works if a retry carries the id the first attempt did.
+    fake.transientAppendFailures = 1;
+    const plugin = makePlugin({
+      retryConfig: {maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1},
+    });
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
     await plugin.flush();
-    expect(fake.insertIds).toEqual([onlyRow().event_id]);
+    expect(fake.appendAttempts).toHaveLength(2);
+    expect(fake.appendAttempts[0]).toEqual(fake.appendAttempts[1]);
+    expect(fake.appendAttempts[1]).toEqual([onlyRow().event_id]);
   });
 
   it('gives every row a distinct event id', async () => {

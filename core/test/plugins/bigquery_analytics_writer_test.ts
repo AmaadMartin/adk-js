@@ -25,6 +25,8 @@ import {
   BigQueryRowWriter,
   retryDelayMs,
 } from '../../src/plugins/bigquery_analytics_writer.js';
+import type {Logger} from '../../src/utils/logger.js';
+import {setLogger} from '../../src/utils/logger.js';
 
 const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
   /** A status the service reports on an append it resolved rather than threw. */
@@ -52,6 +54,7 @@ const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
     tableExists: boolean;
     createError?: Error;
     appendHold?: Promise<void>;
+    streamSchema: unknown;
     queries: string[];
     queryError?: Error;
   }
@@ -73,6 +76,7 @@ const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
     liveLabels: {},
     tableExists: true,
     queries: [],
+    streamSchema: {fields: []},
   };
 
   class FakeTable {
@@ -188,7 +192,7 @@ const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
     }): Promise<{tableSchema: unknown}> {
       fake.streamIds.push(request.streamId);
       fake.streamViews.push(request.view);
-      return {tableSchema: {fields: []}};
+      return {tableSchema: fake.streamSchema};
     }
 
     async createStreamConnection(): Promise<FakeStreamConnection> {
@@ -250,6 +254,22 @@ function rowErrorStatus(rejected: number): {
       code: 'FIELDS_ERROR',
     })),
   };
+}
+
+/** Redirects `logger.error` into `sink` until the returned function is called. */
+function captureErrors(sink: string[]): () => void {
+  const capturing: Logger = {
+    setLogLevel: () => {},
+    log: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: (...args: unknown[]) => {
+      sink.push(args.map((arg) => String(arg)).join(' '));
+    },
+  };
+  setLogger(capturing);
+  return () => setLogger(null);
 }
 
 /** One well-formed row, distinguished by `id`. */
@@ -329,6 +349,7 @@ beforeEach(() => {
   fake.tableExists = true;
   fake.createError = undefined;
   fake.appendHold = undefined;
+  fake.streamSchema = {fields: []};
   fake.queries = [];
   fake.queryError = undefined;
 });
@@ -707,6 +728,7 @@ describe('BigQueryRowWriter fresh table propagation', () => {
     fake.tableExists = true;
     fake.createError = undefined;
     fake.appendHold = undefined;
+    fake.streamSchema = {fields: []};
     fake.appendErrors = [statusError(5, 'Not found: Table agent_events')];
     const writer = makeWriter();
     await writeOneRow(writer);
@@ -806,6 +828,32 @@ describe('BigQueryRowWriter storage write stream', () => {
     expect(fake.streamIds).toEqual([]);
     expect(writer.getDropStats()[AnalyticsDropReason.SETUP_UNAVAILABLE]).toBe(
       1,
+    );
+  });
+});
+
+describe('BigQueryRowWriter stream setup failure', () => {
+  it('counts a drop when the service returns a stream with no schema', async () => {
+    fake.streamSchema = null;
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    expect(fake.appendCalls).toEqual([]);
+    expect(writer.getDropStats()[AnalyticsDropReason.SETUP_UNAVAILABLE]).toBe(
+      1,
+    );
+  });
+
+  it('names the table in the schemaless-stream error it logs', async () => {
+    fake.streamSchema = undefined;
+    const logged: string[] = [];
+    const restore = captureErrors(logged);
+    try {
+      await writeOneRow(makeWriter());
+    } finally {
+      restore();
+    }
+    expect(logged.join('\n')).toContain(
+      'returned no schema for projects/test-project/datasets/agent_analytics/tables/agent_events',
     );
   });
 });

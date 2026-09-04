@@ -40,8 +40,15 @@ const agent = new LlmAgent({
   instruction: 'Answer weather questions.',
 });
 
+const projectId = process.env['GOOGLE_CLOUD_PROJECT'];
+if (projectId === undefined) {
+  throw new Error(
+    'Set GOOGLE_CLOUD_PROJECT to the project holding the dataset.',
+  );
+}
+
 const analytics = new BigQueryAgentAnalyticsPlugin({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT!,
+  projectId,
   datasetId: 'agent_analytics',
 });
 
@@ -182,13 +189,16 @@ The column expressions match adk-python's, so a query written against a Python-c
 The client uses Application Default Credentials. Pass `credentials` to authenticate as a particular service account instead.
 
 ```typescript
+const clientEmail = process.env['ANALYTICS_CLIENT_EMAIL'];
+const privateKey = process.env['ANALYTICS_PRIVATE_KEY'];
+if (clientEmail === undefined || privateKey === undefined) {
+  throw new Error('Set ANALYTICS_CLIENT_EMAIL and ANALYTICS_PRIVATE_KEY.');
+}
+
 const analytics = new BigQueryAgentAnalyticsPlugin({
   projectId: 'my-project',
   datasetId: 'agent_analytics',
-  credentials: {
-    client_email: process.env.ANALYTICS_CLIENT_EMAIL!,
-    private_key: process.env.ANALYTICS_PRIVATE_KEY!,
-  },
+  credentials: {client_email: clientEmail, private_key: privateKey},
 });
 ```
 

@@ -15,9 +15,11 @@ import type {
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
-import type {ResolvedAnalyticsRetryConfig} from './bigquery_analytics_config.js';
+import type {
+  BigQueryRowWriterOptions,
+  ResolvedAnalyticsRetryConfig,
+} from './bigquery_analytics_config.js';
 import {
-  AnalyticsPayloadColumn,
   AnalyticsRow,
   EVENTS_TABLE_SCHEMA,
   mergeSchemaFields,
@@ -92,33 +94,6 @@ const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([4, 8, 13, 14]);
 
 /** gRPC `NOT_FOUND`, which a table still propagating answers an append with. */
 const NOT_FOUND_STATUS = 5;
-
-/**
- * Credentials for the BigQuery client, in the SDK's own option shape.
- *
- * Taken from the SDK's options rather than declared here, so the two can never
- * disagree, and so this stays a pass-through with no cast in between.
- */
-export type BigQueryCredentials = BigQueryOptions['credentials'];
-
-/** Everything {@link BigQueryRowWriter} needs to open and feed the table. */
-export interface BigQueryRowWriterOptions {
-  projectId: string;
-  datasetId: string;
-  tableId: string;
-  location: string;
-  credentials?: BigQueryCredentials;
-  clusteringFields: string[];
-  batchSize: number;
-  flushIntervalMs: number;
-  shutdownTimeoutMs: number;
-  queueMaxSize: number;
-  retry: ResolvedAnalyticsRetryConfig;
-  autoSchemaUpgrade: boolean;
-  createViews: boolean;
-  viewPrefix: string;
-  deniedColumns: ReadonlySet<AnalyticsPayloadColumn>;
-}
 
 /**
  * Finds or creates `dataset`. A create that loses the race to a concurrent
