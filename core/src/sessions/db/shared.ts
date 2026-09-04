@@ -141,9 +141,6 @@ export class PreciseTimestampType extends Type<
     value: string | number | Date | null,
     platform: Platform,
   ): Date | null {
-    if (value == null) {
-      return value;
-    }
     if (typeof value === 'number') {
       return posixSecondsToDate(value);
     }
