@@ -7,7 +7,6 @@
 import {MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
-import {naiveDatetimeOptions} from './dialect.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
@@ -119,10 +118,9 @@ export async function getConnectionOptionsFromUri(
     throw new Error(`Unsupported database URI: ${redactUriPassword(uri)}`);
   }
 
-  // The scheme is the backend name, and the chain above has already rejected
-  // every scheme this module does not support.
-  const timezone = naiveDatetimeOptions(uri.slice(0, uri.indexOf('://')));
-
+  // simplicity: every backend the chain above accepts drops the zone, so UTC
+  // is unconditional. A zone-aware backend, such as Cloud Spanner, would need
+  // its own answer here; adk-js ships no driver for one.
   if (uri.startsWith('sqlite://')) {
     return {
       entities: ENTITIES,
@@ -131,7 +129,7 @@ export async function getConnectionOptionsFromUri(
           ? ':memory:'
           : uri.substring('sqlite://'.length),
       driver,
-      ...timezone,
+      forceUtcTimezone: true,
     } as MikroORMOptions;
   }
 
@@ -139,7 +137,7 @@ export async function getConnectionOptionsFromUri(
     entities: ENTITIES,
     clientUrl: uri,
     driver,
-    ...timezone,
+    forceUtcTimezone: true,
   } as MikroORMOptions;
 }
 
