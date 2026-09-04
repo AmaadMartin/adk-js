@@ -781,6 +781,23 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       ).not.toHaveBeenCalled();
     });
 
+    it('rejects a language the sandbox does not support', async () => {
+      await expect(
+        executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'ls',
+            language: CodeExecutionLanguage.SHELL,
+            inputFiles: [],
+          },
+        }),
+      ).rejects.toThrow('Unsupported language for Agent Engine Sandbox: shell');
+
+      expect(
+        mockClient.agentEnginesInternal.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
     it('sends no display name when auto-creating the agent engine', async () => {
       await executor.executeCode({
         invocationContext,
