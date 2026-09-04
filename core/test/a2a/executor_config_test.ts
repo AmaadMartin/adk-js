@@ -10,18 +10,19 @@ import {
   A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS,
   A2AAgentExecutor,
   A2aAgentExecutorConverterConfig,
+  A2AEvent,
   Event as AdkEvent,
   AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   ExecutorContext,
   GenAIPartToA2APartConverter,
   resolveA2aAgentExecutorConfig,
   Runner,
   RunnerConfig,
-  Session,
   toA2AArtifactUpdateEvents,
   toA2AArtifactUpdateEventsFromArtifactMap,
 } from '@google/adk';
@@ -59,6 +60,15 @@ const {
   a2aPartConverter: defaultA2aPartConverter,
   genAiPartConverter: defaultGenAiPartConverter,
 } = A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS;
+
+/** Asserts the converter produced exactly one artifact update, and returns it. */
+const onlyArtifactUpdate = (events: A2AEvent[]): TaskArtifactUpdateEvent => {
+  const [event] = events;
+  if (event?.kind !== 'artifact-update') {
+    expect.fail(`expected one artifact update, got ${JSON.stringify(events)}`);
+  }
+  return event;
+};
 
 const noopEventConverter: AdkEventToA2AEventsConverter = () => [];
 const noopAdkEventConverter: AdkEventToA2AEventsConverterImpl = () => [];
@@ -155,20 +165,24 @@ describe('toA2AArtifactUpdateEventsFromArtifactMap', () => {
   it('reuses one artifact id across the chunks of one response', () => {
     const agentsArtifacts = new Map<string, string>();
 
-    const [first] = toA2AArtifactUpdateEventsFromArtifactMap(
-      modelEvent('chunk 1', true),
-      agentsArtifacts,
-      TASK_ID,
-      CONTEXT_ID,
-      defaultGenAiPartConverter,
-    ) as TaskArtifactUpdateEvent[];
-    const [last] = toA2AArtifactUpdateEventsFromArtifactMap(
-      modelEvent('chunk 2'),
-      agentsArtifacts,
-      TASK_ID,
-      CONTEXT_ID,
-      defaultGenAiPartConverter,
-    ) as TaskArtifactUpdateEvent[];
+    const first = onlyArtifactUpdate(
+      toA2AArtifactUpdateEventsFromArtifactMap(
+        modelEvent('chunk 1', true),
+        agentsArtifacts,
+        TASK_ID,
+        CONTEXT_ID,
+        defaultGenAiPartConverter,
+      ),
+    );
+    const last = onlyArtifactUpdate(
+      toA2AArtifactUpdateEventsFromArtifactMap(
+        modelEvent('chunk 2'),
+        agentsArtifacts,
+        TASK_ID,
+        CONTEXT_ID,
+        defaultGenAiPartConverter,
+      ),
+    );
 
     expect(first.artifact.artifactId).toBe(last.artifact.artifactId);
     expect(first.append).toBe(true);
@@ -204,25 +218,29 @@ describe('toA2AArtifactUpdateEventsFromArtifactMap', () => {
       (): A2APart => ({kind: 'text', text: 'rewritten'}),
     );
 
-    const [event] = toA2AArtifactUpdateEventsFromArtifactMap(
-      modelEvent('original'),
-      new Map(),
-      TASK_ID,
-      CONTEXT_ID,
-      genAiPartConverter,
-    ) as TaskArtifactUpdateEvent[];
+    const event = onlyArtifactUpdate(
+      toA2AArtifactUpdateEventsFromArtifactMap(
+        modelEvent('original'),
+        new Map(),
+        TASK_ID,
+        CONTEXT_ID,
+        genAiPartConverter,
+      ),
+    );
 
     expect((event.artifact.parts[0] as TextPart).text).toBe('rewritten');
     expect(genAiPartConverter).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to toA2APart when no converter is supplied', () => {
-    const [event] = toA2AArtifactUpdateEventsFromArtifactMap(
-      modelEvent('original'),
-      new Map(),
-      TASK_ID,
-      CONTEXT_ID,
-    ) as TaskArtifactUpdateEvent[];
+    const event = onlyArtifactUpdate(
+      toA2AArtifactUpdateEventsFromArtifactMap(
+        modelEvent('original'),
+        new Map(),
+        TASK_ID,
+        CONTEXT_ID,
+      ),
+    );
 
     expect((event.artifact.parts[0] as TextPart).text).toBe('original');
   });
@@ -257,38 +275,46 @@ describe('toA2AArtifactUpdateEvents', () => {
   it('reuses one artifact id across the chunks of one execution', () => {
     const executorContext = executorContextFor('session-1');
 
-    const [first] = toA2AArtifactUpdateEvents(
-      modelEvent('chunk 1', true),
-      executorContext,
-      TASK_ID,
-      CONTEXT_ID,
-      defaultGenAiPartConverter,
-    ) as TaskArtifactUpdateEvent[];
-    const [second] = toA2AArtifactUpdateEvents(
-      modelEvent('chunk 2', true),
-      executorContext,
-      TASK_ID,
-      CONTEXT_ID,
-      defaultGenAiPartConverter,
-    ) as TaskArtifactUpdateEvent[];
+    const first = onlyArtifactUpdate(
+      toA2AArtifactUpdateEvents(
+        modelEvent('chunk 1', true),
+        executorContext,
+        TASK_ID,
+        CONTEXT_ID,
+        defaultGenAiPartConverter,
+      ),
+    );
+    const second = onlyArtifactUpdate(
+      toA2AArtifactUpdateEvents(
+        modelEvent('chunk 2', true),
+        executorContext,
+        TASK_ID,
+        CONTEXT_ID,
+        defaultGenAiPartConverter,
+      ),
+    );
 
     expect(first.artifact.artifactId).toBe(second.artifact.artifactId);
   });
 
   it('keeps two executions apart', () => {
-    const [first] = toA2AArtifactUpdateEvents(
-      modelEvent('chunk 1', true),
-      executorContextFor('session-1'),
-      TASK_ID,
-      CONTEXT_ID,
-      defaultGenAiPartConverter,
-    ) as TaskArtifactUpdateEvent[];
-    const [second] = toA2AArtifactUpdateEvents(
-      modelEvent('chunk 1', true),
-      executorContextFor('session-2'),
-      TASK_ID,
-      CONTEXT_ID,
-    ) as TaskArtifactUpdateEvent[];
+    const first = onlyArtifactUpdate(
+      toA2AArtifactUpdateEvents(
+        modelEvent('chunk 1', true),
+        executorContextFor('session-1'),
+        TASK_ID,
+        CONTEXT_ID,
+        defaultGenAiPartConverter,
+      ),
+    );
+    const second = onlyArtifactUpdate(
+      toA2AArtifactUpdateEvents(
+        modelEvent('chunk 1', true),
+        executorContextFor('session-2'),
+        TASK_ID,
+        CONTEXT_ID,
+      ),
+    );
 
     expect(first.artifact.artifactId).not.toBe(second.artifact.artifactId);
   });
@@ -312,20 +338,19 @@ describe('A2AAgentExecutor converter routing', () => {
 
     mockEventBus = {publish: vi.fn()} as unknown as Mocked<ExecutionEventBus>;
 
-    mockSessionService.getSession.mockResolvedValue({
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session);
+    mockSessionService.getSession.mockResolvedValue(
+      createSession({
+        id: 'session-id',
+        userId: 'test-user',
+        appName: 'test-app',
+      }),
+    );
   });
 
-  const runnerConfig = () =>
-    ({
-      appName: 'test-app',
-      sessionService: mockSessionService,
-    }) as unknown as RunnerConfig;
+  const runnerConfig = (): RunnerConfig => ({
+    appName: 'test-app',
+    sessionService: mockSessionService,
+  });
 
   const requestContext = (contextId: string): RequestContext =>
     ({
