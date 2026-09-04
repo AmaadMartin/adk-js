@@ -7,7 +7,7 @@
 import {AuthClient, GoogleAuth} from 'google-auth-library';
 import {z} from 'zod';
 
-import {formatError} from '../utils/error_utils.js';
+import {asRecord, formatError} from '../utils/error_utils.js';
 import {getLogger} from '../utils/logger.js';
 import {getApiEndpoint} from '../utils/mtls_utils.js';
 import {FunctionTool} from './function_tool.js';
@@ -170,13 +170,6 @@ interface ProbeOutcome {
   results?: DiscoveryEngineSearchResult[];
 }
 
-/** Narrows a JSON value to an object, or `undefined` when it is not one. */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 /**
  * Narrows away a message the API left out. An object with no fields is the
  * JSON form of an unset message, so it counts as absent too.
@@ -247,13 +240,12 @@ function resolveLocation(resourceId: string, location?: string): string {
 
 /** Returns the host that serves `location`, honouring the mutual-TLS setting. */
 function resolveHost(location: string): string {
-  return location === GLOBAL_LOCATION
-    ? getApiEndpoint(location, DEFAULT_ENDPOINT, DEFAULT_MTLS_ENDPOINT)
-    : getApiEndpoint(
-        location,
-        `{location}-${DEFAULT_ENDPOINT}`,
-        `{location}-${DEFAULT_MTLS_ENDPOINT}`,
-      );
+  const prefix = location === GLOBAL_LOCATION ? '' : '{location}-';
+  return getApiEndpoint(
+    location,
+    `${prefix}${DEFAULT_ENDPOINT}`,
+    `${prefix}${DEFAULT_MTLS_ENDPOINT}`,
+  );
 }
 
 /** Builds the `contentSearchSpec` that asks for results in `mode`. */
