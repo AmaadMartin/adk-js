@@ -549,7 +549,7 @@ function resolveScopedArtifactPath(
       `Artifact filename ${filename} must not contain parent traversal.`,
     );
   }
-  if (relative === '' || relative === '.') {
+  if (relative === '') {
     return path.join(scopeRoot, 'artifact');
   }
 
@@ -574,15 +574,9 @@ function getScopeRoot(
   filename: string,
 ): string {
   const baseRoot = getUserRoot(getAppRoot(rootDir, appName), userId);
-  if (isUserScoped(sessionId, filename)) {
-    return getUserArtifactsDir(baseRoot);
-  }
-  if (!sessionId) {
-    throw new InputValidationError(
-      'Session ID must be provided for session-scoped artifacts.',
-    );
-  }
-  return getSessionArtifactsDir(baseRoot, sessionId);
+  return isUserScoped(sessionId, filename)
+    ? getUserArtifactsDir(baseRoot)
+    : getSessionArtifactsDir(baseRoot, sessionId);
 }
 
 /**
