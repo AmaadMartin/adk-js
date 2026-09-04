@@ -111,6 +111,9 @@ describe('core/package.json subpath exports', () => {
       './artifacts/gcs',
       './sessions/database',
       './telemetry/gcp',
+      // Not a subsystem: a deprecation shim the barrel deliberately skips, so
+      // this subpath is the only way a deliberate importer can still reach it.
+      './tools/agent_simulator/agent_simulator_config',
       './tools/mcp',
     ]);
   });

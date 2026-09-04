@@ -13,6 +13,25 @@ export function resetDeprecationWarnings(): void {
   warnedItems.clear();
 }
 
+/**
+ * Logs `reason` the first time `key` is seen, and stays quiet after that.
+ *
+ * {@link deprecated} covers a class, because it hooks the constructor. A module
+ * that moved, or a renamed function parameter, has no constructor to hook, so
+ * it calls this instead. Both share one registry, so
+ * {@link resetDeprecationWarnings} clears both.
+ *
+ * @param key Identifies the deprecated item, so each one warns once.
+ * @param reason The message a caller sees.
+ */
+export function warnDeprecatedOnce(key: string, reason: string): void {
+  if (warnedItems.has(key)) {
+    return;
+  }
+  warnedItems.add(key);
+  logger.warn(reason);
+}
+
 // `any[]` rather than `unknown[]`: a class whose constructor takes a typed
 // config (every agent) is not assignable to `new (...args: unknown[]) => …`,
 // so the stricter signature would reject exactly the classes this decorates.
