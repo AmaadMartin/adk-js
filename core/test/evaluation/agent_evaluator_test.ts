@@ -692,6 +692,9 @@ describe('AgentEvaluator.evaluateEvalSet parity with adk-python', () => {
     ).toBeInstanceOf(CustomMetricEvaluator);
   });
 
+  // The registry has no unregister, so this leaves its metric on the
+  // process-wide default. The name is unique to this test and no other test
+  // resolves it.
   it('test_evaluate_eval_set_keeps_evaluators_from_the_default_registry', async () => {
     const metricName = 'globally_registered_metric_for_agent_evaluator_test';
     defaultMetricEvaluatorRegistry().registerEvaluator(
