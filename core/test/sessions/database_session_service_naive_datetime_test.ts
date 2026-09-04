@@ -186,10 +186,32 @@ describe('DatabaseSessionService naive datetime handling', () => {
   });
 });
 
+/**
+ * The dialects adk-python parametrises
+ * `test_database_session_service_uses_naive_datetime_for_dialect` over, with a
+ * URI for each. adk-python asks its engine for the dialect name; adk-js reads
+ * the backend out of the URI, so the equivalent assertion is that the
+ * connection the URI produces carries the UTC option.
+ */
+const REFERENCE_NAIVE_URIS: ReadonlyArray<[string, string]> = [
+  ['sqlite', 'sqlite://:memory:'],
+  ['postgresql', 'postgresql://user:pass@localhost:5432/db'],
+  ['mysql', 'mysql://user:pass@localhost:3306/db'],
+  ['mariadb', 'mariadb://user:pass@localhost:3306/db'],
+];
+
 describe('getConnectionOptionsFromUri timezone handling', () => {
-  it('asks a naive backend for UTC', async () => {
+  for (const [dialect, uri] of REFERENCE_NAIVE_URIS) {
+    it(`test_database_session_service_uses_naive_datetime_for_dialect[${dialect}]`, async () => {
+      const options = await getConnectionOptionsFromUri(uri);
+
+      expect(options.forceUtcTimezone).toBe(true);
+    });
+  }
+
+  it('asks SQL Server for UTC, which adk-python does not enumerate', async () => {
     const options = await getConnectionOptionsFromUri(
-      'mysql://user:pass@localhost:3306/db',
+      'mssql://user:pass@localhost:1433/db',
     );
 
     expect(options.forceUtcTimezone).toBe(true);

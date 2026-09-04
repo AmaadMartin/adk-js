@@ -19,13 +19,14 @@ import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {
+  ensureDatabaseCreated,
   forkForRead,
   forkForWrite,
   getConnectionOptionsFromUri,
   getDatabaseBackend,
   validateDatabaseSchemaVersion,
 } from '../../src/sessions/db/operations.js';
-import {StorageSession} from '../../src/sessions/db/schema.js';
+import {ENTITIES, StorageSession} from '../../src/sessions/db/schema.js';
 
 // The read/write split is observable only through which fork the service
 // asks for, so those two seams and the backend probe are spied on while every
@@ -387,13 +388,13 @@ describe('DatabaseSessionService', () => {
   });
 
   it('should fail with incompatible schema version', async () => {
-    const internalService = new DatabaseSessionService({
+    const orm = await MikroORM.init({
       dbName: ':memory:',
       driver: SqliteDriver,
+      entities: ENTITIES,
       allowGlobalContext: true,
     });
-    await internalService.init();
-    const orm = (internalService as unknown as {orm: MikroORM}).orm as MikroORM;
+    await ensureDatabaseCreated(orm);
 
     // Manually insert bad version
     const em = orm.em.fork();
@@ -690,11 +691,12 @@ describe('DatabaseSessionService', () => {
 
       await service.appendEvent({session, event});
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
-      const storedEvents = (await em.find('StorageEvent', {
+      const stored = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
         sessionId: 's-temp',
-      })) as {sessionId: string; eventData: Event}[];
-      const eventData = storedEvents[0].eventData;
+      });
+      const eventData = stored!.events[0];
 
       expect(eventData.actions?.stateDelta?.['keep']).toBe('me');
       expect(
@@ -716,12 +718,13 @@ describe('DatabaseSessionService', () => {
 
       expect(session.lastUpdateTime).toBe(timestamp);
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
-      const storedSession = (await em.findOne('StorageSession', {
-        id: 's-time',
-      })) as {id: string; updateTime: Date};
+      const stored = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-time',
+      });
 
-      expect(storedSession.updateTime.getTime()).toBe(timestamp);
+      expect(stored?.lastUpdateTime).toBe(timestamp);
     });
   });
 });

@@ -10,7 +10,6 @@ import {
   MissingOptionalPeerError,
 } from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
-import {naiveDatetimeOptions} from './dialect.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
@@ -37,12 +36,6 @@ const SCHEME_SEPARATOR = '://';
 
 /** Backend name this module normalizes the sqlite dialect to. */
 const SQLITE_BACKEND = 'sqlite';
-
-/** Dialect name the sqlite driver reports through knex. */
-const SQLITE_KNEX_DIALECT = 'sqlite3';
-
-/** The sqlite database name that opens a database held in memory. */
-const SQLITE_MEMORY_DATABASE = ':memory:';
 
 /**
  * The driver package each supported backend needs. Every `import()` keeps its
@@ -89,12 +82,6 @@ const ROW_LEVEL_LOCKING_BACKENDS: ReadonlySet<string> = new Set([
   'mysql',
   'postgresql',
 ]);
-
-/** Statement that turns on sqlite's foreign-key enforcement. */
-const SQLITE_FOREIGN_KEYS_PRAGMA = 'PRAGMA foreign_keys = ON';
-
-/** Statement the pool runs to check a connection is still usable. */
-const LIVENESS_PROBE_SQL = 'select 1';
 
 /**
  * Splits a connection URI into the backend it names and, when the scheme
@@ -175,7 +162,7 @@ export function enableSqliteForeignKeys(
   connection: SqliteConnectionHandle,
   done: PoolConnectCallback,
 ): void {
-  connection.run(SQLITE_FOREIGN_KEYS_PRAGMA, (error) =>
+  connection.run('PRAGMA foreign_keys = ON', (error) =>
     done(error, connection),
   );
 }
@@ -211,7 +198,7 @@ export function connectionIsAlive(connection: unknown): Promise<boolean> {
   }
 
   return new Promise((resolve) => {
-    connection.query(LIVENESS_PROBE_SQL, (error) => resolve(!error));
+    connection.query('select 1', (error) => resolve(!error));
   });
 }
 
@@ -241,7 +228,7 @@ export function dialectOf(connection: object): string {
   if (typeof dialect !== 'string') {
     return '';
   }
-  return dialect === SQLITE_KNEX_DIALECT ? SQLITE_BACKEND : dialect;
+  return dialect === 'sqlite3' ? SQLITE_BACKEND : dialect;
 }
 
 /**
@@ -360,13 +347,19 @@ export async function openDatabaseOrm(
  */
 function sqlitePoolOptions(dbName: string): Partial<MikroORMOptions> {
   return {
-    ...(dbName === SQLITE_MEMORY_DATABASE ? {pool: {min: 1, max: 1}} : {}),
+    ...(dbName === ':memory:' ? {pool: {min: 1, max: 1}} : {}),
     driverOptions: {pool: {afterCreate: enableSqliteForeignKeys}},
   };
 }
 
 /**
  * Parses a database connection URI and returns MikroORM Options.
+ *
+ * Every backend adk-js supports stores a timestamp in a column that drops the
+ * zone, so `forceUtcTimezone` keeps the stored wall clock on UTC instead of
+ * the Node process's local zone, and makes MikroORM read a zone-less string
+ * back as UTC. adk-python reaches the same result by stripping `tzinfo` before
+ * it stores.
  *
  * @param uri The database connection URI (e.g., "postgres://user:password@host:port/database")
  * @param overrides Options applied on top of the ones the URI implies, the
@@ -395,7 +388,7 @@ export async function getConnectionOptionsFromUri(
       dbName,
       driver,
       ...sqlitePoolOptions(dbName),
-      ...naiveDatetimeOptions(backend),
+      forceUtcTimezone: true,
       ...overrides,
     } as MikroORMOptions;
   }
@@ -405,7 +398,7 @@ export async function getConnectionOptionsFromUri(
     clientUrl: uri,
     driver,
     driverOptions: {pool: {validate: connectionIsAlive}},
-    ...naiveDatetimeOptions(backend),
+    forceUtcTimezone: true,
     ...overrides,
   } as MikroORMOptions;
 }

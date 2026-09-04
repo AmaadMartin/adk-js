@@ -56,15 +56,17 @@ export function isDatabaseConnectionString(uri?: string): boolean {
   return !!uri && namesSupportedDatabaseBackend(uri);
 }
 
+/** What the caller gave the constructor to open the database with. */
+type DatabaseSource =
+  | {uri: string; overrides?: Partial<MikroDBOptions>}
+  | {options: MikroDBOptions};
+
 /**
  * A session service that uses a SQL database for storage via MikroORM.
  */
 export class DatabaseSessionService extends BaseSessionService {
-  private orm?: MikroORM;
-  private connection?: Promise<void>;
-  private options?: MikroDBOptions;
-  private connectionString?: string;
-  private readonly optionOverrides?: Partial<MikroDBOptions>;
+  private connection?: Promise<MikroORM>;
+  private readonly source: DatabaseSource;
 
   /**
    * @param connectionStringOrOptions A connection URI, or MikroORM options.
@@ -81,8 +83,7 @@ export class DatabaseSessionService extends BaseSessionService {
       // Reject a bad URI here rather than at the first query, matching
       // adk-python's engine construction.
       assertSupportedDatabaseUri(connectionStringOrOptions);
-      this.connectionString = connectionStringOrOptions;
-      this.optionOverrides = overrides;
+      this.source = {uri: connectionStringOrOptions, overrides};
     } else {
       if (overrides) {
         throw new Error(
@@ -96,38 +97,48 @@ export class DatabaseSessionService extends BaseSessionService {
 
       // Every backend adk-js supports drops the zone, so UTC is the default
       // here as it is for a URI. A caller's own value wins.
-      this.options = {
-        ...connectionStringOrOptions,
-        entities: ENTITIES,
-        forceUtcTimezone: connectionStringOrOptions.forceUtcTimezone ?? true,
+      this.source = {
+        options: {
+          ...connectionStringOrOptions,
+          entities: ENTITIES,
+          forceUtcTimezone: connectionStringOrOptions.forceUtcTimezone ?? true,
+        },
       };
     }
   }
 
   async init() {
+    await this.ready();
+  }
+
+  /**
+   * Opens the database on the first call, and returns the open instance.
+   *
+   * @returns The initialized MikroORM instance.
+   */
+  private ready(): Promise<MikroORM> {
     // Memoize the in-flight connection so concurrent callers share one ORM,
     // and so `close()` can never race an `init()` into leaking one.
     this.connection ??= this.connect();
-    try {
-      await this.connection;
-    } catch (error: unknown) {
+    return this.connection.catch((error: unknown) => {
       this.connection = undefined;
       throw error;
-    }
+    });
   }
 
-  private async connect(): Promise<void> {
-    if (this.connectionString && (!this.options || !this.options.driver)) {
-      this.options = await getConnectionOptionsFromUri(
-        this.connectionString,
-        this.optionOverrides,
-      );
-    }
+  private async connect(): Promise<MikroORM> {
+    const source = this.source;
+    const orm =
+      'options' in source
+        ? await openDatabaseOrm(source.options)
+        : await openDatabaseOrm(
+            await getConnectionOptionsFromUri(source.uri, source.overrides),
+            source.uri,
+          );
 
-    const orm = await openDatabaseOrm(this.options!, this.connectionString);
     await ensureDatabaseCreated(orm);
     await validateDatabaseSchemaVersion(orm);
-    this.orm = orm;
+    return orm;
   }
 
   /**
@@ -145,9 +156,7 @@ export class DatabaseSessionService extends BaseSessionService {
 
     // A failed connection has nothing to close, and its error already reached
     // whoever called `init()`.
-    await connection.catch(() => {});
-    const orm = this.orm;
-    this.orm = undefined;
+    const orm = await connection.catch(() => undefined);
     await orm?.close();
   }
 
@@ -161,8 +170,7 @@ export class DatabaseSessionService extends BaseSessionService {
     state,
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
-    await this.init();
-    const em = forkForWrite(this.orm!);
+    const em = forkForWrite(await this.ready());
 
     const id = sessionId || randomUUID();
     const now = new Date();
@@ -252,8 +260,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
-    await this.init();
-    const em = forkForRead(this.orm!);
+    const em = forkForRead(await this.ready());
 
     const storageSession = await em.findOne(StorageSession, {
       appName,
@@ -314,8 +321,7 @@ export class DatabaseSessionService extends BaseSessionService {
     page,
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
-    await this.init();
-    const em = forkForRead(this.orm!);
+    const em = forkForRead(await this.ready());
 
     const where: FilterQuery<StorageSession> = {appName};
     if (userId) {
@@ -414,8 +420,7 @@ export class DatabaseSessionService extends BaseSessionService {
     userId,
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
-    await this.init();
-    const em = forkForWrite(this.orm!);
+    const em = forkForWrite(await this.ready());
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
     await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
@@ -425,8 +430,8 @@ export class DatabaseSessionService extends BaseSessionService {
     session,
     event,
   }: AppendEventRequest): Promise<Event> {
-    await this.init();
-    const em = forkForWrite(this.orm!);
+    const orm = await this.ready();
+    const em = forkForWrite(orm);
 
     if (event.partial) {
       return event;
@@ -436,7 +441,7 @@ export class DatabaseSessionService extends BaseSessionService {
     // sqlite compiles `FOR UPDATE` away, and mssql turns it into a table hint
     // adk-python never takes. Only the dialects adk-python locks are asked
     // for a row-level lock.
-    const lockMode = supportsRowLevelLocking(getDatabaseBackend(this.orm!))
+    const lockMode = supportsRowLevelLocking(getDatabaseBackend(orm))
       ? LockMode.PESSIMISTIC_WRITE
       : undefined;
 
