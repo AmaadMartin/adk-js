@@ -8,7 +8,6 @@ import type {MikroORM, Options} from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
-import {naiveDatetimeOptions} from './dialect.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
@@ -396,17 +395,19 @@ export function getDatabaseBackend(orm: MikroORM): string {
 export async function getConnectionOptionsFromUri(
   uri: string,
 ): Promise<MikroORMOptions> {
-  // The scheme is the backend name, and the chain below rejects every scheme
-  // this module does not support. A backend that drops the zone on a datetime
-  // column is opened on UTC.
-  const timezone = naiveDatetimeOptions(uri.slice(0, uri.indexOf('://')));
-
+  // simplicity: every backend the chain below accepts drops the zone on a
+  // datetime column, so UTC is unconditional. A zone-aware backend, such as
+  // Cloud Spanner, would need its own answer here; adk-js ships no driver for
+  // one.
   if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
     const {PostgreSqlDriver} = await loadOptionalPeer(
       driverPeer('@mikro-orm/postgresql', 'postgres'),
       () => import('@mikro-orm/postgresql'),
     );
-    return {...buildPostgresOptions(uri, PostgreSqlDriver), ...timezone};
+    return {
+      ...buildPostgresOptions(uri, PostgreSqlDriver),
+      forceUtcTimezone: true,
+    };
   }
 
   if (uri.startsWith('mysql://')) {
@@ -414,7 +415,10 @@ export async function getConnectionOptionsFromUri(
       driverPeer('@mikro-orm/mysql', 'mysql'),
       () => import('@mikro-orm/mysql'),
     );
-    return {...buildMySqlFamilyOptions(uri, MySqlDriver), ...timezone};
+    return {
+      ...buildMySqlFamilyOptions(uri, MySqlDriver),
+      forceUtcTimezone: true,
+    };
   }
 
   if (uri.startsWith('mariadb://')) {
@@ -422,7 +426,10 @@ export async function getConnectionOptionsFromUri(
       driverPeer('@mikro-orm/mariadb', 'mariadb'),
       () => import('@mikro-orm/mariadb'),
     );
-    return {...buildMySqlFamilyOptions(uri, MariaDbDriver), ...timezone};
+    return {
+      ...buildMySqlFamilyOptions(uri, MariaDbDriver),
+      forceUtcTimezone: true,
+    };
   }
 
   if (uri.startsWith('sqlite://')) {
@@ -437,7 +444,7 @@ export async function getConnectionOptionsFromUri(
           ? ':memory:'
           : uri.substring('sqlite://'.length),
       driver: SqliteDriver,
-      ...timezone,
+      forceUtcTimezone: true,
     } as MikroORMOptions;
   }
 
@@ -450,7 +457,7 @@ export async function getConnectionOptionsFromUri(
       entities: ENTITIES,
       clientUrl: uri,
       driver: MsSqlDriver,
-      ...timezone,
+      forceUtcTimezone: true,
     } as MikroORMOptions;
   }
 
