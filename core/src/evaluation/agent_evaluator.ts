@@ -291,14 +291,14 @@ async function resolveTestFiles(input: string | string[]): Promise<string[]> {
 }
 
 /**
- * Loads eval data in ADK's original format from a file, from every
- * `.test.json` file under a directory, or from an explicit list of files.
+ * Loads eval data in ADK's original format from a file, or from every
+ * `.test.json` file under a directory.
  *
  * @throws {InputValidationError} When {@link resolveTestFiles} rejects the
  *   input, or when a file does not hold a list of records.
  */
 async function loadDataset(
-  input: string | string[],
+  input: string,
 ): Promise<Array<Array<Record<string, unknown>>>> {
   const testFiles = await resolveTestFiles(input);
   const datasets: Array<Array<Record<string, unknown>>> = [];

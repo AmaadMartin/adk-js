@@ -8,6 +8,7 @@ import {
   AgentEvaluator,
   AgentModuleExports,
   App,
+  CustomMetricEvaluator,
   DEFAULT_EVAL_CONFIG,
   EvalCaseResult,
   EvalMetricResult,
@@ -17,8 +18,12 @@ import {
   InMemoryArtifactService,
   Invocation,
   LlmAgent,
+  MetricEvaluatorRegistry,
   NUM_RUNS,
   PrebuiltMetrics,
+  TrajectoryEvaluator,
+  UserSimulatorProvider,
+  defaultMetricEvaluatorRegistry,
   setEvalRuntime,
 } from '@google/adk';
 import {FunctionCall} from '@google/genai';
@@ -502,6 +507,261 @@ describe('AgentEvaluator.evaluateEvalSet', () => {
   });
 });
 
+/**
+ * Tests ported from adk-python
+ * `tests/unittests/evaluation/test_agent_evaluator.py`. The reference test
+ * names are kept verbatim, so a reader can grep for the original.
+ */
+describe('AgentEvaluator.evaluateEvalSet parity with adk-python', () => {
+  let runtime: StubEvalRuntime;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  function install(evalCaseResults: EvalCaseResult[]): StubEvalRuntime {
+    runtime = new StubEvalRuntime(evalCaseResults);
+    setEvalRuntime(runtime);
+    return runtime;
+  }
+
+  beforeEach(() => {
+    install(scoredOnce(1, 0.8));
+    vi.spyOn(logger, 'info').mockImplementation(() => {});
+    warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    setEvalRuntime(undefined);
+    vi.restoreAllMocks();
+  });
+
+  it('test_evaluate_eval_set_reports_not_evaluated_metric_separately', async () => {
+    install(scoredOnce(undefined, 0.8));
+
+    const failure = await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig: createEvalConfig(0.8),
+    }).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain(`${MATCH_METRIC} for the agent module was not`);
+    expect(message).toContain('was not evaluated');
+    expect(message).not.toContain('Failed. Expected');
+    expect(message).not.toContain('but got undefined');
+  });
+
+  it('reports a scored regression and an unscored metric one line each', async () => {
+    install([
+      createEvalCaseResult([
+        createPerInvocation([
+          createMetricResult(0.1, 0.8, MATCH_METRIC),
+          createMetricResult(undefined, 0.9, TRAJECTORY_METRIC),
+        ]),
+      ]),
+    ]);
+
+    const failure = await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig: {criteria: {[MATCH_METRIC]: 0.8, [TRAJECTORY_METRIC]: 0.9}},
+    }).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(Error);
+    const lines = (failure as Error).message.split('\n').slice(1);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe(
+      `${MATCH_METRIC} for the agent module Failed. Expected 0.8, but got 0.1.`,
+    );
+    expect(lines[1]).toBe(
+      `${TRAJECTORY_METRIC} for the agent module was not evaluated. No score ` +
+        'was produced, so the threshold of 0.9 was never checked and this is ' +
+        'not a score regression. See the logs for why the metric could not ' +
+        'run.',
+    );
+  });
+
+  it('scores the metrics named by the deprecated criteria option', async () => {
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      criteria: {[MATCH_METRIC]: 0.4},
+      numRuns: 1,
+    });
+
+    expect(runtime.params?.evalConfig).toEqual({
+      criteria: {[MATCH_METRIC]: {threshold: 0.4}},
+    });
+    expect(
+      runtime.service?.evaluateRequests[0].evaluateConfig.evalMetrics,
+    ).toEqual([
+      {
+        metricName: MATCH_METRIC,
+        threshold: 0.4,
+        criterion: {threshold: 0.4},
+        customFunctionPath: undefined,
+      },
+    ]);
+  });
+
+  it('warns once and names evalConfig when criteria is used', async () => {
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      criteria: {[MATCH_METRIC]: 0.4},
+      numRuns: 1,
+    });
+
+    const deprecations = warnSpy.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.includes('`criteria` field is deprecated'));
+    expect(deprecations).toHaveLength(1);
+    expect(deprecations[0]).toContain('move to using the `evalConfig` field');
+  });
+
+  it('lets criteria replace an eval config given alongside it', async () => {
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig: {criteria: {[TRAJECTORY_METRIC]: 1}},
+      criteria: {[MATCH_METRIC]: 0.4},
+      numRuns: 1,
+    });
+
+    expect(runtime.params?.evalConfig).toEqual({
+      criteria: {[MATCH_METRIC]: {threshold: 0.4}},
+    });
+  });
+
+  it('keeps the eval config when criteria is empty', async () => {
+    const evalConfig = createEvalConfig(0.8);
+
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig,
+      criteria: {},
+      numRuns: 1,
+    });
+
+    expect(runtime.params?.evalConfig).toBe(evalConfig);
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('`criteria` field is deprecated'),
+    );
+  });
+
+  it('rejects a call that gives neither criteria nor an eval config', async () => {
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agentModule: createAgentModule(),
+        evalSet: createEvalSet(),
+      }),
+    ).rejects.toThrowError('`evalConfig` is required.');
+  });
+
+  it('checks the app name before it checks the eval config', async () => {
+    await expect(
+      AgentEvaluator.evaluateEvalSet({
+        agentModule: createAgentModule(),
+        evalSet: createEvalSet(),
+        evalSetResultsManager: new RecordingEvalSetResultsManager(),
+      }),
+    ).rejects.toThrowError(
+      'app_name is required when eval_set_results_manager is provided.',
+    );
+  });
+
+  it('test_evaluate_eval_set_registers_custom_metrics', async () => {
+    const evalConfig = {
+      criteria: {},
+      customMetrics: {
+        my_custom_metric: {codeConfig: {name: './metrics.js#score'}},
+      },
+    };
+
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig,
+      numRuns: 1,
+    });
+
+    const registry = runtime.params?.metricEvaluatorRegistry;
+    expect(registry).toBeInstanceOf(MetricEvaluatorRegistry);
+    expect(
+      registry?.getEvaluator({metricName: 'my_custom_metric', threshold: 0.5}),
+    ).toBeInstanceOf(CustomMetricEvaluator);
+  });
+
+  it('test_evaluate_eval_set_keeps_evaluators_from_the_default_registry', async () => {
+    const metricName = 'globally_registered_metric_for_agent_evaluator_test';
+    defaultMetricEvaluatorRegistry().registerEvaluator(
+      metricName,
+      (evalMetric) => new TrajectoryEvaluator({evalMetric}),
+    );
+
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig: {criteria: {}},
+      numRuns: 1,
+    });
+
+    expect(
+      runtime.params?.metricEvaluatorRegistry?.getEvaluator({
+        metricName,
+        threshold: 0.5,
+      }),
+    ).toBeInstanceOf(TrajectoryEvaluator);
+  });
+
+  it('keeps the run registry and the default registry isolated', async () => {
+    const runOnly = 'metric_registered_only_on_the_fork';
+    const defaultOnly = 'metric_registered_only_on_the_default';
+
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig: {
+        criteria: {},
+        customMetrics: {[runOnly]: {codeConfig: {name: './metrics.js#score'}}},
+      },
+      numRuns: 1,
+    });
+    const forked = runtime.params?.metricEvaluatorRegistry;
+    if (forked === undefined) {
+      expect.fail('the runtime received no metric evaluator registry');
+    }
+
+    expect(() =>
+      defaultMetricEvaluatorRegistry().getEvaluator({
+        metricName: runOnly,
+        threshold: 0.5,
+      }),
+    ).toThrowError(`${runOnly} not found in registry.`);
+
+    defaultMetricEvaluatorRegistry().registerEvaluator(
+      defaultOnly,
+      (evalMetric) => new TrajectoryEvaluator({evalMetric}),
+    );
+    expect(() =>
+      forked.getEvaluator({metricName: defaultOnly, threshold: 0.5}),
+    ).toThrowError(`${defaultOnly} not found in registry.`);
+  });
+
+  it('hands the runtime a user simulator provider', async () => {
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig: createEvalConfig(0.8),
+      numRuns: 1,
+    });
+
+    expect(runtime.params?.userSimulatorProvider).toBeInstanceOf(
+      UserSimulatorProvider,
+    );
+  });
+});
+
 describe('AgentEvaluator CSV output', () => {
   let workDir: string;
   let outputFile: string;
@@ -733,6 +993,52 @@ describe('AgentEvaluator.evaluate', () => {
         (service) => service.inferenceRequests[0].evalSetId,
       ),
     ).toEqual(['set-a', 'set-b', 'set-c']);
+  });
+
+  it('scores every file of an explicit list, in the order given', async () => {
+    const second = await write('b.test.json', evalSetFile('set-b'));
+    const first = await write('a.test.json', evalSetFile('set-a'));
+
+    await AgentEvaluator.evaluate({
+      agentModule: createAgentModule(),
+      evalDatasetFilePathOrDir: [second, first],
+      numRuns: 1,
+    });
+
+    expect(
+      runtime.allServices.map(
+        (service) => service.inferenceRequests[0].evalSetId,
+      ),
+    ).toEqual(['set-b', 'set-a']);
+  });
+
+  it('rejects a list holding a path that names nothing', async () => {
+    const present = await write('a.test.json', evalSetFile('set-a'));
+
+    await expect(
+      AgentEvaluator.evaluate({
+        agentModule: createAgentModule(),
+        evalDatasetFilePathOrDir: [present, path.join(workDir, 'absent.json')],
+      }),
+    ).rejects.toThrowError('Input list must contain valid file paths.');
+  });
+
+  it('rejects a list holding a directory', async () => {
+    await expect(
+      AgentEvaluator.evaluate({
+        agentModule: createAgentModule(),
+        evalDatasetFilePathOrDir: [workDir],
+      }),
+    ).rejects.toThrowError('Input list must contain valid file paths.');
+  });
+
+  it('rejects an empty list', async () => {
+    await expect(
+      AgentEvaluator.evaluate({
+        agentModule: createAgentModule(),
+        evalDatasetFilePathOrDir: [],
+      }),
+    ).rejects.toThrowError('Input list must contain valid file paths.');
   });
 
   it('surfaces a file system error that is not a missing path', async () => {
