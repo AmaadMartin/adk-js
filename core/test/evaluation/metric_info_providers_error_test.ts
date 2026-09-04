@@ -76,3 +76,11 @@ describe('the MetricInfo a provider returns', () => {
     expect(first).not.toBe(second);
   });
 });
+
+describe('parseMetricInfo on a payload a provider did not produce', () => {
+  it('throws InputValidationError when metricName is missing', () => {
+    expect(() => parseMetricInfo({metricValueInfo: {}})).toThrow(
+      InputValidationError,
+    );
+  });
+});

@@ -71,24 +71,15 @@ match.metricValueInfo.interval; // {minValue: 0, openAtMin: false, maxValue: 1, 
 ## Failure modes
 
 `ResponseEvaluatorMetricInfoProvider` accepts any string. It checks the name
-when you call `getMetricInfo()`, not when you construct it, so build a provider
-from configuration first and handle the failure where you read it:
+when you call `getMetricInfo()`, not when you construct it, so a provider built
+from configuration fails where you read it, not where you build it:
 
 ```ts
-import {
-  isInputValidationError,
-  ResponseEvaluatorMetricInfoProvider,
-} from '@google/adk';
+import {ResponseEvaluatorMetricInfoProvider} from '@google/adk';
 
 const provider = new ResponseEvaluatorMetricInfoProvider('nope'); // does not throw
 
-try {
-  provider.getMetricInfo();
-} catch (e: unknown) {
-  if (isInputValidationError(e)) {
-    e.message; // '`nope` is not supported.'
-  }
-}
+provider.getMetricInfo(); // throws InputValidationError: `nope` is not supported.
 ```
 
 Every other provider takes no argument and cannot fail.
