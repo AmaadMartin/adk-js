@@ -15,10 +15,7 @@ import {EntityManager, LockMode, MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
-import {
-  sessionLockMode,
-  supportsRowLevelLocking,
-} from '../../src/sessions/db/dialect.js';
+import {sessionLockMode} from '../../src/sessions/db/dialect.js';
 import {
   dialectOf,
   getDatabaseBackend,
@@ -815,7 +812,7 @@ describe('DatabaseSessionService row-level locking gate', () => {
     });
     try {
       expect(getDatabaseBackend(orm)).toBe('sqlite');
-      expect(supportsRowLevelLocking(getDatabaseBackend(orm))).toBe(false);
+      expect(sessionLockMode(getDatabaseBackend(orm))).toBeUndefined();
     } finally {
       await orm.close();
     }
