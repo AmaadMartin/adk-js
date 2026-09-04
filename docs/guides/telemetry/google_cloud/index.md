@@ -33,14 +33,10 @@ import {
   getGcpExporters,
   getGcpResource,
   maybeSetOtelProviders,
+  resolveGoogleAuth,
 } from '@google/adk';
-import {GoogleAuth} from 'google-auth-library';
 
-const auth = new GoogleAuth();
-const [authClient, projectId] = await Promise.all([
-  auth.getClient(),
-  auth.getProjectId(),
-]);
+const googleAuth = await resolveGoogleAuth();
 
 maybeSetOtelProviders(
   [
@@ -48,16 +44,26 @@ maybeSetOtelProviders(
       enableTracing: true,
       enableMetrics: true,
       enableLogging: true,
-      googleAuth: {authClient, projectId},
+      googleAuth,
     }),
   ],
-  getGcpResource(projectId),
+  getGcpResource(googleAuth?.projectId),
 );
 ```
 
-`googleAuth` is optional. Omit it and each call resolves Application Default
-Credentials for itself. Pass it when your service already holds credentials, as
-the example does, so the lookup happens once.
+Resolve the credentials with `resolveGoogleAuth` rather than by hand. It reads
+Application Default Credentials, and on Agent Engine it turns the project
+number they report into a project id. Pass its result to both calls, so the
+exporters and the resource name the same project.
+
+`googleAuth` is optional on `getGcpExporters`. Omit it and it calls
+`resolveGoogleAuth` itself, which is enough when you do not also need the
+project id for the resource. `resolveGoogleAuth` returns `undefined` when the
+process is not authenticated, and nothing here throws.
+
+Supply `googleAuth` yourself, rather than letting it resolve, when your service
+already holds credentials. A project id you pass in is used as given: no
+project-number lookup runs on it.
 
 Enable `telemetry.googleapis.com` on the project before you run this. Traces go
 to `https://telemetry.googleapis.com/v1/traces`, metrics to `/v1/metrics` and
@@ -126,10 +132,14 @@ ingestion, so putting it on the shared resource would move the deployment's
 metrics off their monitored resource.
 
 Agent Engine reports a project number where Cloud Logging wants a project id,
-so the exporters resolve one to the other through the Cloud Resource Manager
-API. Enable `cloudresourcemanager.googleapis.com` on the project. Without it
-the lookup warns and the project number is kept, which leaves logs and traces
-unassociated.
+so `resolveGoogleAuth` turns one into the other through the Cloud Resource
+Manager API. Enable `cloudresourcemanager.googleapis.com` on the project.
+Without it the lookup warns and the project number is kept, which leaves logs
+and traces unassociated.
+
+This is why the example resolves once and passes the result to both calls. A
+project id you supply yourself is used as given, so resolving the credentials
+by hand and passing the project number through would produce the same split.
 
 ## Mutual TLS
 
