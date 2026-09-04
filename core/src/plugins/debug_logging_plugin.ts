@@ -83,7 +83,8 @@ interface InvocationDebugState {
   invocationId: string;
   sessionId: string;
   appName: string;
-  userId?: string;
+  /** Always present: an adk-js `Session` always carries a user id. */
+  userId: string;
   /** ISO-8601 timestamp of when the invocation started. */
   startTime: string;
   entries: DebugEntry[];
@@ -337,7 +338,7 @@ function toDocument(state: InvocationDebugState): Record<string, unknown> {
     invocationId: state.invocationId,
     sessionId: state.sessionId,
     appName: state.appName,
-    ...(state.userId === undefined ? {} : {userId: state.userId}),
+    userId: state.userId,
     startTime: state.startTime,
     ...(state.incomplete ? {incomplete: true} : {}),
     entries: state.entries.map((entry) => ({

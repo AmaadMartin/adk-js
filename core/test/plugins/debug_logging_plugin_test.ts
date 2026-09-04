@@ -1055,3 +1055,426 @@ describe('TestDebugLoggingPluginSystemInstructionConfig', () => {
     expect(config['systemInstructionLength']).toBe(28);
   });
 });
+
+describe('DebugLoggingPlugin adk-js behaviour', () => {
+  it('records the user message that arrives before the run callback', async () => {
+    // The runner calls `onUserMessageCallback` first, so a plugin that only
+    // opens its record in `beforeRunCallback` drops the message. adk-python
+    // has this defect; its unit test hides it by calling the run callback by
+    // hand first.
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const invocationContext = makeInvocationContext(makeSession());
+
+    await plugin.onUserMessageCallback({
+      invocationContext,
+      userMessage: {role: 'user', parts: [{text: 'Hello, world!'}]},
+    });
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.afterRunCallback({invocationContext});
+
+    const document = await readDocument();
+    const content = at(
+      onlyEntryData(document, DebugEntryType.USER_MESSAGE),
+      'content',
+    );
+    expect(listAt(content, 'parts')[0]).toEqual({text: 'Hello, world!'});
+    expect(entriesOf(document)[0]['entryType']).toBe(
+      DebugEntryType.USER_MESSAGE,
+    );
+  });
+
+  it('keeps one record when the run callback fires twice', async () => {
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const invocationContext = makeInvocationContext(makeSession());
+
+    await plugin.onUserMessageCallback({
+      invocationContext,
+      userMessage: {role: 'user', parts: [{text: 'Hello, world!'}]},
+    });
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.afterRunCallback({invocationContext});
+
+    const document = await readDocument();
+    expect(entriesOfType(document, DebugEntryType.USER_MESSAGE)).toHaveLength(
+      1,
+    );
+  });
+
+  it('flushes the oldest invocation once the buffer is full', async () => {
+    const plugin = new DebugLoggingPlugin({
+      outputPath: outputFile,
+      maxBufferedInvocations: 2,
+    });
+    const session = makeSession();
+
+    for (const invocationId of ['inv-1', 'inv-2', 'inv-3']) {
+      await plugin.beforeRunCallback({
+        invocationContext: makeInvocationContext(session, {invocationId}),
+      });
+    }
+
+    const documents = await readDocuments();
+    expect(documents).toHaveLength(1);
+    expect(documents[0]['invocationId']).toBe('inv-1');
+    expect(documents[0]['incomplete']).toBe(true);
+  });
+
+  it('never evicts an invocation that completed normally', async () => {
+    const plugin = new DebugLoggingPlugin({
+      outputPath: outputFile,
+      maxBufferedInvocations: 2,
+    });
+    const session = makeSession();
+
+    for (const invocationId of ['inv-1', 'inv-2', 'inv-3']) {
+      const invocationContext = makeInvocationContext(session, {invocationId});
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.afterRunCallback({invocationContext});
+    }
+
+    const documents = await readDocuments();
+    expect(documents).toHaveLength(3);
+    expect(documents.map((document) => document['incomplete'])).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('holds every invocation when the bound is not positive', async () => {
+    const plugin = new DebugLoggingPlugin({
+      outputPath: outputFile,
+      maxBufferedInvocations: 0,
+    });
+    const session = makeSession();
+
+    for (const invocationId of ['inv-1', 'inv-2', 'inv-3']) {
+      await plugin.beforeRunCallback({
+        invocationContext: makeInvocationContext(session, {invocationId}),
+      });
+    }
+
+    await expect(fs.access(outputFile)).rejects.toThrow();
+  });
+
+  it('logs a failed write and still drops the invocation', async () => {
+    const {logger, messages} = makeLogger();
+    // A directory cannot be opened for appending.
+    const plugin = new DebugLoggingPlugin({outputPath: tempDir});
+    const invocationContext = makeInvocationContext(makeSession());
+
+    await plugin.beforeRunCallback({invocationContext});
+    setLogger(logger);
+    await plugin.afterRunCallback({invocationContext});
+    await plugin.afterRunCallback({invocationContext});
+
+    expect(
+      messages.some((message) =>
+        message.startsWith('Failed to write debug data:'),
+      ),
+    ).toBe(true);
+    expect(messages).toContain(
+      'No debug state for invocation test-invocation-id, skipping write',
+    );
+  });
+
+  it('drops an entry recorded for an unknown invocation', async () => {
+    const {logger, messages} = makeLogger();
+    setLogger(logger);
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const invocationContext = makeInvocationContext(makeSession());
+
+    const result = await plugin.afterAgentCallback({
+      agent: new LlmAgent({name: 'test_agent'}),
+      callbackContext: makeCallbackContext(invocationContext),
+    });
+
+    expect(result).toBeUndefined();
+    expect(messages).toContain(
+      'No debug state for invocation test-invocation-id, skipping entry',
+    );
+    await expect(fs.access(outputFile)).rejects.toThrow();
+  });
+
+  it('records the agent, event and response fields the runner supplies', async () => {
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const session = makeSession();
+    const invocationContext = makeInvocationContext(session, {
+      branch: 'root.child',
+    });
+    const agent = new LlmAgent({name: 'test_agent'});
+    const callbackContext = makeCallbackContext(invocationContext);
+
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeAgentCallback({agent, callbackContext});
+    await plugin.afterAgentCallback({agent, callbackContext});
+    await plugin.beforeModelCallback({
+      callbackContext,
+      llmRequest: {
+        model: 'gemini-2.5-flash',
+        contents: [{role: 'user', parts: [{text: 'hi'}]}],
+        config: {
+          temperature: 0.5,
+          topP: 0.9,
+          topK: 20,
+          maxOutputTokens: 1024,
+          responseMimeType: 'application/json',
+          responseSchema: {type: 'STRING'},
+        },
+        liveConnectConfig: {},
+        toolsDict: {my_tool: makeTool('my_tool')},
+      },
+    });
+    await plugin.afterModelCallback({
+      callbackContext,
+      llmResponse: {
+        errorCode: 'INTERNAL',
+        errorMessage: 'boom',
+        usageMetadata: {
+          promptTokenCount: 12,
+          candidatesTokenCount: 34,
+          totalTokenCount: 46,
+          cachedContentTokenCount: 2,
+        },
+        groundingMetadata: {},
+        finishReason: 'STOP',
+        modelVersion: 'gemini-2.5-flash-001',
+      },
+    });
+    await plugin.onEventCallback({
+      invocationContext,
+      event: createEvent({
+        author: 'test_agent',
+        branch: 'root.child',
+        errorCode: 'INTERNAL',
+        errorMessage: 'boom',
+        groundingMetadata: {},
+        usageMetadata: {
+          promptTokenCount: 1,
+          candidatesTokenCount: 2,
+          totalTokenCount: 3,
+        },
+        longRunningToolIds: ['lrt-1'],
+        actions: {
+          stateDelta: {counter: 1},
+          artifactDelta: {'report.pdf': 2},
+          transferToAgent: 'other_agent',
+          escalate: true,
+          requestedAuthConfigs: {
+            'fc-1': {
+              authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
+              rawAuthCredential: oauthCredential(),
+              credentialKey: 'k',
+            },
+          },
+        },
+      }),
+    });
+    await plugin.afterRunCallback({invocationContext});
+
+    const document = await readDocument();
+    const raw = await fs.readFile(outputFile, 'utf-8');
+    expect(raw).not.toContain(SENTINEL_ACCESS_TOKEN);
+
+    expect(onlyEntryData(document, DebugEntryType.AGENT_START)['branch']).toBe(
+      'root.child',
+    );
+    expect(
+      entriesOfType(document, DebugEntryType.AGENT_END)[0]['agentName'],
+    ).toBe('test_agent');
+
+    const request = onlyEntryData(document, DebugEntryType.LLM_REQUEST);
+    expect(request['tools']).toEqual(['my_tool']);
+    const config = at(request, 'config');
+    expect(config['temperature']).toBe(0.5);
+    expect(config['topP']).toBe(0.9);
+    expect(config['topK']).toBe(20);
+    expect(config['maxOutputTokens']).toBe(1024);
+    expect(config['responseMimeType']).toBe('application/json');
+    expect(config['hasResponseSchema']).toBe(true);
+
+    const response = onlyEntryData(document, DebugEntryType.LLM_RESPONSE);
+    expect(response['errorCode']).toBe('INTERNAL');
+    expect(response['errorMessage']).toBe('boom');
+    expect(at(response, 'usageMetadata')['cachedContentTokenCount']).toBe(2);
+    expect(response['hasGroundingMetadata']).toBe(true);
+    expect(response['finishReason']).toBe('STOP');
+    expect(response['modelVersion']).toBe('gemini-2.5-flash-001');
+
+    const event = onlyEntryData(document, DebugEntryType.EVENT);
+    expect(event['branch']).toBe('root.child');
+    expect(event['errorCode']).toBe('INTERNAL');
+    expect(event['hasGroundingMetadata']).toBe(true);
+    expect(at(event, 'usageMetadata')['totalTokenCount']).toBe(3);
+    expect(event['longRunningToolIds']).toEqual(['lrt-1']);
+    const actions = at(event, 'actions');
+    expect(actions['stateDelta']).toEqual({counter: 1});
+    expect(actions['artifactDelta']).toEqual({'report.pdf': 2});
+    expect(actions['transferToAgent']).toBe('other_agent');
+    expect(actions['escalate']).toBe(true);
+    // The count only: an auth config holds a credential.
+    expect(actions['requestedAuthConfigs']).toBe(1);
+  });
+
+  it('omits the actions and config blocks when they carry nothing', async () => {
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const invocationContext = makeInvocationContext(makeSession());
+
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeModelCallback({
+      callbackContext: makeCallbackContext(invocationContext),
+      llmRequest: {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        config: {},
+        liveConnectConfig: {},
+        toolsDict: {},
+      },
+    });
+    await plugin.onEventCallback({
+      invocationContext,
+      event: createEvent({author: 'test_agent'}),
+    });
+    await plugin.afterRunCallback({invocationContext});
+
+    const document = await readDocument();
+    const request = onlyEntryData(document, DebugEntryType.LLM_REQUEST);
+    expect(request['config']).toBeUndefined();
+    expect(request['tools']).toBeUndefined();
+    expect(
+      onlyEntryData(document, DebugEntryType.EVENT)['actions'],
+    ).toBeUndefined();
+  });
+
+  it('omits a request config the caller never set', async () => {
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const invocationContext = makeInvocationContext(makeSession());
+
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeModelCallback({
+      callbackContext: makeCallbackContext(invocationContext),
+      llmRequest: {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        toolsDict: {},
+      },
+    });
+    await plugin.afterRunCallback({invocationContext});
+
+    expect(
+      onlyEntryData(await readDocument(), DebugEntryType.LLM_REQUEST)['config'],
+    ).toBeUndefined();
+  });
+
+  it('reports only the presence of a non-string system instruction', async () => {
+    const plugin = new DebugLoggingPlugin({
+      outputPath: outputFile,
+      includeSystemInstruction: false,
+    });
+    const invocationContext = makeInvocationContext(makeSession());
+
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeModelCallback({
+      callbackContext: makeCallbackContext(invocationContext),
+      llmRequest: {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        config: {
+          systemInstruction: {role: 'user', parts: [{text: 'be helpful'}]},
+        },
+        liveConnectConfig: {},
+        toolsDict: {},
+      },
+    });
+    await plugin.afterRunCallback({invocationContext});
+
+    const config = at(
+      onlyEntryData(await readDocument(), DebugEntryType.LLM_REQUEST),
+      'config',
+    );
+    expect(config['hasSystemInstruction']).toBe(true);
+    expect(config['systemInstructionLength']).toBeUndefined();
+  });
+
+  it('records every part kind and never the inline bytes', () => {
+    const result = serializeContent({
+      role: 'user',
+      parts: [
+        {text: 'hello'},
+        {
+          functionResponse: {
+            id: 'fr-1',
+            name: 'do_it',
+            response: {'api_key': SENTINEL_CLIENT_SECRET, ok: true},
+          },
+        },
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            displayName: 'shot.png',
+            data: 'aGVsbG8=',
+          },
+        },
+        {fileData: {fileUri: 'gs://bucket/o', mimeType: 'text/plain'}},
+        {codeExecutionResult: {outcome: 'OUTCOME_OK', output: '4'}},
+        {executableCode: {language: 'PYTHON', code: 'print(2+2)'}},
+        {thought: true},
+      ],
+    });
+
+    expect(result).toEqual({
+      role: 'user',
+      parts: [
+        {text: 'hello'},
+        {
+          functionResponse: {
+            id: 'fr-1',
+            name: 'do_it',
+            response: {'api_key': REDACTED, ok: true},
+          },
+        },
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            displayName: 'shot.png',
+            dataOmitted: true,
+          },
+        },
+        {fileData: {fileUri: 'gs://bucket/o', mimeType: 'text/plain'}},
+        {codeExecutionResult: {outcome: 'OUTCOME_OK', output: '4'}},
+        {executableCode: {language: 'PYTHON', code: 'print(2+2)'}},
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain('aGVsbG8=');
+  });
+
+  it('records a content value that carries no parts', () => {
+    expect(serializeContent({role: 'model'})).toEqual({
+      role: 'model',
+      parts: [],
+    });
+  });
+
+  it.skipIf(!onPosix)('warns once about a permissive output file', async () => {
+    await fs.writeFile(outputFile, '');
+    await fs.chmod(outputFile, 0o644);
+    const {logger, messages} = makeLogger();
+    setLogger(logger);
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const session = makeSession();
+
+    for (const invocationId of ['inv-1', 'inv-2']) {
+      const invocationContext = makeInvocationContext(session, {invocationId});
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.afterRunCallback({invocationContext});
+    }
+
+    expect(
+      messages.filter((message) =>
+        message.includes('readable beyond its owner'),
+      ),
+    ).toHaveLength(1);
+  });
+});
