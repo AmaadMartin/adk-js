@@ -24,6 +24,8 @@ import {
   Event,
   ExecuteCodeParams,
   FunctionTool,
+  getFunctionCalls,
+  getFunctionResponses,
   InMemoryArtifactService,
   InMemorySessionService,
   INTERACTIONS_REQUEST_PROCESSOR,
@@ -2723,5 +2725,153 @@ describe('LlmAgent set_model_response round trip', () => {
     );
     expect(textEvents).toHaveLength(1);
     expect(textEvents[0].content?.parts?.[0].text).toBe('giving up');
+  });
+});
+
+/**
+ * The suite that arrived with the `set_model_response` validation and retry
+ * change. It drives the workaround end to end through `runAsync`.
+ */
+describe('LlmAgent set_model_response handling', () => {
+  const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
+
+  const PERSON_SCHEMA = z4.object({
+    name: z4.string(),
+    age: z4.number(),
+    tags: z4.array(z4.string()).default([]),
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function setModelResponseCall(args: Record<string, unknown>): LlmResponse {
+    return {
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'set_model_response', args}}],
+      },
+    };
+  }
+
+  /**
+   * Runs an agent whose model cannot take an output schema alongside tools, so
+   * the `set_model_response` workaround is engaged.
+   */
+  async function runWorkaround(
+    turns: LlmResponse[][],
+    outputSchema: z4.ZodObject<z4.ZodRawShape> = PERSON_SCHEMA,
+  ): Promise<{events: Event[]; model: CountingMockLlm}> {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    const model = new CountingMockLlm(turns);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model,
+      outputSchema,
+      outputKey: 'person',
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: createSession({
+        id: 'sess_123',
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+    return {events, model};
+  }
+
+  it('promotes a valid call to a final model response', async () => {
+    const {events} = await runWorkaround([
+      [setModelResponseCall({name: 'Alice', age: 25, tags: ['friend']})],
+    ]);
+
+    expect(events).toHaveLength(3);
+    expect(getFunctionCalls(events[0])[0].name).toBe('set_model_response');
+    expect(getFunctionResponses(events[1])[0].name).toBe('set_model_response');
+    expect(getFunctionCalls(events[2])).toHaveLength(0);
+    expect(events[2].content?.parts?.[0].text).toBe(
+      '{"name":"Alice","age":25,"tags":["friend"]}',
+    );
+    expect(events[2].actions.stateDelta['person']).toEqual({
+      name: 'Alice',
+      age: 25,
+      tags: ['friend'],
+    });
+  });
+
+  it('applies a declared default the model omitted', async () => {
+    const {events} = await runWorkaround([
+      [setModelResponseCall({name: 'Alice', age: 25})],
+    ]);
+
+    expect(events[2].actions.stateDelta['person']).toEqual({
+      name: 'Alice',
+      age: 25,
+      tags: [],
+    });
+  });
+
+  it('enforces a refinement the genai conversion cannot express', async () => {
+    // The tool must validate against the schema as supplied. The converted
+    // genai `Schema` carries the field types but not the refinement.
+    const capitalisedName = z4
+      .object({name: z4.string(), age: z4.number()})
+      .refine((person) => person.name[0] === person.name[0].toUpperCase(), {
+        message: 'name must start with a capital letter',
+      });
+
+    const {events} = await runWorkaround(
+      [
+        [setModelResponseCall({name: 'alice', age: 25})],
+        [setModelResponseCall({name: 'Alice', age: 25})],
+      ],
+      capitalisedName,
+    );
+
+    expect(getFunctionResponses(events[1])[0].response).toEqual({
+      error: expect.stringContaining('name must start with a capital letter'),
+    });
+    expect(events[4].content?.parts?.[0].text).toBe(
+      '{"name":"Alice","age":25}',
+    );
+  });
+
+  it('asks the model to retry an invalid call instead of answering with it', async () => {
+    const {events, model} = await runWorkaround([
+      [setModelResponseCall({name: 'Bob', age: 'not a number'})],
+      [setModelResponseCall({name: 'Bob', age: 30})],
+    ]);
+
+    expect(model.callCount).toBe(2);
+    expect(getFunctionResponses(events[1])[0].response).toEqual({
+      error: expect.stringContaining('Validation Error found:'),
+    });
+    // The rejected call is answered, and nothing is promoted from it.
+    expect(
+      events.slice(0, 2).some((event) => event.content?.parts?.[0].text),
+    ).toBe(false);
+    expect(events[4].content?.parts?.[0].text).toBe(
+      '{"name":"Bob","age":30,"tags":[]}',
+    );
+    expect(events[4].actions.stateDelta['person']).toEqual({
+      name: 'Bob',
+      age: 30,
+      tags: [],
+    });
   });
 });

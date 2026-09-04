@@ -14,11 +14,11 @@ other combination rejects that request. For those, `LlmAgent` declares a
 call arguments.
 
 `SetModelResponseTool` is what makes that path safe. A function call is
-model-generated text, so its arguments can violate the schema the model was
-given. The tool validates them, and on failure it returns an error naming the
-bad fields rather than throwing. The model reads that error as an ordinary
-function response and calls again, so a malformed answer costs one extra turn
-instead of ending the turn with bad data.
+model-generated text, so treat its arguments as untrusted: they can violate the
+schema the model was given. The tool validates them, and on failure it returns
+an error naming the bad fields rather than throwing. The model reads that error
+as an ordinary function response and calls again, so a malformed answer costs
+one extra turn instead of ending the turn with bad data.
 
 You do not construct the tool. `LlmAgent` creates it when the model needs it,
 which is whenever the agent has both an `outputSchema` and at least one tool and
@@ -51,10 +51,12 @@ const agent = new LlmAgent({
 });
 ```
 
-The model calls `lookup`, then calls `set_model_response({name, age})`. The
-agent's last event carries the validated object as JSON text, and `outputKey`
-receives the validated value. `tags` may be absent, because a field with a
-default is not advertised to the model as required.
+The model calls `lookup`, then calls `set_model_response({name, age})`. That
+last call produces three events: the function call, the function response, and a
+final model response whose text is the validated object as JSON. `outputKey`
+receives the validated value, so `state['person']` holds it. `tags` may be
+absent, because a field with a default is not advertised to the model as
+required.
 
 ## What the model sees
 
@@ -68,7 +70,8 @@ The tool's parameters follow the shape of the output schema.
 
 Field descriptions and defaults reach the declaration, at the top level and
 inside nested objects and array items, so the model sees the same guidance it
-would get from a native response schema.
+would get from a native response schema. A field the schema declares optional
+stays optional, so the model is not told to supply it.
 
 ## Validation and retry
 
@@ -77,7 +80,10 @@ converted form, so Zod refinements and defaults are enforced.
 
 On success it publishes the validated value on
 `event.actions.setModelResponse`, and the agent turns that into its final model
-event. On failure it publishes nothing and returns:
+event. A key whose validated value is `undefined` is dropped, matching
+adk-python's `model_dump(exclude_none=True)`. An explicit `null` is kept,
+because a nullable field means it. On failure the tool publishes nothing and
+returns:
 
 ```
 {
@@ -92,11 +98,28 @@ element's `id` field reads `0.id`.
 Because the value is published only on success, a failed call leaves the agent
 loop running and the model gets another turn.
 
+## The functional form
+
+`createSetModelResponseTool` builds the same tool, for a custom flow that wants
+a factory rather than `new`. Pass the output schema, and optionally a validator
+for the checks that schema cannot carry on its own:
+
+```ts
+import {createSetModelResponseTool} from '@google/adk';
+
+const tool = createSetModelResponseTool(outputSchema);
+```
+
 ## Limits
 
 A schema written as a genai `Schema` is validated only when it can be compiled
 to a validator. `parseWithSchema` returns such a value unchecked rather than
 rejecting it, so a schema using constructs Zod cannot express is passed through.
+
+A schema the genai dialect cannot render at all — a Zod date, for instance —
+reaches the model as an unconstrained parameter. The model gets no shape to
+follow, but the tool stays callable and its arguments are still validated when
+they arrive.
 
 The live API path does not use this tool. An agent using `outputSchema` with
 tools over a live connection produces no structured output.
