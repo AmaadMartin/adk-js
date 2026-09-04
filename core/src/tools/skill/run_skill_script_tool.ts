@@ -676,8 +676,12 @@ function deriveScriptStatus(
 
 /** Warns when a skill's resources exceed the size an executor should carry. */
 function warnOnOversizedPayload(skillName: string, files: File[]): void {
+  // Measured through each file's own encoding: a base64 string is a third
+  // larger than the bytes it carries, so counting its characters would report
+  // a binary skill as oversized well before it is.
   const totalBytes = files.reduce(
-    (total, file) => total + Buffer.byteLength(file.content),
+    (total, file) =>
+      total + Buffer.byteLength(file.content, file.contentEncoding ?? 'utf-8'),
     0,
   );
   if (totalBytes > MAX_SKILL_PAYLOAD_BYTES) {

@@ -365,4 +365,43 @@ describe('RunSkillScriptTool payload size', () => {
     expect(String(warnings[0][0])).toContain('16777216 bytes');
     warn.mockRestore();
   });
+
+  it('sizes a binary resource by its bytes, not by its base64 text', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    // Under the limit as bytes, over it once base64 adds a third.
+    const binarySkill: Skill = {
+      frontmatter: {name: 'binary-skill', description: 'A binary skill'},
+      instructions: 'Test instructions',
+      resources: {
+        assets: {'big.png': Buffer.alloc(13 * 1024 * 1024, 1)},
+        scripts: {'setup.js': {src: 'console.log(1);'}},
+      },
+    };
+    const toolset = new SkillToolset([binarySkill], {
+      codeExecutor: new MockCodeExecutor(),
+      scriptOutputDir: await fs.mkdtemp(
+        path.join(os.tmpdir(), 'skill_payload_binary_test_'),
+      ),
+    });
+
+    await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'binary-skill', script_path: 'scripts/setup.js'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'payload-invocation',
+          agent: new LlmAgent({name: 'test-agent', model: 'gemini-2.0-flash'}),
+          session: createSession({id: 's', appName: 'app', userId: 'u'}),
+          sessionService: new InMemorySessionService(),
+          pluginManager: new PluginManager([]),
+        }),
+      }),
+    });
+
+    expect(
+      warn.mock.calls.filter((c) =>
+        String(c[0]).includes('exceeding the recommended limit'),
+      ),
+    ).toEqual([]);
+    warn.mockRestore();
+  });
 });
