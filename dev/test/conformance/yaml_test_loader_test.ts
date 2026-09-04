@@ -50,6 +50,23 @@ recordings:
             - text: hi
 `;
 
+const TOOL_RECORDINGS_YAML = `
+recordings:
+  - user_message_index: 0
+    agent_name: test-agent
+    tool_recording:
+      tool_call:
+        id: fc-1
+        name: roll_die
+        args:
+          num_sides: 6
+      tool_response:
+        id: fc-1
+        name: roll_die
+        response:
+          die_result: 4
+`;
+
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -157,5 +174,26 @@ describe('batchLoadYamlTestDefs', () => {
     await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
       'File not found',
     );
+  });
+
+  it('keeps the keys the tool and the test author chose', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/t1/spec.yaml',
+    ]);
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
+      if (filePath.endsWith('generated-recordings.yaml'))
+        return TOOL_RECORDINGS_YAML;
+      throw new Error(`File not found: ${filePath}`);
+    });
+
+    const tests = await batchLoadYamlTestDefs(rootDir);
+
+    const toolRecording =
+      tests.get('t1')?.recordings.recordings[0].toolRecording;
+    expect(toolRecording?.toolCall?.args).toEqual({num_sides: 6});
+    expect(toolRecording?.toolResponse?.response).toEqual({die_result: 4});
   });
 });
