@@ -659,16 +659,114 @@ describe('RecordingPlugin reading the fixture it appends to', () => {
     expect(recordings).toHaveLength(1);
   });
 
-  it('cleans up the invocation state when the write fails', async () => {
-    const missingDir = path.join(await makeTempDir(), 'no-such-case');
+  it('treats the empty document adk-python writes as no recordings', async () => {
+    const dir = await makeTempDir();
+    await fs.writeFile(
+      path.join(dir, 'generated-recordings.yaml'),
+      '{}\n',
+      'utf-8',
+    );
     const plugin = new RecordingPlugin();
     const invocationContext = makeInvocationContext({
-      state: recordingsConfig(missingDir),
+      state: recordingsConfig(dir),
     });
 
     await recordOneTurn(plugin, invocationContext);
 
-    await expect(fs.access(missingDir)).rejects.toThrow();
+    const {recordings} = await readFixture(dir);
+    expect(recordings).toHaveLength(1);
+  });
+
+  it('replaces a fixture whose recordings key is not a list', async () => {
+    const dir = await makeTempDir();
+    await fs.writeFile(
+      path.join(dir, 'generated-recordings.yaml'),
+      'recordings:\n',
+      'utf-8',
+    );
+    const plugin = new RecordingPlugin();
+    const invocationContext = makeInvocationContext({
+      state: recordingsConfig(dir),
+    });
+
+    await recordOneTurn(plugin, invocationContext);
+
+    const {recordings} = await readFixture(dir);
+    expect(recordings).toHaveLength(1);
+  });
+
+  it('keeps the tool keys of a record it appends to', async () => {
+    const dir = await makeTempDir();
+    const plugin = new RecordingPlugin();
+
+    for (const [invocationId, sides] of [
+      ['inv-1', 6],
+      ['inv-2', 20],
+    ] as const) {
+      const invocationContext = makeInvocationContext({
+        invocationId,
+        state: recordingsConfig(dir, {user_message_index: sides === 6 ? 0 : 1}),
+      });
+      const toolContext = new Context({
+        invocationContext,
+        functionCallId: `fc-${sides}`,
+      });
+      await plugin.beforeRunCallback({invocationContext});
+      await plugin.beforeToolCallback({
+        tool: rollDie,
+        toolArgs: {num_sides: sides},
+        toolContext,
+      });
+      await plugin.afterToolCallback({
+        tool: rollDie,
+        toolArgs: {num_sides: sides},
+        toolContext,
+        result: {die_result: 4},
+      });
+      await plugin.afterRunCallback({invocationContext});
+    }
+
+    // Assert on the bytes: the record written by the first invocation must
+    // still carry the tool's own key names after the second one appends.
+    const raw = await fs.readFile(
+      path.join(dir, 'generated-recordings.yaml'),
+      'utf-8',
+    );
+    expect(raw).toContain('num_sides: 6');
+    expect(raw).toContain('num_sides: 20');
+    expect(raw.match(/die_result: 4/g)).toHaveLength(2);
+    expect(raw).not.toContain('numSides');
+    expect(raw).not.toContain('dieResult');
+  });
+
+  it('records into a test case directory that does not exist yet', async () => {
+    const newDir = path.join(await makeTempDir(), 'category', 'new-case');
+    const plugin = new RecordingPlugin();
+    const invocationContext = makeInvocationContext({
+      state: recordingsConfig(newDir),
+    });
+
+    await recordOneTurn(plugin, invocationContext);
+
+    const {recordings} = await readFixture(newDir);
+    expect(recordings).toHaveLength(1);
+  });
+
+  it('cleans up the invocation state when the write fails', async () => {
+    // A file where the case directory should be: `mkdir` cannot create a
+    // directory under it, so the write fails.
+    const blocked = path.join(await makeTempDir(), 'blocked');
+    await fs.writeFile(blocked, 'not a directory', 'utf-8');
+    const plugin = new RecordingPlugin();
+    const invocationContext = makeInvocationContext({
+      state: recordingsConfig(path.join(blocked, 'case')),
+    });
+
+    await recordOneTurn(plugin, invocationContext);
+
+    await expect(fs.readFile(blocked, 'utf-8')).resolves.toBe(
+      'not a directory',
+    );
     await expect(
       plugin.beforeModelCallback({
         callbackContext: new Context({invocationContext}),

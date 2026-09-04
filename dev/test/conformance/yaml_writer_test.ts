@@ -10,7 +10,11 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
-import {toSnakeKeys, writeYamlFile} from '../../src/conformance/yaml_writer.js';
+import {
+  toCamelKeys,
+  toSnakeKeys,
+  writeYamlFile,
+} from '../../src/conformance/yaml_writer.js';
 import {Recordings} from '../../src/integration/test_types.js';
 
 const tempDirs: string[] = [];
@@ -88,7 +92,76 @@ describe('toSnakeKeys', () => {
   });
 });
 
+describe('toCamelKeys', () => {
+  it('renames a snake_case key at every depth', () => {
+    const value = {
+      user_message_index: 0,
+      llm_recording: {llm_request: {previous_interaction_id: 'i-1'}},
+      recordings: [{agent_name: 'dice_agent'}],
+    };
+
+    expect(toCamelKeys(value)).toEqual({
+      userMessageIndex: 0,
+      llmRecording: {llmRequest: {previousInteractionId: 'i-1'}},
+      recordings: [{agentName: 'dice_agent'}],
+    });
+  });
+
+  it('keeps the keys the agent or the test author chose', () => {
+    const value = {
+      initial_state: {user_name: 'ada'},
+      state_delta: {user_name: 'grace'},
+      artifact_delta: {'Report.PDF': 2},
+      custom_metadata: {trace_id: 't-1'},
+      tool_call: {args: {num_sides: 6}},
+      tool_response: {response: {die_result: 4}},
+    };
+
+    expect(toCamelKeys(value)).toEqual({
+      initialState: {user_name: 'ada'},
+      stateDelta: {user_name: 'grace'},
+      artifactDelta: {'Report.PDF': 2},
+      customMetadata: {trace_id: 't-1'},
+      toolCall: {args: {num_sides: 6}},
+      toolResponse: {response: {die_result: 4}},
+    });
+  });
+
+  it('returns an array, a primitive and null unchanged in shape', () => {
+    expect(toCamelKeys([1, 'two_words', null])).toEqual([1, 'two_words', null]);
+    expect(toCamelKeys('user_name')).toBe('user_name');
+    expect(toCamelKeys(null)).toBeNull();
+    expect(toCamelKeys({error_code: null})).toEqual({errorCode: null});
+  });
+
+  it('undoes toSnakeKeys, opaque values included', () => {
+    const value = {
+      userMessageIndex: 0,
+      toolRecording: {
+        toolCall: {args: {num_sides: 6}},
+        toolResponse: {response: {die_result: 4}},
+      },
+      stateDelta: {user_name: 'ada'},
+    };
+
+    expect(toCamelKeys(toSnakeKeys(value))).toEqual(value);
+  });
+});
+
 describe('writeYamlFile', () => {
+  it('creates the directories the file needs', async () => {
+    const file = path.join(
+      await makeTempDir(),
+      'category',
+      'case',
+      'generated-recordings.yaml',
+    );
+
+    await writeYamlFile(file, {recordings: []});
+
+    await expect(fs.readFile(file, 'utf-8')).resolves.toContain('recordings');
+  });
+
   it('writes snake_case that reads back as the original object', async () => {
     const file = path.join(await makeTempDir(), 'generated-recordings.yaml');
     const value = {recordings: [{userMessageIndex: 0, agentName: 'a'}]};

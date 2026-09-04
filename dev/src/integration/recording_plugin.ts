@@ -14,11 +14,10 @@ import {
   StreamingMode,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import camelcaseKeys from 'camelcase-keys';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {writeYamlFile} from '../conformance/yaml_writer.js';
+import {toCamelKeys, writeYamlFile} from '../conformance/yaml_writer.js';
 import {isFileExists} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {Recording, Recordings, ToolRecording} from './test_types.js';
@@ -396,15 +395,32 @@ async function loadRecordings(file: string): Promise<Recordings> {
     return {recordings: []};
   }
   try {
-    const parsed = yaml.load(await fs.readFile(file, 'utf-8'));
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new Error('Recordings file must be a YAML mapping');
-    }
-    return camelcaseKeys(parsed, {deep: true}) as Recordings;
+    return readRecordings(
+      toCamelKeys(yaml.load(await fs.readFile(file, 'utf-8'))),
+    );
   } catch (e: unknown) {
     logger.error(`Failed to load recordings from ${file}: ${errorMessage(e)}`);
     return {recordings: []};
   }
+}
+
+/**
+ * Narrows a parsed fixture to {@link Recordings}.
+ *
+ * A mapping with no `recordings` key holds no recordings. adk-python writes
+ * exactly that — `dump_pydantic_to_yaml` drops a field still at its default,
+ * and `Recordings.recordings` defaults to an empty list — so an empty fixture
+ * it produced is the document `{}`.
+ */
+function readRecordings(parsed: unknown): Recordings {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Recordings file must be a YAML mapping');
+  }
+  const recordings = 'recordings' in parsed ? parsed.recordings : [];
+  if (!Array.isArray(recordings)) {
+    throw new Error('The recordings key of a recordings file must be a list');
+  }
+  return {recordings: recordings as Recording[]};
 }
 
 /** Whether `pending` holds the entry a fixture recording needs. */
