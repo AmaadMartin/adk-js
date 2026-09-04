@@ -183,7 +183,7 @@ describe('prompt inputs', () => {
     ]);
 
     expect(llm.requests[0].contents[0].parts?.[0].text).toContain(
-      "agent called tool 'get_weather' with args: None",
+      "agent called tool 'get_weather' with args: null",
     );
   });
 });
@@ -248,7 +248,23 @@ describe('summarizeConversation', () => {
     expect(summarizeConversation(events)).toBe('user: the only turn');
   });
 
-  it('renders a tool argument the way python renders it', () => {
+  it('renders a tool response that carries no payload', () => {
+    const events = [
+      createEvent({
+        author: 'agent',
+        content: {
+          parts: [{functionResponse: {name: 'notify'}}],
+          role: 'model',
+        },
+      }),
+    ];
+
+    expect(summarizeConversation(events, true)).toBe(
+      "Tool 'notify' returned: null",
+    );
+  });
+
+  it('renders a tool argument as json', () => {
     const events = [
       createEvent({
         author: 'agent',
@@ -273,9 +289,8 @@ describe('summarizeConversation', () => {
     ];
 
     expect(summarizeConversation(events, true)).toBe(
-      "agent called tool 'book' with args: {'seats': 2, 'tags': ['aisle'," +
-        " 'window'], 'refundable': true, 'note': None," +
-        " 'passenger': {'name': 'Ada'}}",
+      `agent called tool 'book' with args: {"seats":2,"tags":["aisle",` +
+        `"window"],"refundable":true,"note":null,"passenger":{"name":"Ada"}}`,
     );
   });
 });

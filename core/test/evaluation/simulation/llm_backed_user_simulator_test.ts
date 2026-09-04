@@ -149,15 +149,15 @@ describe('TestHelperMethods', () => {
   });
 
   it('test_summarize_conversation_with_function_calls', () => {
-    // adk-python renders the tool argument and the tool response with Python's
-    // `repr`. adk-js reproduces that rendering so both SDKs put the same
-    // conversation history in front of the model.
+    // Divergence: adk-python renders the tool argument and the tool response
+    // with Python's `repr` (`None`, `{'name': 'John Doe'}`). adk-js renders
+    // JSON. Only the spelling differs, and the string is read by a model.
     expect(summarizeConversation(INPUT_EVENTS, true)).toBe(
       `user: Can you help me?
 
-helpful_assistant called tool 'get_user_name' with args: None
+helpful_assistant called tool 'get_user_name' with args: null
 
-Tool 'get_user_name' returned: {'name': 'John Doe'}
+Tool 'get_user_name' returned: {"name":"John Doe"}
 
 helpful_assistant: Hi John, what can I do for you?`,
     );

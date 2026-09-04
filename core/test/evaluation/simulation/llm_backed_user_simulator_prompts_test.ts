@@ -48,7 +48,7 @@ const PERSONA_INSTRUCTIONS = `Persona template
 {{ b.description | render_string_filter }}
 
 Instructions:
-{{ b.get_behavior_instructions_str() | render_string_filter }}
+{{ b.behavior_instructions_str | render_string_filter }}
 {% endfor %}
 # Conversation Plan
 {{ conversation_plan }}

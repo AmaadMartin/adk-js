@@ -166,10 +166,7 @@ export {
   getUserSimulatorInstructionsTemplate,
   isValidUserSimulatorTemplate,
 } from './evaluation/simulation/llm_backed_user_simulator_prompts.js';
-export {
-  UserSimulatorStatus,
-  validateNextUserMessage,
-} from './evaluation/simulation/user_simulator.js';
+export {UserSimulatorStatus} from './evaluation/simulation/user_simulator.js';
 export type {
   NextUserMessage,
   UserSimulator,

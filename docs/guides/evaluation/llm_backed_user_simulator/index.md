@@ -8,9 +8,10 @@ agent says, so you cannot write them in advance.
 ## Introduction
 
 An eval case is driven turn by turn, and a `UserSimulator` decides what the
-user says next. `StaticUserSimulator` replays a recorded conversation, which is
-all a case with a pre-authored `conversation` needs. It cannot answer a
-question the agent asks, because the reply was fixed before the run.
+user says next. A case that carries a pre-authored conversation already knows
+every user turn, so replaying that script is all it needs. A script cannot
+answer a question the agent asks, because every reply was fixed before the
+run.
 
 `LlmBackedUserSimulator` reads a `ConversationScenario` instead. The scenario
 carries a `startingPrompt`, which is the fixed opening message, and a
@@ -188,6 +189,5 @@ Python internal.
 - A persona field is interpolated rather than compiled, as described above.
 - `llm` is an addition. adk-python always resolves the model through its
   registry.
-- An `EvalCase` carries no `conversationScenario` yet, and
-  `UserSimulatorProvider` cannot select this simulator. Build one yourself and
-  pass it as `createUserSimulator`.
+- An `EvalCase` cannot carry a `ConversationScenario` yet, so nothing selects
+  this simulator for you. Construct it and drive it yourself.

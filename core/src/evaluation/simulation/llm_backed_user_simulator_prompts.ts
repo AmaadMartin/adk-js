@@ -8,7 +8,7 @@ import nunjucks from 'nunjucks';
 
 import {InputValidationError} from '../../errors/input_validation_error.js';
 
-import type {UserBehavior, UserPersona} from './user_simulator_personas.js';
+import type {UserPersona} from './user_simulator_personas.js';
 
 /** The instructions used when the scenario names no persona. */
 const DEFAULT_USER_SIMULATOR_INSTRUCTIONS_TEMPLATE = `You are a Simulated User designed to test an AI Agent.
@@ -83,7 +83,7 @@ This persona behaves in the following ways:
 {{ b.description | render_string_filter }}
 
 Instructions:
-{{ b.get_behavior_instructions_str() | render_string_filter }}
+{{ b.behavior_instructions_str | render_string_filter }}
 {% endfor %}
 # Conversation Plan
 
@@ -254,23 +254,19 @@ const SIMULATOR_ENV = new nunjucks.Environment(null, {
 });
 SIMULATOR_ENV.addFilter('render_string_filter', renderStringFilter);
 
-/** Formats a behavior's instructions as the bulleted list the prompt shows. */
-function getBehaviorInstructionsStr(behavior: UserBehavior): string {
-  return behavior.behaviorInstructions
-    .map((instruction) => `  * ${instruction}`)
-    .join('\n');
-}
-
 /**
- * Gives each behavior the `get_behavior_instructions_str()` member the persona
- * template calls, matching the template adk-python renders.
+ * Gives each behavior the `behavior_instructions_str` the persona template
+ * reads. adk-python's template calls a method here; the value is precomputed
+ * so that no callable enters the render context.
  */
 function toTemplatePersona(persona: UserPersona): Record<string, unknown> {
   return {
     ...persona,
     behaviors: persona.behaviors.map((behavior) => ({
       ...behavior,
-      get_behavior_instructions_str: () => getBehaviorInstructionsStr(behavior),
+      behavior_instructions_str: behavior.behaviorInstructions
+        .map((instruction) => `  * ${instruction}`)
+        .join('\n'),
     })),
   };
 }

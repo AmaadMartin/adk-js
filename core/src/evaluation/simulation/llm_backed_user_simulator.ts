@@ -93,32 +93,6 @@ export interface LlmBackedUserSimulatorConfig {
 }
 
 /**
- * Renders a tool argument or a tool response the way adk-python's prompt shows
- * it, so both SDKs put the same conversation history in front of the model.
- *
- * The rendering is Python's `repr`: `None` for an absent value, single quotes
- * around a string, and `{'key': value}` for an object.
- */
-function formatToolValue(value: unknown): string {
-  if (value === undefined || value === null) {
-    return 'None';
-  }
-  if (typeof value === 'string') {
-    return `'${value}'`;
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(formatToolValue).join(', ')}]`;
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value).map(
-      ([key, entryValue]) => `'${key}': ${formatToolValue(entryValue)}`,
-    );
-    return `{${entries.join(', ')}}`;
-  }
-  return String(value);
-}
-
-/**
  * Rewrites a conversation as the plain dialogue the simulator's prompt shows.
  *
  * The agent's thoughts are dropped, because the simulated user plays a person
@@ -145,12 +119,12 @@ export function summarizeConversation(
       } else if (includeFunctionCalls && part.functionCall) {
         rewrittenDialogue.push(
           `${event.author} called tool '${part.functionCall.name}' with args:` +
-            ` ${formatToolValue(part.functionCall.args)}`,
+            ` ${JSON.stringify(part.functionCall.args ?? null)}`,
         );
       } else if (includeFunctionCalls && part.functionResponse) {
         rewrittenDialogue.push(
           `Tool '${part.functionResponse.name}' returned:` +
-            ` ${formatToolValue(part.functionResponse.response)}`,
+            ` ${JSON.stringify(part.functionResponse.response ?? null)}`,
         );
       }
     }
