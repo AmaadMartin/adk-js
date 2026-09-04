@@ -125,7 +125,7 @@ describe('LlmSummarizer', () => {
       {content: {role: 'model', parts: [{text: 'Summary'}]}},
     ]);
     const summarizer = new LlmSummarizer({
-      llm: mockLlm as unknown as BaseLlm,
+      llm: mockLlm,
       prompt: 'Custom prompt.',
     });
 
