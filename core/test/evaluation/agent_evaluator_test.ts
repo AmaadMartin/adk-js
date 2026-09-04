@@ -236,8 +236,9 @@ describe('AgentEvaluator.evaluateEvalSet', () => {
         evalConfig: createEvalConfig(0.8),
       }),
     ).rejects.toThrowError(
-      `${MATCH_METRIC} for the agent module Failed. Expected 0.8, but got ` +
-        'undefined.',
+      `${MATCH_METRIC} for the agent module was not evaluated. No score was ` +
+        'produced, so the threshold of 0.8 was never checked and this is not ' +
+        'a score regression. See the logs for why the metric could not run.',
     );
     expect(infoSpy).toHaveBeenCalledWith(
       expect.stringContaining('`NOT_EVALUATED`'),
