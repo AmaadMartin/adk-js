@@ -187,6 +187,20 @@ describe('DataAgentToolset', () => {
     expect(namesOf(tools)).toEqual(['ask_data_agent']);
   });
 
+  it('selects nothing for an empty filter, even with a context', async () => {
+    // The inherited `isToolSelected` reads an empty array as "no filter" and
+    // would answer with every tool; this toolset follows adk-python instead.
+    const toolset = new DataAgentToolset({toolFilter: []});
+
+    expect(await toolset.getTools(makeToolContext())).toHaveLength(0);
+  });
+
+  it('selects nothing for a filter of unknown names, with a context', async () => {
+    const toolset = new DataAgentToolset({toolFilter: ['unknown']});
+
+    expect(await toolset.getTools(makeToolContext())).toHaveLength(0);
+  });
+
   it('applies a name filter when it is given a context', async () => {
     const toolset = new DataAgentToolset({toolFilter: ['ask_data_agent']});
 
