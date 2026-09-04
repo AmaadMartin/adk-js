@@ -139,6 +139,9 @@ describe('SimplePromptOptimizer behaviour', () => {
       {initialAgent, sampler: new FakeSampler()},
     );
 
+    expect(result.optimizedAgents[0].optimizedAgent.instruction).toBe(
+      INITIAL_INSTRUCTION,
+    );
     expect(result.optimizedAgents[0].optimizedAgent).toBe(initialAgent);
   });
 
