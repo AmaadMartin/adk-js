@@ -220,6 +220,20 @@ describe('model stream handling', () => {
   });
 });
 
+describe('stop signal', () => {
+  it('detects a stop signal written in another case', async () => {
+    const {simulator, llm} = await simulatorPastOpeningTurn({
+      model: FAKE_MODEL,
+    });
+    llm.responses.push({content: {parts: [{text: 'Bye!</FINISHED>'}]}});
+
+    const next = await simulator.getNextUserMessage([]);
+
+    expect(next.status).toBe(UserSimulatorStatus.STOP_SIGNAL_DETECTED);
+    expect(next.userMessage).toBeUndefined();
+  });
+});
+
 describe('summarizeConversation', () => {
   it('skips an event that carries no parts', () => {
     const events = [
