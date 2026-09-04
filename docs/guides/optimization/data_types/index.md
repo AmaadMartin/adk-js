@@ -26,12 +26,11 @@ type as a parameter, so an optimizer that reports its own metrics extends
 `AgentWithScores` and names the subtype. A sampler that reports its own fields
 extends `SamplingResult` the same way.
 
-Each type has a `createX` factory. TypeScript already checks a typed object
-literal, so the factory exists for the values the compiler never sees: a sampler
-is caller-supplied code, and its result reaches the optimizer unchecked. The
-factory throws `InputValidationError` on a bad field. This is the same
-validate-at-construction guarantee `google/adk-python` gets from pydantic, and
-the same pattern `createRunConfig` already uses in this package.
+This module declares types only. TypeScript erases them at compile time, so a
+value that arrives as `unknown` is not checked for you. `google/adk-python`
+validates these models on construction because pydantic does it for free;
+adk-js relies on the compiler instead. Validate a value you read from an
+untyped source at the point you receive it.
 
 ## Get started
 
@@ -39,24 +38,21 @@ Score a candidate agent, then return the best agent you found.
 
 ```typescript
 import {
-  createAgentWithScores,
-  createOptimizerResult,
-  createUnstructuredSamplingResult,
   LlmAgent,
+  OptimizerResult,
+  UnstructuredSamplingResult,
 } from '@google/adk';
 
-const sampled = createUnstructuredSamplingResult({
+const sampled: UnstructuredSamplingResult = {
   scores: {train1: 0.8, train2: 0.0},
   data: {train1: {output: 'result'}, train2: {}},
-});
+};
 
 const tunedAgent = new LlmAgent({name: 'tuned_agent'});
 
-const best = createOptimizerResult({
-  optimizedAgents: [
-    createAgentWithScores({optimizedAgent: tunedAgent, overallScore: 0.9}),
-  ],
-});
+const best: OptimizerResult = {
+  optimizedAgents: [{optimizedAgent: tunedAgent, overallScore: 0.9}],
+};
 ```
 
 `sampled.scores` maps each example UID to a number. `sampled.data` is optional:
@@ -76,28 +72,19 @@ scores are enough.
 `UnstructuredSamplingResult` extends `SamplingResult`, so it carries `scores`
 too.
 
-A factory returns the object you gave it, unchanged. `optimizedAgent` passes
-through by reference: you get back the same `LlmAgent` instance, not a copy.
-Extra fields survive as well, which is what makes the subtype below work.
-
 ## Extend the types with your own metrics
 
 An optimizer that reports more than one number extends `AgentWithScores` and
 parameterizes `OptimizerResult` on the subtype.
 
 ```typescript
-import {
-  AgentWithScores,
-  createOptimizerResult,
-  LlmAgent,
-  OptimizerResult,
-} from '@google/adk';
+import {AgentWithScores, LlmAgent, OptimizerResult} from '@google/adk';
 
 interface AgentWithLatency extends AgentWithScores {
   medianLatencyMs: number;
 }
 
-const front: OptimizerResult<AgentWithLatency> = createOptimizerResult({
+const front: OptimizerResult<AgentWithLatency> = {
   optimizedAgents: [
     {
       optimizedAgent: new LlmAgent({name: 'fast_agent'}),
@@ -110,36 +97,7 @@ const front: OptimizerResult<AgentWithLatency> = createOptimizerResult({
       medianLatencyMs: 980,
     },
   ],
-});
+};
 ```
 
 Both agents stay in the front because neither wins on both measures.
-
-## Failure modes
-
-Every factory throws `InputValidationError` and names the field at fault. The
-message quotes the example UID when the fault is inside a map.
-
-| Condition                                      | Message                                                                            |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `scores` is absent, `null`, or not an object   | `scores must be an object mapping each example UID to a number.`                   |
-| A value in `scores` is not a number            | `scores['<uid>'] must be a number.`                                                |
-| `data` is present and is not an object         | `data must be an object mapping each example UID to an object of evaluation data.` |
-| A value in `data` is not an object             | `data['<uid>'] must be an object of evaluation data.`                              |
-| `optimizedAgent` is not an `LlmAgent`          | `optimizedAgent must be an LlmAgent.`                                              |
-| `overallScore` is present and is not a number  | `overallScore must be a number.`                                                   |
-| `optimizedAgents` is absent or is not an array | `optimizedAgents must be an array.`                                                |
-
-`createOptimizerResult` validates each element and lets the inner error through
-unchanged, so a bad agent in the list reports the field that is wrong.
-
-Two things the factories accept on purpose:
-
-- `Infinity` and `NaN` are valid scores. `google/adk-python` accepts them, and
-  rejecting them here would make a sampler behave differently in the two SDKs.
-- An empty `scores` map and an empty `data` map are both valid. An empty `data`
-  map is not the same as an omitted one.
-
-One thing they refuse: a numeric string. pydantic coerces `"0.5"` to `0.5` in
-its default mode; this package throws instead, because rewriting caller data at
-an API boundary hides the sampler's bug rather than reporting it.
