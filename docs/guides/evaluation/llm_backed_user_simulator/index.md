@@ -76,10 +76,18 @@ accept.
 
 ## Custom instructions
 
-Custom instructions are a Jinja template, rendered with nunjucks. They must
+Custom instructions are text with `{{ placeholder }}` substitutions. They must
 reference `{{ stop_signal }}`, `{{ conversation_plan }}` and
 `{{ conversation_history }}`; a template that misses one is rejected when the
 config is parsed.
+
+A placeholder holds a name, optionally dotted, and nothing else. An expression,
+a filter or a `{% ... %}` statement is rejected rather than passed to the
+model, so the subset is narrower than adk-python's Jinja. The reason is that
+instructions and personas are evaluation data. adk-python renders them in a
+Jinja2 `SandboxedEnvironment`; JavaScript's Jinja-compatible engines have no
+sandbox, and rendering data through one lets `{{ range.constructor('...')() }}`
+execute. Substitution evaluates nothing.
 
 ```typescript
 const simulator = new LlmBackedUserSimulator({
@@ -118,9 +126,15 @@ const scenarioWithPersona: ConversationScenario = {
 };
 ```
 
-Persona text is itself rendered as a template, so a behavior may refer to
-`{{ stop_signal }}` or `{{ conversation_plan }}`. Custom instructions combined
-with a persona must also reference `{{ persona }}`.
+A behavior's name, description and instructions carry placeholders of their
+own, so a behavior may refer to `{{ stop_signal }}` or
+`{{ conversation_plan }}`. The persona's own description is inserted verbatim.
+
+Custom instructions combined with a persona must also reference
+`{{ persona }}`. A persona offers `{{ persona.id }}`,
+`{{ persona.description }}` and `{{ persona.behaviors }}`, the last being the
+rendered behavior list; bare `{{ persona }}` is the description followed by
+that list.
 
 ## How a conversation ends
 

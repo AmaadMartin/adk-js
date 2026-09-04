@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import nunjucks from 'nunjucks';
-
 import {InputValidationError} from '../../errors/input_validation_error.js';
 import type {UserPersona} from './user_simulator_personas.js';
 
@@ -70,11 +68,10 @@ Step 3: Formulate a response based on the chosen action and the below Action Pro
 /**
  * Instructions given to a simulated user that adopts a persona.
  *
- * The template reads `persona.behaviors[].behaviorInstructionsText`, which
- * {@link getLlmBackedUserSimulatorPrompt} derives from the behavior's
- * `behaviorInstructions`. adk-python calls a `UserBehavior` method for the
- * same string; `UserBehavior` is an interface here, so the renderer supplies
- * the field instead.
+ * adk-python loops over the persona's behaviors inside the template. Every
+ * placeholder here is a plain name, so {@link getLlmBackedUserSimulatorPrompt}
+ * renders the behavior list into `persona.behaviors` instead. The text the
+ * model receives is the same.
  */
 export const USER_SIMULATOR_INSTRUCTIONS_WITH_PERSONA_TEMPLATE = `You are a Simulated User designed to test an AI Agent.
 
@@ -85,13 +82,7 @@ The Conversation Plan is your canonical grounding, not a script; your response M
 
 {{ persona.description }}
 This persona behaves in the following ways:
-{% for b in persona.behaviors %}
-## {{ b.name | render_string_filter}}
-{{ b.description | render_string_filter }}
-
-Instructions:
-{{ b.behaviorInstructionsText | render_string_filter }}
-{% endfor %}
+{{ persona.behaviors }}
 # Conversation Plan
 
 {{ conversation_plan }}
@@ -121,70 +112,79 @@ const PERSONA_CUSTOM_INSTRUCTIONS_ERROR = `Custom instructions using personas mu
   * {{ conversation_history }} : the conversation between the user and the agent so far.
   * {{ persona }} : UserPersona for the simulator to use.`;
 
-/** Matches the body of one `{{ ... }}` or `{% ... %}` expression. */
-const EXPRESSION_PATTERN = /\{\{([\s\S]*?)\}\}|\{%([\s\S]*?)%\}/g;
-
-/** Matches one identifier inside an expression body. */
-const IDENTIFIER_PATTERN = /[A-Za-z_][A-Za-z0-9_]*/g;
+/**
+ * Matches one `{{ name }}` or `{{ name.field }}` placeholder.
+ *
+ * A placeholder holds a dotted name and nothing else. An expression, a filter
+ * or a call does not match it, and {@link isValidUserSimulatorTemplate}
+ * rejects a template that contains one.
+ */
+const PLACEHOLDER_PATTERN =
+  /\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\}\}/g;
 
 /**
- * The part of a nunjucks render context a filter receives as `this`.
+ * Substitutes a template's placeholders.
  *
- * `@types/nunjucks` 3.2.6 types a filter as `(...args: any[]) => any` and
- * declares no context type, so the one method used here is declared locally.
- */
-interface TemplateFilterContext {
-  /** The variables the enclosing template is being rendered with. */
-  getVariables(): Record<string, unknown>;
-}
-
-/**
- * Builds the environment the instruction templates render in.
+ * A placeholder the context does not name renders as the empty string, which
+ * is what Jinja2 does with an undefined variable. Each name is looked up whole
+ * in a `Map`, so a template cannot walk an object and reach a function through
+ * it.
  *
- * `render_string_filter` renders a persona's own text as a template against
- * the surrounding context, so a persona may refer to the stop signal or to the
- * conversation plan. Autoescaping is off: the output is a model prompt, not
- * HTML, and adk-python's Jinja environment does not escape either.
+ * This is deliberately not a template engine. Persona text and custom
+ * instructions are evaluation data, and nunjucks — the closest JavaScript has
+ * to Jinja2 — documents templates as trusted code and offers no counterpart to
+ * Jinja2's `SandboxedEnvironment`. Rendering that data through it makes
+ * `{{ range.constructor('...')() }}` execute.
+ *
+ * @param template The template to render.
+ * @param context The value of each placeholder.
+ * @returns The rendered text.
  */
-function createTemplateEnvironment(): nunjucks.Environment {
-  const environment = new nunjucks.Environment(null, {autoescape: false});
-  environment.addFilter(
-    'render_string_filter',
-    function (this: TemplateFilterContext, value: string): string {
-      if (!value) {
-        return '';
-      }
-      return environment.renderString(value, this.getVariables());
-    },
+function renderTemplate(
+  template: string,
+  context: ReadonlyMap<string, string>,
+): string {
+  // A replacement function, so a value containing `$&` is inserted literally.
+  return template.replace(
+    PLACEHOLDER_PATTERN,
+    (_placeholder, name: string) => context.get(name) ?? '',
   );
-  return environment;
 }
 
 /**
- * Collects the identifiers a template mentions inside its expressions.
+ * Reports whether a template uses syntax the renderer does not support.
  *
- * This over-approximates what Jinja2's `meta.find_undeclared_variables` gives
- * adk-python: a name bound by `{% for %}` and a field name such as the
- * `description` of `persona.description` are both counted. nunjucks does not
- * publish a typed parser, and the check only asks whether the author wrote a
- * placeholder at all, so the coarser answer is enough.
+ * A leftover `{{` is an unclosed placeholder or an expression, and `{%` opens
+ * a Jinja statement. A template holding either is rejected, rather than
+ * reaching the model as literal text.
+ *
+ * @param template The template to check.
+ * @returns Whether the template holds unsupported syntax.
+ */
+function hasUnsupportedSyntax(template: string): boolean {
+  return (
+    template.replace(PLACEHOLDER_PATTERN, '').includes('{{') ||
+    template.includes('{%')
+  );
+}
+
+/**
+ * Collects the first segment of every placeholder in a template.
  *
  * @param template The template to scan.
- * @returns Every identifier that appears in an expression.
+ * @returns The name each placeholder starts with.
  */
-function referencedNames(template: string): Set<string> {
-  const names = new Set<string>();
-  for (const expression of template.matchAll(EXPRESSION_PATTERN)) {
-    const body = expression[1] ?? expression[2];
-    for (const identifier of body.matchAll(IDENTIFIER_PATTERN)) {
-      names.add(identifier[0]);
-    }
+function placeholderRoots(template: string): Set<string> {
+  const roots = new Set<string>();
+  for (const placeholder of template.matchAll(PLACEHOLDER_PATTERN)) {
+    roots.add(placeholder[1].split('.')[0]);
   }
-  return names;
+  return roots;
 }
 
 /**
- * Reports whether a template parses and mentions every required placeholder.
+ * Reports whether a template is supported and references every required
+ * placeholder.
  *
  * @param template The template to check.
  * @param requiredParams The placeholders the template must reference.
@@ -194,18 +194,11 @@ export function isValidUserSimulatorTemplate(
   template: string,
   requiredParams: string[],
 ): boolean {
-  try {
-    new nunjucks.Template(
-      template,
-      createTemplateEnvironment(),
-      undefined,
-      true,
-    );
-  } catch {
+  if (hasUnsupportedSyntax(template)) {
     return false;
   }
-  const referenced = referencedNames(template);
-  return requiredParams.every((param) => referenced.has(param));
+  const roots = placeholderRoots(template);
+  return requiredParams.every((param) => roots.has(param));
 }
 
 /** The inputs that select which instruction template a prompt renders. */
@@ -249,22 +242,32 @@ export function getUserSimulatorInstructionsTemplate(
 }
 
 /**
- * Renders a persona with the extra field the instruction templates read.
+ * Renders a persona's behaviors as the block the instructions embed.
+ *
+ * A behavior's own text is rendered as well, so a persona may refer to the
+ * stop signal or the conversation plan, which is what adk-python's
+ * `render_string_filter` allows.
  *
  * @param persona The persona to render.
- * @returns The persona, each behavior carrying its instructions as one bullet
- *     per line.
+ * @param context The value of each placeholder.
+ * @returns One block per behavior, each opening with a blank line.
  */
-function toRenderablePersona(persona: UserPersona) {
-  return {
-    ...persona,
-    behaviors: persona.behaviors.map((behavior) => ({
-      ...behavior,
-      behaviorInstructionsText: behavior.behaviorInstructions
-        .map((instruction) => `  * ${instruction}`)
-        .join('\n'),
-    })),
-  };
+function renderBehaviors(
+  persona: UserPersona,
+  context: ReadonlyMap<string, string>,
+): string {
+  return persona.behaviors
+    .map((behavior) => {
+      const instructions = behavior.behaviorInstructions
+        .map((instruction) => `  * ${renderTemplate(instruction, context)}`)
+        .join('\n');
+      return (
+        `\n## ${renderTemplate(behavior.name, context)}\n` +
+        `${renderTemplate(behavior.description, context)}\n\n` +
+        `Instructions:\n${instructions}\n`
+      );
+    })
+    .join('');
 }
 
 /** Options for {@link getLlmBackedUserSimulatorPrompt}. */
@@ -282,6 +285,10 @@ export interface LlmBackedUserSimulatorPromptOptions extends UserSimulatorInstru
 /**
  * Builds the prompt that asks a model for the next user message.
  *
+ * A persona contributes `{{ persona.id }}`, `{{ persona.description }}` and
+ * `{{ persona.behaviors }}`. Bare `{{ persona }}` renders the description
+ * followed by the behaviors.
+ *
  * @param options The conversation state, and the custom instructions and
  *     persona to render with it.
  * @returns The rendered prompt.
@@ -292,13 +299,22 @@ export function getLlmBackedUserSimulatorPrompt(
   options: LlmBackedUserSimulatorPromptOptions,
 ): string {
   const template = getUserSimulatorInstructionsTemplate(options);
-  const context: Record<string, unknown> = {
-    stop_signal: options.stopSignal,
-    conversation_plan: options.conversationPlan,
-    conversation_history: options.conversationHistory,
-  };
-  if (options.userPersona !== undefined) {
-    context['persona'] = toRenderablePersona(options.userPersona);
+  const context = new Map<string, string>([
+    ['stop_signal', options.stopSignal],
+    ['conversation_plan', options.conversationPlan],
+    ['conversation_history', options.conversationHistory],
+  ]);
+
+  const persona = options.userPersona;
+  if (persona !== undefined) {
+    // The description is inserted verbatim, as adk-python does: its
+    // `render_string_filter` reaches each behavior, not the description.
+    const behaviors = renderBehaviors(persona, context);
+    context.set('persona.id', persona.id);
+    context.set('persona.description', persona.description);
+    context.set('persona.behaviors', behaviors);
+    context.set('persona', `${persona.description}\n${behaviors}`);
   }
-  return createTemplateEnvironment().renderString(template, context);
+
+  return renderTemplate(template, context);
 }

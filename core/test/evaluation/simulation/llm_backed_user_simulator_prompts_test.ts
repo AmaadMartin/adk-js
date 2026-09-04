@@ -37,18 +37,17 @@ const MOCK_DEFAULT_TEMPLATE = `Default template
 # Stop signal
 {{stop_signal}}`;
 
-/** Stands in for the persona template, for the same reason. */
+/**
+ * Stands in for the persona template, for the same reason. adk-python's mock
+ * loops over `persona.behaviors` in the template; the renderer builds that
+ * block, so the placeholder takes the loop's place. The expected output below
+ * is adk-python's, unchanged.
+ */
 const MOCK_PERSONA_TEMPLATE = `Persona template
 
 # Persona Description
 {{persona.description}}
-{% for b in persona.behaviors %}
-## {{ b.name }}
-{{ b.description }}
-
-Instructions:
-{{ b.behaviorInstructionsText }}
-{% endfor %}
+{{persona.behaviors}}
 # Conversation Plan
 {{conversation_plan}}
 
@@ -248,8 +247,6 @@ test stop`);
 
   // Ports
   // test_get_llm_backed_user_simulator_prompt_renders_persona_templates_in_sandbox.
-  // adk-python renders in a Jinja2 sandbox; nunjucks has none, so only the
-  // nested rendering is ported.
   it('renders the placeholders a persona writes into its own text', () => {
     const userPersona: UserPersona = {
       id: 'test_persona',
@@ -309,6 +306,125 @@ test stop`);
 
     expect(prompt).toContain('ask for a price < 150 & a "morning" flight');
   });
+
+  it('inserts a value containing a replacement pattern literally', () => {
+    const prompt = getLlmBackedUserSimulatorPrompt({
+      conversationPlan: 'cost $& and $` and $1',
+      conversationHistory: 'test history',
+      stopSignal: 'test stop',
+    });
+
+    expect(prompt).toContain('cost $& and $` and $1');
+  });
+});
+
+// Ports test_get_llm_backed_user_simulator_prompt_blocks_unsafe_persona_templates.
+// adk-python renders in a Jinja2 SandboxedEnvironment and raises SecurityError
+// on `{{ ''.__class__.__mro__ }}`. JavaScript has no `__mro__`, and its
+// equivalent escape reaches `Function` through any value's `constructor`. The
+// renderer substitutes names and evaluates nothing, so the payload is inert
+// rather than refused.
+describe('untrusted template text', () => {
+  // The payload builds its marker by concatenation, so the marker appears in
+  // the prompt only if the payload ran.
+  const CODE_PAYLOAD = `{{ range.constructor("return 'PWN' + 'ED'")() }}`;
+
+  it('does not execute code a persona writes into its name', () => {
+    const userPersona: UserPersona = {
+      id: 'test_persona',
+      description: 'Test persona description',
+      behaviors: [
+        {
+          name: CODE_PAYLOAD,
+          description: 'Test behavior description',
+          behaviorInstructions: ['instruction 1'],
+          violationRubrics: ['rubric 1'],
+        },
+      ],
+    };
+
+    const prompt = getLlmBackedUserSimulatorPrompt({
+      conversationPlan: 'test plan',
+      conversationHistory: 'test history',
+      stopSignal: 'test stop',
+      userPersona,
+    });
+
+    expect(prompt).not.toContain('PWNED');
+    expect(prompt).toContain(`## ${CODE_PAYLOAD}`);
+  });
+
+  it('does not execute code a persona writes into its description', () => {
+    const userPersona: UserPersona = {
+      id: 'test_persona',
+      description: `Test persona ${CODE_PAYLOAD}`,
+      behaviors: [],
+    };
+
+    const prompt = getLlmBackedUserSimulatorPrompt({
+      conversationPlan: 'test plan',
+      conversationHistory: 'test history',
+      stopSignal: 'test stop',
+      userPersona,
+    });
+
+    expect(prompt).not.toContain('PWNED');
+    expect(prompt).toContain(`Test persona ${CODE_PAYLOAD}`);
+  });
+
+  it('does not execute code a behavior instruction carries', () => {
+    const userPersona: UserPersona = {
+      id: 'test_persona',
+      description: 'Test persona description',
+      behaviors: [
+        {
+          name: 'Test behavior',
+          description: 'Test behavior description',
+          behaviorInstructions: [CODE_PAYLOAD],
+          violationRubrics: ['rubric 1'],
+        },
+      ],
+    };
+
+    const prompt = getLlmBackedUserSimulatorPrompt({
+      conversationPlan: 'test plan',
+      conversationHistory: 'test history',
+      stopSignal: 'test stop',
+      userPersona,
+    });
+
+    expect(prompt).not.toContain('PWNED');
+    expect(prompt).toContain(`  * ${CODE_PAYLOAD}`);
+  });
+
+  it('rejects custom instructions that carry an expression', () => {
+    const customInstructions =
+      '{{ stop_signal }} {{ conversation_plan }} {{ conversation_history }}' +
+      ` ${CODE_PAYLOAD}`;
+
+    expect(
+      isValidUserSimulatorTemplate(customInstructions, [
+        'stop_signal',
+        'conversation_plan',
+        'conversation_history',
+      ]),
+    ).toBe(false);
+  });
+
+  it('renders no value for a placeholder naming an object member', () => {
+    const prompt = getLlmBackedUserSimulatorPrompt({
+      conversationPlan: 'test plan',
+      conversationHistory: 'test history',
+      stopSignal: 'test stop',
+      customInstructions:
+        '{{ stop_signal }} {{ conversation_plan }} {{ conversation_history }}' +
+        ' [{{ persona.constructor }}] [{{ persona.__proto__ }}]' +
+        ' [{{ constructor }}]',
+      userPersona: SAMPLE_PERSONA,
+    });
+
+    expect(prompt).toContain('[] [] []');
+  });
 });
 
 describe('isValidUserSimulatorTemplate', () => {
@@ -329,10 +445,28 @@ describe('isValidUserSimulatorTemplate', () => {
     expect(isValidUserSimulatorTemplate('Hello', ['name'])).toBe(false);
   });
 
-  it('accepts a parameter referenced from a block tag', () => {
+  it('rejects a template that uses a Jinja statement', () => {
     expect(
-      isValidUserSimulatorTemplate('{% if name %}hi{% endif %}', ['name']),
-    ).toBe(true);
+      isValidUserSimulatorTemplate('{{ name }}{% if name %}hi{% endif %}', [
+        'name',
+      ]),
+    ).toBe(false);
+  });
+
+  it('rejects a template whose placeholder holds an expression', () => {
+    expect(isValidUserSimulatorTemplate('{{ name | upper }}', ['name'])).toBe(
+      false,
+    );
+  });
+
+  it('rejects a name quoted inside a placeholder', () => {
+    expect(isValidUserSimulatorTemplate('{{ "name" }}', ['name'])).toBe(false);
+  });
+
+  it('rejects a required name that is only a field of another', () => {
+    expect(isValidUserSimulatorTemplate('{{ other.name }}', ['name'])).toBe(
+      false,
+    );
   });
 
   it('accepts a parameter referenced through an attribute', () => {
