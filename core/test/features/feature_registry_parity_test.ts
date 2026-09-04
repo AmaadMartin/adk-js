@@ -22,6 +22,7 @@ import {
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
+import {unlistedFeatureName} from './feature_name_test_utils.js';
 
 const overriddenFeatures: FeatureName[] = [];
 
@@ -50,7 +51,7 @@ describe('feature registry parity', () => {
 
   describe('TestGetFeatureConfig', () => {
     it('test_feature_in_registry', () => {
-      const name = 'MY_FEATURE' as FeatureName;
+      const name = unlistedFeatureName('MY_FEATURE');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: true,
@@ -64,20 +65,20 @@ describe('feature registry parity', () => {
 
     it('test_feature_not_in_registry', () => {
       expect(
-        getFeatureConfig('UNKNOWN_FEATURE' as FeatureName),
+        getFeatureConfig(unlistedFeatureName('UNKNOWN_FEATURE')),
       ).toBeUndefined();
     });
   });
 
   describe('TestIsFeatureEnabled', () => {
     it('test_not_in_registry_raises_value_error', () => {
-      expect(() => isFeatureEnabled('NEW_FEATURE' as FeatureName)).toThrowError(
-        /is not registered/,
-      );
+      expect(() =>
+        isFeatureEnabled(unlistedFeatureName('NEW_FEATURE')),
+      ).toThrowError(/is not registered/);
     });
 
     it('test_wip_feature_disabled', () => {
-      const name = 'WIP_FEATURE_DISABLED' as FeatureName;
+      const name = unlistedFeatureName('WIP_FEATURE_DISABLED');
       registerFeature(name, {stage: FeatureStage.WIP, defaultOn: false});
 
       expect(isFeatureEnabled(name)).toBe(false);
@@ -85,7 +86,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_wip_feature_enabled', () => {
-      const name = 'WIP_FEATURE_ENABLED' as FeatureName;
+      const name = unlistedFeatureName('WIP_FEATURE_ENABLED');
       registerFeature(name, {stage: FeatureStage.WIP, defaultOn: true});
 
       expect(isFeatureEnabled(name)).toBe(true);
@@ -96,7 +97,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_experimental_disabled_feature', () => {
-      const name = 'EXP_DISABLED' as FeatureName;
+      const name = unlistedFeatureName('EXP_DISABLED');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: false,
@@ -107,7 +108,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_experimental_enabled_feature', () => {
-      const name = 'EXP_ENABLED' as FeatureName;
+      const name = unlistedFeatureName('EXP_ENABLED');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: true,
@@ -121,7 +122,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_stable_feature_enabled', () => {
-      const name = 'STABLE_FEATURE' as FeatureName;
+      const name = unlistedFeatureName('STABLE_FEATURE');
       registerFeature(name, {stage: FeatureStage.STABLE, defaultOn: true});
 
       expect(isFeatureEnabled(name)).toBe(true);
@@ -129,7 +130,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_enable_env_var_takes_precedence', () => {
-      const name = 'ENV_ENABLE_TEST' as FeatureName;
+      const name = unlistedFeatureName('ENV_ENABLE_TEST');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: false,
@@ -144,7 +145,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_disable_env_var_takes_precedence', () => {
-      const name = 'ENV_DISABLE_TEST' as FeatureName;
+      const name = unlistedFeatureName('ENV_DISABLE_TEST');
       registerFeature(name, {stage: FeatureStage.STABLE, defaultOn: true});
       process.env.ADK_DISABLE_ENV_DISABLE_TEST = 'true';
 
@@ -153,7 +154,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_warn_once_per_feature', () => {
-      const name = 'WARN_ONCE_FEATURE' as FeatureName;
+      const name = unlistedFeatureName('WARN_ONCE_FEATURE');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: false,
@@ -172,12 +173,12 @@ describe('feature registry parity', () => {
   describe('TestOverrideFeatureEnabled', () => {
     it('test_override_not_in_registry_raises_value_error', () => {
       expect(() =>
-        overrideFeatureEnabled('UNKNOWN_FEATURE' as FeatureName, true),
+        overrideFeatureEnabled(unlistedFeatureName('UNKNOWN_FEATURE'), true),
       ).toThrowError(/is not registered/);
     });
 
     it('test_override_enables_disabled_feature', () => {
-      const name = 'OVERRIDE_ENABLE_TEST' as FeatureName;
+      const name = unlistedFeatureName('OVERRIDE_ENABLE_TEST');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: false,
@@ -194,7 +195,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_override_disables_enabled_feature', () => {
-      const name = 'OVERRIDE_DISABLE_TEST' as FeatureName;
+      const name = unlistedFeatureName('OVERRIDE_DISABLE_TEST');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: true,
@@ -207,7 +208,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_override_takes_precedence_over_env_enable', () => {
-      const name = 'PRIORITY_ENV_ENABLE' as FeatureName;
+      const name = unlistedFeatureName('PRIORITY_ENV_ENABLE');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: false,
@@ -223,7 +224,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_override_takes_precedence_over_env_disable', () => {
-      const name = 'PRIORITY_ENV_DISABLE' as FeatureName;
+      const name = unlistedFeatureName('PRIORITY_ENV_DISABLE');
       registerFeature(name, {
         stage: FeatureStage.EXPERIMENTAL,
         defaultOn: true,
@@ -241,7 +242,7 @@ describe('feature registry parity', () => {
     });
 
     it('test_override_stable_feature_no_warning', () => {
-      const name = 'STABLE_OVERRIDE' as FeatureName;
+      const name = unlistedFeatureName('STABLE_OVERRIDE');
       registerFeature(name, {stage: FeatureStage.STABLE, defaultOn: true});
 
       overrideForTest(name, true);

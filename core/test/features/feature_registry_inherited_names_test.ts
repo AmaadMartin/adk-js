@@ -5,7 +5,6 @@
  */
 
 import {
-  FeatureName,
   FeatureStage,
   getFeatureConfig,
   isFeatureEnabled,
@@ -14,6 +13,7 @@ import {
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {unlistedFeatureName} from './feature_name_test_utils.js';
 
 /**
  * The registry and the override map are object literals, so they inherit the
@@ -25,36 +25,34 @@ const INHERITED_NAMES = [
   'constructor',
   'valueOf',
   'hasOwnProperty',
-] as const;
+].map(unlistedFeatureName);
 
 describe('feature registry inherited names', () => {
   it.each(INHERITED_NAMES)('getFeatureConfig(%s) is undefined', (name) => {
-    expect(getFeatureConfig(name as FeatureName)).toBeUndefined();
+    expect(getFeatureConfig(name)).toBeUndefined();
   });
 
   it.each(INHERITED_NAMES)('isFeatureEnabled(%s) throws', (name) => {
-    expect(() => isFeatureEnabled(name as FeatureName)).toThrowError(
-      /is not registered/,
-    );
+    expect(() => isFeatureEnabled(name)).toThrowError(/is not registered/);
   });
 
   it.each(INHERITED_NAMES)('overrideFeatureEnabled(%s) throws', (name) => {
-    expect(() =>
-      overrideFeatureEnabled(name as FeatureName, true),
-    ).toThrowError(/is not registered/);
+    expect(() => overrideFeatureEnabled(name, true)).toThrowError(
+      /is not registered/,
+    );
   });
 
   it.each(INHERITED_NAMES)(
     'withTemporaryFeatureOverride(%s) rejects',
     async (name) => {
       await expect(
-        withTemporaryFeatureOverride(name as FeatureName, true, () => 'ran'),
+        withTemporaryFeatureOverride(name, true, () => 'ran'),
       ).rejects.toThrowError(/is not registered/);
     },
   );
 
   it('resolves a registered feature that shadows an inherited member', async () => {
-    const name = 'propertyIsEnumerable' as FeatureName;
+    const name = unlistedFeatureName('propertyIsEnumerable');
     registerFeature(name, {stage: FeatureStage.EXPERIMENTAL, defaultOn: false});
 
     expect(isFeatureEnabled(name)).toBe(false);

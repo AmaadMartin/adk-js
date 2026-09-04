@@ -132,22 +132,12 @@ export enum FeatureStage {
  */
 export interface FeatureConfig {
   stage: FeatureStage;
-  /** Whether the feature is enabled by default. Defaults to false. */
-  defaultOn?: boolean;
-}
-
-/**
- * A feature configuration as the registry stores it.
- *
- * `registerFeature` fills in an omitted `defaultOn`, so a reader always sees a
- * concrete boolean.
- */
-export interface ResolvedFeatureConfig extends FeatureConfig {
+  /** Whether the feature is enabled by default. */
   defaultOn: boolean;
 }
 
-// Central registry: FeatureName -> ResolvedFeatureConfig.
-const FEATURE_REGISTRY: Record<FeatureName, ResolvedFeatureConfig> = {
+// Central registry: FeatureName -> FeatureConfig
+const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.AGENT_CONFIG]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
@@ -320,7 +310,7 @@ const FEATURE_OVERRIDES: Partial<Record<FeatureName, boolean>> = {};
  */
 export function getFeatureConfig(
   featureName: FeatureName,
-): ResolvedFeatureConfig | undefined {
+): FeatureConfig | undefined {
   return Object.hasOwn(FEATURE_REGISTRY, featureName)
     ? FEATURE_REGISTRY[featureName]
     : undefined;
@@ -336,10 +326,7 @@ export function registerFeature(
   featureName: FeatureName,
   config: FeatureConfig,
 ): void {
-  FEATURE_REGISTRY[featureName] = {
-    stage: config.stage,
-    defaultOn: config.defaultOn ?? false,
-  };
+  FEATURE_REGISTRY[featureName] = config;
 }
 
 /**

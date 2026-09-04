@@ -5,12 +5,10 @@
  */
 
 import {
-  FeatureConfig,
   FeatureName,
   FeatureStage,
   getFeatureConfig,
   isFeatureEnabled,
-  registerFeature,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -116,26 +114,5 @@ describe('feature registry table', () => {
     } finally {
       process.env = originalEnv;
     }
-  });
-
-  it('defaults defaultOn to false when registerFeature omits it', () => {
-    const name = 'DEFAULT_ON_OMITTED' as FeatureName;
-    const config: FeatureConfig = {stage: FeatureStage.WIP};
-
-    registerFeature(name, config);
-
-    expect(getFeatureConfig(name)?.defaultOn).toBe(false);
-  });
-
-  it('returns a concrete defaultOn from a stored config', () => {
-    const stored = getFeatureConfig(FeatureName.PROGRESSIVE_SSE_STREAMING);
-    if (!stored) {
-      expect.fail('PROGRESSIVE_SSE_STREAMING is not registered.');
-    }
-
-    // Pins the return type: a `boolean | undefined` fails `npm run ts:check`.
-    const defaultOn: boolean = stored.defaultOn;
-
-    expect(defaultOn).toBe(true);
   });
 });

@@ -14,6 +14,7 @@ import {
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {unlistedFeatureName} from './feature_name_test_utils.js';
 
 describe('FeatureRegistry', () => {
   const originalEnv = process.env;
@@ -54,7 +55,7 @@ describe('FeatureRegistry', () => {
 
   it('should respect ADK_ENABLE_ env var', () => {
     // Register a dummy feature that is default off
-    const dummyName = 'DUMMY_FEATURE' as FeatureName;
+    const dummyName = unlistedFeatureName('DUMMY_FEATURE');
     registerFeature(dummyName, {
       stage: FeatureStage.EXPERIMENTAL,
       defaultOn: false,
@@ -75,9 +76,9 @@ describe('FeatureRegistry', () => {
   });
 
   it('should throw error when checking unregistered feature', () => {
-    expect(() => isFeatureEnabled('NON_EXISTENT' as FeatureName)).toThrowError(
-      /is not registered/,
-    );
+    expect(() =>
+      isFeatureEnabled(unlistedFeatureName('NON_EXISTENT')),
+    ).toThrowError(/is not registered/);
   });
 
   it('should support temporary overrides', async () => {
@@ -160,8 +161,10 @@ describe('FeatureRegistry', () => {
 
   it('should throw when temporarily overriding an unregistered feature', async () => {
     await expect(
-      withTemporaryFeatureOverride('NO_SUCH_FEATURE' as FeatureName, true, () =>
-        expect.fail('the callback must not run'),
+      withTemporaryFeatureOverride(
+        unlistedFeatureName('NO_SUCH_FEATURE'),
+        true,
+        () => expect.fail('the callback must not run'),
       ),
     ).rejects.toThrowError(/is not registered/);
   });

@@ -27,9 +27,10 @@ three lifecycle stages.
   one on.
 
 The flag set matches the Python SDK, so a flag you read about in the ADK
-documentation has the same name and the same default here. A flag whose feature
-has not been ported to TypeScript yet is still declared, so the name resolves
-and the environment variable behaves the same way.
+documentation has the same name and the same default here. Many of those
+features are not ported to TypeScript yet. Their names are declared and
+reserved, so `isFeatureEnabled` answers and does not throw, but nothing reads
+the flag: setting the variable has no effect until the feature ships here.
 
 ## Get started
 
@@ -130,13 +131,15 @@ getFeatureConfig(FeatureName.PROGRESSIVE_SSE_STREAMING);
 // {stage: FeatureStage.EXPERIMENTAL, defaultOn: true}
 ```
 
-`registerFeature` adds or replaces an entry. `defaultOn` is optional and
-defaults to `false`:
+`registerFeature` adds or replaces an entry:
 
 ```ts
 import {FeatureName, FeatureStage, registerFeature} from '@google/adk';
 
-registerFeature('MY_FEATURE' as FeatureName, {stage: FeatureStage.WIP});
+registerFeature(FeatureName.SNAKE_CASE_SKILL_NAME, {
+  stage: FeatureStage.STABLE,
+  defaultOn: true,
+});
 ```
 
 ## Failure modes
