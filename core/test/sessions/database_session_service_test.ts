@@ -11,11 +11,37 @@ import {
   Event,
   State,
 } from '@google/adk';
-import {MikroORM} from '@mikro-orm/core';
+import {EntityManager, LockMode, MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
-import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {
+  forkForRead,
+  forkForWrite,
+  getConnectionOptionsFromUri,
+  getDatabaseBackend,
+  validateDatabaseSchemaVersion,
+} from '../../src/sessions/db/operations.js';
+import {StorageSession} from '../../src/sessions/db/schema.js';
+
+// The read/write split is observable only through which fork the service
+// asks for, so those two seams and the backend probe are spied on while every
+// other export keeps its real behaviour.
+vi.mock('../../src/sessions/db/operations.js', async (importOriginal) => {
+  const original =
+    await importOriginal<
+      typeof import('../../src/sessions/db/operations.js')
+    >();
+  return {
+    ...original,
+    forkForRead: vi.fn(original.forkForRead),
+    forkForWrite: vi.fn(original.forkForWrite),
+    getDatabaseBackend: vi.fn(original.getDatabaseBackend),
+  };
+});
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -739,5 +765,340 @@ describe('isDatabaseConnectionString', () => {
       false,
     ); // Has = and ; but no common keys
     expect(isDatabaseConnectionString('Server=myServer')).toBe(false); // Missing semicolon implies not a full connection string or just a weird config
+  });
+});
+
+describe('DatabaseSessionService read and write entity managers', () => {
+  let service: DatabaseSessionService;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    service = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+    await service.init();
+    await service.createSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await service.close();
+  });
+
+  it('reads a session through the read entity manager', async () => {
+    await service.getSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+
+    expect(forkForRead).toHaveBeenCalledTimes(1);
+    expect(forkForWrite).not.toHaveBeenCalled();
+  });
+
+  it('lists sessions through the read entity manager', async () => {
+    await service.listSessions({appName: 'split-app'});
+
+    expect(forkForRead).toHaveBeenCalledTimes(1);
+    expect(forkForWrite).not.toHaveBeenCalled();
+  });
+
+  it('creates a session through the write entity manager', async () => {
+    await service.createSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'written-session',
+    });
+
+    expect(forkForWrite).toHaveBeenCalledTimes(1);
+    expect(forkForRead).not.toHaveBeenCalled();
+  });
+
+  it('deletes a session through the write entity manager', async () => {
+    await service.deleteSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+
+    expect(forkForWrite).toHaveBeenCalledTimes(1);
+    expect(forkForRead).not.toHaveBeenCalled();
+  });
+
+  it('appends an event through the write entity manager', async () => {
+    const session = await service.getSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+    if (!session) {
+      expect.fail('the seeded session was expected to exist');
+    }
+    vi.clearAllMocks();
+
+    await service.appendEvent({
+      session,
+      event: createEvent({author: 'user', invocationId: 'inv-1'}),
+    });
+
+    expect(forkForWrite).toHaveBeenCalledTimes(1);
+    expect(forkForRead).not.toHaveBeenCalled();
+  });
+
+  it('stays usable after a read throws', async () => {
+    const broken = vi.mocked(forkForRead).mockImplementationOnce(() => {
+      throw new Error('read entity manager unavailable');
+    });
+
+    await expect(
+      service.getSession({
+        appName: 'split-app',
+        userId: 'split-user',
+        sessionId: 'split-session',
+      }),
+    ).rejects.toThrow('read entity manager unavailable');
+    expect(broken).toHaveBeenCalledTimes(1);
+
+    const recovered = await service.getSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+    expect(recovered?.id).toBe('split-session');
+  });
+});
+
+describe('DatabaseSessionService row-level locking', () => {
+  /**
+   * Appends one event with the backend probe stubbed, and reports the lock
+   * modes `appendEvent` asked for when it loaded the session row.
+   */
+  async function lockModesForBackend(
+    backend: string,
+  ): Promise<Array<LockMode | undefined>> {
+    vi.mocked(getDatabaseBackend).mockReturnValue(backend);
+    const service = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+    const session = await service.createSession({
+      appName: 'lock-app',
+      userId: 'lock-user',
+      sessionId: 'lock-session',
+    });
+
+    const findOne = vi.spyOn(EntityManager.prototype, 'findOne');
+    try {
+      await service.appendEvent({
+        session,
+        event: createEvent({author: 'user', invocationId: 'inv-lock'}),
+      });
+      // `mockRestore` also clears the recorded calls, so read them first.
+      return findOne.mock.calls
+        .filter(([entityName]) => entityName === StorageSession)
+        .map(([, , options]) => options?.lockMode);
+    } finally {
+      findOne.mockRestore();
+      await service.close();
+    }
+  }
+
+  it('takes no row-level lock on sqlite', async () => {
+    expect(await lockModesForBackend('sqlite')).toEqual([undefined]);
+  });
+
+  it('takes no row-level lock on mssql', async () => {
+    expect(await lockModesForBackend('mssql')).toEqual([undefined]);
+  });
+
+  it('takes a row-level write lock on postgresql', async () => {
+    expect(await lockModesForBackend('postgresql')).toEqual([
+      LockMode.PESSIMISTIC_WRITE,
+    ]);
+  });
+});
+
+describe('DatabaseSessionService lifecycle', () => {
+  let databaseFile: string;
+
+  beforeEach(() => {
+    databaseFile = path.join(
+      mkdtempSync(path.join(tmpdir(), 'adk-session-db-')),
+      'sessions.db',
+    );
+  });
+
+  afterEach(() => {
+    rmSync(path.dirname(databaseFile), {recursive: true, force: true});
+  });
+
+  it('closes before init without throwing', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('closes twice without throwing', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    await service.init();
+
+    await expect(service.close()).resolves.toBeUndefined();
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('closes after a failed init without throwing', async () => {
+    // A regular file where the database directory should be, so the driver
+    // cannot create the database.
+    writeFileSync(path.join(path.dirname(databaseFile), 'blocked'), '');
+    const service = new DatabaseSessionService(
+      `sqlite://${path.join(path.dirname(databaseFile), 'blocked', 'x.db')}`,
+    );
+    await expect(service.init()).rejects.toThrow(
+      /^Failed to create database engine for URL 'sqlite:/,
+    );
+
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('retries a failed init', async () => {
+    writeFileSync(path.join(path.dirname(databaseFile), 'blocked2'), '');
+    const blockedPath = path.join(path.dirname(databaseFile), 'blocked2');
+    const service = new DatabaseSessionService(
+      `sqlite://${path.join(blockedPath, 'x.db')}`,
+    );
+    await expect(service.init()).rejects.toThrow(
+      'Failed to create database engine for URL',
+    );
+
+    rmSync(blockedPath);
+    await expect(service.init()).resolves.toBeUndefined();
+    await service.close();
+  });
+
+  it('releases the database so another service can reopen it', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    const session = await service.createSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({author: 'user', invocationId: 'inv-file'}),
+    });
+    await service.close();
+
+    const reopened = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    const restored = await reopened.getSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    expect(restored?.events.map((event) => event.invocationId)).toEqual([
+      'inv-file',
+    ]);
+
+    await reopened.deleteSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    const deleted = await reopened.getSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    expect(deleted).toBeUndefined();
+    await reopened.close();
+  });
+
+  it('turns foreign keys on for every sqlite connection', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    await service.init();
+
+    const orm = await MikroORM.init(
+      await getConnectionOptionsFromUri(`sqlite://${databaseFile}`),
+    );
+    const rows = await orm.em
+      .getConnection()
+      .execute('pragma foreign_keys', [], 'all');
+    expect(rows).toEqual([{foreign_keys: 1}]);
+
+    await orm.close();
+    await service.close();
+  });
+
+  it('reopens the database when init follows close', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    await service.createSession({
+      appName: 'reuse-app',
+      userId: 'reuse-user',
+      sessionId: 'reuse-session',
+    });
+    await service.close();
+
+    await service.init();
+    const restored = await service.getSession({
+      appName: 'reuse-app',
+      userId: 'reuse-user',
+      sessionId: 'reuse-session',
+    });
+    expect(restored?.id).toBe('reuse-session');
+    await service.close();
+  });
+
+  it('closes the service at the end of an await using block', async () => {
+    const closed: DatabaseSessionService[] = [];
+    {
+      await using service = new DatabaseSessionService(
+        `sqlite://${databaseFile}`,
+      );
+      vi.spyOn(service, 'close').mockImplementation(async () => {
+        closed.push(service);
+      });
+      await service.init();
+      expect(closed).toEqual([]);
+    }
+
+    expect(closed).toHaveLength(1);
+  });
+});
+
+describe('DatabaseSessionService construction diagnostics', () => {
+  const password = 'hunter2';
+
+  it('rejects a driver named in the scheme, with the password masked', () => {
+    expect(
+      () =>
+        new DatabaseSessionService(
+          `postgresql+asyncpg://user:${password}@db:5432/app`,
+        ),
+    ).toThrow(
+      "Database URL 'postgresql+asyncpg://user:***@db:5432/app' names the " +
+        "'asyncpg' driver in its scheme.",
+    );
+  });
+
+  it('rejects a string that is not a URL', () => {
+    expect(() => new DatabaseSessionService('definitely not a url')).toThrow(
+      'Invalid database URL format or argument',
+    );
+  });
+
+  it('rejects overrides combined with an options object', () => {
+    expect(
+      () =>
+        new DatabaseSessionService(
+          {dbName: ':memory:', driver: SqliteDriver},
+          {pool: {min: 2, max: 4}},
+        ),
+    ).toThrow('Overrides cannot be combined with an options object');
   });
 });

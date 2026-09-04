@@ -221,15 +221,14 @@ function isKnexBackedConnection(value: object): value is KnexBackedConnection {
 }
 
 /**
- * Returns the backend name the open connection reports, normalized to the
+ * Returns the backend name a driver connection reports, normalized to the
  * names adk-python's SQLAlchemy dialects use.
  *
- * @param orm The initialized MikroORM instance.
- * @returns The backend name, or an empty string for a driver exposing no knex
- *   handle.
+ * @param connection The driver connection to read the dialect from.
+ * @returns The backend name, or an empty string for a connection exposing no
+ *   knex handle and for one naming no dialect.
  */
-export function getDatabaseBackend(orm: MikroORM): string {
-  const connection = orm.em.getConnection();
+export function dialectOf(connection: object): string {
   if (!isKnexBackedConnection(connection)) {
     return '';
   }
@@ -239,6 +238,16 @@ export function getDatabaseBackend(orm: MikroORM): string {
     return '';
   }
   return dialect === SQLITE_KNEX_DIALECT ? SQLITE_BACKEND : dialect;
+}
+
+/**
+ * Returns the backend name the open database reports.
+ *
+ * @param orm The initialized MikroORM instance.
+ * @returns The backend name, as {@link dialectOf} normalizes it.
+ */
+export function getDatabaseBackend(orm: MikroORM): string {
+  return dialectOf(orm.em.getConnection());
 }
 
 /**
