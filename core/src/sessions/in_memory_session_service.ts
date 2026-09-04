@@ -5,9 +5,10 @@
  */
 import {cloneDeep} from 'lodash-es';
 
+import {SessionNotFoundError} from '../errors/session_not_found_error.js';
 import {Event} from '../events/event.js';
+import {FeatureName, isFeatureEnabled} from '../features/feature_registry.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
-import {logger} from '../utils/logger.js';
 
 import {
   AppendEventRequest,
@@ -17,7 +18,6 @@ import {
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
-  mergeStates,
   trimTempState,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
@@ -28,6 +28,50 @@ import {State} from './state.js';
  */
 export function isInMemoryConnectionString(uri?: string): boolean {
   return uri === 'memory://';
+}
+
+/**
+ * Returns the copy of a stored session that the caller owns.
+ *
+ * With `IN_MEMORY_SESSION_SERVICE_LIGHT_COPY` off the copy is a deep clone.
+ * With it on only the containers are copied: the caller can add an event or a
+ * state key without touching the stored session, but the event objects and
+ * state values are shared, which avoids a recursive clone of every event on
+ * every read.
+ */
+function copySession(session: Session): Session {
+  if (!isFeatureEnabled(FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY)) {
+    return cloneDeep(session);
+  }
+  return {
+    ...session,
+    events: [...session.events],
+    // `Object.assign` onto a null-prototype target rather than a `{...state}`
+    // literal: state keys are caller-controlled, and `State` looks them up
+    // with `in`, so a plain literal would hand back every key of
+    // `Object.prototype` as session state.
+    state: Object.assign(Object.create(null), session.state),
+  };
+}
+
+/**
+ * Writes the app- and user-scoped store entries into a session copy's state.
+ *
+ * `copySession` has already produced the state object the caller owns, so the
+ * extra clone `mergeStates` performs would be paid twice on the deep path and
+ * would undo the light one.
+ */
+function mergeScopedState(
+  target: Record<string, unknown>,
+  appState: Record<string, unknown> = {},
+  userState: Record<string, unknown> = {},
+): void {
+  for (const [key, value] of Object.entries(appState)) {
+    target[State.APP_PREFIX + key] = value;
+  }
+  for (const [key, value] of Object.entries(userState)) {
+    target[State.USER_PREFIX + key] = value;
+  }
 }
 
 /**
@@ -87,11 +131,11 @@ export class InMemorySessionService extends BaseSessionService {
 
     this.sessions[appName][userId][session.id] = session;
 
-    const copiedSession = cloneDeep(session);
-    copiedSession.state = mergeStates(
+    const copiedSession = copySession(session);
+    mergeScopedState(
+      copiedSession.state,
       this.appState[appName],
       this.userState[appName]?.[userId],
-      copiedSession.state,
     );
 
     return copiedSession;
@@ -112,7 +156,7 @@ export class InMemorySessionService extends BaseSessionService {
     }
 
     const session: Session = this.sessions[appName][userId][sessionId];
-    const copiedSession = cloneDeep(session);
+    const copiedSession = copySession(session);
 
     if (config) {
       if (config.numRecentEvents) {
@@ -134,10 +178,10 @@ export class InMemorySessionService extends BaseSessionService {
       }
     }
 
-    copiedSession.state = mergeStates(
+    mergeScopedState(
+      copiedSession.state,
       this.appState[appName],
       this.userState[appName]?.[userId],
-      copiedSession.state,
     );
 
     return copiedSession;
@@ -270,31 +314,24 @@ export class InMemorySessionService extends BaseSessionService {
     session,
     event,
   }: AppendEventRequest): Promise<Event> {
-    await super.appendEvent({session, event});
-    session.lastUpdateTime = event.timestamp;
+    if (event.partial) {
+      return event;
+    }
 
     const appName = session.appName;
     const userId = session.userId;
     const sessionId = session.id;
 
-    const warning = (message: string) => {
-      logger.warn(`Failed to append event to session ${sessionId}: ${message}`);
-    };
-
-    if (!this.sessions[appName]) {
-      warning(`appName ${appName} not in sessions`);
-      return event;
+    // The lookup precedes every mutation, so a caller holding a deleted or
+    // never-created session learns that the append did not happen instead of
+    // half-applying its state delta.
+    const storageSession = this.sessions[appName]?.[userId]?.[sessionId];
+    if (!storageSession) {
+      throw new SessionNotFoundError(`Session ${sessionId} not found.`);
     }
 
-    if (!this.sessions[appName][userId]) {
-      warning(`userId ${userId} not in sessions[appName]`);
-      return event;
-    }
-
-    if (!this.sessions[appName][userId][sessionId]) {
-      warning(`sessionId ${sessionId} not in sessions[appName][userId]`);
-      return event;
-    }
+    await super.appendEvent({session, event});
+    session.lastUpdateTime = event.timestamp;
 
     if (event.actions && event.actions.stateDelta) {
       for (const key of Object.keys(event.actions.stateDelta)) {
@@ -316,9 +353,7 @@ export class InMemorySessionService extends BaseSessionService {
       }
     }
 
-    const storageSession: Session = this.sessions[appName][userId][sessionId];
     await super.appendEvent({session: storageSession, event});
-
     storageSession.lastUpdateTime = event.timestamp;
 
     return event;
