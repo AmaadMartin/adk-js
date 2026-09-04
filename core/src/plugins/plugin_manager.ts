@@ -46,6 +46,7 @@ export const DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS = 5;
  */
 export class PluginManager {
   private readonly plugins: Set<BasePlugin> = new Set();
+  private skipClosingPlugins = false;
 
   /** Whether any plugin is registered. */
   get hasPlugins(): boolean {
@@ -72,6 +73,20 @@ export class PluginManager {
   }
 
   /**
+   * Controls whether `close()` tears down the registered plugins.
+   *
+   * Set this to `true` when another component owns the plugins, for example a
+   * parent `Runner` whose plugin list this manager borrowed. `close()` then
+   * does nothing, so the shared plugins survive for their owner. The switch is
+   * reversible: passing `false` restores normal closing.
+   *
+   * @param value `true` to skip closing the plugins, `false` to close them.
+   */
+  setSkipClosingPlugins(value: boolean): void {
+    this.skipClosingPlugins = value;
+  }
+
+  /**
    * Closes every registered plugin, in registration order.
    *
    * A plugin that throws or exceeds `closeTimeoutSeconds` does not stop the
@@ -79,10 +94,19 @@ export class PluginManager {
    * concurrent because a plugin that owns a transport, an MCP session for
    * example, must not be torn down while its peers are still using it.
    *
+   * Does nothing when `setSkipClosingPlugins(true)` was called. The skip is
+   * checked before the first plugin, so no close timeout ever starts.
+   *
    * @throws An `AggregateError` naming every plugin that failed to close, once
    *     all of them have been attempted.
    */
   async close(): Promise<void> {
+    if (this.skipClosingPlugins) {
+      logger.debug(
+        'Skipping plugin close; plugins are owned by another component.',
+      );
+      return;
+    }
     const failures: Array<{name: string; error: Error}> = [];
     for (const plugin of this.plugins) {
       const error = await closePlugin(plugin, this.closeTimeoutSeconds);
