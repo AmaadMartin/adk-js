@@ -26,6 +26,8 @@ export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
+export {SqliteSessionService} from './sessions/sqlite_session_service.js';
+export type {GetUserStateRequest} from './sessions/sqlite_session_service.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
 export type {
   VertexAiCreateSessionRequest,
