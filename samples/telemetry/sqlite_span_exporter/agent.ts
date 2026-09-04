@@ -8,20 +8,27 @@
  * SqliteSpanExporter
  * ../../../docs/guides/telemetry/sqlite_span_exporter/index.md
  *
- * Persists this agent's OpenTelemetry spans to `adk_traces.db` in the working
- * directory, so the trace tree of a session survives a restart. Only the
- * `call_llm` span carries the session id, so the agent has to call a model for
- * the file to hold anything queryable.
+ * Persists this workflow's OpenTelemetry spans to `adk_traces.db` in the
+ * working directory, so the trace tree of a session survives a restart. The
+ * workflow invocation span carries `gen_ai.conversation.id`, which is what
+ * `getAllSpansForSession` resolves the session by; the node spans have no
+ * session attribute and come back because they share the trace.
  *
- * REQUIRES the optional SQLite driver and an API key. Set GEMINI_API_KEY, then:
+ * Run (offline, no API key). The SQLite driver is an optional peer:
  *   npm install @mikro-orm/sqlite
  *   npm run sample -- samples/telemetry/sqlite_span_exporter/agent.ts
  *
- * Send a turn, stop the process, and read the rows back:
+ * Send a turn, then type `exit`. The rows are already on disk:
  *   sqlite3 adk_traces.db 'select session_id, name from spans'
  */
 
-import {LlmAgent, maybeSetOtelProviders, SqliteSpanExporter} from '@google/adk';
+import {
+  maybeSetOtelProviders,
+  node,
+  NodeContext,
+  SqliteSpanExporter,
+  Workflow,
+} from '@google/adk';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 
 const exporter = new SqliteSpanExporter({dbPath: './adk_traces.db'});
@@ -31,8 +38,12 @@ const exporter = new SqliteSpanExporter({dbPath: './adk_traces.db'});
 // works too and writes fewer times.
 maybeSetOtelProviders([{spanProcessors: [new SimpleSpanProcessor(exporter)]}]);
 
-export const rootAgent = new LlmAgent({
-  name: 'traced_agent',
-  model: 'gemini-flash-latest',
-  instruction: 'Answer the user in one short sentence.',
+const shoutNode = node(
+  (_ctx: NodeContext, nodeInput: string) => nodeInput.trim().toUpperCase(),
+  {name: 'shout_node'},
+);
+
+export const rootAgent = new Workflow({
+  name: 'traced_workflow',
+  edges: [['START', shoutNode]],
 });
