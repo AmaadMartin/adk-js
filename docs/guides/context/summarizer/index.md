@@ -43,7 +43,6 @@ import {
   CompactedEvent,
   Event,
   LlmSummarizer,
-  TokenBasedContextCompactor,
 } from '@google/adk';
 
 const MIN_EVENTS_TO_SUMMARIZE = 4;
@@ -58,12 +57,6 @@ class BudgetAwareSummarizer implements BaseSummarizer {
     return this.delegate.summarize(events);
   }
 }
-
-const compactor = new TokenBasedContextCompactor({
-  tokenThreshold: 8000,
-  eventRetentionSize: 4,
-  summarizer: new BudgetAwareSummarizer(new LlmSummarizer({llm: myLlm})),
-});
 ```
 
 When `BudgetAwareSummarizer` returns `null`, the compactor appends nothing and

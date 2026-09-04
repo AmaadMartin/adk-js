@@ -153,11 +153,7 @@ export class LlmSummarizer implements BaseSummarizer {
       request,
       false,
     )) {
-      const parts = response.content?.parts;
-      if (!parts) {
-        continue;
-      }
-      for (const part of parts) {
+      for (const part of response.content?.parts ?? []) {
         if (part.text) {
           compactedContent += part.text;
         }

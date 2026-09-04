@@ -142,6 +142,28 @@ describe('LlmSummarizer', () => {
     );
   });
 
+  it('should keep the usage metadata of a chunk that carries no content', async () => {
+    const mockLlm = new MockLlm([
+      {content: {role: 'model', parts: [{text: 'Summary'}]}},
+      {usageMetadata: {promptTokenCount: 10, candidatesTokenCount: 5}},
+    ]);
+    const summarizer = new LlmSummarizer({llm: mockLlm});
+
+    const compactedEvent = await summarizer.summarize([
+      createEvent({
+        author: 'user',
+        timestamp: 1000,
+        content: {role: 'user', parts: [{text: 'Hello'}]},
+      }),
+    ]);
+
+    expect(compactedEvent).not.toBeNull();
+    expect(compactedEvent!.usageMetadata).toEqual({
+      promptTokenCount: 10,
+      candidatesTokenCount: 5,
+    });
+  });
+
   it('should render a tool call with no args and a tool response with no response', async () => {
     const mockLlm = new MockLlm([
       {content: {role: 'model', parts: [{text: 'Summary'}]}},
