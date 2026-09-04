@@ -413,6 +413,29 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     expect(plugin.name).toBe('bigquery_agent_analytics');
   });
 
+  it('drains a queued row when the event loop empties', async () => {
+    const plugin = makePlugin({flushOnRunEnd: false, batchSize: 100});
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {role: 'user', parts: [{text: 'hello'}]},
+    });
+    expect(fake.inserted).toHaveLength(0);
+    // The exit drain is the only thing that can write the row here: nothing
+    // below calls flush() or shutdown().
+    process.emit('beforeExit', 0);
+    await vi.waitFor(() => {
+      expect(fake.inserted).toHaveLength(1);
+    });
+  });
+
+  it('keeps one exit listener however many plugins are live', async () => {
+    const before = process.listenerCount('beforeExit');
+    const plugins = [makePlugin(), makePlugin(), makePlugin()];
+    expect(process.listenerCount('beforeExit')).toBe(before + 1);
+    await Promise.all(plugins.map((plugin) => plugin.shutdown()));
+    expect(process.listenerCount('beforeExit')).toBe(before);
+  });
+
   it('has no side effects at all when disabled', async () => {
     const plugin = makePlugin({enabled: false});
     await runTurn(plugin, makeInvocationContext());
