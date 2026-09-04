@@ -148,13 +148,37 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {PrebuiltMetrics} from './evaluation/eval_metrics.js';
+export type {
+  Interval,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+} from './evaluation/eval_metrics.js';
+export {
+  FinalResponseMatchV2EvaluatorMetricInfoProvider,
+  HallucinationsV1EvaluatorMetricInfoProvider,
+  MultiTurnTaskSuccessV1MetricInfoProvider,
+  MultiTurnToolUseQualityV1MetricInfoProvider,
+  MultiTurnTrajectoryQualityV1MetricInfoProvider,
+  PerTurnUserSimulatorQualityV1MetricInfoProvider,
+  ResponseEvaluatorMetricInfoProvider,
+  RubricBasedFinalResponseQualityV1EvaluatorMetricInfoProvider,
+  RubricBasedMultiTurnTrajectoryMetricInfoProvider,
+  RubricBasedToolUseV1EvaluatorMetricInfoProvider,
+  SafetyEvaluatorV1MetricInfoProvider,
+  TrajectoryEvaluatorMetricInfoProvider,
+} from './evaluation/metric_info_providers.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
