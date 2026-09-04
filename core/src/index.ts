@@ -48,3 +48,8 @@ export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
 // of this barrel.
 export * from './tools/mcp/index.js';
+// The Pub/Sub tools are deliberately NOT re-exported here. They reach
+// `@google-cloud/pubsub` through a literal `import()`, which a bundler
+// follows, so re-exporting them would pull that peer into every bundle.
+// Import them from `@google/adk/tools/pubsub`, which nothing else in this
+// barrel reaches.
