@@ -29,6 +29,8 @@ import {
 } from '@google/adk';
 import {afterEach, describe, expect, it} from 'vitest';
 
+import {resetLogger, setLogger} from '../../src/utils/logger.js';
+
 /** Records every run error the manager reported to it. */
 class ErrorTrackingPlugin extends BasePlugin {
   readonly runErrors: Array<{
@@ -76,9 +78,26 @@ function createContext(): InvocationContext {
   });
 }
 
+/** Collects the messages a run writes at error level. */
+function recordErrors(): string[] {
+  const messages: string[] = [];
+  setLogger({
+    setLogLevel: () => {},
+    log: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: (...args: unknown[]) => {
+      messages.push(args.map((a) => String(a)).join(' '));
+    },
+  });
+  return messages;
+}
+
 describe('PluginManager.runOnRunErrorCallback', () => {
   afterEach(() => {
     notifyOrder.length = 0;
+    resetLogger();
   });
 
   it('notifies every registered plugin', async () => {
@@ -143,6 +162,20 @@ describe('PluginManager.runOnRunErrorCallback', () => {
 
     expect(first.notified).toBe(true);
     expect(second.notified).toBe(true);
+  });
+
+  it('logs the plugin that failed instead of rejecting', async () => {
+    const manager = new PluginManager([new FailingPlugin('p1')]);
+    const errors = recordErrors();
+
+    await manager.runOnRunErrorCallback({
+      invocationContext: createContext(),
+      error: new Error('app crash'),
+    });
+
+    expect(errors).toEqual([
+      "Error in plugin 'p1' during 'onRunErrorCallback' callback: plugin boom",
+    ]);
   });
 
   it('resolves for a plugin that does not override the hook', async () => {

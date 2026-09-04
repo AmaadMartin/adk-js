@@ -207,4 +207,40 @@ describe('PluginManager.setSkipClosingPlugins', () => {
 
     await expect(manager.close()).resolves.toBeUndefined();
   });
+
+  it('leaves every plugin open once skipping is set', async () => {
+    const borrowed = new ClosablePlugin('borrowed');
+    const manager = new PluginManager([borrowed]);
+
+    manager.setSkipClosingPlugins(true);
+
+    await expect(manager.close()).resolves.toBeUndefined();
+    expect(borrowed.closeCount).toBe(0);
+    expect(closeOrder).toEqual([]);
+  });
+
+  it('starts no close timeout while skipping', async () => {
+    const stuck = new ClosablePlugin('stuck', 'hang');
+    const manager = new PluginManager([stuck], 2);
+    manager.setSkipClosingPlugins(true);
+    // Registration logs, which itself schedules a timer, so the fake clock
+    // only starts once the manager is built.
+    vi.useFakeTimers();
+
+    await manager.close();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(stuck.closeCount).toBe(0);
+  });
+
+  it('closes the plugins again once skipping is turned off', async () => {
+    const borrowed = new ClosablePlugin('borrowed');
+    const manager = new PluginManager([borrowed]);
+
+    manager.setSkipClosingPlugins(true);
+    manager.setSkipClosingPlugins(false);
+    await manager.close();
+
+    expect(borrowed.closeCount).toBe(1);
+  });
 });

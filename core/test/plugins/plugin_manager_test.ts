@@ -306,6 +306,9 @@ describe('PluginManager', () => {
 
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).cause).toBe(originalException);
+    expect((caught as Error).message).toBe(
+      "Error in plugin 'plugin1' during 'beforeRunCallback' callback: Error: Something went wrong inside the plugin!",
+    );
     expect(formatError(caught)).toContain(
       'Something went wrong inside the plugin!',
     );

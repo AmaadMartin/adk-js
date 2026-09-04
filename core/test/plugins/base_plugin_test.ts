@@ -163,6 +163,17 @@ describe('BasePlugin', () => {
     await expect(plugin.close()).resolves.toBeUndefined();
   });
 
+  it('default onRunErrorCallback should resolve to undefined', async () => {
+    const plugin = new TestablePlugin('run_error_plugin');
+
+    await expect(
+      plugin.onRunErrorCallback({
+        invocationContext: mockInvocationContext,
+        error: mockError,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('default callbacks should return undefined', async () => {
     const plugin = new TestablePlugin('default_plugin');
 
