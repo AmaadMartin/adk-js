@@ -8,12 +8,19 @@
  * The ADK evaluation module (a parity port of `google/adk-python`'s
  * `google/adk/evaluation`). It currently covers the eval case data model, the
  * accessors that read a recorded trajectory, the contract every metric
- * evaluator implements, and the `ResponseEvaluator`, `LlmAsJudge`,
+ * evaluator implements, the `ResponseEvaluator`, `LlmAsJudge`,
  * `FinalResponseMatchV2Evaluator` and `SafetyEvaluatorV1` evaluators that
- * stand on it.
+ * stand on it, and the user simulation half under `./simulation`.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
+export {evalModel, optionalField} from './common.js';
+export type {
+  EvalDumpOptions,
+  EvalModel,
+  EvalModelOptions,
+  ExtraKeysPolicy,
+} from './common.js';
 export type {ConversationScenario} from './conversation_scenarios.js';
 export {
   getAllToolCalls,
@@ -92,10 +99,29 @@ export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';
 export type {RougeScore} from './rouge_scorer.js';
 export {SafetyEvaluatorV1} from './safety_evaluator.js';
 export type {SafetyEvaluatorV1Options} from './safety_evaluator.js';
+export {StaticUserSimulator} from './simulation/static_user_simulator.js';
+export {
+  BASE_USER_SIMULATOR_CONFIG_NAME,
+  UserSimulatorStatus,
+  getRegisteredUserSimulator,
+  parseBaseUserSimulatorConfig,
+  registerUserSimulator,
+  registeredUserSimulatorTypes,
+  unpackUserSimulatorConfig,
+  unregisterUserSimulator,
+  validateNextUserMessage,
+} from './simulation/user_simulator.js';
+export type {
+  BaseUserSimulatorConfig,
+  NextUserMessage,
+  UserSimulator,
+  UserSimulatorFactory,
+} from './simulation/user_simulator.js';
 export type {
   UserBehavior,
   UserPersona,
 } from './simulation/user_simulator_personas.js';
+export {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
 export {
   MultiTurnVertexAiEvalFacade,
   SingleTurnVertexAiEvalFacade,

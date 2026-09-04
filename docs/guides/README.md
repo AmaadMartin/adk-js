@@ -120,7 +120,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [TrajectoryEvaluator](evaluation/tool_trajectory/index.md) - Scoring the tool
   calls an agent made against a golden trajectory.
 - [Choosing the user simulator](evaluation/user_simulator/index.md) - Replaying
-  an eval case's static conversation, and driving a case that has none.
+  an eval case's static conversation, and dispatching a conversation scenario
+  to a registered simulator.
 - [Vertex AI eval facades](evaluation/vertex_ai_eval_facade/index.md) - Scoring one invocation, or a whole conversation, with a metric of the Vertex AI Gen AI evaluation service.
 
 ### Events

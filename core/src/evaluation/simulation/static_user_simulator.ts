@@ -6,6 +6,7 @@
 
 import {Event} from '../../events/event.js';
 import {Invocation} from '../eval_case.js';
+import {Evaluator} from '../evaluator.js';
 import {
   NextUserMessage,
   UserSimulator,
@@ -42,5 +43,13 @@ export class StaticUserSimulator implements UserSimulator {
     const userMessage = this.staticConversation[this.invocationIdx].userContent;
     this.invocationIdx++;
     return {status: UserSimulatorStatus.SUCCESS, userMessage};
+  }
+
+  /**
+   * Returns `undefined`: a replayed script cannot deviate, so there is nothing
+   * to score.
+   */
+  getSimulationEvaluator(): Evaluator | undefined {
+    return undefined;
   }
 }
