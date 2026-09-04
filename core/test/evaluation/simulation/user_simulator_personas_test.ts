@@ -7,8 +7,12 @@
 /**
  * Ported from adk-python
  * `tests/unittests/evaluation/simulation/test_user_simulator_personas.py`
- * at ref a3bd1115. The test names are kept verbatim so a reader can find the
- * original.
+ * at ref a3bd1115. That file defines eight tests and all eight are here, with
+ * their names kept verbatim so a reader can find the original. Each asserts
+ * what the original asserts.
+ *
+ * Tests that adk-js adds are in the sibling
+ * `user_simulator_personas_own_test.ts`.
  */
 
 import {
