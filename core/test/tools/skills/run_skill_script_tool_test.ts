@@ -12,11 +12,14 @@ import {
   ExecuteCodeParams,
   File,
   FileContentEncoding,
+  InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  PluginManager,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
+  createSession,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -335,10 +338,13 @@ describe('RunSkillScriptTool payload size', () => {
     const result = await new RunSkillScriptTool(toolset).runAsync({
       args: {skill_name: 'big-skill', script_path: 'scripts/setup.js'},
       toolContext: new Context({
-        invocationContext: {
-          session: {state: {}},
-          agent: {name: 'test-agent'},
-        } as unknown as InvocationContext,
+        invocationContext: new InvocationContext({
+          invocationId: 'payload-invocation',
+          agent: new LlmAgent({name: 'test-agent', model: 'gemini-2.0-flash'}),
+          session: createSession({id: 's', appName: 'app', userId: 'u'}),
+          sessionService: new InMemorySessionService(),
+          pluginManager: new PluginManager([]),
+        }),
       }),
     });
 
