@@ -39,6 +39,20 @@ const SANITIZE_BUDGET_EXCEEDED = '[SANITIZE_BUDGET_EXCEEDED]';
 const REDACTED = '[REDACTED]';
 
 /**
+ * Replaces a container-shaped string this module cannot prove free of
+ * credentials: one that will not parse, one past an inspection ceiling, or one
+ * nested past {@link MAX_JSON_NESTING_DEPTH}.
+ */
+export const UNPARSEABLE_JSON_BLOB = '[UNPARSEABLE_JSON_BLOB]';
+
+/**
+ * Replaces free text whose decoded form carries a credential. Decoding is a
+ * detection step only, so the credential cannot be replaced in place without
+ * rewriting text the caller supplied; the whole string goes instead.
+ */
+export const REDACTED_SENSITIVE_TEXT = '[REDACTED_SENSITIVE_TEXT]';
+
+/**
  * Longest string this module parses as JSON. A longer one takes the free-text
  * pass instead, which bounds the work a single adversarial payload can cause.
  */
@@ -57,6 +71,13 @@ const MAX_SANITIZE_DEPTH = 50;
  * million-element array otherwise burns unbounded synchronous time.
  */
 const MAX_SANITIZE_NODES = 100_000;
+
+/**
+ * Deepest JSON structure `JSON.parse` is allowed to materialize. The limit is
+ * checked by a linear scan of the text, so an adversarially nested blob is
+ * rejected before the parser builds the graph it describes.
+ */
+const MAX_JSON_NESTING_DEPTH = 1_000;
 
 /**
  * Keys whose values are credentials, written in snake_case.
@@ -270,6 +291,110 @@ function redactKeyValuePairs(text: string): string {
   return result + text.slice(copiedTo);
 }
 
+/** Highest code point the canonicalizer decodes an escape to. */
+const MAX_ASCII_CODE_POINT = 0x7f;
+
+/** One hexadecimal digit, anchored so a longer run does not match. */
+const HEX_DIGITS_PATTERN = /^[0-9a-fA-F]+$/;
+
+/**
+ * The escape shapes {@link canonicalizeAsciiEscapes} decodes, longest first so
+ * that `\uXXXX` is preferred over the `%XX` its own tail could look like.
+ */
+const ASCII_ESCAPE_SHAPES: ReadonlyArray<{
+  introducer: string;
+  marker?: string;
+  digits: number;
+}> = [
+  {introducer: '\\', marker: 'u', digits: 4},
+  {introducer: '\\', marker: 'x', digits: 2},
+  {introducer: '%', digits: 2},
+];
+
+/** An escape sequence sitting at the end of the decoder's output. */
+interface TrailingEscape {
+  /** Where the sequence starts, so the decoder can replace it in place. */
+  start: number;
+  /** The code point the sequence denotes. */
+  code: number;
+}
+
+/**
+ * Returns the escape sequence ending at the last character of `output`, or
+ * undefined when the tail is not one.
+ */
+function readTrailingEscape(
+  output: readonly string[],
+): TrailingEscape | undefined {
+  for (const {introducer, marker, digits} of ASCII_ESCAPE_SHAPES) {
+    const prefixLength = marker === undefined ? 1 : 2;
+    const start = output.length - prefixLength - digits;
+    if (start < 0 || output[start] !== introducer) {
+      continue;
+    }
+    if (marker !== undefined && output[start + 1].toLowerCase() !== marker) {
+      continue;
+    }
+    const hex = output.slice(start + prefixLength).join('');
+    if (!HEX_DIGITS_PATTERN.test(hex)) {
+      continue;
+    }
+    return {start, code: parseInt(hex, 16)};
+  }
+  return undefined;
+}
+
+/**
+ * Decodes the `\uXXXX`, `\xXX` and percent escapes in `text` that stand for an
+ * ASCII character.
+ *
+ * A credential construct survives pattern redaction by spelling its own key in
+ * escapes: `access%5Ftoken=SECRET` carries no literal `access_token`. Decoding
+ * exposes the construct so a caller can detect it.
+ *
+ * The result is a detection form, not a replacement: an escape may decode to
+ * another escape introducer, so one source character has no single canonical
+ * counterpart and a caller cannot map a redaction back onto the original.
+ * Callers therefore keep the original text and discard it whole.
+ *
+ * Each decoded character is pushed onto the output and re-examined there, so
+ * `%255F` and `\u005cu005f` resolve in the one pass that reads each input
+ * character once.
+ *
+ * @param text The text to decode.
+ * @return The decoded form, equal to `text` when it holds no ASCII escape.
+ */
+export function canonicalizeAsciiEscapes(text: string): string {
+  const output: string[] = [];
+  for (const char of text) {
+    output.push(char);
+    for (;;) {
+      const escape = readTrailingEscape(output);
+      if (escape === undefined || escape.code > MAX_ASCII_CODE_POINT) {
+        break;
+      }
+      output.length = escape.start;
+      output.push(String.fromCharCode(escape.code));
+    }
+  }
+  return output.join('');
+}
+
+/**
+ * Returns whether `text` carries a credential construct, literally or behind
+ * ASCII escapes.
+ *
+ * @param text The text to classify.
+ * @return True when redaction would change either form of `text`.
+ */
+export function containsCredentialConstruct(text: string): boolean {
+  if (redactFreeText(text) !== text) {
+    return true;
+  }
+  const canonical = canonicalizeAsciiEscapes(text);
+  return canonical !== text && redactFreeText(canonical) !== canonical;
+}
+
 /**
  * Returns `text` with its credentials replaced and its length bounded.
  *
@@ -283,6 +408,11 @@ function redactKeyValuePairs(text: string): string {
  * have cut in half is already gone. Only {@link MAX_INSPECT_CHARS} characters
  * are inspected, which bounds the work regardless of the caller's limit.
  *
+ * A credential spelled in ASCII escapes survives pattern redaction, and
+ * decoding it cannot be undone character by character. Such text is replaced
+ * whole by {@link REDACTED_SENSITIVE_TEXT}. Text that decodes to nothing new —
+ * a Windows path, a string the decoder cannot read — comes back byte-identical.
+ *
  * @param text The free text to sanitize.
  * @param maxLength Maximum length of the result, or -1 for no limit.
  * @return The sanitized text and whether anything was cut.
@@ -292,7 +422,12 @@ export function sanitizeErrorText(
   maxLength: number,
 ): {text: string; truncated: boolean} {
   const inspected = text.slice(0, MAX_INSPECT_CHARS);
-  const bounded = truncateText(redactFreeText(inspected), maxLength);
+  const redacted = redactFreeText(inspected);
+  const canonical = canonicalizeAsciiEscapes(redacted);
+  if (canonical !== redacted && containsCredentialConstruct(canonical)) {
+    return {text: REDACTED_SENSITIVE_TEXT, truncated: true};
+  }
+  const bounded = truncateText(redacted, maxLength);
   return {
     text: bounded.text,
     truncated: bounded.truncated || inspected.length < text.length,
@@ -356,47 +491,107 @@ function sanitizeRecord(
 }
 
 /**
- * Parses `text` as a JSON object or array, or returns undefined when it is not
- * one. Text past {@link MAX_INSPECT_CHARS} is not parsed, so one adversarial
- * payload cannot buy unbounded parse time.
+ * Returns whether the JSON structure in `text` nests deeper than
+ * {@link MAX_JSON_NESTING_DEPTH}.
+ *
+ * A bracket inside a JSON string is payload rather than structure, so the scan
+ * tracks string and escape state. It reads each character once and stops at
+ * the first level past the limit, which bounds the work a blob can cause
+ * before `JSON.parse` would materialize the graph it describes.
+ *
+ * @param text The JSON text to measure.
+ * @return True when the text nests too deeply to parse.
  */
-function parseJsonStructure(text: string): {value: unknown} | undefined {
-  if (!isJsonShaped(text) || text.length > MAX_INSPECT_CHARS) {
-    return undefined;
+function jsonNestingExceedsLimit(text: string): boolean {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === '{' || char === '[') {
+      depth += 1;
+      if (depth > MAX_JSON_NESTING_DEPTH) {
+        return true;
+      }
+    } else if (char === '}' || char === ']') {
+      depth -= 1;
+    }
+  }
+  return false;
+}
+
+/** What {@link classifyJsonBlob} made of a string leaf. */
+type JsonBlob =
+  /** Not shaped like a JSON container; the caller takes the free-text pass. */
+  | {kind: 'free-text'}
+  /** Shaped like one but not provably credential-free; fail closed. */
+  | {kind: 'unverifiable'}
+  /** Parsed, so the caller can walk it like any other structure. */
+  | {kind: 'parsed'; value: unknown};
+
+/**
+ * Decides how to treat a string leaf that might be an encoded JSON container.
+ *
+ * A credential often arrives as an opaque JSON string, where walking the
+ * enclosing object cannot see it. Such a string is parsed so the walk reaches
+ * its keys. When it cannot be parsed the sanitizer refuses to publish it:
+ * inspecting the raw text instead is bypassable, because a JSON string escape
+ * spells `access_token` without those characters ever appearing.
+ *
+ * The two ceilings run before `JSON.parse`, which is synchronous and would
+ * otherwise allocate a graph as large as an adversarial blob describes.
+ */
+function classifyJsonBlob(text: string): JsonBlob {
+  if (!isJsonShaped(text)) {
+    return {kind: 'free-text'};
+  }
+  if (text.length > MAX_INSPECT_CHARS || jsonNestingExceedsLimit(text)) {
+    return {kind: 'unverifiable'};
   }
   try {
-    return {value: JSON.parse(text) as unknown};
+    return {kind: 'parsed', value: JSON.parse(text) as unknown};
   } catch {
-    return undefined;
+    return {kind: 'unverifiable'};
   }
 }
 
 /**
  * Sanitizes a string leaf.
  *
- * A credential often arrives as an opaque JSON string — a tool result, a
- * serialized request body — where walking the enclosing object cannot see it.
- * Such a string is parsed, walked like any other structure, and re-serialized.
+ * A parsed container is walked like any other structure and re-serialized.
  * Re-serialization is unconditional because `JSON.parse` keeps the last of a
  * duplicate key: a blob carrying the secret under an earlier copy of the key
  * would otherwise pass through as its own raw text.
  *
- * Every other string takes the free-text pass, which redacts by pattern. That
- * includes a string that merely opens with a bracket, because model output and
- * tool arguments are full of them: a log line, a markdown link and a dict repr
- * all start that way and none of them parse.
+ * A container-shaped string that {@link classifyJsonBlob} cannot verify is
+ * replaced whole. Every other string takes the free-text pass, which redacts
+ * by pattern.
  */
 function sanitizeStringLeaf(
   text: string,
   state: SanitizeState,
   depth: number,
 ): SanitizeResult {
-  const parsed = parseJsonStructure(text);
-  if (parsed === undefined) {
+  const blob = classifyJsonBlob(text);
+  if (blob.kind === 'free-text') {
     const sanitized = sanitizeErrorText(text, state.maxLength);
     return {value: sanitized.text, truncated: sanitized.truncated};
   }
-  const walked = sanitizeValue(parsed.value, state, depth + 1);
+  if (blob.kind === 'unverifiable') {
+    return {value: UNPARSEABLE_JSON_BLOB, truncated: true};
+  }
+  const walked = sanitizeValue(blob.value, state, depth + 1);
   const bounded = truncateText(JSON.stringify(walked.value), state.maxLength);
   return {
     value: bounded.text,
