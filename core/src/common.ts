@@ -290,6 +290,11 @@ export type {ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
+  DATA_AGENT_DEFAULT_SCOPE,
+  DATA_AGENT_TOKEN_CACHE_KEY,
+  DataAgentCredentialsConfig,
+} from './tools/data_agent/data_agent_credentials.js';
+export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
