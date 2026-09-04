@@ -6,6 +6,7 @@
 
 import {
   DatabaseSessionService,
+  InMemoryMemoryService,
   InMemorySessionService,
   LogLevel,
   setLogLevel,
@@ -257,6 +258,38 @@ describe('CLI Entrypoint', () => {
 
       const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.sessionService).toBeInstanceOf(InMemorySessionService);
+    });
+
+    it('builds the memory service --memory_service_uri names', async () => {
+      await parse([
+        'api_server',
+        agentsDir,
+        '--memory_service_uri',
+        'memory://',
+      ]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
+    it('refuses a memory URI no factory claims', async () => {
+      // Throwing from the `process.exit` stub both keeps the worker alive and
+      // gives the mock the `never` return type its signature declares.
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+
+      await expect(
+        parse(['api_server', agentsDir, '--memory_service_uri', 'nope://x']),
+      ).rejects.toThrowError('process.exit');
+      expect(AdkApiServer).not.toHaveBeenCalled();
+    });
+
+    it('leaves the memory service unset when no URI is given', async () => {
+      await parse(['api_server', agentsDir]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeUndefined();
     });
 
     it('falls back to the core resolver for a scheme the registry does not claim', async () => {

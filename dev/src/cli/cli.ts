@@ -7,6 +7,7 @@
 
 import {
   BaseArtifactService,
+  BaseMemoryService,
   BaseSessionService,
   LogLevel,
   getArtifactServiceFromUri,
@@ -26,7 +27,11 @@ import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
-import {getServiceRegistry, loadServicesModule} from './service_registry.js';
+import {
+  getServiceRegistry,
+  loadServicesModule,
+  parseUriScheme,
+} from './service_registry.js';
 
 dotenv.config({quiet: true});
 
@@ -79,6 +84,30 @@ function getArtifactServiceFromOptions(
     getServiceRegistry().createArtifactService(uri, {agentsDir}) ??
     getArtifactServiceFromUri(uri)
   );
+}
+
+/**
+ * There is no core resolver to fall back to for a memory URI, so an unclaimed
+ * scheme is an error rather than a silent downgrade to the in-memory default.
+ * The message names the scheme only: a custom URI may carry credentials.
+ */
+function getMemoryServiceFromOptions(
+  options: {
+    memory_service_uri?: string;
+  },
+  agentsDir?: string,
+): BaseMemoryService | undefined {
+  const uri = options['memory_service_uri'];
+  if (!uri) {
+    return undefined;
+  }
+  const service = getServiceRegistry().createMemoryService(uri, {agentsDir});
+  if (!service) {
+    throw new Error(
+      `Unsupported memory service URI scheme: '${parseUriScheme(uri) ?? ''}'`,
+    );
+  }
+  return service;
 }
 
 function getAgentFileOptions(options: {
@@ -160,6 +189,10 @@ const SESSION_SERVICE_URI_OPTION = new Option(
 const ARTIFACT_SERVICE_URI_OPTION = new Option(
   '--artifact_service_uri <string>',
   'Optional. The URI of the artifact service. Supported URIs: gs://<bucket name> for GCS artifact service.',
+);
+const MEMORY_SERVICE_URI_OPTION = new Option(
+  '--memory_service_uri <string>',
+  'Optional. The URI of the memory service. Supported URIs: memory:// for in-memory memory service, agentengine://<resource id> for Vertex AI Memory Bank.',
 );
 const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
@@ -257,6 +290,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -287,6 +321,10 @@ export function createProgram(): Command {
             options,
             resolvedAgentsDir,
           ),
+          memoryService: getMemoryServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -313,6 +351,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -340,6 +379,10 @@ export function createProgram(): Command {
             resolvedAgentsDir,
           ),
           artifactService: getArtifactServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
+          memoryService: getMemoryServiceFromOptions(
             options,
             resolvedAgentsDir,
           ),
@@ -419,6 +462,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -438,6 +482,7 @@ export function createProgram(): Command {
           sessionId: options['session_id'],
           sessionService: getSessionServiceFromOptions(options, agentsDir),
           artifactService: getArtifactServiceFromOptions(options, agentsDir),
+          memoryService: getMemoryServiceFromOptions(options, agentsDir),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           reloadAgents: getBoolean(options['reload_agents']),

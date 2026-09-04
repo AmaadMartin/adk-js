@@ -30,7 +30,6 @@ export const SERVICE_METHODS: Record<ServiceType, readonly string[]> = {
     'listVersions',
   ],
   'memory': ['addSessionToMemory', 'searchMemory'],
-  'task_store': ['save', 'load'],
 };
 
 export interface ServiceClassSourceOptions {

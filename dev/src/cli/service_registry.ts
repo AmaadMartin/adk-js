@@ -5,42 +5,18 @@
  */
 
 /**
- * ADK service registry.
+ * ADK service registry: URI scheme -> the service that serves it.
  *
- * The registry maps a URI scheme to a factory that builds a session, artifact,
- * memory or A2A task store service. ADK seeds it with the backends it ships
- * with. You can add a scheme of your own in two ways.
+ * A scheme is added from the agent directory, either declaratively in
+ * `services.yaml` or imperatively in `services.js`. Both files may be present:
+ * the YAML file is processed first, so a scheme declared in both ends up bound
+ * to the factory `services.js` registers.
  *
- * 1. Declare it in `services.yaml` (or `services.yml`) next to your agent:
- *
- * ```yaml
- * services:
- *   - scheme: mysession
- *     type: session
- *     class: '@acme/adk-redis#RedisSessionService'
- * ```
- *
- * 2. Register it in `services.js` next to your agent, when the backend needs
- *    more than `new MyService({uri})`:
- *
- * ```js
- * import {getServiceRegistry} from '@google/adk-devtools';
- * import {MySessionService} from './my_session_service.js';
- *
- * getServiceRegistry().registerSessionService(
- *   'mysession',
- *   (uri) => new MySessionService(new URL(uri).host),
- * );
- * ```
- *
- * Both files may be present. The YAML file is processed first, then
- * `services.js`, so a scheme declared in both ends up bound to the factory
- * `services.js` registers.
+ * See `docs/guides/apps/service_registry/index.md`.
  *
  * Ported from adk-python `src/google/adk/cli/service_registry.py`.
  */
 
-import {InMemoryTaskStore, TaskStore} from '@a2a-js/sdk/server';
 import {
   BaseArtifactService,
   BaseMemoryService,
@@ -76,21 +52,13 @@ const URI_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):/;
 
 const URI_AUTHORITY_PREFIX = '//';
 
-/**
- * Everything a factory receives besides the URI.
- *
- * adk-python passes these as `**kwargs`. A named interface keeps them typed,
- * and `extra` is a field rather than an index signature so that a typo in a
- * known option stays a compile error.
- */
+/** Everything a factory receives besides the URI. */
 export interface ServiceFactoryOptions {
   /**
    * The agent directory. Factories that need a Google Cloud project and
    * location read `<agentsDir>/.env` before the ambient environment.
    */
   agentsDir?: string;
-  /** Backend-specific options. Built-in factories do not accept any. */
-  extra?: Readonly<Record<string, unknown>>;
 }
 
 /** Builds one service from the URI that named it. */
@@ -100,7 +68,7 @@ export type ServiceFactory<T> = (
 ) => T;
 
 /** The service kinds a `services.yaml` entry can declare. */
-export type ServiceType = 'session' | 'artifact' | 'memory' | 'task_store';
+export type ServiceType = 'session' | 'artifact' | 'memory';
 
 /** The single argument a class declared in `services.yaml` is constructed with. */
 export interface DeclaredServiceOptions extends ServiceFactoryOptions {
@@ -127,11 +95,6 @@ export class ServiceRegistry {
     string,
     ServiceFactory<BaseMemoryService>
   >();
-  private readonly taskStoreFactories = new Map<
-    string,
-    ServiceFactory<TaskStore>
-  >();
-
   /**
    * Binds a session service URI scheme to a factory, replacing any factory
    * already bound to that scheme.
@@ -159,14 +122,6 @@ export class ServiceRegistry {
     this.memoryFactories.set(scheme, factory);
   }
 
-  /** Binds an A2A task store URI scheme to a factory. */
-  registerTaskStoreService(
-    scheme: string,
-    factory: ServiceFactory<TaskStore>,
-  ): void {
-    this.taskStoreFactories.set(scheme, factory);
-  }
-
   /**
    * Builds the session service for `uri`, or returns `undefined` when no
    * factory claims its scheme so the caller can fall back.
@@ -192,31 +147,6 @@ export class ServiceRegistry {
     options?: ServiceFactoryOptions,
   ): BaseMemoryService | undefined {
     return createFromFactories(this.memoryFactories, uri, options);
-  }
-
-  /**
-   * Builds the A2A task store for `uri`.
-   *
-   * @throws If no factory claims the scheme. A task store has no fallback
-   *   resolver, so an unknown scheme is an error rather than a miss.
-   */
-  createTaskStoreService(
-    uri: string,
-    options?: ServiceFactoryOptions,
-  ): TaskStore {
-    const taskStore = createFromFactories(
-      this.taskStoreFactories,
-      uri,
-      options,
-    );
-    if (taskStore) {
-      return taskStore;
-    }
-    const supported = [...this.taskStoreFactories.keys()].sort().join(', ');
-    throw new Error(
-      `Unsupported A2A task store URI scheme: '${parseUriScheme(uri) ?? ''}'.` +
-        ` Supported schemes: ${supported}`,
-    );
   }
 }
 
@@ -253,8 +183,6 @@ export function registerBuiltinServices(registry: ServiceRegistry): void {
 
   registry.registerMemoryService('memory', createInMemoryMemoryService);
   registry.registerMemoryService('agentengine', createAgentEngineMemoryService);
-
-  registry.registerTaskStoreService('memory', createInMemoryTaskStoreService);
 }
 
 /**
@@ -320,7 +248,7 @@ function createFromFactories<T>(
 }
 
 /** Returns the lower-cased scheme of `uri`, or `undefined` if it has none. */
-function parseUriScheme(uri: string): string | undefined {
+export function parseUriScheme(uri: string): string | undefined {
   return URI_SCHEME_PATTERN.exec(uri)?.[1].toLowerCase();
 }
 
@@ -349,15 +277,11 @@ function createDatabaseSessionService(uri: string): BaseSessionService {
   return new DatabaseSessionService(uri);
 }
 
-function createSqliteSessionService(
-  uri: string,
-  options?: ServiceFactoryOptions,
-): BaseSessionService {
+function createSqliteSessionService(uri: string): BaseSessionService {
   const {authority, path: dbPath} = splitUriAuthority(uri);
   if (!authority && !dbPath) {
     return createInMemorySessionService();
   }
-  warnIgnoredOptions('DatabaseSessionService', options);
   return new DatabaseSessionService(uri);
 }
 
@@ -374,11 +298,7 @@ function createInMemoryArtifactService(): BaseArtifactService {
   return new InMemoryArtifactService();
 }
 
-function createGcsArtifactService(
-  uri: string,
-  options?: ServiceFactoryOptions,
-): BaseArtifactService {
-  warnIgnoredOptions('GcsArtifactService', options);
+function createGcsArtifactService(uri: string): BaseArtifactService {
   return new GcsArtifactService(splitUriAuthority(uri).authority);
 }
 
@@ -397,10 +317,6 @@ function createFileArtifactService(uri: string): BaseArtifactService {
 
 function createInMemoryMemoryService(): BaseMemoryService {
   return new InMemoryMemoryService();
-}
-
-function createInMemoryTaskStoreService(): TaskStore {
-  return new InMemoryTaskStore();
 }
 
 function createAgentEngineMemoryService(
@@ -474,26 +390,6 @@ function loadGcpConfig(
   return {projectId, location};
 }
 
-/**
- * Warns that a built-in factory drops `extra`.
- *
- * A built-in factory forwards only what its adk-js constructor declares, so an
- * unrecognised option would otherwise disappear without a trace. Register your
- * own factory for the scheme when you need to pass backend options.
- */
-function warnIgnoredOptions(
-  serviceName: string,
-  options?: ServiceFactoryOptions,
-): void {
-  const ignored = Object.keys(options?.extra ?? {});
-  if (ignored.length > 0) {
-    logger.warn(
-      `${serviceName} does not support additional options.` +
-        ` The following parameters will be ignored: ${ignored.join(', ')}`,
-    );
-  }
-}
-
 async function registerServicesFromYamlConfig(
   config: unknown,
   registry: ServiceRegistry,
@@ -549,12 +445,6 @@ function registerDeclaredService(
         declaredFactory(constructor, classPath, 'memory', isMemoryService),
       );
       break;
-    case 'task_store':
-      registry.registerTaskStoreService(
-        scheme,
-        declaredFactory(constructor, classPath, 'task_store', isTaskStore),
-      );
-      break;
     default:
       logger.warn(`Unknown service type in YAML: ${serviceType}`);
   }
@@ -574,11 +464,7 @@ function declaredFactory<T>(
   isService: (value: unknown) => value is T,
 ): ServiceFactory<T> {
   return (uri, options) => {
-    const service = new constructor({
-      uri,
-      agentsDir: options?.agentsDir,
-      extra: options?.extra,
-    });
+    const service = new constructor({uri, agentsDir: options?.agentsDir});
     if (!isService(service)) {
       throw new Error(
         `Class ${classPath} declared for service type '${serviceType}' does not implement it.`,
@@ -698,10 +584,6 @@ function isArtifactService(value: unknown): value is BaseArtifactService {
 
 function isMemoryService(value: unknown): value is BaseMemoryService {
   return hasMethods(value, ['addSessionToMemory', 'searchMemory']);
-}
-
-function isTaskStore(value: unknown): value is TaskStore {
-  return hasMethods(value, ['save', 'load']);
 }
 
 function toError(value: unknown): Error {

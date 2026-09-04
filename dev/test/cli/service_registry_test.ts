@@ -11,7 +11,6 @@
  * in the pull request body.
  */
 
-import {InMemoryTaskStore} from '@a2a-js/sdk/server';
 import {
   BaseArtifactService,
   BaseMemoryService,
@@ -25,22 +24,13 @@ import {
   VertexAiMemoryBankService,
   VertexAiSessionService,
 } from '@google/adk';
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  MockInstance,
-  vi,
-} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   registerBuiltinServices,
   ServiceFactory,
   ServiceFactoryOptions,
   ServiceRegistry,
 } from '../../src/cli/service_registry.js';
-import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('@google/adk', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/adk')>();
@@ -111,11 +101,8 @@ function assertRoutesFullUri<T>(
 }
 
 describe('ServiceRegistry', () => {
-  let warn: MockInstance<AdkLogger['warn']>;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    warn = vi.spyOn(AdkLogger.prototype, 'warn').mockImplementation(() => {});
     delete process.env['GOOGLE_CLOUD_PROJECT'];
     delete process.env['GOOGLE_CLOUD_LOCATION'];
   });
@@ -135,26 +122,10 @@ describe('ServiceRegistry', () => {
       expect(mockedDatabaseSession).toHaveBeenCalledWith('sqlite:///test.db');
     });
 
-    it('test_create_session_service_sqlite_ignores_unsupported_kwargs', () => {
-      builtinRegistry().createSessionService('sqlite:///test.db', {
-        agentsDir: 'foo',
-        extra: {poolSize: 10},
-      });
-
-      expect(mockedDatabaseSession).toHaveBeenCalledWith('sqlite:///test.db');
-      const message = String(warn.mock.calls[0]?.[0]);
-      expect(message).toContain(
-        'DatabaseSessionService does not support additional options',
-      );
-      expect(message).toContain('poolSize');
-      expect(message).not.toContain('agentsDir');
-    });
-
     it('builds an in-memory session service for sqlite:// with no path', () => {
       expect(
         builtinRegistry().createSessionService('sqlite://'),
       ).toBeInstanceOf(InMemorySessionService);
-      expect(warn).not.toHaveBeenCalled();
     });
 
     it('test_create_session_service_postgresql', () => {
@@ -251,16 +222,9 @@ describe('ServiceRegistry', () => {
     it('test_create_artifact_service_gcs', () => {
       builtinRegistry().createArtifactService('gs://my-bucket/path/prefix', {
         agentsDir: 'foo',
-        extra: {otherOption: 'bar'},
       });
 
       expect(mockedGcsArtifact).toHaveBeenCalledWith('my-bucket');
-      const message = String(warn.mock.calls[0]?.[0]);
-      expect(message).toContain(
-        'GcsArtifactService does not support additional options',
-      );
-      expect(message).toContain('otherOption');
-      expect(message).not.toContain('agentsDir');
     });
 
     it('builds an in-memory artifact service for memory://', () => {
@@ -353,41 +317,6 @@ describe('ServiceRegistry', () => {
     });
   });
 
-  describe('task stores', () => {
-    it('test_create_task_store_memory', () => {
-      expect(
-        builtinRegistry().createTaskStoreService('memory://'),
-      ).toBeInstanceOf(InMemoryTaskStore);
-    });
-
-    it('test_create_task_store_postgresql', () => {
-      // Not portable: `@a2a-js/sdk` ships no `DatabaseTaskStore`, so the
-      // driver-suffixed schemes stay unregistered.
-      expect(() =>
-        builtinRegistry().createTaskStoreService(
-          'postgresql+asyncpg://user:pass@host/db',
-        ),
-      ).toThrowError(
-        "Unsupported A2A task store URI scheme: 'postgresql+asyncpg'. Supported schemes: memory",
-      );
-    });
-
-    it('names an empty scheme when the task store URI has none', () => {
-      expect(() =>
-        builtinRegistry().createTaskStoreService('no-scheme'),
-      ).toThrowError("Unsupported A2A task store URI scheme: ''.");
-    });
-
-    it('lists the supported task store schemes in sorted order', () => {
-      const registry = builtinRegistry();
-      registry.registerTaskStoreService('alpha', () => new InMemoryTaskStore());
-
-      expect(() => registry.createTaskStoreService('nope://x')).toThrowError(
-        'Supported schemes: alpha, memory',
-      );
-    });
-  });
-
   describe('scheme routing', () => {
     it('test_unsupported_scheme', () => {
       const registry = builtinRegistry();
@@ -399,9 +328,6 @@ describe('ServiceRegistry', () => {
         registry.createArtifactService('unsupported://foo'),
       ).toBeUndefined();
       expect(registry.createMemoryService('unsupported://foo')).toBeUndefined();
-      expect(() =>
-        registry.createTaskStoreService('unsupported://foo'),
-      ).toThrowError('Unsupported A2A task store URI scheme');
       expect(mockedDatabaseSession).not.toHaveBeenCalled();
       expect(mockedVertexSession).not.toHaveBeenCalled();
       expect(mockedGcsArtifact).not.toHaveBeenCalled();
@@ -470,9 +396,6 @@ describe('ServiceRegistry', () => {
 
       expect(registry.createArtifactService('shared://x')).toBeUndefined();
       expect(registry.createMemoryService('shared://x')).toBeUndefined();
-      expect(() => registry.createTaskStoreService('shared://x')).toThrowError(
-        'Unsupported A2A task store URI scheme',
-      );
       expect(calls).toEqual([]);
       expect(registry.createSessionService('shared://x')).toBe(sessionService);
     });
