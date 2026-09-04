@@ -5,7 +5,12 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {loadEventActions} from '../../src/sessions/restricted_pickle.js';
+import {createEventActions} from '../../src/events/event_actions.js';
+import {
+  dumpEventActions,
+  loadEventActions,
+} from '../../src/sessions/restricted_pickle.js';
+import {loadPickle} from '../../src/utils/pickle_reader.js';
 import {fromBase64, payload, STOP} from '../utils/pickle_payload_test_utils.js';
 import {
   ESCALATE,
@@ -387,5 +392,69 @@ describe('loadEventActions key handling', () => {
       ),
     );
     expect(actions.stateDelta).toEqual({'1': 'one'});
+  });
+});
+
+describe('dumpEventActions', () => {
+  it('round-trips every value kind the actions carry', () => {
+    const actions = createEventActions({
+      stateDelta: {
+        text: 'hello',
+        whole: 7,
+        fractional: 0.5,
+        yes: true,
+        no: false,
+        nothing: null,
+        list: [1, 'two', null],
+        nested: {inner: {leaf: []}},
+        empty: {},
+      },
+      artifactDelta: {'report.pdf': 3},
+      transferToAgent: 'agent_b',
+      escalate: true,
+      skipSummarization: false,
+      endOfAgent: true,
+      agentState: {cursor: 'node-1'},
+    });
+
+    expect(loadEventActions(dumpEventActions(actions))).toEqual(actions);
+  });
+
+  it('round-trips default actions', () => {
+    const actions = createEventActions();
+
+    expect(loadEventActions(dumpEventActions(actions))).toEqual(actions);
+  });
+
+  it('names the EventActions class and nothing else', () => {
+    const named: string[] = [];
+    loadPickle(dumpEventActions(createEventActions()), (module, name) => {
+      named.push(`${module}.${name}`);
+      return {construct: () => ({})};
+    });
+
+    expect(named).toEqual(['google.adk.events.event_actions.EventActions']);
+  });
+
+  it('writes the actions under their Python field names', () => {
+    const actions = createEventActions({
+      skipSummarization: true,
+      transferToAgent: 'agent_b',
+      endOfAgent: true,
+    });
+
+    const text = Buffer.from(dumpEventActions(actions)).toString('binary');
+
+    expect(text).toContain('skip_summarization');
+    expect(text).toContain('transfer_to_agent');
+    expect(text).toContain('end_of_agent');
+  });
+
+  it('preserves a state delta key that is already snake_case', () => {
+    const actions = createEventActions({stateDelta: {userName: 'ada'}});
+
+    expect(
+      loadEventActions(dumpEventActions(actions)).stateDelta,
+    ).toStrictEqual({userName: 'ada'});
   });
 });
