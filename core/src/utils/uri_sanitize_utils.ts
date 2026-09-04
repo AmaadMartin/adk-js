@@ -164,9 +164,10 @@ function sanitizeQuery(params: URLSearchParams): {
  *
  * A URI that cannot be stored with any part intact comes back as
  * `[REDACTED_SENSITIVE_URI]`: one that is not a string, one longer than
- * {@link MAX_INSPECT_CHARS}, one that carries userinfo, and one no URL parser
- * accepts. Userinfo redacts the whole URI because it is credential-bearing by
- * definition, and a username is not worth guessing about.
+ * {@link MAX_INSPECT_CHARS}, one that carries userinfo, one no URL parser
+ * accepts, and one whose path refuses the redaction. Userinfo redacts the
+ * whole URI because it is credential-bearing by definition, and a username is
+ * not worth guessing about.
  *
  * @param uri The URI a model, a tool or a user supplied.
  * @param maxLength Maximum length of the result, or -1 for no limit.
@@ -194,6 +195,12 @@ export function sanitizeExternalUri(
   const fragment = sanitizeUriText(parsed.hash.replace(/^#/, ''));
 
   parsed.pathname = path.path;
+  if (parsed.pathname !== path.path) {
+    // The `pathname` setter does nothing on a URL that cannot be a base — a
+    // `data:`, `mailto:` or `blob:` URI. Writing the URI back would return the
+    // credential the path pass just found, so the whole URI is refused.
+    return {uri: REDACTED_SENSITIVE_URI, changed: true};
+  }
   parsed.search = query.query.toString();
   parsed.hash = fragment.text;
   const bounded = truncateText(parsed.href, maxLength);

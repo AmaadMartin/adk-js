@@ -85,6 +85,34 @@ describe('sanitizeExternalUri path segments', () => {
     const uri = 'gs://bucket/2026-01-01/trace/span_p0.png';
     expect(sanitizeExternalUri(uri, -1)).toEqual({uri, changed: false});
   });
+
+  it('redacts a whole opaque URI whose path refuses the redaction', () => {
+    // A `data:`, `mailto:` or `blob:` URL cannot be a base, and the WHATWG
+    // `pathname` setter does nothing on one. Writing the URI back would return
+    // the credential the path pass just found.
+    for (const uri of [
+      'data:text/plain,x/token/SECRET-IN-DATA',
+      'mailto:a@b.test/token/SECRET-IN-MAILTO',
+      'blob:https://example.test/token/SECRET-IN-BLOB',
+    ]) {
+      expect(sanitizeExternalUri(uri, -1)).toEqual({
+        uri: REDACTED_URI,
+        changed: true,
+      });
+    }
+  });
+
+  it('keeps an opaque URI that carries no credential', () => {
+    for (const uri of ['mailto:a@b.test', 'data:text/plain,hello']) {
+      expect(sanitizeExternalUri(uri, -1)).toEqual({uri, changed: false});
+    }
+  });
+
+  it('still redacts the query of an opaque URI', () => {
+    const result = sanitizeExternalUri('mailto:a@b.test?token=SECRET', -1);
+    expect(result.uri).toBe('mailto:a@b.test?token=%5BREDACTED%5D');
+    expect(result.changed).toBe(true);
+  });
 });
 
 describe('sanitizeExternalUri query and fragment', () => {

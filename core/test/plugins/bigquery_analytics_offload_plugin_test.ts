@@ -141,6 +141,11 @@ describe('BigQueryAgentAnalyticsPlugin content offload', () => {
   it('still writes a row for an event that has no open span', async () => {
     const plugin = makePlugin({gcsBucketName: 'b'});
 
+    // `afterModelCallback` opens no span of its own, so the row carries a null
+    // `span_id` and the plugin builds no offload destination for it. The
+    // response payload is a summary object rather than a `Content`, so it
+    // yields no content parts either; the assertion below pins the row, not
+    // the skipped destination.
     await plugin.afterModelCallback({
       callbackContext: new Context({
         invocationContext: makeInvocationContext(),
@@ -152,6 +157,7 @@ describe('BigQueryAgentAnalyticsPlugin content offload', () => {
     await plugin.flush();
 
     expect(inserted[0].span_id).toBeNull();
+    expect(inserted[0].content_parts).toEqual([]);
     expect(saved).toEqual([]);
   });
 

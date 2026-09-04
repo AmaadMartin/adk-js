@@ -81,12 +81,6 @@ const FORMATTER_FAILED = '[FORMATTER_FAILED]';
 const CONTENT_PARSE_FAILED = '[CONTENT_PARSE_FAILED]';
 
 /**
- * Stands in for the span id in an offloaded object's name when the event has
- * none. A row can carry a null `span_id`; an object name cannot.
- */
-const NO_SPAN_ID = 'no-span';
-
-/**
  * Builds the content offloader, or returns undefined when nothing would read
  * what it uploads.
  *
@@ -877,7 +871,12 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     return undefined;
   }
 
-  /** Builds one row and queues it. Never waits on the network. */
+  /**
+   * Builds one row and queues it.
+   *
+   * The queue is never waited on. The content offload is, when a bucket is
+   * configured, because the row has to carry the URI the upload returns.
+   */
   private async logEvent(params: LogEventParams): Promise<void> {
     const {eventType, invocationContext, rawContent, data = {}} = params;
     if (!this.config.enabled || !this.isLogged(eventType)) {
@@ -890,9 +889,16 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       return;
     }
     const invocationId = invocationContext.invocationId;
+    // Every value the span stack and the clock supply is read before the
+    // offload is awaited. A concurrent branch can push or pop a span during
+    // that await, and the upload can take seconds, so reading them afterwards
+    // would date the row late and correlate it against another branch's stack.
+    const timestamp = new Date().toISOString();
     const traceId = data.traceIdOverride ?? this.spans.traceId(invocationId);
     const spanId =
       data.spanIdOverride ?? this.spans.current(invocationId)?.spanId ?? null;
+    const parentSpanId =
+      data.parentSpanIdOverride ?? this.spans.parentSpanId(invocationId) ?? null;
     const parsed = await this.parseContent(eventType, rawContent, {
       traceId,
       spanId,
@@ -907,7 +913,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         : sanitizeErrorText(data.errorMessage, this.config.maxContentLength);
     const latency = buildLatency(data);
     const row: AnalyticsRow = {
-      timestamp: new Date().toISOString(),
+      timestamp,
       event_id: newHexId(),
       event_type: eventType,
       agent: invocationContext.agent?.name ?? data.sourceEvent?.author ?? null,
@@ -916,10 +922,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       user_id: invocationContext.userId,
       trace_id: traceId,
       span_id: spanId,
-      parent_span_id:
-        data.parentSpanIdOverride ??
-        this.spans.parentSpanId(invocationId) ??
-        null,
+      parent_span_id: parentSpanId,
       content: parsed.payload === null ? null : JSON.stringify(parsed.payload),
       content_parts: this.config.logMultiModalContent ? parsed.parts : [],
       attributes: JSON.stringify(attributes.value),
@@ -936,6 +939,10 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
    * The Cloud Storage destination for this event's oversized parts, or
    * undefined when the plugin offloads nothing.
    *
+   * An event with no open span gets no destination. A row may carry a null
+   * `span_id`, but an object name may not, and an object no row can be traced
+   * back to is worse than an inline sentinel.
+   *
    * The span identifies the event and names its objects, so it is passed per
    * call: one parser instance serves concurrent events, and reading a mutable
    * field would let one event resume under another event's identity.
@@ -944,13 +951,13 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     traceId: string;
     spanId: string | null;
   }): AnalyticsOffload | undefined {
-    if (this.offloader === undefined) {
+    if (this.offloader === undefined || span.spanId === null) {
       return undefined;
     }
     return {
       offloader: this.offloader,
       traceId: span.traceId,
-      spanId: span.spanId ?? NO_SPAN_ID,
+      spanId: span.spanId,
       connectionId: this.config.connectionId,
     };
   }
