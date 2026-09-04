@@ -812,5 +812,30 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         mockClient.agentEnginesInternal.createInternal,
       ).toHaveBeenCalledExactlyOnceWith({});
     });
+
+    it('retries the agent engine creation after a failed attempt', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockRejectedValueOnce(
+        new Error('engine unavailable'),
+      );
+      const codeExecutionInput = {
+        code: 'print("hello")',
+        language: CodeExecutionLanguage.PYTHON,
+        inputFiles: [],
+      };
+
+      await expect(
+        executor.executeCode({invocationContext, codeExecutionInput}),
+      ).rejects.toThrow('engine unavailable');
+
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput,
+      });
+
+      expect(result.stdout).toBe('hello world');
+      expect(
+        mockClient.agentEnginesInternal.createInternal,
+      ).toHaveBeenCalledTimes(2);
+    });
   });
 });
