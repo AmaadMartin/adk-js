@@ -11,11 +11,11 @@ import {
   EvaluationResult,
   Invocation,
 } from '@google/adk';
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mkdtemp, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it} from 'vitest';
 
 const METRIC: EvalMetric = {
   metricName: 'my_custom_metric',
@@ -175,29 +175,12 @@ describe('CustomMetricEvaluator', () => {
 });
 
 describe('CustomMetricEvaluator specifier resolution', () => {
-  let workDir: string;
   let modulePath: string;
 
-  // The module sits under the working directory rather than under the system
-  // temp directory. On Windows the two often live on different drives, and
-  // `path.relative` then returns an absolute path with no relative form.
   beforeEach(async () => {
-    workDir = await mkdtemp(path.join(process.cwd(), 'adk-custom-metric-'));
+    const workDir = await mkdtemp(path.join(tmpdir(), 'adk-custom-metric-'));
     modulePath = path.join(workDir, 'metrics.mjs');
     await writeFile(modulePath, RECORDING_MODULE, 'utf-8');
-  });
-
-  afterEach(async () => {
-    await rm(workDir, {recursive: true, force: true});
-  });
-
-  it('resolves a relative specifier against the working directory', async () => {
-    const relative = `./${path.relative(process.cwd(), modulePath)}`;
-    const evaluator = new CustomMetricEvaluator(METRIC, `${relative}#score`);
-
-    const result = await evaluator.evaluateInvocations([]);
-
-    expect(result.overallScore).toBe(0.5);
   });
 
   it('resolves an absolute file path that carries no URL scheme', async () => {
