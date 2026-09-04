@@ -210,6 +210,22 @@ export interface RubricsBasedCriterion extends BaseCriterion {
   rubrics?: Rubric[];
 }
 
+/**
+ * An {@link LlmAsAJudgeCriterion} that has been validated, so its judge model
+ * options carry every default and a judge can read them off the criterion.
+ */
+export interface ParsedLlmAsAJudgeCriterion extends LlmAsAJudgeCriterion {
+  judgeModelOptions: ResolvedJudgeModelOptions;
+}
+
+/**
+ * A {@link RubricsBasedCriterion} that has been validated, so its judge model
+ * options and its rubric list are both set.
+ */
+export interface ParsedRubricsBasedCriterion extends ParsedLlmAsAJudgeCriterion {
+  rubrics: Rubric[];
+}
+
 /** Criterion for scoring an agent response for hallucinations. */
 export interface HallucinationsCriterion extends BaseCriterion {
   /** Options for the judge model. */
@@ -482,13 +498,14 @@ const llmAsAJudgeCriterionModel: EvalModel<LlmAsAJudgeCriterion> = evalModel(
 );
 
 /** Validates a {@link RubricsBasedCriterion} payload. */
-const rubricsBasedCriterionModel: EvalModel<RubricsBasedCriterion> = evalModel(
-  {
-    ...llmAsAJudgeCriterionShape,
-    rubrics: z.array(rubricModel.schema).default(() => []),
-  },
-  {...CRITERION_OPTIONS, name: 'RubricsBasedCriterion'},
-);
+const rubricsBasedCriterionModel: EvalModel<ParsedRubricsBasedCriterion> =
+  evalModel(
+    {
+      ...llmAsAJudgeCriterionShape,
+      rubrics: z.array(rubricModel.schema).default(() => []),
+    },
+    {...CRITERION_OPTIONS, name: 'RubricsBasedCriterion'},
+  );
 
 /** Validates a {@link HallucinationsCriterion} payload. */
 const hallucinationsCriterionModel: EvalModel<HallucinationsCriterion> =
@@ -564,7 +581,7 @@ parseLlmAsAJudgeCriterion.criterionName = 'LlmAsAJudgeCriterion';
  */
 export function parseRubricsBasedCriterion(
   raw: unknown,
-): RubricsBasedCriterion {
+): ParsedRubricsBasedCriterion {
   return rubricsBasedCriterionModel.parse(raw);
 }
 parseRubricsBasedCriterion.criterionName = 'RubricsBasedCriterion';

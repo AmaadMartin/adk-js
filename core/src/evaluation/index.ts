@@ -9,9 +9,10 @@
  * `google/adk/evaluation`). It currently covers the eval case data model, the
  * accessors that read a recorded trajectory, the contract every metric
  * evaluator implements, the `ResponseEvaluator`, `LlmAsJudge`,
- * `FinalResponseMatchV2Evaluator` and `SafetyEvaluatorV1` evaluators that
- * stand on it, the metric info providers that describe each prebuilt metric,
- * and the user simulation half under `./simulation`.
+ * `FinalResponseMatchV2Evaluator`, `SafetyEvaluatorV1` and
+ * `RubricBasedToolUseV1Evaluator` evaluators that stand on it, the metric info
+ * providers that describe each prebuilt metric, and the user simulation half
+ * under `./simulation`.
  */
 
 export {getDeveloperInstructions, getToolsByAgentName} from './app_details.js';
@@ -59,6 +60,7 @@ export type {
   BaseCriterion,
   CriterionParser,
   EvalMetric,
+  EvalMetricCriterion,
   Interval,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
@@ -66,8 +68,11 @@ export type {
   MetricInfo,
   MetricInfoProvider,
   MetricValueInfo,
+  ParsedLlmAsAJudgeCriterion,
+  ParsedRubricsBasedCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
+  Threshold,
 } from './eval_metrics.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export {
@@ -98,7 +103,11 @@ export type {AutoRaterScore, LlmAsJudgeOptions} from './llm_as_judge.js';
 export {
   Label,
   PARTIALLY_VALID_LABELS,
+  formatPromptTemplate,
+  getAverageRubricScore,
   getTextFromInvocation,
+  getToolCallsAndResponsesAsJsonStr,
+  getToolDeclarationsAsJsonStr,
 } from './llm_as_judge_utils.js';
 export {
   FinalResponseMatchV2EvaluatorMetricInfoProvider,
@@ -118,6 +127,20 @@ export {ResponseEvaluator} from './response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';
 export type {RougeScore} from './rouge_scorer.js';
+export {
+  DefaultAutoRaterResponseParser,
+  MajorityVotePerInvocationResultsAggregator,
+  MeanInvocationResultsSummarizer,
+  RubricBasedEvaluator,
+} from './rubric_based_evaluator.js';
+export type {
+  AutoRaterResponseParser,
+  InvocationResultsSummarizer,
+  PerInvocationResultsAggregator,
+  RubricBasedEvaluatorOptions,
+  RubricResponse,
+} from './rubric_based_evaluator.js';
+export {RubricBasedToolUseV1Evaluator} from './rubric_based_tool_use_quality_v1.js';
 export {SafetyEvaluatorV1} from './safety_evaluator.js';
 export type {SafetyEvaluatorV1Options} from './safety_evaluator.js';
 export {StaticUserSimulator} from './simulation/static_user_simulator.js';
