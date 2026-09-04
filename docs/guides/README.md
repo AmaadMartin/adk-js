@@ -163,6 +163,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [Choosing a Runner entry point](runner/run_entry_points/index.md) - When to
   run an invocation ahead of the caller that reads it, and what that changes.
+- [Live mode](runner/live_mode/index.md) - Running an agent or a workflow over a bidirectional stream, and the events that reach the caller from underneath the root.
 - [Resuming an invocation](runner/invocation_resume/index.md) - How the runner
   decides which invocation a message belongs to, and how to resume one.
 - [Starting a run](runner/starting_a_run/index.md) - How the runner finds or

@@ -15,6 +15,7 @@ import {findMatchingFunctionCall} from '../agents/functions.js';
 import {
   InvocationContext,
   newInvocationContextId,
+  QueuedInvocationEvent,
   requireAgent,
 } from '../agents/invocation_context.js';
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
@@ -66,6 +67,7 @@ import {
   RunnableRoot,
   runNodeAsInvocation,
 } from '../workflow/run_node_as_invocation.js';
+import {mergeLiveEventStreams} from './live_event_merge.js';
 import {findActiveTaskScope, findTaskAgentNames} from './task_scope_utils.js';
 
 /**
@@ -1271,18 +1273,15 @@ export class Runner {
       throw new Error('liveRequestQueue is required for runLive.');
     }
 
-    if (!isBaseAgent(this.agent)) {
-      throw new Error('runLive is only supported for agents.');
-    }
-    const agent = this.agent;
+    const agent = isBaseAgent(this.agent) ? this.agent : undefined;
 
     const runConfig = createRunConfig(params.runConfig);
     if (!runConfig.responseModalities?.length) {
       runConfig.responseModalities = [Modality.AUDIO];
     }
     // For multi-agent live setups, the model's text transcription is needed
-    // as context for the transferred agent.
-    if (agent.subAgents?.length) {
+    // as context for the transferred agent. A node root has no sub-agents.
+    if (agent?.subAgents?.length) {
       if (runConfig.responseModalities.includes(Modality.AUDIO)) {
         runConfig.outputAudioTranscription ??= {};
       }
@@ -1338,10 +1337,14 @@ export class Runner {
             resumabilityConfig: this.resumabilityConfig,
           });
 
-          invocationContext.agent = this.determineAgentForResumption(
-            session,
-            agent,
-          );
+          // Only meaningful for an agent root: this resolves an event author
+          // against the agent tree, and a node subtree is not in that tree.
+          if (agent) {
+            invocationContext.agent = this.determineAgentForResumption(
+              session,
+              agent,
+            );
+          }
 
           // Step 1: before-run plugin hook (early exit if it returns content).
           const beforeRunCallbackResponse =
@@ -1366,51 +1369,69 @@ export class Runner {
             return;
           }
 
-          // Step 2: drive the agent's runLive and propagate events.
-          for await (const event of requireAgent(invocationContext).runLive(
-            invocationContext,
-          )) {
-            if (params.abortSignal?.aborted) {
-              return;
-            }
+          // Step 2: drive the root and propagate events.
+          //
+          // A streaming tool or a node tool running underneath the root has no
+          // way to yield an event back through the root's own stream, so it
+          // pushes onto this queue instead; without a queue those pushes throw.
+          const eventQueue = new AsyncQueue<QueuedInvocationEvent>();
+          invocationContext.eventQueue = eventQueue;
+          try {
+            const rootEvents = mergeLiveEventStreams(
+              eventQueue,
+              agent
+                ? requireAgent(invocationContext).runLive(invocationContext)
+                : runNodeAsInvocation(this.agent, invocationContext),
+            );
 
-            const modifiedEvent = await this.pluginManager.runOnEventCallback({
-              invocationContext,
-              event,
-            });
-            if (params.abortSignal?.aborted) {
-              return;
-            }
-
-            const eventToProcess = modifiedEvent ?? event;
-            applyRunConfigCustomMetadata(eventToProcess, runConfig);
-
-            // An event carrying inline audio, video or image data is persisted
-            // only when `saveLiveBlob` is on, and then its blobs go to the
-            // artifact service first, so the session holds a placeholder and a
-            // `fileData` reference instead of the raw bytes.
-            if (!eventToProcess.partial) {
-              const isMedia =
-                isLiveModelMediaEventWithInlineData(eventToProcess);
-              if (!isMedia || runConfig.saveLiveBlob) {
-                await this.sessionService.appendEvent({
-                  session,
-                  event: isMedia
-                    ? {
-                        ...eventToProcess,
-                        content: await this.saveArtifacts(
-                          invocationContext.invocationId,
-                          session.userId,
-                          session.id,
-                          eventToProcess.content,
-                        ),
-                      }
-                    : eventToProcess,
-                });
+            for await (const event of rootEvents) {
+              if (params.abortSignal?.aborted) {
+                return;
               }
-            }
 
-            yield eventToProcess;
+              const modifiedEvent = await this.pluginManager.runOnEventCallback(
+                {
+                  invocationContext,
+                  event,
+                },
+              );
+              if (params.abortSignal?.aborted) {
+                return;
+              }
+
+              const eventToProcess = modifiedEvent ?? event;
+              applyRunConfigCustomMetadata(eventToProcess, runConfig);
+
+              // An event carrying inline audio, video or image data is
+              // persisted only when `saveLiveBlob` is on, and then its blobs go
+              // to the artifact service first, so the session holds a
+              // placeholder and a `fileData` reference instead of the raw
+              // bytes.
+              if (!eventToProcess.partial) {
+                const isMedia =
+                  isLiveModelMediaEventWithInlineData(eventToProcess);
+                if (!isMedia || runConfig.saveLiveBlob) {
+                  await this.sessionService.appendEvent({
+                    session,
+                    event: isMedia
+                      ? {
+                          ...eventToProcess,
+                          content: await this.saveArtifacts(
+                            invocationContext.invocationId,
+                            session.userId,
+                            session.id,
+                            eventToProcess.content,
+                          ),
+                        }
+                      : eventToProcess,
+                  });
+                }
+              }
+
+              yield eventToProcess;
+            }
+          } finally {
+            invocationContext.eventQueue = undefined;
           }
 
           // Step 3: after-run plugin hook for cleanup/metrics.
