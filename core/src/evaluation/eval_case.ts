@@ -82,12 +82,3 @@ export interface Invocation {
   /** Rubrics that apply to this invocation alone. */
   rubrics?: Rubric[];
 }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Returns true when the intermediate data is a list of invocation events. */
-export function isInvocationEvents(value: unknown): value is InvocationEvents {
-  return isRecord(value) && 'invocationEvents' in value;
-}
