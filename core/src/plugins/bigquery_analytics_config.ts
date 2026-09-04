@@ -297,16 +297,7 @@ function requireRetryConfig(retry: AnalyticsRetryConfig): void {
   }
 }
 
-/**
- * Rejects a configuration that cannot produce a working plugin.
- *
- * This throws where the rest of the plugin swallows, and does so at
- * construction: a misconfigured value is a caller mistake, and silently
- * dropping every row is a worse answer than refusing to start.
- *
- * @param config The configuration to check.
- * @throws Error when an option is out of range or names a protected column.
- */
+/** Rejects a blank string. */
 function requireNonEmpty(name: string, value: string): void {
   if (value.trim() === '') {
     throw configError(`${name} must not be empty.`);
@@ -321,15 +312,15 @@ function requireNonEmptyIfSet(name: string, value: string | undefined): void {
 }
 
 /**
- * Rejects an empty view prefix, which would name a view after the event type
- * alone and so let it collide with an ordinary table in the dataset.
+ * Rejects a configuration that cannot produce a working plugin.
+ *
+ * This throws where the rest of the plugin swallows, and does so at
+ * construction: a misconfigured value is a caller mistake, and silently
+ * dropping every row is a worse answer than refusing to start.
+ *
+ * @param config The configuration to check.
+ * @throws Error when an option is out of range or names a protected column.
  */
-function requireViewPrefix(config: BigQueryLoggerConfig): void {
-  if (config.viewPrefix !== undefined && config.viewPrefix.trim() === '') {
-    throw configError('viewPrefix must not be empty.');
-  }
-}
-
 function validateConfig(config: BigQueryLoggerConfig): void {
   requireCount('batchSize', config.batchSize, 1);
   requireCount('queueMaxSize', config.queueMaxSize, 1);
@@ -337,7 +328,9 @@ function validateConfig(config: BigQueryLoggerConfig): void {
   requireFiniteAboveZero('shutdownTimeoutMs', config.shutdownTimeoutMs);
   requireContentLimit(config.maxContentLength);
   requireRetryConfig(config.retryConfig ?? {});
-  requireViewPrefix(config);
+  // An empty prefix names a view after the event type alone, so it can collide
+  // with an ordinary table in the dataset.
+  requireNonEmptyIfSet('viewPrefix', config.viewPrefix);
   requireNonEmptyIfSet('gcsBucketName', config.gcsBucketName);
   requireNonEmptyIfSet('connectionId', config.connectionId);
 }

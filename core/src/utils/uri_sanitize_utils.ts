@@ -12,6 +12,11 @@
  * grant into a durable one, so every surface of the URI that can carry a
  * credential — userinfo, path segments, query parameters, the fragment — is
  * inspected before the value is persisted.
+ *
+ * This is the pass for a URI that is being stored. It fails closed: a URI it
+ * cannot verify is replaced whole, so the result may not be readable. For a
+ * URI going into a log line or an error message, where the location has to
+ * stay legible, use `redactUriPassword` in `redact_uri.ts` instead.
  */
 
 import {

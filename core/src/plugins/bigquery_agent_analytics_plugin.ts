@@ -93,15 +93,21 @@ const NO_SPAN_ID = 'no-span';
  * Builds the content offloader, or returns undefined when nothing would read
  * what it uploads.
  *
- * Denying `content_parts` drops the column that holds the object reference, so
- * an upload would cost storage and leave no row pointing at it.
+ * `content_parts` holds the object reference, so an upload would cost storage
+ * and leave no row pointing at it whenever that column is empty. Both the
+ * denylist and `logMultiModalContent` empty it. adk-python guards only the
+ * denylist, because it has no second way to drop the column.
  */
 function createOffloader(
   projectId: string,
   config: ResolvedConfig,
 ): GcsOffloader | undefined {
-  const {gcsBucketName, deniedColumns} = config;
-  if (gcsBucketName === undefined || deniedColumns.has('content_parts')) {
+  const {gcsBucketName, deniedColumns, logMultiModalContent} = config;
+  if (
+    gcsBucketName === undefined ||
+    deniedColumns.has('content_parts') ||
+    !logMultiModalContent
+  ) {
     return undefined;
   }
   return new GcsOffloader({projectId, bucketName: gcsBucketName});
@@ -244,44 +250,6 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
 }
 
 /**
- * Streams agent lifecycle events into a BigQuery table so that agent
- * behaviour, cost and failures can be queried in SQL.
- *
- * Each callback the runner fires becomes one row of `<project>.<dataset>.
- * <table>`: the user message, the invocation, each agent turn, each model
- * request and response, each tool call, and each state delta. The table is
- * created on first use, partitioned by day on `timestamp` and clustered by the
- * configured fields, and the dataset is created too if absent. Column names, types
- * and values match `google/adk-python`'s plugin of the same name, so one
- * dataset can hold rows from both SDKs.
- *
- * The plugin never breaks an agent run. Every callback swallows its own
- * failures, every credential-bearing key is redacted before a row is written,
- * and the row queue, the span bookkeeping and the sanitizer are all bounded.
- *
- * `@google-cloud/bigquery` is an optional peer dependency, loaded on the first
- * row. When it is missing the row is counted in {@link getDropStats} and the
- * run continues.
- *
- * Two departures from adk-python are deliberate. Rows go through
- * `tabledata.insertAll` rather than the Storage Write API, so BigQuery
- * de-duplicates a row on its insert id on a best-effort basis rather than
- * exactly. And the `AGENT_ERROR` and `INVOCATION_ERROR` event types are
- * declared but never written, because adk-js `BasePlugin` has no
- * `onAgentErrorCallback` or `onRunErrorCallback` to write them from.
- *
- * Example:
- * ```typescript
- * const analytics = new BigQueryAgentAnalyticsPlugin({
- *   projectId: 'my-project',
- *   datasetId: 'agent_analytics',
- * });
- * const runner = new Runner({appName, agent, sessionService, plugins: [analytics]});
- * // ... run agents ...
- * await analytics.shutdown();
- * ```
- */
-/**
  * Plugins that have not been shut down, drained when the event loop empties.
  *
  * This is the backstop for a host that never calls `shutdown()` and turns
@@ -322,6 +290,44 @@ function forgetOnShutdown(plugin: BigQueryAgentAnalyticsPlugin): void {
   }
 }
 
+/**
+ * Streams agent lifecycle events into a BigQuery table so that agent
+ * behaviour, cost and failures can be queried in SQL.
+ *
+ * Each callback the runner fires becomes one row of `<project>.<dataset>.
+ * <table>`: the user message, the invocation, each agent turn, each model
+ * request and response, each tool call, and each state delta. The table is
+ * created on first use, partitioned by day on `timestamp` and clustered by the
+ * configured fields, and the dataset is created too if absent. Column names, types
+ * and values match `google/adk-python`'s plugin of the same name, so one
+ * dataset can hold rows from both SDKs.
+ *
+ * The plugin never breaks an agent run. Every callback swallows its own
+ * failures, every credential-bearing key is redacted before a row is written,
+ * and the row queue, the span bookkeeping and the sanitizer are all bounded.
+ *
+ * `@google-cloud/bigquery` is an optional peer dependency, loaded on the first
+ * row. When it is missing the row is counted in {@link getDropStats} and the
+ * run continues.
+ *
+ * Two departures from adk-python are deliberate. Rows go through
+ * `tabledata.insertAll` rather than the Storage Write API, so BigQuery
+ * de-duplicates a row on its insert id on a best-effort basis rather than
+ * exactly. And the `AGENT_ERROR` and `INVOCATION_ERROR` event types are
+ * declared but never written, because adk-js `BasePlugin` has no
+ * `onAgentErrorCallback` or `onRunErrorCallback` to write them from.
+ *
+ * Example:
+ * ```typescript
+ * const analytics = new BigQueryAgentAnalyticsPlugin({
+ *   projectId: 'my-project',
+ *   datasetId: 'agent_analytics',
+ * });
+ * const runner = new Runner({appName, agent, sessionService, plugins: [analytics]});
+ * // ... run agents ...
+ * await analytics.shutdown();
+ * ```
+ */
 @experimental
 export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   private readonly config: ResolvedConfig;
@@ -900,7 +906,16 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
           parts: visible,
         }),
       },
-      data: {sourceEvent: event},
+      // The flat trio duplicates `attributes.adk.*`, which stays canonical.
+      // adk-python writes both, and `v_agent_response` reads the flat names.
+      data: {
+        sourceEvent: event,
+        extraAttributes: {
+          source_event_id: event.id,
+          source_event_author: event.author,
+          source_event_branch: event.branch,
+        },
+      },
     });
   }
 
