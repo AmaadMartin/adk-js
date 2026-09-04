@@ -117,8 +117,10 @@ three defaults come first and anything you add follows them.
 
 ## What the catalogue guarantees
 
-- `PRE_BUILT_BEHAVIORS` is frozen. One caller cannot edit the behavior text that
-  every other caller reads.
+- `PRE_BUILT_BEHAVIORS` is frozen, so a caller cannot add or replace a catalogue
+  entry. The freeze is one level deep. Every registry shares the same behavior
+  objects, so editing one behavior's own fields changes the prompt text
+  everywhere; treat those fields as read-only.
 - The behavior and persona text matches ADK Python field for field, including
   its typographical errors. The text is model input, so correcting a typo would
   change what the simulator produces and what the judge accepts. Write your own

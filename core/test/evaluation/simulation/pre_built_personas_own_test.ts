@@ -67,7 +67,7 @@ describe('PRE_BUILT_BEHAVIORS', () => {
     expect(behavior.violationRubrics, name).not.toEqual([]);
   });
 
-  it('is frozen, so one caller cannot edit the shared catalogue', () => {
+  it('is frozen, so a caller cannot add or replace a catalogue entry', () => {
     expect(Object.isFrozen(PRE_BUILT_BEHAVIORS)).toBe(true);
   });
 });
