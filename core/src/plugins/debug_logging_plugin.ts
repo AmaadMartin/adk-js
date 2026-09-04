@@ -332,23 +332,18 @@ function serializeLlmResponse(
   return data;
 }
 
-/** Renders one buffered invocation as the mapping written to the file. */
-function toDocument(state: InvocationDebugState): Record<string, unknown> {
-  return {
-    invocationId: state.invocationId,
-    sessionId: state.sessionId,
-    appName: state.appName,
-    userId: state.userId,
-    startTime: state.startTime,
-    ...(state.incomplete ? {incomplete: true} : {}),
-    entries: state.entries.map((entry) => ({
-      timestamp: entry.timestamp,
-      entryType: entry.entryType,
-      invocationId: entry.invocationId,
-      ...(entry.agentName === undefined ? {} : {agentName: entry.agentName}),
-      data: entry.data,
-    })),
-  };
+/**
+ * Renders one buffered invocation as the mapping written to the file.
+ *
+ * `incomplete` is lifted out of the header so that it reads just above the
+ * entries it qualifies, wherever it was set.
+ */
+function toDocument({
+  incomplete,
+  entries,
+  ...header
+}: InvocationDebugState): Record<string, unknown> {
+  return {...header, ...(incomplete ? {incomplete: true} : {}), entries};
 }
 
 /**
@@ -713,6 +708,8 @@ export class DebugLoggingPlugin extends BasePlugin {
       timestamp: new Date().toISOString(),
       entryType,
       invocationId,
+      // js-yaml drops a mapping key whose value is undefined, so an entry
+      // recorded outside an agent simply carries no `agentName`.
       agentName,
       data: safeSerializeRecord(data),
     });
