@@ -2,7 +2,9 @@
  * @license
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
- *
+ */
+
+/**
  * Ported from adk-python
  * `tests/unittests/evaluation/simulation/test_per_turn_user_simulation_quality_v1.py`.
  * Each `it` name is the reference test name, so a reviewer can grep for it.

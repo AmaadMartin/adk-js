@@ -2,7 +2,9 @@
  * @license
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
- *
+ */
+
+/**
  * Tests written for adk-js, kept apart from the ported reference tests in
  * `per_turn_user_simulator_quality_v1_test.ts` so the ported set stays legible.
  */

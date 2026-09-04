@@ -2,7 +2,9 @@
  * @license
  * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
- *
+ */
+
+/**
  * Covers the slice of `eval_metrics.ts` that
  * `PerTurnUserSimulatorQualityV1` reads. The module is vendored from the
  * `parity` branch, where it carries its own full test file.
