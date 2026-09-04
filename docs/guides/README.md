@@ -54,6 +54,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Artifact version metadata](artifacts/artifact_version/index.md) - The record
   a service keeps about one saved version: its URI, its creation time, and the
   metadata the caller attached.
+- [FileArtifactService](artifacts/file_artifact_service/index.md) - Storing
+  artifacts on local disk, with app-scoped layout and atomic version publishing.
 - [InMemoryArtifactService](artifacts/in_memory_artifact_service/index.md) - The in-process artifact store, its scoping and version indexing, and how to seed it in a test.
 
 ### Auth

@@ -18,7 +18,10 @@ import {File} from '../code_executors/code_execution_utils.js';
  * `/tmp/agent-evil/x`. Requiring the trailing separator (or exact equality)
  * closes that gap.
  */
-function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
+export function isInsideDir(
+  resolvedPath: string,
+  resolvedBaseDir: string,
+): boolean {
   return (
     resolvedPath === resolvedBaseDir ||
     resolvedPath.startsWith(resolvedBaseDir + path.sep)
