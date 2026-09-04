@@ -23,7 +23,11 @@ span processor gives you, no sampling, and no retention policy. For anything
 leaving your machine, use an OTLP exporter.
 
 The table and column names match the adk-python exporter exactly, so a file
-written by one SDK is readable by the other.
+written by one SDK is readable by the other. The two SDKs declare the timestamp
+columns differently: adk-python declares `INTEGER` and this exporter declares
+`bigint`. SQLite gives both the same integer affinity, so the stored values are
+identical. Opening an adk-python file with this exporter rewrites those two
+column declarations once, and adk-python still reads the file afterwards.
 
 ## Get started
 
