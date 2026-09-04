@@ -31,6 +31,7 @@ import {
 } from './db/operations.js';
 import {
   ENTITIES,
+  getUpdateTimestamp,
   StorageAppState,
   StorageEvent,
   storageEventFromEvent,
@@ -404,8 +405,12 @@ export class DatabaseSessionService extends BaseSessionService {
         txEm.persist(userStateModel);
       }
 
-      // Stale session check
-      if (storageSession.updateTime.getTime() > session.lastUpdateTime) {
+      // Stale session check. Any difference counts, not just a later stored
+      // time: another writer can leave `update_time` BEHIND the reader's own,
+      // because `appendEvent` sets the column to its event's timestamp. On a
+      // backend that rounds the column — MySQL and MariaDB round a `DATETIME`
+      // to whole seconds — this reloads once more than it strictly needs to.
+      if (getUpdateTimestamp(storageSession) !== session.lastUpdateTime) {
         // Reload state
         const events = await txEm.find(
           StorageEvent,
@@ -487,7 +492,7 @@ export class DatabaseSessionService extends BaseSessionService {
       } else {
         session.events.push(event);
       }
-      session.lastUpdateTime = storageSession.updateTime.getTime();
+      session.lastUpdateTime = getUpdateTimestamp(storageSession);
     });
 
     return event;

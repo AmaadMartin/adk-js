@@ -19,6 +19,7 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {
   ENTITIES,
   EVENTS_TIMESTAMP_INDEX_NAME,
+  getUpdateTimestamp,
   StorageEvent,
   storageEventFromEvent,
   storageEventToEvent,
@@ -61,14 +62,25 @@ function eventRow(id: string, timestamp: Date, payloadEpoch: number) {
   return row;
 }
 
+/** Every database a test opened, closed together after it finishes. */
+const openDatabases: MikroORM[] = [];
+
 async function openOrm(): Promise<MikroORM> {
-  return MikroORM.init({
+  const orm = await MikroORM.init({
     dbName: ':memory:',
     driver: SqliteDriver,
     entities: ENTITIES,
     allowGlobalContext: true,
   });
+  openDatabases.push(orm);
+  return orm;
 }
+
+afterEach(async () => {
+  for (const orm of openDatabases.splice(0)) {
+    await orm.close();
+  }
+});
 
 /** Runs a statement whose rows the sqlite driver hands back untyped. */
 async function readRows(
@@ -169,16 +181,8 @@ describe('schema converters', () => {
 });
 
 describe('schema DDL', () => {
-  let orm: MikroORM;
-
-  afterEach(async () => {
-    if (orm) {
-      await orm.close();
-    }
-  });
-
   it('test_new_db_uses_latest_schema', async () => {
-    orm = await openOrm();
+    const orm = await openOrm();
     await orm.schema.createSchema();
 
     const columns = await readRows(
@@ -197,7 +201,7 @@ describe('schema DDL', () => {
   });
 
   it('declares the events foreign key with on delete cascade', async () => {
-    orm = await openOrm();
+    const orm = await openOrm();
 
     const sql = await orm.schema.getCreateSchemaSQL();
     const eventsTable = sql
@@ -218,15 +222,7 @@ describe('schema DDL', () => {
 });
 
 describe('schema behaviour on sqlite', () => {
-  let orm: MikroORM;
-
-  afterEach(async () => {
-    if (orm) {
-      await orm.close();
-    }
-  });
-
-  async function seedSession(updateTime: Date): Promise<void> {
+  async function seedSession(orm: MikroORM, updateTime: Date): Promise<void> {
     const em = orm.em.fork();
     const session = em.create(StorageSession, {
       id: 's1',
@@ -254,9 +250,9 @@ describe('schema behaviour on sqlite', () => {
   }
 
   it('round trips an event through both converters', async () => {
-    orm = await openOrm();
+    const orm = await openOrm();
     await orm.schema.createSchema();
-    await seedSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+    await seedSession(orm, new Date(FIRST_REPEATED_HOUR_EPOCH));
 
     const row = await orm.em.fork().findOneOrFail(StorageEvent, {id: 'e1'});
     const event = storageEventToEvent(row);
@@ -268,9 +264,9 @@ describe('schema behaviour on sqlite', () => {
   });
 
   it('updates an event row that already exists', async () => {
-    orm = await openOrm();
+    const orm = await openOrm();
     await orm.schema.createSchema();
-    await seedSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+    await seedSession(orm, new Date(FIRST_REPEATED_HOUR_EPOCH));
 
     const em = orm.em.fork();
     const row = await em.findOneOrFail(StorageEvent, {id: 'e1'});
@@ -286,9 +282,9 @@ describe('schema behaviour on sqlite', () => {
   });
 
   it('removes an event row through the entity manager', async () => {
-    orm = await openOrm();
+    const orm = await openOrm();
     await orm.schema.createSchema();
-    await seedSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+    await seedSession(orm, new Date(FIRST_REPEATED_HOUR_EPOCH));
 
     const em = orm.em.fork();
     em.remove(await em.findOneOrFail(StorageEvent, {id: 'e1'}));
@@ -299,9 +295,9 @@ describe('schema behaviour on sqlite', () => {
   });
 
   it('deletes a session row and its events together', async () => {
-    orm = await openOrm();
+    const orm = await openOrm();
     await orm.schema.createSchema();
-    await seedSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+    await seedSession(orm, new Date(FIRST_REPEATED_HOUR_EPOCH));
 
     const em = orm.em.fork();
     await em.nativeDelete(StorageSession, {
@@ -320,15 +316,8 @@ describe('schema behaviour on sqlite', () => {
  * through the entity here.
  */
 describe('rows written by adk-python', () => {
-  let orm: MikroORM;
-
-  afterEach(async () => {
-    if (orm) {
-      await orm.close();
-    }
-  });
-
   async function insertEvent(
+    orm: MikroORM,
     timestampColumn: number,
     eventData: string | null,
   ): Promise<StorageEvent> {
@@ -353,8 +342,8 @@ describe('rows written by adk-python', () => {
   }
 
   it('reads a row whose event_data is null', async () => {
-    orm = await openOrm();
-    const row = await insertEvent(FIRST_REPEATED_HOUR_EPOCH, null);
+    const orm = await openOrm();
+    const row = await insertEvent(orm, FIRST_REPEATED_HOUR_EPOCH, null);
 
     const event = storageEventToEvent(row);
 
@@ -366,8 +355,9 @@ describe('rows written by adk-python', () => {
   });
 
   it('falls back to the timestamp column when the payload has none', async () => {
-    orm = await openOrm();
+    const orm = await openOrm();
     const row = await insertEvent(
+      orm,
       SECOND_REPEATED_HOUR_EPOCH,
       '{"author": "user"}',
     );
@@ -376,5 +366,79 @@ describe('rows written by adk-python', () => {
 
     expect(event.author).toBe('user');
     expect(event.timestamp).toBe(SECOND_REPEATED_HOUR_EPOCH);
+  });
+});
+
+describe('session update time', () => {
+  const originalTimeZone = process.env.TZ;
+
+  afterEach(() => {
+    if (originalTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTimeZone;
+    }
+  });
+
+  async function storeSession(updateTime: Date): Promise<MikroORM> {
+    const orm = await openOrm();
+    await orm.schema.createSchema();
+    const em = orm.em.fork();
+    em.create(StorageSession, {
+      id: 's1',
+      appName: 'my_app',
+      userId: 'u1',
+      state: {},
+      createTime: updateTime,
+      updateTime,
+    });
+    await em.flush();
+    return orm;
+  }
+
+  async function reloadSession(orm: MikroORM): Promise<StorageSession> {
+    return orm.em.fork().findOneOrFail(StorageSession, {id: 's1'});
+  }
+
+  it('reports the update time in milliseconds', () => {
+    expect(getUpdateTimestamp(sessionRow(NAIVE_UPDATE_TIME))).toBe(
+      NAIVE_UPDATE_TIME.getTime(),
+    );
+  });
+
+  it('reads back the instant it wrote under a non-UTC process zone', async () => {
+    process.env.TZ = 'America/Los_Angeles';
+    const orm = await storeSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const row = await reloadSession(orm);
+
+    expect(getUpdateTimestamp(row)).toBe(FIRST_REPEATED_HOUR_EPOCH);
+  });
+
+  it('stamps update_time on an update that leaves the column alone', async () => {
+    const orm = await storeSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const em = orm.em.fork();
+    const row = await em.findOneOrFail(StorageSession, {id: 's1'});
+    row.state = {k: 'v'};
+    await em.flush();
+
+    expect((await reloadSession(orm)).updateTime.getTime()).toBeGreaterThan(
+      FIRST_REPEATED_HOUR_EPOCH,
+    );
+  });
+
+  it('keeps an update_time the caller assigned', async () => {
+    const orm = await storeSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const em = orm.em.fork();
+    const row = await em.findOneOrFail(StorageSession, {id: 's1'});
+    row.state = {k: 'v'};
+    row.updateTime = new Date(SECOND_REPEATED_HOUR_EPOCH);
+    await em.flush();
+
+    expect((await reloadSession(orm)).updateTime.getTime()).toBe(
+      SECOND_REPEATED_HOUR_EPOCH,
+    );
   });
 });
