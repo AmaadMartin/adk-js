@@ -74,13 +74,13 @@ export interface ConversationGenerationConfig {
  * unwrapped, so an unknown id surfaces as `NotFoundError` rather than as a
  * validation failure. adk-python's `validate_user_persona` behaves the same.
  */
-const userPersonaField = z
-  .union([z.string(), userPersonaModel.schema])
-  .transform((value) =>
+const userPersonaField = z.preprocess(
+  (value) =>
     typeof value === 'string'
       ? getDefaultPersonaRegistry().getPersona(value)
       : value,
-  );
+  userPersonaModel.schema,
+);
 
 /** Validates a {@link ConversationScenario} payload. */
 export const conversationScenarioModel: EvalModel<ConversationScenario> =
