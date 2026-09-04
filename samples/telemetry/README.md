@@ -23,11 +23,14 @@ locally:
 npm run ts:check:samples
 ```
 
-These samples call a live model, so they need an API key. Set `GEMINI_API_KEY`
-before running one. They are not executed in CI.
+The CLI is interactive: type a message and press Enter to send it, then type
+`exit` to quit.
+
+These samples are not executed in CI, only type-checked.
 
 ## Samples
 
 - [`sqlite_span_exporter`](sqlite_span_exporter/agent.ts) - Persists spans to a
-  local SQLite file with `SqliteSpanExporter`. Needs `@mikro-orm/sqlite`. See
-  the [guide](../../docs/guides/telemetry/sqlite_span_exporter/index.md).
+  local SQLite file with `SqliteSpanExporter`. Runs offline, and needs the
+  optional `@mikro-orm/sqlite` peer. See the
+  [guide](../../docs/guides/telemetry/sqlite_span_exporter/index.md).

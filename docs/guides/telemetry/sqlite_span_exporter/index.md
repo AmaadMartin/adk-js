@@ -7,10 +7,10 @@ process restarts.
 
 ## Introduction
 
-ADK opens a span for every model call, every tool call and every agent
-invocation, and tags them with the session they belong to. Those spans live in
-whatever exporter you register. The in-process exporters that back `adk web`
-keep them in memory, so a restart loses every trace you had.
+ADK opens a span for every agent invocation, model call and tool call, and
+tags most of them with the session they belong to. Those spans live in whatever
+exporter you register. The in-process exporters that back `adk web` keep them
+in memory, so a restart loses every trace you had.
 
 `SqliteSpanExporter` solves that one problem. It is an OpenTelemetry
 `SpanExporter`, so it plugs into the same span processor pipeline as any other
@@ -52,16 +52,17 @@ const names = spans.map((span) => span.name);
 A runnable version of this is in
 [`samples/telemetry/sqlite_span_exporter/agent.ts`](../../../../samples/telemetry/sqlite_span_exporter/agent.ts).
 
-`dbPath` is required. It takes a file path, which need not exist yet, or
-`:memory:` for a database that disappears with the process. The parent
-directory must exist.
+`dbPath` is required. It takes a file path, or `:memory:` for a database that
+disappears with the process. Neither the file nor its parent directory has to
+exist: the exporter creates both on first use.
 
 ## How a session is resolved
 
 The exporter reads the session id off the span's own attributes, in this order:
 
-1. `gcp.vertex.agent.session_id`
-2. `gen_ai.conversation.id`
+1. `gcp.vertex.agent.session_id`, which ADK sets on the `call_llm` span.
+2. `gen_ai.conversation.id`, which ADK sets on agent and workflow invocation
+   spans.
 
 Only a string counts. An empty string, a number, or a missing attribute falls
 through to the next candidate, and a span that matches neither is stored with a
@@ -73,10 +74,10 @@ null `session_id`.
 id. It first collects the distinct trace ids of those spans, then returns
 **every** span on those traces, oldest first.
 
-That matters because ADK does not tag every span. An invocation span opened
-before the session is known, or a tool span created by an instrumentation
-library, carries no session attribute of its own. Filtering on the attribute
-alone would return a trace tree with holes in it.
+That matters because ADK does not tag every span. A tool call span
+(`execute_tool`) and a workflow node span (`execute_node`) carry no session
+attribute of their own. Filtering on the attribute alone would return a trace
+tree with holes in it.
 
 ## Lifecycle
 
