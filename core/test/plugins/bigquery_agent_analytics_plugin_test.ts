@@ -1334,7 +1334,10 @@ describe('BigQueryAgentAnalyticsPlugin content parts', () => {
     });
     await plugin.flush();
     const parts = onlyRow().content_parts;
-    expect(parts[0]).toMatchObject({uri: null, mime_type: 'text/plain'});
+    expect(parts[0]).toMatchObject({
+      uri: '[REDACTED_SENSITIVE_URI]',
+      mime_type: 'text/plain',
+    });
     expect(parts[1]).toMatchObject({text: ''});
     expect(parts[2]).toMatchObject({text: ''});
     expect(parseColumn(onlyRow().content)).toEqual({
