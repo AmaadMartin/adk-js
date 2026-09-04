@@ -277,7 +277,10 @@ export class Workflow extends BaseNode {
       return;
     }
     if (output !== undefined) {
-      ctx.output = output;
+      // Engine write: the entry may already have delegated its output to a
+      // `useAsOutput` child and then returned that same value, which is one
+      // output, not two.
+      ctx.setEngineOutput(output);
     }
   }
 
@@ -633,7 +636,10 @@ export class Workflow extends BaseNode {
       .map((name) => loop.nodeOutputs.get(name));
 
     if (terminalOutputs.length === 1) {
-      ctx.output = terminalOutputs[0];
+      // Engine write, as in `runDynamicEntry`: the workflow node's output is
+      // its terminal node's, which the engine composes rather than the node
+      // body assigning.
+      ctx.setEngineOutput(terminalOutputs[0]);
     } else if (terminalOutputs.length > 1) {
       throw new Error(
         `Workflow ${this.name}: multiple terminal nodes produced output ` +

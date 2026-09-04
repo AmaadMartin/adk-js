@@ -230,7 +230,7 @@ async function runChildNode({
         input,
       });
       if (skipOutput !== undefined) {
-        child.output = skipOutput;
+        child.setEngineOutput(skipOutput);
         // A skipped node still fills its slot in the trace, so record it as
         // completed rather than leaving an attribute-less span behind.
         traceNodeExecution({
@@ -241,7 +241,7 @@ async function runChildNode({
           interruptCount: child.interruptIds.length,
         });
         if (options.useAsOutput) {
-          parent.output = child.output;
+          parent.setEngineOutput(child.output);
           parent.route = child.route;
         }
         return child;
@@ -426,8 +426,11 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
  * holding that context can read what went wrong without catching the throw.
  * The throw itself is unchanged.
  *
- * A failure from a `ctx.runNode` grandchild already names the node it came
- * from, so that path is preserved rather than overwritten with this node's.
+ * Only a real failure reaches here: the attempt loop absorbs a
+ * `NodeInterruptedError` from a child that stopped to ask the user, so a
+ * waiting node keeps `error` unset. A failure from a `ctx.runNode` grandchild
+ * already names the node it came from, so that path is preserved rather than
+ * overwritten with this node's.
  */
 function recordFailure(child: NodeContext, err: unknown): void {
   child.error = err instanceof Error ? err : new Error(String(err));
