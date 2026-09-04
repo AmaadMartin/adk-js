@@ -16,7 +16,7 @@
  */
 
 import {Content} from '@google/genai';
-import {context, Context, trace} from '@opentelemetry/api';
+import {context, Context, SpanStatusCode, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -34,6 +34,9 @@ const GEN_AI_TOOL_CALL_ID = 'gen_ai.tool.call.id';
 const GEN_AI_TOOL_DESCRIPTION = 'gen_ai.tool.description';
 const GEN_AI_TOOL_NAME = 'gen_ai.tool.name';
 const GEN_AI_TOOL_TYPE = 'gen_ai.tool.type';
+
+/** OpenTelemetry semantic convention attribute for a failure's type. */
+const ERROR_TYPE = 'error.type';
 
 const ADK_WORKFLOW_NAME = 'adk.workflow.name';
 const ADK_NODE_PATH = 'adk.node.path';
@@ -153,6 +156,11 @@ export interface TraceToolCallParams {
   tool: BaseTool;
   args: Record<string, unknown>;
   functionResponseEvent: Event;
+  /**
+   * The error type the tool reported in its response without throwing, from
+   * `BaseTool.detectErrorInResponse`. Absent when the call succeeded.
+   */
+  errorType?: string;
 }
 
 /**
@@ -164,9 +172,19 @@ export function traceToolCall({
   tool,
   args,
   functionResponseEvent,
+  errorType,
 }: TraceToolCallParams): void {
   const span = trace.getActiveSpan();
   if (!span) return;
+
+  if (errorType) {
+    span.setAttribute(ERROR_TYPE, errorType);
+    // Without an explicit status the span renders as successful, which hides a
+    // tool that reported its failure as a response object. The description
+    // repeats the type rather than the message, so no tool content lands in an
+    // attribute the content toggle cannot gate.
+    span.setStatus({code: SpanStatusCode.ERROR, message: errorType});
+  }
 
   span.setAttributes({
     [GEN_AI_OPERATION_NAME]: 'execute_tool',

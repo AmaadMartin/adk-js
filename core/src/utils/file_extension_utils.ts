@@ -39,7 +39,11 @@ const EXTENSION_TO_LANGUAGE: Record<string, CodeExecutionLanguage> = {
   '.cmd': CodeExecutionLanguage.WINDOWS_CMD,
   '.ps1': CodeExecutionLanguage.POWERSHELL,
   '.sh': CodeExecutionLanguage.SHELL,
+  '.bash': CodeExecutionLanguage.SHELL,
 };
+
+/** The script extensions {@link getScriptLanguageByExtension} can resolve. */
+export const SUPPORTED_SCRIPT_EXTENSIONS = Object.keys(EXTENSION_TO_LANGUAGE);
 
 /**
  * Gets the MIME type and file content encoding for a given file extension.

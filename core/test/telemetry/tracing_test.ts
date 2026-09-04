@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {trace} from '@opentelemetry/api';
+import {SpanStatusCode, trace} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -45,6 +45,7 @@ describe('Telemetry Tracing Functions', () => {
     mockSpan = {
       setAttributes: vi.fn(),
       setAttribute: vi.fn(),
+      setStatus: vi.fn(),
     };
 
     mockAgent = {
@@ -156,6 +157,38 @@ describe('Telemetry Tracing Functions', () => {
         'gcp.vertex.agent.tool_response':
           expect.stringContaining('test-result'),
       });
+    });
+
+    it('records the error type a tool reported without throwing', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+        errorType: 'RESOURCE_NOT_FOUND_FATAL',
+      });
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'error.type',
+        'RESOURCE_NOT_FOUND_FATAL',
+      );
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: 'RESOURCE_NOT_FOUND_FATAL',
+      });
+    });
+
+    it('leaves the span unmarked when the tool reported no error', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+      });
+
+      expect(mockSpan.setStatus).not.toHaveBeenCalled();
     });
 
     it('should handle tool call without function response', () => {
