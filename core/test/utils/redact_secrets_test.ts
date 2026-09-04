@@ -121,11 +121,20 @@ describe('isCredentialLike', () => {
   });
 
   it('keeps the siblings of a token in an ordinary object', () => {
-    // Collapsing the whole object would drop `rows` from the trace. The key
-    // name redacts the token on its own.
+    // Collapsing the whole object would drop `rows` from the trace, which is
+    // what a tool result carrying a token used to do. The key name redacts
+    // the token on its own.
     expect(
-      safeSerializeRecord({accessToken: SENTINEL_ACCESS_TOKEN, rows: 3}),
+      safeSerialize({accessToken: SENTINEL_ACCESS_TOKEN, rows: 3}),
     ).toEqual({accessToken: REDACTED, rows: 3});
+  });
+
+  it('keeps the siblings of a token nested in a tool result', () => {
+    expect(
+      safeSerializeRecord({
+        result: {accessToken: SENTINEL_ACCESS_TOKEN, rows: 3},
+      }),
+    ).toEqual({result: {accessToken: REDACTED, rows: 3}});
   });
 
   it('rejects values that are not objects', () => {
