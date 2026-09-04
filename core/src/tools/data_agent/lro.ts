@@ -21,7 +21,6 @@ import {
 } from './gda_client.js';
 import {DataAgentToolError, DataAgentToolResult} from './tool_result.js';
 
-
 /** Below this much budget another poll cannot finish, so the loop stops. */
 const MIN_REMAINING_SECONDS = 0.1;
 

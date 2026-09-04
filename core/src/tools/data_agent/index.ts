@@ -16,12 +16,12 @@ export {
   type DataAgentCredentialsConfig,
 } from './credentials.js';
 export {
-  type DataAgentToolError,
-  type DataAgentToolResult,
-  type DataAgentToolSuccess,
-} from './tool_result.js';
-export {
   DataAgentToolset,
   type DataAgentToolsetOptions,
 } from './data_agent_toolset.js';
 export {type GdaEndpointOptions} from './gda_client.js';
+export {
+  type DataAgentToolError,
+  type DataAgentToolResult,
+  type DataAgentToolSuccess,
+} from './tool_result.js';

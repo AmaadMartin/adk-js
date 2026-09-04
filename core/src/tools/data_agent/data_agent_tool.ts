@@ -26,10 +26,7 @@ import {
   streamChat,
 } from './gda_client.js';
 import {awaitLro, Clock, systemClock} from './lro.js';
-import {
-  DataAgentToolError,
-  DataAgentToolResult,
-} from './tool_result.js';
+import {DataAgentToolError, DataAgentToolResult} from './tool_result.js';
 
 /** One resource-name segment: the character class the API accepts. */
 const SEGMENT = '[a-zA-Z0-9][a-zA-Z0-9_.-]*';
@@ -44,8 +41,6 @@ const DATA_AGENT_NAME_PATTERN = new RegExp(
 );
 
 const SEGMENT_PATTERN = new RegExp(`^${SEGMENT}$`);
-
-
 
 /** What one data agent tool call needs beyond its model-supplied arguments. */
 export interface DataAgentToolDeps {
@@ -215,8 +210,6 @@ function raiseForStatus(response: GdaResponse): void {
   }
 }
 
-
-
 /** One create, update or delete, and the operation it starts. */
 interface MutateOptions {
   /** Builds the request URL from the API root. */
@@ -382,11 +375,7 @@ export async function askDataAgent(
     const {session, endpoint} = await deps.openSession(
       endpointOptions(location, settings.apiEndpoint),
     );
-    const agentInfo = await getDataAgentInfo(
-      args.dataAgentName,
-      deps,
-      session,
-    );
+    const agentInfo = await getDataAgentInfo(args.dataAgentName, deps, session);
     if (agentInfo.status === 'ERROR') {
       return agentInfo;
     }
