@@ -6,6 +6,7 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 
@@ -149,9 +150,9 @@ describe('batchLoadYamlTestDefs', () => {
 
   it('keeps the names a recorded tool argument was written with', async () => {
     const rootDir = '/root/tests';
-    (fg.stream as unknown as Mock).mockReturnValue([
-      '/root/tests/t1/spec.yaml',
-    ]);
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml']),
+    );
     (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
       if (filePath.endsWith('generated-recordings.yaml')) {
         return [
