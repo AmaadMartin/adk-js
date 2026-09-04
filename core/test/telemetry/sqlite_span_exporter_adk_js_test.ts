@@ -653,6 +653,37 @@ describe('SqliteSpanExporter', () => {
       expect(raw.attributes).toEqual({});
     });
 
+    it('creates the database file and its parent directory on first use', async () => {
+      const nested = join(tempDir, 'traces', 'run-1');
+      const exporter = createExporter(join(nested, 'spans.db'));
+
+      const result = await exportSpans(exporter, [
+        createTestSpan({
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-nested'},
+        }),
+      ]);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      expect(
+        await exporter.getAllSpansForSession('session-nested'),
+      ).toHaveLength(1);
+    });
+
+    it('keeps an in-memory database readable for the life of the exporter', async () => {
+      const exporter = createExporter(':memory:');
+
+      const result = await exportSpans(exporter, [
+        createTestSpan({
+          name: 'in_memory',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-memory'},
+        }),
+      ]);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      const retrieved = await exporter.getAllSpansForSession('session-memory');
+      expect(retrieved.map((span) => span.name)).toEqual(['in_memory']);
+    });
+
     it('reads spans written by a previous exporter on the same file', async () => {
       const first = createExporter();
       await exportSpans(first, [
