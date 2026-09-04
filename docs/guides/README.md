@@ -14,6 +14,10 @@ Versioned binary and text storage (`Part` payloads) scoped to an individual sess
 
 - [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
 
+### Optimization
+
+- [Agent optimization data types](optimization/data_types/index.md) - The contract between a sampler and an optimizer: per-example scores, a Pareto front of optimized agents, and the validators for a result that arrives as `unknown`.
+
 ### Planners
 
 Planning for an `LlmAgent` through its `planner` option: the model's built-in thinking, or a Plan-ReAct instruction for a model without it.
