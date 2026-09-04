@@ -434,6 +434,58 @@ describe('validActiveCache', () => {
     expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
   });
 
+  it('reuses a cache whose use count equals the interval budget', async () => {
+    const llmRequest = largePrefixRequest();
+    const cacheMetadata = {
+      cacheName: 'cachedContents/x',
+      expireTime: Date.now() / 1000 + 60,
+      invocationsUsed: CACHE_CONFIG.cacheIntervals,
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+    llmRequest.cacheMetadata = cacheMetadata;
+
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toEqual(
+      cacheMetadata,
+    );
+  });
+
+  it('rejects a cache one use past the interval budget', async () => {
+    const llmRequest = largePrefixRequest();
+    llmRequest.cacheMetadata = {
+      cacheName: 'cachedContents/x',
+      expireTime: Date.now() / 1000 + 60,
+      invocationsUsed: CACHE_CONFIG.cacheIntervals + 1,
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
+  });
+
+  it('rejects a cache at the instant it expires', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-01-01T00:00:00Z'));
+    try {
+      const llmRequest = largePrefixRequest();
+      llmRequest.cacheMetadata = {
+        cacheName: 'cachedContents/x',
+        expireTime: Date.now() / 1000,
+        invocationsUsed: 1,
+        fingerprint: await generateCacheFingerprint(
+          llmRequest,
+          0,
+          GEMINI_SCOPE,
+        ),
+        contentsCount: 0,
+      };
+
+      expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('throws when an active cache has no cache configuration', async () => {
     const llmRequest = largePrefixRequest();
     llmRequest.cacheConfig = undefined;
