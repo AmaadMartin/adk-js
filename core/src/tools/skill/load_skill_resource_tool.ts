@@ -14,7 +14,7 @@ import {
   ToolProcessLlmRequest,
 } from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
-import {LOAD_SKILL_RESOURCE_TOOL_NAME} from './skill_system_instruction.js';
+import {LOAD_SKILL_RESOURCE_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 const BINARY_FILE_DETECTED_MSG =

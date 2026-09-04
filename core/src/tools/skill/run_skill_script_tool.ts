@@ -20,7 +20,7 @@ import {
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
-import {RUN_SKILL_SCRIPT_TOOL_NAME} from './skill_system_instruction.js';
+import {RUN_SKILL_SCRIPT_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental

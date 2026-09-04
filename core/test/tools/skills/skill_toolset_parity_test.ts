@@ -510,29 +510,6 @@ describe('skill_toolset parity: toolset shape', () => {
     ).toThrow("Duplicate skill name 'skill1'.");
   });
 
-  it('test_clone_with_updated_skills', () => {
-    const registry = new StubRegistry();
-    const executor = new StubCodeExecutor();
-    const extraTool = new ListSkillsTool(new SkillToolset([]));
-    const toolset = new SkillToolset(
-      [createSkill('skill1'), createSkill('skill2')],
-      {
-        registry,
-        codeExecutor: executor,
-        additionalTools: [extraTool],
-        toolNamePrefix: 'my',
-      },
-    );
-
-    const clone = toolset.cloneWithUpdatedSkills([createSkill('skill3')]);
-
-    expect(Object.keys(clone.skills)).toEqual(['skill3']);
-    expect(clone.registry).toBe(registry);
-    expect(clone.codeExecutor).toBe(executor);
-    expect(clone.additionalTools).toContain(extraTool);
-    expect(clone.prefix).toBe('my');
-  });
-
   it('re-resolves the additional tools after close clears the cache', async () => {
     let resolutions = 0;
     class CountingToolset extends BaseToolset {

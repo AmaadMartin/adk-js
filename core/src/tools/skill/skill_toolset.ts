@@ -25,13 +25,13 @@ import {LoadSkillTool} from './load_skill_tool.js';
 import {RunSkillInlineScriptTool} from './run_skill_inline_script_tool.js';
 import {RunSkillScriptTool} from './run_skill_script_tool.js';
 import {SearchSkillsTool} from './search_skills_tool.js';
+import {buildSkillSystemInstruction} from './skill_system_instruction.js';
 import {
-  buildSkillSystemInstruction,
   LIST_SKILLS_TOOL_NAME,
   prefixedToolName,
   RUN_SKILL_SCRIPT_TOOL_NAME,
   SEARCH_SKILLS_TOOL_NAME,
-} from './skill_system_instruction.js';
+} from './skill_tool_names.js';
 
 /** Options for {@link SkillToolset}. */
 export interface SkillToolsetOptions {
@@ -140,15 +140,16 @@ export class SkillToolset extends BaseToolset {
       allTools = allTools.filter((t) => t.name !== runScriptName);
     }
 
-    return allTools.filter((tool) => {
-      if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
-        return (this.toolFilter as string[]).includes(tool.name);
-      }
-      if (context) {
-        return this.isToolSelected(tool, context);
-      }
-      return true;
-    });
+    // A name list is checked here rather than through `isToolSelected`, so it
+    // still applies when `getTools` is called without a context. A predicate
+    // needs the context it is handed.
+    const nameFilter = this.toolFilter;
+    if (Array.isArray(nameFilter) && nameFilter.length > 0) {
+      return allTools.filter((tool) => nameFilter.includes(tool.name));
+    }
+    return context
+      ? allTools.filter((tool) => this.isToolSelected(tool, context))
+      : allTools;
   }
 
   override async close(): Promise<void> {
@@ -158,24 +159,6 @@ export class SkillToolset extends BaseToolset {
 
   getSkill(name: string): Skill | undefined {
     return this.skills[name];
-  }
-
-  /**
-   * Returns a new toolset carrying this one's configuration and `skills` in
-   * place of the current ones.
-   */
-  cloneWithUpdatedSkills(
-    skills: Record<string, Skill> | Skill[],
-  ): SkillToolset {
-    return new SkillToolset(skills, {
-      codeExecutor: this.codeExecutor,
-      additionalTools: this.additionalTools,
-      registry: this.registry,
-      allowInlineScripts: this.allowInlineScripts,
-      scriptOutputDir: this.scriptOutputDir,
-      toolFilter: this.toolFilter,
-      toolNamePrefix: this.prefix,
-    });
   }
 
   /**
