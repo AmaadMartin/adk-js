@@ -16,7 +16,6 @@
 // Only what a caller configuring or reading a `PubSubToolset` names. The
 // credentials manager, the client cache and the tool factories stay internal
 // to this module.
-export type {PubSubToolConfig} from './config.js';
 export type {PulledMessage} from './message_codec.js';
 export type {
   AcknowledgeMessagesResult,

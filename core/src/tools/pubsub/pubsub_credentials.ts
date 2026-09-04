@@ -45,14 +45,6 @@ export interface PubSubCredentialsConfig {
   scopes?: string[];
 }
 
-/** An OAuth grant, as cached in one end user's session state. */
-export interface PubSubAccessToken {
-  accessToken: string;
-  refreshToken?: string;
-  /** Epoch milliseconds at which `accessToken` expires, if known. */
-  expiresAt?: number;
-}
-
 /** The credential fields one tool call builds its Pub/Sub client with. */
 export interface ResolvedPubSubCredentials {
   credentials?: PubSubSdkCredentials;
@@ -88,13 +80,6 @@ export function validatePubSubCredentialsConfig(
   }
 }
 
-/** Whether a cached grant can still authenticate a call. */
-function isUsable(token: PubSubAccessToken): boolean {
-  // Only the refresh token authenticates a Pub/Sub client, and it outlives
-  // the access token it minted.
-  return Boolean(token.refreshToken);
-}
-
 /** Describes the scopes for the OpenAPI security scheme. */
 function scopeDescriptions(scopes: readonly string[]): Record<string, string> {
   return Object.fromEntries(
@@ -111,9 +96,14 @@ function scopeDescriptions(scopes: readonly string[]): Record<string, string> {
  */
 export class PubSubCredentialsManager {
   private readonly scopes: string[];
+  /** Set only when the config named a complete OAuth client. */
+  private readonly oauth?: {clientId: string; clientSecret: string};
 
   constructor(private readonly config: PubSubCredentialsConfig) {
     this.scopes = [...(config.scopes ?? PUBSUB_DEFAULT_SCOPES)];
+    const {clientId, clientSecret} = config;
+    this.oauth =
+      clientId && clientSecret ? {clientId, clientSecret} : undefined;
   }
 
   /**
@@ -127,14 +117,14 @@ export class PubSubCredentialsManager {
    *   from, or if the grant carries no refresh token.
    */
   resolve(context?: Context): ResolvedPubSubCredentials | undefined {
-    const {credentials, keyFilename, clientId} = this.config;
+    const {credentials, keyFilename} = this.config;
     if (credentials) {
       return {credentials, scopes: this.scopes};
     }
     if (keyFilename) {
       return {keyFilename, scopes: this.scopes};
     }
-    if (!clientId) {
+    if (!this.oauth) {
       // Application Default Credentials.
       return {scopes: this.scopes};
     }
@@ -144,53 +134,43 @@ export class PubSubCredentialsManager {
           ' session state. Call the tool through an agent.',
       );
     }
-    return this.runOAuthFlow(context);
-  }
-
-  private runOAuthFlow(
-    context: Context,
-  ): ResolvedPubSubCredentials | undefined {
-    const cached = context.state.get<PubSubAccessToken>(PUBSUB_TOKEN_CACHE_KEY);
-    if (cached && isUsable(cached)) {
-      return this.authorizedUser(cached);
-    }
-
-    const authConfig = this.authConfig();
-    const oauth2 = context.getAuthResponse(authConfig)?.oauth2;
-    if (!oauth2?.accessToken) {
-      context.requestCredential(authConfig);
-      return undefined;
-    }
-
-    const token: PubSubAccessToken = {
-      accessToken: oauth2.accessToken,
-      refreshToken: oauth2.refreshToken,
-      expiresAt: oauth2.expiresAt,
-    };
-    context.state.set(PUBSUB_TOKEN_CACHE_KEY, token);
-    return this.authorizedUser(token);
+    return this.runOAuthFlow(context, this.oauth);
   }
 
   /**
-   * Turns one end user's grant into the credentials the SDK reads.
+   * Reads this end user's refresh token, running the authorization flow the
+   * first time. Only the refresh token is kept: the SDK mints its own access
+   * tokens and cannot present one it was handed.
    *
-   * @throws Error if the grant carries no refresh token. The SDK mints its
-   *   own access tokens and cannot present one it was handed.
+   * @throws Error if the grant carries no refresh token.
    */
-  private authorizedUser(token: PubSubAccessToken): ResolvedPubSubCredentials {
-    const {clientId, clientSecret} = this.config;
-    if (!token.refreshToken || !clientId || !clientSecret) {
-      throw new Error(
-        'The authorization did not return a refresh token, which Pub/Sub' +
-          ' needs to authenticate as this user. Request offline access.',
-      );
+  private runOAuthFlow(
+    context: Context,
+    oauth: {clientId: string; clientSecret: string},
+  ): ResolvedPubSubCredentials | undefined {
+    let refreshToken = context.state.get<string>(PUBSUB_TOKEN_CACHE_KEY);
+    if (!refreshToken) {
+      const authConfig = this.authConfig();
+      const oauth2 = context.getAuthResponse(authConfig)?.oauth2;
+      if (!oauth2?.accessToken) {
+        context.requestCredential(authConfig);
+        return undefined;
+      }
+      if (!oauth2.refreshToken) {
+        throw new Error(
+          'The authorization did not return a refresh token, which Pub/Sub' +
+            ' needs to authenticate as this user. Request offline access.',
+        );
+      }
+      refreshToken = oauth2.refreshToken;
+      context.state.set(PUBSUB_TOKEN_CACHE_KEY, refreshToken);
     }
     return {
       credentials: {
         type: 'authorized_user',
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: token.refreshToken,
+        client_id: oauth.clientId,
+        client_secret: oauth.clientSecret,
+        refresh_token: refreshToken,
       },
       scopes: this.scopes,
     };

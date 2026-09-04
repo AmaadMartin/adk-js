@@ -32,16 +32,10 @@ export const CACHE_TTL_MS = 30 * 60 * 1000;
  */
 export const CACHE_MAX_SIZE = 10;
 
-/** Which identity a client speaks as, and how it identifies itself. */
+/** Which identity a client speaks as, and which project it works in. */
 export interface PubSubClientRequest {
   credentials: ResolvedPubSubCredentials;
   projectId?: string;
-  /**
-   * Extra components identifying the call: the project id and the operation
-   * name. They separate one operation's client from another's, as adk-python's
-   * `user_agent` argument does.
-   */
-  userAgent?: string[];
 }
 
 /** A client the cache holds, and when it stops being reused. */
@@ -69,11 +63,6 @@ class ClientCache<T extends Closeable> {
    *   nothing, which is what adk-python's subscriber cache does.
    */
   constructor(private readonly maxSize?: number) {}
-
-  /** How many clients the cache currently holds. */
-  get size(): number {
-    return this.entries.size;
-  }
 
   /**
    * Returns the client cached under `key`, or builds and caches one.
@@ -143,7 +132,6 @@ function cacheKey(request: PubSubClientRequest): string {
   const identity = JSON.stringify([
     request.credentials,
     request.projectId ?? '',
-    request.userAgent ?? [],
   ]);
   return createHash('sha256').update(identity).digest('hex');
 }
@@ -200,9 +188,4 @@ export function getSubscriberClient(
  */
 export async function cleanupClients(): Promise<void> {
   await Promise.all([publisherCache.close(), subscriberCache.close()]);
-}
-
-/** How many publisher clients the cache holds. Read by the tests. */
-export function publisherCacheSize(): number {
-  return publisherCache.size;
 }

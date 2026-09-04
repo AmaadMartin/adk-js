@@ -19,6 +19,7 @@
  * never interchangeable because `AuthClient` carries protected members.
  */
 
+import type {protos} from '@google-cloud/pubsub';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 
 /**
@@ -62,34 +63,20 @@ export type PubSubSdkOptions = {
   libVersion: string;
 };
 
-/** A protobuf timestamp: whole seconds plus nanoseconds. */
-export interface PubSubTimestamp {
-  /** A `Long` when the response was decoded from the wire. */
-  seconds?: number | string | {toString(): string} | null;
-  nanos?: number | null;
-}
+/**
+ * A protobuf timestamp: whole seconds plus nanoseconds. `seconds` arrives as
+ * a `Long` when the response was decoded from the wire.
+ */
+export type PubSubTimestamp = protos.google.protobuf.ITimestamp;
 
 /** One message a pull answers with, and its acknowledgement id. */
-export interface PubSubReceivedMessage {
-  ackId?: string | null;
-  message?: {
-    messageId?: string | null;
-    data?: Uint8Array | string | null;
-    attributes?: Record<string, string> | null;
-    orderingKey?: string | null;
-    publishTime?: PubSubTimestamp | null;
-  } | null;
-}
+export type PubSubReceivedMessage = protos.google.pubsub.v1.IReceivedMessage;
 
 /** What a synchronous pull answers with. */
-export interface PubSubPullResponse {
-  receivedMessages?: PubSubReceivedMessage[] | null;
-}
+export type PubSubPullResponse = protos.google.pubsub.v1.IPullResponse;
 
 /** What a publish answers with. */
-export interface PubSubPublishResponse {
-  messageIds?: string[] | null;
-}
+export type PubSubPublishResponse = protos.google.pubsub.v1.IPublishResponse;
 
 /**
  * The generated client, which publishes one message per call.

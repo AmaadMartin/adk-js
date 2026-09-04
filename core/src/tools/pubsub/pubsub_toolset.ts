@@ -9,7 +9,6 @@ import {experimental} from '../../utils/experimental.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {cleanupClients} from './client.js';
-import {PubSubToolConfig} from './config.js';
 import {
   createAcknowledgeMessagesTool,
   createPublishMessageTool,
@@ -20,6 +19,22 @@ import {
   PubSubCredentialsManager,
   validatePubSubCredentialsConfig,
 } from './pubsub_credentials.js';
+
+/**
+ * Configuration for the Pub/Sub tools.
+ *
+ * adk-python declares this model with `extra='forbid'`. TypeScript's
+ * excess-property check rejects an unknown field on an object literal at the
+ * call site, so there is no runtime validator here. A value widened to
+ * `PubSubToolConfig` before it is passed escapes that check.
+ */
+export interface PubSubToolConfig {
+  /**
+   * GCP project id to use for the Pub/Sub operations. When unset, the project
+   * is inferred from the environment or from the credentials.
+   */
+  projectId?: string;
+}
 
 /** Options for {@link PubSubToolset}. */
 export interface PubSubToolsetOptions {
@@ -52,14 +67,8 @@ export interface PubSubToolsetOptions {
  * loaded on the first tool call. Install it with
  * `npm install @google-cloud/pubsub`.
  *
- * One identity for every end user, from Application Default Credentials:
- *
- * ```ts
- * const authClient = await new GoogleAuth({
- *   scopes: [...PUBSUB_DEFAULT_SCOPES],
- * }).getClient();
- * const toolset = new PubSubToolset({credentialsConfig: {authClient}});
- * ```
+ * `new PubSubToolset({credentialsConfig: {}})` uses Application Default
+ * Credentials, which is one identity for every end user.
  *
  * An empty `toolFilter` array exposes no tools, which follows adk-python and
  * not `BaseToolset.isToolSelected`. The base class reads an empty array as
@@ -72,8 +81,8 @@ export class PubSubToolset extends BaseToolset {
 
   /**
    * @param options How the tools authenticate, and which of them to expose.
-   * @throws Error if `credentialsConfig` names no credential source or more
-   *   than one.
+   * @throws Error if `credentialsConfig` names two credential sources, or
+   *   half an OAuth client.
    */
   constructor(options: PubSubToolsetOptions) {
     // `BaseToolset` requires a filter, so an absent one becomes a predicate
@@ -82,39 +91,26 @@ export class PubSubToolset extends BaseToolset {
     super(options.toolFilter ?? (() => true));
     validatePubSubCredentialsConfig(options.credentialsConfig);
     const credentials = new PubSubCredentialsManager(options.credentialsConfig);
-    const settings = options.pubsubToolConfig ?? {};
+    const projectId = options.pubsubToolConfig?.projectId;
     this.tools = [
-      createPublishMessageTool(credentials, settings),
-      createPullMessagesTool(credentials, settings),
-      createAcknowledgeMessagesTool(credentials, settings),
+      createPublishMessageTool(credentials, projectId),
+      createPullMessagesTool(credentials, projectId),
+      createAcknowledgeMessagesTool(credentials, projectId),
     ];
   }
 
-  /**
-   * Selects a tool the way adk-python's `PubSubToolset._is_tool_selected`
-   * does: a name the list carries selects the tool, and an empty list selects
-   * none. The inherited version reads an empty list as "no filter" and would
-   * expose every tool instead.
-   */
-  protected override isToolSelected(
-    tool: BaseTool,
-    context: ReadonlyContext,
-  ): boolean {
-    const filter = this.toolFilter;
-    return Array.isArray(filter)
-      ? filter.includes(tool.name)
-      : filter(tool, context);
-  }
-
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    if (context) {
-      return this.tools.filter((tool) => this.isToolSelected(tool, context));
-    }
-    // A predicate needs a context, so without one only a name filter applies.
-    // `OpenAPIToolset` returns every tool in the same situation.
     const filter = this.toolFilter;
-    return Array.isArray(filter)
-      ? this.tools.filter((tool) => filter.includes(tool.name))
+    if (Array.isArray(filter)) {
+      // A name the list carries selects the tool, and an empty list selects
+      // none, as adk-python's `_is_tool_selected` does. The inherited version
+      // reads an empty list as "no filter" and would expose every tool.
+      return this.tools.filter((tool) => filter.includes(tool.name));
+    }
+    // A predicate needs a context, so without one every tool is exposed.
+    // `OpenAPIToolset` does the same.
+    return context
+      ? this.tools.filter((tool) => filter(tool, context))
       : this.tools;
   }
 

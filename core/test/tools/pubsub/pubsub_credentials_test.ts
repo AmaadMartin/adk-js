@@ -18,7 +18,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 // caller, so these are imported from the source they live in.
 import {
   PUBSUB_TOKEN_CACHE_KEY,
-  PubSubAccessToken,
   PubSubCredentialsManager,
   validatePubSubCredentialsConfig,
 } from '../../../src/tools/pubsub/pubsub_credentials.js';
@@ -30,9 +29,9 @@ import {
 
 const OAUTH_CONFIG = {clientId: 'abc', clientSecret: 'def'};
 
-/** Reads the grant this manager cached in session state. */
-function cachedToken(context: Context): PubSubAccessToken | undefined {
-  return context.state.get<PubSubAccessToken>(PUBSUB_TOKEN_CACHE_KEY);
+/** Reads the refresh token this manager cached in session state. */
+function cachedToken(context: Context): string | undefined {
+  return context.state.get<string>(PUBSUB_TOKEN_CACHE_KEY);
 }
 
 /** Answers the next `getAuthResponse` with `credential`. */
@@ -232,19 +231,14 @@ describe('PubSubCredentialsManager', () => {
         },
         scopes: [...PUBSUB_DEFAULT_SCOPES],
       });
-      expect(cachedToken(context)).toEqual({
-        accessToken: 'granted-token',
-        refreshToken: 'refresh',
-        expiresAt: 1_700_000_000_000,
-      });
+      // Only the refresh token is kept: an access token nothing presents has
+      // no business sitting in session state.
+      expect(cachedToken(context)).toBe('refresh');
     });
 
     it('reuses a cached grant without asking again', () => {
       const context = makeToolContext();
-      context.state.set(PUBSUB_TOKEN_CACHE_KEY, {
-        accessToken: 'cached-token',
-        refreshToken: 'cached-refresh',
-      });
+      context.state.set(PUBSUB_TOKEN_CACHE_KEY, 'cached-refresh');
       const requestCredential = vi.spyOn(context, 'requestCredential');
       const manager = new PubSubCredentialsManager(OAUTH_CONFIG);
 
@@ -255,17 +249,6 @@ describe('PubSubCredentialsManager', () => {
         refresh_token: 'cached-refresh',
       });
       expect(requestCredential).not.toHaveBeenCalled();
-    });
-
-    it('re-runs the flow for a cached grant with no refresh token', () => {
-      const context = makeToolContext();
-      context.state.set(PUBSUB_TOKEN_CACHE_KEY, {accessToken: 'expired-token'});
-      const manager = new PubSubCredentialsManager(OAUTH_CONFIG);
-
-      expect(manager.resolve(context)).toBeUndefined();
-      expect(
-        context.actions.requestedAuthConfigs[FUNCTION_CALL_ID],
-      ).toBeDefined();
     });
 
     it('re-runs the flow when the response carries no access token', () => {

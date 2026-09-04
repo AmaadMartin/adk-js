@@ -18,7 +18,6 @@ import {
   cleanupClients,
   getPublisherClient,
   getSubscriberClient,
-  publisherCacheSize,
   PUBSUB_USER_AGENT,
 } from '../../../src/tools/pubsub/client.js';
 import {logger} from '../../../src/utils/logger.js';
@@ -82,11 +81,7 @@ describe('getPublisherClient', () => {
   });
 
   it('test_get_publisher_client_with_options', async () => {
-    await getPublisherClient({
-      credentials: someone(),
-      projectId: 'my-project',
-      userAgent: ['my-project', 'publish_message'],
-    });
+    await getPublisherClient({credentials: someone(), projectId: 'my-project'});
 
     expect(pubsubFake.publisherOptions[0]['projectId']).toBe('my-project');
   });
@@ -109,7 +104,6 @@ describe('getPublisherClient', () => {
       getPublisherClient({
         credentials: testResolvedCredentials('agent'),
         projectId: 'my-project',
-        userAgent: ['my-project', 'publish_message'],
       });
 
     const first = await request();
@@ -124,28 +118,30 @@ describe('getPublisherClient', () => {
   it('test_get_publisher_client_caching_different_options', async () => {
     const credentials = someone();
 
-    const publishing = await getPublisherClient({
-      credentials,
-      userAgent: ['publish_message'],
-    });
-    const pulling = await getPublisherClient({
-      credentials,
-      userAgent: ['pull_messages'],
-    });
+    const orders = await getPublisherClient({credentials, projectId: 'orders'});
+    const events = await getPublisherClient({credentials, projectId: 'events'});
 
-    expect(pulling).not.toBe(publishing);
+    expect(events).not.toBe(orders);
     expect(pubsubFake.publisherOptions).toHaveLength(2);
   });
 
   it('test_get_publisher_client_cache_is_bounded', async () => {
-    const total = CACHE_MAX_SIZE + 5;
-
-    for (let call = 0; call < total; call++) {
-      await getPublisherClient({credentials: someone()});
+    const users = Array.from({length: CACHE_MAX_SIZE}, someone);
+    for (const credentials of users) {
+      await getPublisherClient({credentials});
     }
 
-    expect(pubsubFake.publisherOptions).toHaveLength(total);
-    expect(publisherCacheSize()).toBe(CACHE_MAX_SIZE);
+    // Every one of them is still cached, so the cache holds at least
+    // CACHE_MAX_SIZE clients.
+    for (const credentials of users) {
+      await getPublisherClient({credentials});
+    }
+    expect(pubsubFake.publisherOptions).toHaveLength(CACHE_MAX_SIZE);
+
+    // One more evicts the oldest, so it holds no more than CACHE_MAX_SIZE.
+    await getPublisherClient({credentials: someone()});
+    await getPublisherClient({credentials: users[0]});
+    expect(pubsubFake.publisherOptions).toHaveLength(CACHE_MAX_SIZE + 2);
   });
 
   it('test_get_publisher_client_cache_evicts_least_recently_used', async () => {
@@ -252,14 +248,20 @@ describe('beyond the adk-python suite', () => {
   });
 
   it('closes every cached client and empties both caches', async () => {
-    await getPublisherClient({credentials: someone()});
-    await getSubscriberClient({credentials: someone()});
+    const publishing = someone();
+    const pulling = someone();
+    await getPublisherClient({credentials: publishing});
+    await getSubscriberClient({credentials: pulling});
 
     await cleanupClients();
 
     expect(pubsubFake.closedPublishers).toBe(1);
     expect(pubsubFake.closedSubscribers).toBe(1);
-    expect(publisherCacheSize()).toBe(0);
+    // The caches are empty, so the same credentials build fresh clients.
+    await getPublisherClient({credentials: publishing});
+    await getSubscriberClient({credentials: pulling});
+    expect(pubsubFake.publisherOptions).toHaveLength(2);
+    expect(pubsubFake.subscriberOptions).toHaveLength(2);
   });
 
   it('is a no-op when called a second time', async () => {

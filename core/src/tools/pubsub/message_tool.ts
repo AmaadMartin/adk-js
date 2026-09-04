@@ -14,12 +14,8 @@ import {
   getSubscriberClient,
   PubSubClientRequest,
 } from './client.js';
-import {PubSubToolConfig} from './config.js';
 import {PulledMessage, toPulledMessage} from './message_codec.js';
-import {
-  PubSubCredentialsManager,
-  ResolvedPubSubCredentials,
-} from './pubsub_credentials.js';
+import {PubSubCredentialsManager} from './pubsub_credentials.js';
 
 /** What a Pub/Sub tool answers with when the call fails. */
 export interface PubSubErrorResult {
@@ -97,29 +93,21 @@ const acknowledgeMessagesParams = z.object({
 });
 
 /**
- * The user-agent components that separate one operation's client from
- * another's, matching adk-python's `_user_agent`.
- */
-function userAgent(projectId: string | undefined, operation: string): string[] {
-  return [projectId, operation].filter((component): component is string =>
-    Boolean(component),
-  );
-}
-
-/**
- * Resolves the calling end user's credentials.
+ * Resolves who one tool call speaks as.
  *
  * @param credentials The manager that reads the user's session state.
+ * @param projectId Which project the tool works in.
  * @param toolName The tool asking, named in the authorization message.
  * @param context The calling tool's context.
- * @return The credentials to call Pub/Sub with.
+ * @return The client request.
  * @throws Error if the user has not completed the authorization flow.
  */
-function resolveCredentials(
+function clientRequest(
   credentials: PubSubCredentialsManager,
+  projectId: string | undefined,
   toolName: string,
   context?: Context,
-): ResolvedPubSubCredentials {
+): PubSubClientRequest {
   const resolved = credentials.resolve(context);
   if (!resolved) {
     throw new Error(
@@ -127,7 +115,7 @@ function resolveCredentials(
         ` ${toolName}. Please complete the authorization flow.`,
     );
   }
-  return resolved;
+  return {credentials: resolved, projectId};
 }
 
 /**
@@ -158,12 +146,12 @@ async function runPubSubTool<T extends object>(
  * Builds the `publish_message` tool.
  *
  * @param credentials Resolves the calling end user's credentials.
- * @param settings Which project the tool publishes in.
+ * @param projectId Which project the tool publishes in.
  * @return The tool.
  */
 export function createPublishMessageTool(
   credentials: PubSubCredentialsManager,
-  settings: PubSubToolConfig,
+  projectId: string | undefined,
 ): FunctionTool<typeof publishMessageParams> {
   const name = 'publish_message';
   return new FunctionTool({
@@ -176,7 +164,7 @@ export function createPublishMessageTool(
         async () => {
           const request = clientRequest(
             credentials,
-            settings,
+            projectId,
             name,
             toolContext,
           );
@@ -207,12 +195,12 @@ export function createPublishMessageTool(
  * Builds the `pull_messages` tool.
  *
  * @param credentials Resolves the calling end user's credentials.
- * @param settings Which project the tool pulls in.
+ * @param projectId Which project the tool pulls in.
  * @return The tool.
  */
 export function createPullMessagesTool(
   credentials: PubSubCredentialsManager,
-  settings: PubSubToolConfig,
+  projectId: string | undefined,
 ): FunctionTool<typeof pullMessagesParams> {
   const name = 'pull_messages';
   return new FunctionTool({
@@ -228,7 +216,7 @@ export function createPullMessagesTool(
         async () => {
           const request = clientRequest(
             credentials,
-            settings,
+            projectId,
             name,
             toolContext,
           );
@@ -258,12 +246,12 @@ export function createPullMessagesTool(
  * Builds the `acknowledge_messages` tool.
  *
  * @param credentials Resolves the calling end user's credentials.
- * @param settings Which project the tool acknowledges in.
+ * @param projectId Which project the tool acknowledges in.
  * @return The tool.
  */
 export function createAcknowledgeMessagesTool(
   credentials: PubSubCredentialsManager,
-  settings: PubSubToolConfig,
+  projectId: string | undefined,
 ): FunctionTool<typeof acknowledgeMessagesParams> {
   const name = 'acknowledge_messages';
   return new FunctionTool({
@@ -277,7 +265,7 @@ export function createAcknowledgeMessagesTool(
         async () => {
           const request = clientRequest(
             credentials,
-            settings,
+            projectId,
             name,
             toolContext,
           );
@@ -289,26 +277,4 @@ export function createAcknowledgeMessagesTool(
       );
     },
   });
-}
-
-/**
- * Resolves who one tool call speaks as, and how its client identifies itself.
- *
- * @param credentials Resolves the calling end user's credentials.
- * @param settings Which project the tool works in.
- * @param operation The tool asking, which gets its own cached client.
- * @param context The calling tool's context.
- * @return The client request.
- */
-function clientRequest(
-  credentials: PubSubCredentialsManager,
-  settings: PubSubToolConfig,
-  operation: string,
-  context?: Context,
-): PubSubClientRequest {
-  return {
-    credentials: resolveCredentials(credentials, operation, context),
-    projectId: settings.projectId,
-    userAgent: userAgent(settings.projectId, operation),
-  };
 }

@@ -294,7 +294,7 @@ describe('beyond the adk-python suite', () => {
     expect(pubsubFake.publisherOptions[0]['projectId']).toBeUndefined();
   });
 
-  it('gives each operation its own client', async () => {
+  it('shares one subscriber client between the two subscriber tools', async () => {
     const toolset = makeToolset();
 
     await runTool(toolset, 'pull_messages', {subscription_name: SUBSCRIPTION});
@@ -303,7 +303,8 @@ describe('beyond the adk-python suite', () => {
       ack_ids: ['ack1'],
     });
 
-    expect(pubsubFake.subscriberOptions).toHaveLength(2);
+    // One credential and one project, so one gRPC channel serves both.
+    expect(pubsubFake.subscriberOptions).toHaveLength(1);
   });
 
   it.each([
