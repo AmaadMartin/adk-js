@@ -216,6 +216,11 @@ export class StorageEvent {
    * It carries the `events -> sessions ON DELETE CASCADE` constraint
    * adk-python declares, so deleting a session row removes its events even when
    * the caller never goes through {@link StorageEvent}.
+   *
+   * A database that already exists keeps its old tables: `updateSchema({safe:
+   * true})` adds the index but cannot add the constraint on sqlite, which has
+   * no `ALTER TABLE ADD CONSTRAINT`. Those databases still rely on
+   * `DatabaseSessionService.deleteSession` deleting the event rows itself.
    */
   @ManyToOne(() => StorageSession, {
     primary: true,
