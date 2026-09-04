@@ -40,6 +40,21 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('the cache bounds', () => {
+  // The bounded-cache tests below read these constants, so they prove the
+  // mechanism and not the values. adk-python fixes both, and a client that
+  // outlives its credential or a cache that grows without bound is the
+  // failure they prevent.
+  it('match adk-python _CACHE_MAX_SIZE and _CACHE_TTL', () => {
+    expect(CACHE_MAX_SIZE).toBe(10);
+    expect(CACHE_TTL_MS).toBe(1800 * 1000);
+  });
+
+  it('reports the ADK attribution adk-python sends', () => {
+    expect(PUBSUB_USER_AGENT).toBe('adk-pubsub-tool google-adk');
+  });
+});
+
 describe('getPublisherClient', () => {
   it('test_get_publisher_client', async () => {
     const authClient = testAuthClient();
