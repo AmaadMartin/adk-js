@@ -925,6 +925,71 @@ describe('DatabaseSessionService row-level locking', () => {
   });
 });
 
+/** The pooled sqlite connection the test reads its pragma from. */
+interface PooledSqliteConnection {
+  get(
+    sql: string,
+    callback: (error: Error | null, row?: {foreign_keys?: number}) => void,
+  ): void;
+}
+
+interface KnexBackedConnection {
+  getKnex(): {
+    client: {
+      acquireConnection(): Promise<PooledSqliteConnection>;
+      releaseConnection(connection: PooledSqliteConnection): void;
+    };
+  };
+}
+
+function isKnexBackedConnection(value: object): value is KnexBackedConnection {
+  return 'getKnex' in value && typeof value.getKnex === 'function';
+}
+
+function readForeignKeys(connection: PooledSqliteConnection): Promise<number> {
+  return new Promise((resolve, reject) => {
+    connection.get('pragma foreign_keys', (error, row) => {
+      if (error || row?.foreign_keys === undefined) {
+        reject(error ?? new Error('the pragma returned no row'));
+        return;
+      }
+      resolve(row.foreign_keys);
+    });
+  });
+}
+
+/**
+ * Opens a two-connection pool against `databaseFile` and reports the
+ * `foreign_keys` setting each of its connections carries.
+ */
+async function foreignKeysPerConnection(
+  databaseFile: string,
+  withPragmaHook: boolean,
+): Promise<number[]> {
+  const orm = await MikroORM.init(
+    await getConnectionOptionsFromUri(`sqlite://${databaseFile}`, {
+      pool: {min: 2, max: 2},
+      ...(withPragmaHook ? {} : {driverOptions: {}}),
+    }),
+  );
+  const connection = orm.em.getConnection();
+  if (!isKnexBackedConnection(connection)) {
+    expect.fail('the sqlite connection was expected to expose a knex handle');
+  }
+
+  const {client} = connection.getKnex();
+  const pooled = [
+    await client.acquireConnection(),
+    await client.acquireConnection(),
+  ];
+  try {
+    return [await readForeignKeys(pooled[0]), await readForeignKeys(pooled[1])];
+  } finally {
+    pooled.forEach((one) => client.releaseConnection(one));
+    await orm.close();
+  }
+}
+
 describe('DatabaseSessionService lifecycle', () => {
   let databaseFile: string;
 
@@ -1019,20 +1084,12 @@ describe('DatabaseSessionService lifecycle', () => {
     await reopened.close();
   });
 
-  it('turns foreign keys on for every sqlite connection', async () => {
-    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
-    await service.init();
-
-    const orm = await MikroORM.init(
-      await getConnectionOptionsFromUri(`sqlite://${databaseFile}`),
-    );
-    const rows = await orm.em
-      .getConnection()
-      .execute('pragma foreign_keys', [], 'all');
-    expect(rows).toEqual([{foreign_keys: 1}]);
-
-    await orm.close();
-    await service.close();
+  it('turns foreign keys on for every sqlite connection the pool opens', async () => {
+    // The sqlite driver runs the pragma once while connecting, so only the
+    // first pooled connection gets it. The control below pins that, and is
+    // what makes the assertion above it meaningful.
+    expect(await foreignKeysPerConnection(databaseFile, true)).toEqual([1, 1]);
+    expect(await foreignKeysPerConnection(databaseFile, false)).toEqual([1, 0]);
   });
 
   it('reopens the database when init follows close', async () => {
