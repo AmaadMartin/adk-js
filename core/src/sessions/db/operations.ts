@@ -8,6 +8,7 @@ import type {MikroORM, Options} from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
+import {naiveDatetimeOptions} from './dialect.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
@@ -21,6 +22,17 @@ import {
  * `Partial<Options>`.
  */
 export type MikroORMOptions = Partial<Options>;
+
+/** Backend name this module normalizes the sqlite dialect to. */
+const SQLITE_BACKEND = 'sqlite';
+
+/** Dialect name the sqlite driver reports through knex. */
+const SQLITE_KNEX_DIALECT = 'sqlite3';
+
+/** A driver connection that exposes the knex instance underneath it. */
+interface KnexBackedConnection {
+  getKnex(): {client?: {dialect?: unknown}};
+}
 
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
@@ -329,6 +341,33 @@ function buildMySqlFamilyOptions(
   );
 }
 
+function isKnexBackedConnection(value: object): value is KnexBackedConnection {
+  return 'getKnex' in value && typeof value.getKnex === 'function';
+}
+
+/**
+ * Returns the backend name the open database reports.
+ *
+ * adk-python reads `engine.dialect.name`, which spells sqlite `sqlite`. knex
+ * spells it `sqlite3`, so that one name is normalized.
+ *
+ * @param orm The initialized MikroORM instance.
+ * @returns The backend name, or an empty string when the driver names no
+ *   dialect.
+ */
+export function getDatabaseBackend(orm: MikroORM): string {
+  const connection: object = orm.em.getConnection();
+  if (!isKnexBackedConnection(connection)) {
+    return '';
+  }
+
+  const dialect = connection.getKnex().client?.dialect;
+  if (typeof dialect !== 'string') {
+    return '';
+  }
+  return dialect === SQLITE_KNEX_DIALECT ? SQLITE_BACKEND : dialect;
+}
+
 /**
  * Parses a database connection URI and returns MikroORM Options.
  *
@@ -338,6 +377,9 @@ function buildMySqlFamilyOptions(
  * "Dependency declarations" in CONTRIBUTING.md);
  * `tests/integration/lazy_load_db_drivers/driver_manifest_test.ts` enforces it.
  *
+ * A backend that drops the time zone on a datetime column is opened on UTC, so
+ * that the stored wall clock does not follow the Node process's local zone.
+ *
  * @param uri The database connection URI (e.g., "postgres://user:password@host:port/database")
  * @returns MikroORM Options configured for the database
  * @throws Error if the URI is invalid or unsupported
@@ -345,12 +387,17 @@ function buildMySqlFamilyOptions(
 export async function getConnectionOptionsFromUri(
   uri: string,
 ): Promise<MikroORMOptions> {
+  // The scheme is the backend name, and the chain below rejects every scheme
+  // this module does not support. A backend that drops the zone on a datetime
+  // column is opened on UTC.
+  const timezone = naiveDatetimeOptions(uri.slice(0, uri.indexOf('://')));
+
   if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
     const {PostgreSqlDriver} = await loadOptionalPeer(
       driverPeer('@mikro-orm/postgresql', 'postgres'),
       () => import('@mikro-orm/postgresql'),
     );
-    return buildPostgresOptions(uri, PostgreSqlDriver);
+    return {...buildPostgresOptions(uri, PostgreSqlDriver), ...timezone};
   }
 
   if (uri.startsWith('mysql://')) {
@@ -358,7 +405,7 @@ export async function getConnectionOptionsFromUri(
       driverPeer('@mikro-orm/mysql', 'mysql'),
       () => import('@mikro-orm/mysql'),
     );
-    return buildMySqlFamilyOptions(uri, MySqlDriver);
+    return {...buildMySqlFamilyOptions(uri, MySqlDriver), ...timezone};
   }
 
   if (uri.startsWith('mariadb://')) {
@@ -366,7 +413,7 @@ export async function getConnectionOptionsFromUri(
       driverPeer('@mikro-orm/mariadb', 'mariadb'),
       () => import('@mikro-orm/mariadb'),
     );
-    return buildMySqlFamilyOptions(uri, MariaDbDriver);
+    return {...buildMySqlFamilyOptions(uri, MariaDbDriver), ...timezone};
   }
 
   if (uri.startsWith('sqlite://')) {
@@ -381,6 +428,7 @@ export async function getConnectionOptionsFromUri(
           ? ':memory:'
           : uri.substring('sqlite://'.length),
       driver: SqliteDriver,
+      ...timezone,
     } as MikroORMOptions;
   }
 
@@ -393,6 +441,7 @@ export async function getConnectionOptionsFromUri(
       entities: ENTITIES,
       clientUrl: uri,
       driver: MsSqlDriver,
+      ...timezone,
     } as MikroORMOptions;
   }
 
