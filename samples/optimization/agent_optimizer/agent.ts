@@ -12,6 +12,11 @@
  * This sample implements both with hardcoded numbers, so it runs offline with
  * no credentials and no model call.
  *
+ * The agent being optimized is an `LlmAgent`, because that is what
+ * `OptimizeParams.initialAgent` takes. The optimizer only reads its
+ * `instruction`, so it never needs a model. A `Workflow` runs the optimization
+ * and reports the winning instruction, which keeps the whole sample offline.
+ *
  * Run (offline, no API key):
  *   npm run sample -- samples/optimization/agent_optimizer/agent.ts
  */
@@ -19,13 +24,15 @@
 import {
   AgentOptimizer,
   AgentWithScores,
-  getLogger,
   LlmAgent,
+  node,
+  NodeContext,
   OptimizeParams,
   OptimizerResult,
   SampleAndScoreParams,
   Sampler,
   UnstructuredSamplingResult,
+  Workflow,
 } from '@google/adk';
 
 /** The instruction the optimizer tries in place of the starting one. */
@@ -43,6 +50,9 @@ const EXPECTED_PHRASES: Record<string, string[]> = {
 
 function scoreInstruction(instruction: string, exampleId: string): number {
   const phrases = EXPECTED_PHRASES[exampleId];
+  if (!phrases) {
+    throw new Error(`No expected phrases for example id: ${exampleId}`);
+  }
   const text = instruction.toLowerCase();
   const hits = phrases.filter((phrase) => text.includes(phrase)).length;
   return hits / phrases.length;
@@ -132,19 +142,29 @@ class TwoInstructionOptimizer extends AgentOptimizer<
   }
 }
 
-export const rootAgent = new LlmAgent({
+/** The agent the optimizer rewrites. Only its instruction is ever read. */
+const startingAgent = new LlmAgent({
   name: 'support_agent',
   instruction: 'Help the user with their order.',
 });
 
-const result = await new TwoInstructionOptimizer().optimize({
-  initialAgent: rootAgent,
-  sampler: new PhraseCoverageSampler(),
-});
+const optimizeInstruction = node(
+  async (_ctx: NodeContext) => {
+    const {optimizedAgents} = await new TwoInstructionOptimizer().optimize({
+      initialAgent: startingAgent,
+      sampler: new PhraseCoverageSampler(),
+    });
+    return optimizedAgents
+      .map(
+        ({optimizedAgent, overallScore}) =>
+          `validation score ${overallScore}: ${optimizedAgent.instruction}`,
+      )
+      .join('\n');
+  },
+  {name: 'optimize_instruction'},
+);
 
-const logger = getLogger();
-for (const {optimizedAgent, overallScore} of result.optimizedAgents) {
-  logger.debug(
-    `validation score ${overallScore}: ${optimizedAgent.instruction}`,
-  );
-}
+export const rootAgent = new Workflow({
+  name: 'agent_optimizer_workflow',
+  edges: [['START', optimizeInstruction]],
+});

@@ -164,8 +164,9 @@ const [best] = result.optimizedAgents;
 // best.overallScore is 1, best.optimizedAgent.instruction is the rewrite.
 ```
 
-`samples/optimization/agent_optimizer/agent.ts` is a runnable version of the
-same thing. It needs no credentials.
+`samples/optimization/agent_optimizer/agent.ts` runs this same optimizer and
+sampler. It wraps them in a `Workflow` node so that `npm run sample` reports the
+winning instruction, and it needs no credentials.
 
 ## Capturing full evaluation data
 
