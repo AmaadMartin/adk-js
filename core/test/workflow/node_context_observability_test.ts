@@ -13,6 +13,7 @@
  */
 
 import {beforeEach, describe, expect, it} from 'vitest';
+import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent, Event} from '../../src/events/event.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
@@ -127,25 +128,44 @@ describe('NodeContext failure record', () => {
 });
 
 describe('NodeContext.eventAuthor', () => {
-  it('names the workflow on an event the node left unattributed', async () => {
-    // A `RequestInput` interrupt event carries no author of its own, so the
-    // engine fills one in. Inside a workflow that is the workflow's name.
-    const asker = new FunctionNode('asker', (ctx) =>
-      ctx.resumeInputs['approve-1'] === undefined
-        ? new RequestInput({interruptId: 'approve-1', message: 'Approve?'})
-        : 'approved',
-    );
-    const wf = new Workflow({name: 'billing', edges: [['START', asker]]});
+  it('keeps a nested agent author on an event the agent left unattributed', async () => {
+    // An agent run as a node records its own author on the context, so a later
+    // event it leaves unattributed is attributed to the agent rather than to
+    // the node it was registered under.
+    class TwoEventAgent extends BaseAgent {
+      protected async *runAsyncImpl(
+        ic: InvocationContext,
+      ): AsyncGenerator<Event, void, void> {
+        yield createEvent({
+          author: 'inner_specialist',
+          invocationId: ic.invocationId,
+          content: {role: 'model', parts: [{text: 'first'}]},
+        });
+        yield createEvent({
+          invocationId: ic.invocationId,
+          content: {role: 'model', parts: [{text: 'second'}]},
+        });
+      }
+      protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {}
+    }
 
-    const {events} = await driveWorkflow(wf);
+    const drained: Event[] = [];
+    const root = rootCtx();
+    const settle = root
+      .runNode(new TwoEventAgent({name: 'registered_as'}))
+      .then(() => channel.close());
+    for await (const event of channel) {
+      drained.push(event);
+    }
+    await settle;
 
-    const interruptEvent = events.find((event) =>
-      event.longRunningToolIds?.includes('approve-1'),
-    );
-    expect(interruptEvent?.author).toBe('billing');
+    expect(drained.map((event) => event.author)).toEqual([
+      'inner_specialist',
+      'inner_specialist',
+    ]);
   });
 
-  it('falls back to the node name outside a workflow', async () => {
+  it('falls back to the node name when nothing set an author', async () => {
     const asker = new FunctionNode(
       'asker',
       () => new RequestInput({interruptId: 'approve-1', message: 'Approve?'}),

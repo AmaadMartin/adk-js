@@ -180,10 +180,6 @@ export class Workflow extends BaseNode {
     // Child events are streamed through ctx.channel by ctx.runNode(), so this
     // orchestration generator itself yields nothing.
 
-    // Attribute the child events to this workflow, so a reader grouping events
-    // by author sees one workflow rather than N separate nodes.
-    ctx.eventAuthor = this.name;
-
     const dynamicState = new DynamicNodeState();
 
     // Workflow-scoped cancellation: a controller chained to the invocation's
