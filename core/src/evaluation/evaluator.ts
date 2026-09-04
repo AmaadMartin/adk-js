@@ -7,17 +7,6 @@
 import type {Content} from '@google/genai';
 import type {ConversationScenario, Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
-import type {RubricScore} from './eval_rubrics.js';
-
-/**
- * The verdict a metric returns for an invocation, or for a whole eval case.
- *
- * The numeric values match the `EvalStatus` of `google/adk-python`, so a
- * serialized status is portable between the two runtimes. The enum lives in
- * `eval_metrics.ts`, and is re-exported here so that a metric reads its whole
- * contract from this module.
- */
-export {EvalStatus};
 
 /** Metric evaluation score for one invocation. */
 export interface PerInvocationResult {
@@ -32,12 +21,6 @@ export interface PerInvocationResult {
 
   /** The status of this invocation. */
   evalStatus: EvalStatus;
-
-  /**
-   * The rubrics a rubric-based metric assessed for this invocation. Absent
-   * when no rubric assessment happened.
-   */
-  rubricScores?: RubricScore[];
 }
 
 /** The outcome of applying one metric to a list of invocations. */
@@ -50,12 +33,6 @@ export interface EvaluationResult {
 
   /** Detailed results per invocation. */
   perInvocationResults: PerInvocationResult[];
-
-  /**
-   * The rubric scores aggregated over the invocations. Absent when no rubric
-   * assessment happened.
-   */
-  overallRubricScores?: RubricScore[];
 }
 
 /** A metrics evaluator. */

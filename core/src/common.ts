@@ -156,13 +156,7 @@ export {
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
 export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
-export type {
-  IntermediateData,
-  IntermediateDataType,
-  Invocation,
-  InvocationEvent,
-  InvocationEvents,
-} from './evaluation/eval_case.js';
+export type {Invocation} from './evaluation/eval_case.js';
 export {
   DEFAULT_JUDGE_NUM_SAMPLES,
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
@@ -176,14 +170,7 @@ export type {
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
   LlmBackedUserSimulatorCriterion,
-  ResolvedJudgeModelOptions,
-  Threshold,
 } from './evaluation/eval_metrics.js';
-export type {
-  Rubric,
-  RubricContent,
-  RubricScore,
-} from './evaluation/eval_rubrics.js';
 export type {
   EvaluationResult,
   Evaluator,

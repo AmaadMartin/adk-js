@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {GenerateContentConfig} from '@google/genai';
 import {InputValidationError} from '../../errors/input_validation_error.js';
 import {BaseLlm} from '../../models/base_llm.js';
 import {LlmRequest} from '../../models/llm_request.js';
@@ -12,17 +13,11 @@ import {LLMRegistry} from '../../models/registry.js';
 import {experimental} from '../../utils/experimental.js';
 import type {ConversationScenario} from '../conversation_scenarios.js';
 import type {Invocation} from '../eval_case.js';
-import type {
-  EvalMetric,
-  LlmBackedUserSimulatorCriterion,
-  ResolvedJudgeModelOptions,
-} from '../eval_metrics.js';
+import type {EvalMetric} from '../eval_metrics.js';
 import {
-  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
   getMetricThreshold,
   parseLlmBackedUserSimulatorCriterion,
-  resolveJudgeModelOptions,
 } from '../eval_metrics.js';
 import type {
   EvaluationResult,
@@ -113,35 +108,19 @@ export function formatConversationHistory(invocations: Invocation[]): string {
 /**
  * Builds the judge prompt for one simulated user turn.
  *
- * adk-python's `PerTurnUserSimulatorQualityV1._format_llm_prompt`.
- *
- * `conversationScenario` and `previousInvocations` are optional so that the
- * two rejection guards adk-python declares stay reachable, even though the
- * metric itself always supplies both.
- *
- * @throws {InputValidationError} When either optional argument is absent.
+ * adk-python's `PerTurnUserSimulatorQualityV1._format_llm_prompt`. Its two
+ * `None` guards are dropped: both parameters are required here, so the caller
+ * cannot omit them. `evaluateInvocations` rejects a missing scenario at the
+ * boundary a caller can actually reach.
  */
 export function formatJudgePrompt(params: {
   invocation: Invocation;
-  conversationScenario?: ConversationScenario;
-  previousInvocations?: Invocation[];
+  conversationScenario: ConversationScenario;
+  previousInvocations: Invocation[];
   stopSignal: string;
 }): string {
   const {invocation, conversationScenario, previousInvocations, stopSignal} =
     params;
-  if (previousInvocations === undefined) {
-    throw new InputValidationError(
-      'Previous invocations should have a set value when formatting the LLM ' +
-        `prompt. Encountered: ${previousInvocations}`,
-    );
-  }
-  if (conversationScenario === undefined) {
-    throw new InputValidationError(
-      'Conversation scenario should have a set value when formatting the LLM ' +
-        `prompt. Encountered: ${conversationScenario}`,
-    );
-  }
-
   return getPerTurnUserSimulatorQualityPrompt({
     conversationPlan: conversationScenario.conversationPlan,
     conversationHistory: formatConversationHistory(previousInvocations),
@@ -280,24 +259,22 @@ export interface PerTurnUserSimulatorQualityV1Options {
 @experimental
 export class PerTurnUserSimulatorQualityV1 implements Evaluator {
   private readonly threshold: number;
-  private readonly judgeModelOptions: ResolvedJudgeModelOptions;
   private readonly stopSignal: string;
+  private readonly numSamples: number;
+  private readonly judgeModelConfig: GenerateContentConfig;
   private readonly judgeModel: BaseLlm;
 
   constructor(
     evalMetric: EvalMetric,
     options?: PerTurnUserSimulatorQualityV1Options,
   ) {
-    const criterion = deserializeCriterion(evalMetric);
+    const {judgeModelOptions, stopSignal} = deserializeCriterion(evalMetric);
     this.threshold = getMetricThreshold(evalMetric);
-    this.judgeModelOptions = resolveJudgeModelOptions(
-      criterion.judgeModelOptions,
-    );
-    this.stopSignal =
-      criterion.stopSignal ?? DEFAULT_USER_SIMULATOR_STOP_SIGNAL;
+    this.stopSignal = stopSignal;
+    this.numSamples = judgeModelOptions.numSamples;
+    this.judgeModelConfig = judgeModelOptions.judgeModelConfig ?? {};
     this.judgeModel =
-      options?.judgeModel ??
-      LLMRegistry.newLlm(this.judgeModelOptions.judgeModel);
+      options?.judgeModel ?? LLMRegistry.newLlm(judgeModelOptions.judgeModel);
   }
 
   /**
@@ -378,14 +355,14 @@ export class PerTurnUserSimulatorQualityV1 implements Evaluator {
           ],
         },
       ],
-      config: this.judgeModelOptions.judgeModelConfig ?? {},
+      config: this.judgeModelConfig,
       liveConnectConfig: {},
       toolsDict: {},
     };
     addDefaultRetryOptionsIfNotPresent(llmRequest);
 
     const samples: PerInvocationResult[] = [];
-    for (let sample = 0; sample < this.judgeModelOptions.numSamples; sample++) {
+    for (let sample = 0; sample < this.numSamples; sample++) {
       const {score} = await this.sampleJudge(llmRequest);
       samples.push({
         actualInvocation: invocationAtStep,
@@ -423,9 +400,7 @@ export class PerTurnUserSimulatorQualityV1 implements Evaluator {
  * @throws {InputValidationError} When the metric names no criterion, or names
  *   one this metric cannot read.
  */
-function deserializeCriterion(
-  evalMetric: EvalMetric,
-): LlmBackedUserSimulatorCriterion {
+function deserializeCriterion(evalMetric: EvalMetric) {
   const message =
     `\`${evalMetric.metricName}\` metric expects a criterion of type ` +
     `\`${CRITERION_TYPE_NAME}\`.`;

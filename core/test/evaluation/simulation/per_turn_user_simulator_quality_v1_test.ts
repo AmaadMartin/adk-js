@@ -27,7 +27,6 @@ import {
   convertLlmResponseToScore,
   evaluateFirstTurn,
   formatConversationHistory,
-  formatJudgePrompt,
   parseIsValidLabel,
 } from '../../../src/evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 import {FakeJudgeLlm} from '../fake_judge_llm.js';
@@ -148,30 +147,6 @@ describe('parseIsValidLabel', () => {
     '"partially",',
   ])('test_parse_llm_response_label_invalid (%s)', (label) => {
     expect(parseIsValidLabel(critique(label))).toBe(Label.INVALID);
-  });
-});
-
-describe('formatJudgePrompt', () => {
-  it('test_format_llm_prompt_raises_error_if_previous_invocations_is_none', () => {
-    expect(() =>
-      formatJudgePrompt({
-        invocation: createTestInvocation('1'),
-        conversationScenario: createTestConversationScenario(),
-        previousInvocations: undefined,
-        stopSignal: 'test stop signal',
-      }),
-    ).toThrow(/Previous invocations should have a set value/);
-  });
-
-  it('test_format_llm_prompt_raises_error_if_conversation_scenario_is_none', () => {
-    expect(() =>
-      formatJudgePrompt({
-        invocation: createTestInvocation('1'),
-        conversationScenario: undefined,
-        previousInvocations: [],
-        stopSignal: 'test stop signal',
-      }),
-    ).toThrow(/Conversation scenario should have a set value/);
   });
 });
 

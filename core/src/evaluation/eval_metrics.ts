@@ -7,9 +7,7 @@
 import type {GenerateContentConfig} from '@google/genai';
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
-import {evalModel, type EvalModel} from './common.js';
-
-export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
+import {evalSchema, parseEval} from './common.js';
 
 /** The verdict for one metric, or for a whole eval case. */
 export enum EvalStatus {
@@ -17,31 +15,6 @@ export enum EvalStatus {
   FAILED = 2,
   NOT_EVALUATED = 3,
 }
-
-/**
- * Metrics that ADK ships with.
- *
- * The string values are written into eval config files and eval results, so
- * they match adk-python exactly.
- */
-export enum PrebuiltMetrics {
-  TOOL_TRAJECTORY_AVG_SCORE = 'tool_trajectory_avg_score',
-  RESPONSE_EVALUATION_SCORE = 'response_evaluation_score',
-  RESPONSE_MATCH_SCORE = 'response_match_score',
-  SAFETY_V1 = 'safety_v1',
-  FINAL_RESPONSE_MATCH_V2 = 'final_response_match_v2',
-  RUBRIC_BASED_FINAL_RESPONSE_QUALITY_V1 = 'rubric_based_final_response_quality_v1',
-  HALLUCINATIONS_V1 = 'hallucinations_v1',
-  RUBRIC_BASED_TOOL_USE_QUALITY_V1 = 'rubric_based_tool_use_quality_v1',
-  PER_TURN_USER_SIMULATOR_QUALITY_V1 = 'per_turn_user_simulator_quality_v1',
-  MULTI_TURN_TASK_SUCCESS_V1 = 'multi_turn_task_success_v1',
-  MULTI_TURN_TRAJECTORY_QUALITY_V1 = 'multi_turn_trajectory_quality_v1',
-  MULTI_TURN_TOOL_USE_QUALITY_V1 = 'multi_turn_tool_use_quality_v1',
-  RUBRIC_BASED_MULTI_TURN_TRAJECTORY_QUALITY_V1 = 'rubric_based_multi_turn_trajectory_quality_v1',
-}
-
-/** The value a metric's score is compared against to decide pass from fail. */
-export type Threshold = number;
 
 /** The model a judge-backed metric prompts when no other model is named. */
 export const DEFAULT_JUDGE_MODEL = 'gemini-2.5-flash';
@@ -57,8 +30,6 @@ export const DEFAULT_JUDGE_NUM_SAMPLES = 5;
 
 /** How many judge calls a metric issues at once when it is not configured. */
 export const DEFAULT_JUDGE_PARALLELISM_LIMIT = 1;
-
-const MIN_JUDGE_PARALLELISM_LIMIT = 1;
 
 /** Options for an eval metric's judge model. Every field has a default. */
 export interface JudgeModelOptions {
@@ -84,79 +55,6 @@ export interface JudgeModelOptions {
   parallelismLimit?: number;
 }
 
-/** {@link JudgeModelOptions} with every default applied. */
-export interface ResolvedJudgeModelOptions {
-  judgeModel: string;
-  judgeModelConfig?: GenerateContentConfig;
-  numSamples: number;
-  parallelismLimit: number;
-}
-
-function requireInteger(field: string, value: number): number {
-  if (!Number.isInteger(value)) {
-    throw new InputValidationError(
-      `judgeModelOptions.${field} must be an integer, but got ${value}.`,
-    );
-  }
-  return value;
-}
-
-/**
- * Applies the judge model defaults and rejects options a judge cannot honour.
- *
- * adk-python applies these defaults and this validation in the
- * `JudgeModelOptions` constructor. A TypeScript interface is erased at run
- * time, so a caller reads its options through this function instead.
- *
- * @throws {InputValidationError} When `numSamples` or `parallelismLimit` is
- *   not an integer, or `parallelismLimit` is below 1.
- */
-export function resolveJudgeModelOptions(
-  options?: JudgeModelOptions,
-): ResolvedJudgeModelOptions {
-  const parallelismLimit = requireInteger(
-    'parallelismLimit',
-    options?.parallelismLimit ?? DEFAULT_JUDGE_PARALLELISM_LIMIT,
-  );
-  if (parallelismLimit < MIN_JUDGE_PARALLELISM_LIMIT) {
-    throw new InputValidationError(
-      `judgeModelOptions.parallelismLimit must be at least ` +
-        `${MIN_JUDGE_PARALLELISM_LIMIT}, but got ${parallelismLimit}.`,
-    );
-  }
-
-  return {
-    judgeModel: options?.judgeModel ?? DEFAULT_JUDGE_MODEL,
-    judgeModelConfig: options?.judgeModelConfig,
-    numSamples: requireInteger(
-      'numSamples',
-      options?.numSamples ?? DEFAULT_JUDGE_NUM_SAMPLES,
-    ),
-    parallelismLimit,
-  };
-}
-
-/**
- * Validates a {@link JudgeModelOptions} payload.
- *
- * `judgeModelConfig` passes through by reference: it holds a `@google/genai`
- * object this schema does not describe, matching adk-python's
- * `arbitrary_types_allowed`.
- */
-const judgeModelOptionsModel: EvalModel<ResolvedJudgeModelOptions> = evalModel(
-  {
-    judgeModel: z.string().default(DEFAULT_JUDGE_MODEL),
-    judgeModelConfig: z.custom<GenerateContentConfig>().optional(),
-    numSamples: z.number().int().default(DEFAULT_JUDGE_NUM_SAMPLES),
-    parallelismLimit: z
-      .number()
-      .int()
-      .min(MIN_JUDGE_PARALLELISM_LIMIT)
-      .default(DEFAULT_JUDGE_PARALLELISM_LIMIT),
-  },
-  {name: 'JudgeModelOptions'},
-);
-
 /**
  * The criterion a metric is judged against.
  *
@@ -166,14 +64,7 @@ const judgeModelOptionsModel: EvalModel<ResolvedJudgeModelOptions> = evalModel(
  */
 export interface BaseCriterion {
   /** The threshold to be used by the metric. */
-  threshold: Threshold;
-
-  /**
-   * Whether to judge the intermediate text an agent emits before its tool
-   * calls together with its final response. Defaults to false, which judges
-   * the final response alone.
-   */
-  includeIntermediateResponsesInFinal?: boolean;
+  threshold: number;
 }
 
 /** Criterion for a metric that asks a judge model to score a response. */
@@ -222,37 +113,49 @@ export interface EvalMetric {
   customFunctionPath?: string;
 }
 
-const baseCriterionShape = {
-  threshold: z.number(),
-  includeIntermediateResponsesInFinal: z.boolean().default(false),
-};
+/**
+ * Validates a {@link JudgeModelOptions} payload and applies every default.
+ *
+ * `judgeModelConfig` passes through by reference: it holds a `@google/genai`
+ * object this schema does not describe, matching adk-python's
+ * `arbitrary_types_allowed`.
+ */
+const judgeModelOptionsSchema = evalSchema(
+  z.strictObject({
+    judgeModel: z.string().default(DEFAULT_JUDGE_MODEL),
+    judgeModelConfig: z.custom<GenerateContentConfig>().optional(),
+    numSamples: z.number().int().default(DEFAULT_JUDGE_NUM_SAMPLES),
+    parallelismLimit: z
+      .number()
+      .int()
+      .min(1)
+      .default(DEFAULT_JUDGE_PARALLELISM_LIMIT),
+  }),
+);
 
 /**
- * A criterion keeps the keys its own shape does not name.
+ * Validates an {@link LlmBackedUserSimulatorCriterion} payload.
  *
- * adk-python declares `BaseCriterion` with `extra="allow"` rather than
- * inheriting `EvalBaseModel`, because an eval config holds one criterion
- * literal whose metric-specific fields must survive being read as a base
- * criterion.
+ * A criterion keeps the keys its own shape does not name, so it is a loose
+ * object: adk-python declares `BaseCriterion` with `extra="allow"`, because an
+ * eval config holds one criterion literal whose metric-specific fields must
+ * survive being read as a base criterion.
  */
-const CRITERION_OPTIONS = {extraKeys: 'allow'} as const;
+const llmBackedUserSimulatorCriterionSchema = evalSchema(
+  z.looseObject({
+    threshold: z.number(),
+    judgeModelOptions: judgeModelOptionsSchema.prefault({}),
+    stopSignal: z.string().default(DEFAULT_USER_SIMULATOR_STOP_SIGNAL),
+  }),
+);
 
-const judgeModelOptionsField = judgeModelOptionsModel.schema.prefault({});
-
-const llmAsAJudgeCriterionShape = {
-  ...baseCriterionShape,
-  judgeModelOptions: judgeModelOptionsField,
-};
-
-/** Validates an {@link LlmBackedUserSimulatorCriterion} payload. */
-const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimulatorCriterion> =
-  evalModel(
-    {
-      ...llmAsAJudgeCriterionShape,
-      stopSignal: z.string().default(DEFAULT_USER_SIMULATOR_STOP_SIGNAL),
-    },
-    {...CRITERION_OPTIONS, name: 'LlmBackedUserSimulatorCriterion'},
-  );
+/**
+ * An {@link LlmBackedUserSimulatorCriterion} with every default applied, as
+ * {@link parseLlmBackedUserSimulatorCriterion} returns it.
+ */
+type ValidatedUserSimulatorCriterion = z.infer<
+  typeof llmBackedUserSimulatorCriterionSchema
+>;
 
 /**
  * Validates a user simulator criterion payload.
@@ -261,8 +164,12 @@ const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimulatorCrit
  */
 export function parseLlmBackedUserSimulatorCriterion(
   raw: unknown,
-): LlmBackedUserSimulatorCriterion {
-  return llmBackedUserSimulatorCriterionModel.parse(raw);
+): ValidatedUserSimulatorCriterion {
+  return parseEval(
+    llmBackedUserSimulatorCriterionSchema,
+    'LlmBackedUserSimulatorCriterion',
+    raw,
+  );
 }
 
 /**
