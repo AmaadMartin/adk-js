@@ -23,6 +23,7 @@ import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
   getScriptLanguageByExtension,
+  SUPPORTED_SCRIPT_EXTENSIONS,
 } from '../../utils/file_extension_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {logger} from '../../utils/logger.js';
@@ -41,18 +42,6 @@ const MAX_ERROR_MESSAGE_LENGTH = 200;
 
 /** Resource bytes a skill may carry into an executor before it is flagged. */
 const MAX_SKILL_PAYLOAD_BYTES = 16 * 1024 * 1024;
-
-/** Script extensions the code executors can launch, for the error message. */
-const SUPPORTED_SCRIPT_EXTENSIONS = [
-  '.js',
-  '.ts',
-  '.py',
-  '.sh',
-  '.bash',
-  '.bat',
-  '.cmd',
-  '.ps1',
-];
 
 @experimental
 export class RunSkillScriptTool extends BaseTool {
@@ -460,9 +449,7 @@ function describeArgumentType(value: unknown): string {
  *
  * This only reports; the caller decides that a non-empty result is an error.
  */
-export function validateScriptArguments(
-  args: Record<string, unknown>,
-): string[] {
+function validateScriptArguments(args: Record<string, unknown>): string[] {
   const scriptArgs = args['args'];
   const shortOptions = args['short_options'];
   const positionalArgs = args['positional_args'];
@@ -510,7 +497,7 @@ export function validateScriptArguments(
  *
  * Call only after {@link validateScriptArguments} reports no problem.
  */
-export function buildScriptArgv(args: Record<string, unknown>): string[] {
+function buildScriptArgv(args: Record<string, unknown>): string[] {
   const scriptArgs = args['args'];
   if (Array.isArray(scriptArgs)) {
     return scriptArgs.map(String);
@@ -560,18 +547,16 @@ function describeExtension(scriptPath: string): string {
  * A reported non-zero status is an error. With no status reported, output on
  * stderr alone is an error and stderr alongside stdout is a warning.
  */
-export function deriveScriptStatus(
+function deriveScriptStatus(
   result: CodeExecutionResult,
 ): 'success' | 'warning' | 'error' {
-  if (result.exitCode !== undefined && result.exitCode !== null) {
-    return result.exitCode === 0 ? statusFromStreams(result) : 'error';
+  // A reported non-zero status is an error. `0`, `null` and `undefined` are
+  // all falsy, so a run that reported success and one that reported nothing
+  // are both classified from the streams: stderr alone is a failure, stderr
+  // alongside stdout is a warning.
+  if (result.exitCode) {
+    return 'error';
   }
-  return statusFromStreams(result);
-}
-
-function statusFromStreams(
-  result: CodeExecutionResult,
-): 'success' | 'warning' | 'error' {
   if (!result.stderr) {
     return 'success';
   }

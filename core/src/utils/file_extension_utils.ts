@@ -42,6 +42,9 @@ const EXTENSION_TO_LANGUAGE: Record<string, CodeExecutionLanguage> = {
   '.bash': CodeExecutionLanguage.SHELL,
 };
 
+/** The script extensions {@link getScriptLanguageByExtension} can resolve. */
+export const SUPPORTED_SCRIPT_EXTENSIONS = Object.keys(EXTENSION_TO_LANGUAGE);
+
 /**
  * Gets the MIME type and file content encoding for a given file extension.
  * @param ext The file extension (e.g., '.js', '.png').
