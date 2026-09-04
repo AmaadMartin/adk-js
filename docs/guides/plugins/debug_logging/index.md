@@ -37,15 +37,15 @@ Run a turn, then read `/tmp/adk_debug.yaml`:
 
 ```yaml
 ---
-invocationId: e-4f2c1a90
-sessionId: 0d5f2b31
-appName: my_app
-userId: user
-startTime: '2026-09-04T12:34:56.789Z'
+invocation_id: e-4f2c1a90
+session_id: 0d5f2b31
+app_name: my_app
+user_id: user
+start_time: '2026-09-04T12:34:56.789Z'
 entries:
   - timestamp: '2026-09-04T12:34:56.790Z'
-    entryType: user_message
-    invocationId: e-4f2c1a90
+    entry_type: user_message
+    invocation_id: e-4f2c1a90
     data:
       content:
         role: user
@@ -79,9 +79,9 @@ const runner = new InMemoryRunner({
 
 ## Entry kinds
 
-Every entry carries a `timestamp`, an `entryType`, the `invocationId`, an `agentName` where one applies, and a `data` payload. The `DebugEntryType` enum names each kind, and its values match adk-python's, so you can filter a trace the same way in either SDK.
+Every entry carries a `timestamp`, an `entry_type`, the `invocation_id`, an `agent_name` where one applies, and a `data` payload. The `DebugEntryType` enum names each kind, and its values match adk-python's, so you can filter a trace the same way in either SDK.
 
-| `entryType`              | Recorded when                                           |
+| `entry_type`             | Recorded when                                           |
 | :----------------------- | :------------------------------------------------------ |
 | `invocation_start`       | The runner starts an invocation.                        |
 | `user_message`           | A user message arrives.                                 |
@@ -97,7 +97,7 @@ Every entry carries a `timestamp`, an `entryType`, the `invocationId`, an `agent
 | `session_state_snapshot` | The invocation ends, and `includeSessionState` is true. |
 | `invocation_end`         | The invocation ends.                                    |
 
-An `llm_request` entry records the model name, the number of contents, the contents themselves, the tool names available, and the generation config. Inline blob bytes are never written; a part carrying one records its mime type, its display name and `dataOmitted: true`.
+An `llm_request` entry records the model name, the number of contents, the contents themselves, the tool names available, and the generation config. Inline blob bytes are never written; a part carrying one records its mime type, its display name and `_data_omitted: true`.
 
 ## Redaction
 
@@ -130,9 +130,8 @@ The file itself grows for the life of the process. The plugin does not rotate it
 
 ## Differences from adk-python
 
-The port follows `google/adk-python`'s `debug_logging_plugin` closely. Four differences are worth knowing:
+The port follows `google/adk-python`'s `debug_logging_plugin` closely. The file format matches the reference, including its snake_case keys. Three differences are worth knowing:
 
-- **Keys in the file are camelCase** (`entryType`, `functionCall`, `mimeType`) rather than snake_case. The `entryType` **values** are unchanged, so a filter on `llm_request` works against either SDK's file.
 - **A credential is identified by its shape**, not by its class, because the credential types are erased TypeScript interfaces with no runtime representation. One consequence: an `OAuth2Auth` carrying only a `clientId` is not detected as a credential. It holds nothing to protect, and any secret-named key inside it is still redacted by name.
 - **Timestamps are UTC** (`new Date().toISOString()`), where adk-python writes naive local time.
 - **The user message is always recorded.** The runner calls the user-message callback before the run callback, so adk-python's plugin, which opens its record only in the run callback, drops the message at real runtime. This port opens the record from whichever callback arrives first.
