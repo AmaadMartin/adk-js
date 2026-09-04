@@ -15,7 +15,7 @@
  * preflight read is the real one rather than a stub.
  */
 
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 // Not part of the public entry point: these are the module's own seams, so
 // they are imported from the source they live in.
 import {z} from 'zod';
@@ -35,6 +35,7 @@ import {
   validateDataAgentName,
   validatePathSegment,
 } from '../../../src/tools/data_agent/data_agent_tool.js';
+import {DataAgentToolset} from '../../../src/tools/data_agent/data_agent_toolset.js';
 import {
   DEFAULT_ENDPOINT,
   errorOf,
@@ -50,6 +51,8 @@ import {
 const AGENT_NAME = 'projects/p/locations/g/dataAgents/agent-1';
 /** The host location `l` resolves to, since it is neither `eu` nor `us`. */
 const LOCATION_L_ENDPOINT = 'https://geminidataanalytics-l.googleapis.com';
+/** The host `AGENT_NAME`'s own location, `g`, resolves to. */
+const LOCATION_G_ENDPOINT = 'https://geminidataanalytics-g.googleapis.com';
 const OPERATION_NAME = 'projects/p/locations/g/operations/op-1';
 const MUTATION_ENABLED = {
   enableDataAgentModification: true,
@@ -948,6 +951,15 @@ describe('listAccessibleDataAgents', () => {
     expect(successOf(result)['response']).toEqual([]);
   });
 
+  it('answers with no agents when the body is not an object', async () => {
+    const {deps, session} = makeDeps();
+    session.respond(jsonResponse('not an object'));
+
+    const result = await listAccessibleDataAgents({projectId: 'p'}, deps);
+
+    expect(successOf(result)['response']).toEqual([]);
+  });
+
   it('reports a non-2xx status to the model', async () => {
     const {deps, session} = makeDeps();
     session.respond(errorResponse(403, 'denied'));
@@ -1128,6 +1140,17 @@ describe('awaitLro', () => {
     expect(session.requests).toHaveLength(1);
   });
 
+  it('does not retry a thrown value that carries no error code', async () => {
+    const session = new FakeGdaSession().respond(() => {
+      throw 'a string, not an Error';
+    });
+
+    const result = await pollWith(session, new FakeClock(), runningOperation());
+
+    expect(errorOf(result)).toContain('Polling failed with exception:');
+    expect(session.requests).toHaveLength(1);
+  });
+
   it('answers with a bare success for a body that is not an object', async () => {
     const result = await pollWith(
       new FakeGdaSession(),
@@ -1136,6 +1159,44 @@ describe('awaitLro', () => {
     );
 
     expect(successOf(result)['response']).toEqual({});
+  });
+});
+
+describe('updateDataAgent', () => {
+  it('reports a config that is not JSON', async () => {
+    const {deps, factory} = makeDeps(MUTATION_ENABLED);
+
+    const result = await updateDataAgent(
+      {
+        dataAgentName: AGENT_NAME,
+        agentConfig: 'invalid-json',
+        updateMask: 'displayName',
+      },
+      deps,
+    );
+
+    expect(errorOf(result)).toContain('Invalid agent_config:');
+    expect(factory.calls).toEqual([]);
+  });
+});
+
+describe('deleteDataAgent', () => {
+  it('refuses a resource name that is not a data agent', async () => {
+    const {deps, factory} = makeDeps(MUTATION_ENABLED);
+
+    const result = await deleteDataAgent('invalid-name', deps);
+
+    expect(errorOf(result)).toContain('Invalid data_agent_name format');
+    expect(factory.calls).toEqual([]);
+  });
+
+  it('reports a request that never reached the API', async () => {
+    const {deps, session} = makeDeps(MUTATION_ENABLED);
+    session.respond(new Error('Delete failed!'));
+
+    const result = await deleteDataAgent(AGENT_NAME, deps);
+
+    expect(errorOf(result)).toContain('Delete failed!');
   });
 });
 
@@ -1199,5 +1260,163 @@ describe('createDataAgentTool', () => {
       'external_access_token_key is provided but no access token found in' +
         ' tool_context.state with key missing_key.',
     );
+  });
+});
+
+describe('the six tools, driven through their model-facing schema', () => {
+  /**
+   * Runs one tool the way a model calls it, over a stubbed `fetch`, and
+   * reports the requests that reached the network. This is what pins the
+   * snake_case parameter names the model sees, and the mapping from them to
+   * the TypeScript arguments each function takes.
+   */
+  async function callTool(
+    name: string,
+    args: Record<string, unknown>,
+    bodies: string[],
+  ): Promise<{result: unknown; urls: string[]}> {
+    const urls: string[] = [];
+    let answered = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        const body = bodies[Math.min(answered, bodies.length - 1)];
+        answered += 1;
+        return new Response(body, {status: 200});
+      }),
+    );
+
+    const toolset = new DataAgentToolset({
+      dataAgentToolConfig: {enableDataAgentModification: true},
+    });
+    const tool = (await toolset.getTools()).find((each) => each.name === name);
+    if (!tool) {
+      return expect.fail(`the toolset exposes no tool named ${name}`);
+    }
+    const result = await tool.runAsync({args, toolContext: makeToolContext()});
+    return {result, urls};
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lists the agents a project can see', async () => {
+    const {result, urls} = await callTool(
+      'list_accessible_data_agents',
+      {project_id: 'p', location: 'eu'},
+      ['{"dataAgents":["a"]}'],
+    );
+
+    expect(successOf(result)['response']).toEqual(['a']);
+    expect(urls).toEqual([
+      'https://geminidataanalytics.eu.rep.googleapis.com/v1/projects/p/locations/eu/dataAgents:listAccessible',
+    ]);
+  });
+
+  it('reads one agent by resource name', async () => {
+    const {result, urls} = await callTool(
+      'get_data_agent_info',
+      {data_agent_name: AGENT_NAME},
+      ['{"name":"agent-1"}'],
+    );
+
+    expect(successOf(result)['response']).toEqual({name: 'agent-1'});
+    expect(urls).toEqual([`${LOCATION_G_ENDPOINT}/v1/${AGENT_NAME}`]);
+  });
+
+  it('asks an agent a question', async () => {
+    const {result, urls} = await callTool(
+      'ask_data_agent',
+      {data_agent_name: AGENT_NAME, query: 'how many rows?'},
+      ['{"name":"agent-1"}', '[{\n"systemMessage": {"text": "hi"}\n}]'],
+    );
+
+    expect(successOf(result)['response']).toEqual([{text: 'hi'}]);
+    expect(urls).toEqual([
+      `${LOCATION_G_ENDPOINT}/v1/${AGENT_NAME}`,
+      `${LOCATION_G_ENDPOINT}/v1/projects/p/locations/g:chat`,
+    ]);
+  });
+
+  it('creates an agent from a JSON config string', async () => {
+    const {result, urls} = await callTool(
+      'create_data_agent',
+      {
+        project_id: 'p',
+        data_agent_id: 'new-agent',
+        agent_config: '{"displayName":"test"}',
+        location: 'global',
+      },
+      ['{"name":"agent-1","done":true}'],
+    );
+
+    expect(successOf(result)).toBeDefined();
+    expect(urls).toEqual([
+      `${DEFAULT_ENDPOINT}/v1/projects/p/locations/global/dataAgents?dataAgentId=new-agent`,
+    ]);
+  });
+
+  it('patches an agent under an update mask', async () => {
+    const {result, urls} = await callTool(
+      'update_data_agent',
+      {
+        data_agent_name: AGENT_NAME,
+        agent_config: '{"displayName":"new"}',
+        update_mask: 'displayName',
+      },
+      ['{"name":"op","done":true}'],
+    );
+
+    expect(successOf(result)).toBeDefined();
+    expect(urls).toEqual([
+      `${LOCATION_G_ENDPOINT}/v1/${AGENT_NAME}?updateMask=displayName`,
+    ]);
+  });
+
+  it('deletes an agent', async () => {
+    const {result, urls} = await callTool(
+      'delete_data_agent',
+      {data_agent_name: AGENT_NAME},
+      ['{"name":"op","done":true}'],
+    );
+
+    expect(successOf(result)).toBeDefined();
+    expect(urls).toEqual([`${LOCATION_G_ENDPOINT}/v1/${AGENT_NAME}`]);
+  });
+});
+
+describe('the system clock', () => {
+  it('polls a running operation on real time when no clock is injected', async () => {
+    const session = new FakeGdaSession().respond(
+      runningOperation(),
+      finishedOperation({name: AGENT_NAME}),
+    );
+
+    const result = await awaitLro({
+      session,
+      baseUrl: `${DEFAULT_ENDPOINT}/v1`,
+      headers: {},
+      response: runningOperation(),
+      deadline: performance.now() / 1000 + 1,
+      pollIntervalSeconds: 0.01,
+      totalTimeoutSeconds: 1,
+    });
+
+    expect(successOf(result)['response']).toEqual({name: AGENT_NAME});
+    expect(session.requests).toHaveLength(2);
+  });
+
+  it('mutates on real time when no clock is injected', async () => {
+    const {deps, session} = makeDeps(MUTATION_ENABLED);
+    session.respond(jsonResponse({name: 'op', done: true}));
+
+    const result = await deleteDataAgent(AGENT_NAME, {
+      openSession: deps.openSession,
+      settings: deps.settings,
+    });
+
+    expect(successOf(result)).toBeDefined();
   });
 });

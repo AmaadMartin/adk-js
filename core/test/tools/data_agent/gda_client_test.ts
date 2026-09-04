@@ -289,6 +289,18 @@ describe('streamChat', () => {
   });
 });
 
+describe('formatDataRetrieved', () => {
+  it('reports no rows for a result whose data is not an array', () => {
+    expect(formatDataRetrieved({data: 'nope'}, 10)).toEqual({
+      'Data Retrieved': {
+        headers: [],
+        rows: [],
+        summary: 'Showing all 0 rows.',
+      },
+    });
+  });
+});
+
 describe('createGdaSession', () => {
   it('reports the host the endpoint options select', async () => {
     const {endpoint} = await createGdaSession(undefined, {location: 'eu'});

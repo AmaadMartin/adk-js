@@ -292,10 +292,13 @@ async function* readLines(
         break;
       }
       buffer += decoder.decode(value, {stream: true});
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        yield line.replace(/\r$/, '');
+      for (
+        let newline = buffer.indexOf('\n');
+        newline >= 0;
+        newline = buffer.indexOf('\n')
+      ) {
+        yield buffer.slice(0, newline).replace(/\r$/, '');
+        buffer = buffer.slice(newline + 1);
       }
     }
     buffer += decoder.decode();

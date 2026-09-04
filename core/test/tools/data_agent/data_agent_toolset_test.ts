@@ -187,6 +187,14 @@ describe('DataAgentToolset', () => {
     expect(namesOf(tools)).toEqual(['ask_data_agent']);
   });
 
+  it('applies a name filter when it is given a context', async () => {
+    const toolset = new DataAgentToolset({toolFilter: ['ask_data_agent']});
+
+    const tools = await toolset.getTools(makeToolContext());
+
+    expect(namesOf(tools)).toEqual(['ask_data_agent']);
+  });
+
   it('applies a name filter when it has no context', async () => {
     const toolset = new DataAgentToolset({toolFilter: ['get_data_agent_info']});
     expect(namesOf(await toolset.getTools())).toEqual(['get_data_agent_info']);

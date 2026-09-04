@@ -23,8 +23,8 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /**
  * How the data agent tools obtain credentials. Exactly one of three shapes is
- * valid, which TypeScript cannot express, so
- * {@link validateDataAgentCredentialsConfig} enforces it at construction:
+ * valid, which TypeScript cannot express, so the `DataAgentToolset`
+ * constructor enforces it at runtime:
  *
  *   1. `credentials` alone — one identity for every end user.
  *   2. `externalAccessTokenKey` alone — a token another component already

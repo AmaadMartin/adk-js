@@ -485,6 +485,9 @@ async function mutateDataAgent(
   const {settings} = deps;
   const clock = deps.clock ?? systemClock;
 
+  // All three callers resolve a location before they get here, so the
+  // fallback only guards a caller that does not. It matches adk-python's
+  // `loc = location or settings.location`.
   const {session, endpoint} = await deps.openSession(
     endpointOptions(location ?? settings.location, settings.apiEndpoint),
   );
