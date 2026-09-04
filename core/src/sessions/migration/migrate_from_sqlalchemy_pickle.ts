@@ -175,8 +175,12 @@ function toBinary(value: unknown): Uint8Array | undefined {
   return undefined;
 }
 
-/** Port of adk-python's `_get_state_dict`. */
-function stateOf(value: unknown): Record<string, unknown> {
+/**
+ * Reads a `state` column, which holds a JSON object on every backend and an
+ * already-decoded object on Postgres. Port of adk-python's `_get_state_dict`,
+ * and exported for direct testing alongside {@link rowToEvent}.
+ */
+export function toStateRecord(value: unknown): Record<string, unknown> {
   if (isPlainRecord(value)) {
     return value;
   }
@@ -414,7 +418,7 @@ async function copyDatabase(
     async (row) => {
       await em.upsert(StorageAppState, {
         appName: String(row['app_name']),
-        state: stateOf(row['state']),
+        state: toStateRecord(row['state']),
         updateTime: toDateOrNow(row['update_time']),
       });
       return true;
@@ -429,7 +433,7 @@ async function copyDatabase(
       await em.upsert(StorageUserState, {
         appName: String(row['app_name']),
         userId: String(row['user_id']),
-        state: stateOf(row['state']),
+        state: toStateRecord(row['state']),
         updateTime: toDateOrNow(row['update_time']),
       });
       return true;
@@ -445,7 +449,7 @@ async function copyDatabase(
         id: String(row['id']),
         appName: String(row['app_name']),
         userId: String(row['user_id']),
-        state: stateOf(row['state']),
+        state: toStateRecord(row['state']),
         createTime: toDateOrNow(row['create_time']),
         updateTime: toDateOrNow(row['update_time']),
       });

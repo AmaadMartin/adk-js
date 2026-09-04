@@ -41,6 +41,7 @@ import {
   databasePath,
   makeTempDir,
   SqliteFixture,
+  sqliteUrl,
 } from './testdata/v0_database.js';
 
 const SOURCE_URL = 'postgresql+asyncpg://user:sup3r-s3cret@host:5432/src';
@@ -158,7 +159,7 @@ describe('migrate_from_sqlalchemy_pickle', () => {
     const sourceDbUrl = source.url;
     await source.close();
     const destPath = databasePath(directory, `${name}-dest.db`);
-    return {sourceDbUrl, destDbUrl: `sqlite:///${destPath}`, destPath};
+    return {sourceDbUrl, destDbUrl: sqliteUrl(destPath), destPath};
   }
 
   /** Inserts the session row an event's foreign key needs. */
@@ -522,8 +523,8 @@ describe('migrate_from_sqlalchemy_pickle', () => {
     const destPath = databasePath(directory, 'async-dest.db');
 
     await migrateFromSqlalchemyPickle({
-      sourceDbUrl: `sqlite+aiosqlite:///${sourcePath}`,
-      destDbUrl: `sqlite+aiosqlite:///${destPath}`,
+      sourceDbUrl: sqliteUrl(sourcePath, 'sqlite+aiosqlite'),
+      destDbUrl: sqliteUrl(destPath, 'sqlite+aiosqlite'),
     });
 
     const destination = await readDestination(destPath);

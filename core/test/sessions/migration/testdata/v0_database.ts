@@ -86,7 +86,7 @@ export class SqliteFixture {
 
   /** The SQLAlchemy-style URL adk-python users hold for this database. */
   get url(): string {
-    return `sqlite:///${this.path}`;
+    return sqliteUrl(this.path);
   }
 
   /** Creates the named v0 tables. Omit `tables` to create all four. */
@@ -133,6 +133,17 @@ export class SqliteFixture {
   async close(): Promise<void> {
     await this.orm.close(true);
   }
+}
+
+/**
+ * The connection URL for a sqlite file.
+ *
+ * A POSIX path already opens with a slash, giving SQLAlchemy's familiar
+ * `sqlite:///tmp/x.db`; a Windows path opens with a drive letter and takes
+ * only the two slashes of the scheme.
+ */
+export function sqliteUrl(path: string, scheme = 'sqlite'): string {
+  return `${scheme}://${path.startsWith('/') ? '/' : ''}${path}`;
 }
 
 /** Returns a fresh temporary directory that the test can put databases in. */
