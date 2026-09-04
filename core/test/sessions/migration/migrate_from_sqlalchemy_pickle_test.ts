@@ -67,22 +67,35 @@ async function readDestination(
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Narrows a decoded JSON value to an object, failing the test if it is not. */
+function asRecord(value: unknown, what: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    expect.fail(`Expected ${what} to be an object, got ${String(value)}`);
+  }
+  return value;
+}
+
 /** Parses the `event_data` column of the single migrated event row. */
-function eventDataOf(rows: Array<Record<string, unknown>>): {
-  [key: string]: unknown;
-} {
+function eventDataOf(
+  rows: Array<Record<string, unknown>>,
+): Record<string, unknown> {
   const raw = rows[0]?.['event_data'];
   if (typeof raw !== 'string') {
     expect.fail(`Expected an event_data string, got ${String(raw)}`);
   }
-  return JSON.parse(raw);
+  const parsed: unknown = JSON.parse(raw);
+  return asRecord(parsed, 'event_data');
 }
 
 /** The `actions` record of the single migrated event row. */
-function actionsOf(rows: Array<Record<string, unknown>>): {
-  [key: string]: unknown;
-} {
-  return eventDataOf(rows)['actions'] as {[key: string]: unknown};
+function actionsOf(
+  rows: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  return asRecord(eventDataOf(rows)['actions'], 'actions');
 }
 
 describe('to_sync_url', () => {

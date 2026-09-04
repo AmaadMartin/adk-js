@@ -36,9 +36,7 @@ const summary = await migrateFromSqlalchemyPickle({
   sourceDbUrl: 'postgresql+asyncpg://user:pw@host:5432/legacy',
   destDbUrl: 'postgresql://user:pw@host:5432/migrated',
 });
-
-console.log(summary);
-// {appStates: 3, userStates: 12, sessions: 240, events: 9861, skippedEvents: 0}
+// summary => {appStates: 3, userStates: 12, sessions: 240, events: 9861, skippedEvents: 0}
 ```
 
 The same run from the command line:
