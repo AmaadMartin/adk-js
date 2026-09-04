@@ -75,8 +75,11 @@ setLogLevel(LogLevel.DEBUG);
 
 ## Environment ids
 
-`LlmResponse.environmentId` holds the execution environment an interactions-API
-agent runs in, and `Event` inherits the field. Nothing in adk-js writes it yet:
-`findPreviousInteractionState` returns it when an event carries one, but no
-response path populates it. Treat it as read-only until an agent that
-provisions an environment lands.
+`LlmResponse.environmentId` holds the execution environment the interactions
+API ran the turn in, and `Event` inherits the field. The API reports one only
+when the request configured an environment, so it is usually absent.
+
+A non-streaming response carries the id through
+`convertInteractionToLlmResponse`, and `findPreviousInteractionState` returns
+it beside the interaction id. A streaming response does not: the SDK's
+`InteractionSSEEvent` declares no environment id, so there is nothing to read.

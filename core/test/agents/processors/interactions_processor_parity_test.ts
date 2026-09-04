@@ -23,10 +23,8 @@ import {
   LlmRequest,
   PluginManager,
 } from '@google/adk';
-import {
-  findPreviousInteractionState,
-  isEventInBranch,
-} from '@google/adk/agents/processors/interactions_request_processor.js';
+import {findPreviousInteractionState} from '@google/adk/agents/processors/interactions_request_processor.js';
+import {isEventInBranch} from '@google/adk/utils/branch_trie.js';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 const AGENT_NAME = 'test_agent';
@@ -99,15 +97,16 @@ describe('interactions processor parity', () => {
   });
 
   it('test_find_previous_interaction_id_empty_events', () => {
-    const state = findPreviousInteractionState([], {agentName: AGENT_NAME});
+    const state = findPreviousInteractionState([], AGENT_NAME);
 
     expect(state.interactionId).toBeUndefined();
   });
 
   it('test_find_previous_interaction_id_user_only_events', () => {
-    const state = findPreviousInteractionState([event('user'), event('user')], {
-      agentName: AGENT_NAME,
-    });
+    const state = findPreviousInteractionState(
+      [event('user'), event('user')],
+      AGENT_NAME,
+    );
 
     expect(state.interactionId).toBeUndefined();
   });
@@ -115,7 +114,7 @@ describe('interactions processor parity', () => {
   it('test_find_previous_interaction_id_no_interaction_id', () => {
     const state = findPreviousInteractionState(
       [event('user'), event(AGENT_NAME)],
-      {agentName: AGENT_NAME},
+      AGENT_NAME,
     );
 
     expect(state.interactionId).toBeUndefined();
@@ -124,7 +123,7 @@ describe('interactions processor parity', () => {
   it('test_find_previous_interaction_id_from_model_event', () => {
     const state = findPreviousInteractionState(
       [event('user'), event(AGENT_NAME, 'interaction_123')],
-      {agentName: AGENT_NAME},
+      AGENT_NAME,
     );
 
     expect(state.interactionId).toBe('interaction_123');
@@ -138,7 +137,7 @@ describe('interactions processor parity', () => {
         event('user'),
         event(AGENT_NAME, 'interaction_second'),
       ],
-      {agentName: AGENT_NAME},
+      AGENT_NAME,
     );
 
     expect(state.interactionId).toBe('interaction_second');
@@ -150,7 +149,7 @@ describe('interactions processor parity', () => {
         event(AGENT_NAME, 'interaction_model'),
         event('user', 'interaction_user'),
       ],
-      {agentName: AGENT_NAME},
+      AGENT_NAME,
     );
 
     expect(state.interactionId).toBe('interaction_model');
@@ -187,7 +186,7 @@ describe('interactions processor parity', () => {
         event('my_agent', 'int_2'),
         event('other_agent', 'int_3'),
       ],
-      {agentName: 'my_agent'},
+      'my_agent',
     );
 
     expect(state.interactionId).toBe('int_2');
@@ -199,16 +198,15 @@ describe('interactions processor parity', () => {
         event('my_agent', 'int_main'),
         event('my_agent', 'int_other_branch', 'branch_b'),
       ],
-      {agentName: 'my_agent', currentBranch: 'branch_a'},
+      'my_agent',
+      'branch_a',
     );
 
     expect(state.interactionId).toBe('int_main');
   });
 
   it('test_find_previous_interaction_id_none_when_absent', () => {
-    const state = findPreviousInteractionState([event('user')], {
-      agentName: 'my_agent',
-    });
+    const state = findPreviousInteractionState([event('user')], 'my_agent');
 
     expect(state.interactionId).toBeUndefined();
   });
@@ -220,7 +218,7 @@ describe('interactions processor parity', () => {
         event('user'),
         event('my_agent', 'int_2', undefined, 'env_2'),
       ],
-      {agentName: 'my_agent'},
+      'my_agent',
     );
 
     expect(state).toEqual({interactionId: 'int_2', environmentId: 'env_2'});
@@ -244,9 +242,7 @@ describe('interactions processor parity', () => {
   });
 
   it('returns no ids for an empty event list', () => {
-    expect(findPreviousInteractionState([], {agentName: AGENT_NAME})).toEqual(
-      {},
-    );
+    expect(findPreviousInteractionState([], AGENT_NAME)).toEqual({});
   });
 
   it('chains runAsync on a branch-less event while a branch is set', async () => {
