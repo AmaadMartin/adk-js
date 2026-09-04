@@ -870,7 +870,7 @@ describe('AgentRegistry', () => {
 
       try {
         await expect(badRegistry.getAuthHeaders()).rejects.toThrow(
-          'Failed to refresh Google Cloud credentials: Auth error',
+          'Failed to get default Google Cloud credentials: Auth error',
         );
       } finally {
         shouldAuthThrow = false;
