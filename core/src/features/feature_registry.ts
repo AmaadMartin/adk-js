@@ -308,13 +308,18 @@ const FEATURE_OVERRIDES: Partial<Record<FeatureName, boolean>> = {};
 /**
  * Get the configuration of a feature from the registry.
  *
+ * `Object.hasOwn` keeps a name that collides with an `Object.prototype` member
+ * — `toString`, `constructor` — from resolving to the inherited property.
+ *
  * @param featureName The feature name.
  * @returns The feature config from the registry, or undefined if not found.
  */
 export function getFeatureConfig(
   featureName: FeatureName,
 ): ResolvedFeatureConfig | undefined {
-  return FEATURE_REGISTRY[featureName];
+  return Object.hasOwn(FEATURE_REGISTRY, featureName)
+    ? FEATURE_REGISTRY[featureName]
+    : undefined;
 }
 
 /**
@@ -369,13 +374,13 @@ export function overrideFeatureEnabled(
  * @returns True if the feature is enabled, false otherwise.
  */
 export function isFeatureEnabled(featureName: FeatureName): boolean {
-  const config = FEATURE_REGISTRY[featureName];
+  const config = getFeatureConfig(featureName);
   if (!config) {
     throw new Error(`Feature ${featureName} is not registered.`);
   }
 
   // Check programmatic overrides first
-  if (featureName in FEATURE_OVERRIDES) {
+  if (Object.hasOwn(FEATURE_OVERRIDES, featureName)) {
     const enabled = FEATURE_OVERRIDES[featureName]!;
     if (enabled && config.stage !== FeatureStage.STABLE) {
       emitNonStableWarningOnce(featureName, config.stage);
@@ -430,7 +435,7 @@ export async function withTemporaryFeatureOverride<T>(
     throw new Error(`Feature ${featureName} is not registered.`);
   }
 
-  const hadOverride = featureName in FEATURE_OVERRIDES;
+  const hadOverride = Object.hasOwn(FEATURE_OVERRIDES, featureName);
   const originalValue = FEATURE_OVERRIDES[featureName];
 
   FEATURE_OVERRIDES[featureName] = enabled;
