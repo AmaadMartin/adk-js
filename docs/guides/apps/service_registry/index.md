@@ -82,6 +82,17 @@ getServiceRegistry().registerSessionService(
 registration made here is visible everywhere. Registering a scheme twice
 replaces the previous factory.
 
+A factory may be asynchronous. Return a promise when the backend has to connect
+before it can serve, and the registry awaits it:
+
+```js
+getServiceRegistry().registerSessionService('demo', async (uri) => {
+  const service = new DemoSessionService({uri});
+  await service.connect();
+  return service;
+});
+```
+
 ## Using the registry directly
 
 Outside the CLI, build the services yourself:
@@ -90,16 +101,19 @@ Outside the CLI, build the services yourself:
 import {getServiceRegistry, loadServicesModule} from '@google/adk-devtools';
 
 await loadServicesModule('/path/to/my_agent');
-const sessionService = getServiceRegistry().createSessionService(
+const sessionService = await getServiceRegistry().createSessionService(
   'demo://local',
   {agentsDir: '/path/to/my_agent'},
 );
 ```
 
+Every `create*` returns a promise, because a factory may need to await
+something before it can hand back a service.
+
 `createSessionService`, `createArtifactService` and `createMemoryService`
-return `undefined` when no factory claims the scheme, which is how a caller
+resolve `undefined` when no factory claims the scheme, which is how a caller
 tells "not my scheme, fall back" from "your URI is broken".
-`createTaskStoreService` throws instead, because a task store has no fallback
+`createTaskStoreService` rejects instead, because a task store has no fallback
 resolver.
 
 Pass `agentsDir` when you can. Factories that need a Google Cloud project and
@@ -107,23 +121,32 @@ location read `<agentsDir>/.env` before the ambient environment.
 
 ## Built-in schemes
 
-| Service type | Scheme                      | Builds                                                                                |
-| ------------ | --------------------------- | ------------------------------------------------------------------------------------- |
-| session      | `memory://`                 | `InMemorySessionService`                                                              |
-| session      | `sqlite://`                 | `InMemorySessionService` when the URI has no path, otherwise `DatabaseSessionService` |
-| session      | `postgresql://`, `mysql://` | `DatabaseSessionService`                                                              |
-| session      | `agentengine://`            | `VertexAiSessionService`                                                              |
-| artifact     | `memory://`                 | `InMemoryArtifactService`                                                             |
-| artifact     | `gs://`                     | `GcsArtifactService`, bucket taken from the authority                                 |
-| artifact     | `file://`                   | `FileArtifactService`, local paths only                                               |
-| memory       | `memory://`                 | `InMemoryMemoryService`                                                               |
-| memory       | `agentengine://`            | `VertexAiMemoryBankService`                                                           |
-| task store   | `memory://`                 | `InMemoryTaskStore`                                                                   |
+| Service type | Scheme                                                               | Builds                                                                                |
+| ------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| session      | `memory://`                                                          | `InMemorySessionService`                                                              |
+| session      | `sqlite://`                                                          | `InMemorySessionService` when the URI has no path, otherwise `DatabaseSessionService` |
+| session      | `postgresql://`, `postgres://`, `mysql://`, `mariadb://`, `mssql://` | `DatabaseSessionService`                                                              |
+| session      | `agentengine://`                                                     | `VertexAiSessionService`                                                              |
+| artifact     | `memory://`                                                          | `InMemoryArtifactService`                                                             |
+| artifact     | `gs://`                                                              | `GcsArtifactService`, bucket taken from the authority                                 |
+| artifact     | `file://`                                                            | `FileArtifactService`, local paths only                                               |
+| memory       | `memory://`                                                          | `InMemoryMemoryService`                                                               |
+| memory       | `rag://`                                                             | `VertexAiRagMemoryService`, corpus taken from the authority                           |
+| memory       | `agentengine://`                                                     | `VertexAiMemoryBankService`                                                           |
+| task store   | `memory://`                                                          | `InMemoryTaskStore`                                                                   |
 
 `agentengine://` accepts a bare id (`agentengine://123`, which needs
 `agentsDir` and `GOOGLE_CLOUD_PROJECT`/`GOOGLE_CLOUD_LOCATION`) or a full
 resource name
 (`agentengine://projects/p/locations/l/reasoningEngines/123`).
+
+`rag://my-corpus` builds the corpus resource name
+`projects/{project}/locations/{location}/ragCorpora/my-corpus`, so it needs
+`agentsDir` and the same two environment variables. It resolves
+`VertexAiRagMemoryService` from `@google/adk` on the call that needs it,
+because the class is newer than the oldest `@google/adk` this package accepts.
+Against an older core package the call fails with a message telling you to use
+`agentengine://` instead.
 
 A built-in factory forwards only what its constructor declares. The `sqlite://`
 and `gs://` factories log a warning naming the keys in `extra` that they drop;

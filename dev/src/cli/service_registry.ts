@@ -77,6 +77,22 @@ const URI_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):/;
 const URI_AUTHORITY_PREFIX = '//';
 
 /**
+ * The schemes `DatabaseSessionService` accepts, minus `sqlite` which has its
+ * own factory.
+ *
+ * adk-python registers `postgresql` and `mysql` only. adk-js keeps the list
+ * aligned with `isDatabaseConnectionString` in `@google/adk`, so the registry
+ * never turns down a connection string the session service can open.
+ */
+const DATABASE_SESSION_SCHEMES = [
+  'postgresql',
+  'postgres',
+  'mysql',
+  'mariadb',
+  'mssql',
+] as const;
+
+/**
  * Everything a factory receives besides the URI.
  *
  * adk-python passes these as `**kwargs`. A named interface keeps them typed,
@@ -93,11 +109,17 @@ export interface ServiceFactoryOptions {
   extra?: Readonly<Record<string, unknown>>;
 }
 
-/** Builds one service from the URI that named it. */
+/**
+ * Builds one service from the URI that named it.
+ *
+ * A factory may be asynchronous. Opening a connection or resolving a driver
+ * needs an `await`, so every `create*` on the registry returns a promise.
+ * adk-python builds its services synchronously.
+ */
 export type ServiceFactory<T> = (
   uri: string,
   options?: ServiceFactoryOptions,
-) => T;
+) => T | Promise<T>;
 
 /** The service kinds a `services.yaml` entry can declare. */
 export type ServiceType = 'session' | 'artifact' | 'memory' | 'task_store';
@@ -168,29 +190,29 @@ export class ServiceRegistry {
   }
 
   /**
-   * Builds the session service for `uri`, or returns `undefined` when no
+   * Builds the session service for `uri`, or resolves `undefined` when no
    * factory claims its scheme so the caller can fall back.
    */
   createSessionService(
     uri: string,
     options?: ServiceFactoryOptions,
-  ): BaseSessionService | undefined {
+  ): Promise<BaseSessionService | undefined> {
     return createFromFactories(this.sessionFactories, uri, options);
   }
 
-  /** Builds the artifact service for `uri`, or `undefined`. */
+  /** Builds the artifact service for `uri`, or resolves `undefined`. */
   createArtifactService(
     uri: string,
     options?: ServiceFactoryOptions,
-  ): BaseArtifactService | undefined {
+  ): Promise<BaseArtifactService | undefined> {
     return createFromFactories(this.artifactFactories, uri, options);
   }
 
-  /** Builds the memory service for `uri`, or `undefined`. */
+  /** Builds the memory service for `uri`, or resolves `undefined`. */
   createMemoryService(
     uri: string,
     options?: ServiceFactoryOptions,
-  ): BaseMemoryService | undefined {
+  ): Promise<BaseMemoryService | undefined> {
     return createFromFactories(this.memoryFactories, uri, options);
   }
 
@@ -200,11 +222,11 @@ export class ServiceRegistry {
    * @throws If no factory claims the scheme. A task store has no fallback
    *   resolver, so an unknown scheme is an error rather than a miss.
    */
-  createTaskStoreService(
+  async createTaskStoreService(
     uri: string,
     options?: ServiceFactoryOptions,
-  ): TaskStore {
-    const taskStore = createFromFactories(
+  ): Promise<TaskStore> {
+    const taskStore = await createFromFactories(
       this.taskStoreFactories,
       uri,
       options,
@@ -240,8 +262,9 @@ export function getServiceRegistry(): ServiceRegistry {
 export function registerBuiltinServices(registry: ServiceRegistry): void {
   registry.registerSessionService('memory', createInMemorySessionService);
   registry.registerSessionService('sqlite', createSqliteSessionService);
-  registry.registerSessionService('postgresql', createDatabaseSessionService);
-  registry.registerSessionService('mysql', createDatabaseSessionService);
+  for (const scheme of DATABASE_SESSION_SCHEMES) {
+    registry.registerSessionService(scheme, createDatabaseSessionService);
+  }
   registry.registerSessionService(
     'agentengine',
     createAgentEngineSessionService,
@@ -252,6 +275,7 @@ export function registerBuiltinServices(registry: ServiceRegistry): void {
   registry.registerArtifactService('file', createFileArtifactService);
 
   registry.registerMemoryService('memory', createInMemoryMemoryService);
+  registry.registerMemoryService('rag', createRagMemoryService);
   registry.registerMemoryService('agentengine', createAgentEngineMemoryService);
 
   registry.registerTaskStoreService('memory', createInMemoryTaskStoreService);
@@ -309,11 +333,11 @@ export async function loadServicesModule(
   }
 }
 
-function createFromFactories<T>(
+async function createFromFactories<T>(
   factories: ReadonlyMap<string, ServiceFactory<T>>,
   uri: string,
   options?: ServiceFactoryOptions,
-): T | undefined {
+): Promise<T | undefined> {
   const scheme = parseUriScheme(uri);
   const factory = scheme === undefined ? undefined : factories.get(scheme);
   return factory?.(uri, options);
@@ -410,6 +434,61 @@ function createAgentEngineMemoryService(
   return new VertexAiMemoryBankService(
     parseAgentEngineUri(uri, options?.agentsDir),
   );
+}
+
+/** The options the Vertex AI RAG memory service is constructed with. */
+interface RagMemoryServiceOptions {
+  /** `projects/{project}/locations/{location}/ragCorpora/{corpus}`. */
+  ragCorpus: string;
+}
+
+/** The class {@link resolveRagMemoryService} looks up in `@google/adk`. */
+type RagMemoryServiceConstructor = new (
+  options: RagMemoryServiceOptions,
+) => unknown;
+
+async function createRagMemoryService(
+  uri: string,
+  options?: ServiceFactoryOptions,
+): Promise<BaseMemoryService> {
+  const corpus = splitUriAuthority(uri).authority;
+  if (!corpus) {
+    throw new Error('Rag corpus can not be empty.');
+  }
+  const {projectId, location} = loadGcpConfig(
+    options?.agentsDir,
+    'RAG memory service',
+  );
+  const constructor = await resolveRagMemoryService();
+  const service = new constructor({
+    ragCorpus: `projects/${projectId}/locations/${location}/ragCorpora/${corpus}`,
+  });
+  if (!isMemoryService(service)) {
+    throw new Error(
+      'VertexAiRagMemoryService exported by @google/adk is not a memory service.',
+    );
+  }
+  return service;
+}
+
+/**
+ * Reads the RAG memory service out of `@google/adk` at call time.
+ *
+ * `dev` declares `@google/adk` as a version range, and the service is newer
+ * than the low end of it. A static import would therefore fail to compile
+ * against an older core package, so `rag://` resolves the class on the call
+ * that needs it and reports a usable error when it is missing.
+ */
+async function resolveRagMemoryService(): Promise<RagMemoryServiceConstructor> {
+  const adk: unknown = await import('@google/adk');
+  const exported = readProperty(adk, 'VertexAiRagMemoryService');
+  if (!isRagMemoryServiceConstructor(exported)) {
+    throw new Error(
+      'rag:// needs VertexAiRagMemoryService, which the installed @google/adk' +
+        ' does not export. Use agentengine:// for Agent Engine memory instead.',
+    );
+  }
+  return exported;
 }
 
 /** The Agent Engine coordinates a `agentengine://` URI names. */
@@ -667,6 +746,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isDeclaredServiceConstructor(
   value: unknown,
 ): value is DeclaredServiceConstructor {
+  return typeof value === 'function' && 'prototype' in value;
+}
+
+function isRagMemoryServiceConstructor(
+  value: unknown,
+): value is RagMemoryServiceConstructor {
   return typeof value === 'function' && 'prototype' in value;
 }
 

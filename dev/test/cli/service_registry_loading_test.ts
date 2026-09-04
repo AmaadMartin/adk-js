@@ -88,11 +88,15 @@ describe('loadServicesModule', () => {
     await loadServicesModule(agentsDir, registry);
 
     expect(
-      registry.createSessionService('demosession://host', {agentsDir}),
+      await registry.createSessionService('demosession://host', {agentsDir}),
     ).toBeDefined();
-    expect(registry.createArtifactService('demoartifact://x')).toBeDefined();
-    expect(registry.createMemoryService('demomemory://x')).toBeDefined();
-    expect(registry.createTaskStoreService('demotasks://x')).toBeDefined();
+    expect(
+      await registry.createArtifactService('demoartifact://x'),
+    ).toBeDefined();
+    expect(await registry.createMemoryService('demomemory://x')).toBeDefined();
+    expect(
+      await registry.createTaskStoreService('demotasks://x'),
+    ).toBeDefined();
     expect(warn).not.toHaveBeenCalled();
 
     const recorded: unknown = JSON.parse(fs.readFileSync(recordPath, 'utf-8'));
@@ -112,7 +116,7 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('fromyml://x')).toBeDefined();
+    expect(await registry.createSessionService('fromyml://x')).toBeDefined();
   });
 
   it('imports the default export when the class path names no export', async () => {
@@ -131,7 +135,9 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('defaultexport://x')).toBeDefined();
+    expect(
+      await registry.createSessionService('defaultexport://x'),
+    ).toBeDefined();
   });
 
   it('imports a class named by an installed package', async () => {
@@ -146,7 +152,7 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('packaged://x')).toBeInstanceOf(
+    expect(await registry.createSessionService('packaged://x')).toBeInstanceOf(
       InMemorySessionService,
     );
   });
@@ -165,7 +171,7 @@ describe('loadServicesModule', () => {
       'Failed to load services.yaml',
     );
     expect(
-      getServiceRegistry().createSessionService('stopmarker://x'),
+      await getServiceRegistry().createSessionService('stopmarker://x'),
     ).toBeUndefined();
   });
 
@@ -195,7 +201,7 @@ describe('loadServicesModule', () => {
     write('services.js', servicesScriptSource('overridden', 'ScriptSession'));
 
     await loadServicesModule(agentsDir, getServiceRegistry());
-    getServiceRegistry().createSessionService('overridden://x');
+    await getServiceRegistry().createSessionService('overridden://x');
 
     expect(fs.existsSync(scriptRecord)).toBe(true);
     expect(fs.existsSync(yamlRecord)).toBe(false);
@@ -220,9 +226,9 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('good://x')).toBeDefined();
-    expect(registry.createSessionService('broken://x')).toBeUndefined();
-    expect(registry.createMemoryService('alsogood://x')).toBeDefined();
+    expect(await registry.createSessionService('good://x')).toBeDefined();
+    expect(await registry.createSessionService('broken://x')).toBeUndefined();
+    expect(await registry.createMemoryService('alsogood://x')).toBeDefined();
     expect(String(warn.mock.calls[0]?.[0])).toContain(
       'Invalid service config in YAML',
     );
@@ -262,7 +268,7 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('nonsense://x')).toBeUndefined();
+    expect(await registry.createSessionService('nonsense://x')).toBeUndefined();
     expect(String(warn.mock.calls[0]?.[0])).toContain(
       'Unknown service type in YAML: nonsense',
     );
@@ -288,7 +294,7 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('builtin://x')).toBeUndefined();
+    expect(await registry.createSessionService('builtin://x')).toBeUndefined();
     expect(String(warn.mock.calls[0]?.[0])).toContain(
       'is a Node built-in module',
     );
@@ -306,7 +312,7 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('inline://x')).toBeUndefined();
+    expect(await registry.createSessionService('inline://x')).toBeUndefined();
     expect(String(warn.mock.calls[0]?.[0])).toContain(
       "'data:' module specifiers are not allowed",
     );
@@ -325,7 +331,9 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(registry.createSessionService('notaclass://x')).toBeUndefined();
+    expect(
+      await registry.createSessionService('notaclass://x'),
+    ).toBeUndefined();
     expect(String(warn.mock.calls[0]?.[0])).toContain(
       "export 'NotAClass' is not a class",
     );
@@ -344,7 +352,9 @@ describe('loadServicesModule', () => {
 
     await loadServicesModule(agentsDir, registry);
 
-    expect(() => registry.createSessionService('mismatched://x')).toThrowError(
+    await expect(
+      registry.createSessionService('mismatched://x'),
+    ).rejects.toThrowError(
       "declared for service type 'session' does not implement it",
     );
   });
@@ -377,7 +387,7 @@ describe('loadServicesModule', () => {
 });
 
 describe('getServiceRegistry', () => {
-  it('returns one instance that keeps the registrations made through it', () => {
+  it('returns one instance that keeps the registrations made through it', async () => {
     const service = new InMemorySessionService();
     const first = getServiceRegistry();
     first.registerSessionService('singleton', () => service);
@@ -385,7 +395,7 @@ describe('getServiceRegistry', () => {
     const second = getServiceRegistry();
 
     expect(second).toBe(first);
-    expect(second.createSessionService('singleton://x')).toBe(service);
+    expect(await second.createSessionService('singleton://x')).toBe(service);
   });
 });
 
