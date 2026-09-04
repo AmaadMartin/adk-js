@@ -124,7 +124,9 @@ describe('mcpInstructionProvider behaviour', () => {
 
     await provider(makeContext({present: 'here'}));
 
-    expect(forwardedArgs()).toEqual({present: 'here'});
+    // toStrictEqual, not toEqual: toEqual ignores a key whose value is
+    // undefined, which is the exact defect this test pins.
+    expect(forwardedArgs()).toStrictEqual({present: 'here'});
   });
 
   it('serializes a non-string argument value as JSON', async () => {
