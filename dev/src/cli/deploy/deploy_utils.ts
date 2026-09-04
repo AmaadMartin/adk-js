@@ -35,6 +35,26 @@ export const spawnAsync = (
 
 export const REQUIRED_NPM_PACKAGES = ['@google/adk'];
 
+/**
+ * Hazard a deployment carries when it ships the developer web UI. The text is
+ * adk-python's `_ADK_WEB_WARNING`, verbatim.
+ */
+export const ADK_WEB_WARNING =
+  'ADK Web is for development purposes. It has access to all' +
+  ' data and should not be used in production.';
+
+/**
+ * Warns on stderr that a deployment ships the developer web UI.
+ *
+ * Call this before the deployment does any work, so a later failure cannot
+ * swallow the warning.
+ */
+export function warnIfWithUi(withUi: boolean): void {
+  if (withUi) {
+    console.warn(`WARNING: ${ADK_WEB_WARNING}`);
+  }
+}
+
 export interface CreateDockerFileContentOptions {
   appName?: string;
   project: string;
