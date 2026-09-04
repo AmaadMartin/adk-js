@@ -328,10 +328,20 @@ export {ResponseEvaluator} from './evaluation/response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './evaluation/rouge_scorer.js';
 export type {RougeScore} from './evaluation/rouge_scorer.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
+export {
+  UserSimulatorStatus,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
 export type {
   UserBehavior,
   UserPersona,
 } from './evaluation/simulation/user_simulator_personas.js';
+export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {

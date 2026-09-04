@@ -22,6 +22,7 @@ import {
   NUM_RUNS,
   PrebuiltMetrics,
   TrajectoryEvaluator,
+  UserSimulatorProvider,
   defaultMetricEvaluatorRegistry,
   setEvalRuntime,
 } from '@google/adk';
@@ -748,6 +749,19 @@ describe('AgentEvaluator.evaluateEvalSet parity with adk-python', () => {
     expect(() =>
       forked.getEvaluator({metricName: defaultOnly, threshold: 0.5}),
     ).toThrowError(`${defaultOnly} not found in registry.`);
+  });
+
+  it('hands the runtime a user simulator provider', async () => {
+    await AgentEvaluator.evaluateEvalSet({
+      agentModule: createAgentModule(),
+      evalSet: createEvalSet(),
+      evalConfig: createEvalConfig(0.8),
+      numRuns: 1,
+    });
+
+    expect(runtime.params?.userSimulatorProvider).toBeInstanceOf(
+      UserSimulatorProvider,
+    );
   });
 });
 

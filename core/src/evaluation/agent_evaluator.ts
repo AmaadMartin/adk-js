@@ -62,6 +62,7 @@ import {
   defaultMetricEvaluatorRegistry,
   registerCustomMetricsFromConfig,
 } from './metric_evaluator_registry.js';
+import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
 
 /** How many times every entry of an eval dataset is assessed by default. */
 export const NUM_RUNS = 2;
@@ -728,6 +729,7 @@ export class AgentEvaluator {
         evalConfig,
         defaultMetricEvaluatorRegistry().fork(),
       ),
+      userSimulatorProvider: new UserSimulatorProvider(),
       artifactService,
       evalSetResultsManager,
     });
