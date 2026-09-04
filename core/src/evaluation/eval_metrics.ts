@@ -580,6 +580,8 @@ export function parseLlmBackedUserSimulatorCriterion(
 ): LlmBackedUserSimulatorCriterion {
   return llmBackedUserSimulatorCriterionModel.parse(raw);
 }
+parseLlmBackedUserSimulatorCriterion.criterionName =
+  'LlmBackedUserSimulatorCriterion';
 
 /**
  * Validates a tool trajectory criterion payload.

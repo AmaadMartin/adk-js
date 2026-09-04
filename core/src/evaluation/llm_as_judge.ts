@@ -87,7 +87,7 @@ interface SettledInvocation {
  * @throws {InputValidationError} When the metric carries no criterion, or one
  *   the parser rejects.
  */
-function parseMetricCriterion<CriterionT extends LlmAsAJudgeCriterion>(
+export function parseMetricCriterion<CriterionT extends LlmAsAJudgeCriterion>(
   evalMetric: EvalMetric,
   parseCriterion: CriterionParser<CriterionT>,
 ): CriterionT {
