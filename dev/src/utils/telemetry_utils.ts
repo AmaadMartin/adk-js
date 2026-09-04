@@ -7,9 +7,9 @@
 import {
   getGcpExporters,
   getGcpResource,
-  GoogleAuthConfig,
   maybeSetOtelProviders,
   OTelHooks,
+  resolveGoogleAuth,
 } from '@google/adk';
 import {HrTime} from '@opentelemetry/api';
 import {
@@ -17,11 +17,6 @@ import {
   SpanExporter,
   SpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
-import {GoogleAuth} from 'google-auth-library';
-
-import {AdkLogger} from './logger.js';
-
-const logger = new AdkLogger({label: 'Telemetry'});
 
 /**
  * Converts HrTime to nanoseconds timestamp
@@ -157,26 +152,6 @@ export async function setupTelemetry(
   }
 }
 
-/**
- * Resolves Application Default Credentials once, for every GCP exporter.
- *
- * Undefined when the process is not authenticated, so that
- * `adk web --otel_to_cloud` degrades to a warning instead of throwing.
- */
-async function resolveGoogleAuth(): Promise<GoogleAuthConfig | undefined> {
-  try {
-    const auth = new GoogleAuth();
-    const [authClient, projectId] = await Promise.all([
-      auth.getClient(),
-      auth.getProjectId(),
-    ]);
-    return {authClient, projectId};
-  } catch (e: unknown) {
-    logger.debug('Failed to resolve Application Default Credentials.', e);
-    return undefined;
-  }
-}
-
 async function setupGcpTelemetryExperimental(
   internalExporters: SpanProcessor[] = [],
 ): Promise<void> {
@@ -188,6 +163,9 @@ async function setupGcpTelemetryExperimental(
     });
   }
 
+  // Resolved once, so that the exporters and the resource name the same
+  // project. It is undefined when the process is not authenticated, which
+  // leaves `getGcpExporters` to warn rather than throw.
   const googleAuth = await resolveGoogleAuth();
   const gcpExporters = await getGcpExporters({
     enableTracing: true,

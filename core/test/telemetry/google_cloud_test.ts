@@ -14,6 +14,7 @@ import {
   getGcpResource,
   OTelHooks,
 } from '@google/adk';
+import {AttributeValue} from '@opentelemetry/api';
 import {OTLPLogExporter} from '@opentelemetry/exporter-logs-otlp-http';
 import {OTLPTraceExporter} from '@opentelemetry/exporter-trace-otlp-http';
 import {resourceFromAttributes} from '@opentelemetry/resources';
@@ -388,14 +389,18 @@ describe('mutual TLS without a certificate', () => {
 });
 
 describe('project number conversion', () => {
-  /** Returns the `resource_container` the log processor pins records to. */
+  /**
+   * Returns the `resource_container` the log processor pins records to.
+   *
+   * The project arrives through Application Default Credentials, which is the
+   * path that converts a project number into a project id.
+   */
   async function pinnedResourceContainer(
     authClient: FakeAuthClient,
-  ): Promise<unknown> {
-    const result = await getGcpExporters({
-      enableLogging: true,
-      googleAuth: {authClient, projectId: PROJECT_NUMBER},
-    });
+  ): Promise<AttributeValue | undefined> {
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', PROJECT_NUMBER);
+    vi.spyOn(GoogleAuth.prototype, 'getClient').mockResolvedValue(authClient);
+    const result = await getGcpExporters({enableLogging: true});
     const [processor] = result.logRecordProcessors ?? [];
     if (!processor) {
       expect.fail('getGcpExporters installed no log record processor');
@@ -449,6 +454,32 @@ describe('project number conversion', () => {
 
     await expect(pinnedResourceContainer(authClient)).resolves.toBeUndefined();
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('should take a supplied project at its word', async () => {
+    vi.stubEnv('GOOGLE_CLOUD_AGENT_ENGINE_ID', PROJECT_NUMBER);
+    const authClient = new FakeAuthClient();
+    const request = vi.spyOn(authClient, 'request');
+    const getClient = vi.spyOn(GoogleAuth.prototype, 'getClient');
+
+    const result = await getGcpExporters({
+      enableLogging: true,
+      googleAuth: {authClient, projectId: PROJECT_ID},
+    });
+    const [processor] = result.logRecordProcessors ?? [];
+    if (!processor) {
+      expect.fail('getGcpExporters installed no log record processor');
+    }
+    const {forwarded} = emitLogRecord(processor);
+    await shutdown(result);
+
+    // A caller that resolved the project already gets no second lookup, so
+    // the id it passed to getGcpResource is the id the log records carry.
+    expect(forwarded.resource.attributes['resource_container']).toBe(
+      `projects/${PROJECT_ID}`,
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(getClient).not.toHaveBeenCalled();
   });
 });
 

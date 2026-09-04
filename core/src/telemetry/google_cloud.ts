@@ -131,8 +131,10 @@ export interface GcpExportersConfig extends OtelExportersConfig {
 }
 
 /** Credentials and project, once both are known. */
-interface ResolvedGoogleAuth {
+export interface ResolvedGoogleAuth {
+  /** Auth client that signs each export. */
   authClient: AuthClient;
+  /** Project telemetry is reported to, as a project id. */
   projectId: string;
 }
 
@@ -141,18 +143,6 @@ interface OtlpExporterConfig {
   url: string;
   headers: Record<string, string>;
   httpAgentOptions?: ClientCertSource;
-}
-
-/**
- * Returns the `User-Agent` header Agent Engine attributes its traffic with.
- *
- * Undefined when the deployment has not opted in to telemetry.
- */
-function telemetryUserAgentHeaders(): Record<string, string> | undefined {
-  if (!process.env[AGENT_ENGINE_TELEMETRY_ENV]) {
-    return undefined;
-  }
-  return {[USER_AGENT_HEADER]: `Vertex-Agent-Engine/${version}`};
 }
 
 /** Returns the bearer token `authClient` currently signs requests with. */
@@ -177,7 +167,13 @@ async function readAuthorization(authClient: AuthClient): Promise<string> {
 async function createExportHeaders(
   authClient: AuthClient,
 ): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {...telemetryUserAgentHeaders()};
+  // Agent Engine attributes its export traffic with a `User-Agent`, once the
+  // deployment has opted in to telemetry.
+  const headers: Record<string, string> = process.env[
+    AGENT_ENGINE_TELEMETRY_ENV
+  ]
+    ? {[USER_AGENT_HEADER]: `Vertex-Agent-Engine/${version}`}
+    : {};
   let authorization = await readAuthorization(authClient);
   let refreshing = false;
 
@@ -359,7 +355,7 @@ function copyLogRecord(
  * This processor names every record before it is batched, and on Agent Engine
  * pins the MonitoredResource the previous stdout pipeline produced.
  */
-export class GcpBatchLogRecordProcessor extends BatchLogRecordProcessor {
+class GcpBatchLogRecordProcessor extends BatchLogRecordProcessor {
   private readonly logResource: Resource;
   private readonly defaultLogName: string;
 
@@ -425,11 +421,6 @@ function maybeDetectAgentEngineResource(
   return resourceFromAttributes(attributes);
 }
 
-/** Returns the resource the GCP detector describes this platform with. */
-function maybeDetectGcpResource(): Resource {
-  return detectResources({detectors: [gcpDetector]});
-}
-
 /**
  * Turns a project number into a project ID so logs and traces line up.
  *
@@ -450,30 +441,44 @@ async function resolveProjectId(
   }
 }
 
-/** Resolves the credentials and the project, falling back to ADC. */
-async function resolveGoogleAuth(
+/**
+ * Resolves the credentials and the project to export telemetry with.
+ *
+ * Application Default Credentials answer whichever half `googleAuth` leaves
+ * out, and on Agent Engine the project number they report is turned into a
+ * project id. A caller that supplies both halves is taken at its word, so pass
+ * the result of this call to both {@link getGcpExporters} and
+ * {@link getGcpResource} to keep the two describing the same project.
+ *
+ * Undefined when no project can be determined. It never throws.
+ *
+ * @param googleAuth Credentials and project to use instead of ADC.
+ */
+export async function resolveGoogleAuth(
   googleAuth?: GoogleAuthConfig,
 ): Promise<ResolvedGoogleAuth | undefined> {
-  let authClient = googleAuth?.authClient;
-  let projectId = googleAuth?.projectId;
-
-  if (!authClient || !projectId) {
-    try {
-      const auth = new GoogleAuth();
-      authClient ??= await auth.getClient();
-      projectId ??= await auth.getProjectId();
-    } catch (e: unknown) {
-      logger.debug('Failed to resolve Application Default Credentials.', e);
-    }
+  const {authClient, projectId} = googleAuth ?? {};
+  if (authClient && projectId) {
+    return {authClient, projectId};
   }
-  if (!authClient || !projectId) {
+
+  let resolvedClient = authClient;
+  let resolvedProject = projectId;
+  try {
+    const auth = new GoogleAuth();
+    resolvedClient ??= await auth.getClient();
+    resolvedProject ??= await auth.getProjectId();
+  } catch (e: unknown) {
+    logger.debug('Failed to resolve Application Default Credentials.', e);
+  }
+  if (!resolvedClient || !resolvedProject) {
     return undefined;
   }
 
   if (process.env[AGENT_ENGINE_ID_ENV]) {
-    projectId = await resolveProjectId(authClient, projectId);
+    resolvedProject = await resolveProjectId(resolvedClient, resolvedProject);
   }
-  return {authClient, projectId};
+  return {authClient: resolvedClient, projectId: resolvedProject};
 }
 
 /**
@@ -549,7 +554,7 @@ export function getGcpResource(projectId?: string): Resource {
   resource = resource.merge(detectResources({detectors: [envDetector]}));
 
   if (!agentEngineResource) {
-    resource = resource.merge(maybeDetectGcpResource());
+    resource = resource.merge(detectResources({detectors: [gcpDetector]}));
   }
   return resource;
 }

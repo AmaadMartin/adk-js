@@ -12,22 +12,8 @@ import {promisify} from 'node:util';
 
 import {logger} from './logger.js';
 
-/**
- * Runs the certificate provider command and returns what it printed.
- *
- * `execFile` is read here rather than at module load, so that importing this
- * module costs nothing on a process that never asks for a client certificate.
- */
-async function runCertProviderCommand(
-  file: string,
-  args: string[],
-): Promise<string> {
-  const {stdout} = await promisify(execFile)(file, args);
-  return stdout;
-}
-
 /** How `GOOGLE_API_USE_MTLS_ENDPOINT` picks between the two endpoints. */
-export enum MtlsEndpointSetting {
+enum MtlsEndpointSetting {
   /** Use the mutual-TLS endpoint when a client certificate is available. */
   AUTO = 'auto',
   /** Always use the mutual-TLS endpoint. */
@@ -48,19 +34,6 @@ const USE_MTLS_ENDPOINT_ENV = 'GOOGLE_API_USE_MTLS_ENDPOINT';
 const USE_CLIENT_CERTIFICATE_ENV = 'GOOGLE_API_USE_CLIENT_CERTIFICATE';
 
 const CERT_PROVIDER_COMMAND_KEY = 'cert_provider_command';
-
-/**
- * Returns where gcloud writes the context-aware access metadata.
- *
- * The path and the `cert_provider_command` key are the contract
- * google-auth-library-python reads in
- * `google/auth/transport/_mtls_helper.py`; this module is the Node side of the
- * same contract.
- */
-function contextAwareMetadataPath(): string {
-  return join(homedir(), '.secureConnect', 'context_aware_metadata.json');
-}
-
 const CERTIFICATE_PATTERN =
   /-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/;
 const PRIVATE_KEY_PATTERN =
@@ -141,7 +114,14 @@ function isStringArray(value: unknown): value is string[] {
  * because the caller asked for a certificate and will not get one.
  */
 async function readCertProviderCommand(): Promise<string[] | undefined> {
-  const metadataPath = contextAwareMetadataPath();
+  // The path and the `cert_provider_command` key are the contract
+  // google-auth-library-python reads in
+  // `google/auth/transport/_mtls_helper.py`; this is the Node side of it.
+  const metadataPath = join(
+    homedir(),
+    '.secureConnect',
+    'context_aware_metadata.json',
+  );
   let contents: string;
   try {
     contents = await readFile(metadataPath, 'utf8');
@@ -191,7 +171,10 @@ export async function defaultClientCertSource(): Promise<
   const [file, ...args] = command;
   let stdout: string;
   try {
-    stdout = await runCertProviderCommand(file, args);
+    // `promisify` reads `execFile` here rather than at module load, so that
+    // importing this module costs nothing on a process that never asks for a
+    // client certificate.
+    ({stdout} = await promisify(execFile)(file, args));
   } catch (e: unknown) {
     logger.warn(`The \`${CERT_PROVIDER_COMMAND_KEY}\` \`${file}\` failed.`, e);
     return undefined;
