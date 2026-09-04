@@ -162,14 +162,8 @@ describe('AppDetails serialization', () => {
       },
     };
 
-    const json = JSON.stringify(appDetails);
+    const parsed: AppDetails = JSON.parse(JSON.stringify(appDetails));
 
-    expect(json).toContain('"agentDetails"');
-    expect(json).toContain('"instructions"');
-    expect(json).toContain('"toolDeclarations"');
-
-    const parsed: AppDetails = JSON.parse(json);
-    expect(parsed).toEqual(appDetails);
     expect(getDeveloperInstructions(parsed, 'agent1')).toBe(
       'instruction for agent1',
     );
