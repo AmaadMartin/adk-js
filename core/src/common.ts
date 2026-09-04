@@ -47,6 +47,11 @@ export {
 } from './agents/common_configs.js';
 export type {AgentRefConfig, CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
+export {
+  contextCacheTtlString,
+  createContextCacheConfig,
+  formatContextCacheConfig,
+} from './agents/context_cache_config.js';
 export type {ContextCacheConfig} from './agents/context_cache_config.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
