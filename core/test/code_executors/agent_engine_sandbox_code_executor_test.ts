@@ -659,5 +659,141 @@ describe('AgentEngineSandboxCodeExecutor', () => {
           'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
       });
     });
+
+    it('rethrows a non-not-found error from getInternal', async () => {
+      invocationContext.session!.state!['sandbox_name'] =
+        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      mockClient.agentEnginesInternal.sandboxes.getInternal.mockRejectedValue(
+        Object.assign(new Error('Internal error'), {status: 500}),
+      );
+
+      await expect(
+        executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'print("hello")',
+            language: CodeExecutionLanguage.PYTHON,
+            inputFiles: [],
+          },
+        }),
+      ).rejects.toThrow('Internal error');
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('creates new sandbox if getInternal reports gRPC NOT_FOUND', async () => {
+      invocationContext.session!.state!['sandbox_name'] =
+        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      mockClient.agentEnginesInternal.sandboxes.getInternal.mockRejectedValue(
+        Object.assign(new Error('Not found'), {code: 5}),
+      );
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).toHaveBeenCalled();
+    });
+
+    it('does not create an agent engine when sandboxResourceName is set', async () => {
+      executor = new AgentEngineSandboxCodeExecutor({
+        sandboxResourceName:
+          'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+        client: mockClient as unknown as Client,
+      });
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('creates new sandbox if the cached one holds another language', async () => {
+      invocationContext.session!.state!['sandbox_name'] =
+        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
+        name: 'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+        state: 'STATE_RUNNING',
+        spec: {codeExecutionEnvironment: {codeLanguage: 'LANGUAGE_PYTHON'}},
+      });
+      mockClient.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        {
+          name: 'operations/create-sandbox-op',
+          done: true,
+          response: {
+            name: 'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/js',
+          },
+        },
+      );
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("hello")',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).toHaveBeenCalled();
+      expect(invocationContext.session!.state!['sandbox_name']).toBe(
+        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/js',
+      );
+    });
+
+    it('reuses a cached sandbox that declares no language', async () => {
+      invocationContext.session!.state!['sandbox_name'] =
+        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
+        state: 'STATE_RUNNING',
+      });
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('sends no display name when auto-creating the agent engine', async () => {
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.createInternal,
+      ).toHaveBeenCalledExactlyOnceWith({});
+    });
   });
 });
