@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InputValidationError} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import type {
   AnalyticsRetryConfig,
@@ -244,5 +245,20 @@ describe('resolvePluginOptions payload column denylist', () => {
         customMetadataAllowlist: ['tenant_id'],
       }),
     ).not.toThrow();
+  });
+});
+
+describe('resolvePluginOptions error type', () => {
+  it.each<[string, BigQueryLoggerConfig]>([
+    ['a count outside its range', {batchSize: 0}],
+    ['a duration that is not finite', {shutdownTimeoutMs: Number.NaN}],
+    ['a retry delay outside its range', {retryConfig: {maxRetries: -1}}],
+    ['a protected payload column', {payloadColumnDenylist: ['session_id']}],
+    [
+      'a denied attributes column that metadata is captured into',
+      {payloadColumnDenylist: ['attributes'], customMetadataAllowlist: ['a*']},
+    ],
+  ])('reports %s as an InputValidationError', (_name, config) => {
+    expect(() => resolve(config)).toThrow(InputValidationError);
   });
 });

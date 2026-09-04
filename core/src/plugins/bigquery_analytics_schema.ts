@@ -10,6 +10,7 @@ import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
 } from '../agents/framework_function_calls.js';
+import {InputValidationError} from '../errors/input_validation_error.js';
 
 /**
  * The wire contract of the agent analytics events table.
@@ -509,7 +510,7 @@ export function validatePayloadColumnDenylist(
     }
   }
   if (invalid.length > 0) {
-    throw new Error(
+    throw new InputValidationError(
       `BigQueryAgentAnalyticsPlugin: payloadColumnDenylist may only contain ` +
         `${PROJECTABLE_PAYLOAD_COLUMNS.join(', ')}; got ${invalid.join(', ')}. ` +
         `The identity and correlation columns are protected because the ` +

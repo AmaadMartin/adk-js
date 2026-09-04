@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {NO_LENGTH_LIMIT} from '../utils/sanitize_utils.js';
 import {
   AnalyticsEventType,
@@ -182,8 +183,8 @@ export interface ResolvedConfig {
 }
 
 /** Prefixes every configuration error with the option's owner. */
-function configError(message: string): Error {
-  return new Error(`BigQueryAgentAnalyticsPlugin: ${message}`);
+function configError(message: string): InputValidationError {
+  return new InputValidationError(`BigQueryAgentAnalyticsPlugin: ${message}`);
 }
 
 /**
