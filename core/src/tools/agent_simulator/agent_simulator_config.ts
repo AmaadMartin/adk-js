@@ -26,12 +26,8 @@ export type {
   ToolSimulationConfig,
 } from '../environment_simulation/environment_simulation_config.js';
 
-const MOVED_WARNING_KEY = 'tools/agent_simulator/agent_simulator_config';
-
-const TRACING_PATH_WARNING_KEY = 'AgentSimulatorConfigParams.tracingPath';
-
 warnDeprecatedOnce(
-  MOVED_WARNING_KEY,
+  'tools/agent_simulator/agent_simulator_config',
   'tools/agent_simulator/agent_simulator_config is moved to ' +
     'tools/environment_simulation/environment_simulation_config',
 );
@@ -70,7 +66,7 @@ export function createAgentSimulatorConfig(
     return createEnvironmentSimulationConfig(rest);
   }
   warnDeprecatedOnce(
-    TRACING_PATH_WARNING_KEY,
+    'AgentSimulatorConfigParams.tracingPath',
     '`tracingPath` is deprecated. Use `tracing` instead.',
   );
   return createEnvironmentSimulationConfig({

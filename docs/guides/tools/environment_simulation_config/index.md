@@ -121,7 +121,7 @@ warns once when it is evaluated, and `createAgentSimulatorConfig` warns once
 when you pass `tracingPath`. An explicit `tracing` wins over `tracingPath`.
 
 ```ts
-import {createAgentSimulatorConfig} from '@google/adk/tools/agent_simulator/agent_simulator_config.js';
+import {createAgentSimulatorConfig} from '@google/adk/tools/agent_simulator/agent_simulator_config';
 
 const legacy = createAgentSimulatorConfig({
   toolSimulationConfigs,
