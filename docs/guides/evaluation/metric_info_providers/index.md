@@ -69,19 +69,12 @@ description is asked for, so a caller may construct a provider for a name it has
 not validated yet.
 
 ```ts
-import {
-  isInputValidationError,
-  ResponseEvaluatorMetricInfoProvider,
-} from '@google/adk';
+import {ResponseEvaluatorMetricInfoProvider} from '@google/adk';
 
 const provider = new ResponseEvaluatorMetricInfoProvider('not_a_metric');
 
-try {
-  provider.getMetricInfo();
-} catch (e: unknown) {
-  isInputValidationError(e); // true
-  // e.message === '`not_a_metric` is not supported.'
-}
+provider.getMetricInfo();
+// throws InputValidationError: `not_a_metric` is not supported.
 ```
 
 ## The providers
