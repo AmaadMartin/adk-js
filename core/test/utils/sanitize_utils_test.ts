@@ -354,6 +354,18 @@ describe('sanitizeErrorText', () => {
     },
     LINEAR_SCAN_BUDGET_MS,
   );
+
+  it.each([
+    '[INFO] request finished',
+    '[urgent] find flights to SFO',
+    "{'status': 'ok', 'rows': 3}",
+    '[link](https://example.com) see the docs',
+  ])('keeps bracketed prose byte-identical: %s', (prose) => {
+    expect(sanitizeErrorText(prose, -1)).toEqual({
+      text: prose,
+      truncated: false,
+    });
+  });
 });
 
 describe('recursiveSmartTruncate on strings', () => {
@@ -389,8 +401,8 @@ describe('recursiveSmartTruncate on strings', () => {
 
   it('redacts a string that looks like JSON but does not parse', () => {
     const result = recursiveSmartTruncate({body: '{"token": "abc"'}, -1);
-    expect(result.value).toEqual({body: '{"token": "[REDACTED]"'});
-    expect(result.truncated).toBe(false);
+    expect(result.value).toEqual({body: '[UNPARSEABLE_JSON_BLOB]'});
+    expect(result.truncated).toBe(true);
   });
 
   it.each([
@@ -398,10 +410,10 @@ describe('recursiveSmartTruncate on strings', () => {
     '[urgent] find flights to SFO',
     "{'status': 'ok', 'rows': 3}",
     '[link](https://example.com) see the docs',
-  ])('keeps bracketed prose byte-identical: %s', (prose) => {
+  ])('fails bracketed prose closed in a payload: %s', (prose) => {
     const result = recursiveSmartTruncate({q: prose}, -1);
-    expect(result.value).toEqual({q: prose});
-    expect(result.truncated).toBe(false);
+    expect(result.value).toEqual({q: '[UNPARSEABLE_JSON_BLOB]'});
+    expect(result.truncated).toBe(true);
   });
 
   it('redacts a container-shaped string past the inspection ceiling', () => {
@@ -409,14 +421,8 @@ describe('recursiveSmartTruncate on strings', () => {
     expect(huge.length).toBeGreaterThan(4_000_000);
     const result = recursiveSmartTruncate({body: huge}, -1);
     expect(result.truncated).toBe(true);
-    const body = result.value;
-    if (typeof body !== 'object' || body === null || !('body' in body)) {
-      expect.fail('expected a record carrying body');
-    }
-    const text = String(body.body);
-    expect(text).toContain('["password=[REDACTED]",');
-    expect(text).not.toContain('hunter2');
-    expect(text.length).toBeLessThan(huge.length);
+    expect(result.value).toEqual({body: '[UNPARSEABLE_JSON_BLOB]'});
+    expect(JSON.stringify(result.value)).not.toContain('hunter2');
   });
 
   it('redacts a credential nested inside a blob inside a blob', () => {
