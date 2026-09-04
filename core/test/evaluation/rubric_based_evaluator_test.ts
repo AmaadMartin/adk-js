@@ -101,7 +101,7 @@ function metricWithThresholds(
   rubrics: Rubric[] = DEFAULT_RUBRICS,
 ): EvalMetric {
   return {
-    metricName: PrebuiltMetrics.RUBRIC_BASED_FINAL_RESPONSE_QUALITY_V1,
+    metricName: PrebuiltMetrics.RUBRIC_BASED_TOOL_USE_QUALITY_V1,
     threshold: metricThreshold,
     criterion: {
       threshold: criterionThreshold,

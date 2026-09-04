@@ -18,25 +18,14 @@ export enum EvalStatus {
 }
 
 /**
- * Metrics that ADK ships with.
+ * Metrics that ADK ships with. Each name gains a member when its evaluator
+ * lands, so a caller cannot select a metric with nothing behind it.
  *
  * The string values are written into eval config files and eval results, so
  * they match adk-python exactly.
  */
 export enum PrebuiltMetrics {
-  TOOL_TRAJECTORY_AVG_SCORE = 'tool_trajectory_avg_score',
-  RESPONSE_EVALUATION_SCORE = 'response_evaluation_score',
-  RESPONSE_MATCH_SCORE = 'response_match_score',
-  SAFETY_V1 = 'safety_v1',
-  FINAL_RESPONSE_MATCH_V2 = 'final_response_match_v2',
-  RUBRIC_BASED_FINAL_RESPONSE_QUALITY_V1 = 'rubric_based_final_response_quality_v1',
-  HALLUCINATIONS_V1 = 'hallucinations_v1',
   RUBRIC_BASED_TOOL_USE_QUALITY_V1 = 'rubric_based_tool_use_quality_v1',
-  PER_TURN_USER_SIMULATOR_QUALITY_V1 = 'per_turn_user_simulator_quality_v1',
-  MULTI_TURN_TASK_SUCCESS_V1 = 'multi_turn_task_success_v1',
-  MULTI_TURN_TRAJECTORY_QUALITY_V1 = 'multi_turn_trajectory_quality_v1',
-  MULTI_TURN_TOOL_USE_QUALITY_V1 = 'multi_turn_tool_use_quality_v1',
-  RUBRIC_BASED_MULTI_TURN_TRAJECTORY_QUALITY_V1 = 'rubric_based_multi_turn_trajectory_quality_v1',
 }
 
 /** The value a metric's score is compared against to decide pass from fail. */
@@ -56,8 +45,6 @@ export const DEFAULT_JUDGE_NUM_SAMPLES = 5;
 
 /** How many judge calls a metric issues at once when it is not configured. */
 export const DEFAULT_JUDGE_PARALLELISM_LIMIT = 1;
-
-const MIN_JUDGE_PARALLELISM_LIMIT = 1;
 
 /** Options for an eval metric's judge model. Every field has a default. */
 export interface JudgeModelOptions {
@@ -101,13 +88,6 @@ export interface ResolvedJudgeModelOptions {
 export interface BaseCriterion {
   /** The threshold to be used by the metric. */
   threshold: Threshold;
-
-  /**
-   * Whether to judge the intermediate text an agent emits before its tool
-   * calls together with its final response. Defaults to false, which judges
-   * the final response alone.
-   */
-  includeIntermediateResponsesInFinal?: boolean;
 }
 
 /** Criterion for a metric that asks a judge model to score a response. */
@@ -164,14 +144,10 @@ export interface EvalMetric {
    * criterion literal carrying metric-specific fields type-checks here.
    */
   criterion?: EvalMetricCriterion;
-
-  /** Path to the scoring function, when this is a custom metric. */
-  customFunctionPath?: string;
 }
 
 const baseCriterionShape = {
   threshold: z.number(),
-  includeIntermediateResponsesInFinal: z.boolean().default(false),
 };
 
 /**
@@ -199,7 +175,7 @@ const judgeModelOptionsModel: EvalModel<ResolvedJudgeModelOptions> = evalModel(
     parallelismLimit: z
       .number()
       .int()
-      .min(MIN_JUDGE_PARALLELISM_LIMIT)
+      .min(1)
       .default(DEFAULT_JUDGE_PARALLELISM_LIMIT),
   },
   {name: 'JudgeModelOptions'},

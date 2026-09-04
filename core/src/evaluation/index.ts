@@ -11,7 +11,7 @@
  * stands on, and the contract every metric implements.
  */
 
-export {getDeveloperInstructions, getToolsByAgentName} from './app_details.js';
+export {getToolsByAgentName} from './app_details.js';
 export type {AgentDetails, AppDetails} from './app_details.js';
 export {getAllToolCallsWithResponses, isInvocationEvents} from './eval_case.js';
 export type {
@@ -61,8 +61,6 @@ export type {AutoRaterScore, LlmAsJudgeOptions} from './llm_as_judge.js';
 export {
   formatPromptTemplate,
   getAverageRubricScore,
-  getGroundingMetadataAsJsonStr,
-  getTextFromInvocation,
   getToolCallsAndResponsesAsJsonStr,
   getToolDeclarationsAsJsonStr,
 } from './llm_as_judge_utils.js';

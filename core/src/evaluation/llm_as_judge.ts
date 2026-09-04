@@ -51,9 +51,6 @@ export interface LlmAsJudgeOptions<
    */
   parseCriterion: CriterionParser<CriterionT>;
 
-  /** Rejects a call that supplies no expected invocations. Defaults to false. */
-  expectedInvocationsRequired?: boolean;
-
   /**
    * The judge model to grade with. Resolved from `LLMRegistry` when absent.
    * Supply one to grade against a model the registry does not own.
@@ -155,11 +152,8 @@ export abstract class LlmAsJudge<
 
   protected readonly threshold: number;
   protected readonly judgeModel: BaseLlm;
-  private readonly expectedInvocationsRequired: boolean;
 
   constructor(options: LlmAsJudgeOptions<CriterionT>) {
-    this.expectedInvocationsRequired =
-      options.expectedInvocationsRequired ?? false;
     this.criterion = parseMetricCriterion(
       options.evalMetric,
       options.parseCriterion,
@@ -202,18 +196,12 @@ export abstract class LlmAsJudge<
    * A sample that fails is logged and marks its own invocation
    * `NOT_EVALUATED`; the other invocations are graded as usual.
    *
-   * @throws {InputValidationError} When the metric needs expected invocations
-   *   and none were supplied, or the two lists have different lengths.
+   * @throws {InputValidationError} When the two lists have different lengths.
    */
   async evaluateInvocations(
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
   ): Promise<EvaluationResult> {
-    if (this.expectedInvocationsRequired && expectedInvocations === undefined) {
-      throw new InputValidationError(
-        'expectedInvocations is needed by this metric.',
-      );
-    }
     validateInvocationLengths(actualInvocations, expectedInvocations);
 
     const samples = this.buildSamples(actualInvocations, expectedInvocations);

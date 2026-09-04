@@ -8,18 +8,12 @@ import {toSnakeCase} from '../utils/object_notation_utils.js';
 import {getToolsByAgentName, type AppDetails} from './app_details.js';
 import {
   getAllToolCallsWithResponses,
-  isInvocationEvents,
   type IntermediateDataType,
-  type Invocation,
 } from './eval_case.js';
 import type {RubricScore} from './eval_rubrics.js';
-import {getTextFromContent} from './evaluator.js';
 
 /** What the judge is told when the agent took no intermediate step. */
 const NO_TOOL_CALLS_TEXT = 'No intermediate steps were taken.';
-
-/** What the judge is told when no event carried grounding metadata. */
-const NO_GROUNDING_METADATA_TEXT = 'No grounding metadata was provided.';
 
 /** The indent of the JSON a judge model reads, matching adk-python. */
 const JSON_INDENT = 2;
@@ -105,75 +99,4 @@ export function getToolCallsAndResponsesAsJsonStr(
     }),
   );
   return JSON.stringify({tool_calls_and_response: entries}, null, JSON_INDENT);
-}
-
-/**
- * Returns the grounding metadata the model attached to the invocation's
- * events as a JSON string, for a judge model to read.
- *
- * The step is the index of the event, so it lines up with the agent's own
- * ordering rather than counting only the events that carry metadata.
- */
-export function getGroundingMetadataAsJsonStr(
-  intermediateData?: IntermediateDataType,
-): string {
-  if (!isInvocationEvents(intermediateData)) {
-    return NO_GROUNDING_METADATA_TEXT;
-  }
-
-  const entries = intermediateData.invocationEvents.flatMap((event, step) =>
-    event.groundingMetadata === undefined
-      ? []
-      : [
-          {
-            step,
-            author: event.author,
-            grounding_metadata: toSnakeCase(event.groundingMetadata),
-          },
-        ],
-  );
-  if (entries.length === 0) {
-    return NO_GROUNDING_METADATA_TEXT;
-  }
-  return JSON.stringify({grounding_metadata: entries}, null, JSON_INDENT);
-}
-
-/**
- * Returns the text of an invocation's response, for a judge model to read.
- *
- * @param invocation The invocation to read.
- * @param options.includeIntermediateResponsesInFinal Whether the text an agent
- *   emitted on its way to the final response is read too. The intermediate
- *   text comes first, and the final response text last.
- */
-export function getTextFromInvocation(
-  invocation: Invocation,
-  options: {includeIntermediateResponsesInFinal?: boolean} = {},
-): string {
-  const finalText = getTextFromContent(invocation.finalResponse);
-  if (!options.includeIntermediateResponsesInFinal) {
-    return finalText;
-  }
-
-  const texts = getIntermediateTexts(invocation);
-  if (finalText) {
-    texts.push(finalText);
-  }
-  return texts.join('\n');
-}
-
-/** Returns the text an agent emitted before its final response, in order. */
-function getIntermediateTexts(invocation: Invocation): string[] {
-  const intermediateData = invocation.intermediateData;
-  if (intermediateData === undefined) {
-    return [];
-  }
-
-  const contents = isInvocationEvents(intermediateData)
-    ? intermediateData.invocationEvents.map((event) => event.content)
-    : intermediateData.intermediateResponses.map(([, parts]) => ({parts}));
-
-  return contents
-    .map((content) => getTextFromContent(content))
-    .filter((text) => text !== '');
 }

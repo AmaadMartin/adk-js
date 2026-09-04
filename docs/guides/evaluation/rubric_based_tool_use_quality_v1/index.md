@@ -8,11 +8,11 @@ geocoding output".
 
 ## Introduction
 
-`TrajectoryEvaluator` compares the tool calls against a recorded golden
-trajectory, so it pins the exact tool names and arguments. That is too strict
-for an agent whose orchestration is allowed to vary. This metric replaces the
-golden trajectory with rubrics. Each rubric is one plain-English property of
-the tool usage, and the judge returns one `yes` or `no` verdict for it.
+Grading tool use against a recorded golden trajectory pins the exact tool
+names and arguments, which is too strict for an agent whose orchestration is
+allowed to vary. This metric replaces the golden trajectory with rubrics. Each
+rubric is one plain-English property of the tool usage, and the judge returns
+one `yes` or `no` verdict for it.
 
 A `yes` scores 1.0 and a `no` scores 0.0, so an invocation scores the mean of
 the rubrics that were assessed, in `[0, 1]`. A rubric the judge did not score
@@ -24,8 +24,7 @@ against the criterion's `threshold`.
 
 The judge prompt carries the tool declarations the app offers, the user's
 message, and every tool call paired with its response. It does not carry the
-final answer. Use `RubricBasedFinalResponseQualityV1Evaluator` to grade the
-answer, and this metric to grade the work behind it.
+final answer, so this metric grades the work rather than the reply.
 
 `RubricBasedEvaluator` is the base this metric stands on. It owns the rubric
 bookkeeping, reads the verdicts back, and folds them into a score;
