@@ -8,17 +8,14 @@ import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
-import {
-  BaseTool,
-  RunAsyncToolRequest,
-  ToolProcessLlmRequest,
-} from '../base_tool.js';
+import {RunAsyncToolRequest, ToolProcessLlmRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
 import {detectSkillToolError} from './skill_error_detection.js';
 import {
   countInvocationFailure,
   RESOURCE_NOT_FOUND_COUNTER_PREFIX,
 } from './skill_failure_counter.js';
+import {SkillTool} from './skill_tool.js';
 import {LOAD_SKILL_RESOURCE_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
@@ -26,11 +23,11 @@ const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';
 
 @experimental
-export class LoadSkillResourceTool extends BaseTool {
+export class LoadSkillResourceTool extends SkillTool {
   static readonly TOOL_NAME = LOAD_SKILL_RESOURCE_TOOL_NAME;
 
-  constructor(private toolset: SkillToolset) {
-    super({
+  constructor(toolset: SkillToolset) {
+    super(toolset, {
       name: toolset.toolName(LoadSkillResourceTool.TOOL_NAME),
       description:
         'Loads a resource file (from references/, assets/, or scripts/) from within a skill.',

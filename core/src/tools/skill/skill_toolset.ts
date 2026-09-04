@@ -104,6 +104,7 @@ export class SkillToolset extends BaseToolset {
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
   private tempOutputDir?: Promise<string>;
+  private readonly preparedRequests = new WeakSet<LlmRequest>();
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -219,6 +220,19 @@ export class SkillToolset extends BaseToolset {
       : allTools;
   }
 
+  /**
+   * Brings the environment up if it is not up yet.
+   *
+   * `LocalEnvironment` only knows its working directory after this, so both
+   * the skills folder and any command depend on it. `initialize()` is
+   * idempotent, and the flag keeps a second call from paying for the check.
+   */
+  async ensureEnvironmentInitialized(): Promise<void> {
+    if (this.environment && !this.environment.isInitialized) {
+      await this.environment.initialize();
+    }
+  }
+
   override async close(): Promise<void> {
     if (this.environment?.isInitialized) {
       await this.environment.close();
@@ -292,12 +306,28 @@ export class SkillToolset extends BaseToolset {
     llmRequest: LlmRequest,
   ): Promise<void> {
     await super.processLlmRequest(toolContext, llmRequest);
+    await this.prepareLlmRequest(toolContext, llmRequest);
+  }
 
-    // The default `skillsFolder` reads the environment's working directory,
-    // which only exists once the environment is initialized.
-    if (this.environment && !this.environment.isInitialized) {
-      await this.environment.initialize();
+  /**
+   * Initializes the environment and appends the skill guidance to `llmRequest`.
+   *
+   * `LlmAgent` flattens a toolset into its tools and then calls
+   * `BaseTool.processLlmRequest` on each one, so a toolset's own hook never
+   * runs. Every skill tool calls this instead, and the first one through does
+   * the work; the rest find the request already prepared. The set is weak, so
+   * a finished request is collected rather than retained.
+   */
+  async prepareLlmRequest(
+    toolContext: Context,
+    llmRequest: LlmRequest,
+  ): Promise<void> {
+    if (this.preparedRequests.has(llmRequest)) {
+      return;
     }
+    this.preparedRequests.add(llmRequest);
+
+    await this.ensureEnvironmentInitialized();
 
     const allowedTools = new Set(
       this.tools

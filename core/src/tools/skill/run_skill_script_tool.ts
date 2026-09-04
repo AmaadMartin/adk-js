@@ -28,13 +28,14 @@ import {
 } from '../../utils/file_extension_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {logger} from '../../utils/logger.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
 import {detectSkillToolError} from './skill_error_detection.js';
 import {
   countInvocationFailure,
   SCRIPT_NOT_FOUND_COUNTER_PREFIX,
 } from './skill_failure_counter.js';
+import {SkillTool} from './skill_tool.js';
 import {RUN_SKILL_SCRIPT_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
@@ -51,15 +52,44 @@ const MAX_SKILL_PAYLOAD_BYTES = 16 * 1024 * 1024;
 const REQUIRE_CONFIRMATION_MESSAGE =
   'This tool call needs external confirmation before completion.';
 
+/** The failure envelope `run_skill_script` returns instead of throwing. */
+interface SkillScriptError {
+  error: string;
+  /** The field name adk-python uses, and the one the model is told to read. */
+  error_code: SkillErrorCode;
+  /** The name adk-js shipped first. Carries the same value. */
+  errorCode: SkillErrorCode;
+}
+
+/** Builds a failure envelope carrying the code under both field names. */
+function skillScriptError(
+  error: string,
+  code: SkillErrorCode,
+): SkillScriptError {
+  return {error, error_code: code, errorCode: code};
+}
+
 @experimental
-export class RunSkillScriptTool extends BaseTool {
+export class RunSkillScriptTool extends SkillTool {
   static readonly TOOL_NAME = RUN_SKILL_SCRIPT_TOOL_NAME;
 
-  constructor(private toolset: SkillToolset) {
-    super({
+  constructor(toolset: SkillToolset) {
+    super(toolset, {
       name: toolset.toolName(RunSkillScriptTool.TOOL_NAME),
       description: "Executes a script from a skill's scripts/ directory.",
     });
+  }
+
+  /**
+   * Whether this call is gated on human approval.
+   *
+   * Only the environment path is, because only it runs a command the model
+   * wrote. The resume path asks this again a turn later, and refuses an
+   * approval for a tool that answers "no", so the gate and this answer have to
+   * agree.
+   */
+  override async checkRequireConfirmation(): Promise<boolean> {
+    return this.toolset.environment !== undefined;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -142,34 +172,34 @@ export class RunSkillScriptTool extends BaseTool {
     const scriptPath = args['script_path'] as string;
 
     if (!skillName) {
-      return {
-        error: 'Skill name is required.',
-        errorCode: SkillErrorCode.MISSING_SKILL_NAME,
-      };
+      return skillScriptError(
+        'Skill name is required.',
+        SkillErrorCode.MISSING_SKILL_NAME,
+      );
     }
     if (!scriptPath) {
-      return {
-        error: 'Script path is required.',
-        errorCode: SkillErrorCode.MISSING_SCRIPT_PATH,
-      };
+      return skillScriptError(
+        'Script path is required.',
+        SkillErrorCode.MISSING_SCRIPT_PATH,
+      );
     }
 
     const command = typeof args['command'] === 'string' ? args['command'] : '';
     if (this.toolset.environment && !command) {
-      return {
-        error: "Argument 'command' is required and must be a string.",
-        errorCode: SkillErrorCode.INVALID_ARGUMENTS,
-      };
+      return skillScriptError(
+        "Argument 'command' is required and must be a string.",
+        SkillErrorCode.INVALID_ARGUMENTS,
+      );
     }
 
     let scriptArgv: string[] = [];
     if (!this.toolset.environment) {
       const argumentErrors = validateScriptArguments(args);
       if (argumentErrors.length > 0) {
-        return {
-          error: argumentErrors.join('\n'),
-          errorCode: SkillErrorCode.INVALID_ARGUMENTS,
-        };
+        return skillScriptError(
+          argumentErrors.join('\n'),
+          SkillErrorCode.INVALID_ARGUMENTS,
+        );
       }
       scriptArgv = buildScriptArgv(args);
     }
@@ -181,17 +211,17 @@ export class RunSkillScriptTool extends BaseTool {
         toolContext.invocationId,
       );
     } catch (e: unknown) {
-      return {
-        error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        errorCode: SkillErrorCode.REGISTRY_ERROR,
-      };
+      return skillScriptError(
+        `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
+        SkillErrorCode.REGISTRY_ERROR,
+      );
     }
 
     if (!skill) {
-      return {
-        error: `Skill '${skillName}' not found.`,
-        errorCode: SkillErrorCode.SKILL_NOT_FOUND,
-      };
+      return skillScriptError(
+        `Skill '${skillName}' not found.`,
+        SkillErrorCode.SKILL_NOT_FOUND,
+      );
     }
 
     const relScriptPath = scriptPath.startsWith('scripts/')
@@ -210,19 +240,18 @@ export class RunSkillScriptTool extends BaseTool {
         SCRIPT_NOT_FOUND_COUNTER_PREFIX,
       );
       if (failCount > 1) {
-        return {
-          error:
-            `Script '${scriptPath}' not found in skill '${skillName}'.` +
+        return skillScriptError(
+          `Script '${scriptPath}' not found in skill '${skillName}'.` +
             ` This is script lookup failure #${failCount} this invocation.` +
             ' Do not retry any script path — report the error to the user and' +
             ' stop.',
-          errorCode: SkillErrorCode.SCRIPT_NOT_FOUND_FATAL,
-        };
+          SkillErrorCode.SCRIPT_NOT_FOUND_FATAL,
+        );
       }
-      return {
-        error: `Script '${scriptPath}' not found in skill '${skillName}'.`,
-        errorCode: SkillErrorCode.SCRIPT_NOT_FOUND,
-      };
+      return skillScriptError(
+        `Script '${scriptPath}' not found in skill '${skillName}'.`,
+        SkillErrorCode.SCRIPT_NOT_FOUND,
+      );
     }
 
     const environment = this.toolset.environment;
@@ -232,6 +261,10 @@ export class RunSkillScriptTool extends BaseTool {
         return gate;
       }
       try {
+        // The command may be the first thing to touch the environment, and
+        // `skillsFolderIn` reads a working directory that only exists once it
+        // is up.
+        await this.toolset.ensureEnvironmentInitialized();
         await ensureSkillMaterializedInEnv(
           this.toolset.skillsFolderIn(environment),
           skill,
@@ -249,10 +282,10 @@ export class RunSkillScriptTool extends BaseTool {
           timed_out: result.timedOut,
         };
       } catch (e: unknown) {
-        return {
-          error: `Failed to execute script '${scriptPath}' in environment:\n${describeCause(e)}`,
-          errorCode: SkillErrorCode.EXECUTION_ERROR,
-        };
+        return skillScriptError(
+          `Failed to execute script '${scriptPath}' in environment:\n${describeCause(e)}`,
+          SkillErrorCode.EXECUTION_ERROR,
+        );
       }
     }
 
@@ -265,18 +298,18 @@ export class RunSkillScriptTool extends BaseTool {
     }
 
     if (!codeExecutor) {
-      return {
-        error: 'No code executor configured.',
-        errorCode: SkillErrorCode.NO_CODE_EXECUTOR,
-      };
+      return skillScriptError(
+        'No code executor configured.',
+        SkillErrorCode.NO_CODE_EXECUTOR,
+      );
     }
 
     const language = getScriptLanguageByExtension(path.extname(scriptPath));
     if (language === CodeExecutionLanguage.UNSPECIFIED) {
-      return {
-        error: `Unsupported script type ${describeExtension(scriptPath)}. Supported types: ${SUPPORTED_SCRIPT_EXTENSIONS.join(', ')}`,
-        errorCode: SkillErrorCode.UNSUPPORTED_SCRIPT_TYPE,
-      };
+      return skillScriptError(
+        `Unsupported script type ${describeExtension(scriptPath)}. Supported types: ${SUPPORTED_SCRIPT_EXTENSIONS.join(', ')}`,
+        SkillErrorCode.UNSUPPORTED_SCRIPT_TYPE,
+      );
     }
 
     try {
@@ -310,10 +343,10 @@ export class RunSkillScriptTool extends BaseTool {
         outputDirectory: outputDir,
       };
     } catch (e: unknown) {
-      return {
-        error: `Failed to execute script '${scriptPath}': ${(e as Error).message}`,
-        errorCode: SkillErrorCode.EXECUTION_ERROR,
-      };
+      return skillScriptError(
+        `Failed to execute script '${scriptPath}': ${(e as Error).message}`,
+        SkillErrorCode.EXECUTION_ERROR,
+      );
     }
   }
 
@@ -408,7 +441,7 @@ function enforceCommandConfirmation(
   toolContext: Context,
   command: string,
   skillName: string,
-): {partial: string} | {error: string; errorCode: SkillErrorCode} | undefined {
+): {partial: string} | SkillScriptError | undefined {
   const confirmation = toolContext.toolConfirmation;
 
   if (!confirmation) {
@@ -423,10 +456,10 @@ function enforceCommandConfirmation(
   }
 
   if (!confirmation.confirmed) {
-    return {
-      error: 'Skill script command was not confirmed and was rejected.',
-      errorCode: SkillErrorCode.CONFIRMATION_REJECTED,
-    };
+    return skillScriptError(
+      'Skill script command was not confirmed and was rejected.',
+      SkillErrorCode.CONFIRMATION_REJECTED,
+    );
   }
 
   return undefined;
