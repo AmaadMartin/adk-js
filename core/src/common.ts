@@ -472,6 +472,20 @@ export {
   defaultMetricEvaluatorRegistry,
 } from './evaluation/metric_evaluator_registry.js';
 export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
+export {
+  FinalResponseMatchV2EvaluatorMetricInfoProvider,
+  HallucinationsV1EvaluatorMetricInfoProvider,
+  MultiTurnTaskSuccessV1MetricInfoProvider,
+  MultiTurnToolUseQualityV1MetricInfoProvider,
+  MultiTurnTrajectoryQualityV1MetricInfoProvider,
+  PerTurnUserSimulatorQualityV1MetricInfoProvider,
+  ResponseEvaluatorMetricInfoProvider,
+  RubricBasedFinalResponseQualityV1EvaluatorMetricInfoProvider,
+  RubricBasedMultiTurnTrajectoryMetricInfoProvider,
+  RubricBasedToolUseV1EvaluatorMetricInfoProvider,
+  SafetyEvaluatorV1MetricInfoProvider,
+  TrajectoryEvaluatorMetricInfoProvider,
+} from './evaluation/metric_info_providers.js';
 export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
 export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';

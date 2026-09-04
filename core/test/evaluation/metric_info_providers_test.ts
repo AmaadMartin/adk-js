@@ -5,18 +5,25 @@
  */
 
 /**
- * Tests ported from `google/adk-python`, file
+ * The `MetricInfoProviders` block below is ported from google/adk-python
  * `tests/unittests/evaluation/test_metric_evaluator_registry.py`, class
- * `TestMetricInfoProviders`, at `main`. Each `it(...)` string is the reference
- * test method name, so a reviewer can grep it against the Python file.
+ * `TestMetricInfoProviders`, at `main`. Each `it` keeps its Python test name so
+ * a reader can grep the original.
  *
- * One reference test, `test_every_prebuilt_metric_is_registered_by_default`,
- * is not ported. See the pull request body.
+ * The reference class has 15 tests. 14 are here.
+ * `test_every_prebuilt_metric_is_registered_by_default` is not ported: it reads
+ * `DEFAULT_METRIC_EVALUATOR_REGISTRY.get_registered_metrics()`, and adk-js's
+ * registry neither exposes that accessor nor stores a `MetricInfo` per
+ * registration.
+ *
+ * The two blocks after it cover the error path, the descriptions and the
+ * openness of the interval, none of which the reference asserts.
  */
 
 import {
   FinalResponseMatchV2EvaluatorMetricInfoProvider,
   HallucinationsV1EvaluatorMetricInfoProvider,
+  InputValidationError,
   MultiTurnTaskSuccessV1MetricInfoProvider,
   MultiTurnToolUseQualityV1MetricInfoProvider,
   MultiTurnTrajectoryQualityV1MetricInfoProvider,
@@ -28,10 +35,29 @@ import {
   RubricBasedToolUseV1EvaluatorMetricInfoProvider,
   SafetyEvaluatorV1MetricInfoProvider,
   TrajectoryEvaluatorMetricInfoProvider,
+  type MetricInfoProvider,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
-describe('metric info providers', () => {
+const ALL_PROVIDERS: MetricInfoProvider[] = [
+  new TrajectoryEvaluatorMetricInfoProvider(),
+  new ResponseEvaluatorMetricInfoProvider(
+    PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+  ),
+  new ResponseEvaluatorMetricInfoProvider(PrebuiltMetrics.RESPONSE_MATCH_SCORE),
+  new SafetyEvaluatorV1MetricInfoProvider(),
+  new MultiTurnTaskSuccessV1MetricInfoProvider(),
+  new MultiTurnTrajectoryQualityV1MetricInfoProvider(),
+  new MultiTurnToolUseQualityV1MetricInfoProvider(),
+  new FinalResponseMatchV2EvaluatorMetricInfoProvider(),
+  new RubricBasedFinalResponseQualityV1EvaluatorMetricInfoProvider(),
+  new HallucinationsV1EvaluatorMetricInfoProvider(),
+  new RubricBasedToolUseV1EvaluatorMetricInfoProvider(),
+  new PerTurnUserSimulatorQualityV1MetricInfoProvider(),
+  new RubricBasedMultiTurnTrajectoryMetricInfoProvider(),
+];
+
+describe('MetricInfoProviders', () => {
   it('test_trajectory_evaluator_metric_info_provider', () => {
     const metricInfo =
       new TrajectoryEvaluatorMetricInfoProvider().getMetricInfo();
@@ -196,5 +222,63 @@ describe('metric info providers', () => {
     expect(new Set(metricNames)).toEqual(
       new Set(Object.values(PrebuiltMetrics)),
     );
+  });
+});
+
+describe('ResponseEvaluatorMetricInfoProvider', () => {
+  it('throws an InputValidationError naming an unsupported metric', () => {
+    const provider = new ResponseEvaluatorMetricInfoProvider('not_a_metric');
+
+    expect(() => provider.getMetricInfo()).toThrow(InputValidationError);
+    expect(() => provider.getMetricInfo()).toThrow(
+      /^`not_a_metric` is not supported\.$/,
+    );
+  });
+
+  it('throws on the empty metric name rather than describing it', () => {
+    const provider = new ResponseEvaluatorMetricInfoProvider('');
+
+    expect(() => provider.getMetricInfo()).toThrow(InputValidationError);
+    expect(() => provider.getMetricInfo()).toThrow(/^`` is not supported\.$/);
+  });
+
+  it('accepts an unsupported metric name at construction time', () => {
+    expect(
+      () => new ResponseEvaluatorMetricInfoProvider('not_a_metric'),
+    ).not.toThrow();
+  });
+});
+
+describe('every metric info provider', () => {
+  it('describes its metric with a distinct, non-empty description', () => {
+    const descriptions = ALL_PROVIDERS.map(
+      (provider) => provider.getMetricInfo().description,
+    );
+
+    for (const description of descriptions) {
+      expect(description).toBeTruthy();
+    }
+    expect(new Set(descriptions).size).toBe(descriptions.length);
+  });
+
+  it('returns equal values on every call, sharing no interval', () => {
+    for (const provider of ALL_PROVIDERS) {
+      const first = provider.getMetricInfo();
+      const second = provider.getMetricInfo();
+
+      expect(first).toEqual(second);
+      expect(first.metricValueInfo.interval).not.toBe(
+        second.metricValueInfo.interval,
+      );
+    }
+  });
+
+  it('leaves both ends of the interval closed', () => {
+    for (const provider of ALL_PROVIDERS) {
+      const interval = provider.getMetricInfo().metricValueInfo.interval;
+
+      expect(interval?.openAtMin).toBe(false);
+      expect(interval?.openAtMax).toBe(false);
+    }
   });
 });

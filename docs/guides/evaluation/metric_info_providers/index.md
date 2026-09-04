@@ -104,3 +104,69 @@ Every other provider takes no argument and cannot fail.
 
 The thirteen names are exactly the members of `PrebuiltMetrics`, and no two
 providers claim the same one.
+
+## Listing every metric
+
+The full set of providers describes every member of `PrebuiltMetrics` once, so
+a tool can build its own index from them.
+
+```ts
+import {
+  FinalResponseMatchV2EvaluatorMetricInfoProvider,
+  HallucinationsV1EvaluatorMetricInfoProvider,
+  MultiTurnTaskSuccessV1MetricInfoProvider,
+  MultiTurnToolUseQualityV1MetricInfoProvider,
+  MultiTurnTrajectoryQualityV1MetricInfoProvider,
+  PerTurnUserSimulatorQualityV1MetricInfoProvider,
+  PrebuiltMetrics,
+  ResponseEvaluatorMetricInfoProvider,
+  RubricBasedFinalResponseQualityV1EvaluatorMetricInfoProvider,
+  RubricBasedMultiTurnTrajectoryMetricInfoProvider,
+  RubricBasedToolUseV1EvaluatorMetricInfoProvider,
+  SafetyEvaluatorV1MetricInfoProvider,
+  TrajectoryEvaluatorMetricInfoProvider,
+  type MetricInfo,
+  type MetricInfoProvider,
+} from '@google/adk';
+
+const providers: MetricInfoProvider[] = [
+  new TrajectoryEvaluatorMetricInfoProvider(),
+  new ResponseEvaluatorMetricInfoProvider(
+    PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+  ),
+  new ResponseEvaluatorMetricInfoProvider(PrebuiltMetrics.RESPONSE_MATCH_SCORE),
+  new SafetyEvaluatorV1MetricInfoProvider(),
+  new MultiTurnTaskSuccessV1MetricInfoProvider(),
+  new MultiTurnTrajectoryQualityV1MetricInfoProvider(),
+  new MultiTurnToolUseQualityV1MetricInfoProvider(),
+  new FinalResponseMatchV2EvaluatorMetricInfoProvider(),
+  new RubricBasedFinalResponseQualityV1EvaluatorMetricInfoProvider(),
+  new HallucinationsV1EvaluatorMetricInfoProvider(),
+  new RubricBasedToolUseV1EvaluatorMetricInfoProvider(),
+  new PerTurnUserSimulatorQualityV1MetricInfoProvider(),
+  new RubricBasedMultiTurnTrajectoryMetricInfoProvider(),
+];
+
+const byName = new Map<string, MetricInfo>(
+  providers
+    .map((provider) => provider.getMetricInfo())
+    .map((info) => [info.metricName, info]),
+);
+
+byName.size; // 13
+```
+
+## Parity with adk-python
+
+This module is a port of `google/adk/evaluation/metric_info_providers.py`. The
+class names, the metric names, the intervals and the description strings match
+it character for character, so a description rendered by either SDK reads the
+same. Two things differ, neither observable in a score:
+
+- adk-python raises `ValueError` for an unsupported metric name. adk-js throws
+  `InputValidationError`, which is what the rest of this package throws for a
+  bad input. The message text is the same.
+- adk-python's `Interval` carries `open_at_min` and `open_at_max` as required
+  booleans that default to `False`. adk-js declares them optional, so every
+  provider writes them explicitly as `false` and a serialized `MetricInfo`
+  carries the same fields either way.
