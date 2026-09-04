@@ -151,8 +151,9 @@ touching the rest:
 ```ts
 import {
   AutoRaterResponseParser,
-  RubricResponse,
+  EvalMetric,
   RubricBasedEvaluator,
+  RubricResponse,
   parseRubricsBasedCriterion,
 } from '@google/adk';
 
