@@ -7,3 +7,4 @@ This directory contains specific developer guides for the ADK TypeScript impleme
 ### Plugins
 
 - [Plugin close lifecycle](plugins/plugin_close_lifecycle/index.md) - Releasing the resources a plugin holds, and the timeout that bounds each shutdown.
+- [Run error notifications](plugins/run_error_notifications/index.md) - Telling every plugin that an error escaped a run, without letting a plugin replace it.
