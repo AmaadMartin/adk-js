@@ -367,9 +367,7 @@ function reconstructTime(args: PickleValue[]): string {
 function reconstructTimedelta(args: PickleValue[]): number {
   const field = (index: number) =>
     typeof args[index] === 'number' ? (args[index] as number) : 0;
-  return (
-    field(0) * 86_400_000 + field(1) * 1000 + Math.floor(field(2) / 1000)
-  );
+  return field(0) * 86_400_000 + field(1) * 1000 + Math.floor(field(2) / 1000);
 }
 
 /** Reconstructs a `timezone(timedelta)` as an offset in minutes. */
@@ -715,7 +713,9 @@ class PickleReader {
 
   private readMemo(index: number): PickleValue {
     if (!this.memo.has(index)) {
-      throw new UnpicklingError(`Memo slot ${index} was read before it was written.`);
+      throw new UnpicklingError(
+        `Memo slot ${index} was read before it was written.`,
+      );
     }
     return this.memo.get(index) as PickleValue;
   }
@@ -749,7 +749,9 @@ class PickleReader {
   private readUint64(): number {
     const value = this.view.getBigUint64(this.advance(8), true);
     if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new UnpicklingError('The pickle payload declares a length this reader cannot address.');
+      throw new UnpicklingError(
+        'The pickle payload declares a length this reader cannot address.',
+      );
     }
     return Number(value);
   }
@@ -853,7 +855,12 @@ export function pythonObjectToJson(object: PythonObject): {
  * same value.
  */
 export function pickleToJson(value: PickleValue): JsonValue {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+  if (
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'number' ||
+    typeof value === 'string'
+  ) {
     return value;
   }
   if (typeof value === 'bigint') {

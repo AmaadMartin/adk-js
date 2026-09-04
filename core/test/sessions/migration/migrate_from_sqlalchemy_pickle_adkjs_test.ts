@@ -10,6 +10,7 @@
  * rollback, and the promise that the source is never written to.
  */
 
+import {DatabaseSessionService} from '@google/adk';
 import {spawnSync} from 'node:child_process';
 import {rmSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
@@ -679,6 +680,96 @@ describe('main', () => {
     expect(logs.text()).toContain(
       'Migration failed: Both --source_db_url and --dest_db_url are required.',
     );
+  });
+});
+
+describe('the migrated database', () => {
+  let directory: string;
+  let logs: CapturedLogs;
+
+  beforeAll(() => {
+    directory = makeTempDir();
+  });
+
+  afterAll(() => {
+    rmSync(directory, {recursive: true, force: true});
+  });
+
+  beforeEach(() => {
+    logs = captureLogs();
+  });
+
+  afterEach(() => {
+    logs.restore();
+  });
+
+  /** A v0 source holding one session and one event. */
+  async function makeSource(name: string): Promise<string> {
+    const source = await SqliteFixture.open(
+      databasePath(directory, `${name}.db`),
+    );
+    await source.createV0Tables();
+    await source.insert('sessions', {
+      app_name: 'app1',
+      user_id: 'user1',
+      id: 'session1',
+      state: '{"skey": 3}',
+      create_time: NOW,
+      update_time: NOW,
+    });
+    await source.insert('events', {
+      id: 'event1',
+      app_name: 'app1',
+      user_id: 'user1',
+      session_id: 'session1',
+      invocation_id: 'invoke1',
+      author: 'user',
+      actions: fixtureBytes(SIMPLE_STATE_DELTA),
+      timestamp: NOW,
+    });
+    const url = source.url;
+    await source.close();
+    return url;
+  }
+
+  it('opens in DatabaseSessionService, as the guide shows', async () => {
+    const sourceDbUrl = await makeSource('service-source');
+    const destPath = databasePath(directory, 'service-dest.db');
+    await migrateFromSqlalchemyPickle({
+      sourceDbUrl,
+      destDbUrl: sqliteUrl(destPath),
+    });
+
+    const service = new DatabaseSessionService(sqliteUrl(destPath));
+    await service.init();
+    const session = await service.getSession({
+      appName: 'app1',
+      userId: 'user1',
+      sessionId: 'session1',
+    });
+
+    expect(session?.state).toEqual({skey: 3});
+    expect(session?.events).toHaveLength(1);
+    expect(session?.events[0].actions.stateDelta).toEqual({skey: 4});
+  });
+
+  it('can be produced again over the same destination', async () => {
+    const sourceDbUrl = await makeSource('rerun-source');
+    const destDbUrl = sqliteUrl(databasePath(directory, 'rerun-dest.db'));
+
+    const first = await migrateFromSqlalchemyPickle({sourceDbUrl, destDbUrl});
+    const second = await migrateFromSqlalchemyPickle({sourceDbUrl, destDbUrl});
+
+    expect(second).toEqual(first);
+
+    const destination = await SqliteFixture.open(
+      databasePath(directory, 'rerun-dest.db'),
+    );
+    const sessions = await destination.execute('SELECT id FROM sessions');
+    const events = await destination.execute('SELECT id FROM events');
+    await destination.close();
+    expect(sessions).toHaveLength(1);
+    expect(events).toHaveLength(1);
   });
 });
 

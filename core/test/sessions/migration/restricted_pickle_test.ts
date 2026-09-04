@@ -52,15 +52,15 @@ function load(payload: string, allowUnknownGlobals = false): PickleValue {
 }
 
 /** Narrows a decoded value to a {@link PythonObject}, failing the test if not. */
-function asPythonObject(value: PickleValue): PythonObject {
-  if (!isPythonObject(value)) {
+function asPythonObject(value: PickleValue | undefined): PythonObject {
+  if (value === undefined || !isPythonObject(value)) {
     expect.fail(`Expected a PythonObject, got ${String(value)}`);
   }
   return value;
 }
 
 /** Narrows a decoded value to the `Map` a Python dict decodes to. */
-function asMap(value: PickleValue): Map<PickleValue, PickleValue> {
+function asMap(value: PickleValue | undefined): Map<PickleValue, PickleValue> {
   if (!(value instanceof Map)) {
     expect.fail(`Expected a Map, got ${String(value)}`);
   }
@@ -68,7 +68,7 @@ function asMap(value: PickleValue): Map<PickleValue, PickleValue> {
 }
 
 /** Narrows a decoded value to the array a Python list or tuple decodes to. */
-function asList(value: PickleValue): PickleValue[] {
+function asList(value: PickleValue | undefined): PickleValue[] {
   if (!Array.isArray(value)) {
     expect.fail(`Expected an array, got ${String(value)}`);
   }
