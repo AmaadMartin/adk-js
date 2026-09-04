@@ -281,6 +281,47 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
  * await analytics.shutdown();
  * ```
  */
+/**
+ * Plugins that have not been shut down, drained when the event loop empties.
+ *
+ * This is the backstop for a host that never calls `shutdown()` and turns
+ * `flushOnRunEnd` off, and it mirrors the set of live plugins adk-python
+ * drains from its `atexit` handler.
+ *
+ * One listener serves every plugin. Registering one each would exceed Node's
+ * ten-listener warning threshold in a host that builds more than ten, and
+ * report a leak that is not there.
+ */
+const pendingDrain = new Set<BigQueryAgentAnalyticsPlugin>();
+
+/**
+ * Drains every live plugin.
+ *
+ * `beforeExit` is the only exit event that can await an insert, and a listener
+ * on it does not hold the loop open, so the process still ends once the drain
+ * settles. It does not fire on an explicit `process.exit()` or on a fatal
+ * signal, neither of which any asynchronous flush survives.
+ */
+function drainPendingBeforeExit(): void {
+  void Promise.all([...pendingDrain].map((plugin) => plugin.shutdown()));
+}
+
+/** Registers `plugin` for the exit drain, installing the listener once. */
+function trackUntilShutdown(plugin: BigQueryAgentAnalyticsPlugin): void {
+  if (pendingDrain.size === 0) {
+    process.on('beforeExit', drainPendingBeforeExit);
+  }
+  pendingDrain.add(plugin);
+}
+
+/** Drops `plugin` from the exit drain, releasing the listener with the last. */
+function forgetOnShutdown(plugin: BigQueryAgentAnalyticsPlugin): void {
+  pendingDrain.delete(plugin);
+  if (pendingDrain.size === 0) {
+    process.removeListener('beforeExit', drainPendingBeforeExit);
+  }
+}
+
 @experimental
 export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   private readonly config: ResolvedConfig;
@@ -296,6 +337,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     this.config = resolved.config;
     this.writer = new BigQueryRowWriter(resolved.writer);
     this.offloader = createOffloader(options.projectId, resolved.config);
+    trackUntilShutdown(this);
   }
 
   /**
@@ -329,6 +371,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   /** Refuses further rows, then waits for the queued ones to settle. */
   private async drain(): Promise<void> {
     this.shutDown = true;
+    forgetOnShutdown(this);
     this.spans.clear();
     await this.writer.shutdown();
   }
