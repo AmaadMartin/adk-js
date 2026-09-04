@@ -155,6 +155,36 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
+export {
+  LlmBackedUserSimulator,
+  parseLlmBackedUserSimulatorConfig,
+} from './evaluation/simulation/llm_backed_user_simulator.js';
+export type {
+  LlmBackedUserSimulatorConfig,
+  LlmBackedUserSimulatorOptions,
+  ResolvedLlmBackedUserSimulatorConfig,
+} from './evaluation/simulation/llm_backed_user_simulator.js';
+export {
+  getLlmBackedUserSimulatorPrompt,
+  isValidUserSimulatorTemplate,
+} from './evaluation/simulation/llm_backed_user_simulator_prompts.js';
+export type {
+  LlmBackedUserSimulatorPromptOptions,
+  UserSimulatorInstructionsTemplateOptions,
+} from './evaluation/simulation/llm_backed_user_simulator_prompts.js';
+export {
+  UserSimulatorStatus,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
