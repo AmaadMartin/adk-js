@@ -89,12 +89,16 @@ function createMockClient(): MockClient {
 
 describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
   let mockClient: MockClient;
+  // `Client` is a third-party class a partial mock cannot implement, so the
+  // injection cast lives here once instead of at every construction site.
+  let client: Client;
   let invocationContext: InvocationContext;
 
   beforeEach(() => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'us-central1');
     mockClient = createMockClient();
+    client = mockClient as unknown as Client;
     invocationContext = {
       invocationId: 'test-invocation-123',
       session: {
@@ -111,7 +115,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
   it('test_init_with_sandbox_overrides', () => {
     const executor = new AgentEngineSandboxCodeExecutor({
       sandboxResourceName: SANDBOX_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     expect(executor.sandboxResourceName).toBe(SANDBOX_NAME);
@@ -123,7 +127,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
         new AgentEngineSandboxCodeExecutor({
           sandboxResourceName:
             'projects/123/locations/us-central1/reasoningEngines/456/sandboxes/789',
-          client: mockClient as unknown as Client,
+          client,
         }),
     ).toThrow('Invalid sandbox resource name');
   });
@@ -134,7 +138,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
         new AgentEngineSandboxCodeExecutor({
           agentEngineResourceName:
             'projects/123/locations/us-central1/reason/456',
-          client: mockClient as unknown as Client,
+          client,
         }),
     ).toThrow('Invalid agent engine resource name');
   });
@@ -167,7 +171,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
     );
     const executor = new AgentEngineSandboxCodeExecutor({
       sandboxResourceName: SANDBOX_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     const result = await executor.executeCode({
@@ -202,7 +206,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
   it('test_execute_code_sends_input_files_with_content_key', async () => {
     const executor = new AgentEngineSandboxCodeExecutor({
       sandboxResourceName: SANDBOX_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     await executor.executeCode({
@@ -242,7 +246,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
     );
     const executor = new AgentEngineSandboxCodeExecutor({
       agentEngineResourceName: AGENT_ENGINE_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     const result = await executor.executeCode({
@@ -282,7 +286,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
     );
     const executor = new AgentEngineSandboxCodeExecutor({
       agentEngineResourceName: AGENT_ENGINE_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     const result = await executor.executeCode({
@@ -315,7 +319,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
   it('test_execute_code_creates_sandbox_if_missing', async () => {
     const executor = new AgentEngineSandboxCodeExecutor({
       agentEngineResourceName: AGENT_ENGINE_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     await executor.executeCode({
@@ -348,7 +352,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
     const code = "import pandas as pd; df = pd.read_csv('data.csv')";
     const executor = new AgentEngineSandboxCodeExecutor({
       sandboxResourceName: SANDBOX_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     await executor.executeCode({
@@ -389,7 +393,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
   it('test_init_with_agent_engine_resource_name', async () => {
     const executor = new AgentEngineSandboxCodeExecutor({
       agentEngineResourceName: AGENT_ENGINE_NAME,
-      client: mockClient as unknown as Client,
+      client,
     });
 
     expect(executor.agentEngineResourceName).toBe(AGENT_ENGINE_NAME);
@@ -414,7 +418,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
   it('test_execute_code_with_auto_create_agent_engine', async () => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project-456');
     const executor = new AgentEngineSandboxCodeExecutor({
-      client: mockClient as unknown as Client,
+      client,
     });
 
     await executor.executeCode({
@@ -444,7 +448,7 @@ describe('AgentEngineSandboxCodeExecutor parity with adk-python', () => {
       new Error('Failed to auto-create Agent Engine'),
     );
     const executor = new AgentEngineSandboxCodeExecutor({
-      client: mockClient as unknown as Client,
+      client,
     });
 
     await expect(
