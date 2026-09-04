@@ -62,6 +62,8 @@ await analytics.shutdown();
 
 Each run ends with a flush, which `shutdownTimeoutMs` bounds, so a BigQuery call that hangs delays the run by a known amount instead of holding it open. Nothing is dropped: the next flush waits for that insert again. Set `flushOnRunEnd` to false to take the write off the run entirely and leave it to the timer.
 
+If you do neither — `flushOnRunEnd` off and no `shutdown()` — the plugin still drains on `beforeExit`, which Node emits when the event loop empties. That backstop cannot cover an explicit `process.exit()` or a fatal signal, because neither leaves time for an insert. Call `shutdown()` when you need the guarantee.
+
 Query the result:
 
 ```sql
