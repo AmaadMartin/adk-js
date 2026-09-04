@@ -159,3 +159,18 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Reports whether a thrown value carries a specific Node `errno` code.
+ *
+ * Node reports a filesystem or network failure as a plain `Error` carrying the
+ * code on a `code` property, so a `catch (e: unknown)` block has to inspect the
+ * shape rather than narrow by type.
+ *
+ * @param err The thrown or rejected value.
+ * @param code The `errno` code to test for, e.g. `ENOENT`.
+ * @return True when the value carries that code.
+ */
+export function isErrnoCode(err: unknown, code: string): boolean {
+  return asRecord(err)?.code === code;
+}

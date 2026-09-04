@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, isErrnoCode} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,27 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('isErrnoCode', () => {
+  it('matches an error carrying the code', () => {
+    const err = Object.assign(new Error('missing'), {code: 'ENOENT'});
+    expect(isErrnoCode(err, 'ENOENT')).toBe(true);
+  });
+
+  it('rejects an error carrying a different code', () => {
+    const err = Object.assign(new Error('exists'), {code: 'EEXIST'});
+    expect(isErrnoCode(err, 'ENOENT')).toBe(false);
+  });
+
+  it('rejects an error with no code', () => {
+    expect(isErrnoCode(new Error('plain'), 'ENOENT')).toBe(false);
+  });
+
+  it('rejects a thrown value that is not an object', () => {
+    expect(isErrnoCode('ENOENT', 'ENOENT')).toBe(false);
+    expect(isErrnoCode(null, 'ENOENT')).toBe(false);
+    expect(isErrnoCode(undefined, 'ENOENT')).toBe(false);
   });
 });

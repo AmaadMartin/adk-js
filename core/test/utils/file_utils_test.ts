@@ -9,7 +9,11 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {materializeFiles} from '../../src/utils/file_utils.js';
+import {
+  isInsideDir,
+  materializeFiles,
+  pathExists,
+} from '../../src/utils/file_utils.js';
 
 describe('file_utils', () => {
   let tempDir: string;
@@ -211,6 +215,40 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content3).toBe('third');
+    });
+  });
+
+  describe('isInsideDir', () => {
+    it('accepts the base directory itself', () => {
+      expect(isInsideDir('/tmp/root', '/tmp/root')).toBe(true);
+    });
+
+    it('accepts a nested path', () => {
+      expect(isInsideDir('/tmp/root/a/b', '/tmp/root')).toBe(true);
+    });
+
+    it('rejects a sibling whose name shares the prefix', () => {
+      expect(isInsideDir('/tmp/root-evil/a', '/tmp/root')).toBe(false);
+    });
+
+    it('rejects a path above the base directory', () => {
+      expect(isInsideDir('/tmp', '/tmp/root')).toBe(false);
+    });
+  });
+
+  describe('pathExists', () => {
+    it('reports an existing file', async () => {
+      const target = path.join(tempDir, 'present.txt');
+      await fs.writeFile(target, 'x', 'utf8');
+      expect(await pathExists(target)).toBe(true);
+    });
+
+    it('reports an existing directory', async () => {
+      expect(await pathExists(tempDir)).toBe(true);
+    });
+
+    it('reports a missing path', async () => {
+      expect(await pathExists(path.join(tempDir, 'absent'))).toBe(false);
     });
   });
 });
