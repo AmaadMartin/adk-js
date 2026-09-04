@@ -26,7 +26,9 @@ import {
   actionsBlob,
   DETONATING_PAYLOAD,
   EMPTY_ACTIONS_PAYLOAD,
+  ENCODED_ACTIONS_GOLDEN,
   POPULATED_ACTIONS_PAYLOAD,
+  SHARED_ACTIONS_VALUES_PAYLOAD,
   STDLIB_STATE_ACTIONS_PAYLOAD,
 } from './pickled_actions_fixtures.js';
 
@@ -175,6 +177,32 @@ describe('decodeEventActionsPickle', () => {
     expect(state['outcome']).toBe('OUTCOME_OK');
   });
 
+  it('gives both references to one model the same fields', () => {
+    const actions = decodeEventActionsPickle(
+      actionsBlob(SHARED_ACTIONS_VALUES_PAYLOAD),
+    );
+
+    // adk-python writes one `ToolConfirmation` and references the memo for the
+    // second call id, so the second must not come back empty.
+    expect(actions.requestedToolConfirmations['call-2']).toEqual({
+      hint: 'approve?',
+      confirmed: true,
+      payload: null,
+    });
+    expect(actions.requestedToolConfirmations['call-1']).toEqual(
+      actions.requestedToolConfirmations['call-2'],
+    );
+  });
+
+  it('gives both references to one uuid the same value', () => {
+    const state = decodeEventActionsPickle(
+      actionsBlob(SHARED_ACTIONS_VALUES_PAYLOAD),
+    ).stateDelta;
+
+    expect(state['first']).toBe('12345678-1234-5678-1234-567812345678');
+    expect(state['second']).toBe(state['first']);
+  });
+
   it('test_process_result_value_rejects_disallowed_global', () => {
     expect(() =>
       decodeEventActionsPickle(actionsBlob(DETONATING_PAYLOAD)),
@@ -307,6 +335,20 @@ describe('encodeEventActionsPickle', () => {
     );
   });
 
+  it('emits the bytes CPython loads as an EventActions', () => {
+    const actions = createEventActions({
+      skipSummarization: true,
+      stateDelta: {'user:name': 'Ada', count: 3},
+      artifactDelta: {'report.txt': 2},
+      transferToAgent: 'analyst',
+      escalate: true,
+    });
+
+    const written = Buffer.from(encodeEventActionsPickle(actions));
+
+    expect(written.toString('base64')).toBe(ENCODED_ACTIONS_GOLDEN);
+  });
+
   it('drops an undefined field rather than writing it', () => {
     const actions = createEventActions({
       stateDelta: {present: 'yes', absent: undefined},
@@ -325,6 +367,63 @@ describe('encodeEventActionsPickle', () => {
     const decoded = decodeEventActionsPickle(encodeEventActionsPickle(actions));
 
     expect(decoded.stateDelta['when']).toBe('2026-01-02T03:04:05.000Z');
+  });
+});
+
+describe('decodeEventActionsPickle defaults', () => {
+  const shortUnicode = (value: string) => {
+    const encoded = Array.from(Buffer.from(value, 'utf-8'));
+    return [SHORT_BINUNICODE, encoded.length, ...encoded];
+  };
+
+  it('defaults a dictionary field a corrupt blob left null', () => {
+    // pydantic annotates `state_delta` as a plain dict, so adk-python never
+    // writes None there. A caller reading the keys still must not crash.
+    const payload = Uint8Array.from([
+      PROTO,
+      4,
+      ...shortUnicode('google.adk.events.event_actions'),
+      ...shortUnicode('EventActions'),
+      STACK_GLOBAL,
+      0x29,
+      0x81,
+      0x7d,
+      ...shortUnicode('state_delta'),
+      0x4e,
+      0x73,
+      0x62,
+      STOP,
+    ]);
+
+    expect(decodeEventActionsPickle(payload).stateDelta).toEqual({});
+  });
+
+  it('keeps a __proto__ key in a state delta as ordinary data', () => {
+    const payload = Uint8Array.from([
+      PROTO,
+      4,
+      ...shortUnicode('google.adk.events.event_actions'),
+      ...shortUnicode('EventActions'),
+      STACK_GLOBAL,
+      0x29,
+      0x81,
+      0x7d,
+      ...shortUnicode('state_delta'),
+      0x7d,
+      ...shortUnicode('__proto__'),
+      ...shortUnicode('kept'),
+      0x73,
+      0x73,
+      0x62,
+      STOP,
+    ]);
+
+    const state = decodeEventActionsPickle(payload).stateDelta;
+
+    expect(Object.keys(state)).toEqual(['__proto__']);
+    expect(Object.getOwnPropertyDescriptor(state, '__proto__')?.value).toBe(
+      'kept',
+    );
   });
 });
 
@@ -384,6 +483,58 @@ describe('decodeEventActionsPickle failure paths', () => {
     ]);
 
     expect(decodeEventActionsPickle(payload).transferToAgent).toBe('analyst');
+  });
+
+  it('reports a model whose fields are not a dictionary', () => {
+    const shortUnicode = (value: string) => {
+      const encoded = Array.from(Buffer.from(value, 'utf-8'));
+      return [SHORT_BINUNICODE, encoded.length, ...encoded];
+    };
+    const payload = Uint8Array.from([
+      PROTO,
+      4,
+      ...shortUnicode('google.adk.events.event_actions'),
+      ...shortUnicode('EventActions'),
+      STACK_GLOBAL,
+      0x29,
+      0x81,
+      0x7d,
+      ...shortUnicode('__dict__'),
+      ...shortUnicode('not a dictionary'),
+      0x73,
+      0x62,
+      STOP,
+    ]);
+
+    expect(() => decodeEventActionsPickle(payload)).toThrowError(
+      expect.objectContaining({code: PickleErrorCode.UNSUPPORTED_TARGET}),
+    );
+  });
+
+  it('reports a BUILD onto a model the payload built as a list', () => {
+    const shortUnicode = (value: string) => {
+      const encoded = Array.from(Buffer.from(value, 'utf-8'));
+      return [SHORT_BINUNICODE, encoded.length, ...encoded];
+    };
+    // A single REDUCE argument builds an enum member, so a payload can hand
+    // the factory a list and then try to apply a state to it.
+    const payload = Uint8Array.from([
+      PROTO,
+      4,
+      ...shortUnicode('google.adk.events.event_actions'),
+      ...shortUnicode('EventActions'),
+      STACK_GLOBAL,
+      0x5d,
+      0x85,
+      REDUCE,
+      0x7d,
+      0x62,
+      STOP,
+    ]);
+
+    expect(() => decodeEventActionsPickle(payload)).toThrowError(
+      expect.objectContaining({code: PickleErrorCode.UNSUPPORTED_TARGET}),
+    );
   });
 
   it('does not swallow a decode failure into empty actions', () => {

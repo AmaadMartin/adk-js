@@ -73,6 +73,13 @@
  * emit("EMPTY_ACTIONS_PAYLOAD", EventActions())
  * emit("STDLIB_STATE_ACTIONS_PAYLOAD", stdlib_state)
  * emit("DETONATING_PAYLOAD", _Payload())
+ *
+ * shared_confirmation = ToolConfirmation(hint="approve?", confirmed=True)
+ * shared_uuid = uuid.UUID("12345678-1234-5678-1234-567812345678")
+ * emit("SHARED_ACTIONS_VALUES_PAYLOAD", EventActions(
+ *     requested_tool_confirmations={"call-1": shared_confirmation,
+ *                                   "call-2": shared_confirmation},
+ *     state_delta={"first": shared_uuid, "second": shared_uuid}))
  * ```
  */
 
@@ -154,6 +161,58 @@ export const STDLIB_STATE_ACTIONS_PAYLOAD =
  */
 export const DETONATING_PAYLOAD =
   'gASVHQAAAAAAAACMCF9fbWFpbl9flIwJX2RldG9uYXRllJOUKVKULg==';
+
+/**
+ * An `EventActions` holding one `ToolConfirmation` under two call ids, and
+ * one `uuid.UUID` under two state keys.
+ */
+export const SHARED_ACTIONS_VALUES_PAYLOAD =
+  'gASVqAEAAAAAAACMH2dvb2dsZS5hZGsuZXZlbnRzLmV2ZW50X2FjdGlvbnOUjAxFdmVu' +
+  'dEFjdGlvbnOUk5QpgZR9lCiMCF9fZGljdF9flH2UKIwLc3RhdGVfZGVsdGGUfZQojAVm' +
+  'aXJzdJSMBHV1aWSUjARVVUlElJOUKYGUfZSMA2ludJSKEHhWNBJ4VjQSeFY0EnhWNBJz' +
+  'YowGc2Vjb25klGgNdYwccmVxdWVzdGVkX3Rvb2xfY29uZmlybWF0aW9uc5R9lCiMBmNh' +
+  'bGwtMZSMImdvb2dsZS5hZGsudG9vbHMudG9vbF9jb25maXJtYXRpb26UjBBUb29sQ29u' +
+  'ZmlybWF0aW9ulJOUKYGUfZQoaAV9lCiMBGhpbnSUjAhhcHByb3ZlP5SMCWNvbmZpcm1l' +
+  'ZJSIjAdwYXlsb2FklE51jBJfX3B5ZGFudGljX2V4dHJhX1+UTowXX19weWRhbnRpY19m' +
+  'aWVsZHNfc2V0X1+Uj5QoaBpoHJCMFF9fcHlkYW50aWNfcHJpdmF0ZV9flE51YowGY2Fs' +
+  'bC0ylGgXdXVoHk5oH4+UKGgRaAeQaCFOdWIu';
+
+/**
+ * The exact bytes `encodeEventActionsPickle` emits for the actions below.
+ *
+ * ```ts
+ * createEventActions({
+ *   skipSummarization: true,
+ *   stateDelta: {'user:name': 'Ada', count: 3},
+ *   artifactDelta: {'report.txt': 2},
+ *   transferToAgent: 'analyst',
+ *   escalate: true,
+ * })
+ * ```
+ *
+ * CPython 3.13.15 with pydantic 2.13.4 loads these bytes into a real
+ * `EventActions`, with `model_fields_set` naming the seven fields written:
+ *
+ * ```
+ * state_delta={'user:name': 'Ada', 'count': 3} artifact_delta={'report.txt': 2}
+ * requested_auth_configs={} requested_tool_confirmations={}
+ * skip_summarization=True transfer_to_agent='analyst' escalate=True
+ * ```
+ *
+ * Pinning the bytes is what stops a change to the writer that adk-js still
+ * reads but CPython rejects: nothing in the test run can call Python.
+ */
+export const ENCODED_ACTIONS_GOLDEN =
+  'gASMH2dvb2dsZS5hZGsuZXZlbnRzLmV2ZW50X2FjdGlvbnOMDEV2ZW50QWN0aW9uc5Mp' +
+  'gX0ojAhfX2RpY3RfX30ojAtzdGF0ZV9kZWx0YX0ojAl1c2VyOm5hbWWMA0FkYYwFY291' +
+  'bnRLA3WMDmFydGlmYWN0X2RlbHRhfSiMCnJlcG9ydC50eHRLAnWMFnJlcXVlc3RlZF9h' +
+  'dXRoX2NvbmZpZ3N9jBxyZXF1ZXN0ZWRfdG9vbF9jb25maXJtYXRpb25zfYwSc2tpcF9z' +
+  'dW1tYXJpemF0aW9uiIwRdHJhbnNmZXJfdG9fYWdlbnSMB2FuYWx5c3SMCGVzY2FsYXRl' +
+  'iHWMEl9fcHlkYW50aWNfZXh0cmFfX06MF19fcHlkYW50aWNfZmllbGRzX3NldF9fjyiM' +
+  'C3N0YXRlX2RlbHRhjA5hcnRpZmFjdF9kZWx0YYwWcmVxdWVzdGVkX2F1dGhfY29uZmln' +
+  'c4wccmVxdWVzdGVkX3Rvb2xfY29uZmlybWF0aW9uc4wSc2tpcF9zdW1tYXJpemF0aW9u' +
+  'jBF0cmFuc2Zlcl90b19hZ2VudIwIZXNjYWxhdGWQjBRfX3B5ZGFudGljX3ByaXZhdGVf' +
+  'X051Yi4=';
 
 /** Decodes a base64 fixture into the bytes the `actions` column holds. */
 export function actionsBlob(base64Payload: string): Uint8Array {

@@ -345,16 +345,19 @@ function pathFactories(): Array<[string, PickleObjectFactory]> {
  * A Python `dict` arrives as a `Map` and a `set` as a `Set`, neither of which
  * survives `JSON.stringify`. Session state has to, so a `Map` becomes an
  * object and a `Set` becomes an array. A `Map` key that is not a string
- * becomes its `String` form, the only key an object can hold.
+ * becomes its `String` form, the only key an object can hold, and a
+ * `__proto__` key stays a key rather than reparenting the object.
  */
 export function pickleToPlain(value: unknown): unknown {
   if (value instanceof Map) {
-    const plain: Record<string, unknown> = {};
-    for (const [key, element] of value) {
-      plain[typeof key === 'string' ? key : String(key)] =
-        pickleToPlain(element);
-    }
-    return plain;
+    // `Object.fromEntries` defines each key rather than assigning it, so a
+    // `__proto__` key becomes ordinary data instead of reparenting the object.
+    return Object.fromEntries(
+      [...value].map(([key, element]) => [
+        typeof key === 'string' ? key : String(key),
+        pickleToPlain(element),
+      ]),
+    );
   }
   if (value instanceof Set) {
     return [...value].map(pickleToPlain);

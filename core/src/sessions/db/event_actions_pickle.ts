@@ -102,10 +102,15 @@ const ALLOWED_MODEL_MODULES: ReadonlySet<string> = new Set([
  * `BUILD` of its `__getstate__` dictionary, whose `__dict__` entry holds the
  * fields. An enum member is written as a call of its class on the member's
  * value, so a single argument is the value itself.
+ *
+ * The fields are copied into the instance the reader already memoized, rather
+ * than returned as a new value. A payload that names one model under two keys
+ * writes it once and references the memo the second time, so replacing the
+ * instance would hand the second reference an empty object.
  */
 const PYDANTIC_VALUE_FACTORY: PickleObjectFactory = {
   create: (args) => (args.length === 1 ? args[0] : new Map<unknown, unknown>()),
-  setState: (_instance, state) => {
+  setState: (instance, state) => {
     if (!(state instanceof Map)) {
       throw new PickleError(
         PickleErrorCode.UNSUPPORTED_TARGET,
@@ -113,7 +118,18 @@ const PYDANTIC_VALUE_FACTORY: PickleObjectFactory = {
           'dictionary state.',
       );
     }
-    return state.get('__dict__') ?? state;
+    const fields = state.get('__dict__') ?? state;
+    if (!(instance instanceof Map) || !(fields instanceof Map)) {
+      throw new PickleError(
+        PickleErrorCode.UNSUPPORTED_TARGET,
+        'A pickled model in a legacy `events.actions` value needs its fields ' +
+          'in a dictionary.',
+      );
+    }
+    for (const [name, value] of fields) {
+      instance.set(name, value);
+    }
+    return instance;
   },
 };
 
@@ -145,11 +161,26 @@ function resolveEventActionsGlobal(
 }
 
 /**
+ * The fields `createEventActions` gives an empty object.
+ *
+ * A blob carrying `None` for one of them would otherwise leave it null, and
+ * the next caller reading its keys would fail. adk-python's annotations are
+ * not optional, so only a corrupt blob reaches that, and the default is a
+ * safer reading of it than a crash further away.
+ */
+const DICTIONARY_COLUMNS = [
+  'state_delta',
+  'artifact_delta',
+  'requested_auth_configs',
+  'requested_tool_confirmations',
+] as const;
+
+/**
  * Decodes the `actions` column of a legacy v0 event row.
  *
- * A field adk-python has and adk-js does not is decoded and then dropped,
- * which is what adk-python's own `EventActions.model_validate` does with a
- * field the current model no longer declares.
+ * A field adk-python declares and adk-js does not is decoded and carried on
+ * the returned object, so a mixed deployment does not lose it on the way
+ * through a Node process.
  *
  * @param blob The stored pickle, which is untrusted input.
  * @returns The actions the blob holds.
@@ -166,9 +197,13 @@ export function decodeEventActionsPickle(blob: Uint8Array): EventActions {
       'A legacy `events.actions` value must hold an EventActions object.',
     );
   }
-  return createEventActions(
-    transformToCamelCaseActions(fields as Record<string, unknown>),
-  );
+  const record = fields as Record<string, unknown>;
+  for (const column of DICTIONARY_COLUMNS) {
+    if (record[column] === null) {
+      delete record[column];
+    }
+  }
+  return createEventActions(transformToCamelCaseActions(record));
 }
 
 /**
