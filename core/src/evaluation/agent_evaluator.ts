@@ -58,6 +58,11 @@ import {EvalSetResultsManager} from './eval_set_results_manager.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
 import {InMemoryEvalSetsManager} from './in_memory_eval_sets_manager.js';
 import {convertLegacyEvalSet} from './legacy_eval_set_converter.js';
+import {
+  defaultMetricEvaluatorRegistry,
+  registerCustomMetricsFromConfig,
+} from './metric_evaluator_registry.js';
+import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
 
 /** How many times every entry of an eval dataset is assessed by default. */
 export const NUM_RUNS = 2;
@@ -145,7 +150,16 @@ export interface EvaluateEvalSetOptions {
   evalSet: EvalSet;
 
   /** The metrics to score, and the threshold each must reach. */
-  evalConfig: EvalConfig;
+  evalConfig?: EvalConfig;
+
+  /**
+   * Metric name to the threshold that metric must reach.
+   *
+   * When non-empty it replaces {@link evalConfig} rather than merging with it.
+   *
+   * @deprecated Use {@link evalConfig} instead.
+   */
+  criteria?: Record<string, number>;
 
   /** Defaults to {@link NUM_RUNS}. */
   numRuns?: number;
@@ -174,8 +188,11 @@ export interface EvaluateOptions {
   /** The module defining the agent, or its specifier. */
   agentModule: AgentModuleRef;
 
-  /** A `*.test.json` file, or a directory searched recursively for them. */
-  evalDatasetFilePathOrDir: string;
+  /**
+   * A `*.test.json` file, a directory searched recursively for them, or an
+   * explicit list of files.
+   */
+  evalDatasetFilePathOrDir: string | string[];
 
   /** Defaults to {@link NUM_RUNS}. */
   numRuns?: number;
@@ -239,29 +256,95 @@ async function loadLegacyFile(
   return parsed;
 }
 
+/** Returns true when every element of a list names an existing file. */
+async function areAllExistingFiles(paths: readonly string[]): Promise<boolean> {
+  const stats = await Promise.all(paths.map(statOrUndefined));
+  return stats.every((info) => info?.isFile() === true);
+}
+
 /**
- * Loads eval data in ADK's original format from a file, or from every
- * `.test.json` file under a directory.
+ * Returns the eval data files named by a path, a directory or a list.
+ *
+ * A list is taken as the files themselves and every element must already
+ * exist, as adk-python's loader requires.
  *
  * @throws {InputValidationError} When the path names neither a file nor a
- *   directory.
+ *   directory, or when the list holds anything but existing files.
  */
-async function loadDataset(
-  input: string,
-): Promise<Array<Array<Record<string, unknown>>>> {
+async function resolveTestFiles(input: string | string[]): Promise<string[]> {
+  if (Array.isArray(input)) {
+    if (input.length === 0 || !(await areAllExistingFiles(input))) {
+      throw new InputValidationError(
+        'Input list must contain valid file paths.',
+      );
+    }
+    return input;
+  }
   const info = await statOrUndefined(input);
   if (info?.isDirectory()) {
-    const testFiles = await listTestFilesInDir(input);
-    const datasets: Array<Array<Record<string, unknown>>> = [];
-    for (const testFile of testFiles) {
-      datasets.push(await loadLegacyFile(testFile));
-    }
-    return datasets;
+    return listTestFilesInDir(input);
   }
   if (info?.isFile()) {
-    return [await loadLegacyFile(input)];
+    return [input];
   }
   throw new InputValidationError(`Input path ${input} is invalid.`);
+}
+
+/**
+ * Loads eval data in ADK's original format from a file, from every
+ * `.test.json` file under a directory, or from an explicit list of files.
+ *
+ * @throws {InputValidationError} When {@link resolveTestFiles} rejects the
+ *   input, or when a file does not hold a list of records.
+ */
+async function loadDataset(
+  input: string | string[],
+): Promise<Array<Array<Record<string, unknown>>>> {
+  const testFiles = await resolveTestFiles(input);
+  const datasets: Array<Array<Record<string, unknown>>> = [];
+  for (const testFile of testFiles) {
+    datasets.push(await loadLegacyFile(testFile));
+  }
+  return datasets;
+}
+
+/**
+ * Message logged once when a caller still passes the deprecated `criteria`.
+ * Mirrors adk-python's wording, with the field names in this SDK's casing.
+ */
+const CRITERIA_DEPRECATION_WARNING =
+  '`criteria` field is deprecated and will be removed in future iterations. ' +
+  'For now, we will automatically map values in `criteria` to `evalConfig`, ' +
+  'but you should move to using the `evalConfig` field.';
+
+/**
+ * Returns the config a run scores, honouring the deprecated `criteria`.
+ *
+ * A non-empty `criteria` replaces `evalConfig` rather than merging with it,
+ * as adk-python does. Each threshold becomes a `BaseCriterion`, mirroring the
+ * reference's `BaseCriterion(threshold=v)`.
+ *
+ * @throws {InputValidationError} When neither is given.
+ */
+function resolveEvalConfig(
+  evalConfig?: EvalConfig,
+  criteria?: Record<string, number>,
+): EvalConfig {
+  if (criteria !== undefined && Object.keys(criteria).length > 0) {
+    logger.warn(CRITERIA_DEPRECATION_WARNING);
+    return {
+      criteria: Object.fromEntries(
+        Object.entries(criteria).map(([name, threshold]) => [
+          name,
+          {threshold},
+        ]),
+      ),
+    };
+  }
+  if (evalConfig === undefined) {
+    throw new InputValidationError('`evalConfig` is required.');
+  }
+  return evalConfig;
 }
 
 /**
@@ -477,7 +560,13 @@ function groupMetricResultsByMetric(
   return byMetric;
 }
 
-/** Averages the scores of each metric and reports the ones that fall short. */
+/**
+ * Averages the scores of each metric and reports the ones that fall short.
+ *
+ * A metric that produced no score at all is reported as not evaluated rather
+ * than as a score below its threshold, so a judge model that could not run
+ * does not read as an agent regression.
+ */
 function processMetricsAndGetFailures(
   resultsByMetric: ReadonlyMap<string, EvalMetricResultWithInvocation[]>,
   printDetailedResults: boolean,
@@ -499,7 +588,14 @@ function processMetricsAndGetFailures(
         overallScore >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
     }
 
-    if (overallEvalStatus !== EvalStatus.PASSED) {
+    if (overallEvalStatus === EvalStatus.NOT_EVALUATED) {
+      failures.push(
+        `${metricName} for ${agentModuleLabel} was not evaluated. No score ` +
+          `was produced, so the threshold of ${threshold} was never checked ` +
+          'and this is not a score regression. See the logs for why the ' +
+          'metric could not run.',
+      );
+    } else if (overallEvalStatus !== EvalStatus.PASSED) {
       failures.push(
         `${metricName} for ${agentModuleLabel} Failed. Expected ` +
           `${threshold}, but got ${overallScore}.`,
@@ -603,7 +699,7 @@ export class AgentEvaluator {
     const {
       agentModule,
       evalSet,
-      evalConfig,
+      criteria,
       numRuns = NUM_RUNS,
       agentName,
       printDetailedResults = true,
@@ -618,6 +714,8 @@ export class AgentEvaluator {
       );
     }
 
+    const evalConfig = resolveEvalConfig(options.evalConfig, criteria);
+
     const {agent, app} = await resolveAgentForEval(agentModule, agentName);
     const evalMetrics = getEvalMetricsFromConfig(evalConfig);
     const appName = options.appName ?? DEFAULT_APP_NAME;
@@ -627,6 +725,11 @@ export class AgentEvaluator {
       app,
       evalSetsManager: await seedEvalSetsManager(appName, evalSet),
       evalConfig,
+      metricEvaluatorRegistry: registerCustomMetricsFromConfig(
+        evalConfig,
+        defaultMetricEvaluatorRegistry().fork(),
+      ),
+      userSimulatorProvider: new UserSimulatorProvider(),
       artifactService,
       evalSetResultsManager,
     });
@@ -729,10 +832,7 @@ export class AgentEvaluator {
       );
     }
 
-    const info = await statOrUndefined(evalDatasetFilePathOrDir);
-    const testFiles = info?.isDirectory()
-      ? await listTestFilesInDir(evalDatasetFilePathOrDir)
-      : [evalDatasetFilePathOrDir];
+    const testFiles = await resolveTestFiles(evalDatasetFilePathOrDir);
     const initialSession = await readInitialSession(initialSessionFile);
 
     for (const testFile of testFiles) {

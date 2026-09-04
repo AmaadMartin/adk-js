@@ -191,11 +191,14 @@ export type {
   EvalDumpOptions,
   EvalModel,
   EvalModelOptions,
+  ExtraKeysPolicy,
 } from './evaluation/common.js';
 export {
   DEFAULT_LIVE_TIMEOUT_SECONDS,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
 } from './evaluation/constants.js';
+export {CustomMetricEvaluator} from './evaluation/custom_metric_evaluator.js';
+export type {CustomMetricFunction} from './evaluation/custom_metric_evaluator.js';
 export {
   getAllToolCalls,
   getAllToolCallsWithResponses,
@@ -318,6 +321,7 @@ export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
 export {
   MetricEvaluatorRegistry,
   defaultMetricEvaluatorRegistry,
+  registerCustomMetricsFromConfig,
 } from './evaluation/metric_evaluator_registry.js';
 export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
 export {ResponseEvaluator} from './evaluation/response_evaluator.js';
