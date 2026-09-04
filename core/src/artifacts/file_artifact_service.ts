@@ -11,6 +11,8 @@ import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
+import {isErrnoCode} from '../utils/error_utils.js';
+import {isInsideDir, pathExists} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -132,7 +134,7 @@ export class FileArtifactService implements BaseArtifactService {
     // Checked here rather than in `getArtifactDir`, which reads and deletes
     // share: an artifact stored under this name before the name was reserved
     // must stay readable and, above all, deletable.
-    if (isReservedArtifactName(path.basename(artifactDir))) {
+    if (isReservedArtifactName(getPayloadName(artifactDir))) {
       throw new InputValidationError(
         `Artifact filename ${filename} is reserved: an artifact may not be ` +
           `named ${METADATA_FILENAME} (in any casing) because its payload is ` +
@@ -145,7 +147,7 @@ export class FileArtifactService implements BaseArtifactService {
     const {version, stagingDir, versionDir} =
       await reserveVersionDir(artifactDir);
 
-    const contentPath = path.join(stagingDir, path.basename(artifactDir));
+    const contentPath = path.join(stagingDir, getPayloadName(artifactDir));
 
     // A version directory is only ever observed complete or not at all. A
     // partially written version -- payload present, metadata missing or
@@ -236,11 +238,7 @@ export class FileArtifactService implements BaseArtifactService {
     // must never be taken from the metadata document: that document lives in
     // the artifact tree and is therefore attacker-influenced input, so
     // honouring a `canonicalUri` from it would be an arbitrary file read.
-    const contentPath = path.join(
-      getVersionsDir(artifactDir),
-      versionToLoad.toString(),
-      path.basename(artifactDir),
-    );
+    const contentPath = getPayloadPath(artifactDir, versionToLoad);
 
     // Read without a preceding `exists()` check. A concurrent `deleteArtifact`
     // can unlink the payload between the check and the read, and reacting to
@@ -401,7 +399,7 @@ export function assertInsideRoot(
 ): void {
   const root = path.resolve(rootDir);
   const resolved = path.resolve(resolvedPath);
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+  if (!isInsideDir(resolved, root)) {
     throw new InputValidationError(
       `[FileArtifactService] ${label} escapes storage root. Resolved: ${resolved}, Root: ${root}`,
     );
@@ -461,11 +459,32 @@ function getVersionsDir(artifactDir: string): string {
   return path.join(artifactDir, VERSIONS_DIRNAME);
 }
 
+function getVersionDir(artifactDir: string, version: number): string {
+  return path.join(getVersionsDir(artifactDir), version.toString());
+}
+
 function getMetadataPath(artifactDir: string, version: number): string {
+  return path.join(getVersionDir(artifactDir, version), METADATA_FILENAME);
+}
+
+/**
+ * Returns the name a payload is stored under.
+ *
+ * A version directory holds the payload beside the metadata document, so the
+ * payload takes the artifact directory's own name. That rule is why
+ * {@link isReservedArtifactName} exists.
+ *
+ * @param artifactDir The artifact directory.
+ * @returns The payload filename.
+ */
+function getPayloadName(artifactDir: string): string {
+  return path.basename(artifactDir);
+}
+
+function getPayloadPath(artifactDir: string, version: number): string {
   return path.join(
-    getVersionsDir(artifactDir),
-    version.toString(),
-    METADATA_FILENAME,
+    getVersionDir(artifactDir, version),
+    getPayloadName(artifactDir),
   );
 }
 
@@ -484,11 +503,6 @@ function isReservedArtifactName(name: string): boolean {
   return name.toLowerCase() === METADATA_FILENAME;
 }
 
-/** Splits a path on both separator conventions. */
-function splitPathSegments(value: string): string[] {
-  return value.split(/[/\\]/);
-}
-
 /** Checks POSIX and Windows rooted or drive-qualified path forms. */
 function isRootedOrDriveQualified(value: string): boolean {
   return (
@@ -500,7 +514,7 @@ function isRootedOrDriveQualified(value: string): boolean {
 
 /** Checks parent traversal using either platform's separators. */
 function hasParentReference(value: string): boolean {
-  return splitPathSegments(value).includes('..');
+  return value.split(/[/\\]/).includes('..');
 }
 
 /**
@@ -535,9 +549,9 @@ function resolveScopedArtifactPath(
     );
   }
 
-  const artifactDir = path.resolve(scopeRoot, cleanFilename);
-  const relative = path.relative(scopeRoot, artifactDir);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+  const scopeRootResolved = path.resolve(scopeRoot);
+  const artifactDir = path.resolve(scopeRootResolved, cleanFilename);
+  if (!isInsideDir(artifactDir, scopeRootResolved)) {
     throw new InputValidationError(
       `Artifact filename ${filename} escapes storage directory.`,
     );
@@ -549,8 +563,8 @@ function resolveScopedArtifactPath(
       `Artifact filename ${filename} must not contain parent traversal.`,
     );
   }
-  if (relative === '') {
-    return path.join(scopeRoot, 'artifact');
+  if (artifactDir === scopeRootResolved) {
+    return path.join(scopeRootResolved, 'artifact');
   }
 
   return artifactDir;
@@ -614,12 +628,7 @@ function getArtifactDir(
  * @returns The canonical URI.
  */
 function getCanonicalUri(artifactDir: string, version: number): string {
-  const payloadPath = path.join(
-    getVersionsDir(artifactDir),
-    version.toString(),
-    path.basename(artifactDir),
-  );
-  return pathToFileURL(payloadPath).toString();
+  return pathToFileURL(getPayloadPath(artifactDir, version)).toString();
 }
 
 /**
@@ -643,34 +652,6 @@ function buildArtifactVersion(
   };
 }
 
-/** Checks whether an error carries a specific `errno` code. */
-function isErrnoCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === code
-  );
-}
-
-/** Checks whether a path exists, following symlinks. */
-async function pathExists(target: string): Promise<boolean> {
-  try {
-    await fs.stat(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Checks whether `target` sits strictly beneath `root`. */
-function isInside(target: string, root: string): boolean {
-  const relative = path.relative(root, target);
-  return (
-    relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
-  );
-}
-
 /**
  * Removes `leaf` and every parent it leaves empty, stopping at `stopAt`.
  *
@@ -683,8 +664,9 @@ function isInside(target: string, root: string): boolean {
  * @param stopAt Scope root. It and everything above it are never removed.
  */
 async function pruneEmptyDirs(leaf: string, stopAt: string): Promise<void> {
-  let current = leaf;
-  while (isInside(current, stopAt)) {
+  const stop = path.resolve(stopAt);
+  let current = path.resolve(leaf);
+  while (current !== stop && isInsideDir(current, stop)) {
     try {
       // Only succeeds on an empty directory.
       await fs.rmdir(current);
@@ -764,7 +746,7 @@ async function reserveVersionDir(
       continue;
     }
 
-    const versionDir = path.join(versionsDir, version.toString());
+    const versionDir = getVersionDir(artifactDir, version);
     if (!(await pathExists(versionDir))) {
       return {version, stagingDir, versionDir};
     }

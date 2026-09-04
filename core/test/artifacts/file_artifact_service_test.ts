@@ -107,6 +107,25 @@ describe('FileArtifactService', () => {
       }
     });
 
+    it('stores a segment that merely starts with two dots', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const scope = {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: '..hidden.txt',
+      };
+
+      try {
+        await service.saveArtifact({...scope, artifact: {text: 'body'}});
+
+        expect((await service.loadArtifact(scope))?.text).toBe('body');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
     const ROOT = '/tmp/adk-test-root';
 
     describe('assertSafeSegment - valid inputs', () => {
