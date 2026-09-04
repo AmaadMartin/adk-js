@@ -276,6 +276,13 @@ function requireRetryConfig(retry: AnalyticsRetryConfig): void {
   }
 }
 
+/** Rejects a name the caller left blank. */
+function requireNonEmpty(name: string, value: string): void {
+  if (value.trim() === '') {
+    throw configError(`${name} must not be empty.`);
+  }
+}
+
 /**
  * Rejects a configuration that cannot produce a working plugin.
  *
@@ -284,24 +291,8 @@ function requireRetryConfig(retry: AnalyticsRetryConfig): void {
  * dropping every row is a worse answer than refusing to start.
  *
  * @param config The configuration to check.
- * @throws Error when an option is out of range or names a protected column.
+ * @throws InputValidationError when an option is out of range or blank.
  */
-function requireNonEmpty(name: string, value: string): void {
-  if (value.trim() === '') {
-    throw configError(`${name} must not be empty.`);
-  }
-}
-
-/**
- * Rejects an empty view prefix, which would name a view after the event type
- * alone and so let it collide with an ordinary table in the dataset.
- */
-function requireViewPrefix(config: BigQueryLoggerConfig): void {
-  if (config.viewPrefix !== undefined && config.viewPrefix.trim() === '') {
-    throw configError('viewPrefix must not be empty.');
-  }
-}
-
 function validateConfig(config: BigQueryLoggerConfig): void {
   requireCount('batchSize', config.batchSize, 1);
   requireCount('queueMaxSize', config.queueMaxSize, 1);
@@ -309,7 +300,11 @@ function validateConfig(config: BigQueryLoggerConfig): void {
   requireFiniteAboveZero('shutdownTimeoutMs', config.shutdownTimeoutMs);
   requireContentLimit(config.maxContentLength);
   requireRetryConfig(config.retryConfig ?? {});
-  requireViewPrefix(config);
+  if (config.viewPrefix !== undefined) {
+    // An empty prefix names a view after the event type alone, where it can
+    // collide with an ordinary table in the dataset.
+    requireNonEmpty('viewPrefix', config.viewPrefix);
+  }
 }
 
 /**
@@ -322,7 +317,7 @@ function validateConfig(config: BigQueryLoggerConfig): void {
  * @param allowlist The caller's entries, if any.
  * @return The two match kinds, ready for the hot path.
  */
-export function parseCustomMetadataAllowlist(
+function parseCustomMetadataAllowlist(
   allowlist: readonly string[] | undefined,
 ): CustomMetadataAllowlist {
   const exact = new Set<string>();
