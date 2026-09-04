@@ -435,3 +435,22 @@ export function transformToSnakeCaseEvent(
     unknown
   >;
 }
+
+/**
+ * Transforms an {@link EventActions} object to its snake_cased form.
+ *
+ * The actions are converted under the `actions` path, so the same keys
+ * {@link transformToSnakeCaseEvent} preserves are preserved here.
+ *
+ * @param actions The camelCased actions.
+ * @returns The snake_cased actions object.
+ */
+export function transformToSnakeCaseActions(
+  actions: EventActions,
+): Record<string, unknown> {
+  const {actions: snakeCased} = toSnakeCase(
+    {actions},
+    PRESERVE_KEYS_CAMEL_CASE,
+  ) as {actions: Record<string, unknown>};
+  return snakeCased;
+}

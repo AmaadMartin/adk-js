@@ -77,7 +77,7 @@ export interface PickleGlobal {
 export type GlobalResolver = (module: string, name: string) => PickleGlobal;
 
 /** The pickle opcodes this reader understands. */
-enum Opcode {
+export enum Opcode {
   MARK = 0x28, // '('
   EMPTY_TUPLE = 0x29, // ')'
   STOP = 0x2e, // '.'
@@ -203,7 +203,9 @@ function decodeRawUnicodeEscape(text: string): string {
 }
 
 /** Narrows to an object whose properties a `BUILD` state may be copied onto. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   return (
     typeof value === 'object' &&
     value !== null &&
