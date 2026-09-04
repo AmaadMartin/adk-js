@@ -41,8 +41,7 @@ describe('SqliteSessionService parity', () => {
 
   afterEach(async () => {
     for (const service of openServices.splice(0)) {
-      const {orm} = service as unknown as {orm?: MikroORM};
-      await orm?.close();
+      await service.close();
     }
     rmSync(tempDir, {recursive: true, force: true});
   });

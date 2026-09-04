@@ -704,6 +704,29 @@ describe('DatabaseSessionService', () => {
     });
   });
 
+  describe('close', () => {
+    it('releases the connections, and does nothing on a second call', async () => {
+      await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-before-close',
+      });
+
+      await service.close();
+      await service.close();
+
+      // Every connection to a SQLite in-memory database opens a separate,
+      // empty one, so the session is gone exactly when the pool really shut
+      // down and the service reconnected.
+      const gone = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-before-close',
+      });
+      expect(gone).toBeUndefined();
+    });
+  });
+
   describe('adk-python parity', () => {
     afterEach(() => {
       vi.restoreAllMocks();

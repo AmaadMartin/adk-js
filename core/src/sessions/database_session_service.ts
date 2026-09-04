@@ -100,6 +100,20 @@ export class DatabaseSessionService extends BaseSessionService {
     this.initialized = true;
   }
 
+  /**
+   * Releases the database connections this service opened.
+   *
+   * The sqlite driver keeps its file open until the pool closes, so a caller
+   * that has finished with a database has no other way to let go of it.
+   * Calling this twice, or before `init`, does nothing.
+   */
+  async close(): Promise<void> {
+    this.initialized = false;
+    const orm = this.orm;
+    this.orm = undefined;
+    await orm?.close();
+  }
+
   async createSession({
     appName,
     userId,
