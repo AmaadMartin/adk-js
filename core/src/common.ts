@@ -682,6 +682,10 @@ export {
   type ReflectAndRetryToolPluginOptions,
 } from './plugins/reflect_retry_tool_plugin.js';
 export {
+  SaveFilesAsArtifactsPlugin,
+  type SaveFilesAsArtifactsPluginOptions,
+} from './plugins/save_files_as_artifacts_plugin.js';
+export {
   InMemoryPolicyEngine,
   PolicyOutcome,
   SecurityPlugin,
