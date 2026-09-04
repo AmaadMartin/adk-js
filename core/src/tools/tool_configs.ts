@@ -37,12 +37,16 @@ export const toolArgsConfigSchema = z.preprocess(
  * ```ts
  * const myToolConfigSchema = baseToolConfigSchema.extend({
  *   threshold: z.number(),
+ *   label: z.string().optional(),
  * });
  * myToolConfigSchema.parse({threshold: 1, thresold: 2}); // rejects the typo
  * ```
  *
  * This is the adk-python `BaseToolConfig` extension point, which carries
  * pydantic's `extra="forbid"` to a subclass.
+ *
+ * The base is a plain object schema, so an author who needs one may wrap their
+ * own extension in `z.preprocess`; only a plain object schema has `.extend()`.
  *
  * @experimental (Experimental, subject to change)
  */
