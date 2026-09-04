@@ -390,6 +390,25 @@ export type {TaskExecutable} from './utils/task.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
 export {version} from './version.js';
 
+export {GCPSkillRegistry} from './skills/gcp_skill_registry.js';
+export type {GCPSkillRegistryOptions} from './skills/gcp_skill_registry.js';
+export {
+  loadAllSkillsInDir,
+  loadSkillFromDir,
+  loadSkillFromZipBuffer,
+  validateSkillDir,
+} from './skills/loader.js';
+export {
+  getAsset,
+  getReference,
+  getScript,
+  getSkillDescription,
+  getSkillName,
+  listAssets,
+  listReferences,
+  listScripts,
+  scriptToString,
+} from './skills/skill.js';
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
