@@ -46,10 +46,10 @@ export interface SampleAndScoreParams {
  */
 export abstract class Sampler<T extends SamplingResult = SamplingResult> {
   /** The example set used to train the agent. */
-  static readonly TRAIN_SET: ExampleSet = 'train';
+  static readonly TRAIN_SET = 'train';
 
   /** The example set used to validate the optimized agent. */
-  static readonly VALIDATION_SET: ExampleSet = 'validation';
+  static readonly VALIDATION_SET = 'validation';
 
   /** Returns the UIDs of examples to use for training the agent. */
   abstract getTrainExampleIds(): string[];
