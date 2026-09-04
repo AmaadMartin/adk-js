@@ -174,7 +174,8 @@ A persona field may itself name a placeholder, such as
 in such a field and renders anything else as empty. It does not compile the
 field, because nunjucks is not a sandbox and a persona can come from a data
 file. adk-python compiles the field with Jinja's `SandboxedEnvironment`
-instead, which raises `SecurityError` on the same input.
+instead, which raises `SecurityError` for an expression that reaches a
+Python internal.
 
 ## Differences from adk-python
 
