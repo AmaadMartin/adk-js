@@ -156,6 +156,10 @@ export {
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
 export {
+  PRE_BUILT_BEHAVIORS,
+  getDefaultPersonaRegistry,
+} from './evaluation/simulation/pre_built_personas.js';
+export {
   UserPersonaRegistry,
   getBehaviorInstructionsStr,
   getViolationRubricsStr,
