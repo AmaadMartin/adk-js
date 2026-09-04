@@ -254,7 +254,10 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
     }
 
     if (!this.agentEngineCreationPromise) {
-      const creation = (async () => {
+      // The reference leaves its resource name unset when creation fails and
+      // retries on the next execution. Dropping the memo keeps that behaviour;
+      // a cached rejection would fail every later call on this executor.
+      this.agentEngineCreationPromise = (async () => {
         logger.debug(
           'No Agent Engine resource name provided. Creating a new one...',
         );
@@ -289,12 +292,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
         this.agentEngineResourceName = createdName;
         logger.debug(`Created Agent Engine: ${createdName}`);
         return createdName;
-      })();
-
-      // The reference leaves its resource name unset when creation fails and
-      // retries on the next execution. Dropping the memo keeps that behaviour;
-      // a cached rejection would fail every later call on this executor.
-      this.agentEngineCreationPromise = creation.catch((error: unknown) => {
+      })().catch((error: unknown) => {
         this.agentEngineCreationPromise = undefined;
         throw error;
       });
