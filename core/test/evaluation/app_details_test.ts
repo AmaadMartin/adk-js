@@ -154,4 +154,23 @@ describe('AppDetails', () => {
     expect(json).toContain('"toolDeclarations"');
     expect(json).toContain('"name"');
   });
+
+  it('is read by both accessors after a JSON round trip', () => {
+    const appDetails: AppDetails = {
+      agentDetails: {
+        agent1: {
+          name: 'agent1',
+          instructions: 'instruction for agent1',
+          toolDeclarations: [TOOL1],
+        },
+      },
+    };
+
+    const parsed: AppDetails = JSON.parse(JSON.stringify(appDetails));
+
+    expect(getDeveloperInstructions(parsed, 'agent1')).toBe(
+      'instruction for agent1',
+    );
+    expect(getToolsByAgentName(parsed)).toEqual({agent1: [TOOL1]});
+  });
 });

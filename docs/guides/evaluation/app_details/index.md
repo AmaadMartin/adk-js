@@ -23,6 +23,11 @@ TypeScript interface holds no methods, so they are exported functions here that
 take the app details as their first argument. This follows `eval_case`, the
 sibling data model in the same module.
 
+Both interfaces survive a `JSON.stringify` and `JSON.parse` round trip, and the
+accessors read the parsed object. The field names are camelCase, matching the
+aliases adk-python serializes its eval models with, so both SDKs read the same
+recorded data.
+
 ## Get started
 
 ```ts
