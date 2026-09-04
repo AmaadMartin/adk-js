@@ -155,7 +155,7 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export type {AppDetails} from './evaluation/app_details.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
 export type {
   IntermediateData,
@@ -169,6 +169,8 @@ export {
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
   DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  normalizeToolTrajectoryMatchType,
   parseLlmBackedUserSimulatorCriterion,
   resolveJudgeModelOptions,
 } from './evaluation/eval_metrics.js';
@@ -176,12 +178,19 @@ export type {
   BaseCriterion,
   EvalMetric,
   EvalMetricCriterion,
+  HallucinationsCriterion,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
   LlmBackedUserSimulatorCriterion,
   ResolvedJudgeModelOptions,
+  RubricsBasedCriterion,
+  ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
-export type {Rubric, RubricScore} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
 export {
   EvalStatus,
   emptyEvaluationResult,
