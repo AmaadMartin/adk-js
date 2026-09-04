@@ -124,7 +124,7 @@ The mode applies only to a file the plugin creates. A file left behind by an ear
 
 The plugin holds one record per in-flight invocation. `afterRunCallback` writes that record and drops it, but an invocation that is abandoned or that crashes never reaches that callback, so in a long-running server the records would accumulate.
 
-`maxBufferedInvocations` bounds them. Once that many are held, opening a new record first flushes the oldest one to the file and drops it. A record flushed this way is marked `incomplete: true`, so you can tell a truncated trace from a finished one. Pass a non-positive number to hold every invocation instead.
+`maxBufferedInvocations` bounds them. Once that many are held, opening a new record first flushes the oldest one to the file and drops it. A record flushed this way is marked `incomplete: true`, so you can tell a truncated trace from a finished one.
 
 The file itself grows for the life of the process. The plugin does not rotate it and does not cap its size — the whole point is to keep entire prompts and responses. Delete or rotate it yourself between debugging sessions.
 
