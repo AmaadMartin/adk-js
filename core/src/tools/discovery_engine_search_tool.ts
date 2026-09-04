@@ -407,8 +407,9 @@ export class DiscoveryEngineSearchTool extends FunctionTool<
     });
 
     const {dataStoreId, searchEngineId, dataStoreSpecs} = params;
+    const resourceId = dataStoreId ?? searchEngineId;
     if (
-      (dataStoreId === undefined && searchEngineId === undefined) ||
+      resourceId === undefined ||
       (dataStoreId !== undefined && searchEngineId !== undefined)
     ) {
       throw new Error(
@@ -421,7 +422,6 @@ export class DiscoveryEngineSearchTool extends FunctionTool<
       );
     }
 
-    const resourceId = dataStoreId ?? searchEngineId ?? '';
     this.servingConfig = `${resourceId}/servingConfigs/default_config`;
     // Resolved here, as in adk-python, so the mutual-TLS environment is
     // sampled when the tool is built rather than when it first searches.
