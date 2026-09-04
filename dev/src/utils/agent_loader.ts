@@ -169,6 +169,13 @@ export interface AgentLoadFailure {
  */
 export interface AgentFileOptions {
   compile?: boolean;
+  /**
+   * Whether to inline the agent's dependencies into the single compiled file.
+   *
+   * With bundling enabled every relative import is inlined. With bundling
+   * disabled only the entry file is compiled, so the agent must be a single
+   * self-contained file: a relative import is rejected by `AgentFile.load()`.
+   */
   bundle?: boolean;
   moduleType?: FileModuleType;
 }
@@ -295,7 +302,7 @@ export class AgentFile {
       );
       await linkProjectNodeModules(outputDir, parsedPath.dir);
 
-      await esbuild.build({
+      const buildResult = await esbuild.build({
         entryPoints: [filePath],
         outfile: compiledFilePath,
         target: 'node16',
@@ -307,13 +314,35 @@ export class AgentFile {
         // esbuild rejects `packages` and `external` unless it is bundling, so
         // both have to be withheld when `--bundle false` asks it only to
         // transpile. Nothing is being inlined in that mode, so there is
-        // nothing to hold out of the bundle either.
+        // nothing to hold out of the bundle either. The metafile is the
+        // reverse: it is only needed to detect the relative imports that a
+        // non-bundled build leaves unresolved.
         ...(this.options.bundle
           ? {packages: 'bundle' as const, external: EXTERNAL_PACKAGES}
-          : {}),
+          : {metafile: true}),
       });
 
       this.cleanupFilePath = compiledFilePath;
+
+      const relativeImports = buildResult?.metafile
+        ? findUnresolvedRelativeImports(buildResult.metafile)
+        : [];
+      if (relativeImports.length > 0) {
+        const specifiers = relativeImports
+          .map((specifier) => `"${specifier}"`)
+          .join(', ');
+        const message =
+          `Agent file ${this.filePath} imports relative module(s) ` +
+          `${specifiers}, but bundling is disabled. Without bundling only ` +
+          `the entry file is compiled, into a temporary directory, so ` +
+          `relative imports cannot be resolved at runtime. Re-run with ` +
+          `bundling enabled (the default, or --bundle true), or make the ` +
+          `agent a single self-contained file.`;
+        logger.error(message);
+        await this.dispose();
+        throw new AgentFileLoadingError(message);
+      }
+
       filePath = compiledFilePath;
     }
 
@@ -731,6 +760,26 @@ export class AgentLoader {
         `Skipping it; the other agents are unaffected.`,
     );
   }
+}
+
+/**
+ * Returns the relative module specifiers (`./x`, `../x`) that the compiled
+ * output still imports.
+ *
+ * Only meaningful for a non-bundled build: esbuild leaves such specifiers
+ * untouched when `bundle` is false, and records them on the output entry of
+ * the metafile with `external: true`.
+ */
+function findUnresolvedRelativeImports(metafile: esbuild.Metafile): string[] {
+  const specifiers = Object.values(metafile.outputs).flatMap((output) =>
+    output.imports.map((imported) => imported.path),
+  );
+
+  return [
+    ...new Set(
+      specifiers.filter((s) => s.startsWith('./') || s.startsWith('../')),
+    ),
+  ];
 }
 
 function isJsFile(fileExt?: string): boolean {

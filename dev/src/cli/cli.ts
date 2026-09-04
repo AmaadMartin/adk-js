@@ -228,7 +228,8 @@ const COMPILE_AGENT_FILE = new Option(
 const BUNDLE_AGENT_FILE = new Option(
   '--bundle [boolean]',
   'Optional. Whether to inline the agent file dependencies into a single ' +
-    'bundle before execution. Bundling also minifies the result.',
+    'bundle before execution. Bundling also minifies the result. When it is ' +
+    'disabled, the agent must be a single self-contained file.',
 ).default(true);
 const A2A_OPTION = new Option(
   '--a2a [boolean]',
