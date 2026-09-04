@@ -10,6 +10,7 @@ import {ReadableSpan, SpanExporter} from '@opentelemetry/sdk-trace-base';
 
 import {ensureDatabaseCreated} from '../sessions/db/operations.js';
 import {logger} from '../utils/logger.js';
+import {loadOptionalPeer} from '../utils/optional_peer.js';
 import {StorageSpan} from './db/schema.js';
 import {
   compareByStartTime,
@@ -173,7 +174,10 @@ export class SqliteSpanExporter implements SpanExporter {
   }
 
   private async open(): Promise<MikroORM> {
-    const {SqliteDriver} = await import('@mikro-orm/sqlite');
+    const {SqliteDriver} = await loadOptionalPeer(
+      {packageName: '@mikro-orm/sqlite', feature: 'SqliteSpanExporter'},
+      () => import('@mikro-orm/sqlite'),
+    );
     // `connect: false` keeps the connection out of `init`, which would
     // otherwise open the file and leak it by throwing before returning a
     // handle to close. Windows then refuses to delete the file.
