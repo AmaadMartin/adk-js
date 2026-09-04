@@ -69,6 +69,8 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     datasetCreateError?: Error;
     insertError?: unknown;
     insertGate?: Promise<void>;
+    queries: string[];
+    queryError?: Error;
   }
 
   const fake: FakeBigQuery = {
@@ -84,6 +86,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     liveLabels: {adk_schema_version: '2'},
     tableExists: false,
     datasetExists: true,
+    queries: [],
   };
 
   class FakeTable {
@@ -173,6 +176,13 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
 
     dataset(id: string): FakeDataset {
       return new FakeDataset(id);
+    }
+
+    async query(sql: string): Promise<void> {
+      fake.queries.push(sql);
+      if (fake.queryError !== undefined) {
+        throw fake.queryError;
+      }
     }
   }
 
@@ -385,6 +395,8 @@ beforeEach(() => {
   fake.datasetCreateError = undefined;
   fake.insertError = undefined;
   fake.insertGate = undefined;
+  fake.queries = [];
+  fake.queryError = undefined;
 });
 
 afterEach(async () => {
@@ -433,6 +445,43 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
       // The plugin owns the retry policy, so the client must not add its own.
       retryOptions: {autoRetry: false},
     });
+  });
+
+  it('creates one view per event type alongside the table', async () => {
+    const plugin = makePlugin({viewPrefix: 'v'}, {tableId: 'my_events'});
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(fake.queries.length).toBeGreaterThan(0);
+    expect(
+      fake.queries.every((sql) => sql.startsWith('CREATE OR REPLACE VIEW')),
+    ).toBe(true);
+    expect(fake.queries.some((sql) => sql.includes('.v_llm_request`'))).toBe(
+      true,
+    );
+    expect(fake.queries.every((sql) => sql.includes('.my_events`'))).toBe(true);
+  });
+
+  it('creates no view when createViews is off', async () => {
+    const plugin = makePlugin({createViews: false});
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(fake.queries).toEqual([]);
+    expect(fake.created).toHaveLength(1);
+  });
+
+  it('keeps writing rows when a view cannot be created', async () => {
+    fake.queryError = new Error('permission denied on the dataset');
+    const plugin = makePlugin();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(fake.inserted).toHaveLength(1);
+    expect(plugin.getDropStats()['setup_unavailable'] ?? 0).toBe(0);
   });
 
   it('declares the full 17-column schema on the created table', async () => {
