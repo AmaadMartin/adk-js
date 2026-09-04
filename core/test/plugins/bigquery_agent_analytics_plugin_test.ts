@@ -1752,6 +1752,25 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
     expect(row.agent).toBe('root_agent');
   });
 
+  it('repeats the source event as the flat trio v_agent_response reads', async () => {
+    const plugin = makePlugin();
+    const event = createEvent({
+      author: 'root_agent',
+      branch: 'root',
+      content: {role: 'model', parts: [{text: 'sunny'}]},
+    });
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event,
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      source_event_id: event.id,
+      source_event_author: 'root_agent',
+      source_event_branch: 'root',
+    });
+  });
+
   it('writes an AGENT_RESPONSE row for an event rehydrated without tool ids', async () => {
     const plugin = makePlugin();
     const rehydrated: Event = {

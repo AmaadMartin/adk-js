@@ -167,4 +167,39 @@ describe('BigQueryAgentAnalyticsPlugin content offload', () => {
     expect(saved).toEqual([]);
     expect(inserted[0].content_parts[0].storage_mode).toBe('INLINE');
   });
+
+  it('offloads nothing when the parts column is denied', async () => {
+    const plugin = makePlugin({
+      gcsBucketName: 'b',
+      payloadColumnDenylist: ['content_parts'],
+    });
+
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {role: 'user', parts: [{text: OVERSIZED_TEXT}]},
+    });
+    await plugin.flush();
+
+    // The denylist drops the column from the row entirely.
+    expect(saved).toEqual([]);
+    expect(inserted[0].content_parts).toBeUndefined();
+  });
+
+  it('offloads nothing when multi-modal content is not logged', async () => {
+    const plugin = makePlugin({
+      gcsBucketName: 'b',
+      logMultiModalContent: false,
+    });
+
+    await plugin.onUserMessageCallback({
+      invocationContext: makeInvocationContext(),
+      userMessage: {role: 'user', parts: [{text: OVERSIZED_TEXT}]},
+    });
+    await plugin.flush();
+
+    // The row drops content_parts, so an uploaded object would have nothing
+    // pointing at it.
+    expect(saved).toEqual([]);
+    expect(inserted[0].content_parts).toEqual([]);
+  });
 });
