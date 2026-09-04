@@ -10,7 +10,7 @@ import {isInvocationEvents, type Invocation} from './eval_case.js';
 import {getTextFromContent} from './evaluator.js';
 
 /** The indent of the JSON a judge model reads, matching adk-python. */
-const JSON_INDENT = 2;
+export const JSON_INDENT = 2;
 
 /**
  * The labels a judge model writes into its critique.

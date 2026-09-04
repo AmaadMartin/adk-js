@@ -37,6 +37,7 @@ import {
   type PerInvocationResult,
 } from './evaluator.js';
 import {
+  JSON_INDENT,
   formatPromptTemplate,
   getToolDeclarationsAsJsonStr,
 } from './llm_as_judge_utils.js';
@@ -220,16 +221,6 @@ const NEGATIVE_LABELS: readonly string[] = [
 /** What the judge is told when the app declares no tools. */
 const NO_TOOLS_TEXT = 'Agent has no tools.';
 
-/** The indent of the JSON a judge model reads, matching adk-python. */
-const JSON_INDENT = 2;
-
-/**
- * A tool call's arguments and a tool response's payload are agent data, not
- * typed fields, so their own keys keep the spelling the agent used.
- */
-const TOOL_CALL_PAYLOAD_KEYS = ['args'];
-const TOOL_RESPONSE_PAYLOAD_KEYS = ['response'];
-
 const SENTENCE_PATTERN = /<sentence>(.*?)<\/sentence>/gs;
 
 /**
@@ -309,7 +300,12 @@ function mean(values: number[]): number | undefined {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
-/** Serializes a list of typed SDK values the way a judge model reads them. */
+/**
+ * Serializes a list of typed SDK values the way a judge model reads them.
+ *
+ * @param payloadKeys The keys whose value is agent data rather than a typed
+ *   field, so that its own keys keep the spelling the agent used.
+ */
 function toJsonBlock(values: object[], payloadKeys: string[]): string {
   return JSON.stringify(toSnakeCase(values, payloadKeys), null, JSON_INDENT);
 }
@@ -373,15 +369,12 @@ export function createContextForStep(
       contextParts.push(`${texts.join('\n')}\n`);
     }
     if (toolCalls.length > 0) {
-      contextParts.push(
-        'tool_calls:',
-        `${toJsonBlock(toolCalls, TOOL_CALL_PAYLOAD_KEYS)}\n`,
-      );
+      contextParts.push('tool_calls:', `${toJsonBlock(toolCalls, ['args'])}\n`);
     }
     if (toolResponses.length > 0) {
       contextParts.push(
         'tool_outputs:',
-        `${toJsonBlock(toolResponses, TOOL_RESPONSE_PAYLOAD_KEYS)}\n`,
+        `${toJsonBlock(toolResponses, ['response'])}\n`,
       );
     }
   }

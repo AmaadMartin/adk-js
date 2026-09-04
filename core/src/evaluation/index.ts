@@ -60,18 +60,9 @@ export type {
   Evaluator,
   PerInvocationResult,
 } from './evaluator.js';
-export {
-  HallucinationsV1Evaluator,
-  createContextForStep,
-  evaluateNlResponse,
-  parseSentences,
-  parseValidationResults,
-} from './hallucinations_v1.js';
-export type {
-  EvaluationStep,
-  NlResponseEvaluation,
-  SentenceValidationResult,
-} from './hallucinations_v1.js';
+// The metric's own segmentation, validation and context helpers stay internal,
+// as they are in adk-python. Only the evaluator is public.
+export {HallucinationsV1Evaluator} from './hallucinations_v1.js';
 export {
   formatPromptTemplate,
   getToolDeclarationsAsJsonStr,
