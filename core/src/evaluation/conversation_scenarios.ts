@@ -70,9 +70,9 @@ export interface ConversationGenerationConfig {
 /**
  * Accepts a persona id or a whole persona, and yields a whole persona.
  *
- * A {@link NotFoundError} raised by the registry leaves the transform
- * unwrapped, so an unknown id surfaces as `NotFoundError` rather than as a
- * validation failure. adk-python's `validate_user_persona` behaves the same.
+ * The registry's `NotFoundError` propagates out of the parse unwrapped, so an
+ * unknown id surfaces as `NotFoundError` rather than as a validation failure.
+ * adk-python's `validate_user_persona` behaves the same way.
  */
 const userPersonaField = z.preprocess(
   (value) =>
