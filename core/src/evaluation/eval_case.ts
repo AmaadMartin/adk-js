@@ -113,8 +113,6 @@ export interface SessionInput {
 
   /** The state the session starts from. Applied only when creating it. */
   state?: SessionState;
-
-  [key: string]: unknown;
 }
 
 /** A conversation whose user turns are already recorded. */
@@ -153,8 +151,6 @@ export interface EvalCase {
 
   /** The expected session state at the end of the conversation. */
   finalSessionState?: SessionState;
-
-  [key: string]: unknown;
 }
 
 /** A tool call paired with its response, when one was recorded. */
