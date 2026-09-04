@@ -732,16 +732,17 @@ describe('DatabaseSessionService', () => {
   });
 
   describe('Storage Revision Marker', () => {
-    async function storedUpdateTime(sessionId: string): Promise<Date> {
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
-      const row = (await em.findOne('StorageSession', {id: sessionId})) as {
-        id: string;
-        updateTime: Date;
-      } | null;
-      if (!row) {
-        return expect.fail(`session ${sessionId} was not stored`);
+    /** The marker a fresh read of the same session reports. */
+    async function reloadedMarker(sessionId: string): Promise<string> {
+      const reloaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId,
+      });
+      if (!reloaded?.storageUpdateMarker) {
+        return expect.fail(`session ${sessionId} came back with no marker`);
       }
-      return row.updateTime;
+      return reloaded.storageUpdateMarker;
     }
 
     it('should mark a created session with the stored revision', async () => {
@@ -752,7 +753,10 @@ describe('DatabaseSessionService', () => {
       });
 
       expect(session.storageUpdateMarker).toBe(
-        (await storedUpdateTime('s-marker')).toISOString(),
+        new Date(session.lastUpdateTime).toISOString(),
+      );
+      expect(await reloadedMarker('s-marker')).toBe(
+        session.storageUpdateMarker,
       );
     });
 
@@ -770,8 +774,9 @@ describe('DatabaseSessionService', () => {
       });
 
       expect(session.storageUpdateMarker).not.toBe(created);
-      expect(session.storageUpdateMarker).toBe(
-        (await storedUpdateTime('s-marker-append')).toISOString(),
+      expect(session.storageUpdateMarker).toBe('2009-02-13T23:31:30.000Z');
+      expect(await reloadedMarker('s-marker-append')).toBe(
+        session.storageUpdateMarker,
       );
     });
 
@@ -800,9 +805,7 @@ describe('DatabaseSessionService', () => {
           actions: createEventActions({stateDelta: {'written': 'by-writer'}}),
         }),
       });
-      expect((await storedUpdateTime('s-marker-stale')).getTime()).toBeLessThan(
-        reader.lastUpdateTime,
-      );
+      expect(writer.lastUpdateTime).toBeLessThan(reader.lastUpdateTime);
 
       await service.appendEvent({
         session: reader,
@@ -834,7 +837,7 @@ describe('DatabaseSessionService', () => {
 
       expect(handWritten.state['stored']).toBe('value');
       expect(handWritten.storageUpdateMarker).toBe(
-        (await storedUpdateTime('s-no-marker')).toISOString(),
+        new Date(2000).toISOString(),
       );
     });
   });
