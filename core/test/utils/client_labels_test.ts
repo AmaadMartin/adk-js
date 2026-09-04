@@ -6,7 +6,11 @@
 
 import {getClientLabels, runWithClientLabel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {parseUserAgent} from '../../src/utils/client_labels.js';
+import {
+  getTrackingHeaders,
+  mergeTrackingHeaders,
+  parseUserAgent,
+} from '../../src/utils/client_labels.js';
 
 describe('client_labels', () => {
   describe('parseUserAgent', () => {
@@ -143,6 +147,46 @@ describe('client_labels', () => {
       expect(() => {
         runWithClientLabel('   ', () => {});
       }).toThrow('Client label must be a non-empty string.');
+    });
+  });
+
+  describe('getTrackingHeaders', () => {
+    it('should identify ADK in both tracking headers', () => {
+      const headers = getTrackingHeaders();
+      const expected = getClientLabels().join(' ');
+      expect(headers['x-goog-api-client']).toBe(expected);
+      expect(headers['user-agent']).toBe(expected);
+    });
+  });
+
+  describe('mergeTrackingHeaders', () => {
+    it('should add both tracking headers to an empty input', () => {
+      const expected = getClientLabels().join(' ');
+      expect(mergeTrackingHeaders()).toEqual({
+        'x-goog-api-client': expected,
+        'user-agent': expected,
+      });
+    });
+
+    it('should append a caller label without repeating an ADK one', () => {
+      const adkLabel = getClientLabels()[0];
+      const merged = mergeTrackingHeaders({
+        'x-goog-api-client': `${adkLabel} caller/1.0`,
+      });
+      const parts = merged['x-goog-api-client'].split(' ');
+      expect(parts.filter((p) => p === adkLabel)).toHaveLength(1);
+      expect(parts[parts.length - 1]).toBe('caller/1.0');
+    });
+
+    it('should preserve unrelated caller headers', () => {
+      const merged = mergeTrackingHeaders({'x-goog-user-project': 'proj'});
+      expect(merged['x-goog-user-project']).toBe('proj');
+    });
+
+    it('should not modify the caller headers', () => {
+      const headers = {'x-goog-user-project': 'proj'};
+      mergeTrackingHeaders(headers);
+      expect(headers).toEqual({'x-goog-user-project': 'proj'});
     });
   });
 });
