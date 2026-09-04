@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Ported from adk-python
-// tests/unittests/tools/pubsub/test_pubsub_credentials.py @ main
-
 import {
+  BaseGoogleCredentialsConfig,
   InputValidationError,
   PUBSUB_DEFAULT_SCOPE,
+  PUBSUB_TOKEN_CACHE_KEY,
   PubSubCredentialsConfig,
 } from '@google/adk';
 import {Compute, OAuth2Client} from 'google-auth-library';
@@ -30,6 +29,9 @@ function genericClient(): Compute {
   return new Compute();
 }
 
+// The cases in this block are ported from adk-python
+// tests/unittests/tools/pubsub/test_pubsub_credentials.py @ main, and keep the
+// Python test names.
 describe('PubSubCredentialsConfig', () => {
   it('test_pubsub_credentials_config_client_id_secret', () => {
     const config = new PubSubCredentialsConfig({
@@ -90,5 +92,95 @@ describe('PubSubCredentialsConfig', () => {
 
     expect(build).toThrow(InputValidationError);
     expect(build).toThrow(new InputValidationError(CREDENTIALS_CONFLICT));
+  });
+});
+
+describe('PubSubCredentialsConfig constants', () => {
+  it('pins the scope adk-python requests', () => {
+    expect(PUBSUB_DEFAULT_SCOPE).toEqual([
+      'https://www.googleapis.com/auth/pubsub',
+    ]);
+  });
+
+  it('pins the session-state key adk-python caches under', () => {
+    expect(PUBSUB_TOKEN_CACHE_KEY).toBe('pubsub_token_cache');
+  });
+});
+
+describe('PubSubCredentialsConfig token cache key', () => {
+  it('is set in the OAuth2 consent mode', () => {
+    const config = new PubSubCredentialsConfig({
+      clientId: 'abc',
+      clientSecret: 'def',
+    });
+
+    expect(config.tokenCacheKey).toBe('pubsub_token_cache');
+  });
+
+  it('is set in the pre-built credential mode', () => {
+    const config = new PubSubCredentialsConfig({credentials: new Compute()});
+
+    expect(config.tokenCacheKey).toBe('pubsub_token_cache');
+  });
+
+  it('is set in the external access token mode', () => {
+    const config = new PubSubCredentialsConfig({
+      externalAccessTokenKey: 'my_pubsub_token',
+    });
+
+    expect(config.tokenCacheKey).toBe('pubsub_token_cache');
+  });
+});
+
+describe('PubSubCredentialsConfig default scopes', () => {
+  it('keeps scopes the caller named', () => {
+    const config = new PubSubCredentialsConfig({
+      clientId: 'abc',
+      clientSecret: 'def',
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
+
+    expect(config.scopes).toEqual([
+      'https://www.googleapis.com/auth/cloud-platform',
+    ]);
+  });
+
+  it('applies the default in the external access token mode', () => {
+    const config = new PubSubCredentialsConfig({
+      externalAccessTokenKey: 'my_pubsub_token',
+    });
+
+    expect(config.scopes).toEqual(['https://www.googleapis.com/auth/pubsub']);
+  });
+
+  it('applies the default to a client carrying no OAuth identity', () => {
+    const config = new PubSubCredentialsConfig({credentials: new Compute()});
+
+    expect(config.scopes).toEqual(['https://www.googleapis.com/auth/pubsub']);
+  });
+
+  it('gives two configs two arrays, so neither can mutate the other', () => {
+    const first = new PubSubCredentialsConfig({
+      externalAccessTokenKey: 'my_pubsub_token',
+    });
+    const second = new PubSubCredentialsConfig({
+      externalAccessTokenKey: 'my_pubsub_token',
+    });
+
+    expect(first.scopes).not.toBe(second.scopes);
+    expect(first.scopes).not.toBe(PUBSUB_DEFAULT_SCOPE);
+  });
+});
+
+describe('PubSubCredentialsConfig inheritance', () => {
+  it('carries the fields of the base config', () => {
+    const base: BaseGoogleCredentialsConfig = new PubSubCredentialsConfig({
+      externalAccessTokenKey: 'my_pubsub_token',
+    });
+
+    expect(base.externalAccessTokenKey).toBe('my_pubsub_token');
+    expect(base.credentials).toBeUndefined();
+    expect(base.clientId).toBeUndefined();
+    expect(base.clientSecret).toBeUndefined();
   });
 });
