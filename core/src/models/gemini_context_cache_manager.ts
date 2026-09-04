@@ -12,15 +12,17 @@ import {
   CreateCachedContentParameters,
   DeleteCachedContentParameters,
   DeleteCachedContentResponse,
-  Tool,
-  ToolUnion,
 } from '@google/genai';
 
 import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {tracer} from '../telemetry/tracing.js';
-import {canonicalJson, stableDigest} from '../utils/digest_utils.js';
+import {stableDigest} from '../utils/digest_utils.js';
 import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
+import {
+  canonicalizeTools,
+  declarativeTools,
+} from '../utils/genai_tool_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   ActiveCacheMetadata,
@@ -80,50 +82,6 @@ export interface CacheScope {
 /** A {@link CacheScope} with the backend the client is bound to. */
 export interface QualifiedCacheScope extends CacheScope {
   backend: 'vertex' | 'gemini';
-}
-
-/** Returns true when the tool is a declarative `Tool` rather than callable. */
-function isDeclarativeTool(tool: ToolUnion): tool is Tool {
-  return !('callTool' in tool);
-}
-
-/** Keeps only the declarative tools, which are the ones a cache can hold. */
-function declarativeTools(tools: ToolUnion[] | undefined): Tool[] {
-  return (tools ?? []).filter(isDeclarativeTool);
-}
-
-/** Orders two strings by code unit, so the result does not depend on a locale. */
-function compareByCodeUnit(left: string, right: string): number {
-  if (left === right) {
-    return 0;
-  }
-  return left < right ? -1 : 1;
-}
-
-/** Returns a copy of the tool with its function declarations sorted by name. */
-function withSortedFunctionDeclarations(tool: Tool): Tool {
-  if (!tool.functionDeclarations) {
-    return tool;
-  }
-  return {
-    ...tool,
-    functionDeclarations: [...tool.functionDeclarations].sort((left, right) =>
-      compareByCodeUnit(left.name ?? '', right.name ?? ''),
-    ),
-  };
-}
-
-/**
- * Returns the tools in a canonical order, so a reordered tool list (or a
- * reordered declaration list within a tool) produces the same fingerprint. The
- * caller's own arrays keep their order.
- */
-function canonicalizeTools(tools: Tool[]): Tool[] {
-  return tools
-    .map(withSortedFunctionDeclarations)
-    .sort((left, right) =>
-      compareByCodeUnit(canonicalJson(left), canonicalJson(right)),
-    );
 }
 
 function requireCacheConfig(llmRequest: LlmRequest): ContextCacheConfig {
@@ -401,22 +359,6 @@ export async function validActiveCache(
 }
 
 /**
- * Copies the cache metadata onto a response.
- *
- * `invocationsUsed` is left untouched: the request processor owns that
- * increment, and repeating it here would double-count.
- *
- * @param llmResponse The response to populate.
- * @param cacheMetadata The metadata to copy.
- */
-export function populateCacheMetadataInResponse(
-  llmResponse: LlmResponse,
-  cacheMetadata: CacheMetadata,
-): void {
-  llmResponse.cacheMetadata = {...cacheMetadata};
-}
-
-/**
  * Manages the explicit context cache for Gemini models.
  *
  * On each turn the manager decides whether to reuse a live cache, delete a
@@ -551,6 +493,9 @@ export class GeminiContextCacheManager {
   /**
    * Copies the cache metadata onto a response.
    *
+   * `invocationsUsed` is left untouched: the request processor owns that
+   * increment, and repeating it here would double-count.
+   *
    * @param llmResponse The response to populate.
    * @param cacheMetadata The metadata to copy.
    */
@@ -558,7 +503,7 @@ export class GeminiContextCacheManager {
     llmResponse: LlmResponse,
     cacheMetadata: CacheMetadata,
   ): void {
-    populateCacheMetadataInResponse(llmResponse, cacheMetadata);
+    llmResponse.cacheMetadata = {...cacheMetadata};
   }
 
   private async fingerprintOnlyMetadata(
