@@ -1750,12 +1750,14 @@ describe('RequestConfirmationLlmRequestProcessor author scope', () => {
     expect(resumedCalls).toEqual([]);
   });
 
-  it('honours a runtime confirmation request another agent recorded', async () => {
-    // The tool answers "no" when asked again, so only the recorded request
-    // keeps the approval alive.
+  it('refuses a runtime confirmation request another agent recorded', async () => {
+    // The framework records the request under the agent that is running, and
+    // this agent only resumes calls it issued itself, so the two always share
+    // an author. A request from anyone else cannot stand in for a tool that
+    // never gates.
     const agent = new LlmAgent({name: AGENT_NAME, model: 'gemini-2.5-flash'});
 
-    await run(
+    const error = await run(
       agent,
       [
         ...gatedCallEvents({
@@ -1768,9 +1770,13 @@ describe('RequestConfirmationLlmRequestProcessor author scope', () => {
         approvalEvent(['gate-1']),
       ],
       [ungatedWireTransferTool()],
-    );
+    ).catch((e: unknown) => e);
 
-    expect(resumedCalls).toEqual([wireTransferCall]);
+    expect(isIntentMismatchError(error)).toBe(true);
+    expect((error as IntentMismatchError).reason).toBe(
+      'confirmation_not_required',
+    );
+    expect(resumedCalls).toEqual([]);
   });
 
   it('refuses a runtime confirmation request the client recorded', async () => {

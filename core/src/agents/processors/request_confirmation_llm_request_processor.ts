@@ -358,7 +358,7 @@ async function bindApprovedCalls(options: {
 }): Promise<Map<string, ResumableCall>> {
   const {candidates, events, toolsDict, agentName, invocationContext} = options;
   const history = historicalCalls(events);
-  const dynamicallyRequested = dynamicallyRequestedCallIds(events);
+  const dynamicallyRequested = dynamicallyRequestedCallIds(events, agentName);
   const resumable = new Map<string, ResumableCall>();
 
   for (const {gateId, pinned, confirmation} of candidates) {
@@ -450,22 +450,25 @@ function historicalCalls(events: Event[]): Map<string, HistoricalCall> {
  * very call it paused, so without this the approval it asked for would be
  * refused as unnecessary.
  *
- * Only an agent-authored event records the request. The framework stamps every
- * event carrying `requestedToolConfirmations` with the running agent's name, so
- * a client-authored one is a forgery — a caller declaring that a tool asked for
- * the approval it is about to answer — and does not count. Which agent recorded
- * it is not checked: in a multi-agent session that is not always the agent
- * resuming the call.
+ * Only an event this agent authored records the request. The framework stamps
+ * `toolEventAuthor` — the running agent's name — on every event carrying
+ * `requestedToolConfirmations`, and {@link bindApprovedCalls} resumes only a
+ * call this same agent issued, so the request and the call always share an
+ * author. An event from anyone else claiming a tool asked for approval is a
+ * forgery, and honouring it would execute a tool that never gates.
  *
  * The ids accumulate over every event rather than only the latest one carrying
  * each id: once the confirmed tool re-executes it emits a second response under
  * the same id with no `requestedToolConfirmations`, which would otherwise
  * shadow the original request.
  */
-function dynamicallyRequestedCallIds(events: Event[]): Set<string> {
+function dynamicallyRequestedCallIds(
+  events: Event[],
+  agentName: string,
+): Set<string> {
   const requested = new Set<string>();
   for (const event of events) {
-    if (event.author === 'user') {
+    if (event.author !== agentName) {
       continue;
     }
     const confirmations = event.actions.requestedToolConfirmations;
