@@ -889,6 +889,11 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
+export {
+  PUBSUB_DEFAULT_SCOPE,
+  PUBSUB_TOKEN_CACHE_KEY,
+  PubSubCredentialsConfig,
+} from './tools/pubsub/pubsub_credentials.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {GeminiEmbeddingModel} from './tools/retrieval/embedding_model.js';
