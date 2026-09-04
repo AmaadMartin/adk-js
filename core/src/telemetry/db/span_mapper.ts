@@ -18,14 +18,16 @@ import {emptyResource} from '@opentelemetry/resources';
 import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 
 import {logger} from '../../utils/logger.js';
+import {isRecord} from '../../utils/object_utils.js';
 import {version} from '../../version.js';
+import {
+  ADK_SCOPE_NAME,
+  CONVERSATION_ID_ATTRIBUTE,
+  INVOCATION_ID_ATTRIBUTE,
+  SESSION_ID_ATTRIBUTE,
+} from '../semconv.js';
 import {StorageSpan} from './schema.js';
 
-const SESSION_ID_ATTRIBUTE = 'gcp.vertex.agent.session_id';
-const INVOCATION_ID_ATTRIBUTE = 'gcp.vertex.agent.invocation_id';
-const CONVERSATION_ID_ATTRIBUTE = 'gen_ai.conversation.id';
-
-const INSTRUMENTATION_SCOPE_NAME = 'gcp.vertex.agent';
 const NANOS_PER_SECOND = 1_000_000_000n;
 
 /** Converts an OpenTelemetry `HrTime` to epoch nanoseconds. */
@@ -140,7 +142,7 @@ export function toReadableSpan(row: StorageSpan): ReadableSpan {
     events: [],
     ended: true,
     resource: emptyResource(),
-    instrumentationScope: {name: INSTRUMENTATION_SCOPE_NAME, version},
+    instrumentationScope: {name: ADK_SCOPE_NAME, version},
     droppedAttributesCount: 0,
     droppedEventsCount: 0,
     droppedLinksCount: 0,
@@ -154,10 +156,6 @@ function nanosToHrTime(total: bigint): HrTime {
 /** Reads a stored timestamp, treating a missing one as the epoch. */
 function toNanos(stored: string | undefined): bigint {
   return BigInt(stored ?? '0');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isAttributePrimitive(
