@@ -27,9 +27,10 @@ three lifecycle stages.
   one on.
 
 The flag set matches the Python SDK, so a flag you read about in the ADK
-documentation has the same name and the same default here. A flag whose feature
-has not been ported to TypeScript yet is still declared, so the name resolves
-and the environment variable behaves the same way.
+documentation has the same name and the same default here. Many of those
+features are not ported to TypeScript yet. Their names are declared and
+reserved, so `isFeatureEnabled` answers and does not throw, but nothing reads
+the flag: setting the variable has no effect until the feature ships here.
 
 ## Get started
 
@@ -130,13 +131,15 @@ getFeatureConfig(FeatureName.PROGRESSIVE_SSE_STREAMING);
 // {stage: FeatureStage.EXPERIMENTAL, defaultOn: true}
 ```
 
-`registerFeature` adds or replaces an entry. `defaultOn` is optional and
-defaults to `false`:
+`registerFeature` adds or replaces an entry:
 
 ```ts
 import {FeatureName, FeatureStage, registerFeature} from '@google/adk';
 
-registerFeature('MY_FEATURE' as FeatureName, {stage: FeatureStage.WIP});
+registerFeature(FeatureName.SNAKE_CASE_SKILL_NAME, {
+  stage: FeatureStage.STABLE,
+  defaultOn: true,
+});
 ```
 
 ## Failure modes
@@ -155,6 +158,11 @@ registerFeature('MY_FEATURE' as FeatureName, {stage: FeatureStage.WIP});
 - **The flag set is not stable across releases.** Members are added and removed
   as features graduate. A variable naming a flag that no longer exists is
   ignored, with no warning and no error.
+- **A member whose name starts with `_` is internal.** It is a temporary kill
+  switch that ADK may remove without a major version bump, so do not read it by
+  name. Only the member name carries the underscore, so
+  `FeatureName._MCP_GRACEFUL_ERROR_HANDLING` is set with
+  `ADK_ENABLE_MCP_GRACEFUL_ERROR_HANDLING=1`.
 - **When a flag is read is feature-specific.** Setting a variable after the
   object that reads it exists may have no effect.
 - **The warning has no per-flag switch.** It goes through the ADK logger at the

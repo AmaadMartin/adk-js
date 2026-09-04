@@ -28,79 +28,12 @@ const mockForecastTool = new FunctionTool({
   execute: (args) => `Forecast chart for ${args.location} shown.`,
 });
 
-/** Mock streaming responses representing a full tool back-and-forth. */
-const MODEL_RESPONSES: RawGenerateContentResponse[] = [
-  // LLM Call 1: mixed response containing text and tool call
-  {
-    candidates: [
-      {
-        content: {
-          role: 'model',
-          parts: [
-            {text: 'Let me show the forecast. '},
-            {
-              functionCall: {
-                name: 'showForecastChart',
-                args: {location: 'San Francisco'},
-              },
-            },
-          ],
-        },
-        finishReason: FinishReason.STOP,
-      },
-    ],
-  },
-  // LLM Call 2: post-tool final text answer
-  {
-    candidates: [
-      {
-        content: {
-          role: 'model',
-          parts: [
-            {text: 'Here is the forecast: it is sunny in San Francisco.'},
-          ],
-        },
-        finishReason: FinishReason.STOP,
-      },
-    ],
-  },
-];
-
-const USER_ID = 'test_user';
-
-/** Runs the forecast agent once in SSE mode and collects the events. */
-async function runForecastAgent(): Promise<{
-  results: Event[];
-  runner: InMemoryRunner;
-  sessionId: string;
-  appName: string;
-}> {
-  const sseAgent = new LlmAgent({
-    name: 'sse_integration_agent',
-    model: new GeminiWithMockResponses(MODEL_RESPONSES),
-    instruction: 'You must call showForecastChart for San Francisco.',
-    tools: [mockForecastTool],
-  });
-
-  const appName = sseAgent.name;
-  const runner = new InMemoryRunner({agent: sseAgent, appName});
-  const session = await runner.sessionService.createSession({
-    appName,
-    userId: USER_ID,
-  });
-
-  const results: Event[] = [];
-  for await (const event of runner.runAsync({
-    userId: USER_ID,
-    sessionId: session.id,
-    newMessage: createUserContent('Show me the forecast.'),
-    runConfig: {streamingMode: StreamingMode.SSE},
-  })) {
-    results.push(event);
-  }
-
-  return {results, runner, sessionId: session.id, appName};
-}
+const sseAgent = new LlmAgent({
+  name: 'sse_integration_agent',
+  model: 'gemini-2.5-flash',
+  instruction: 'You must call showForecastChart for San Francisco.',
+  tools: [mockForecastTool],
+});
 
 describe('SSE Streaming Model Response Integration', () => {
   afterEach(() => {
@@ -108,9 +41,69 @@ describe('SSE Streaming Model Response Integration', () => {
   });
 
   it('should preserve tool calls in session history event and successfully finish execution under StreamingMode.SSE', async () => {
+    // This test pins the consolidated event sequence, so it keeps the
+    // non-progressive strategy the registry defaulted to when it was written.
     overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, false);
 
-    const {results, runner, sessionId, appName} = await runForecastAgent();
+    // Predefine mock streaming responses representing a full tool back-and-forth
+    const modelResponses: RawGenerateContentResponse[] = [
+      // LLM Call 1: mixed response containing text and tool call
+      {
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [
+                {text: 'Let me show the forecast. '},
+                {
+                  functionCall: {
+                    name: 'showForecastChart',
+                    args: {location: 'San Francisco'},
+                  },
+                },
+              ],
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+      // LLM Call 2: post-tool final text answer
+      {
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [
+                {text: 'Here is the forecast: it is sunny in San Francisco.'},
+              ],
+            },
+            finishReason: FinishReason.STOP,
+          },
+        ],
+      },
+    ];
+
+    // Setup agent with custom mock Gemini Llm connection
+    sseAgent.model = new GeminiWithMockResponses(modelResponses);
+
+    // Setup runner and session
+    const userId = 'test_user';
+    const appName = sseAgent.name;
+    const runner = new InMemoryRunner({agent: sseAgent, appName});
+    const session = await runner.sessionService.createSession({
+      appName,
+      userId,
+    });
+
+    const results: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId,
+      sessionId: session.id,
+      newMessage: createUserContent('Show me the forecast.'),
+      runConfig: {streamingMode: StreamingMode.SSE},
+    })) {
+      results.push(event);
+    }
 
     // Validate events yielded by the generator:
     // 0. Consolidated model text response event (non-progressive)
@@ -173,8 +166,8 @@ describe('SSE Streaming Model Response Integration', () => {
     // Fetch session history from DB and verify that the tool call is correctly saved
     const dbSession = await runner.sessionService.getSession({
       appName,
-      userId: USER_ID,
-      sessionId,
+      userId,
+      sessionId: session.id,
     });
     expect(dbSession).toBeDefined();
 
@@ -195,7 +188,63 @@ describe('SSE Streaming Model Response Integration', () => {
   });
 
   it('should flush the first chunk as a partial event under the progressive default', async () => {
-    const {results} = await runForecastAgent();
+    const progressiveAgent = new LlmAgent({
+      name: 'sse_progressive_agent',
+      model: new GeminiWithMockResponses([
+        {
+          candidates: [
+            {
+              content: {
+                role: 'model',
+                parts: [
+                  {text: 'Let me show the forecast. '},
+                  {
+                    functionCall: {
+                      name: 'showForecastChart',
+                      args: {location: 'San Francisco'},
+                    },
+                  },
+                ],
+              },
+              finishReason: FinishReason.STOP,
+            },
+          ],
+        },
+        {
+          candidates: [
+            {
+              content: {
+                role: 'model',
+                parts: [
+                  {text: 'Here is the forecast: it is sunny in San Francisco.'},
+                ],
+              },
+              finishReason: FinishReason.STOP,
+            },
+          ],
+        },
+      ]),
+      instruction: 'You must call showForecastChart for San Francisco.',
+      tools: [mockForecastTool],
+    });
+
+    const userId = 'test_user';
+    const appName = progressiveAgent.name;
+    const runner = new InMemoryRunner({agent: progressiveAgent, appName});
+    const session = await runner.sessionService.createSession({
+      appName,
+      userId,
+    });
+
+    const results: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId,
+      sessionId: session.id,
+      newMessage: createUserContent('Show me the forecast.'),
+      runConfig: {streamingMode: StreamingMode.SSE},
+    })) {
+      results.push(event);
+    }
 
     // The progressive strategy flushes the first chunk as it arrives, so the
     // run yields one more event than the consolidated strategy does.

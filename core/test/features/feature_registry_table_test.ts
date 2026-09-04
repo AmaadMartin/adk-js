@@ -5,11 +5,10 @@
  */
 
 import {
-  FeatureConfig,
   FeatureName,
   FeatureStage,
   getFeatureConfig,
-  registerFeature,
+  isFeatureEnabled,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -18,9 +17,8 @@ import {describe, expect, it} from 'vitest';
  * adk-python src/google/adk/features/_feature_registry.py at commit
  * 93cd316a9fc757a9025d5ab0f90d5b358ec8e5ca (google/adk-python main).
  *
- * Python names its MCP kill-switch `_MCP_GRACEFUL_ERROR_HANDLING`; adk-js
- * declares the same flag without the underscore, so the two enums differ in
- * member name but agree on every string value.
+ * The two enums agree on every member name and every string value, including
+ * the leading underscore Python puts on its MCP kill-switch.
  */
 const EXPECTED_FEATURES: ReadonlyArray<[FeatureName, FeatureStage, boolean]> = [
   [FeatureName.AGENT_CONFIG, FeatureStage.EXPERIMENTAL, true],
@@ -48,7 +46,7 @@ const EXPECTED_FEATURES: ReadonlyArray<[FeatureName, FeatureStage, boolean]> = [
   [FeatureName.GOOGLE_TOOL, FeatureStage.EXPERIMENTAL, true],
   [FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, FeatureStage.EXPERIMENTAL, true],
   [FeatureName.MCP_AGENT_SERVER, FeatureStage.EXPERIMENTAL, true],
-  [FeatureName.MCP_GRACEFUL_ERROR_HANDLING, FeatureStage.EXPERIMENTAL, true],
+  [FeatureName._MCP_GRACEFUL_ERROR_HANDLING, FeatureStage.EXPERIMENTAL, true],
   [FeatureName.PROGRESSIVE_SSE_STREAMING, FeatureStage.EXPERIMENTAL, true],
   [FeatureName.PUBSUB_TOOL_CONFIG, FeatureStage.EXPERIMENTAL, true],
   [FeatureName.PUBSUB_TOOLSET, FeatureStage.EXPERIMENTAL, true],
@@ -79,16 +77,42 @@ describe('feature registry table', () => {
 
   it('names every member after its string value', () => {
     for (const [memberName, value] of Object.entries(FeatureName)) {
-      expect(value).toBe(memberName);
+      expect(value).toBe(memberName.replace(/^_/, ''));
     }
   });
 
-  it('defaults defaultOn to false when registerFeature omits it', () => {
-    const name = 'DEFAULT_ON_OMITTED' as FeatureName;
-    const config: FeatureConfig = {stage: FeatureStage.WIP};
+  it('marks only the MCP kill-switch private, and only in its member name', () => {
+    const underscored = Object.keys(FeatureName).filter((memberName) =>
+      memberName.startsWith('_'),
+    );
 
-    registerFeature(name, config);
+    expect(underscored).toEqual(['_MCP_GRACEFUL_ERROR_HANDLING']);
+    expect(FeatureName._MCP_GRACEFUL_ERROR_HANDLING).toBe(
+      'MCP_GRACEFUL_ERROR_HANDLING',
+    );
+  });
 
-    expect(getFeatureConfig(name)?.defaultOn).toBe(false);
+  it('builds the MCP kill-switch env var from the value, not the member name', () => {
+    const originalEnv = process.env;
+
+    try {
+      process.env = {
+        ...originalEnv,
+        ADK_DISABLE__MCP_GRACEFUL_ERROR_HANDLING: '1',
+      };
+      expect(isFeatureEnabled(FeatureName._MCP_GRACEFUL_ERROR_HANDLING)).toBe(
+        true,
+      );
+
+      process.env = {
+        ...originalEnv,
+        ADK_DISABLE_MCP_GRACEFUL_ERROR_HANDLING: '1',
+      };
+      expect(isFeatureEnabled(FeatureName._MCP_GRACEFUL_ERROR_HANDLING)).toBe(
+        false,
+      );
+    } finally {
+      process.env = originalEnv;
+    }
   });
 });

@@ -76,10 +76,14 @@ export enum FeatureName {
    * `ADK_DISABLE_MCP_GRACEFUL_ERROR_HANDLING=1` to restore the throwing
    * behaviour.
    *
+   * The leading underscore marks the member private, as adk-python marks it.
+   * Only the member name carries it; the string value, and so the environment
+   * variable, is unchanged.
+   *
    * @internal A temporary kill-switch, not supported API. Do not read it by
    * name from outside this package.
    */
-  MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
+  _MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
   /**
    * Flushes streamed parts as they arrive instead of aggregating them into one
    * response.
@@ -128,13 +132,12 @@ export enum FeatureStage {
  */
 export interface FeatureConfig {
   stage: FeatureStage;
-  /** Whether the feature is enabled by default. Defaults to false. */
-  defaultOn?: boolean;
+  /** Whether the feature is enabled by default. */
+  defaultOn: boolean;
 }
 
-// Central registry: FeatureName -> FeatureConfig. Every stored config carries
-// a concrete `defaultOn`; `registerFeature` fills it in when a caller omits it.
-const FEATURE_REGISTRY: Record<FeatureName, Required<FeatureConfig>> = {
+// Central registry: FeatureName -> FeatureConfig
+const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.AGENT_CONFIG]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
@@ -235,7 +238,7 @@ const FEATURE_REGISTRY: Record<FeatureName, Required<FeatureConfig>> = {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },
-  [FeatureName.MCP_GRACEFUL_ERROR_HANDLING]: {
+  [FeatureName._MCP_GRACEFUL_ERROR_HANDLING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },
@@ -299,13 +302,18 @@ const FEATURE_OVERRIDES: Partial<Record<FeatureName, boolean>> = {};
 /**
  * Get the configuration of a feature from the registry.
  *
+ * `Object.hasOwn` keeps a name that collides with an `Object.prototype` member
+ * — `toString`, `constructor` — from resolving to the inherited property.
+ *
  * @param featureName The feature name.
  * @returns The feature config from the registry, or undefined if not found.
  */
 export function getFeatureConfig(
   featureName: FeatureName,
 ): FeatureConfig | undefined {
-  return FEATURE_REGISTRY[featureName];
+  return Object.hasOwn(FEATURE_REGISTRY, featureName)
+    ? FEATURE_REGISTRY[featureName]
+    : undefined;
 }
 
 /**
@@ -318,10 +326,7 @@ export function registerFeature(
   featureName: FeatureName,
   config: FeatureConfig,
 ): void {
-  FEATURE_REGISTRY[featureName] = {
-    stage: config.stage,
-    defaultOn: config.defaultOn ?? false,
-  };
+  FEATURE_REGISTRY[featureName] = config;
 }
 
 /**
@@ -360,13 +365,13 @@ export function overrideFeatureEnabled(
  * @returns True if the feature is enabled, false otherwise.
  */
 export function isFeatureEnabled(featureName: FeatureName): boolean {
-  const config = FEATURE_REGISTRY[featureName];
+  const config = getFeatureConfig(featureName);
   if (!config) {
     throw new Error(`Feature ${featureName} is not registered.`);
   }
 
   // Check programmatic overrides first
-  if (featureName in FEATURE_OVERRIDES) {
+  if (Object.hasOwn(FEATURE_OVERRIDES, featureName)) {
     const enabled = FEATURE_OVERRIDES[featureName]!;
     if (enabled && config.stage !== FeatureStage.STABLE) {
       emitNonStableWarningOnce(featureName, config.stage);
@@ -421,7 +426,7 @@ export async function withTemporaryFeatureOverride<T>(
     throw new Error(`Feature ${featureName} is not registered.`);
   }
 
-  const hadOverride = featureName in FEATURE_OVERRIDES;
+  const hadOverride = Object.hasOwn(FEATURE_OVERRIDES, featureName);
   const originalValue = FEATURE_OVERRIDES[featureName];
 
   FEATURE_OVERRIDES[featureName] = enabled;
