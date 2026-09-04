@@ -89,31 +89,19 @@ export class DataAgentToolset extends BaseToolset {
   }
 
   /**
-   * Selects a tool the way adk-python's `DataAgentToolset._is_tool_selected`
-   * does: a name the list carries selects the tool, and an empty list selects
-   * none. The inherited version reads an empty list as "no filter" and would
-   * expose every tool instead.
+   * Selects tools the way adk-python's `DataAgentToolset._is_tool_selected`
+   * does, and not the way `BaseToolset.isToolSelected` does: a name the list
+   * carries selects the tool, and an empty list selects none. The inherited
+   * version reads an empty list as "no filter" and would expose every tool.
    */
-  protected override isToolSelected(
-    tool: BaseTool,
-    context: ReadonlyContext,
-  ): boolean {
-    const filter = this.toolFilter;
-    return Array.isArray(filter)
-      ? filter.includes(tool.name)
-      : filter(tool, context);
-  }
-
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const tools = buildDataAgentTools(this.credentials, this.settings);
-    if (context) {
-      return tools.filter((tool) => this.isToolSelected(tool, context));
-    }
-    // A predicate needs a context, so without one only a name filter applies.
     const filter = this.toolFilter;
-    return Array.isArray(filter)
-      ? tools.filter((tool) => filter.includes(tool.name))
-      : tools;
+    if (Array.isArray(filter)) {
+      return tools.filter((tool) => filter.includes(tool.name));
+    }
+    // A predicate needs a context, so without one every tool is exposed.
+    return context ? tools.filter((tool) => filter(tool, context)) : tools;
   }
 
   /**

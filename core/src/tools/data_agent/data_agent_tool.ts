@@ -7,6 +7,7 @@
 import {z} from 'zod';
 import {Context} from '../../agents/context.js';
 import {formatError} from '../../utils/error_utils.js';
+import {isRecord} from '../../utils/object_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {FunctionTool, ToolExecuteArgument} from '../function_tool.js';
 import {ResolvedDataAgentToolConfig} from './config.js';
@@ -21,11 +22,14 @@ import {
   GdaSession,
   GdaSessionFactory,
   GLOBAL_LOCATION,
-  isRecord,
   resolveGdaEndpoint,
-  RETRYABLE_STATUS_CODES,
   streamChat,
 } from './gda_client.js';
+import {awaitLro, Clock, systemClock} from './lro.js';
+import {
+  DataAgentToolError,
+  DataAgentToolResult,
+} from './tool_result.js';
 
 /** One resource-name segment: the character class the API accepts. */
 const SEGMENT = '[a-zA-Z0-9][a-zA-Z0-9_.-]*';
@@ -41,54 +45,7 @@ const DATA_AGENT_NAME_PATTERN = new RegExp(
 
 const SEGMENT_PATTERN = new RegExp(`^${SEGMENT}$`);
 
-/** Below this much budget another poll cannot finish, so the loop stops. */
-const MIN_REMAINING_SECONDS = 0.1;
 
-/** Error codes a failed connection or an expired request timeout reports. */
-const CONNECTION_ERROR_CODES: readonly string[] = [
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'ECONNABORTED',
-  'EPIPE',
-  'ETIMEDOUT',
-  'ENOTFOUND',
-  'EAI_AGAIN',
-  'ERR_SOCKET_CONNECTION_TIMEOUT',
-  'ABORT_ERR',
-];
-
-/** A tool call that reached the API and got an answer. */
-export interface DataAgentToolSuccess {
-  status: 'SUCCESS';
-  response: unknown;
-}
-
-/** A tool call that failed. `operation_name` names a mutation still running. */
-export interface DataAgentToolError {
-  status: 'ERROR';
-  error_details: string;
-  operation_name?: string;
-}
-
-/** What every data agent tool resolves to. No tool throws. */
-export type DataAgentToolResult = DataAgentToolSuccess | DataAgentToolError;
-
-/**
- * The clock the polling loop runs on, so a test can drive a 60-second timeout
- * without waiting for it.
- */
-export interface Clock {
-  /** Seconds elapsed on a monotonic timeline. */
-  now(): number;
-  /** Suspends for `seconds`. */
-  sleep(seconds: number): Promise<void>;
-}
-
-const systemClock: Clock = {
-  now: () => performance.now() / 1000,
-  sleep: (seconds) =>
-    new Promise((resolve) => setTimeout(resolve, seconds * 1000)),
-};
 
 /** What one data agent tool call needs beyond its model-supplied arguments. */
 export interface DataAgentToolDeps {
@@ -258,212 +215,7 @@ function raiseForStatus(response: GdaResponse): void {
   }
 }
 
-/**
- * Whether a failed poll is worth retrying.
- *
- * adk-python matches `requests.ConnectionError` and `requests.Timeout`. There
- * is no equivalent exception hierarchy here, so the classification reads the
- * error code the fetch layer reports.
- */
-function isConnectionFailure(err: unknown): boolean {
-  if (!isRecord(err)) {
-    return false;
-  }
-  const code = err['code'];
-  if (typeof code === 'string' && CONNECTION_ERROR_CODES.includes(code)) {
-    return true;
-  }
-  return err['name'] === 'TimeoutError' || err['name'] === 'AbortError';
-}
 
-/** Whether an operation reports itself finished. */
-function isDone(operation: Record<string, unknown>): boolean {
-  return Boolean(operation['done']);
-}
-
-/**
- * Reads a finished operation.
- *
- * @param operation The operation body.
- * @param operationName The name to report on failure, when one is known.
- * @return The success or error the tool returns.
- */
-function lroOutcome(
-  operation: Record<string, unknown>,
-  operationName?: string,
-): DataAgentToolResult {
-  if (!Object.hasOwn(operation, 'error')) {
-    return {
-      status: 'SUCCESS',
-      response: Object.hasOwn(operation, 'response')
-        ? operation['response']
-        : operation,
-    };
-  }
-  const error: DataAgentToolError = {
-    status: 'ERROR',
-    error_details: JSON.stringify(operation['error']),
-  };
-  if (operationName !== undefined) {
-    error.operation_name = operationName;
-  }
-  return error;
-}
-
-/** Parses an operation body, which the caller has already checked is 2xx. */
-function parseOperation(text: string): Record<string, unknown> {
-  const operation: unknown = JSON.parse(text);
-  return isRecord(operation) ? operation : {};
-}
-
-/** What {@link awaitLro} needs to interpret and finish a mutation. */
-export interface AwaitLroOptions {
-  /** The session the mutation was issued on. */
-  session: GdaSession;
-  /** The API root, already ending in `/v1`. */
-  baseUrl: string;
-  /** Headers to send with each poll. */
-  headers: Record<string, string>;
-  /** The mutation's own response. */
-  response: GdaResponse;
-  /** The clock reading past which the operation is abandoned. */
-  deadline: number;
-  /** Seconds between two polls. */
-  pollIntervalSeconds: number;
-  /** The total budget, named in the timeout message. */
-  totalTimeoutSeconds: number;
-  /** Defaults to the system clock. */
-  clock?: Clock;
-}
-
-/**
- * Interprets a mutation response and polls the operation until it finishes.
- *
- * A timeout is not a failure: the operation may still be running, so the
- * error carries `operation_name` for a caller that wants to check later.
- *
- * @param options The mutation response and the polling budget.
- * @return The operation's outcome, or the reason polling gave up.
- */
-export async function awaitLro(
-  options: AwaitLroOptions,
-): Promise<DataAgentToolResult> {
-  const {
-    session,
-    baseUrl,
-    headers,
-    response,
-    deadline,
-    pollIntervalSeconds,
-    totalTimeoutSeconds,
-  } = options;
-  const clock = options.clock ?? systemClock;
-
-  if (!response.ok) {
-    return {
-      status: 'ERROR',
-      error_details: `API returned error status: ${response.status} ${response.text}`,
-    };
-  }
-
-  const operation = parseOperation(response.text);
-  if (isDone(operation)) {
-    return lroOutcome(operation);
-  }
-
-  const operationName = operation['name'];
-  if (
-    typeof operationName !== 'string' ||
-    !operationName.includes('/operations/')
-  ) {
-    // adk-python reads a missing `done` key as done, so an operation that
-    // says nothing is reported as the finished resource it looks like.
-    if (Object.hasOwn(operation, 'done') && !operation['done']) {
-      return {
-        status: 'ERROR',
-        error_details:
-          'Operation is not completed and does not contain a pollable' +
-          ` '/operations/' name: ${JSON.stringify(operation)}`,
-      };
-    }
-    return {status: 'SUCCESS', response: operation};
-  }
-
-  const pollUrl = `${baseUrl}/${operationName}`;
-  for (;;) {
-    let remaining = deadline - clock.now();
-    if (remaining <= MIN_REMAINING_SECONDS) {
-      break;
-    }
-
-    let pollResponse: GdaResponse;
-    try {
-      pollResponse = await session.request({
-        method: 'GET',
-        url: pollUrl,
-        headers,
-        timeoutSeconds: Math.min(GDA_REQUEST_TIMEOUT_SECONDS, remaining),
-      });
-    } catch (err: unknown) {
-      const failure: DataAgentToolError = {
-        status: 'ERROR',
-        error_details: `Polling failed with exception: ${formatError(err)}`,
-        operation_name: operationName,
-      };
-      remaining = deadline - clock.now();
-      if (!isConnectionFailure(err) || remaining <= pollIntervalSeconds) {
-        return failure;
-      }
-      await clock.sleep(Math.min(pollIntervalSeconds, remaining));
-      continue;
-    }
-
-    if (!pollResponse.ok) {
-      remaining = deadline - clock.now();
-      if (
-        RETRYABLE_STATUS_CODES.includes(pollResponse.status) &&
-        remaining > pollIntervalSeconds
-      ) {
-        await clock.sleep(Math.min(pollIntervalSeconds, remaining));
-        continue;
-      }
-      return {
-        status: 'ERROR',
-        error_details: `Polling failed with status: ${pollResponse.status} ${pollResponse.text}`,
-        operation_name: operationName,
-      };
-    }
-
-    let polled: Record<string, unknown>;
-    try {
-      polled = parseOperation(pollResponse.text);
-    } catch (err: unknown) {
-      return {
-        status: 'ERROR',
-        error_details: `Polling returned invalid JSON: ${formatError(err)}`,
-        operation_name: operationName,
-      };
-    }
-    if (isDone(polled)) {
-      return lroOutcome(polled, operationName);
-    }
-
-    remaining = deadline - clock.now();
-    if (remaining <= MIN_REMAINING_SECONDS) {
-      break;
-    }
-    await clock.sleep(Math.min(pollIntervalSeconds, remaining));
-  }
-
-  return {
-    status: 'ERROR',
-    error_details:
-      `Operation ${operationName} did not complete within` +
-      ` ${totalTimeoutSeconds} seconds. The operation may still be executing` +
-      ' asynchronously in the background. Do not retry the operation.',
-    operation_name: operationName,
-  };
-}
 
 /** One create, update or delete, and the operation it starts. */
 interface MutateOptions {
@@ -575,7 +327,7 @@ export async function listAccessibleDataAgents(
  * @param session A session to reuse instead of opening one.
  * @return The data agent, or the reason the call failed.
  */
-export async function getDataAgentInfoWith(
+export async function getDataAgentInfo(
   dataAgentName: string,
   deps: DataAgentToolDeps,
   session?: GdaSession,
@@ -598,20 +350,6 @@ export async function getDataAgentInfoWith(
   } catch (err: unknown) {
     return {status: 'ERROR', error_details: formatError(err)};
   }
-}
-
-/**
- * Reads one data agent by resource name.
- *
- * @param dataAgentName The resource name to read.
- * @param deps The session factory and the resolved settings.
- * @return The data agent, or the reason the call failed.
- */
-export function getDataAgentInfo(
-  dataAgentName: string,
-  deps: DataAgentToolDeps,
-): Promise<DataAgentToolResult> {
-  return getDataAgentInfoWith(dataAgentName, deps);
 }
 
 /** Arguments {@link askDataAgent} takes. */
@@ -644,7 +382,7 @@ export async function askDataAgent(
     const {session, endpoint} = await deps.openSession(
       endpointOptions(location, settings.apiEndpoint),
     );
-    const agentInfo = await getDataAgentInfoWith(
+    const agentInfo = await getDataAgentInfo(
       args.dataAgentName,
       deps,
       session,

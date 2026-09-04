@@ -23,10 +23,7 @@ import {
   DataAgentToolConfig,
   resolveDataAgentToolConfig,
 } from '../../../src/tools/data_agent/config.js';
-import {
-  Clock,
-  DataAgentToolDeps,
-} from '../../../src/tools/data_agent/data_agent_tool.js';
+import {DataAgentToolDeps} from '../../../src/tools/data_agent/data_agent_tool.js';
 import {
   GdaEndpointOptions,
   GdaRequest,
@@ -34,9 +31,16 @@ import {
   GdaSession,
   GdaSessionFactory,
 } from '../../../src/tools/data_agent/gda_client.js';
+import {Clock} from '../../../src/tools/data_agent/lro.js';
 
 /** The host the fakes answer on unless a test names another. */
 export const DEFAULT_ENDPOINT = 'https://geminidataanalytics.googleapis.com';
+
+/** The data agent the suites act on. */
+export const AGENT_NAME = 'projects/p/locations/g/dataAgents/agent-1';
+
+/** The operation a mutation on {@link AGENT_NAME} starts. */
+export const OPERATION_NAME = 'projects/p/locations/g/operations/op-1';
 
 /** How the fake session answers one request: a response, or a throw. */
 export type FakeAnswer = GdaResponse | Error | (() => GdaResponse);
@@ -235,4 +239,19 @@ export function errorOf(result: unknown): string {
     return expect.fail(`expected error_details, got ${String(details)}`);
   }
   return details;
+}
+
+/** An operation that has not finished yet. */
+export function runningOperation(): GdaResponse {
+  return jsonResponse({name: OPERATION_NAME, done: false});
+}
+
+/** An operation that finished with `response`. */
+export function finishedOperation(response: unknown): GdaResponse {
+  return jsonResponse({name: OPERATION_NAME, done: true, response});
+}
+
+/** A failure carrying the error code a dropped connection reports. */
+export function connectionError(message: string): Error {
+  return Object.assign(new Error(message), {code: 'ECONNRESET'});
 }

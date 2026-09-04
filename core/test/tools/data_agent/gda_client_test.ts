@@ -22,7 +22,6 @@ import {
   formatDataRetrieved,
   gdaHeaders,
   GdaSession,
-  isRecord,
   resolveGdaEndpoint,
   streamChat,
 } from '../../../src/tools/data_agent/gda_client.js';
@@ -213,15 +212,6 @@ describe('gdaHeaders', () => {
       'Content-Type': 'application/json',
       'X-Goog-API-Client': 'GOOGLE_ADK',
     });
-  });
-});
-
-describe('isRecord', () => {
-  it('accepts a plain object and rejects everything else', () => {
-    expect(isRecord({a: 1})).toBe(true);
-    expect(isRecord([1, 2])).toBe(false);
-    expect(isRecord(null)).toBe(false);
-    expect(isRecord('text')).toBe(false);
   });
 });
 

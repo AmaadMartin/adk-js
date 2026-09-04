@@ -19,7 +19,7 @@ export {
   type DataAgentToolError,
   type DataAgentToolResult,
   type DataAgentToolSuccess,
-} from './data_agent_tool.js';
+} from './tool_result.js';
 export {
   DataAgentToolset,
   type DataAgentToolsetOptions,

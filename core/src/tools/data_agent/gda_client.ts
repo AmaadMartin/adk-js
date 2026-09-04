@@ -5,6 +5,7 @@
  */
 
 import {AuthClient} from 'google-auth-library';
+import {isRecord} from '../../utils/object_utils.js';
 
 /** The client identifier the Conversational Analytics API is told to record. */
 export const GDA_CLIENT_ID = 'GOOGLE_ADK';
@@ -92,11 +93,6 @@ export interface GdaSessionHandle {
 export type GdaSessionFactory = (
   options: GdaEndpointOptions,
 ) => Promise<GdaSessionHandle>;
-
-/** Whether `value` is a plain JSON object, as Python's `isinstance(x, dict)` is. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Returns the Conversational Analytics host for a location.
