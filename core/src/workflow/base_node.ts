@@ -252,6 +252,10 @@ export function isBaseNode(value: unknown): value is BaseNode {
   );
 }
 
+// Re-exported for the callers that imported `isContent` from this module
+// before it moved to `utils/content_utils.ts`.
+export {isContent} from '../utils/content_utils.js';
+
 /**
  * The sentinel node marking the entry point of a workflow graph. It is never
  * executed — the orchestrator seeds triggers for its successors directly.

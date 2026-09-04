@@ -32,6 +32,11 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
   agent's tool calls against a golden trajectory, and the `Evaluator` seam every
   metric sits behind.
 
+### Events
+
+- [Event and NodeInfo](events/event/index.md) - The event fields, the
+  convenience construction options, and reading the emitting workflow node.
+
 ### Models
 
 - [Anthropic Claude models](models/anthropic/index.md) - Driving an agent with

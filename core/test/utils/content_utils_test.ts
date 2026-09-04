@@ -8,6 +8,7 @@ import type {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   contentUnionToText,
+  contentUnionToUserContent,
   extractTextFromContent,
   filterAudioParts,
   isAudioPart,
@@ -126,11 +127,13 @@ describe('SKIP_THOUGHT_SIGNATURE_VALIDATOR', () => {
 
 describe('isContent', () => {
   it('accepts a value with a parts array', () => {
+    expect(isContent({parts: []})).toBe(true);
     expect(isContent({role: 'user', parts: [{text: 'hi'}]})).toBe(true);
   });
 
   it('rejects a value without a parts array', () => {
     expect(isContent({role: 'user'})).toBe(false);
+    expect(isContent({parts: 'x'})).toBe(false);
     expect(isContent('hi')).toBe(false);
     expect(isContent(null)).toBe(false);
   });
@@ -315,5 +318,43 @@ describe('extractTextFromContent', () => {
 
   it('returns an empty string for a content with no parts', () => {
     expect(extractTextFromContent({role: 'user'})).toBe('');
+  });
+});
+
+describe('contentUnionToUserContent', () => {
+  it('returns a Content value unchanged', () => {
+    const content: Content = {role: 'model', parts: [{text: 'kept'}]};
+    expect(contentUnionToUserContent(content)).toBe(content);
+  });
+
+  it('converts a string to user content', () => {
+    const converted = contentUnionToUserContent('hello');
+    expect(converted.role).toBe('user');
+    expect(converted.parts?.[0].text).toBe('hello');
+  });
+
+  it('converts a single part', () => {
+    const part: Part = {text: 'from part'};
+    const converted = contentUnionToUserContent(part);
+    expect(converted.role).toBe('user');
+    expect(converted.parts?.[0].text).toBe('from part');
+  });
+
+  it('converts a list of parts and keeps their order', () => {
+    const converted = contentUnionToUserContent([
+      {text: 'first'},
+      {text: 'second'},
+    ]);
+    expect(converted.parts?.map((part) => part.text)).toEqual([
+      'first',
+      'second',
+    ]);
+  });
+
+  it('raises the SDK error for a value that is not a part list', () => {
+    expect(() => contentUnionToUserContent([])).toThrow(/empty array/);
+    expect(() => contentUnionToUserContent({})).toThrow(
+      /must be a Part object/,
+    );
   });
 });

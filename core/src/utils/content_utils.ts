@@ -13,6 +13,7 @@
  */
 
 import type {Content, ContentUnion, Part} from '@google/genai';
+import {createUserContent} from '@google/genai';
 
 /**
  * Placeholder `Part.thoughtSignature` that bypasses backend validation.
@@ -143,6 +144,21 @@ export function toUserContent(value: unknown): Content {
     text = String(value);
   }
   return {role: 'user', parts: [{text}]};
+}
+
+/**
+ * Converts a genai `ContentUnion` to `Content` with the `user` role.
+ *
+ * An already-`Content` value is returned unchanged, so the caller keeps object
+ * identity. Anything the SDK cannot turn into parts raises the SDK's own
+ * error, mirroring `google/adk-python`'s `_transformers.t_content`.
+ *
+ * Use this for a value that is declared a `ContentUnion`, such as an event
+ * message. Use {@link toUserContent} for a value of any type, which serializes
+ * what the SDK rejects instead of raising.
+ */
+export function contentUnionToUserContent(value: ContentUnion): Content {
+  return isContent(value) ? value : createUserContent(value);
 }
 
 function isAudioMimeType(mimeType: string | undefined): boolean {
