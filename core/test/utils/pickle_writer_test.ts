@@ -45,6 +45,20 @@ function fieldOf(payload: Uint8Array, name: string): unknown {
 }
 
 describe('dumpPydanticModel', () => {
+  it('writes a null-prototype map as a dict', () => {
+    // `trimTempDeltaState` builds `stateDelta` with a null prototype so a
+    // `__proto__` key cannot re-parent it, and those actions reach the writer
+    // on the legacy v0 write path.
+    const nested: Record<string, unknown> = Object.create(null);
+    nested['topic'] = 'pickles';
+
+    const payload = dumpPydanticModel(MODULE, CLASS, {state_delta: nested});
+
+    expect(fieldOf(payload, 'state_delta')).toEqual(
+      new Map([['topic', 'pickles']]),
+    );
+  });
+
   it('opens with the protocol 4 header', () => {
     const payload = dumpPydanticModel(MODULE, CLASS, {});
 
@@ -236,9 +250,13 @@ describe('dumpPydanticModel', () => {
     ).toThrowError(/an instance of Date/);
   });
 
-  it('refuses an object with no prototype, which has no class to name', () => {
+  it('refuses an object with no class to name', () => {
+    // A null prototype is a dict and is written as one, so the unnameable
+    // value here is an object whose own prototype has none.
+    const unnameable: unknown = Object.create(Object.create(null));
+
     expect(() =>
-      dumpPydanticModel(MODULE, CLASS, {bad: Object.create(null)}),
+      dumpPydanticModel(MODULE, CLASS, {bad: unnameable}),
     ).toThrowError(/an instance of an anonymous class/);
   });
 });

@@ -16,8 +16,12 @@ import {
   createEventActions,
   DatabaseSessionService,
 } from '@google/adk';
-import {EntityManager, LockMode} from '@mikro-orm/core';
-import {SqliteDriver} from '@mikro-orm/sqlite';
+import {EntityManager, EntityProperty, LockMode} from '@mikro-orm/core';
+import {MariaDbPlatform} from '@mikro-orm/mariadb';
+import {MsSqlPlatform} from '@mikro-orm/mssql';
+import {MySqlPlatform} from '@mikro-orm/mysql';
+import {PostgreSqlPlatform} from '@mikro-orm/postgresql';
+import {SqliteDriver, SqlitePlatform} from '@mikro-orm/sqlite';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   connectionIsAlive,
@@ -31,6 +35,7 @@ import {
   StorageSession,
   StorageUserState,
 } from '../../src/sessions/db/schema.js';
+import {PreciseTimestampType} from '../../src/sessions/db/shared.js';
 
 vi.mock('../../src/sessions/db/operations.js', async (importOriginal) => {
   const original =
@@ -248,5 +253,54 @@ describe('DatabaseSessionService parity with adk-python', () => {
       expect(message).toContain("names the 'psycopg2' driver in its scheme");
       expect(message).toContain("use a 'postgresql://' URL instead");
     });
+  });
+});
+
+/**
+ * Adapted. adk-python asks the service whether the active SQLAlchemy dialect
+ * is naive (`_uses_naive_datetime`), then strips tzinfo before storage. A
+ * JavaScript `Date` carries no tzinfo, so the only place the distinction is
+ * observable in adk-js is the column adk-js declares. MikroORM gives a
+ * `Platform` no dialect name, so each case drives the real platform of the
+ * dialect the reference parametrizes over and pins its declaration.
+ */
+describe('naive datetime columns, ported from adk-python', () => {
+  const preciseTimestamp = new PreciseTimestampType();
+  const columnProp = {} as EntityProperty;
+
+  /** The declaration each dialect in `_NAIVE_DATETIME_DIALECTS` must get. */
+  const NAIVE_DIALECTS = {
+    sqlite: {platform: new SqlitePlatform(), declaration: 'datetime'},
+    postgresql: {
+      platform: new PostgreSqlPlatform(),
+      declaration: 'timestamp(6)',
+    },
+    mysql: {platform: new MySqlPlatform(), declaration: 'datetime(6)'},
+    mariadb: {platform: new MariaDbPlatform(), declaration: 'datetime(6)'},
+  };
+
+  for (const [dialect, {platform, declaration}] of Object.entries(
+    NAIVE_DIALECTS,
+  )) {
+    it(`test_database_session_service_uses_naive_datetime_for_dialect[${dialect}]`, () => {
+      const columnType = preciseTimestamp.getColumnType(columnProp, platform);
+
+      expect(columnType).toBe(declaration);
+      expect(columnType).not.toContain('timestamptz');
+    });
+  }
+
+  /**
+   * Adapted from `test_database_session_service_keeps_timezone_for_spanner`.
+   * adk-python excludes Cloud Spanner because its `TIMESTAMP` keeps a zone.
+   * adk-js registers no Spanner driver (`DRIVER_LOADERS` in
+   * `db/operations.ts`), so there is no Spanner platform to declare a column
+   * with. This pins the other half of the rule instead: a platform that
+   * already writes a zone-free declaration keeps it verbatim.
+   */
+  it('keeps a declaration that carries no time zone verbatim', () => {
+    expect(
+      preciseTimestamp.getColumnType(columnProp, new MsSqlPlatform()),
+    ).toBe('datetime2(6)');
   });
 });
