@@ -6,9 +6,9 @@
 
 /**
  * Ported from adk-python tests/unittests/skills/test_models.py
- * (github.com/google/adk-python, main). 26 of its 27 tests are here under
- * their Python names. test_script_to_string is omitted: it pins
- * `Script.__str__`, and a TypeScript caller reads `script.src` directly.
+ * (github.com/google/adk-python, main). All 27 of its tests are here under
+ * their Python names. test_script_to_string calls scriptToString, because
+ * `String()` on a plain object cannot reach a structural type.
  */
 
 import {
@@ -20,7 +20,11 @@ import {
   listReferences,
   listScripts,
   Resources,
+  Script,
+  scriptToString,
   Skill,
+  skillDescription,
+  skillName,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -74,7 +78,15 @@ describe('models parity', () => {
 
     expect(skill.frontmatter.name).toBe('my-skill');
     expect(skill.frontmatter.description).toBe('my description');
+    expect(skillName(skill)).toBe('my-skill');
+    expect(skillDescription(skill)).toBe('my description');
     expect(skill.uri).toBeUndefined();
+  });
+
+  it('test_script_to_string', () => {
+    const script: Script = {src: "print('hello')"};
+
+    expect(scriptToString(script)).toBe("print('hello')");
   });
 
   // --- Name validation tests ---

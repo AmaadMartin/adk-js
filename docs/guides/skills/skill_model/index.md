@@ -26,12 +26,17 @@ are no methods to call.
 ## Get started
 
 ```ts
-import {getReference, listScripts, loadSkillFromDir} from '@google/adk';
+import {
+  getReference,
+  listScripts,
+  loadSkillFromDir,
+  skillName,
+} from '@google/adk';
 
 const skill = await loadSkillFromDir('./skills/algorithmic-art');
 
 // 'algorithmic-art', from the `name:` field of SKILL.md.
-const name = skill.frontmatter.name;
+const name = skillName(skill);
 
 // The contents of references/style.md, or undefined if there is no such file.
 const style = getReference(skill.resources, 'style.md');
@@ -94,12 +99,13 @@ import {
   listAssets,
   listReferences,
   listScripts,
+  scriptToString,
 } from '@google/adk';
 
 const schema = getAsset(skill.resources, 'db-schema.sql');
 const doc = getReference(skill.resources, 'workflow.md');
 const script = getScript(skill.resources, 'render.js');
-const source = script?.src;
+const source = script ? scriptToString(script) : undefined;
 
 const names = [
   ...listReferences(skill.resources),
@@ -110,7 +116,13 @@ const names = [
 
 A reference or asset is a `string` when the file is UTF-8 and a `Buffer` when it
 is not, so narrow with `Buffer.isBuffer` before you treat it as text. A script
-is a `Script`, and its source is `script.src`.
+is a `Script`, and `scriptToString` returns its source.
+
+## Reading a skill
+
+`skillName(skill)` and `skillDescription(skill)` read the two frontmatter fields
+a caller needs most often. Use them where the value is a `Skill`, so a caller
+does not reach through `frontmatter` for a field the skill itself names.
 
 ## Where a skill came from
 
