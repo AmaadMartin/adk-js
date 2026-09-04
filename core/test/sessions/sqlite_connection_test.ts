@@ -46,6 +46,8 @@ describe('parseSqliteDbPath', () => {
     ['sqlite+aiosqlite:///relative.db', 'relative.db', 'relative.db', false],
     ['sqlite+aiosqlite:///x.db?mode=ro', 'x.db', 'file:x.db?mode=ro', true],
     ['sqlite://', 'sqlite://', 'sqlite://', false],
+    // The opaque form carries no authority and no leading slash to strip.
+    ['sqlite:opaque.db', 'opaque.db', 'opaque.db', false],
   ])('parses %s', (input, filePath, connectPath, useUri) => {
     expect(parseSqliteDbPath(input)).toEqual({
       filePath,
@@ -202,6 +204,38 @@ describe('SqliteDatabase', () => {
     );
     await connection.close();
     expect(row).toEqual({foreign_keys: 1});
+  });
+
+  it('rejects when the database file cannot be opened', async () => {
+    const database = new SqliteDatabase(join(dir, 'missing-dir', 'x.db'));
+    await expect(database.connect()).rejects.toThrow(/SQLITE_CANTOPEN/);
+  });
+
+  it('rejects a failing query rather than resolving with no rows', async () => {
+    const connection = await new SqliteDatabase(
+      join(dir, 'bad-sql.db'),
+    ).connect();
+    try {
+      await expect(connection.get('SELECT * FROM absent')).rejects.toThrow(
+        /no such table: absent/,
+      );
+      await expect(connection.all('SELECT * FROM absent')).rejects.toThrow(
+        /no such table: absent/,
+      );
+      await expect(
+        connection.run('INSERT INTO absent VALUES (1)'),
+      ).rejects.toThrow(/no such table: absent/);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it('rejects a second close of the same handle', async () => {
+    const connection = await new SqliteDatabase(
+      join(dir, 'double.db'),
+    ).connect();
+    await connection.close();
+    await expect(connection.close()).rejects.toThrow(/Database (is|handle is)/);
   });
 
   it('closes the handle when schema creation fails', async () => {

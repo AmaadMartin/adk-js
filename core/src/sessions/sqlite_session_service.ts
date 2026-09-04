@@ -13,6 +13,7 @@ import {
   transformToSnakeCaseEvent,
 } from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   AppendEventRequest,
@@ -112,8 +113,9 @@ export function decodeState(
   try {
     decoded = JSON.parse(value);
   } catch (e: unknown) {
-    const detail = e instanceof Error ? e.message : String(e);
-    throw new Error(`Invalid JSON in ${context}: ${detail}`, {cause: e});
+    throw new Error(`Invalid JSON in ${context}: ${formatError(e)}`, {
+      cause: e,
+    });
   }
 
   if (
@@ -196,10 +198,7 @@ function extractJsonSafeStateDelta(
  * runs, so the caller's own delta object keeps its values.
  */
 function makeDeltaJsonSafe(event: Event): void {
-  const stateDelta = event.actions?.stateDelta;
-  if (!stateDelta) {
-    return;
-  }
+  const stateDelta = event.actions.stateDelta;
   for (const [key, value] of Object.entries(stateDelta)) {
     stateDelta[key] = toJsonSafe(key, value);
   }
@@ -211,11 +210,7 @@ function makeDeltaJsonSafe(event: Event): void {
  * trimmed out of the event before it is persisted.
  */
 function applyTempState(session: Session, event: Event): void {
-  const stateDelta = event.actions?.stateDelta;
-  if (!stateDelta) {
-    return;
-  }
-  for (const [key, value] of Object.entries(stateDelta)) {
+  for (const [key, value] of Object.entries(event.actions.stateDelta)) {
     if (key.startsWith(State.TEMP_PREFIX)) {
       session.state[key] = value;
     }
@@ -712,9 +707,9 @@ export class SqliteSessionService extends BaseSessionService {
       throw new StaleSessionError(STALE_SESSION_MESSAGE);
     }
 
-    const stateDelta = event.actions?.stateDelta;
+    const stateDelta = event.actions.stateDelta;
     const sessionStateWritten =
-      stateDelta && Object.keys(stateDelta).length > 0
+      Object.keys(stateDelta).length > 0
         ? await writeStateDelta(
             connection,
             key,

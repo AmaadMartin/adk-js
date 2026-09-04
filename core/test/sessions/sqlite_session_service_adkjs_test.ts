@@ -249,6 +249,70 @@ describe('SqliteSessionService file layout', () => {
   });
 });
 
+describe('SqliteSessionService listSessions state merge', () => {
+  /** Gives two users of one app an app-scoped and a user-scoped value each. */
+  async function seedTwoUsers(dbPath: string): Promise<SqliteSessionService> {
+    const service = new SqliteSessionService(dbPath);
+    await service.createSession({
+      appName: 'app',
+      userId: 'u1',
+      sessionId: 's1',
+      state: {'app:shared': 'a', 'user:pref': 'one', own: 1},
+    });
+    await service.createSession({
+      appName: 'app',
+      userId: 'u2',
+      sessionId: 's2',
+      state: {'user:pref': 'two', own: 2},
+    });
+    return service;
+  }
+
+  it('merges one user state when a user id is given', async () => {
+    const service = await seedTwoUsers(join(dir, 'list-one-user.db'));
+
+    const {sessions} = await service.listSessions({
+      appName: 'app',
+      userId: 'u1',
+    });
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].state).toEqual({
+      'app:shared': 'a',
+      'user:pref': 'one',
+      own: 1,
+    });
+  });
+
+  it('merges each user own state when no user id is given', async () => {
+    const service = await seedTwoUsers(join(dir, 'list-all-users.db'));
+
+    const {sessions} = await service.listSessions({appName: 'app'});
+    const byId = new Map(sessions.map((s) => [s.id, s]));
+    expect(byId.get('s1')?.state).toEqual({
+      'app:shared': 'a',
+      'user:pref': 'one',
+      own: 1,
+    });
+    // u2 must see the shared app value but only its own user value.
+    expect(byId.get('s2')?.state).toEqual({
+      'app:shared': 'a',
+      'user:pref': 'two',
+      own: 2,
+    });
+  });
+
+  it('reports an empty result set as zero pages', async () => {
+    const service = new SqliteSessionService(join(dir, 'list-empty.db'));
+    expect(await service.listSessions({appName: 'app'})).toEqual({
+      sessions: [],
+      page: 1,
+      limit: 0,
+      totalItems: 0,
+      totalPages: 0,
+    });
+  });
+});
+
 describe('SqliteSessionService state merge', () => {
   it('stores a null-valued delta rather than deleting the key', async () => {
     // `json_patch` would read the null as "delete this key"; the merge SQL

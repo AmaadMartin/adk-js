@@ -354,14 +354,14 @@ export class SqliteDatabase {
 
   private async loadDriver(): Promise<Sqlite3Module> {
     if (this.driver === undefined) {
+      // node-sqlite3 is CommonJS, so its exports arrive under `default`, as
+      // Express's do in `a2a/agent_to_a2a.ts`. Its type declarations describe
+      // the flat shape instead, so the namespace is annotated here.
       const mod = await loadOptionalPeer(
         SQLITE3_PEER,
-        (): Promise<Sqlite3Module & {default?: Sqlite3Module}> =>
-          import('sqlite3'),
+        (): Promise<{default: Sqlite3Module}> => import('sqlite3'),
       );
-      // node-sqlite3 is CommonJS, so a loader may hand back the module
-      // namespace itself or nest the real exports under `default`.
-      this.driver = mod.default ?? mod;
+      this.driver = mod.default;
     }
     return this.driver;
   }
