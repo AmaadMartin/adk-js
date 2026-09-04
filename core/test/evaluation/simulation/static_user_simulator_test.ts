@@ -70,3 +70,11 @@ describe('StaticUserSimulator', () => {
     expect(next.userMessage?.parts?.[0].text).toBe('scripted');
   });
 });
+
+describe('StaticUserSimulator.getSimulationEvaluator', () => {
+  it('returns no evaluator', () => {
+    const simulator = new StaticUserSimulator([turn('only')]);
+
+    expect(simulator.getSimulationEvaluator()).toBeUndefined();
+  });
+});
