@@ -338,10 +338,34 @@ describe('sanitizeErrorText', () => {
     expect(result.truncated).toBe(true);
   });
 
-  it('reports the loss when the text passes the inspection ceiling', () => {
+  it('refuses text past the inspection ceiling when no limit bounds it', () => {
     const result = sanitizeErrorText('x'.repeat(4_000_050), -1);
-    expect(result.text).toHaveLength(4_000_000);
-    expect(result.truncated).toBe(true);
+    expect(result).toEqual({
+      text: '[REDACTED_SENSITIVE_TEXT]',
+      truncated: true,
+    });
+  });
+
+  it('inspects only the prefix a limit allows through', () => {
+    const result = sanitizeErrorText(
+      `token=hunter2 ${'x'.repeat(4_000_050)}`,
+      30,
+    );
+    expect(result).toEqual({
+      text: 'token=[REDACTED] xxxxxxxxxxxxx...[TRUNCATED]',
+      truncated: true,
+    });
+  });
+
+  it('refuses an over-ceiling prefix that hides an encoded credential', () => {
+    const result = sanitizeErrorText(
+      `access%5Ftoken=SECRET ${'x'.repeat(4_000_050)}`,
+      30,
+    );
+    expect(result).toEqual({
+      text: '[REDACTED_SENSITIVE_TEXT]',
+      truncated: true,
+    });
   });
 
   it(
