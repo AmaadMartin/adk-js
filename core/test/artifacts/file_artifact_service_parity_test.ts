@@ -555,6 +555,86 @@ describe('FileArtifactService adk-python parity', () => {
     });
   });
 
+  describe('app name validation', () => {
+    // adk-python asserts on its deny-list wording. adk-js keeps its stricter
+    // allow-list, so these assert the rejection and adk-js's own message.
+    const invalidAppNames = [
+      '../escape',
+      '../../etc',
+      'foo/../../bar',
+      '..',
+      '.',
+      'null\x00byte',
+      '',
+      '/etc/passwd',
+      '\\leading\\backslash',
+      'C:\\absolute',
+      'C:drive-relative',
+    ];
+    const scope = {
+      userId: 'user123',
+      sessionId: 'sess123',
+      filename: 'user:safe.txt',
+    };
+
+    for (const appName of invalidAppNames) {
+      it(`test_save_artifact_rejects_traversal_in_app_name (${JSON.stringify(appName)})`, async () => {
+        await expect(
+          service.saveArtifact({
+            ...scope,
+            appName,
+            artifact: {text: 'data'},
+          }),
+        ).rejects.toThrow('Invalid appName');
+      });
+    }
+
+    it('test_load_artifact_rejects_traversal_in_app_name', async () => {
+      await expect(
+        service.loadArtifact({...scope, appName: '../escape'}),
+      ).rejects.toThrow('Invalid appName');
+    });
+
+    it('test_delete_artifact_rejects_traversal_in_app_name', async () => {
+      await expect(
+        service.deleteArtifact({...scope, appName: '../escape'}),
+      ).rejects.toThrow('Invalid appName');
+    });
+
+    it('test_list_artifact_keys_rejects_traversal_in_app_name', async () => {
+      await expect(
+        service.listArtifactKeys({
+          appName: '../escape',
+          userId: 'user123',
+          sessionId: 'sess123',
+        }),
+      ).rejects.toThrow('Invalid appName');
+    });
+  });
+
+  it('test_load_artifact_preserves_inline_data_display_name', async () => {
+    const scope = {
+      appName: 'app0',
+      userId: 'user0',
+      sessionId: 'sess0',
+      filename: 'artifact.bin',
+    };
+    const displayName = 'My Report (final).png';
+    await service.saveArtifact({
+      ...scope,
+      artifact: {
+        inlineData: {
+          mimeType: 'image/png',
+          data: Buffer.from('\x89PNG\r\n\x1a\n', 'binary').toString('base64'),
+          displayName,
+        },
+      },
+    });
+
+    const loaded = await service.loadArtifact(scope);
+    expect(loaded?.inlineData?.displayName).toBe(displayName);
+  });
+
   describe('canonical URI', () => {
     it('test_load_artifact_ignores_canonical_uri_from_metadata', async () => {
       const secret = path.join(root, 'secret.txt');
