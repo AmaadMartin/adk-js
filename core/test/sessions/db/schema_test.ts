@@ -35,6 +35,8 @@ const USER_ID = 'test_user';
 const SESSION_ID = 's1';
 const INVOCATION_ID = 'invocation-1';
 const INDEX_COLUMNS = ['app_name', 'user_id', 'session_id', 'timestamp'];
+/** The literal name adk-python declares, so a rename here fails the tests. */
+const INDEX_NAME = 'idx_events_app_user_session_ts';
 
 /**
  * The schema adk-js emitted before this change: no foreign key on `events`
@@ -203,14 +205,16 @@ describe('sessions storage schema', () => {
   });
 
   describe('index creation', () => {
+    it('names the index the way adk-python names it', () => {
+      expect(EVENTS_SESSION_TIMESTAMP_INDEX).toBe(INDEX_NAME);
+    });
+
     // test_new_db_uses_latest_schema
     it('creates the events index on a new database', async () => {
       const databaseFile = await tempDatabaseFile('new_db.db');
       const orm = await track(await openDatabase(databaseFile));
 
-      expect(await indexColumns(orm, EVENTS_SESSION_TIMESTAMP_INDEX)).toEqual(
-        INDEX_COLUMNS,
-      );
+      expect(await indexColumns(orm, INDEX_NAME)).toEqual(INDEX_COLUMNS);
     });
 
     // test_prepare_tables_recreates_missing_latest_events_index
@@ -218,12 +222,8 @@ describe('sessions storage schema', () => {
       const databaseFile = await tempDatabaseFile('missing_index.db');
       const first = await openDatabase(databaseFile);
       await seedSession(first);
-      await first.em
-        .getConnection()
-        .execute(`drop index ${EVENTS_SESSION_TIMESTAMP_INDEX}`);
-      expect(await indexColumns(first, EVENTS_SESSION_TIMESTAMP_INDEX)).toEqual(
-        [],
-      );
+      await first.em.getConnection().execute(`drop index ${INDEX_NAME}`);
+      expect(await indexColumns(first, INDEX_NAME)).toEqual([]);
       await first.close();
 
       const reopened = await track(await openDatabase(databaseFile));
@@ -231,9 +231,7 @@ describe('sessions storage schema', () => {
       expect(
         await reopened.em.fork().findOne(StorageSession, {id: SESSION_ID}),
       ).not.toBeNull();
-      expect(
-        await indexColumns(reopened, EVENTS_SESSION_TIMESTAMP_INDEX),
-      ).toEqual(INDEX_COLUMNS);
+      expect(await indexColumns(reopened, INDEX_NAME)).toEqual(INDEX_COLUMNS);
     });
 
     it('adds the index to a database written before this change, keeping its rows', async () => {
@@ -251,9 +249,7 @@ describe('sessions storage schema', () => {
       const orm = await track(await openDatabase(databaseFile));
 
       expect(await orm.em.fork().count(StorageEvent, {})).toBe(1);
-      expect(await indexColumns(orm, EVENTS_SESSION_TIMESTAMP_INDEX)).toEqual(
-        INDEX_COLUMNS,
-      );
+      expect(await indexColumns(orm, INDEX_NAME)).toEqual(INDEX_COLUMNS);
     });
   });
 });
