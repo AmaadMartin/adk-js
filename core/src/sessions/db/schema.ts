@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Entity, JsonType, PrimaryKey, Property} from '@mikro-orm/core';
+import {
+  Entity,
+  Index,
+  JsonType,
+  ManyToOne,
+  PrimaryKey,
+  Property,
+  Ref,
+} from '@mikro-orm/core';
 import {
   Event,
   transformToCamelCaseEvent,
@@ -14,6 +22,22 @@ import {
 export const SCHEMA_VERSION_KEY = 'schema_version';
 export const SCHEMA_VERSION_1_JSON = '1';
 export const STORAGE_KEY_COLUMN_LENGTH = 191;
+/**
+ * Fractional-second digits every stored timestamp column keeps.
+ *
+ * MySQL and MariaDB default a `DATETIME` column to whole seconds, which would
+ * round away the millisecond an `Event.timestamp` carries. The stale-session
+ * marker and the event ordering both compare those values, so the column has
+ * to hold what the caller wrote.
+ */
+export const DATETIME_FRACTIONAL_DIGITS = 3;
+/**
+ * Name of the index over the event lookup columns, matching adk-python.
+ *
+ * Both SDKs read the same database, so sharing the name stops the two of them
+ * creating two indexes for one access path.
+ */
+export const EVENTS_SESSION_TIMESTAMP_INDEX = 'idx_events_app_user_session_ts';
 
 /**
  * Custom type for serializing and deserializing ADK Event objects.
@@ -59,6 +83,7 @@ export class StorageAppState {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -87,6 +112,7 @@ export class StorageUserState {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -120,6 +146,7 @@ export class StorageSession {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'create_time',
     onCreate: () => new Date(),
   })
@@ -127,6 +154,7 @@ export class StorageSession {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'update_time',
     onCreate: () => new Date(),
   })
@@ -136,6 +164,10 @@ export class StorageSession {
 }
 
 @Entity({tableName: 'events'})
+@Index({
+  name: EVENTS_SESSION_TIMESTAMP_INDEX,
+  properties: ['appName', 'userId', 'sessionId', 'timestamp'],
+})
 export class StorageEvent {
   @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
   id!: string;
@@ -164,11 +196,31 @@ export class StorageEvent {
   @Property({type: 'string', fieldName: 'invocation_id'})
   invocationId!: string;
 
-  @Property({type: 'datetime'})
+  @Property({type: 'datetime', length: DATETIME_FRACTIONAL_DIGITS})
   timestamp!: Date;
 
   @Property({type: CamelCaseToSnakeCaseJsonType, fieldName: 'event_data'})
   eventData!: Event;
+
+  /**
+   * The session this event belongs to, read through the key columns above.
+   *
+   * This relation carries the `ON DELETE CASCADE` foreign key, so a deleted
+   * session takes its events with it. `ownColumns: []` leaves `appName`,
+   * `userId` and `sessionId` owning their columns, because they are primary
+   * keys that callers set by name; assigning this relation does not set them.
+   */
+  @ManyToOne(() => StorageSession, {
+    joinColumns: ['app_name', 'user_id', 'session_id'],
+    referencedColumnNames: ['app_name', 'user_id', 'id'],
+    deleteRule: 'cascade',
+    updateRule: 'no action',
+    ownColumns: [],
+    index: false,
+    nullable: true,
+    ref: true,
+  })
+  session?: Ref<StorageSession>;
 
   [PrimaryKey.name]?: [string, string, string, string];
 }
