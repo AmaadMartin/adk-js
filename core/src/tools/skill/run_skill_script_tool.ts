@@ -11,17 +11,23 @@ import {
   CodeExecutionLanguage,
   File,
 } from '../../code_executors/code_execution_utils.js';
+import {BaseEnvironment} from '../../environment/base_environment.js';
 import {Script, Skill} from '../../skills/skill.js';
+import {formatError, isFileNotFoundError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
   getScriptLanguageByExtension,
 } from '../../utils/file_extension_utils.js';
 import {materializeFiles} from '../../utils/file_utils.js';
+import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
 import {RUN_SKILL_SCRIPT_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
+
+/** Characters of a failure message reported before it is truncated. */
+const MAX_ERROR_MESSAGE_LENGTH = 200;
 
 @experimental
 export class RunSkillScriptTool extends BaseTool {
@@ -35,6 +41,32 @@ export class RunSkillScriptTool extends BaseTool {
   }
 
   override _getDeclaration(): FunctionDeclaration {
+    if (this.toolset.environment) {
+      return {
+        name: this.name,
+        description: this.description,
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            skill_name: {
+              type: Type.STRING,
+              description: 'The name of the skill.',
+            },
+            script_path: {
+              type: Type.STRING,
+              description:
+                "The relative path to the script (e.g., 'scripts/setup.js').",
+            },
+            command: {
+              type: Type.STRING,
+              description: 'The command to execute in the environment.',
+            },
+          },
+          required: ['skill_name', 'script_path', 'command'],
+        },
+      };
+    }
+
     return {
       name: this.name,
       description: this.description,
@@ -83,6 +115,14 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
+    const command = typeof args['command'] === 'string' ? args['command'] : '';
+    if (this.toolset.environment && !command) {
+      return {
+        error: "Argument 'command' is required and must be a string.",
+        errorCode: SkillErrorCode.INVALID_ARGUMENTS,
+      };
+    }
+
     let skill;
     try {
       skill = await this.toolset.getOrFetchSkill(
@@ -116,6 +156,33 @@ export class RunSkillScriptTool extends BaseTool {
         error: `Script '${scriptPath}' not found in skill '${skillName}'.`,
         errorCode: SkillErrorCode.SCRIPT_NOT_FOUND,
       };
+    }
+
+    const environment = this.toolset.environment;
+    if (environment) {
+      try {
+        await ensureSkillMaterializedInEnv(
+          this.toolset.skillsFolderIn(environment),
+          skill,
+          scriptPath,
+          environment,
+        );
+        const result = await environment.execute(
+          command,
+          this.toolset.scriptTimeoutSeconds,
+        );
+        return {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          exit_code: result.exitCode,
+          timed_out: result.timedOut,
+        };
+      } catch (e: unknown) {
+        return {
+          error: `Failed to execute script '${scriptPath}' in environment:\n${describeCause(e)}`,
+          errorCode: SkillErrorCode.EXECUTION_ERROR,
+        };
+      }
     }
 
     let codeExecutor = this.toolset.codeExecutor;
@@ -230,4 +297,60 @@ export function getSkillResourceFiles(skill: Skill): File[] {
   }
 
   return files;
+}
+
+/**
+ * Writes the skill's resources into `env` the first time one of its scripts is
+ * run, so a command the model supplies can reach them on the filesystem.
+ */
+async function ensureSkillMaterializedInEnv(
+  skillsFolder: string,
+  skill: Skill,
+  scriptPath: string,
+  env: BaseEnvironment,
+): Promise<void> {
+  const skillDir = `${skillsFolder}/${skill.frontmatter.name}`;
+  const relScriptPath = scriptPath.startsWith('scripts/')
+    ? scriptPath
+    : `scripts/${scriptPath}`;
+
+  try {
+    await env.readFile(`${skillDir}/${relScriptPath}`);
+    return;
+  } catch (e: unknown) {
+    // Only a missing file means "not materialized yet". Anything else — a
+    // permission failure, a transport error from a remote sandbox — must reach
+    // the caller rather than trigger a pointless rewrite.
+    if (!isFileNotFoundError(e)) {
+      throw e;
+    }
+  }
+
+  logger.debug(
+    `Materializing skill resources for ${skill.frontmatter.name} in environment`,
+  );
+  const resources = skill.resources ?? {};
+  const writes = [
+    ...Object.entries(resources.references ?? {}).map(([name, content]) =>
+      env.writeFile(`${skillDir}/references/${name}`, content),
+    ),
+    ...Object.entries(resources.assets ?? {}).map(([name, content]) =>
+      env.writeFile(`${skillDir}/assets/${name}`, content),
+    ),
+    ...Object.entries(resources.scripts ?? {}).map(([name, script]) =>
+      env.writeFile(`${skillDir}/scripts/${name}`, script.src),
+    ),
+  ];
+  await Promise.all(writes);
+}
+
+/** Renders a thrown value as `<Name>: <message>`, truncating a long message. */
+function describeCause(err: unknown): string {
+  const name = err instanceof Error ? err.name : 'Error';
+  const message = formatError(err);
+  return `${name}: ${
+    message.length > MAX_ERROR_MESSAGE_LENGTH
+      ? `${message.slice(0, MAX_ERROR_MESSAGE_LENGTH)}...`
+      : message
+  }`;
 }

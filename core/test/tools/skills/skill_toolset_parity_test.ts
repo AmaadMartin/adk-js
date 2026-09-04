@@ -34,6 +34,7 @@ import {
   SkillToolset,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {FakeEnvironment} from './fake_environment.js';
 
 class StubCodeExecutor extends BaseCodeExecutor {
   override async executeCode(): Promise<CodeExecutionResult> {
@@ -540,5 +541,230 @@ describe('skill_toolset parity: toolset shape', () => {
 
     expect(resolutions).toBe(2);
     expect(names).toContain('counted_tool');
+  });
+});
+
+describe('skill_toolset parity: environment', () => {
+  const envSkill: Skill = {
+    frontmatter: {name: 'skill1', description: 'A test skill'},
+    instructions: 'Test instructions',
+    resources: {scripts: {'run.py': {src: "print('hi')"}}},
+  };
+
+  it('test_init_accepts_environment', () => {
+    const env = new FakeEnvironment();
+
+    expect(new SkillToolset([envSkill], {environment: env}).environment).toBe(
+      env,
+    );
+  });
+
+  it('test_init_accepts_skills_folder', () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+      skillsFolder: '/custom/skills',
+    });
+
+    expect(toolset.skillsFolder).toBe('/custom/skills');
+  });
+
+  it('test_init_raises_when_skills_folder_provided_without_environment', () => {
+    expect(
+      () => new SkillToolset([envSkill], {skillsFolder: '/custom/skills'}),
+    ).toThrow('Cannot specify skillsFolder without an environment');
+  });
+
+  it('test_skills_folder_defaults_to_environment', () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment({workingDir: '/workspace'}),
+    });
+
+    expect(toolset.skillsFolder).toBe('/workspace/skills');
+  });
+
+  it('test_init_raises_when_both_executor_and_environment_provided', () => {
+    expect(
+      () =>
+        new SkillToolset([envSkill], {
+          codeExecutor: new StubCodeExecutor(),
+          environment: new FakeEnvironment(),
+        }),
+    ).toThrow('Cannot have both codeExecutor and environment');
+  });
+
+  it('test_run_skill_script_declaration_with_environment', () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+    });
+
+    const declaration = new RunSkillScriptTool(toolset)._getDeclaration();
+    const properties = declaration?.parameters?.properties ?? {};
+
+    expect(Object.keys(properties)).toEqual([
+      'skill_name',
+      'script_path',
+      'command',
+    ]);
+    expect(declaration?.parameters?.required).toContain('command');
+  });
+
+  it('test_run_skill_script_execute_with_environment_missing_command', async () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+    });
+
+    const result = (await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py'},
+      toolContext: createContext(),
+    })) as {error: string; errorCode: string};
+
+    expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+    expect(result.error).toContain("Argument 'command' is required");
+  });
+
+  it('test_run_skill_script_execute_with_environment', async () => {
+    const env = new FakeEnvironment({
+      workingDir: '/workspace',
+      result: {exitCode: 0, stdout: 'env out', stderr: '', timedOut: false},
+    });
+    const toolset = new SkillToolset([envSkill], {environment: env});
+
+    const result = await new RunSkillScriptTool(toolset).runAsync({
+      args: {
+        skill_name: 'skill1',
+        script_path: 'run.py',
+        command: 'python3 skills/skill1/scripts/run.py --flag 1',
+      },
+      toolContext: createContext(),
+    });
+
+    expect(result).toEqual({
+      stdout: 'env out',
+      stderr: '',
+      exit_code: 0,
+      timed_out: false,
+    });
+    expect(env.writeCalls.map((w) => w.filePath)).toEqual([
+      '/workspace/skills/skill1/scripts/run.py',
+    ]);
+    expect(env.executeCalls).toHaveLength(1);
+    expect(env.executeCalls[0].command).toBe(
+      'python3 skills/skill1/scripts/run.py --flag 1',
+    );
+  });
+
+  it('test_run_skill_script_environment_execute_exception', async () => {
+    const env = new FakeEnvironment({workingDir: '/workspace'});
+    env.files.set('/workspace/skills/skill1/scripts/run.py', "print('hi')");
+    const toolset = new SkillToolset([envSkill], {environment: env});
+    const tool = new RunSkillScriptTool(toolset);
+    const failure = new Error('Sandbox connection lost');
+    failure.name = 'RuntimeError';
+    env.executeError = failure;
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
+      toolContext: createContext(),
+    })) as {error: string; errorCode: string};
+
+    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain('Failed to execute script');
+    expect(result.error).toContain('RuntimeError: Sandbox connection lost');
+  });
+
+  it('test_run_skill_script_environment_materialize_ls_exception', async () => {
+    const failure = new Error('Failed to check file existence');
+    failure.name = 'RuntimeError';
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment({
+        workingDir: '/workspace',
+        readFileError: failure,
+      }),
+    });
+
+    const result = (await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
+      toolContext: createContext(),
+    })) as {error: string; errorCode: string};
+
+    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain(
+      'RuntimeError: Failed to check file existence',
+    );
+  });
+
+  it('test_run_skill_script_environment_materialize_write_exception', async () => {
+    const failure = new Error('Disk full');
+    failure.name = 'RuntimeError';
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment({
+        workingDir: '/workspace',
+        writeFileError: failure,
+      }),
+    });
+
+    const result = (await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
+      toolContext: createContext(),
+    })) as {error: string; errorCode: string};
+
+    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain('RuntimeError: Disk full');
+  });
+
+  it('test_run_skill_script_materialize_writes_concurrently', async () => {
+    let activeWrites = 0;
+    let maxActiveWrites = 0;
+    const env = new FakeEnvironment({
+      workingDir: '/workspace',
+      onWrite: async () => {
+        activeWrites++;
+        maxActiveWrites = Math.max(maxActiveWrites, activeWrites);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        activeWrites--;
+      },
+    });
+    const multiResourceSkill: Skill = {
+      frontmatter: {name: 'multi-res', description: 'desc'},
+      instructions: 'desc',
+      resources: {
+        references: {'ref1.md': 'c1', 'ref2.md': 'c2'},
+        assets: {'asset1.json': 'c3'},
+        scripts: {'run.py': {src: "print('hi')"}},
+      },
+    };
+    const toolset = new SkillToolset([multiResourceSkill], {environment: env});
+
+    await new RunSkillScriptTool(toolset).runAsync({
+      args: {
+        skill_name: 'multi-res',
+        script_path: 'run.py',
+        command: 'python3 run.py',
+      },
+      toolContext: createContext(),
+    });
+
+    expect(env.writeCalls).toHaveLength(4);
+    expect(maxActiveWrites).toBe(4);
+  });
+
+  it('test_get_tools_keeps_run_skill_script_with_environment', async () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+    });
+
+    const names = (await toolset.getTools(createContext())).map((t) => t.name);
+
+    expect(names).toContain('run_skill_script');
+  });
+
+  it('test_close_cancels_futures_and_clears_cache', async () => {
+    const env = new FakeEnvironment();
+    await env.initialize();
+    const toolset = new SkillToolset([envSkill], {environment: env});
+
+    await toolset.close();
+
+    expect(env.closeCount).toBe(1);
   });
 });
