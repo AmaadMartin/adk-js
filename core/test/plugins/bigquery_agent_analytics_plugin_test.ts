@@ -429,7 +429,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     expect(fake.clientOptions[0]).toEqual({
       projectId: PROJECT_ID,
       location: 'EU',
-      authClient: undefined,
+      credentials: undefined,
       // The plugin owns the retry policy, so the client must not add its own.
       retryOptions: {autoRetry: false},
     });
@@ -1766,6 +1766,154 @@ describe('BigQueryAgentAnalyticsPlugin onEventCallback', () => {
         (row) => row.event_type === AnalyticsEventType.AGENT_RESPONSE,
       ),
     ).toHaveLength(0);
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin custom metadata capture', () => {
+  /** Writes one STATE_DELTA row from an event carrying `customMetadata`. */
+  async function logEventWithMetadata(
+    config: BigQueryLoggerConfig,
+    customMetadata: Record<string, unknown>,
+  ): Promise<AnalyticsRow> {
+    const plugin = makePlugin(config);
+    const event = createEvent({
+      author: 'root_agent',
+      actions: {stateDelta: {counter: 1}},
+    });
+    event.customMetadata = customMetadata;
+    await plugin.onEventCallback({
+      invocationContext: makeInvocationContext(),
+      event,
+    });
+    await plugin.flush();
+    return onlyRow();
+  }
+
+  it('captures nothing when no allowlist is configured', async () => {
+    const row = await logEventWithMetadata({}, {'a2a:task_id': 'task-1'});
+    expect(parseColumn(row.attributes)).not.toHaveProperty('custom_metadata');
+  });
+
+  it('captures nothing when the allowlist is empty', async () => {
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: []},
+      {'a2a:task_id': 'task-1'},
+    );
+    expect(parseColumn(row.attributes)).not.toHaveProperty('custom_metadata');
+  });
+
+  it('captures a key the allowlist names in full', async () => {
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: ['tenant_id']},
+      {tenant_id: 'acme', other: 'dropped'},
+    );
+    expect(parseColumn(row.attributes)).toMatchObject({
+      custom_metadata: {tenant_id: 'acme'},
+    });
+    const attributes = parseColumn(row.attributes) as {
+      custom_metadata: Record<string, unknown>;
+    };
+    expect(attributes.custom_metadata).not.toHaveProperty('other');
+  });
+
+  it('captures every key under an allowlisted prefix', async () => {
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: ['a2a:*']},
+      {'a2a:task_id': 'task-1', 'a2a:context_id': 'ctx-1', unrelated: 'no'},
+    );
+    expect(parseColumn(row.attributes)).toMatchObject({
+      custom_metadata: {'a2a:task_id': 'task-1', 'a2a:context_id': 'ctx-1'},
+    });
+  });
+
+  it('treats a plain key as exact, not as a prefix', async () => {
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: ['tenant']},
+      {tenant_id: 'acme'},
+    );
+    expect(parseColumn(row.attributes)).not.toHaveProperty('custom_metadata');
+  });
+
+  it('writes no key at all when nothing in the event matches', async () => {
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: ['tenant_id']},
+      {other: 'value'},
+    );
+    expect(parseColumn(row.attributes)).not.toHaveProperty('custom_metadata');
+  });
+
+  it('captures nothing from a row that has no source event', async () => {
+    const plugin = makePlugin({customMetadataAllowlist: ['tenant_id']});
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).not.toHaveProperty(
+      'custom_metadata',
+    );
+  });
+
+  it('redacts a captured credential like any other captured value', async () => {
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: ['api_key', 'caller']},
+      {api_key: 'a-real-looking-key', caller: 'alice'},
+    );
+    expect(parseColumn(row.attributes)).toMatchObject({
+      custom_metadata: {api_key: '[REDACTED]', caller: 'alice'},
+    });
+  });
+
+  it('truncates a captured value and marks the row truncated', async () => {
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: ['note'], maxContentLength: 10},
+      {note: 'x'.repeat(200)},
+    );
+    expect(row.is_truncated).toBe(true);
+    expect(JSON.stringify(parseColumn(row.attributes))).toContain('TRUNCATED');
+  });
+
+  it('replaces a captured cycle instead of failing the row', async () => {
+    const cyclic: Record<string, unknown> = {name: 'loop'};
+    cyclic['self'] = cyclic;
+    const row = await logEventWithMetadata(
+      {customMetadataAllowlist: ['ref']},
+      {ref: cyclic},
+    );
+    expect(JSON.stringify(parseColumn(row.attributes))).toContain(
+      'CIRCULAR_REFERENCE',
+    );
+  });
+});
+
+describe('BigQueryAgentAnalyticsPlugin shutdown race', () => {
+  it('counts a row produced after shutdown began', async () => {
+    const plugin = makePlugin();
+    await plugin.shutdown();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    expect(plugin.getDropStats()['shutdown_race']).toBe(1);
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('counts nothing for an event type the denylist already suppresses', async () => {
+    const plugin = makePlugin({
+      eventDenylist: [AnalyticsEventType.INVOCATION_STARTING],
+    });
+    await plugin.shutdown();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    expect(plugin.getDropStats()['shutdown_race']).toBe(0);
+  });
+
+  it('counts nothing while the plugin is disabled', async () => {
+    const plugin = makePlugin({enabled: false});
+    await plugin.shutdown();
+    await plugin.beforeRunCallback({
+      invocationContext: makeInvocationContext(),
+    });
+    expect(plugin.getDropStats()['shutdown_race']).toBe(0);
   });
 });
 

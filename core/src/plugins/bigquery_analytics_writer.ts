@@ -86,14 +86,12 @@ const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([
 const MS_PER_SECOND = 1000;
 
 /**
- * The authenticated client the BigQuery client accepts.
+ * Credentials for the BigQuery client, in the SDK's own option shape.
  *
- * Taken from the SDK's own options rather than from `google-auth-library`
- * directly: `@google-cloud/common` depends on an older major of that package
- * and npm nests a second copy of it, so the two `AuthClient` declarations are
- * not interchangeable.
+ * Taken from the SDK's options rather than declared here, so the two can never
+ * disagree, and so this stays a pass-through with no cast in between.
  */
-export type BigQueryAuthClient = NonNullable<BigQueryOptions['authClient']>;
+export type BigQueryCredentials = BigQueryOptions['credentials'];
 
 /** Everything {@link BigQueryRowWriter} needs to open and feed the table. */
 export interface BigQueryRowWriterOptions {
@@ -101,7 +99,7 @@ export interface BigQueryRowWriterOptions {
   datasetId: string;
   tableId: string;
   location: string;
-  credentials?: BigQueryAuthClient;
+  credentials?: BigQueryCredentials;
   clusteringFields: string[];
   batchSize: number;
   flushIntervalMs: number;
@@ -490,9 +488,7 @@ export class BigQueryRowWriter {
     const clientOptions: BigQueryOptions = {
       projectId,
       location,
-      // A client carrying a quota project sends it as `x-goog-user-project`
-      // on every request, so it needs no separate client option here.
-      authClient: credentials,
+      credentials,
       // This writer owns the retry policy, so `retryConfig` is the only thing
       // deciding how often a failed insert is attempted.
       retryOptions: {autoRetry: false},

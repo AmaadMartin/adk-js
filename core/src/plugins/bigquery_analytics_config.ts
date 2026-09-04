@@ -11,7 +11,7 @@ import {
   validatePayloadColumnDenylist,
 } from './bigquery_analytics_schema.js';
 import type {
-  BigQueryAuthClient,
+  BigQueryCredentials,
   BigQueryRowWriterOptions,
 } from './bigquery_analytics_writer.js';
 
@@ -156,10 +156,9 @@ export interface BigQueryAgentAnalyticsPluginOptions {
   location?: string;
   /**
    * Credentials for the BigQuery client. Application Default Credentials are
-   * used when this is omitted. A client carrying a quota project bills the
-   * requests to it.
+   * used when this is omitted.
    */
-  credentials?: BigQueryAuthClient;
+  credentials?: BigQueryCredentials;
   /** Tuning, all of it optional. */
   config?: BigQueryLoggerConfig;
 }
