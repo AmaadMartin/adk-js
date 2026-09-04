@@ -56,11 +56,7 @@ describe('DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
-    // MikroORM closing
-    const orm = (service as unknown as {orm: MikroORM}).orm;
-    if (orm) {
-      await orm.close();
-    }
+    await service.close();
   });
 
   it('should create a session', async () => {
