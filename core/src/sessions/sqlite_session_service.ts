@@ -134,29 +134,40 @@ export function decodeState(
   return state;
 }
 
-/** Returns whether `JSON.stringify` accepts `value`. */
-function isJsonSerializable(value: unknown): boolean {
+/** Returns whether a JSON column can hold `value` as it stands. */
+function isJsonSafe(value: unknown): boolean {
   try {
-    JSON.stringify(value);
-    return true;
+    // `undefined` means JSON dropped the value outright: a function, a
+    // symbol, or `undefined` itself. A BigInt or a cycle throws instead.
+    return JSON.stringify(value) !== undefined;
   } catch {
     return false;
   }
 }
 
-/** Replaces each value `JSON.stringify` rejects with its string form. */
-function coerceToJsonSafe(
-  bucket: Record<string, unknown>,
-): Record<string, unknown> {
-  const safe: Record<string, unknown> = Object.create(null);
-  for (const [key, value] of Object.entries(bucket)) {
-    safe[key] = isJsonSerializable(value) ? value : String(value);
+/** Coerces one delta value into a form a JSON column can hold. */
+function toJsonSafe(key: string, value: unknown): unknown {
+  if (isJsonSafe(value)) {
+    return value;
   }
-  return safe;
+  logger.warn(
+    `Session state key "${key}" is not JSON-serializable; persisting its` +
+      ' string representation instead.',
+  );
+  return String(value);
 }
 
-/** Splits a state delta into its app, user and session scopes. */
-function extractStateDelta(state: Record<string, unknown>): ScopedStateDelta {
+/**
+ * Splits a state delta into its app, user and session scopes, coercing every
+ * value into a JSON-serializable form.
+ *
+ * A value a JSON column cannot hold is replaced with its string
+ * representation rather than failing the whole write, so a lossy write is
+ * diagnosable instead of fatal.
+ */
+function extractJsonSafeStateDelta(
+  state: Record<string, unknown>,
+): ScopedStateDelta {
   // Null-prototype maps: `state` can arrive straight off a request body, and
   // assigning a `__proto__` key to a plain object literal invokes the
   // inherited setter, which re-parents the map instead of storing the entry.
@@ -167,40 +178,14 @@ function extractStateDelta(state: Record<string, unknown>): ScopedStateDelta {
   };
   for (const [key, value] of Object.entries(state)) {
     if (key.startsWith(State.APP_PREFIX)) {
-      deltas.app[key.slice(State.APP_PREFIX.length)] = value;
+      deltas.app[key.slice(State.APP_PREFIX.length)] = toJsonSafe(key, value);
     } else if (key.startsWith(State.USER_PREFIX)) {
-      deltas.user[key.slice(State.USER_PREFIX.length)] = value;
+      deltas.user[key.slice(State.USER_PREFIX.length)] = toJsonSafe(key, value);
     } else if (!key.startsWith(State.TEMP_PREFIX)) {
-      deltas.session[key] = value;
+      deltas.session[key] = toJsonSafe(key, value);
     }
   }
   return deltas;
-}
-
-/**
- * Splits a state delta by scope and coerces it into a JSON-serializable form.
- *
- * A value the JSON columns cannot hold is replaced with its string
- * representation instead of failing the whole write, so that a lossy write is
- * diagnosable rather than fatal.
- */
-function extractJsonSafeStateDelta(
-  state: Record<string, unknown>,
-): ScopedStateDelta {
-  const deltas = extractStateDelta(state);
-  if (isJsonSerializable(deltas)) {
-    return deltas;
-  }
-  logger.warn(
-    'Failed to serialize session state; some values are not' +
-      ' JSON-serializable and will be replaced with a string representation' +
-      ' in the persisted state.',
-  );
-  return {
-    app: coerceToJsonSafe(deltas.app),
-    user: coerceToJsonSafe(deltas.user),
-    session: coerceToJsonSafe(deltas.session),
-  };
 }
 
 /**
