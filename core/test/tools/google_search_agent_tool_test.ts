@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * The reference tests of this module, ported one for one from
- * `adk-python main — tests/unittests/tools/test_google_search_agent_tool.py`.
- * The `it(...)` strings keep the Python test names verbatim.
- */
-
 import {
   BaseLlm,
   BaseLlmConnection,
@@ -20,6 +14,7 @@ import {
   GoogleSearchAgentTool,
   InMemorySessionService,
   InvocationContext,
+  isAgentTool,
   LlmAgent,
   LlmRequest,
   LlmResponse,
@@ -51,6 +46,11 @@ class ScriptedLlm extends BaseLlm {
   }
 }
 
+/**
+ * The reference tests of this module, ported one for one from
+ * `adk-python main — tests/unittests/tools/test_google_search_agent_tool.py`.
+ * The `it(...)` strings keep the Python test names verbatim.
+ */
 describe('google_search_agent_tool', () => {
   it('test_create_google_search_agent_only_carries_the_search_tool', () => {
     const agent = createGoogleSearchAgent('gemini-2.0-flash');
@@ -101,6 +101,54 @@ describe('google_search_agent_tool', () => {
     expect(toolResult).toBe('response from tool');
     expect(toolContext.state.get(GROUNDING_METADATA_KEY)).toEqual(
       GROUNDING_METADATA,
+    );
+  });
+});
+
+describe('createGoogleSearchAgent', () => {
+  it('describes itself the way adk-python describes the same agent', () => {
+    const agent = createGoogleSearchAgent('gemini-2.5-flash');
+
+    expect(agent.description).toBe(
+      'An agent for performing Google search using the `google_search` tool',
+    );
+  });
+
+  it('instructs the sub-agent to search and nothing else', () => {
+    const agent = createGoogleSearchAgent('gemini-2.5-flash');
+
+    expect(agent.instruction).toContain(
+      'You are a specialized Google search agent.',
+    );
+    expect(agent.instruction).toContain(
+      'When given a search query, use the `google_search` tool to find the related information.',
+    );
+  });
+
+  it('passes a model name through untouched', () => {
+    const agent = createGoogleSearchAgent('gemini-2.5-flash');
+
+    expect(agent.model).toBe('gemini-2.5-flash');
+  });
+});
+
+describe('GoogleSearchAgentTool', () => {
+  it('is an agent tool named after the agent it wraps', () => {
+    const tool = new GoogleSearchAgentTool(
+      createGoogleSearchAgent('gemini-2.5-flash'),
+    );
+
+    expect(isAgentTool(tool)).toBe(true);
+    expect(tool.name).toBe('google_search_agent');
+  });
+
+  it('takes its description from the agent it wraps', () => {
+    const tool = new GoogleSearchAgentTool(
+      createGoogleSearchAgent('gemini-2.5-flash'),
+    );
+
+    expect(tool.description).toBe(
+      'An agent for performing Google search using the `google_search` tool',
     );
   });
 });
