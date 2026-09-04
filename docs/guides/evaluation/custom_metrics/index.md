@@ -62,6 +62,7 @@ Then name it when you build the evaluator.
 
 ```ts
 import {CustomMetricEvaluator, type EvalMetric} from '@google/adk';
+import {fileURLToPath} from 'node:url';
 
 const evalMetric: EvalMetric = {
   metricName: 'brand_voice',
@@ -71,7 +72,7 @@ const evalMetric: EvalMetric = {
 const evaluator = new CustomMetricEvaluator(
   evalMetric,
   './brand_voice.js#scoreBrandVoice',
-  import.meta.filename,
+  fileURLToPath(import.meta.url),
 );
 
 const result = await evaluator.evaluateInvocations(actualInvocations);
@@ -109,6 +110,12 @@ Every failure is an `InputValidationError`, thrown from the first
 
 The first case attaches the underlying failure as the error's `cause`, so you
 can report the real import error rather than only the summary.
+
+A path specifier fails this way in the published package. `core/build.js`
+targets `node10.4`, so esbuild lowers `import()` to `require()`, and `require()`
+rejects the `file:` URL the resolver builds. Name your scoring function with a
+package specifier until that target moves. A path specifier does work when you
+run against the TypeScript sources.
 
 ## What the name may point at
 
