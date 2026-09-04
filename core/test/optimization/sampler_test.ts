@@ -60,9 +60,6 @@ describe('Sampler', () => {
   it('reports the two distinct example id lists', () => {
     expect(sampler.getTrainExampleIds()).toEqual(['t1', 't2']);
     expect(sampler.getValidationExampleIds()).toEqual(['a', 'b']);
-    expect(sampler.getTrainExampleIds()).not.toEqual(
-      sampler.getValidationExampleIds(),
-    );
   });
 
   it('evaluates the validation set and captures no extra data by default', async () => {
@@ -107,7 +104,6 @@ describe('Sampler', () => {
   it('resolves asynchronously', async () => {
     const pending = sampler.sampleAndScore({candidate});
 
-    expect(pending).toBeInstanceOf(Promise);
     await expect(pending).resolves.toHaveProperty('scores');
   });
 });
