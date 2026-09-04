@@ -240,7 +240,7 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   },
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
-    defaultOn: false,
+    defaultOn: true,
   },
   [FeatureName.PUBSUB_TOOL_CONFIG]: {
     stage: FeatureStage.EXPERIMENTAL,

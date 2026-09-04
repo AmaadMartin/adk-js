@@ -36,14 +36,14 @@ describe('FeatureRegistry', () => {
     const config = getFeatureConfig(FeatureName.PROGRESSIVE_SSE_STREAMING);
     expect(config).toBeDefined();
     expect(config?.stage).toBe(FeatureStage.EXPERIMENTAL);
-    expect(config?.defaultOn).toBe(false);
+    expect(config?.defaultOn).toBe(true);
   });
 
   it('should return defaultOn value when no overrides or env vars', () => {
     delete process.env.ADK_ENABLE_PROGRESSIVE_SSE_STREAMING;
     delete process.env.ADK_DISABLE_PROGRESSIVE_SSE_STREAMING;
 
-    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(false);
+    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(true);
   });
 
   it('should respect ADK_DISABLE_ env var', () => {
@@ -81,7 +81,7 @@ describe('FeatureRegistry', () => {
   });
 
   it('should support temporary overrides', async () => {
-    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(false);
+    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(true);
 
     await withTemporaryFeatureOverride(
       FeatureName.PROGRESSIVE_SSE_STREAMING,
@@ -94,7 +94,7 @@ describe('FeatureRegistry', () => {
     );
 
     // restored
-    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(false);
+    expect(isFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING)).toBe(true);
   });
 
   it('should support temporary overrides with promises', async () => {
