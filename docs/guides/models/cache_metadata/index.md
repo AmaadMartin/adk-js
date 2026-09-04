@@ -32,22 +32,19 @@ returns milliseconds, so divide by 1000 before you compare a value against
 
 ## Get started
 
-`createCacheMetadata` validates the field values and freezes the result.
+A `CacheMetadata` value is a plain object. The union decides which fields it
+carries.
 
 ```typescript
-import {
-  createCacheMetadata,
-  expireSoon,
-  formatCacheMetadata,
-} from '@google/adk';
+import {CacheMetadata, expireSoon, formatCacheMetadata} from '@google/adk';
 
-const metadata = createCacheMetadata({
+const metadata: CacheMetadata = {
   cacheName: 'projects/123/locations/us-central1/cachedContents/456',
   expireTime: Date.now() / 1000 + 1800,
   fingerprint: 'abc123def456',
   invocationsUsed: 5,
   contentsCount: 3,
-});
+};
 
 if (expireSoon(metadata)) {
   // Create a new cache before the next invocation.
@@ -57,18 +54,21 @@ const line = formatCacheMetadata(metadata);
 // 'Cache 456: used 5 invocations, cached 3 contents, expires in 30.0min'
 ```
 
-A fingerprint-only record needs two fields.
+A fingerprint-only record carries two fields.
 
 ```typescript
-const prefixOnly = createCacheMetadata({
+const prefixOnly: CacheMetadata = {
   fingerprint: 'abc123def456',
   contentsCount: 3,
-});
+};
 
 expireSoon(prefixOnly); // false: no cache, so nothing expires.
 formatCacheMetadata(prefixOnly);
 // Fingerprint-only: 3 contents, fingerprint=abc123de...
 ```
+
+Setting only some of `cacheName`, `expireTime` and `invocationsUsed` does not
+compile, so a half-populated record cannot reach either function.
 
 ## Expiry
 
@@ -79,31 +79,15 @@ exactly `expireTime - 120` it returns `false`.
 
 On a fingerprint-only record `expireSoon` returns `false`.
 
-## Validation
-
-`createCacheMetadata` throws an `Error` in three cases.
-
-| Condition                                                      | Message                                                                                                                  |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `contentsCount` is negative or fractional                      | `contentsCount must be a non-negative integer.`                                                                          |
-| `invocationsUsed` is negative or fractional                    | `invocationsUsed must be a non-negative integer.`                                                                        |
-| `cacheName`, `expireTime` and `invocationsUsed` are partly set | `cacheName, expireTime and invocationsUsed must all be set (active cache) or all be undefined (fingerprint-only state).` |
-
-The last check repeats at runtime what the union already guarantees at compile
-time. It earns its place when a record arrives from outside the type system,
-such as a metadata object parsed back out of serialized session JSON.
-
-The factory copies each field by name, so an unknown key on the input is
-dropped rather than carried onto the result. The returned object is frozen: an
-assignment to one of its fields throws a `TypeError` in strict mode.
-
 ## Relationship to adk-python
 
 This module ports `google.adk.models.cache_metadata.CacheMetadata`. Two
 differences are deliberate.
 
-- Python raises a pydantic `ValidationError`; this module throws a plain
-  `Error` with the messages above, which is the convention in `core/src`.
+- Python is a pydantic model, and validates counts, the active-state invariant
+  and immutability at run time. Here the union expresses the same rules in the
+  type system, which is how `LlmResponse` and the other models in
+  `core/src/models` port their pydantic counterparts.
 - Python exposes `expire_soon` as a property and the log line through
   `__str__`. A TypeScript interface carries neither, so both are module-level
   functions.

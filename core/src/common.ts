@@ -210,15 +210,10 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
-export {
-  createCacheMetadata,
-  expireSoon,
-  formatCacheMetadata,
-} from './models/cache_metadata.js';
+export {expireSoon, formatCacheMetadata} from './models/cache_metadata.js';
 export type {
   ActiveCacheMetadata,
   CacheMetadata,
-  CacheMetadataInput,
   FingerprintCacheMetadata,
 } from './models/cache_metadata.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';

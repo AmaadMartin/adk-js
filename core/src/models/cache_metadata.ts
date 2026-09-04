@@ -59,27 +59,6 @@ export interface FingerprintCacheMetadata extends CacheMetadataBase {
  */
 export type CacheMetadata = ActiveCacheMetadata | FingerprintCacheMetadata;
 
-/** Field values accepted by {@link createCacheMetadata}. */
-export interface CacheMetadataInput {
-  /** Hash of the cacheable contents. */
-  readonly fingerprint: string;
-
-  /** Number of contents the fingerprint covers. Must be a non-negative integer. */
-  readonly contentsCount: number;
-
-  /** Full resource name of the cached content, for an active cache. */
-  readonly cacheName?: string;
-
-  /** Unix timestamp in seconds when the cache expires, for an active cache. */
-  readonly expireTime?: number;
-
-  /** Invocations served, for an active cache. Must be a non-negative integer. */
-  readonly invocationsUsed?: number;
-
-  /** Unix timestamp in seconds when the cache was created. */
-  readonly createdAt?: number;
-}
-
 /** Slack allowed for processing time when judging an imminent expiry. */
 const EXPIRY_BUFFER_SECONDS = 120;
 
@@ -88,71 +67,8 @@ const FINGERPRINT_PREFIX_LENGTH = 8;
 
 const SECONDS_PER_MINUTE = 60;
 
-const ACTIVE_STATE_ERROR =
-  'cacheName, expireTime and invocationsUsed must all be set (active cache) ' +
-  'or all be undefined (fingerprint-only state).';
-
-function assertNonNegativeInteger(value: number, field: string): void {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`${field} must be a non-negative integer.`);
-  }
-}
-
 function nowSeconds(): number {
   return Date.now() / 1000;
-}
-
-/**
- * Builds a frozen {@link CacheMetadata} and rejects an inconsistent record.
- *
- * The union already rules out a half-populated record at compile time. The
- * checks here cover the values that reach the factory at runtime, such as a
- * metadata record read back from serialized session or event JSON.
- *
- * @param input The field values to validate.
- * @returns A frozen metadata record in the active or fingerprint-only state.
- * @throws Error if a count is not a non-negative integer, or if the active
- *     fields are partly set.
- */
-export function createCacheMetadata(input: CacheMetadataInput): CacheMetadata {
-  const {
-    fingerprint,
-    contentsCount,
-    cacheName,
-    expireTime,
-    invocationsUsed,
-    createdAt,
-  } = input;
-
-  assertNonNegativeInteger(contentsCount, 'contentsCount');
-  if (invocationsUsed !== undefined) {
-    assertNonNegativeInteger(invocationsUsed, 'invocationsUsed');
-  }
-
-  if (
-    cacheName !== undefined &&
-    expireTime !== undefined &&
-    invocationsUsed !== undefined
-  ) {
-    return Object.freeze({
-      fingerprint,
-      contentsCount,
-      createdAt,
-      cacheName,
-      expireTime,
-      invocationsUsed,
-    });
-  }
-
-  if (
-    cacheName !== undefined ||
-    expireTime !== undefined ||
-    invocationsUsed !== undefined
-  ) {
-    throw new Error(ACTIVE_STATE_ERROR);
-  }
-
-  return Object.freeze({fingerprint, contentsCount, createdAt});
 }
 
 /**
