@@ -51,6 +51,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
           getInternal: vi.fn().mockResolvedValue({
             name: 'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
             state: 'STATE_RUNNING',
+            spec: {codeExecutionEnvironment: {codeLanguage: 'LANGUAGE_PYTHON'}},
           }),
           createInternal: vi.fn().mockResolvedValue({
             name: 'operations/create-sandbox-op',
@@ -760,7 +761,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       );
     });
 
-    it('reuses a cached sandbox that declares no language', async () => {
+    it('creates new sandbox if the cached one declares no language', async () => {
       invocationContext.session!.state!['sandbox_name'] =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
@@ -778,7 +779,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
 
       expect(
         mockClient.agentEnginesInternal.sandboxes.createInternal,
-      ).not.toHaveBeenCalled();
+      ).toHaveBeenCalled();
     });
 
     it('rejects a language the sandbox does not support', async () => {
@@ -811,6 +812,31 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(
         mockClient.agentEnginesInternal.createInternal,
       ).toHaveBeenCalledExactlyOnceWith({});
+    });
+
+    it('retries the agent engine creation after a failed attempt', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockRejectedValueOnce(
+        new Error('engine unavailable'),
+      );
+      const codeExecutionInput = {
+        code: 'print("hello")',
+        language: CodeExecutionLanguage.PYTHON,
+        inputFiles: [],
+      };
+
+      await expect(
+        executor.executeCode({invocationContext, codeExecutionInput}),
+      ).rejects.toThrow('engine unavailable');
+
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput,
+      });
+
+      expect(result.stdout).toBe('hello world');
+      expect(
+        mockClient.agentEnginesInternal.createInternal,
+      ).toHaveBeenCalledTimes(2);
     });
   });
 });
