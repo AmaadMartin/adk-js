@@ -123,7 +123,13 @@ describe('dumpPydanticModel', () => {
     ['the narrowest four-byte integer', -0x80000000, Opcode.BININT],
     ['the widest four-byte integer', 0x7fffffff, Opcode.BININT],
     ['an integer past four bytes', 2 ** 40, Opcode.LONG1],
+    ['an integer whose top byte needs a sign pad', 0xffffffff, Opcode.LONG1],
     ['a negative integer past four bytes', -(2 ** 40), Opcode.LONG1],
+    [
+      'a negative integer whose top byte is already signed',
+      -(2 ** 39),
+      Opcode.LONG1,
+    ],
   ])('round-trips %s with the narrowest opcode', (_name, value, opcode) => {
     const payload = dumpPydanticModel(MODULE, CLASS, {n: value});
 
@@ -228,5 +234,11 @@ describe('dumpPydanticModel', () => {
     expect(() =>
       dumpPydanticModel(MODULE, CLASS, {bad: new Date(0)}),
     ).toThrowError(/an instance of Date/);
+  });
+
+  it('refuses an object with no prototype, which has no class to name', () => {
+    expect(() =>
+      dumpPydanticModel(MODULE, CLASS, {bad: Object.create(null)}),
+    ).toThrowError(/an instance of an anonymous class/);
   });
 });

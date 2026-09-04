@@ -59,23 +59,25 @@ const INITIAL_CAPACITY = 256;
 
 const UTF8_ENCODER = new TextEncoder();
 
-/** Names a value in an error message without printing its contents. */
+/**
+ * Names a value in an error message without printing its contents.
+ *
+ * Only a value {@link PickleWriter.value} cannot write reaches this, so `null`
+ * and the container kinds are already handled by the time it is called.
+ */
 function describe(value: unknown): string {
-  if (value === null) {
-    return 'null';
+  if (typeof value !== 'object' || value === null) {
+    return typeof value;
   }
-  if (Array.isArray(value)) {
-    return 'an array';
-  }
-  if (typeof value === 'object') {
-    return `an instance of ${value.constructor?.name ?? 'an anonymous class'}`;
-  }
-  return typeof value;
+  return `an instance of ${value.constructor?.name ?? 'an anonymous class'}`;
 }
 
 /**
  * Encodes an integer as the little-endian two's-complement bytes `LONG1`
  * carries, in the narrowest width that keeps its sign.
+ *
+ * The caller writes anything that fits four bytes as a `BININT`, so the value
+ * here always needs at least five and the loop always runs.
  */
 function twosComplementBytes(value: bigint): Uint8Array {
   const digits: number[] = [];
@@ -84,7 +86,7 @@ function twosComplementBytes(value: bigint): Uint8Array {
     digits.push(Number(remaining & 0xffn));
     remaining >>= 8n;
   }
-  const topBitSet = digits.length > 0 && (digits[digits.length - 1] & 0x80) > 0;
+  const topBitSet = (digits[digits.length - 1] & 0x80) > 0;
   if (value >= 0n && topBitSet) {
     digits.push(0x00);
   } else if (value < 0n && !topBitSet) {
