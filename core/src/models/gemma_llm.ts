@@ -333,7 +333,7 @@ export function extractFunctionCallsFromResponse(
     }
     content.parts = [{functionCall}];
   } catch (e: unknown) {
-    if (isJsonSyntaxError(e)) {
+    if (e instanceof SyntaxError) {
       logger.debug(
         `Error attempting to parse JSON into function call. Leaving as text response. ${formatError(e)}`,
       );
@@ -446,11 +446,6 @@ function toGemmaFunctionCall(value: unknown): FunctionCall | null {
 /** Narrows a value to a plain object. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Reports whether a thrown value is the `SyntaxError` `JSON.parse` raises. */
-function isJsonSyntaxError(e: unknown): boolean {
-  return e instanceof Error && e.name === 'SyntaxError';
 }
 
 /**
