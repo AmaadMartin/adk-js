@@ -21,27 +21,13 @@
  */
 
 import {
-  BaseAgent,
   BasePlugin,
-  Event,
   InvocationContext,
+  LlmAgent,
   PluginManager,
   createSession,
 } from '@google/adk';
 import {afterEach, describe, expect, it} from 'vitest';
-
-/** An agent that yields nothing; the tests only need it to build a context. */
-class QuietAgent extends BaseAgent {
-  // eslint-disable-next-line require-yield -- BaseAgent fixes the AsyncGenerator signature; a body with nothing to emit still has to match it.
-  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {
-    return;
-  }
-
-  // eslint-disable-next-line require-yield -- same as runAsyncImpl above.
-  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-    return;
-  }
-}
 
 /** Records every run error the manager reported to it. */
 class ErrorTrackingPlugin extends BasePlugin {
@@ -84,7 +70,7 @@ class FailingPlugin extends BasePlugin {
 function createContext(): InvocationContext {
   return new InvocationContext({
     invocationId: 'test-invocation',
-    agent: new QuietAgent({name: 'quiet_agent'}),
+    agent: new LlmAgent({name: 'quiet_agent'}),
     session: createSession({id: 'test-session', appName: 'test-app'}),
     pluginManager: new PluginManager(),
   });
