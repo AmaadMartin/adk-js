@@ -317,7 +317,7 @@ export class RunSkillScriptTool extends BaseTool {
     }
   }
 
-  override detectErrorInResponse(response: unknown): string | undefined {
+  detectErrorInResponse(response: unknown): string | undefined {
     const errorType = detectSkillToolError(response);
     if (errorType) {
       return errorType;
@@ -628,19 +628,13 @@ function describeExtension(scriptPath: string): string {
 /**
  * Classifies a completed run as `success`, `warning` or `error`.
  *
- * A reported non-zero status is an error. With no status reported, output on
- * stderr alone is an error and stderr alongside stdout is a warning.
+ * `CodeExecutionResult` carries no exit status, so the streams decide: output
+ * on stderr alone is an error, and stderr alongside stdout is a warning. This
+ * is the branch adk-python falls back to when its executor reports no status.
  */
 function deriveScriptStatus(
   result: CodeExecutionResult,
 ): 'success' | 'warning' | 'error' {
-  // A reported non-zero status is an error. `0`, `null` and `undefined` are
-  // all falsy, so a run that reported success and one that reported nothing
-  // are both classified from the streams: stderr alone is a failure, stderr
-  // alongside stdout is a warning.
-  if (result.exitCode) {
-    return 'error';
-  }
   if (!result.stderr) {
     return 'success';
   }

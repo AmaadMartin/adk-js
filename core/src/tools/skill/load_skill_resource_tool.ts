@@ -160,7 +160,7 @@ export class LoadSkillResourceTool extends BaseTool {
     };
   }
 
-  override detectErrorInResponse(response: unknown): string | undefined {
+  detectErrorInResponse(response: unknown): string | undefined {
     return detectSkillToolError(response);
   }
 
