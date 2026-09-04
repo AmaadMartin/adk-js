@@ -22,9 +22,17 @@
  * an admitted name only ever becomes inert data.
  */
 
-import {transformToCamelCaseEvent} from '../events/event.js';
+import {
+  transformToCamelCaseEvent,
+  transformToSnakeCaseActions,
+} from '../events/event.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
 import {GlobalResolver, loadPickle} from '../utils/pickle_reader.js';
+import {dumpPydanticModel} from '../utils/pickle_writer.js';
+
+/** The Python class a v0 `events.actions` blob holds. */
+const EVENT_ACTIONS_MODULE = 'google.adk.events.event_actions';
+const EVENT_ACTIONS_CLASS = 'EventActions';
 
 /** How `loadEventActions` treats a global outside the allowlist. */
 export interface RestrictedPickleOptions {
@@ -521,4 +529,25 @@ export function loadEventActions(
   // transform converts it and preserves the user-data keys.
   const {actions} = transformToCamelCaseEvent({actions: decoded});
   return createEventActions(actions);
+}
+
+/**
+ * Encodes {@link EventActions} as the pickle a legacy v0 `events.actions`
+ * column holds, so adk-python can read back what adk-js wrote.
+ *
+ * adk-js knows fewer fields than adk-python's `EventActions` declares, and the
+ * absent ones are left out rather than guessed at. Pydantic restores a missing
+ * field from its default, which is the same path a model pickled by an older
+ * adk-python takes.
+ *
+ * @param actions The actions to encode.
+ * @return The pickled bytes, readable by CPython's `pickle.loads`.
+ * @throws If the actions hold a value with no Python counterpart.
+ */
+export function dumpEventActions(actions: EventActions): Uint8Array {
+  return dumpPydanticModel(
+    EVENT_ACTIONS_MODULE,
+    EVENT_ACTIONS_CLASS,
+    transformToSnakeCaseActions(actions),
+  );
 }

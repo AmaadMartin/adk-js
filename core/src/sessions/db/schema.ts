@@ -44,6 +44,23 @@ export const METADATA_TABLE_NAME = 'adk_internal_metadata';
 export const EVENTS_TABLE_NAME = 'events';
 export const STORAGE_KEY_COLUMN_LENGTH = 191;
 
+/**
+ * Widest value a legacy `VARCHAR` event column accepts.
+ *
+ * Declared in {@link './shared.js'}, which every column type shares, and
+ * re-exported here because the legacy schema reads it as an event constant.
+ */
+export {DEFAULT_MAX_VARCHAR_LENGTH};
+
+/**
+ * Fractional-second digits a stored timestamp column keeps.
+ *
+ * MySQL and MariaDB default a `DATETIME` column to whole seconds, which would
+ * round away the millisecond an `Event.timestamp` carries. adk-python asks for
+ * six digits; a JavaScript `Date` holds three.
+ */
+export const DATETIME_FRACTIONAL_DIGITS = 3;
+
 /** The events column only the current layout has. */
 export const EVENT_DATA_COLUMN_NAME = 'event_data';
 /** The events column only the legacy layout has. */
@@ -224,6 +241,45 @@ export class StorageSession {
   updateTime: Date = new Date();
 
   [PrimaryKey.name]?: [string, string, string];
+
+  /**
+   * Returns the update time in milliseconds since the epoch.
+   *
+   * adk-python returns POSIX seconds here. adk-js carries
+   * {@link Session.lastUpdateTime} in milliseconds throughout, so the port
+   * keeps milliseconds: converting would corrupt every staleness comparison
+   * that already reads this value.
+   */
+  getUpdateTimestamp(): number {
+    return this.updateTime.getTime();
+  }
+
+  /**
+   * Returns a stable revision marker for optimistic-concurrency checks.
+   *
+   * A marker is only ever compared for equality against another marker made
+   * the same way, so its format is adk-js's own: an ISO-8601 instant in UTC,
+   * to the millisecond a `Date` holds.
+   */
+  getUpdateMarker(): string {
+    return this.updateTime.toISOString();
+  }
+
+  /** Converts the stored row into a {@link Session}. */
+  toSession(
+    state: Record<string, unknown> = {},
+    events: Event[] = [],
+  ): Session {
+    return createSession({
+      appName: this.appName,
+      userId: this.userId,
+      id: this.id,
+      state,
+      events,
+      lastUpdateTime: this.getUpdateTimestamp(),
+      storageUpdateMarker: this.getUpdateMarker(),
+    });
+  }
 }
 
 /**
