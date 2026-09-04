@@ -16,7 +16,6 @@ import {
 } from '@google/adk';
 import {Content, FunctionCall} from '@google/genai';
 import {isDeepStrictEqual} from 'node:util';
-import {z} from 'zod';
 import {loadRecordings, recordingsFilePath} from './recordings_loader.js';
 import {ReplayConfigError, ReplayVerificationError} from './replay_errors.js';
 import {Recording, ToolRecording} from './test_types.js';
@@ -37,11 +36,9 @@ const TRANSFER_TO_AGENT_TOOL = 'transfer_to_agent';
 const logger = getLogger();
 
 /**
- * The replay config, as read out of session state.
- *
- * A client writes this as a state delta and nothing camelCases a delta on the
- * way in, so both spellings of the multi-word keys are read. adk-python writes
- * snake_case.
+ * The replay config, as read out of session state. A client writes it as a
+ * state delta, which nothing camelCases on the way in, so the keys are the
+ * snake_case ones adk-python's conformance client writes.
  */
 interface ReplayConfig {
   dir: string;
@@ -63,8 +60,6 @@ interface ConsumableRecording extends Recording {
   consumed?: boolean;
 }
 
-const replayConfigSchema = z.looseObject({dir: z.string().min(1)});
-
 /**
  * Reads the replay config out of a session-state value.
  *
@@ -73,26 +68,20 @@ const replayConfigSchema = z.looseObject({dir: z.string().min(1)});
  *     replay.
  */
 function readReplayConfig(raw: unknown): ReplayConfig | undefined {
-  const parsed = replayConfigSchema.safeParse(raw);
-  if (!parsed.success) {
+  if (typeof raw !== 'object' || raw === null) {
     return undefined;
   }
-  const config = parsed.data;
-  const userMessageIndex =
-    config['user_message_index'] ?? config['userMessageIndex'];
-  if (typeof userMessageIndex !== 'number') {
+  const config: Record<string, unknown> = {...raw};
+  const dir = config['dir'];
+  const userMessageIndex = config['user_message_index'];
+  if (typeof dir !== 'string' || !dir || typeof userMessageIndex !== 'number') {
     return undefined;
   }
   return {
-    dir: config.dir,
+    dir,
     userMessageIndex,
-    streamingMode: String(config['streaming_mode'] ?? config['streamingMode']),
+    streamingMode: String(config['streaming_mode']),
   };
-}
-
-/** The agent that owns this call, or `''` for a context with no agent. */
-function agentNameOf(context: Context): string {
-  return context.invocationContext.agent?.name ?? '';
 }
 
 /** The tool recordings this agent replays, in recorded order. */
@@ -160,21 +149,6 @@ function verifyAndTakeNextToolRecording(
   const recording = recordings[agentIndex];
   verifyToolCall(recording.toolCall, toolName, toolArgs, agentName, agentIndex);
   return recording;
-}
-
-/** Applies the event action a recorded `transfer_to_agent` call carries. */
-function applyTransferToAgent(
-  toolName: string,
-  toolArgs: Record<string, unknown>,
-  toolContext: Context,
-): void {
-  if (toolName !== TRANSFER_TO_AGENT_TOOL) {
-    return;
-  }
-  const target = toolArgs['agentName'];
-  if (typeof target === 'string') {
-    toolContext.actions.transferToAgent = target;
-  }
 }
 
 /**
@@ -288,7 +262,7 @@ export class ReplayPlugin extends BasePlugin {
     if (!state) {
       return undefined;
     }
-    const agentName = agentNameOf(params.toolContext);
+    const agentName = params.toolContext.invocationContext.agent?.name ?? '';
     const recording = verifyAndTakeNextToolRecording(
       state,
       agentName,
@@ -304,7 +278,13 @@ export class ReplayPlugin extends BasePlugin {
         toolContext: params.toolContext,
       });
     }
-    applyTransferToAgent(params.tool.name, params.toolArgs, params.toolContext);
+    const target = params.toolArgs['agentName'];
+    if (
+      params.tool.name === TRANSFER_TO_AGENT_TOOL &&
+      typeof target === 'string'
+    ) {
+      params.toolContext.actions.transferToAgent = target;
+    }
 
     logger.debug(
       `Verified and replaying tool response for agent ${agentName}: tool=${params.tool.name}`,

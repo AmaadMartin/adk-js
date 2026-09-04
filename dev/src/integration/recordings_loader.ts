@@ -5,11 +5,11 @@
  */
 
 import {StreamingMode} from '@google/adk';
+import camelcaseKeys from 'camelcase-keys';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {z} from 'zod';
-import {isFileExists} from '../utils/file_utils.js';
 import {ReplayConfigError} from './replay_errors.js';
 import {LlmRecording, Recordings} from './test_types.js';
 
@@ -20,39 +20,29 @@ const RECORDINGS_FILE_NAMES: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
- * Keys whose value is a payload the recorded agent chose, not part of the
- * recordings schema. Their inner keys must survive verbatim: a tool recorded
- * by adk-python with an argument named `user_name` is still `user_name` here.
+ * Paths, in the fixture's own snake_case, whose value is a payload the recorded
+ * agent chose rather than part of the recordings schema. Their inner keys must
+ * survive verbatim, so an argument adk-python recorded as `user_name` is read
+ * back as `user_name`. A path names no array index; `camelcase-keys` skips
+ * those when it matches.
  */
-const OPAQUE_VALUE_KEYS: ReadonlySet<string> = new Set(['args', 'response']);
+const OPAQUE_PAYLOAD_PATHS: readonly string[] = [
+  'recordings.tool_recording.tool_call.args',
+  'recordings.tool_recording.tool_response.response',
+  'recordings.llm_recording.llm_request.contents.parts.function_call.args',
+  'recordings.llm_recording.llm_request.contents.parts.function_response.response',
+  'recordings.llm_recording.llm_response.content.parts.function_call.args',
+  'recordings.llm_recording.llm_response.content.parts.function_response.response',
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function toCamelCase(key: string): string {
-  return key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
-}
-
-/**
- * Converts the snake_case keys of the recordings schema to camelCase, leaving
- * the payloads under {@link OPAQUE_VALUE_KEYS} untouched.
- */
-function camelCaseSchemaKeys(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(camelCaseSchemaKeys);
-  }
-  if (!isRecord(value)) {
-    return value;
-  }
-  const converted: Record<string, unknown> = {};
-  for (const [key, nested] of Object.entries(value)) {
-    const camelKey = toCamelCase(key);
-    converted[camelKey] = OPAQUE_VALUE_KEYS.has(camelKey)
-      ? nested
-      : camelCaseSchemaKeys(nested);
-  }
-  return converted;
+function isFileNotFound(e: unknown): boolean {
+  return (
+    typeof e === 'object' && e !== null && 'code' in e && e.code === 'ENOENT'
+  );
 }
 
 const toolCallSchema = z.object({
@@ -112,12 +102,28 @@ export function recordingsFilePath(
  * @throws ReplayConfigError when the file is missing, unreadable or invalid.
  */
 export async function loadRecordings(file: string): Promise<Recordings> {
-  if (!(await isFileExists(file))) {
-    throw new ReplayConfigError(`Recordings file not found: ${file}`);
+  let content: string;
+  try {
+    content = await fs.readFile(file, 'utf-8');
+  } catch (e: unknown) {
+    if (isFileNotFound(e)) {
+      throw new ReplayConfigError(`Recordings file not found: ${file}`);
+    }
+    throw new ReplayConfigError(
+      `Failed to load recordings from ${file}: ${String(e)}`,
+    );
+  }
+  const document = yaml.load(content);
+  if (!isRecord(document)) {
+    throw new ReplayConfigError(
+      `Failed to load recordings from ${file}: the file is not a YAML mapping`,
+    );
   }
   try {
-    const content = await fs.readFile(file, 'utf-8');
-    const parsed = camelCaseSchemaKeys(yaml.load(content));
+    const parsed = camelcaseKeys(document, {
+      deep: true,
+      stopPaths: OPAQUE_PAYLOAD_PATHS,
+    });
     return recordingsSchema.parse(parsed);
   } catch (e: unknown) {
     throw new ReplayConfigError(

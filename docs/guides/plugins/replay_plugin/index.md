@@ -86,10 +86,10 @@ itself.
 | `user_message_index` | Which user message of the case to replay, 0-based. |
 | `streaming_mode`     | `none` or `sse`. Selects the fixture file.         |
 
-adk-python writes these keys in snake_case, and nothing camelCases a state delta
-on the way in, so the plugin reads `user_message_index` and `userMessageIndex`,
-and `streaming_mode` and `streamingMode`. A config naming no directory or no
-user message index leaves the plugin inert rather than half-enabling replay.
+The keys are snake_case because nothing camelCases a state delta on the way in,
+and adk-python's conformance client writes them that way. A config naming no
+directory or no user message index leaves the plugin inert rather than
+half-enabling replay.
 
 `streaming_mode` picks the file: `none` reads `generated-recordings.yaml` and
 `sse` reads `generated-recordings-sse.yaml`. Any other value throws

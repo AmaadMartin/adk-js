@@ -140,6 +140,64 @@ describe('loadRecordings', () => {
     expect(error.message).toBe(`Recordings file not found: ${missing}`);
   });
 
+  it('reports a read failure that is not a missing file', async () => {
+    const error = await loadRecordings(caseDir).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    if (!(error instanceof Error)) {
+      expect.fail('loadRecordings resolved instead of throwing');
+    }
+    expect(isReplayConfigError(error)).toBe(true);
+    expect(error.message).toContain('Failed to load recordings');
+    expect(error.message).not.toContain('not found');
+  });
+
+  it('rejects a file that is not a YAML mapping', async () => {
+    await fs.writeFile(
+      path.join(caseDir, NON_STREAMING_FILE),
+      '- just a list\n',
+      'utf-8',
+    );
+
+    const error = await loadRecordings(
+      path.join(caseDir, NON_STREAMING_FILE),
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    if (!(error instanceof Error)) {
+      expect.fail('loadRecordings resolved instead of throwing');
+    }
+    expect(isReplayConfigError(error)).toBe(true);
+    expect(error.message).toContain('not a YAML mapping');
+  });
+
+  it('leaves the arguments of a recorded function call untouched', async () => {
+    await fs.writeFile(
+      path.join(caseDir, NON_STREAMING_FILE),
+      'recordings:\n  - user_message_index: 0\n    agent_name: agent_a\n' +
+        '    llm_recording:\n      llm_response:\n        content:\n' +
+        '          parts:\n            - function_call:\n' +
+        '                name: greet\n                args:\n' +
+        '                  user_name: ada\n',
+      'utf-8',
+    );
+
+    const {recordings} = await loadRecordings(
+      path.join(caseDir, NON_STREAMING_FILE),
+    );
+
+    // The schema keys convert, so `function_call` is readable as `functionCall`
+    // while the arguments the agent chose keep the names it recorded.
+    expect(
+      recordings[0].llmRecording?.llmResponse?.content?.parts?.[0]
+        ?.functionCall,
+    ).toEqual({name: 'greet', args: {user_name: 'ada'}});
+  });
+
   it('defaults to no recordings when the file holds an empty mapping', async () => {
     await fs.writeFile(path.join(caseDir, NON_STREAMING_FILE), '{}\n', 'utf-8');
 

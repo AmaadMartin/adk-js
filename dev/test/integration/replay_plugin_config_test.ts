@@ -5,9 +5,7 @@
  */
 
 /**
- * How the plugin reads `_adk_replay_config` out of session state. adk-python
- * writes snake_case keys and nothing camelCases a state delta on the way in,
- * so both spellings have to work.
+ * How the plugin reads `_adk_replay_config` out of session state.
  */
 
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
@@ -17,8 +15,6 @@ import {
   makeInvocation,
   removeCase,
   SpyTool,
-  toolRecordingFixture,
-  writeRecordings,
 } from './replay_test_support.js';
 
 describe('ReplayPlugin session-state config', () => {
@@ -30,28 +26,6 @@ describe('ReplayPlugin session-state config', () => {
 
   afterEach(async () => {
     await removeCase(caseDir);
-  });
-
-  it('reads the camelCase spelling of both multi-word keys', async () => {
-    await writeRecordings(caseDir, [
-      toolRecordingFixture({userMessageIndex: 1, response: {result: 4}}),
-    ]);
-    const plugin = new ReplayPlugin();
-    const {invocationContext, contexts} = makeInvocation({caseDir});
-    invocationContext.session.state['_adk_replay_config'] = {
-      dir: caseDir,
-      userMessageIndex: 1,
-      streamingMode: 'none',
-    };
-
-    await plugin.beforeRunCallback({invocationContext});
-    const replayed = await plugin.beforeToolCallback({
-      tool: new SpyTool(),
-      toolArgs: {sides: 6},
-      toolContext: contexts['agent_a'],
-    });
-
-    expect(replayed).toEqual({result: 4});
   });
 
   it('stays inert when the config names an empty directory', async () => {
