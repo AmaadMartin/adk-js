@@ -25,7 +25,6 @@ import {
   BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
-  extractStateDelta,
   GetSessionConfig,
   GetSessionRequest,
   GetUserStateRequest,
@@ -59,6 +58,7 @@ import {
   storageEventV0ToEvent,
 } from './db/schema_v0.js';
 import {CompositeSessionKey, createSession, Session} from './session.js';
+import {extractJsonSafeStateDelta} from './session_util.js';
 
 /**
  * The message a stale write is rejected with. The wording matches adk-python,
@@ -316,10 +316,11 @@ export class DatabaseSessionService extends BaseSessionService {
   /**
    * Releases the database connections this service opened.
    *
-   * The sqlite driver holds an open connection on the event loop, so a
-   * short-lived process that never calls this never exits. A MikroORM instance
-   * supplied by the caller stays open, because the caller owns it. Calling this
-   * twice, or before `init`, does nothing.
+   * The sqlite driver keeps its file open until the pool closes, so a
+   * short-lived process that never calls this never exits, and a caller that
+   * has finished with a database has no other way to let go of it. A MikroORM
+   * instance supplied by the caller stays open, because the caller owns it.
+   * Calling this twice, or before `init`, does nothing.
    */
   async close(): Promise<void> {
     this.initialized = false;
@@ -398,7 +399,7 @@ export class DatabaseSessionService extends BaseSessionService {
     this.assertWritable();
     const em = this.orm!.em.fork();
 
-    const id = sessionId || randomUUID();
+    const id = sessionId?.trim() || randomUUID();
     const now = new Date();
     if (sessionId && (await this.sessionExists({appName, userId, id}))) {
       throw new AlreadyExistsError(`Session with id ${id} already exists.`);
@@ -417,7 +418,7 @@ export class DatabaseSessionService extends BaseSessionService {
       {appName, userId, state: {}, updateTime: now},
     );
 
-    const delta = extractStateDelta(state ?? {});
+    const delta = extractJsonSafeStateDelta(state ?? {});
     applyScopedDelta(appStateModel, delta.app);
     applyScopedDelta(userStateModel, delta.user);
 
@@ -705,7 +706,9 @@ export class DatabaseSessionService extends BaseSessionService {
     // the in-memory session before trimming it out of the persisted event.
     applyTempState({session, event});
     const trimmedEvent = trimTempDeltaState(event);
-    const delta = extractStateDelta(trimmedEvent.actions.stateDelta ?? {});
+    const delta = extractJsonSafeStateDelta(
+      trimmedEvent.actions.stateDelta ?? {},
+    );
 
     // JSON-encode the tuple so that ('a|b', 'c') and ('a', 'b|c') cannot
     // collide on one lock.

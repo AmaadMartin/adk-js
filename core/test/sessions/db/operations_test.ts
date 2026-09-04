@@ -19,6 +19,7 @@ import {
   getConnectionOptionsFromUri,
   getOrCreateRow,
   namesSupportedDatabaseBackend,
+  parseSqliteUri,
   validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
@@ -112,6 +113,45 @@ describe('operations', () => {
         // constant fails here instead of moving both sides together.
         expect(properties[property].length).toBe(3);
       }
+    });
+
+    describe('state column decoding', () => {
+      /**
+       * The state type bound to `StorageSession.state`. A backend whose driver
+       * decodes a json column itself — Postgres, MySQL — hands this an object
+       * rather than text, and only sqlite is installed here, so the branch is
+       * driven through the bound type directly.
+       */
+      async function bindStateType() {
+        orm = await MikroORM.init({
+          dbName: ':memory:',
+          driver: SqliteDriver,
+          entities: ENTITIES,
+        });
+        const stateType = orm.getMetadata().get(StorageSession.name).properties[
+          'state'
+        ].customType;
+        if (!stateType) {
+          expect.fail('StorageSession.state has no state type bound');
+        }
+        return {stateType, platform: orm.em.getPlatform()};
+      }
+
+      it('accepts an object the driver already decoded', async () => {
+        const {stateType, platform} = await bindStateType();
+
+        expect(stateType.convertToJSValue({turns: 2}, platform)).toEqual({
+          turns: 2,
+        });
+      });
+
+      it('rejects a decoded value that is not an object', async () => {
+        const {stateType, platform} = await bindStateType();
+
+        expect(() => stateType.convertToJSValue([1, 2, 3], platform)).toThrow(
+          'Persisted session state must be a JSON object.',
+        );
+      });
     });
   });
 
@@ -257,6 +297,70 @@ describe('operations', () => {
       expect(options.pool).toEqual({min: 2, max: 4});
       expect(options.debug).toBe(true);
       expect(options.dbName).toBe(':memory:');
+    });
+
+    it('turns foreign keys on for every sqlite connection the pool opens', async () => {
+      const options = await getConnectionOptionsFromUri('sqlite://:memory:');
+      expect(options.driverOptions?.['pool']).toEqual({
+        afterCreate: enableSqliteForeignKeys,
+      });
+    });
+
+    it('leaves a sqlite URI without a query string on the plain file name', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'sqlite:///tmp/test.db',
+      );
+      expect(options.driverOptions?.['connection']).toBeUndefined();
+    });
+
+    it('hands a sqlite query string to the driver as a file URI', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'sqlite://./sessions.db?mode=ro',
+      );
+      expect(options.dbName).toBe('./sessions.db');
+      expect(options.driverOptions?.['connection']).toEqual({
+        filename: 'file:./sessions.db?mode=ro',
+        flags: ['OPEN_URI'],
+      });
+    });
+  });
+
+  describe('parseSqliteUri', () => {
+    it.each([
+      ['sqlite://:memory:', ':memory:'],
+      ['sqlite://./sessions.db', './sessions.db'],
+      ['sqlite:///abs/path.db', '/abs/path.db'],
+      ['sqlite://my%20db.db', 'my%20db.db'],
+    ])('resolves %s to the same path it resolves to today', (uri, dbName) => {
+      expect(parseSqliteUri(uri)).toEqual({dbName, query: ''});
+    });
+
+    it('splits a trailing query string off the path', () => {
+      expect(parseSqliteUri('sqlite:///abs/path.db?mode=ro')).toEqual({
+        dbName: '/abs/path.db',
+        query: 'mode=ro',
+      });
+    });
+
+    it('percent-decodes the path once a query string is present', () => {
+      expect(parseSqliteUri('sqlite://my%20db.db?mode=ro')).toEqual({
+        dbName: 'my db.db',
+        query: 'mode=ro',
+      });
+    });
+
+    it('keeps every parameter of a multi-parameter query string', () => {
+      expect(parseSqliteUri('sqlite://a.db?mode=ro&cache=shared')).toEqual({
+        dbName: 'a.db',
+        query: 'mode=ro&cache=shared',
+      });
+    });
+
+    it('reports an empty query string for a bare trailing question mark', () => {
+      expect(parseSqliteUri('sqlite://a.db?')).toEqual({
+        dbName: 'a.db',
+        query: '',
+      });
     });
   });
 

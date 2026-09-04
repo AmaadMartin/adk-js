@@ -1227,6 +1227,101 @@ describe('DatabaseSessionService', () => {
       ).rejects.toThrow(InputValidationError);
     });
   });
+
+  describe('close', () => {
+    it('releases the connections, and does nothing on a second call', async () => {
+      await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-before-close',
+      });
+
+      await service.close();
+      await service.close();
+
+      // Every connection to a SQLite in-memory database opens a separate,
+      // empty one, so the session is gone exactly when the pool really shut
+      // down and the service reconnected.
+      const gone = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-before-close',
+      });
+      expect(gone).toBeUndefined();
+    });
+  });
+
+  describe('adk-python parity', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('generates an id when the caller supplies whitespace only', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: '   ',
+      });
+
+      expect(session.id.trim()).toBe(session.id);
+      expect(session.id).not.toBe('');
+    });
+
+    it('keeps a caller id that only has surrounding whitespace', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: '  padded  ',
+      });
+
+      expect(session.id).toBe('padded');
+    });
+
+    it('persists a BigInt state value as its digits, warning once', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-bigint',
+        state: {retries: 3n},
+      });
+
+      expect(session.state['retries']).toBe('3');
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      const loaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-bigint',
+      });
+      expect(loaded?.state['retries']).toBe('3');
+    });
+
+    it('persists a state delta value JSON cannot represent', async () => {
+      vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-delta-coerce',
+      });
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({stateDelta: {onDone: () => {}}}),
+        }),
+      });
+
+      const loaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-delta-coerce',
+      });
+      expect(loaded?.state['onDone']).toBe('[Function: onDone]');
+    });
+  });
 });
 
 describe('DatabaseSessionService.close', () => {

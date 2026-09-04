@@ -28,8 +28,10 @@ import {
 } from './schema.js';
 
 const SQLITE_BACKEND = 'sqlite';
+/** Prefix that introduces a sqlite connection string. */
 const SQLITE_URI_PREFIX = 'sqlite://';
-const SQLITE_MEMORY_URI = 'sqlite://:memory:';
+/** The path a sqlite connection string uses to name an in-memory database. */
+const SQLITE_MEMORY_DB_NAME = ':memory:';
 
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
@@ -162,6 +164,39 @@ export function assertSupportedDatabaseUri(uri: string): void {
   }
 }
 
+/** A sqlite connection string split into the parts the driver needs. */
+export interface SqliteUriParts {
+  /** Path of the database file, or `:memory:`. */
+  dbName: string;
+  /** Query string that configures the connection, without its leading `?`. */
+  query: string;
+}
+
+/**
+ * Splits a sqlite connection string into its path and its query string.
+ *
+ * Everything between `sqlite://` and a `?` is the path, verbatim. adk-js does
+ * not follow SQLAlchemy's rule that `sqlite:///x.db` is relative and
+ * `sqlite:////x.db` is absolute, so an existing database keeps resolving to
+ * the file it resolves to today.
+ *
+ * A query string configures the connection instead of becoming part of the
+ * file name, which is what adk-python's `_parse_db_path` does. The path is
+ * percent-decoded only when a query string is present, so a URL without one
+ * is unchanged.
+ */
+export function parseSqliteUri(uri: string): SqliteUriParts {
+  const rest = uri.substring(SQLITE_URI_PREFIX.length);
+  const queryStart = rest.indexOf('?');
+  if (queryStart < 0) {
+    return {dbName: rest, query: ''};
+  }
+  return {
+    dbName: decodeURIComponent(rest.slice(0, queryStart)),
+    query: rest.slice(queryStart + 1),
+  };
+}
+
 /** The part of a raw sqlite connection the foreign-key pragma needs. */
 interface SqliteRawConnection {
   run(sql: string, callback: (error: Error | null) => void): void;
@@ -248,14 +283,29 @@ async function deriveConnectionOptionsFromUri(
   const driver = await DRIVER_LOADERS[backend]();
 
   if (backend === SQLITE_BACKEND) {
-    const isMemory = uri === SQLITE_MEMORY_URI;
+    const {dbName, query} = parseSqliteUri(uri);
+    const isMemory = dbName === SQLITE_MEMORY_DB_NAME;
     return {
       entities: ENTITIES,
-      dbName: isMemory ? ':memory:' : uri.substring(SQLITE_URI_PREFIX.length),
+      dbName,
       driver,
-      // knex reaches every connection it opens through this hook, while the
-      // `pool` option below stays free for the caller to replace.
-      driverOptions: {pool: {afterCreate: enableSqliteForeignKeys}},
+      driverOptions: {
+        // knex reaches every connection it opens through this hook, while the
+        // `pool` option below stays free for the caller to replace.
+        pool: {afterCreate: enableSqliteForeignKeys},
+        // A query string only reaches sqlite through a `file:` name, and
+        // sqlite only reads that name as a URI under `OPEN_URI`. sqlite
+        // validates the parameters it knows, `mode` among them, and ignores
+        // the rest — the same contract adk-python gets from `uri=True`.
+        ...(query
+          ? {
+              connection: {
+                filename: `file:${dbName}?${query}`,
+                flags: ['OPEN_URI'],
+              },
+            }
+          : {}),
+      },
       // Every connection to a SQLite in-memory database opens a separate,
       // empty database, so a pool wider than one connection loses the schema
       // and the rows written through its siblings. This is adk-python's
