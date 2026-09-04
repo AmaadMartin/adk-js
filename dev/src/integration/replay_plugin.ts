@@ -162,16 +162,6 @@ function verifyAndTakeNextToolRecording(
   return recording;
 }
 
-function recordedToolResponse(
-  recording: ToolRecording,
-): Record<string, unknown> {
-  const response = recording.toolResponse?.response;
-  if (response instanceof Map) {
-    return Object.fromEntries(response);
-  }
-  return response ?? {};
-}
-
 /** Applies the event action a recorded `transfer_to_agent` call carries. */
 function applyTransferToAgent(
   toolName: string,
@@ -319,7 +309,7 @@ export class ReplayPlugin extends BasePlugin {
     logger.debug(
       `Verified and replaying tool response for agent ${agentName}: tool=${params.tool.name}`,
     );
-    return recordedToolResponse(recording);
+    return recording.toolResponse?.response ?? {};
   }
 
   /**

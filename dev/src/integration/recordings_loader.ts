@@ -106,10 +106,6 @@ export function recordingsFilePath(
   return path.join(caseDir, fileName);
 }
 
-function describeCause(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
-
 /**
  * Reads and validates one recordings fixture.
  *
@@ -125,7 +121,7 @@ export async function loadRecordings(file: string): Promise<Recordings> {
     return recordingsSchema.parse(parsed);
   } catch (e: unknown) {
     throw new ReplayConfigError(
-      `Failed to load recordings from ${file}: ${describeCause(e)}`,
+      `Failed to load recordings from ${file}: ${String(e)}`,
     );
   }
 }
