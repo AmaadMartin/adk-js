@@ -63,8 +63,8 @@ const BACKENDS = {
     driver: PostgreSqlDriver,
     columns: [
       '"state" jsonb',
-      '"create_time" timestamptz(6)',
-      '"update_time" timestamptz(6)',
+      '"create_time" timestamp(6)',
+      '"update_time" timestamp(6)',
     ],
   },
   mssql: {

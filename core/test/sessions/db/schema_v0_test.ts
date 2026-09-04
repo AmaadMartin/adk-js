@@ -317,8 +317,8 @@ describe('the v0 entity set', () => {
     const sql = await orm.schema.getCreateSchemaSQL();
 
     expect(sql).toContain(
-      'create index `idx_events_app_user_session_ts` on `events` ' +
-        '(`app_name`, `user_id`, `session_id`, `timestamp`)',
+      'create index idx_events_app_user_session_ts on events ' +
+        '(app_name, user_id, session_id, timestamp desc)',
     );
     expect(sql).toContain(
       'foreign key(`session_id`, `app_name`, `user_id`) references ' +
