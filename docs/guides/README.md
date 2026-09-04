@@ -42,6 +42,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [SequentialAgent resumability](agents/sequential_agent/index.md) - Checkpointing a sequential pipeline so it resumes where it stopped, and pausing it on a human-in-the-loop call.
 - [SingleFlow](agents/single_flow/index.md) - The standard request and response processor pipeline an LlmAgent runs, and how to extend it.
 - [Static instructions](agents/static_instruction/index.md) - Sending a fixed prompt prefix verbatim, and where the dynamic instruction goes instead.
+- [TranscriptionManager](agents/transcription_manager/index.md) - Building correctly-authored events from live-streaming transcriptions, and counting them.
 
 ### Apps
 

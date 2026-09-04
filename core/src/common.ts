@@ -167,6 +167,8 @@ export type {SequentialAgentState} from './agents/sequential_agent.js';
 export {parseSequentialAgentYamlConfig} from './agents/sequential_agent_config.js';
 export type {SequentialAgentYamlConfig as DeclarativeSequentialAgentConfig} from './agents/sequential_agent_config.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
+export {TranscriptionManager} from './agents/transcription_manager.js';
+export type {TranscriptionStats} from './agents/transcription_manager.js';
 export {getTransferTargets} from './agents/transfer_utils.js';
 export {
   getPendingUserInputRequests,
