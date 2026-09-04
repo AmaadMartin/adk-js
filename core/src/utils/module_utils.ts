@@ -94,8 +94,8 @@ function invalidName(name: string, cause: unknown): InputValidationError {
  *   specifiers ignore it.
  * @return The exported value.
  * @throws {InputValidationError} When the specifier names a built-in, carries
- *   a URL scheme, fails to load, or names no such export. The underlying
- *   failure is attached as the error's `cause`.
+ *   a URL scheme, needs a base path it was not given, fails to load, or names
+ *   no such export. The underlying failure is attached as the error's `cause`.
  */
 export async function resolveFullyQualifiedName(
   name: string,

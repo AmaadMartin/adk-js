@@ -41,6 +41,9 @@ export {canonicalToolsFor} from './agents/canonical_tools.js';
 export {
   agentRefConfigSchema,
   codeConfigSchema,
+  parseAgentRefConfig,
+  parseCodeConfig,
+  resolveCodeReference,
 } from './agents/common_configs.js';
 export type {AgentRefConfig, CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';

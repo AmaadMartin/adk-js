@@ -7,6 +7,11 @@
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
+import {resolveFullyQualifiedName} from '../utils/module_utils.js';
+
+/** Reported when a code reference does not have the shape of one. */
+const CODE_CONFIG_SHAPE_MESSAGE =
+  'A code reference must be an object with a `name` and no other key.';
 
 /**
  * Schema of a code reference to a variable, a function, or a class.
@@ -150,4 +155,91 @@ export function requireExactlyOneSource(ref: AgentRefConfig): AgentRefConfig {
     );
   }
   return ref;
+}
+
+/**
+ * Parses one config document. The message summarizes the rule the document
+ * broke, and the `ZodError` is kept as the cause, because that is what names
+ * the offending key.
+ */
+function parseConfig<T>(
+  schema: z.ZodType<T>,
+  raw: unknown,
+  message: string,
+): T {
+  const result = schema.safeParse(raw);
+  if (!result.success) {
+    throw new InputValidationError(message, {cause: result.error});
+  }
+  return result.data;
+}
+
+/**
+ * Validates a {@link CodeConfig} taken from a parsed configuration document.
+ * An unknown key is rejected, and so is a missing or empty `name`.
+ *
+ * The schema behind this is {@link codeConfigSchema}, so a caller that already
+ * parses a whole document with a schema does not need this function.
+ *
+ * @experimental (Experimental, subject to change.)
+ *
+ * @param raw The value read from the configuration document.
+ * @return The validated config, holding only the declared property.
+ * @throws {InputValidationError} When the value is not a valid `CodeConfig`.
+ */
+export function parseCodeConfig(raw: unknown): CodeConfig {
+  return parseConfig(codeConfigSchema, raw, CODE_CONFIG_SHAPE_MESSAGE);
+}
+
+/**
+ * Validates an {@link AgentRefConfig} taken from a parsed configuration
+ * document. An unknown key is rejected, `config_path` is accepted as an alias
+ * of `configPath`, and exactly one of `code` and `configPath` must be set.
+ *
+ * The field shape comes from {@link agentRefFieldsSchema} and the exactly-one
+ * rule from {@link requireExactlyOneSource}, so that both set and neither set
+ * report the message that names the mistake.
+ *
+ * @experimental (Experimental, subject to change.)
+ *
+ * @param raw The value read from the configuration document.
+ * @return The validated config, holding only the declared properties.
+ * @throws {InputValidationError} When the value is not a valid
+ *   `AgentRefConfig`.
+ */
+export function parseAgentRefConfig(raw: unknown): AgentRefConfig {
+  return requireExactlyOneSource(
+    parseConfig(
+      agentRefFieldsSchema,
+      raw,
+      'An agent reference must be an object with `code` or `configPath` and ' +
+        'no other key.',
+    ),
+  );
+}
+
+/**
+ * Resolves a {@link CodeConfig} to the value it names.
+ *
+ * The import runs the named module's top-level code, so a caller trusts the
+ * config exactly as far as it trusts the configuration file it came from.
+ *
+ * @experimental (Experimental, subject to change.)
+ *
+ * @param config The reference to resolve.
+ * @param baseFilePath Absolute path of the configuration file the reference
+ *   came from. A `./`-relative name needs it; a bare or absolute name does
+ *   not.
+ * @return The named value, for the caller to narrow.
+ * @throws {InputValidationError} When the `name` is empty, or does not
+ *   resolve.
+ */
+export async function resolveCodeReference(
+  config: CodeConfig,
+  baseFilePath?: string,
+): Promise<unknown> {
+  if (!config.name) {
+    throw new InputValidationError(CODE_CONFIG_SHAPE_MESSAGE);
+  }
+  return resolveFullyQualifiedName(config.name, baseFilePath);
 }
