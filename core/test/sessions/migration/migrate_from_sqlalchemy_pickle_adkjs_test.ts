@@ -44,6 +44,15 @@ import {
 
 const NOW = '2026-01-01 10:00:00.000000';
 
+/**
+ * Test budget (ms) for a case that opens a database.
+ *
+ * Each of these creates one or two MikroORM instances over a real sqlite file.
+ * That runs well inside Vitest's 5s default on Linux, and past it on a loaded
+ * Windows runner, where the same case took over five seconds in CI.
+ */
+const DATABASE_TEST_TIMEOUT_MS = 30_000;
+
 describe('parseMigrationArgs', () => {
   it('accepts a value separated by a space', () => {
     expect(
@@ -307,328 +316,336 @@ describe('rowToEvent', () => {
   });
 });
 
-describe('migrateFromSqlalchemyPickle side effects', () => {
-  let directory: string;
-  let logs: CapturedLogs;
+describe(
+  'migrateFromSqlalchemyPickle side effects',
+  {timeout: DATABASE_TEST_TIMEOUT_MS},
+  () => {
+    let directory: string;
+    let logs: CapturedLogs;
 
-  beforeAll(() => {
-    directory = makeTempDir();
-  });
-
-  afterAll(() => {
-    rmSync(directory, {recursive: true, force: true});
-  });
-
-  beforeEach(() => {
-    logs = captureLogs();
-  });
-
-  afterEach(() => {
-    logs.restore();
-  });
-
-  it('migrates what it finds and reports each absent table', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'partial-source.db'),
-    );
-    await source.createV0Tables(['sessions']);
-    await source.insert('sessions', {
-      app_name: 'app1',
-      user_id: 'user1',
-      id: 'session1',
-      state: '{"skey": 1}',
-      create_time: NOW,
-      update_time: NOW,
-    });
-    const sourceDbUrl = source.url;
-    await source.close();
-    const destPath = databasePath(directory, 'partial-dest.db');
-
-    const summary = await migrateFromSqlalchemyPickle({
-      sourceDbUrl,
-      destDbUrl: sqliteUrl(destPath),
+    beforeAll(() => {
+      directory = makeTempDir();
     });
 
-    expect(summary).toEqual({
-      appStates: 0,
-      userStates: 0,
-      sessions: 1,
-      events: 0,
-      skippedEvents: 0,
-    });
-    expect(logs.text()).toContain("No 'app_states' table found in source db.");
-    expect(logs.text()).toContain("No 'user_states' table found in source db.");
-    expect(logs.text()).toContain(
-      "No 'events' table found in source database.",
-    );
-  });
-
-  it('leaves the source database untouched', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'readonly-source.db'),
-    );
-    await source.createV0Tables();
-    await source.insert('sessions', {
-      app_name: 'app1',
-      user_id: 'user1',
-      id: 'session1',
-      state: '{}',
-      create_time: NOW,
-      update_time: NOW,
-    });
-    await source.insert('events', {
-      id: 'event1',
-      app_name: 'app1',
-      user_id: 'user1',
-      session_id: 'session1',
-      invocation_id: 'invoke1',
-      author: 'user',
-      actions: fixtureBytes(SIMPLE_STATE_DELTA),
-      timestamp: NOW,
-    });
-    const before = await source.columnsOf('events');
-    const sourceDbUrl = source.url;
-    const sourcePath = source.path;
-    await source.close();
-
-    await migrateFromSqlalchemyPickle({
-      sourceDbUrl,
-      destDbUrl: sqliteUrl(databasePath(directory, 'readonly-dest.db')),
+    afterAll(() => {
+      rmSync(directory, {recursive: true, force: true});
     });
 
-    const reopened = await SqliteFixture.open(sourcePath);
-    const after = await reopened.columnsOf('events');
-    const tables = await reopened.execute(
-      "SELECT name FROM sqlite_master WHERE type = 'table'",
-    );
-    await reopened.close();
-
-    expect(after).toEqual(before);
-    expect(after).not.toContain('event_data');
-    expect(tables.map((row) => row['name'])).not.toContain(
-      'adk_internal_metadata',
-    );
-  });
-
-  it('counts an unconvertible event row as skipped and keeps going', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'skipped-source.db'),
-    );
-    await source.createV0Tables();
-    await source.insert('sessions', {
-      app_name: 'app1',
-      user_id: 'user1',
-      id: 'session1',
-      state: '{}',
-      create_time: NOW,
-      update_time: NOW,
+    beforeEach(() => {
+      logs = captureLogs();
     });
-    for (const [id, timestamp] of [
-      ['event-good', NOW],
-      ['event-bad', 'not-a-timestamp'],
-    ]) {
+
+    afterEach(() => {
+      logs.restore();
+    });
+
+    it('migrates what it finds and reports each absent table', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'partial-source.db'),
+      );
+      await source.createV0Tables(['sessions']);
+      await source.insert('sessions', {
+        app_name: 'app1',
+        user_id: 'user1',
+        id: 'session1',
+        state: '{"skey": 1}',
+        create_time: NOW,
+        update_time: NOW,
+      });
+      const sourceDbUrl = source.url;
+      await source.close();
+      const destPath = databasePath(directory, 'partial-dest.db');
+
+      const summary = await migrateFromSqlalchemyPickle({
+        sourceDbUrl,
+        destDbUrl: sqliteUrl(destPath),
+      });
+
+      expect(summary).toEqual({
+        appStates: 0,
+        userStates: 0,
+        sessions: 1,
+        events: 0,
+        skippedEvents: 0,
+      });
+      expect(logs.text()).toContain(
+        "No 'app_states' table found in source db.",
+      );
+      expect(logs.text()).toContain(
+        "No 'user_states' table found in source db.",
+      );
+      expect(logs.text()).toContain(
+        "No 'events' table found in source database.",
+      );
+    });
+
+    it('leaves the source database untouched', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'readonly-source.db'),
+      );
+      await source.createV0Tables();
+      await source.insert('sessions', {
+        app_name: 'app1',
+        user_id: 'user1',
+        id: 'session1',
+        state: '{}',
+        create_time: NOW,
+        update_time: NOW,
+      });
       await source.insert('events', {
-        id,
+        id: 'event1',
         app_name: 'app1',
         user_id: 'user1',
         session_id: 'session1',
         invocation_id: 'invoke1',
         author: 'user',
         actions: fixtureBytes(SIMPLE_STATE_DELTA),
-        timestamp,
+        timestamp: NOW,
       });
-    }
-    const sourceDbUrl = source.url;
-    await source.close();
-    const destPath = databasePath(directory, 'skipped-dest.db');
+      const before = await source.columnsOf('events');
+      const sourceDbUrl = source.url;
+      const sourcePath = source.path;
+      await source.close();
 
-    const summary = await migrateFromSqlalchemyPickle({
-      sourceDbUrl,
-      destDbUrl: sqliteUrl(destPath),
+      await migrateFromSqlalchemyPickle({
+        sourceDbUrl,
+        destDbUrl: sqliteUrl(databasePath(directory, 'readonly-dest.db')),
+      });
+
+      const reopened = await SqliteFixture.open(sourcePath);
+      const after = await reopened.columnsOf('events');
+      const tables = await reopened.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'",
+      );
+      await reopened.close();
+
+      expect(after).toEqual(before);
+      expect(after).not.toContain('event_data');
+      expect(tables.map((row) => row['name'])).not.toContain(
+        'adk_internal_metadata',
+      );
     });
 
-    expect(summary).toMatchObject({events: 1, skippedEvents: 1});
-    expect(logs.text()).toContain(
-      'Failed to migrate event row event-bad: Event event-bad must have a timestamp.',
-    );
+    it('counts an unconvertible event row as skipped and keeps going', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'skipped-source.db'),
+      );
+      await source.createV0Tables();
+      await source.insert('sessions', {
+        app_name: 'app1',
+        user_id: 'user1',
+        id: 'session1',
+        state: '{}',
+        create_time: NOW,
+        update_time: NOW,
+      });
+      for (const [id, timestamp] of [
+        ['event-good', NOW],
+        ['event-bad', 'not-a-timestamp'],
+      ]) {
+        await source.insert('events', {
+          id,
+          app_name: 'app1',
+          user_id: 'user1',
+          session_id: 'session1',
+          invocation_id: 'invoke1',
+          author: 'user',
+          actions: fixtureBytes(SIMPLE_STATE_DELTA),
+          timestamp,
+        });
+      }
+      const sourceDbUrl = source.url;
+      await source.close();
+      const destPath = databasePath(directory, 'skipped-dest.db');
 
-    const destination = await SqliteFixture.open(destPath);
-    const rows = await destination.execute('SELECT id FROM events');
-    await destination.close();
-    expect(rows.map((row) => row['id'])).toEqual(['event-good']);
-  });
+      const summary = await migrateFromSqlalchemyPickle({
+        sourceDbUrl,
+        destDbUrl: sqliteUrl(destPath),
+      });
 
-  it('names an event row with no id column in the skip warning', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'no-id-source.db'),
-    );
-    // A legacy table that lost its id column: every row is unconvertible, and
-    // the warning has no id to name.
-    await source.execute(`CREATE TABLE events (
+      expect(summary).toMatchObject({events: 1, skippedEvents: 1});
+      expect(logs.text()).toContain(
+        'Failed to migrate event row event-bad: Event event-bad must have a timestamp.',
+      );
+
+      const destination = await SqliteFixture.open(destPath);
+      const rows = await destination.execute('SELECT id FROM events');
+      await destination.close();
+      expect(rows.map((row) => row['id'])).toEqual(['event-good']);
+    });
+
+    it('names an event row with no id column in the skip warning', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'no-id-source.db'),
+      );
+      // A legacy table that lost its id column: every row is unconvertible, and
+      // the warning has no id to name.
+      await source.execute(`CREATE TABLE events (
       app_name VARCHAR(128) NOT NULL,
       user_id VARCHAR(128) NOT NULL,
       session_id VARCHAR(128) NOT NULL,
       timestamp TIMESTAMP NOT NULL
     )`);
-    await source.insert('events', {
-      app_name: 'app1',
-      user_id: 'user1',
-      session_id: 'session1',
-      timestamp: NOW,
-    });
-    const sourceDbUrl = source.url;
-    await source.close();
+      await source.insert('events', {
+        app_name: 'app1',
+        user_id: 'user1',
+        session_id: 'session1',
+        timestamp: NOW,
+      });
+      const sourceDbUrl = source.url;
+      await source.close();
 
-    const summary = await migrateFromSqlalchemyPickle({
-      sourceDbUrl,
-      destDbUrl: sqliteUrl(databasePath(directory, 'no-id-dest.db')),
+      const summary = await migrateFromSqlalchemyPickle({
+        sourceDbUrl,
+        destDbUrl: sqliteUrl(databasePath(directory, 'no-id-dest.db')),
+      });
+
+      expect(summary).toMatchObject({events: 0, skippedEvents: 1});
+      expect(logs.text()).toContain(
+        'Failed to migrate event row N/A: Event must have an id.',
+      );
     });
 
-    expect(summary).toMatchObject({events: 0, skippedEvents: 1});
-    expect(logs.text()).toContain(
-      'Failed to migrate event row N/A: Event must have an id.',
-    );
-  });
+    it('rolls the destination back when a row cannot be written', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'rollback-source.db'),
+      );
+      await source.createV0Tables(['app_states', 'sessions']);
+      await source.insert('app_states', {
+        app_name: 'app1',
+        state: '{"akey": 1}',
+        update_time: NOW,
+      });
+      // A create_time far outside the range a Date can represent, so the
+      // session write fails after the app state was staged in the same
+      // transaction.
+      await source.insert('sessions', {
+        app_name: 'app1',
+        user_id: 'user1',
+        id: 'session1',
+        state: '{}',
+        create_time: 1e300,
+        update_time: NOW,
+      });
+      const sourceDbUrl = source.url;
+      await source.close();
+      const destPath = databasePath(directory, 'rollback-dest.db');
 
-  it('rolls the destination back when a row cannot be written', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'rollback-source.db'),
-    );
-    await source.createV0Tables(['app_states', 'sessions']);
-    await source.insert('app_states', {
-      app_name: 'app1',
-      state: '{"akey": 1}',
-      update_time: NOW,
-    });
-    // A create_time far outside the range a Date can represent, so the
-    // session write fails after the app state was staged in the same
-    // transaction.
-    await source.insert('sessions', {
-      app_name: 'app1',
-      user_id: 'user1',
-      id: 'session1',
-      state: '{}',
-      create_time: 1e300,
-      update_time: NOW,
-    });
-    const sourceDbUrl = source.url;
-    await source.close();
-    const destPath = databasePath(directory, 'rollback-dest.db');
+      await expect(
+        migrateFromSqlalchemyPickle({
+          sourceDbUrl,
+          destDbUrl: sqliteUrl(destPath),
+        }),
+      ).rejects.toThrow(/^An error occurred during migration: /);
 
-    await expect(
-      migrateFromSqlalchemyPickle({
+      const destination = await SqliteFixture.open(destPath);
+      const appStates = await destination.execute('SELECT * FROM app_states');
+      const sessions = await destination.execute('SELECT * FROM sessions');
+      await destination.close();
+      expect(appStates).toEqual([]);
+      expect(sessions).toEqual([]);
+    });
+
+    it('refuses a destination stamped with an incompatible schema version', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'version-source.db'),
+      );
+      await source.createV0Tables(['sessions']);
+      const sourceDbUrl = source.url;
+      await source.close();
+
+      const destPath = databasePath(directory, 'version-dest.db');
+      const destination = await SqliteFixture.open(destPath);
+      await destination.execute(
+        'CREATE TABLE adk_internal_metadata (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL)',
+      );
+      await destination.insert('adk_internal_metadata', {
+        key: 'schema_version',
+        value: '99',
+      });
+      await destination.close();
+
+      await expect(
+        migrateFromSqlalchemyPickle({
+          sourceDbUrl,
+          destDbUrl: sqliteUrl(destPath),
+        }),
+      ).rejects.toThrow(
+        'An error occurred during migration: ADK Database schema version 99 is not compatible.',
+      );
+    });
+
+    it('warns before reading a source with unsafe unpickling enabled', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'unsafe-warning-source.db'),
+      );
+      await source.createV0Tables(['sessions']);
+      const sourceDbUrl = source.url;
+      await source.close();
+
+      await migrateFromSqlalchemyPickle({
+        sourceDbUrl,
+        destDbUrl: sqliteUrl(databasePath(directory, 'unsafe-warning-dest.db')),
+        allowUnsafeUnpickling: true,
+      });
+
+      expect(logs.text()).toContain('Unsafe pickle migration mode is enabled.');
+    });
+
+    it('defaults a state column the source left unusable to an empty object', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'state-source.db'),
+      );
+      await source.createV0Tables(['app_states', 'user_states']);
+      await source.insert('app_states', {
+        app_name: 'broken-json',
+        state: '{not json',
+        update_time: NOW,
+      });
+      await source.insert('app_states', {
+        app_name: 'not-an-object',
+        state: '[1, 2]',
+        update_time: NOW,
+      });
+      // A state column of another type, and an update_time no driver would
+      // return as a timestamp: both fall back rather than failing the run.
+      await source.insert('user_states', {
+        app_name: 'app1',
+        user_id: 'user1',
+        state: 7,
+        update_time: 'not-a-time',
+      });
+      const sourceDbUrl = source.url;
+      await source.close();
+      const destPath = databasePath(directory, 'state-dest.db');
+
+      await migrateFromSqlalchemyPickle({
         sourceDbUrl,
         destDbUrl: sqliteUrl(destPath),
-      }),
-    ).rejects.toThrow(/^An error occurred during migration: /);
+      });
 
-    const destination = await SqliteFixture.open(destPath);
-    const appStates = await destination.execute('SELECT * FROM app_states');
-    const sessions = await destination.execute('SELECT * FROM sessions');
-    await destination.close();
-    expect(appStates).toEqual([]);
-    expect(sessions).toEqual([]);
-  });
+      const destination = await SqliteFixture.open(destPath);
+      const appStates = await destination.execute(
+        'SELECT app_name, state FROM app_states ORDER BY app_name',
+      );
+      const userStates = await destination.execute(
+        'SELECT update_time FROM user_states',
+      );
+      await destination.close();
 
-  it('refuses a destination stamped with an incompatible schema version', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'version-source.db'),
-    );
-    await source.createV0Tables(['sessions']);
-    const sourceDbUrl = source.url;
-    await source.close();
-
-    const destPath = databasePath(directory, 'version-dest.db');
-    const destination = await SqliteFixture.open(destPath);
-    await destination.execute(
-      'CREATE TABLE adk_internal_metadata (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL)',
-    );
-    await destination.insert('adk_internal_metadata', {
-      key: 'schema_version',
-      value: '99',
+      expect(appStates.map((row) => row['state'])).toEqual(['{}', '{}']);
+      expect(userStates[0]['update_time']).toBeTruthy();
+      expect(logs.text()).toContain(
+        'Failed to parse state JSON string, defaulting to empty dict.',
+      );
+      expect(logs.text()).toContain(
+        'State JSON was not an object, defaulting to empty dict.',
+      );
     });
-    await destination.close();
+  },
+);
 
-    await expect(
-      migrateFromSqlalchemyPickle({
-        sourceDbUrl,
-        destDbUrl: sqliteUrl(destPath),
-      }),
-    ).rejects.toThrow(
-      'An error occurred during migration: ADK Database schema version 99 is not compatible.',
-    );
-  });
-
-  it('warns before reading a source with unsafe unpickling enabled', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'unsafe-warning-source.db'),
-    );
-    await source.createV0Tables(['sessions']);
-    const sourceDbUrl = source.url;
-    await source.close();
-
-    await migrateFromSqlalchemyPickle({
-      sourceDbUrl,
-      destDbUrl: sqliteUrl(databasePath(directory, 'unsafe-warning-dest.db')),
-      allowUnsafeUnpickling: true,
-    });
-
-    expect(logs.text()).toContain('Unsafe pickle migration mode is enabled.');
-  });
-
-  it('defaults a state column the source left unusable to an empty object', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'state-source.db'),
-    );
-    await source.createV0Tables(['app_states', 'user_states']);
-    await source.insert('app_states', {
-      app_name: 'broken-json',
-      state: '{not json',
-      update_time: NOW,
-    });
-    await source.insert('app_states', {
-      app_name: 'not-an-object',
-      state: '[1, 2]',
-      update_time: NOW,
-    });
-    // A state column of another type, and an update_time no driver would
-    // return as a timestamp: both fall back rather than failing the run.
-    await source.insert('user_states', {
-      app_name: 'app1',
-      user_id: 'user1',
-      state: 7,
-      update_time: 'not-a-time',
-    });
-    const sourceDbUrl = source.url;
-    await source.close();
-    const destPath = databasePath(directory, 'state-dest.db');
-
-    await migrateFromSqlalchemyPickle({
-      sourceDbUrl,
-      destDbUrl: sqliteUrl(destPath),
-    });
-
-    const destination = await SqliteFixture.open(destPath);
-    const appStates = await destination.execute(
-      'SELECT app_name, state FROM app_states ORDER BY app_name',
-    );
-    const userStates = await destination.execute(
-      'SELECT update_time FROM user_states',
-    );
-    await destination.close();
-
-    expect(appStates.map((row) => row['state'])).toEqual(['{}', '{}']);
-    expect(userStates[0]['update_time']).toBeTruthy();
-    expect(logs.text()).toContain(
-      'Failed to parse state JSON string, defaulting to empty dict.',
-    );
-    expect(logs.text()).toContain(
-      'State JSON was not an object, defaulting to empty dict.',
-    );
-  });
-});
-
-describe('main', () => {
+describe('main', {timeout: DATABASE_TEST_TIMEOUT_MS}, () => {
   let directory: string;
   let logs: CapturedLogs;
 
@@ -683,7 +700,7 @@ describe('main', () => {
   });
 });
 
-describe('the migrated database', () => {
+describe('the migrated database', {timeout: DATABASE_TEST_TIMEOUT_MS}, () => {
   let directory: string;
   let logs: CapturedLogs;
 
@@ -780,74 +797,78 @@ const CLI_PATH = resolve(
   'dist/esm/sessions/migration/cli.js',
 );
 
-describe('the command-line entry point', () => {
-  let directory: string;
+describe(
+  'the command-line entry point',
+  {timeout: DATABASE_TEST_TIMEOUT_MS},
+  () => {
+    let directory: string;
 
-  beforeAll(() => {
-    directory = makeTempDir();
-  });
-
-  afterAll(() => {
-    rmSync(directory, {recursive: true, force: true});
-  });
-
-  it('migrates a real database in its own process', async () => {
-    const source = await SqliteFixture.open(
-      databasePath(directory, 'e2e-source.db'),
-    );
-    await source.createV0Tables();
-    await source.insert('sessions', {
-      app_name: 'app1',
-      user_id: 'user1',
-      id: 'session1',
-      state: '{"skey": 1}',
-      create_time: NOW,
-      update_time: NOW,
-    });
-    await source.insert('events', {
-      id: 'event1',
-      app_name: 'app1',
-      user_id: 'user1',
-      session_id: 'session1',
-      invocation_id: 'invoke1',
-      author: 'user',
-      actions: fixtureBytes(SIMPLE_STATE_DELTA),
-      timestamp: NOW,
-    });
-    const sourceDbUrl = source.url;
-    await source.close();
-    const destPath = databasePath(directory, 'e2e-dest.db');
-
-    const run = spawnSync(
-      process.execPath,
-      [
-        CLI_PATH,
-        `--source_db_url=${sourceDbUrl}`,
-        `--dest_db_url=${sqliteUrl(destPath)}`,
-      ],
-      {encoding: 'utf8'},
-    );
-
-    expect(run.status).toBe(0);
-
-    const destination = await SqliteFixture.open(destPath);
-    const sessions = await destination.execute('SELECT id FROM sessions');
-    const events = await destination.execute('SELECT event_data FROM events');
-    const metadata = await destination.execute(
-      'SELECT value FROM adk_internal_metadata',
-    );
-    await destination.close();
-
-    expect(sessions.map((row) => row['id'])).toEqual(['session1']);
-    expect(String(events[0]['event_data'])).toContain('"skey":4');
-    expect(metadata[0]['value']).toBe('1');
-  });
-
-  it('exits non-zero when the invocation is wrong', () => {
-    const run = spawnSync(process.execPath, [CLI_PATH, '--nope'], {
-      encoding: 'utf8',
+    beforeAll(() => {
+      directory = makeTempDir();
     });
 
-    expect(run.status).toBe(1);
-  });
-});
+    afterAll(() => {
+      rmSync(directory, {recursive: true, force: true});
+    });
+
+    it('migrates a real database in its own process', async () => {
+      const source = await SqliteFixture.open(
+        databasePath(directory, 'e2e-source.db'),
+      );
+      await source.createV0Tables();
+      await source.insert('sessions', {
+        app_name: 'app1',
+        user_id: 'user1',
+        id: 'session1',
+        state: '{"skey": 1}',
+        create_time: NOW,
+        update_time: NOW,
+      });
+      await source.insert('events', {
+        id: 'event1',
+        app_name: 'app1',
+        user_id: 'user1',
+        session_id: 'session1',
+        invocation_id: 'invoke1',
+        author: 'user',
+        actions: fixtureBytes(SIMPLE_STATE_DELTA),
+        timestamp: NOW,
+      });
+      const sourceDbUrl = source.url;
+      await source.close();
+      const destPath = databasePath(directory, 'e2e-dest.db');
+
+      const run = spawnSync(
+        process.execPath,
+        [
+          CLI_PATH,
+          `--source_db_url=${sourceDbUrl}`,
+          `--dest_db_url=${sqliteUrl(destPath)}`,
+        ],
+        {encoding: 'utf8'},
+      );
+
+      expect(run.status).toBe(0);
+
+      const destination = await SqliteFixture.open(destPath);
+      const sessions = await destination.execute('SELECT id FROM sessions');
+      const events = await destination.execute('SELECT event_data FROM events');
+      const metadata = await destination.execute(
+        'SELECT value FROM adk_internal_metadata',
+      );
+      await destination.close();
+
+      expect(sessions.map((row) => row['id'])).toEqual(['session1']);
+      expect(String(events[0]['event_data'])).toContain('"skey":4');
+      expect(metadata[0]['value']).toBe('1');
+    });
+
+    it('exits non-zero when the invocation is wrong', () => {
+      const run = spawnSync(process.execPath, [CLI_PATH, '--nope'], {
+        encoding: 'utf8',
+      });
+
+      expect(run.status).toBe(1);
+    });
+  },
+);
