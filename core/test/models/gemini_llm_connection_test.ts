@@ -13,16 +13,16 @@ import {
   LiveServerMessage,
   LiveServerSessionResumptionUpdate,
   Part,
+  Session,
 } from '@google/genai';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
 import {GeminiLlmConnection} from '../../src/models/gemini_llm_connection.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {logger} from '../../src/utils/logger.js';
 import {liveServerMessage} from '../utils/live_server_message_test_utils.js';
 
 describe('GeminiLlmConnection', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockSession: any;
+  let mockSession: Mocked<Session>;
   let messageQueue: AsyncQueue<LiveServerMessage>;
 
   beforeEach(() => {
@@ -31,7 +31,7 @@ describe('GeminiLlmConnection', () => {
       sendToolResponse: vi.fn(),
       sendRealtimeInput: vi.fn(),
       close: vi.fn(),
-    };
+    } as unknown as Mocked<Session>;
     messageQueue = new AsyncQueue<LiveServerMessage>();
   });
 
