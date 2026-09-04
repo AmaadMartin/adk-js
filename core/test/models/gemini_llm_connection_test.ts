@@ -4,22 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {LlmResponse} from '@google/adk';
 import type {
   Blob,
   Content,
   LiveServerGoAway,
   LiveServerMessage,
   LiveServerSessionResumptionUpdate,
+  Session,
 } from '@google/genai';
+import type {Mocked} from 'vitest';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import type {LlmResponse} from '../../src/index.js';
 import {GeminiLlmConnection} from '../../src/models/gemini_llm_connection.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {liveServerMessage} from '../utils/live_server_message_test_utils.js';
 
 describe('GeminiLlmConnection', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockSession: any;
+  let mockSession: Mocked<Session>;
   let messageQueue: AsyncQueue<LiveServerMessage>;
 
   beforeEach(() => {
@@ -28,7 +29,7 @@ describe('GeminiLlmConnection', () => {
       sendToolResponse: vi.fn(),
       sendRealtimeInput: vi.fn(),
       close: vi.fn(),
-    };
+    } as unknown as Mocked<Session>;
     messageQueue = new AsyncQueue<LiveServerMessage>();
   });
 
