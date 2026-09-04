@@ -85,7 +85,7 @@ function formatEventsForPrompt(events: Event[]): string {
       }
       if (part.functionCall) {
         const args = truncateToolContent(
-          JSON.stringify(part.functionCall.args),
+          JSON.stringify(part.functionCall.args ?? {}),
         );
         lines.push(
           `${event.author} called tool: ${part.functionCall.name}(${args})`,
@@ -93,7 +93,7 @@ function formatEventsForPrompt(events: Event[]): string {
       }
       if (part.functionResponse) {
         const response = truncateToolContent(
-          JSON.stringify(part.functionResponse.response),
+          JSON.stringify(part.functionResponse.response ?? {}),
         );
         lines.push(
           `Tool response from ${part.functionResponse.name}: ${response}`,

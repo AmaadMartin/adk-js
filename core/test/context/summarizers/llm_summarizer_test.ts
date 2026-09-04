@@ -141,4 +141,34 @@ describe('LlmSummarizer', () => {
       'Custom prompt.\n\nuser: Hello',
     );
   });
+
+  it('should render a tool call with no args and a tool response with no response', async () => {
+    const mockLlm = new MockLlm([
+      {content: {role: 'model', parts: [{text: 'Summary'}]}},
+    ]);
+    const summarizer = new LlmSummarizer({
+      llm: mockLlm,
+      prompt: 'Custom prompt.',
+    });
+
+    const compactedEvent = await summarizer.summarize([
+      createEvent({
+        author: 'model',
+        timestamp: 1000,
+        content: {
+          parts: [
+            {functionCall: {id: 'call_1', name: 'get_time'}},
+            {functionResponse: {id: 'call_1', name: 'get_time'}},
+          ],
+        },
+      }),
+    ]);
+
+    expect(compactedEvent).not.toBeNull();
+    expect(mockLlm.requests[0].contents[0].parts?.[0]?.text).toBe(
+      'Custom prompt.\n\n' +
+        'model called tool: get_time({})\n' +
+        'Tool response from get_time: {}',
+    );
+  });
 });
