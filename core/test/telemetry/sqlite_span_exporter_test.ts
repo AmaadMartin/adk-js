@@ -49,6 +49,14 @@ const DEFAULT_SPAN_ID = 0x00000000000abc12;
 const DEFAULT_TRACE_ID = 0x000000000000000000000000000def45;
 
 /**
+ * The reference's `trace_id=0xABCDEF123456789`, written out.
+ *
+ * Python integers are arbitrary precision; this one is above
+ * `Number.MAX_SAFE_INTEGER`, so a JS numeric literal would round it.
+ */
+const ROUND_TRIP_TRACE_ID = '00000000000000000abcdef123456789';
+
+/**
  * Formats a numeric id as OpenTelemetry JS models it.
  *
  * The reference writes `format(span_id, '016x')` on the way to the database,
@@ -307,7 +315,7 @@ describe('SqliteSpanExporter ported from adk-python', () => {
 
     const originalSpan = createReadableSpan({
       spanId: spanId(0x12345678),
-      traceId: traceId(0xabcdef123456789),
+      traceId: ROUND_TRIP_TRACE_ID,
       name: 'test_operation',
       attributes: originalAttributes,
       startTime: unixNanos(1000000),
@@ -323,7 +331,7 @@ describe('SqliteSpanExporter ported from adk-python', () => {
 
     expect(retrieved.name).toBe('test_operation');
     expect(retrieved.spanContext().spanId).toBe(spanId(0x12345678));
-    expect(retrieved.spanContext().traceId).toBe(traceId(0xabcdef123456789));
+    expect(retrieved.spanContext().traceId).toBe(ROUND_TRIP_TRACE_ID);
     expect(retrieved.startTime).toEqual(unixNanos(1000000));
     expect(retrieved.endTime).toEqual(unixNanos(2000000));
     expect(retrieved.attributes).toEqual(originalAttributes);

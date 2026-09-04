@@ -33,3 +33,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Telemetry
+
+- [SqliteSpanExporter](telemetry/sqlite_span_exporter/index.md) - Persisting OpenTelemetry spans to a local SQLite file and reading them back by session.
