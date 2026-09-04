@@ -113,6 +113,35 @@ const service = new DatabaseSessionService(
 Overrides apply to a URI only. An options object already carries its own
 settings, so combining the two is rejected.
 
+## Timestamps and time zones
+
+Every backend the service supports stores a session timestamp in a column that
+drops the time zone. The service therefore opens each connection with
+`forceUtcTimezone`, so a stored wall clock is UTC rather than the Node
+process's local zone. adk-python reaches the same result by stripping `tzinfo`
+before it stores.
+
+Two things follow. A session that adk-python wrote resolves to the instant it
+meant, even when the reading process runs on another zone. And what
+`createSession` writes equals what `getSession` reads back, so a timestamp
+comparison cannot fail on the offset alone.
+
+Pass `forceUtcTimezone: false` to keep the local zone instead:
+
+```ts
+const service = new DatabaseSessionService('mysql://user:pass@host:3306/db', {
+  forceUtcTimezone: false,
+});
+```
+
+A MySQL, MariaDB or SQL Server database that an earlier version of adk-js wrote
+in a non-UTC process holds local wall clocks. Those rows read back shifted by
+that process's offset. sqlite and PostgreSQL are unaffected, because MikroORM
+already stored an unambiguous value on both.
+
+JavaScript `Date` keeps milliseconds and adk-python keeps microseconds, so a
+timestamp adk-python wrote is truncated when adk-js reads it.
+
 ## Reads, writes and locking
 
 `getSession` and `listSessions` run on an entity manager that does not flush
