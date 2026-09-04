@@ -33,10 +33,13 @@ import {
   ENTITIES,
   StorageAppState,
   StorageEvent,
+  storageEventFromEvent,
+  storageEventToEvent,
   StorageSession,
   StorageUserState,
+  toSession,
 } from './db/schema.js';
-import {createSession, Session} from './session.js';
+import {Session} from './session.js';
 import {State} from './state.js';
 
 /**
@@ -181,14 +184,7 @@ export class DatabaseSessionService extends BaseSessionService {
       sessionState,
     );
 
-    return createSession({
-      id,
-      appName,
-      userId,
-      state: mergedState,
-      events: [],
-      lastUpdateTime: storageSession.createTime.getTime(),
-    });
+    return toSession(storageSession, {state: mergedState});
   }
 
   async getSession({
@@ -241,13 +237,9 @@ export class DatabaseSessionService extends BaseSessionService {
       storageSession.state,
     );
 
-    return createSession({
-      id: sessionId,
-      appName,
-      userId,
+    return toSession(storageSession, {
       state: mergedState,
-      events: storageEvents.map((se) => se.eventData),
-      lastUpdateTime: storageSession.updateTime.getTime(),
+      events: storageEvents.map(storageEventToEvent),
     });
   }
 
@@ -341,14 +333,7 @@ export class DatabaseSessionService extends BaseSessionService {
     const sessions = storageSessions.map((ss) => {
       const uState = userStateMap[ss.userId] || {};
       const merged = mergeStates(appState, uState, ss.state);
-      return createSession({
-        id: ss.id,
-        appName: ss.appName,
-        userId: ss.userId,
-        state: merged,
-        events: [],
-        lastUpdateTime: ss.updateTime.getTime(),
-      });
+      return toSession(ss, {state: merged});
     });
 
     return {sessions, ...paginationMeta};
@@ -438,7 +423,7 @@ export class DatabaseSessionService extends BaseSessionService {
           storageSession.state,
         );
         session.state = mergedState;
-        session.events = events.map((e) => e.eventData);
+        session.events = events.map(storageEventToEvent);
       }
 
       if (event.actions && event.actions.stateDelta) {
@@ -479,15 +464,10 @@ export class DatabaseSessionService extends BaseSessionService {
         existingStorageEvent.timestamp = new Date(trimmedEvent.timestamp);
         txEm.persist(existingStorageEvent);
       } else {
-        const newStorageEvent = txEm.create(StorageEvent, {
-          id: trimmedEvent.id,
-          appName: session.appName,
-          userId: session.userId,
-          sessionId: session.id,
-          invocationId: trimmedEvent.invocationId,
-          timestamp: new Date(trimmedEvent.timestamp),
-          eventData: trimmedEvent,
-        });
+        const newStorageEvent = txEm.create(
+          StorageEvent,
+          storageEventFromEvent(storageSession, trimmedEvent),
+        );
         txEm.persist(newStorageEvent);
       }
       await txEm.commit();
