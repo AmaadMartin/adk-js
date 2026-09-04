@@ -120,13 +120,18 @@ actions are empty, and the reason is reported at warning level:
 Failed to unpickle actions for event event1: Refusing to load builtins.exec …
 ```
 
-Two coarser failures behave the same way. A row that has no id or no readable
-timestamp is skipped with a warning, and the rest of the table still migrates.
-A source table that is not there at all is reported at info level and skipped,
-which is what happens for a v0 database that never wrote app or user state.
+A row that has no id or no readable timestamp is skipped the same way, with a
+warning, and the rest of the table still migrates.
+
+A source table that is not there is reported at info level and skipped, which
+is what happens for a v0 database that never wrote app or user state. Only the
+database's own "no such table" report counts as absent. A table that exists but
+cannot be read — a locked database, a permission error, a corrupt page — aborts
+the migration instead, because skipping it would drop every row it holds and
+still report success.
 
 Anything else — an unreadable state column, a database that cannot be opened —
-aborts the migration and rolls the destination back.
+aborts the migration too. Every abort rolls the destination back.
 
 ## Differences from adk-python
 
