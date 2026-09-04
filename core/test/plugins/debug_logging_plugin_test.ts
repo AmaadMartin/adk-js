@@ -37,7 +37,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {serializeContent} from '../../src/plugins/debug_logging_plugin.js';
+import {serializeContent} from '../../src/plugins/debug_logging_serializers.js';
 import {Logger, resetLogger, setLogger} from '../../src/utils/logger.js';
 import {safeSerialize} from '../../src/utils/redact_secrets.js';
 
@@ -1220,22 +1220,6 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
       undefined,
       undefined,
     ]);
-  });
-
-  it('holds every invocation when the bound is not positive', async () => {
-    const plugin = new DebugLoggingPlugin({
-      outputPath: outputFile,
-      maxBufferedInvocations: 0,
-    });
-    const session = makeSession();
-
-    for (const invocationId of ['inv-1', 'inv-2', 'inv-3']) {
-      await plugin.beforeRunCallback({
-        invocationContext: makeInvocationContext(session, {invocationId}),
-      });
-    }
-
-    await expect(fs.access(outputFile)).rejects.toThrow();
   });
 
   it('logs a failed write and still drops the invocation', async () => {

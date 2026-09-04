@@ -62,13 +62,6 @@ const SENSITIVE_SUBSTRINGS = [
 ] as const;
 
 /**
- * A key ending in one of these names a secret: `bearer_token`,
- * `session_token`. Matched as a suffix rather than as a substring so that the
- * usage counters, `promptTokenCount` and its siblings, keep their values.
- */
-const SENSITIVE_SUFFIXES = ['_token'] as const;
-
-/**
  * Session state keys are namespaced by scope. The scope says nothing about
  * whether the value is a secret, so it is stripped before matching, otherwise
  * `api_key` is redacted while `user:api_key` is written out.
@@ -143,14 +136,6 @@ const OAUTH2_KEYS: ReadonlySet<string> = new Set([
   'tokenEndpointAuthMethod',
 ]);
 
-/**
- * How many of {@link HTTP_CREDENTIAL_KEYS} a value must carry before its shape
- * identifies it as an `HttpCredentials`. A single `{token: ...}` is any
- * caller's object, and collapsing it wholesale would hide the rest of a debug
- * payload; its key name redacts the value on its own.
- */
-const MIN_HTTP_CREDENTIAL_KEYS = 2;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -208,12 +193,14 @@ function isHttpAuth(value: Record<string, unknown>): boolean {
   return typeof value['scheme'] === 'string' && isRecord(value['credentials']);
 }
 
+/**
+ * Two keys minimum: a lone `{token: ...}` is any caller's object, and
+ * collapsing it wholesale would hide the rest of a debug payload. Its key name
+ * redacts the value on its own.
+ */
 function isHttpCredentials(value: Record<string, unknown>): boolean {
   const keys = Object.keys(value);
-  return (
-    keys.length >= MIN_HTTP_CREDENTIAL_KEYS &&
-    keys.every((key) => HTTP_CREDENTIAL_KEYS.has(key))
-  );
+  return keys.length >= 2 && keys.every((key) => HTTP_CREDENTIAL_KEYS.has(key));
 }
 
 /**
@@ -253,7 +240,9 @@ export function isSensitiveKey(key: string): boolean {
   if (SENSITIVE_KEYS.has(normalized)) {
     return true;
   }
-  if (SENSITIVE_SUFFIXES.some((suffix) => normalized.endsWith(suffix))) {
+  // A suffix, not a substring, so the usage counters `prompt_token_count` and
+  // its siblings keep their values while `bearer_token` is redacted.
+  if (normalized.endsWith('_token')) {
     return true;
   }
   return SENSITIVE_SUBSTRINGS.some((marker) => normalized.includes(marker));
