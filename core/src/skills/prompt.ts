@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Frontmatter,
-  getSkillDescription,
-  getSkillName,
-  Skill,
-} from './skill.js';
+import {Frontmatter, Skill} from './skill.js';
 
 function escapeHtml(unsafe: string): string {
   return unsafe
@@ -34,13 +29,13 @@ export function formatSkillsAsXml(skills: Array<Skill | Frontmatter>): string {
   const lines = ['<available_skills>'];
 
   for (const item of skills) {
-    const name = 'frontmatter' in item ? getSkillName(item) : item.name;
-    const description =
-      'frontmatter' in item ? getSkillDescription(item) : item.description;
+    const frontmatter = 'frontmatter' in item ? item.frontmatter : item;
 
     lines.push('  <skill>');
-    lines.push(`    <name>${escapeHtml(name)}</name>`);
-    lines.push(`    <description>${escapeHtml(description)}</description>`);
+    lines.push(`    <name>${escapeHtml(frontmatter.name)}</name>`);
+    lines.push(
+      `    <description>${escapeHtml(frontmatter.description)}</description>`,
+    );
     lines.push('  </skill>');
   }
 

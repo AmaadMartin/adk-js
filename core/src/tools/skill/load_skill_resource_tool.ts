@@ -6,12 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
-import {
-  getAsset,
-  getReference,
-  getScript,
-  scriptToString,
-} from '../../skills/skill.js';
+import {getAsset, getReference, getScript} from '../../skills/skill.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {
@@ -110,7 +105,7 @@ export class LoadSkillResourceTool extends BaseTool {
       const scriptName = resourcePath.substring('scripts/'.length);
       const script = getScript(skill.resources, scriptName);
       if (script) {
-        content = scriptToString(script);
+        content = script.src;
       }
     } else {
       return {

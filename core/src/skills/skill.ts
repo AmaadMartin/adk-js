@@ -16,17 +16,6 @@ const MAX_NAME_LENGTH = 64;
 const MAX_DESCRIPTION_LENGTH = 1024;
 const MAX_COMPATIBILITY_LENGTH = 500;
 
-const NAME_TOO_LONG_MESSAGE = `name must be at most ${MAX_NAME_LENGTH} characters`;
-const SNAKE_OR_KEBAB_NAME_MESSAGE =
-  'name must be lowercase kebab-case (a-z, 0-9, hyphens) or snake_case (a-z, 0-9, underscores), with no leading, trailing, or consecutive delimiters. Mixing hyphens and underscores is not allowed.';
-const KEBAB_NAME_MESSAGE =
-  'name must be lowercase kebab-case (a-z, 0-9, hyphens), with no leading, trailing, or consecutive delimiters';
-const DESCRIPTION_EMPTY_MESSAGE = 'description must not be empty';
-const COMPATIBILITY_TOO_LONG_MESSAGE = `compatibility must be at most ${MAX_COMPATIBILITY_LENGTH} characters`;
-const ADDITIONAL_TOOLS_MESSAGE =
-  'adk_additional_tools must be a list of strings';
-const INJECT_STATE_MESSAGE = 'adk_inject_state must be a bool';
-
 function isStringArray(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === 'string')
@@ -35,7 +24,10 @@ function isStringArray(value: unknown): value is string[] {
 
 function validateName(value: string, ctx: z.RefinementCtx): void {
   if (value.length > MAX_NAME_LENGTH) {
-    ctx.addIssue({code: 'custom', message: NAME_TOO_LONG_MESSAGE});
+    ctx.addIssue({
+      code: 'custom',
+      message: `name must be at most ${MAX_NAME_LENGTH} characters`,
+    });
     return;
   }
   const snakeCaseAllowed = isFeatureEnabled(FeatureName.SNAKE_CASE_SKILL_NAME);
@@ -46,15 +38,15 @@ function validateName(value: string, ctx: z.RefinementCtx): void {
     ctx.addIssue({
       code: 'custom',
       message: snakeCaseAllowed
-        ? SNAKE_OR_KEBAB_NAME_MESSAGE
-        : KEBAB_NAME_MESSAGE,
+        ? 'name must be lowercase kebab-case (a-z, 0-9, hyphens) or snake_case (a-z, 0-9, underscores), with no leading, trailing, or consecutive delimiters. Mixing hyphens and underscores is not allowed.'
+        : 'name must be lowercase kebab-case (a-z, 0-9, hyphens), with no leading, trailing, or consecutive delimiters',
     });
   }
 }
 
 function validateDescription(value: string, ctx: z.RefinementCtx): void {
   if (!value) {
-    ctx.addIssue({code: 'custom', message: DESCRIPTION_EMPTY_MESSAGE});
+    ctx.addIssue({code: 'custom', message: 'description must not be empty'});
     return;
   }
   if (value.length > MAX_DESCRIPTION_LENGTH) {
@@ -73,13 +65,19 @@ function validateMetadata(
     'adk_additional_tools' in value &&
     !isStringArray(value['adk_additional_tools'])
   ) {
-    ctx.addIssue({code: 'custom', message: ADDITIONAL_TOOLS_MESSAGE});
+    ctx.addIssue({
+      code: 'custom',
+      message: 'adk_additional_tools must be a list of strings',
+    });
   }
   if (
     'adk_inject_state' in value &&
     typeof value['adk_inject_state'] !== 'boolean'
   ) {
-    ctx.addIssue({code: 'custom', message: INJECT_STATE_MESSAGE});
+    ctx.addIssue({
+      code: 'custom',
+      message: 'adk_inject_state must be a bool',
+    });
   }
 }
 
@@ -111,7 +109,7 @@ export const FrontmatterSchema = z.preprocess(
       compatibility: z
         .string()
         .max(MAX_COMPATIBILITY_LENGTH, {
-          message: COMPATIBILITY_TOO_LONG_MESSAGE,
+          message: `compatibility must be at most ${MAX_COMPATIBILITY_LENGTH} characters`,
         })
         .optional(),
       'allowed-tools': z.string().optional(),
@@ -224,26 +222,4 @@ export function listAssets(resources: Resources | undefined): string[] {
  */
 export function listScripts(resources: Resources | undefined): string[] {
   return Object.keys(resources?.scripts ?? {});
-}
-
-/**
- * Returns the skill name.
- */
-export function getSkillName(skill: Skill): string {
-  return skill.frontmatter.name;
-}
-
-/**
- * Returns the skill description.
- */
-export function getSkillDescription(skill: Skill): string {
-  return skill.frontmatter.description;
-}
-
-/**
- * Returns the script content as a string, so a script can be written to disk
- * or embedded in a prompt without reaching into its shape.
- */
-export function scriptToString(script: Script): string {
-  return script.src;
 }
