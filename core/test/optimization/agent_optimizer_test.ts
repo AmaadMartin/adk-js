@@ -175,6 +175,7 @@ describe('Sampler', () => {
     });
 
     expect(Object.keys(result.scores)).toEqual(VALIDATION_EXAMPLE_IDS);
+    expect(sampler.calls[0].exampleSet).toBe('validation');
   });
 
   it('scores the train ids when exampleSet is the train set', async () => {
@@ -186,6 +187,7 @@ describe('Sampler', () => {
     });
 
     expect(Object.keys(result.scores)).toEqual(TRAIN_EXAMPLE_IDS);
+    expect(sampler.calls[0].exampleSet).toBe('train');
   });
 
   it('scores an explicit batch instead of either set', async () => {
@@ -247,7 +249,7 @@ describe('AgentOptimizer', () => {
     expect(best.overallScore).toBe(IMPROVED_SCORE);
     expect(sampler.calls).toHaveLength(2);
     expect(sampler.calls[0].candidate).toBe(initialAgent);
-    expect(sampler.calls[0].exampleSet).toBe(Sampler.TRAIN_SET);
+    expect(sampler.calls[0].exampleSet).toBe('train');
   });
 
   it('carries a metric that the base result shape does not declare', async () => {
@@ -309,6 +311,12 @@ describe('isSampler', () => {
 
     expect(isSampler(lookalike)).toBe(false);
   });
+
+  it('accepts a sampler built by another copy of the package', () => {
+    const fromOtherCopy = {[Symbol.for('google.adk.sampler')]: true};
+
+    expect(isSampler(fromOtherCopy)).toBe(true);
+  });
 });
 
 describe('isAgentOptimizer', () => {
@@ -330,5 +338,11 @@ describe('isAgentOptimizer', () => {
 
   it('rejects a Sampler', () => {
     expect(isAgentOptimizer(new FakeSampler())).toBe(false);
+  });
+
+  it('accepts an optimizer built by another copy of the package', () => {
+    const fromOtherCopy = {[Symbol.for('google.adk.agentOptimizer')]: true};
+
+    expect(isAgentOptimizer(fromOtherCopy)).toBe(true);
   });
 });
