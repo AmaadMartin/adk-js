@@ -9,10 +9,10 @@ import {InputValidationError} from '../errors/input_validation_error.js';
 import {toSnakeCaseKey} from '../utils/object_notation_utils.js';
 
 /** How an eval model treats a key its shape does not name. */
-export type ExtraKeysPolicy = 'forbid' | 'allow';
+type ExtraKeysPolicy = 'forbid' | 'allow';
 
 /** Options for {@link evalModel}. */
-export interface EvalModelOptions {
+interface EvalModelOptions {
   /** The model name, used in validation error messages. */
   readonly name: string;
 
@@ -36,7 +36,7 @@ export interface EvalModelOptions {
 }
 
 /** Options for {@link EvalModel.dump}. */
-export interface EvalDumpOptions {
+interface EvalDumpOptions {
   /** Emits snake_case alias keys instead of the canonical camelCase ones. */
   readonly byAlias?: boolean;
 }
