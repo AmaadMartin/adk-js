@@ -304,7 +304,7 @@ function requireNonEmpty(name: string, value: string): void {
   }
 }
 
-/** Rejects an empty optional string. `undefined` passes, and stays unset. */
+/** Rejects a blank optional string. `undefined` passes, and stays unset. */
 function requireNonEmptyIfSet(name: string, value: string | undefined): void {
   if (value !== undefined) {
     requireNonEmpty(name, value);
@@ -318,6 +318,9 @@ function requireNonEmptyIfSet(name: string, value: string | undefined): void {
  * construction: a misconfigured value is a caller mistake, and silently
  * dropping every row is a worse answer than refusing to start.
  *
+ * An empty `viewPrefix` is rejected because it would name a view after the
+ * event type alone, which can collide with an ordinary table in the dataset.
+ *
  * @param config The configuration to check.
  * @throws Error when an option is out of range or names a protected column.
  */
@@ -328,8 +331,6 @@ function validateConfig(config: BigQueryLoggerConfig): void {
   requireFiniteAboveZero('shutdownTimeoutMs', config.shutdownTimeoutMs);
   requireContentLimit(config.maxContentLength);
   requireRetryConfig(config.retryConfig ?? {});
-  // An empty prefix names a view after the event type alone, so it can collide
-  // with an ordinary table in the dataset.
   requireNonEmptyIfSet('viewPrefix', config.viewPrefix);
   requireNonEmptyIfSet('gcsBucketName', config.gcsBucketName);
   requireNonEmptyIfSet('connectionId', config.connectionId);
@@ -345,7 +346,7 @@ function validateConfig(config: BigQueryLoggerConfig): void {
  * @param allowlist The caller's entries, if any.
  * @return The two match kinds, ready for the hot path.
  */
-export function parseCustomMetadataAllowlist(
+function parseCustomMetadataAllowlist(
   allowlist: readonly string[] | undefined,
 ): CustomMetadataAllowlist {
   const exact = new Set<string>();
