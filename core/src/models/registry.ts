@@ -8,6 +8,7 @@ import {logger} from '../utils/logger.js';
 
 import {ApigeeLlm} from './apigee_llm.js';
 import {BaseLlm} from './base_llm.js';
+import {Gemma} from './gemma_llm.js';
 import {Gemini} from './google_llm.js';
 
 /**
@@ -130,4 +131,7 @@ export class LLMRegistry {
 
 /** Registers default LLM factories, e.g. for Gemini models. */
 LLMRegistry.register(Gemini);
+// Registered after Gemini so that `gemma-4.*`, which Gemini claims, resolves
+// to Gemini rather than to the Gemma 3 workaround class.
+LLMRegistry.register(Gemma);
 LLMRegistry.register(ApigeeLlm);
