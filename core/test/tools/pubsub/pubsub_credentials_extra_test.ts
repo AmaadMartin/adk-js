@@ -32,13 +32,13 @@ describe('PubSubCredentialsConfig token cache key', () => {
       clientSecret: 'def',
     });
 
-    expect(config.tokenCacheKey).toBe(PUBSUB_TOKEN_CACHE_KEY);
+    expect(config.tokenCacheKey).toBe('pubsub_token_cache');
   });
 
   it('is set in the pre-built credential mode', () => {
     const config = new PubSubCredentialsConfig({credentials: new Compute()});
 
-    expect(config.tokenCacheKey).toBe(PUBSUB_TOKEN_CACHE_KEY);
+    expect(config.tokenCacheKey).toBe('pubsub_token_cache');
   });
 
   it('is set in the external access token mode', () => {
@@ -46,7 +46,7 @@ describe('PubSubCredentialsConfig token cache key', () => {
       externalAccessTokenKey: 'my_pubsub_token',
     });
 
-    expect(config.tokenCacheKey).toBe(PUBSUB_TOKEN_CACHE_KEY);
+    expect(config.tokenCacheKey).toBe('pubsub_token_cache');
   });
 });
 
@@ -68,13 +68,13 @@ describe('PubSubCredentialsConfig default scopes', () => {
       externalAccessTokenKey: 'my_pubsub_token',
     });
 
-    expect(config.scopes).toEqual([...PUBSUB_DEFAULT_SCOPE]);
+    expect(config.scopes).toEqual(['https://www.googleapis.com/auth/pubsub']);
   });
 
   it('applies the default to a client carrying no OAuth identity', () => {
     const config = new PubSubCredentialsConfig({credentials: new Compute()});
 
-    expect(config.scopes).toEqual([...PUBSUB_DEFAULT_SCOPE]);
+    expect(config.scopes).toEqual(['https://www.googleapis.com/auth/pubsub']);
   });
 
   it('gives two configs two arrays, so neither can mutate the other', () => {
