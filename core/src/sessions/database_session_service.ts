@@ -31,7 +31,6 @@ import {
 } from './db/operations.js';
 import {
   ENTITIES,
-  getUpdateMarker,
   getUpdateTimestamp,
   StorageAppState,
   StorageEvent,
@@ -63,21 +62,6 @@ export function isDatabaseConnectionString(uri?: string): boolean {
     uri.startsWith('mssql://') ||
     uri.startsWith('sqlite://')
   );
-}
-
-/**
- * Reports whether another writer changed the session since it was loaded.
- *
- * The marker is exact, so it is preferred. A session built by hand carries no
- * marker, and then the update time is all there is to compare. A backend that
- * stores `update_time` at a coarser precision than the marker was built at —
- * MySQL and MariaDB round a `DATETIME` to whole seconds — reads the marker
- * back changed, which costs one reload that was not strictly needed.
- */
-function isStale(session: Session, storageSession: StorageSession): boolean {
-  return session.storageUpdateMarker === undefined
-    ? getUpdateTimestamp(storageSession) > session.lastUpdateTime
-    : session.storageUpdateMarker !== getUpdateMarker(storageSession);
 }
 
 /**
@@ -421,8 +405,12 @@ export class DatabaseSessionService extends BaseSessionService {
         txEm.persist(userStateModel);
       }
 
-      // Stale session check
-      if (isStale(session, storageSession)) {
+      // Stale session check. Any difference counts, not just a later stored
+      // time: another writer can leave `update_time` BEHIND the reader's own,
+      // because `appendEvent` sets the column to its event's timestamp. On a
+      // backend that rounds the column — MySQL and MariaDB round a `DATETIME`
+      // to whole seconds — this reloads once more than it strictly needs to.
+      if (getUpdateTimestamp(storageSession) !== session.lastUpdateTime) {
         // Reload state
         const events = await txEm.find(
           StorageEvent,
@@ -505,7 +493,6 @@ export class DatabaseSessionService extends BaseSessionService {
         session.events.push(event);
       }
       session.lastUpdateTime = getUpdateTimestamp(storageSession);
-      session.storageUpdateMarker = getUpdateMarker(storageSession);
     });
 
     return event;

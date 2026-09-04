@@ -146,10 +146,7 @@ export class StorageSession {
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: (row: StorageSession, em: EntityManager) =>
-      nextSessionUpdateTime(
-        row,
-        em.getUnitOfWork().getOriginalEntityData(row)!,
-      ),
+      nextSessionUpdateTime(row, em.getUnitOfWork().getOriginalEntityData(row)),
   })
   updateTime: Date = new Date();
 
@@ -167,9 +164,9 @@ export class StorageSession {
  */
 function nextSessionUpdateTime(
   row: StorageSession,
-  original: EntityData<StorageSession>,
+  original: EntityData<StorageSession> | undefined,
 ): Date {
-  return Number(original.updateTime) === row.updateTime.getTime()
+  return Number(original?.updateTime) === row.updateTime.getTime()
     ? new Date()
     : row.updateTime;
 }
@@ -273,19 +270,6 @@ export interface ToSessionOptions {
 }
 
 /**
- * The revision a session row is currently at.
- *
- * Mirrors adk-python's `get_update_marker`. The string is an opaque equality
- * token: a caller only compares it against another marker this function
- * produced, and it never crosses the SDK boundary. adk-python renders
- * microseconds where a JavaScript `Date` renders milliseconds, so the two SDKs
- * do not produce the same string for one instant.
- */
-export function getUpdateMarker(row: StorageSession): string {
-  return row.updateTime.toISOString();
-}
-
-/**
  * The session row's update time, in milliseconds since the epoch.
  *
  * Mirrors adk-python's `get_update_timestamp`, which returns seconds. adk-js
@@ -312,7 +296,6 @@ export function toSession(
     state: options.state,
     events: options.events ?? [],
     lastUpdateTime: getUpdateTimestamp(row),
-    storageUpdateMarker: getUpdateMarker(row),
   });
 }
 

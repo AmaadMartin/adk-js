@@ -52,16 +52,6 @@ export interface Session {
    * The last update time of the session.
    */
   lastUpdateTime: number;
-
-  /**
-   * The exact storage revision this session was loaded at.
-   *
-   * A persistent session service sets it and compares it against the row it
-   * reloads, to tell whether another writer changed the session meanwhile.
-   * A session built by hand leaves it undefined, which selects the
-   * timestamp-based comparison instead.
-   */
-  storageUpdateMarker?: string;
 }
 
 /**
@@ -83,6 +73,5 @@ export function createSession(
     state: params.state || {},
     events: params.events || [],
     lastUpdateTime: params.lastUpdateTime || 0,
-    storageUpdateMarker: params.storageUpdateMarker,
   };
 }

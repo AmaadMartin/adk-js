@@ -731,72 +731,67 @@ describe('DatabaseSessionService', () => {
     });
   });
 
-  describe('Storage Revision Marker', () => {
-    /** The marker a fresh read of the same session reports. */
-    async function reloadedMarker(sessionId: string): Promise<string> {
+  describe('Stale Writer Detection', () => {
+    /** The update time a fresh read of the same session reports. */
+    async function reloadedUpdateTime(sessionId: string): Promise<number> {
       const reloaded = await service.getSession({
         appName: 'test-app',
         userId: 'test-user',
         sessionId,
       });
-      if (!reloaded?.storageUpdateMarker) {
-        return expect.fail(`session ${sessionId} came back with no marker`);
+      if (!reloaded) {
+        return expect.fail(`session ${sessionId} was not stored`);
       }
-      return reloaded.storageUpdateMarker;
+      return reloaded.lastUpdateTime;
     }
 
-    it('should mark a created session with the stored revision', async () => {
+    it('should report the stored update time on a created session', async () => {
       const session = await service.createSession({
         appName: 'test-app',
         userId: 'test-user',
-        sessionId: 's-marker',
+        sessionId: 's-created',
       });
 
-      expect(session.storageUpdateMarker).toBe(
-        new Date(session.lastUpdateTime).toISOString(),
-      );
-      expect(await reloadedMarker('s-marker')).toBe(
-        session.storageUpdateMarker,
+      expect(session.lastUpdateTime).toBeGreaterThan(0);
+      expect(await reloadedUpdateTime('s-created')).toBe(
+        session.lastUpdateTime,
       );
     });
 
-    it('should refresh the marker when an event is appended', async () => {
+    it('should move the update time to the appended event', async () => {
       const session = await service.createSession({
         appName: 'test-app',
         userId: 'test-user',
-        sessionId: 's-marker-append',
+        sessionId: 's-appended',
       });
-      const created = session.storageUpdateMarker;
+      const created = session.lastUpdateTime;
 
       await service.appendEvent({
         session,
         event: createEvent({id: 'e1', timestamp: 1234567890000}),
       });
 
-      expect(session.storageUpdateMarker).not.toBe(created);
-      expect(session.storageUpdateMarker).toBe('2009-02-13T23:31:30.000Z');
-      expect(await reloadedMarker('s-marker-append')).toBe(
-        session.storageUpdateMarker,
-      );
+      expect(session.lastUpdateTime).not.toBe(created);
+      expect(await reloadedUpdateTime('s-appended')).toBe(1234567890000);
     });
 
-    it('should reload a session whose stored revision moved backwards', async () => {
+    it('should reload a session whose stored update time moved backwards', async () => {
       const writer = await service.createSession({
         appName: 'test-app',
         userId: 'test-user',
-        sessionId: 's-marker-stale',
+        sessionId: 's-backwards',
       });
       const reader = await service.getSession({
         appName: 'test-app',
         userId: 'test-user',
-        sessionId: 's-marker-stale',
+        sessionId: 's-backwards',
       });
       if (!reader) {
         return expect.fail('the session was not found');
       }
 
-      // The writer leaves the stored update time BEFORE the reader's own, so
-      // only the marker tells the reader that the session changed.
+      // appendEvent sets update_time to the event's timestamp, so the writer
+      // leaves it BEHIND the reader's own. A later-than comparison misses it.
       await service.appendEvent({
         session: writer,
         event: createEvent({
@@ -816,15 +811,15 @@ describe('DatabaseSessionService', () => {
       expect(reader.events.map((e) => e.id)).toEqual(['e1', 'e2']);
     });
 
-    it('should compare update times for a session that carries no marker', async () => {
+    it('should reload a hand-built session that has no update time', async () => {
       await service.createSession({
         appName: 'test-app',
         userId: 'test-user',
-        sessionId: 's-no-marker',
+        sessionId: 's-hand-built',
         state: {'stored': 'value'},
       });
       const handWritten = createSession({
-        id: 's-no-marker',
+        id: 's-hand-built',
         appName: 'test-app',
         userId: 'test-user',
         lastUpdateTime: 0,
@@ -836,9 +831,7 @@ describe('DatabaseSessionService', () => {
       });
 
       expect(handWritten.state['stored']).toBe('value');
-      expect(handWritten.storageUpdateMarker).toBe(
-        new Date(2000).toISOString(),
-      );
+      expect(handWritten.lastUpdateTime).toBe(2000);
     });
   });
 });
