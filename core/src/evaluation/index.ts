@@ -6,35 +6,24 @@
 
 /**
  * The ADK evaluation module (a parity port of `google/adk-python`'s
- * `google/adk/evaluation`). It currently covers the eval case data model, the
- * contract every metric evaluator implements, the `LlmAsJudge` base class, and
+ * `google/adk/evaluation`). It currently covers the `LlmAsJudge` base class and
  * the `RubricBasedEvaluator` base class that rubric metrics stand on.
+ *
+ * The exports are what an author of a rubric metric needs, plus the types those
+ * signatures reference. A symbol that belongs to a metric this package does not
+ * ship yet stays internal until that metric lands.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
 export type {ConversationScenario} from './conversation_scenarios.js';
-export {
-  getAllToolCalls,
-  getAllToolCallsWithResponses,
-  getAllToolResponses,
-  isIntermediateData,
-  isInvocationEvents,
-  validateEvalCase,
-} from './eval_case.js';
 export type {
-  EvalCase,
   IntermediateData,
   IntermediateDataType,
   Invocation,
   InvocationEvent,
   InvocationEvents,
-  SessionInput,
-  SessionState,
-  StaticConversation,
-  ToolCallAndResponse,
 } from './eval_case.js';
 export {
-  DEFAULT_JUDGE_MODEL,
   DEFAULT_JUDGE_NUM_SAMPLES,
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
   DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
@@ -43,7 +32,6 @@ export {
   ToolTrajectoryMatchType,
   getMetricThreshold,
   normalizeToolTrajectoryMatchType,
-  parseLlmAsAJudgeCriterion,
   parseRubricsBasedCriterion,
   resolveJudgeModelOptions,
 } from './eval_metrics.js';
@@ -55,37 +43,22 @@ export type {
   HallucinationsCriterion,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
-  LlmAsAJudgeMetric,
   LlmBackedUserSimulatorCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
   ToolTrajectoryCriterion,
 } from './eval_metrics.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
-export {
-  BASE_CRITERION_TYPE,
-  emptyEvaluationResult,
-  getCriterionType,
-  getEvalStatus,
-  getTextFromContent,
-  validateBaseCriterion,
-  validateInvocationLengths,
-} from './evaluator.js';
+export {getEvalStatus, getTextFromContent} from './evaluator.js';
 export type {
   CriterionType,
   EvaluationResult,
   Evaluator,
-  EvaluatorClass,
   PerInvocationResult,
 } from './evaluator.js';
 export {LlmAsJudge} from './llm_as_judge.js';
 export type {AutoRaterScore, LlmAsJudgeOptions} from './llm_as_judge.js';
-export {
-  Label,
-  PARTIALLY_VALID_LABELS,
-  getAverageRubricScore,
-  getTextFromInvocation,
-} from './llm_as_judge_utils.js';
+export {getAverageRubricScore} from './llm_as_judge_utils.js';
 export {
   DefaultAutoRaterResponseParser,
   MajorityVotePerInvocationResultsAggregator,
