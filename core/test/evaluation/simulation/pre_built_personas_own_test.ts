@@ -12,7 +12,11 @@
  * keeps both keys, so the duplicate itself is what has to be detected.
  */
 
-import {getDefaultPersonaRegistry, PRE_BUILT_BEHAVIORS} from '@google/adk';
+import {
+  getDefaultPersonaRegistry,
+  NotFoundError,
+  PRE_BUILT_BEHAVIORS,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('PRE_BUILT_BEHAVIORS', () => {
@@ -43,10 +47,11 @@ describe('getDefaultPersonaRegistry', () => {
     const registry = getDefaultPersonaRegistry();
 
     registry.registerPersona('EXPERT', replacement);
+    registry.registerPersona('EXTRA', {...replacement, id: 'EXTRA'});
 
     expect(registry.getPersona('EXPERT')).toEqual(replacement);
-    expect(getDefaultPersonaRegistry().getPersona('EXPERT')).not.toEqual(
-      replacement,
-    );
+    const next = getDefaultPersonaRegistry();
+    expect(next.getPersona('EXPERT')).not.toEqual(replacement);
+    expect(() => next.getPersona('EXTRA')).toThrowError(NotFoundError);
   });
 });

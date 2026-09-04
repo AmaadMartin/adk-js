@@ -163,6 +163,7 @@ export type {
   EvalDumpOptions,
   EvalModel,
   EvalModelOptions,
+  ExtraKeysPolicy,
 } from './evaluation/common.js';
 export {
   conversationGenerationConfigModel,
