@@ -5,9 +5,8 @@
  */
 
 /**
- * The `config-driven replay` suite ports
- * `tests/unittests/cli/plugins/test_replay_plugin.py` from google/adk-python
- * `main`, keeping each Python test name as its title.
+ * The first suite ports `tests/unittests/cli/plugins/test_replay_plugin.py`
+ * from google/adk-python `main`, keeping each Python test name as its title.
  */
 
 import {
@@ -27,13 +26,12 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
+  ConformanceReplayPlugin,
   isReplayConfigError,
   isReplayVerificationError,
   REPLAY_CONFIG_STATE_KEY,
   ReplayConfig,
-  ReplayPlugin,
-} from '../../src/integration/replay_plugin.js';
-import {Recording} from '../../src/integration/test_types.js';
+} from '../../src/integration/conformance_replay_plugin.js';
 import {createTempDir} from '../../src/utils/file_utils.js';
 
 const NON_STREAMING_FILE = 'generated-recordings.yaml';
@@ -179,7 +177,7 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-describe('ReplayPlugin config-driven replay', () => {
+describe('ConformanceReplayPlugin', () => {
   let caseDir: string;
 
   beforeEach(async () => {
@@ -191,7 +189,7 @@ describe('ReplayPlugin config-driven replay', () => {
   });
 
   it('test_before_run_without_replay_config_leaves_plugin_inert', async () => {
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation();
     const tool = new SpyTool();
 
@@ -210,7 +208,7 @@ describe('ReplayPlugin config-driven replay', () => {
   });
 
   it('test_before_run_with_partial_replay_config_leaves_plugin_inert', async () => {
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: {dir: caseDir, streamingMode: 'none'},
     });
@@ -229,7 +227,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_before_tool_returns_recorded_response_not_live_result', async () => {
     await writeRecordings(caseDir, [recording({response: {result: 4}})]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -247,7 +245,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_before_tool_still_executes_the_underlying_tool', async () => {
     await writeRecordings(caseDir, [recording({args: {sides: 6}})]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -274,7 +272,7 @@ describe('ReplayPlugin config-driven replay', () => {
       [recording({response: {result: 'streaming'}})],
       STREAMING_FILE,
     );
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir, 0, 'sse'),
     });
@@ -300,7 +298,7 @@ describe('ReplayPlugin config-driven replay', () => {
       [recording({response: {result: 'streaming'}})],
       STREAMING_FILE,
     );
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir, 0, 'none'),
     });
@@ -317,7 +315,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_before_run_unsupported_streaming_mode_raises_value_error', async () => {
     await writeRecordings(caseDir, [recording()]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext} = makeInvocation({
       stateConfig: {dir: caseDir, userMessageIndex: 0, streamingMode: 'bidi'},
     });
@@ -333,7 +331,7 @@ describe('ReplayPlugin config-driven replay', () => {
   });
 
   it('test_before_run_missing_recordings_file_raises_config_error', async () => {
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -353,7 +351,7 @@ describe('ReplayPlugin config-driven replay', () => {
         '    tool_recordings: {}\n',
       'utf-8',
     );
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -368,7 +366,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_before_tool_without_loaded_state_raises_config_error', async () => {
     await writeRecordings(caseDir, [recording()]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {contexts} = makeInvocation({stateConfig: replayConfig(caseDir)});
 
     const caught = await rejection(
@@ -385,7 +383,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_before_tool_tool_name_mismatch_raises_verification_error', async () => {
     await writeRecordings(caseDir, [recording({toolName: 'roll_die'})]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -407,7 +405,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_before_tool_args_mismatch_raises_verification_error', async () => {
     await writeRecordings(caseDir, [recording({args: {sides: 6}})]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -429,7 +427,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_before_tool_beyond_recorded_calls_raises_verification_error', async () => {
     await writeRecordings(caseDir, [recording()]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -472,7 +470,7 @@ describe('ReplayPlugin config-driven replay', () => {
         response: {result: 17},
       }),
     ]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
       agentNames: ['agent_a', 'agent_b'],
@@ -516,7 +514,7 @@ describe('ReplayPlugin config-driven replay', () => {
         response: {result: 'second turn'},
       }),
     ]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir, 1),
     });
@@ -542,7 +540,7 @@ describe('ReplayPlugin config-driven replay', () => {
 
   it('test_after_run_discards_the_invocation_state', async () => {
     await writeRecordings(caseDir, [recording(), recording({callId: 'fc-2'})]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -568,7 +566,7 @@ describe('ReplayPlugin config-driven replay', () => {
   });
 });
 
-describe('ReplayPlugin config-driven replay, adk-js specifics', () => {
+describe('ConformanceReplayPlugin, adk-js specifics', () => {
   let caseDir: string;
 
   beforeEach(async () => {
@@ -580,7 +578,7 @@ describe('ReplayPlugin config-driven replay, adk-js specifics', () => {
   });
 
   it('leaves the plugin inert when the config names no directory', async () => {
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: {userMessageIndex: 0, streamingMode: 'none'},
     });
@@ -597,7 +595,7 @@ describe('ReplayPlugin config-driven replay, adk-js specifics', () => {
   });
 
   it('leaves the plugin inert when the configured directory is empty', async () => {
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: {dir: '', userMessageIndex: 0, streamingMode: 'none'},
     });
@@ -622,7 +620,7 @@ describe('ReplayPlugin config-driven replay, adk-js specifics', () => {
       },
       recording({response: {result: 4}}),
     ]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -643,7 +641,7 @@ describe('ReplayPlugin config-driven replay, adk-js specifics', () => {
     await writeRecordings(caseDir, [
       recording({toolName: 'search_agent', args: {}, response: {result: 4}}),
     ]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -667,7 +665,7 @@ describe('ReplayPlugin config-driven replay, adk-js specifics', () => {
         tool_recording: {tool_call: {name: 'roll_die', args: {sides: 6}}},
       },
     ]);
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext, contexts} = makeInvocation({
       stateConfig: replayConfig(caseDir),
     });
@@ -685,129 +683,12 @@ describe('ReplayPlugin config-driven replay, adk-js specifics', () => {
     expect(errorMessage(caught)).toContain('has no response');
   });
 
-  it('replays no model response in config mode', async () => {
-    const plugin = new ReplayPlugin();
-    const {contexts} = makeInvocation({stateConfig: replayConfig(caseDir)});
-
-    const replayed = await plugin.beforeModelCallback({
-      callbackContext: contexts.get('agent_a')!,
-      llmRequest: {contents: [], liveConnectConfig: {}, toolsDict: {}},
-    });
-
-    expect(replayed).toBeUndefined();
-  });
-
   it('discards nothing when an invocation never loaded replay state', async () => {
-    const plugin = new ReplayPlugin();
+    const plugin = new ConformanceReplayPlugin();
     const {invocationContext} = makeInvocation();
 
     await expect(
       plugin.afterRunCallback({invocationContext}),
     ).resolves.toBeUndefined();
-  });
-});
-
-describe('ReplayPlugin constructor-injected replay', () => {
-  const directRecordings: Recording[] = [
-    {
-      userMessageIndex: 0,
-      agentName: 'agent_a',
-      toolRecording: {
-        toolCall: {id: 'fc-1', name: 'roll_die', args: {sides: 6}},
-        toolResponse: {id: 'fc-1', name: 'roll_die', response: {result: 4}},
-      },
-    },
-  ];
-
-  it('replays the injected recording and never reads session state', async () => {
-    const plugin = new ReplayPlugin(structuredClone(directRecordings), {
-      userMessageIndex: 0,
-    });
-    const {invocationContext, contexts} = makeInvocation({
-      // A config in state must not divert the injected mode into loading it.
-      stateConfig: replayConfig('/nonexistent-replay-dir'),
-    });
-    const tool = new SpyTool();
-
-    await plugin.beforeRunCallback({invocationContext});
-    const replayed = await plugin.beforeToolCallback({
-      tool,
-      toolArgs: {sides: 6},
-      toolContext: contexts.get('agent_a')!,
-    });
-
-    expect(replayed).toEqual({result: 4});
-    // Injected mode substitutes the response without running the tool.
-    expect(tool.liveCalls).toEqual([]);
-  });
-
-  it('reports a tool call that was never recorded', async () => {
-    const plugin = new ReplayPlugin(structuredClone(directRecordings), {
-      userMessageIndex: 0,
-    });
-    const {contexts} = makeInvocation();
-
-    const caught = await rejection(
-      plugin.beforeToolCallback({
-        tool: new SpyTool('flip_coin'),
-        toolArgs: {sides: 6},
-        toolContext: contexts.get('agent_a')!,
-      }),
-    );
-
-    expect(errorMessage(caught)).toContain('No tool recording found');
-  });
-
-  it('applies the transfer_to_agent side effect of a recorded call', async () => {
-    const plugin = new ReplayPlugin(
-      [
-        {
-          userMessageIndex: 0,
-          agentName: 'agent_a',
-          toolRecording: {
-            toolCall: {name: 'transfer_to_agent', args: {agentName: 'agent_b'}},
-            toolResponse: {name: 'transfer_to_agent', response: {}},
-          },
-        },
-      ],
-      {userMessageIndex: 0},
-    );
-    const {contexts} = makeInvocation();
-    const toolContext = contexts.get('agent_a')!;
-
-    await plugin.beforeToolCallback({
-      tool: new SpyTool('transfer_to_agent'),
-      toolArgs: {agentName: 'agent_b'},
-      toolContext,
-    });
-
-    expect(toolContext.actions.transferToAgent).toBe('agent_b');
-  });
-
-  it('replays the injected LLM response and consumes it once', async () => {
-    const modelRecordings: Recording[] = [
-      {
-        userMessageIndex: 0,
-        agentName: 'agent_a',
-        llmRecording: {
-          llmResponse: {content: {role: 'model', parts: [{text: 'ok'}]}},
-        },
-      },
-    ];
-    const plugin = new ReplayPlugin(modelRecordings, {userMessageIndex: 0});
-    const {contexts} = makeInvocation();
-    const callbackContext = contexts.get('agent_a')!;
-    const llmRequest = {contents: [], liveConnectConfig: {}, toolsDict: {}};
-
-    const replayed = await plugin.beforeModelCallback({
-      callbackContext,
-      llmRequest,
-    });
-    const caught = await rejection(
-      plugin.beforeModelCallback({callbackContext, llmRequest}),
-    );
-
-    expect(replayed).toEqual({content: {role: 'model', parts: [{text: 'ok'}]}});
-    expect(errorMessage(caught)).toContain('No LLM recording found');
   });
 });
