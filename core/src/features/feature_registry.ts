@@ -132,8 +132,9 @@ export interface FeatureConfig {
   defaultOn?: boolean;
 }
 
-// Central registry: FeatureName -> FeatureConfig
-const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
+// Central registry: FeatureName -> FeatureConfig. Every stored config carries
+// a concrete `defaultOn`; `registerFeature` fills it in when a caller omits it.
+const FEATURE_REGISTRY: Record<FeatureName, Required<FeatureConfig>> = {
   [FeatureName.AGENT_CONFIG]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
@@ -359,7 +360,7 @@ export function overrideFeatureEnabled(
  * @returns True if the feature is enabled, false otherwise.
  */
 export function isFeatureEnabled(featureName: FeatureName): boolean {
-  const config = getFeatureConfig(featureName);
+  const config = FEATURE_REGISTRY[featureName];
   if (!config) {
     throw new Error(`Feature ${featureName} is not registered.`);
   }
@@ -389,11 +390,10 @@ export function isFeatureEnabled(featureName: FeatureName): boolean {
   }
 
   // Fall back to registry config
-  const defaultOn = config.defaultOn ?? false;
-  if (config.stage !== FeatureStage.STABLE && defaultOn) {
+  if (config.stage !== FeatureStage.STABLE && config.defaultOn) {
     emitNonStableWarningOnce(featureName, config.stage);
   }
-  return defaultOn;
+  return config.defaultOn;
 }
 
 function emitNonStableWarningOnce(
