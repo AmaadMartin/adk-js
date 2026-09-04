@@ -31,7 +31,7 @@ import {
   PluginManager,
   Session,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, FinishReason, Language, Outcome} from '@google/genai';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -1238,7 +1238,7 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
           cachedContentTokenCount: 2,
         },
         groundingMetadata: {},
-        finishReason: 'STOP',
+        finishReason: FinishReason.STOP,
         modelVersion: 'gemini-2.5-flash-001',
       },
     });
@@ -1418,8 +1418,10 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
           },
         },
         {fileData: {fileUri: 'gs://bucket/o', mimeType: 'text/plain'}},
-        {codeExecutionResult: {outcome: 'OUTCOME_OK', output: '4'}},
-        {executableCode: {language: 'PYTHON', code: 'print(2+2)'}},
+        {
+          codeExecutionResult: {outcome: Outcome.OUTCOME_OK, output: '4'},
+        },
+        {executableCode: {language: Language.PYTHON, code: 'print(2+2)'}},
         {thought: true},
       ],
     });
@@ -1443,8 +1445,10 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
           },
         },
         {fileData: {fileUri: 'gs://bucket/o', mimeType: 'text/plain'}},
-        {codeExecutionResult: {outcome: 'OUTCOME_OK', output: '4'}},
-        {executableCode: {language: 'PYTHON', code: 'print(2+2)'}},
+        {
+          codeExecutionResult: {outcome: Outcome.OUTCOME_OK, output: '4'},
+        },
+        {executableCode: {language: Language.PYTHON, code: 'print(2+2)'}},
       ],
     });
     expect(JSON.stringify(result)).not.toContain('aGVsbG8=');
