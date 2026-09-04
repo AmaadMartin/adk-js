@@ -48,6 +48,15 @@ class FailingSummarizer implements BaseSummarizer {
   }
 }
 
+class NullSummarizer implements BaseSummarizer {
+  readonly calls: Event[][] = [];
+
+  async summarize(events: Event[]): Promise<CompactedEvent | null> {
+    this.calls.push(events);
+    return null;
+  }
+}
+
 function createMockEvent(
   id: string,
   tokenCount?: number,
@@ -239,6 +248,70 @@ describe('AnchoredContextCompactor', () => {
     expect(context.session.events[1].id).toBe('2');
     expect(context.session.events[2].id).toBe('3');
     expect(context.session.events[3].id).toBe('4');
+  });
+
+  it('should leave history untouched when the summarizer declines with null', async () => {
+    const summarizer = new NullSummarizer();
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer,
+    });
+
+    const context = createMockInvocationContext([
+      createMockEvent('1', 5),
+      createMockEvent('2', 5),
+      createMockEvent('3', 5),
+      createMockEvent('4', 5),
+    ]);
+
+    await expect(compactor.compact(context)).resolves.toBeUndefined();
+
+    expect(summarizer.calls.length).toBe(1);
+    expect(context.session.events.map((e) => e.id)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+    expect(context.session.events.some(isScratchpadEvent)).toBe(false);
+  });
+
+  it('should keep an existing scratchpad when the summarizer declines with null', async () => {
+    const summarizer = new NullSummarizer();
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer,
+    });
+
+    const scratchpad = createMockScratchpadEvent(
+      'scratchpad',
+      5,
+      'existing summary',
+    );
+    const context = createMockInvocationContext([
+      scratchpad,
+      createMockEvent('1', 5),
+      createMockEvent('2', 5),
+      createMockEvent('3', 5),
+      createMockEvent('4', 5),
+    ]);
+
+    await compactor.compact(context);
+
+    // The existing scratchpad is handed to the summarizer, then left in place.
+    expect(summarizer.calls[0][0]).toBe(scratchpad);
+    expect(context.session.events.map((e) => e.id)).toEqual([
+      'scratchpad',
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+    expect((context.session.events[0] as CompactedEvent).compactedContent).toBe(
+      'existing summary',
+    );
   });
 
   it('should not mutate history if summarizer fails', async () => {

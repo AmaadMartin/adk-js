@@ -128,6 +128,7 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     }
 
     if (!scratchpadEvent) {
+      // The summarizer declined to compact; leave the history untouched.
       return;
     }
 

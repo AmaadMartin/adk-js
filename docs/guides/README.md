@@ -92,6 +92,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ContainerCodeExecutor](code_executors/container_code_executor/index.md) - Running model-generated code in a hardened Docker container under a wall-clock bound.
 - [UnsafeLocalCodeExecutor](code_executors/unsafe_local_code_executor/index.md) - Running model-written code on the local host, and what its result reports.
 
+### Context
+
+- [BaseSummarizer](context/summarizer/index.md) - The strategy a context compactor uses to summarize a window of events, and how a summarizer declines to compact.
+
 ### Evaluation
 
 - [AppDetails](evaluation/app_details/index.md) - The eval system's projection
