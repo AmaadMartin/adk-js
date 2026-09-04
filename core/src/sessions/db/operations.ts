@@ -17,9 +17,6 @@ import {
 /** Prefix that introduces a sqlite connection string. */
 const SQLITE_URI_PREFIX = 'sqlite://';
 
-/** Connection string that opens a private in-memory database. */
-const SQLITE_MEMORY_URI = 'sqlite://:memory:';
-
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
   return {
@@ -50,10 +47,6 @@ export interface SqliteUriParts {
  * is unchanged.
  */
 export function parseSqliteUri(uri: string): SqliteUriParts {
-  if (uri === SQLITE_MEMORY_URI) {
-    return {dbName: ':memory:', query: ''};
-  }
-
   const rest = uri.substring(SQLITE_URI_PREFIX.length);
   const queryStart = rest.indexOf('?');
   if (queryStart < 0) {

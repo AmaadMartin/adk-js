@@ -6,9 +6,9 @@
 
 import {State} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {extractStateDelta} from '../../src/sessions/base_session_service.js';
 import {
   extractJsonSafeStateDelta,
+  extractStateDelta,
   makeJsonSafeState,
 } from '../../src/sessions/session_util.js';
 import {logger} from '../../src/utils/logger.js';
