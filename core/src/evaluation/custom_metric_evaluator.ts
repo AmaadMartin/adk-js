@@ -40,7 +40,7 @@ function isCustomMetricFunction(value: unknown): value is CustomMetricFunction {
  *
  * The import runs the named module's top-level code, so a caller must trust
  * `customFunctionPath` as far as it trusts the eval config the path came from.
- * {@link resolveFullyQualifiedName} narrows that by refusing Node built-ins
+ * `resolveFullyQualifiedName` narrows that by refusing Node built-ins
  * and specifiers carrying a URL scheme. It is not a sandbox.
  *
  * @param customFunctionPath A `<module specifier>#<export>` name, or a bare

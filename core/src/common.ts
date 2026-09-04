@@ -170,6 +170,7 @@ export type {
   EvalDumpOptions,
   EvalModel,
   EvalModelOptions,
+  ExtraKeysPolicy,
 } from './evaluation/common.js';
 export {
   CustomMetricEvaluator,
@@ -193,6 +194,9 @@ export type {
   InvocationEvent,
   InvocationEvents,
   SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
 } from './evaluation/eval_case.js';
 export {
   DEFAULT_JUDGE_MODEL,
@@ -261,6 +265,7 @@ export type {
   CriterionType,
   EvaluationResult,
   Evaluator,
+  EvaluatorClass,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
 export type {

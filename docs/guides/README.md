@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Evaluation
+
+- [Custom metrics](evaluation/custom_metrics/index.md) - Scoring an eval case with a function you wrote and named from your eval config.
+
 ### Tools
 
 #### Retrieval
