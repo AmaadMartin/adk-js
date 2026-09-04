@@ -13,9 +13,6 @@
  */
 
 import {
-  DEFAULT_DATA_AGENT_MODIFICATION_POLL_INTERVAL_SECONDS,
-  DEFAULT_DATA_AGENT_MODIFICATION_TIMEOUT_SECONDS,
-  DEFAULT_MAX_QUERY_RESULT_ROWS,
   DataAgentToolConfig,
   InputValidationError,
   createDataAgentToolConfig,
@@ -73,12 +70,6 @@ describe('data agent tool config', () => {
   describe('createDataAgentToolConfig', () => {
     it('resolves an empty object to the defaults', () => {
       expect(createDataAgentToolConfig({})).toEqual(DEFAULTS);
-    });
-
-    it('exports the defaults it applies', () => {
-      expect(DEFAULT_MAX_QUERY_RESULT_ROWS).toBe(50);
-      expect(DEFAULT_DATA_AGENT_MODIFICATION_TIMEOUT_SECONDS).toBe(60);
-      expect(DEFAULT_DATA_AGENT_MODIFICATION_POLL_INTERVAL_SECONDS).toBe(2);
     });
 
     it('round-trips every field unchanged', () => {
