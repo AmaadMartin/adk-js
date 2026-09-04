@@ -20,9 +20,6 @@ export type BigtableQueryParameters = NonNullable<
   ExecuteQueryStreamOptions['parameters']
 >;
 
-/** One value of {@link BigtableQueryParameters}. */
-export type BigtableQueryParameterValue = BigtableQueryParameters[string];
-
 /** The GoogleSQL scalar types a query parameter can be declared as. */
 export const SQL_PARAMETER_TYPE_NAMES = [
   'bool',

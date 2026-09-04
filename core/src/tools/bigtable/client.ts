@@ -29,10 +29,19 @@ export const BIGTABLE_CLIENT_INFO = {
   libVersion: version,
 };
 
-/** A pooled client and the access token it authenticates with. */
-interface PooledClient {
-  accessToken?: string | null;
-  client: Promise<Bigtable>;
+/**
+ * The key a project and its credentials share.
+ *
+ * The access token belongs in the key because a client resolves its
+ * credentials once, at construction. Keying on the project alone would let
+ * one end user's call replace another user's client for the same project.
+ *
+ * @param projectId The Google Cloud project the client reads.
+ * @param credentials The credentials the client authenticates with.
+ * @return The key the pool stores the client under.
+ */
+function poolKey(projectId: string, credentials?: AuthClient): string {
+  return `${projectId}\n${credentials?.credentials.access_token ?? ''}`;
 }
 
 /** Opens a Bigtable client, loading the SDK on first use. */
@@ -74,17 +83,19 @@ async function closeQuietly(client: Promise<Bigtable>): Promise<void> {
 }
 
 /**
- * Opens Bigtable clients on demand and keeps one per project.
+ * Opens Bigtable clients on demand and keeps one per project and caller.
  *
  * A client owns gRPC channels, so opening one per tool call would leak them.
- * A pooled client is replaced when the access token changes, because the
- * client resolves its credentials once, at construction.
+ * Two end users of one project hold two clients: closing a client tears down
+ * its channels, so releasing one to make room for the other would fail a
+ * query in flight. Nothing is closed until {@link close}.
  */
 export class BigtableClientPool {
-  private readonly clients = new Map<string, PooledClient>();
+  private readonly clients = new Map<string, Promise<Bigtable>>();
 
   /**
-   * Returns the client for a project, opening one if there is none.
+   * Returns the client for a project and its credentials, opening one if
+   * there is none.
    *
    * @param projectId The Google Cloud project the client reads.
    * @param credentials The credentials to authenticate with, or `undefined`
@@ -92,23 +103,20 @@ export class BigtableClientPool {
    * @return The client, once the Bigtable package has loaded.
    */
   get(projectId: string, credentials?: AuthClient): Promise<Bigtable> {
-    const accessToken = credentials?.credentials.access_token;
-    const pooled = this.clients.get(projectId);
-    if (pooled && pooled.accessToken === accessToken) {
-      return pooled.client;
+    const key = poolKey(projectId, credentials);
+    const pooled = this.clients.get(key);
+    if (pooled) {
+      return pooled;
     }
 
     const client = createClient(projectId, credentials);
-    this.clients.set(projectId, {accessToken, client});
-    if (pooled) {
-      void closeQuietly(pooled.client);
-    }
+    this.clients.set(key, client);
     return client;
   }
 
   /** Releases every client this pool opened. Safe to call more than once. */
   async close(): Promise<void> {
-    const pending = [...this.clients.values()].map((pooled) => pooled.client);
+    const pending = [...this.clients.values()];
     this.clients.clear();
     await Promise.all(pending.map(closeQuietly));
   }

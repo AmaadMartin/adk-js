@@ -100,14 +100,43 @@ describe('BigtableClientPool', () => {
     expect(fakeBigtableState.calls.constructed).toHaveLength(1);
   });
 
-  it('replaces the client when the access token changes', async () => {
+  it('opens a separate client for each access token', async () => {
     const pool = new BigtableClientPool();
 
-    await pool.get('test-project', credentialsWithToken('token-1'));
-    await pool.get('test-project', credentialsWithToken('token-2'));
-    await vi.waitFor(() => expect(fakeBigtableState.calls.closed).toBe(1));
+    const first = await pool.get('test-project', credentialsWithToken('t-1'));
+    const second = await pool.get('test-project', credentialsWithToken('t-2'));
 
+    expect(second).not.toBe(first);
     expect(fakeBigtableState.calls.constructed).toHaveLength(2);
+  });
+
+  it('keeps one caller client open while another caller opens one', async () => {
+    const pool = new BigtableClientPool();
+    const first = await pool.get('test-project', credentialsWithToken('t-1'));
+
+    const second = await pool.get('test-project', credentialsWithToken('t-2'));
+
+    expect(fakeBigtableState.calls.closed).toBe(0);
+    expect(await pool.get('test-project', credentialsWithToken('t-1'))).toBe(
+      first,
+    );
+    expect(await pool.get('test-project', credentialsWithToken('t-2'))).toBe(
+      second,
+    );
+    expect(second).not.toBe(first);
+  });
+
+  it('closes no client until the pool itself is closed', async () => {
+    const pool = new BigtableClientPool();
+    for (let index = 0; index < 20; index++) {
+      await pool.get('test-project', credentialsWithToken(`t-${index}`));
+    }
+
+    expect(fakeBigtableState.calls.closed).toBe(0);
+
+    await pool.close();
+
+    expect(fakeBigtableState.calls.closed).toBe(20);
   });
 
   it('closes every client it opened', async () => {
