@@ -90,6 +90,11 @@ export {
 } from './plugins/debug_logging_plugin.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {ENTITIES as SESSION_STORAGE_ENTITIES} from './sessions/db/schema.js';
+// Also available as `@google/adk/sessions/migration`, which does not evaluate
+// the rest of this barrel. It stays out of `common.ts`, whose exports reach
+// the browser bundle through `index_web.ts`.
+export {migrate} from './sessions/migration/migrate_from_sqlalchemy_pickle.js';
+export type {MigrateOptions} from './sessions/migration/migrate_from_sqlalchemy_pickle.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
 export type {
