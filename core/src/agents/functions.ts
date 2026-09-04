@@ -22,6 +22,7 @@ import {
 import {BaseTool} from '../tools/base_tool.js';
 import {ResumeInputs} from '../tools/resume_inputs.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 import {
@@ -213,12 +214,43 @@ async function callToolAsync(
           toolContext,
           toolContext.invocationContext,
         ),
+        errorType: detectErrorTypeForTelemetry(tool, toolContext, result),
       });
       return result;
     } finally {
       span.end();
     }
   });
+}
+
+/**
+ * Reports the error type a tool put in its response, for telemetry only.
+ *
+ * Detection is skipped while the tool is asking for credentials or a
+ * confirmation, because the response is an intermediate one rather than a
+ * result. A detector that throws is logged and ignored: telemetry must never
+ * break a tool call.
+ */
+function detectErrorTypeForTelemetry(
+  tool: BaseTool,
+  toolContext: Context,
+  response: unknown,
+): string | undefined {
+  const actions = toolContext.eventActions;
+  if (
+    !isEmpty(actions.requestedAuthConfigs) ||
+    !isEmpty(actions.requestedToolConfirmations)
+  ) {
+    return undefined;
+  }
+  try {
+    return tool.detectErrorInResponse(response);
+  } catch (e: unknown) {
+    logger.warn(
+      `Failed to detect the error type of a ${tool.name} response: ${formatError(e)}`,
+    );
+    return undefined;
+  }
 }
 
 function buildResponseEvent(

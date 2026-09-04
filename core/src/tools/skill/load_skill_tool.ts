@@ -5,10 +5,12 @@
  */
 
 import {FunctionDeclaration, Type} from '@google/genai';
+import {injectSessionState} from '../../agents/instructions.js';
 import {requireAgent} from '../../agents/invocation_context.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
+import {detectSkillToolError} from './skill_error_detection.js';
 import {LOAD_SKILL_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
@@ -81,11 +83,21 @@ export class LoadSkillTool extends BaseTool {
       toolContext.state.set(stateKey, [...currentActivated, skillName]);
     }
 
+    // A skill opts in to templating so an instruction that legitimately
+    // contains braces is not rewritten behind its author's back.
+    const instructions = skill.frontmatter.metadata?.['adk_inject_state']
+      ? await injectSessionState(skill.instructions, toolContext)
+      : skill.instructions;
+
     return {
       skill_name: skillName,
-      instructions: skill.instructions,
+      instructions,
       frontmatter: skill.frontmatter,
       resources: skill.resources,
     };
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return detectSkillToolError(response);
   }
 }
