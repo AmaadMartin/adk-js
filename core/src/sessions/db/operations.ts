@@ -108,34 +108,22 @@ export async function ensureDatabaseCreated(orm: MikroORM): Promise<void> {
   const sql = await orm.schema.getUpdateSchemaSQL({safe: true});
 
   for (const statement of sql.split('\n').filter((line) => line.trim())) {
-    if (ADD_FOREIGN_KEY.test(statement)) {
-      await addForeignKeyIfAccepted(orm, statement);
-    } else {
+    try {
       await orm.schema.execute(statement);
+    } catch (error) {
+      // A table older than the constraint can already hold rows that break it,
+      // and the engine then rejects the whole statement. adk-python never adds
+      // a constraint to a table that exists, so a database it created is in
+      // the same position. The constraint only governs writes from now on, so
+      // refusing to open the database over it would cost more.
+      if (!ADD_FOREIGN_KEY.test(statement)) {
+        throw error;
+      }
+      logger.warn(
+        `The database did not accept a foreign key on an existing table, and ` +
+          `ADK left it off: ${error instanceof Error ? error.message : error}`,
+      );
     }
-  }
-}
-
-/**
- * Adds a foreign key, and continues without it if the database refuses.
- *
- * A table older than the constraint can already hold rows that break it, and
- * the engine then rejects the whole statement. adk-python never adds a
- * constraint to a table that exists, so a database it created is in the same
- * position. The constraint only governs writes from now on, so refusing to
- * open the database over it would cost more than going without it.
- */
-async function addForeignKeyIfAccepted(
-  orm: MikroORM,
-  statement: string,
-): Promise<void> {
-  try {
-    await orm.schema.execute(statement);
-  } catch (error) {
-    logger.warn(
-      `The database did not accept a foreign key on an existing table, and ` +
-        `ADK left it off: ${error instanceof Error ? error.message : error}`,
-    );
   }
 }
 
