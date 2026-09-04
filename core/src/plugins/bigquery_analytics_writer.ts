@@ -8,14 +8,20 @@ import type {
   BigQueryOptions,
   Dataset,
   Table,
+  TableField,
   TableMetadata,
 } from '@google-cloud/bigquery';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
+import type {ResolvedAnalyticsRetryConfig} from './bigquery_analytics_config.js';
 import {
+  AnalyticsPayloadColumn,
   AnalyticsRow,
   EVENTS_TABLE_SCHEMA,
+  mergeSchemaFields,
+  projectRow,
+  projectSchema,
   SCHEMA_VERSION,
   SCHEMA_VERSION_LABEL_KEY,
 } from './bigquery_analytics_schema.js';
@@ -39,10 +45,16 @@ const SETUP_RETRY_MAX_MS = 60_000;
 export enum AnalyticsDropReason {
   /** The in-memory queue was full when the row arrived. */
   QUEUE_FULL = 'queue_full',
-  /** BigQuery rejected the batch. */
-  WRITE_FAILED = 'write_failed',
+  /** BigQuery kept failing the insert until the retries ran out. */
+  RETRY_EXHAUSTED = 'retry_exhausted',
+  /** BigQuery rejected the rows for a reason a retry cannot fix. */
+  NON_RETRYABLE = 'non_retryable',
+  /** The insert threw something the classifier does not recognize. */
+  UNEXPECTED_ERROR = 'unexpected_error',
   /** The row was still pending when the shutdown timeout expired. */
   SHUTDOWN_TIMEOUT = 'shutdown_timeout',
+  /** The row was produced after shutdown began, so it was never queued. */
+  SHUTDOWN_RACE = 'shutdown_race',
   /** The client or the table could not be opened. */
   SETUP_UNAVAILABLE = 'setup_unavailable',
   /** The configured content formatter failed, so the row carries a sentinel. */
@@ -51,17 +63,53 @@ export enum AnalyticsDropReason {
   CONTENT_PARSE_FAILED = 'content_parse_failed',
 }
 
+/**
+ * The failure classes an insert error falls into. A retryable failure is the
+ * only one worth waiting on; the other two are counted and dropped.
+ */
+enum InsertFailure {
+  RETRYABLE = 'retryable',
+  NON_RETRYABLE = 'non_retryable',
+  UNEXPECTED = 'unexpected',
+}
+
+/**
+ * Status codes worth another attempt: HTTP 429, 500, 502 and 503, and the
+ * gRPC codes the client surfaces for the same conditions — 4
+ * (DEADLINE_EXCEEDED), 13 (INTERNAL) and 14 (UNAVAILABLE).
+ */
+const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([
+  4, 13, 14, 429, 500, 502, 503,
+]);
+
+/** Milliseconds in one second, because {@link ResolvedAnalyticsRetryConfig} counts seconds. */
+const MS_PER_SECOND = 1000;
+
+/**
+ * The authenticated client the BigQuery client accepts.
+ *
+ * Taken from the SDK's own options rather than from `google-auth-library`
+ * directly: `@google-cloud/common` depends on an older major of that package
+ * and npm nests a second copy of it, so the two `AuthClient` declarations are
+ * not interchangeable.
+ */
+export type BigQueryAuthClient = NonNullable<BigQueryOptions['authClient']>;
+
 /** Everything {@link BigQueryRowWriter} needs to open and feed the table. */
 export interface BigQueryRowWriterOptions {
   projectId: string;
   datasetId: string;
   tableId: string;
   location: string;
+  credentials?: BigQueryAuthClient;
   clusteringFields: string[];
   batchSize: number;
   flushIntervalMs: number;
   shutdownTimeoutMs: number;
   queueMaxSize: number;
+  retry: ResolvedAnalyticsRetryConfig;
+  autoSchemaUpgrade: boolean;
+  deniedColumns: ReadonlySet<AnalyticsPayloadColumn>;
 }
 
 /**
@@ -126,14 +174,112 @@ async function awaitWithTimeout(
  * @return The number of rows that did not land.
  */
 function rejectedRowCount(err: unknown, batchSize: number): number {
+  const errors = partialFailureEntries(err);
+  return errors === undefined ? batchSize : Math.min(errors.length, batchSize);
+}
+
+/** The per-row entries of a `PartialFailureError`, or undefined for any other error. */
+function partialFailureEntries(err: unknown): unknown[] | undefined {
   if (typeof err !== 'object' || err === null) {
-    return batchSize;
+    return undefined;
   }
   const {name, errors} = err as {name?: unknown; errors?: unknown};
-  if (name !== PARTIAL_FAILURE_ERROR_NAME || !Array.isArray(errors)) {
-    return batchSize;
+  return name === PARTIAL_FAILURE_ERROR_NAME && Array.isArray(errors)
+    ? errors
+    : undefined;
+}
+
+/**
+ * Classifies an insert failure.
+ *
+ * A partial failure is definitive: BigQuery accepted the rest of the batch and
+ * named the rows it rejected, so re-sending them changes nothing. A numeric
+ * status is retryable only when it names a rate limit or a server-side
+ * condition. Anything without a status is unexpected, which keeps a bug in
+ * this file out of the retry loop.
+ *
+ * @param err The error the insert threw.
+ * @return Which failure class the error falls into.
+ */
+function classifyInsertFailure(err: unknown): InsertFailure {
+  if (partialFailureEntries(err) !== undefined) {
+    return InsertFailure.NON_RETRYABLE;
   }
-  return Math.min(errors.length, batchSize);
+  if (typeof err !== 'object' || err === null) {
+    return InsertFailure.UNEXPECTED;
+  }
+  const {code} = err as {code?: unknown};
+  if (typeof code !== 'number') {
+    return InsertFailure.UNEXPECTED;
+  }
+  return RETRYABLE_STATUS_CODES.has(code)
+    ? InsertFailure.RETRYABLE
+    : InsertFailure.NON_RETRYABLE;
+}
+
+/** The drop reason a failure that will not be retried is counted under. */
+function failureReason(failure: InsertFailure): AnalyticsDropReason {
+  return failure === InsertFailure.NON_RETRYABLE
+    ? AnalyticsDropReason.NON_RETRYABLE
+    : AnalyticsDropReason.UNEXPECTED_ERROR;
+}
+
+/** How long to wait before retry number `attempt`, counting from zero. */
+export function retryDelayMs(
+  retry: ResolvedAnalyticsRetryConfig,
+  attempt: number,
+): number {
+  const seconds = Math.min(
+    retry.initialDelay * retry.multiplier ** attempt,
+    retry.maxDelay,
+  );
+  return seconds * MS_PER_SECOND;
+}
+
+/** Resolves after `delayMs`, without holding the process open. */
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs).unref();
+  });
+}
+
+/**
+ * Brings an existing table up to the current schema version, adding only the
+ * columns it is missing.
+ *
+ * The version label gates the work, so a table that is already current costs
+ * one metadata read per process rather than a diff per batch. The label is
+ * written after the schema, so a failed upgrade is attempted again rather than
+ * marked done.
+ *
+ * @param table The live events table.
+ * @param desired The columns this schema version writes.
+ * @throws Error when a shared column has a different type or mode.
+ */
+async function upgradeSchema(
+  table: Table,
+  desired: readonly TableField[],
+): Promise<void> {
+  const [metadata] = await table.getMetadata();
+  const live: TableMetadata = metadata;
+  const merged = mergeSchemaFields(live.schema?.fields ?? [], desired);
+  const labels = live.labels ?? {};
+  if (
+    merged === undefined &&
+    labels[SCHEMA_VERSION_LABEL_KEY] === SCHEMA_VERSION
+  ) {
+    return;
+  }
+  if (merged !== undefined) {
+    logger.debug(
+      `BigQuery analytics is adding ${merged.length - (live.schema?.fields?.length ?? 0)} ` +
+        `column(s) to ${table.id}.`,
+    );
+  }
+  await table.setMetadata({
+    schema: {fields: merged ?? live.schema?.fields},
+    labels: {...labels, [SCHEMA_VERSION_LABEL_KEY]: SCHEMA_VERSION},
+  });
 }
 
 /**
@@ -156,18 +302,24 @@ function rejectedRowCount(err: unknown, batchSize: number): number {
  * should know how. `insertAll` de-duplicates on the insert id of a row on a
  * best-effort basis, where adk-python's committed streams and offsets can
  * de-duplicate exactly. BigQuery also rejects an insert into a table it created
- * moments earlier, until that new table propagates, so the first rows written
- * to a fresh table can be lost. Such a row is counted under
- * {@link AnalyticsDropReason.WRITE_FAILED} rather than retried, because a retry
- * loop here would hold an agent run open on the error path.
+ * moments earlier, until that new table propagates; that rejection is
+ * retryable, so the configured backoff covers it.
+ *
+ * The client's own retry is turned off, so the caller's `retryConfig` is the
+ * only thing deciding how often a failed insert is attempted.
  */
 export class BigQueryRowWriter {
+  /** The columns this writer creates, upgrades to and writes. */
+  private readonly schema: TableField[];
   private readonly queue: AnalyticsRow[] = [];
   private readonly inFlight = new Set<Promise<void>>();
   private readonly drops: Record<AnalyticsDropReason, number> = {
     [AnalyticsDropReason.QUEUE_FULL]: 0,
-    [AnalyticsDropReason.WRITE_FAILED]: 0,
+    [AnalyticsDropReason.RETRY_EXHAUSTED]: 0,
+    [AnalyticsDropReason.NON_RETRYABLE]: 0,
+    [AnalyticsDropReason.UNEXPECTED_ERROR]: 0,
     [AnalyticsDropReason.SHUTDOWN_TIMEOUT]: 0,
+    [AnalyticsDropReason.SHUTDOWN_RACE]: 0,
     [AnalyticsDropReason.SETUP_UNAVAILABLE]: 0,
     [AnalyticsDropReason.FORMATTER_FAILED]: 0,
     [AnalyticsDropReason.CONTENT_PARSE_FAILED]: 0,
@@ -179,7 +331,9 @@ export class BigQueryRowWriter {
   private nextSetupAttemptMs = 0;
   private abandoned = false;
 
-  constructor(private readonly options: BigQueryRowWriterOptions) {}
+  constructor(private readonly options: BigQueryRowWriterOptions) {
+    this.schema = projectSchema(EVENTS_TABLE_SCHEMA, options.deniedColumns);
+  }
 
   /** Fully qualified `project.dataset.table` name, for log messages. */
   get tableName(): string {
@@ -318,8 +472,14 @@ export class BigQueryRowWriter {
    * table.
    */
   private async openTable(): Promise<Table> {
-    const {projectId, datasetId, tableId, location, clusteringFields} =
-      this.options;
+    const {
+      projectId,
+      datasetId,
+      tableId,
+      location,
+      credentials,
+      clusteringFields,
+    } = this.options;
     const {BigQuery} = await loadOptionalPeer(
       {
         packageName: '@google-cloud/bigquery',
@@ -327,16 +487,26 @@ export class BigQueryRowWriter {
       },
       () => import('@google-cloud/bigquery'),
     );
-    const clientOptions: BigQueryOptions = {projectId, location};
+    const clientOptions: BigQueryOptions = {
+      projectId,
+      location,
+      // A client carrying a quota project sends it as `x-goog-user-project`
+      // on every request, so it needs no separate client option here.
+      authClient: credentials,
+      // This writer owns the retry policy, so `retryConfig` is the only thing
+      // deciding how often a failed insert is attempted.
+      retryOptions: {autoRetry: false},
+    };
     const dataset = new BigQuery(clientOptions).dataset(datasetId);
     await ensureDataset(dataset, location);
     const table = dataset.table(tableId);
     const [exists] = await table.exists();
     if (exists) {
+      await this.maybeUpgradeSchema(table);
       return table;
     }
     const metadata: TableMetadata = {
-      schema: EVENTS_TABLE_SCHEMA,
+      schema: this.schema,
       timePartitioning: {type: 'DAY', field: 'timestamp'},
       clustering: {fields: clusteringFields},
       labels: {[SCHEMA_VERSION_LABEL_KEY]: SCHEMA_VERSION},
@@ -351,7 +521,19 @@ export class BigQueryRowWriter {
         throw err;
       }
       const [concurrent] = await table.get();
+      await this.maybeUpgradeSchema(concurrent);
       return concurrent;
+    }
+  }
+
+  /**
+   * Adds the columns an existing table is missing, unless the caller turned
+   * the upgrade off. A failure propagates, so setup is counted as unavailable
+   * and retried rather than marked ready against a table a write can fail on.
+   */
+  private async maybeUpgradeSchema(table: Table): Promise<void> {
+    if (this.options.autoSchemaUpgrade) {
+      await upgradeSchema(table, this.schema);
     }
   }
 
@@ -388,23 +570,50 @@ export class BigQueryRowWriter {
   }
 
   /**
-   * Inserts one batch. `insertId` is the row's `event_id`, which gives
-   * best-effort de-duplication over the same key adk-python uses.
+   * Inserts one batch, retrying a failure that another attempt could fix.
+   *
+   * `insertId` is the row's `event_id`, so a retry of a batch BigQuery already
+   * accepted is de-duplicated on the same key adk-python uses. The attempt
+   * counter lives outside the loop, which is what bounds the retries.
    */
   private async insert(table: Table, rows: AnalyticsRow[]): Promise<void> {
-    try {
-      await table.insert(
-        rows.map((row) => ({insertId: row.event_id, json: row})),
-        {raw: true},
-      );
-    } catch (err: unknown) {
-      const lost = rejectedRowCount(err, rows.length);
-      this.countDrop(AnalyticsDropReason.WRITE_FAILED, lost);
-      logger.warn(
-        `BigQuery analytics dropped ${lost} of ${rows.length} row(s) for ` +
-          `${this.tableName}: ${formatError(err)}`,
-      );
+    const payload = rows.map((row) => ({
+      insertId: row.event_id,
+      json: projectRow(row, this.options.deniedColumns),
+    }));
+    let attempt = 0;
+    for (;;) {
+      try {
+        await table.insert(payload, {raw: true});
+        return;
+      } catch (err: unknown) {
+        const failure = classifyInsertFailure(err);
+        if (failure !== InsertFailure.RETRYABLE) {
+          this.dropBatch(err, rows.length, failureReason(failure));
+          return;
+        }
+        if (attempt >= this.options.retry.maxRetries) {
+          this.dropBatch(err, rows.length, AnalyticsDropReason.RETRY_EXHAUSTED);
+          return;
+        }
+        await sleep(retryDelayMs(this.options.retry, attempt));
+        attempt += 1;
+      }
     }
+  }
+
+  /** Counts a batch BigQuery would not take, and says why. */
+  private dropBatch(
+    err: unknown,
+    batchSize: number,
+    reason: AnalyticsDropReason,
+  ): void {
+    const lost = rejectedRowCount(err, batchSize);
+    this.countDrop(reason, lost);
+    logger.warn(
+      `BigQuery analytics dropped ${lost} of ${batchSize} row(s) for ` +
+        `${this.tableName} (${reason}): ${formatError(err)}`,
+    );
   }
 
   /** Arms the flush timer, unless one is already armed. */

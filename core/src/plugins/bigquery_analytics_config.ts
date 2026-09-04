@@ -5,8 +5,15 @@
  */
 
 import {NO_LENGTH_LIMIT} from '../utils/sanitize_utils.js';
-import {AnalyticsEventType} from './bigquery_analytics_schema.js';
-import type {BigQueryRowWriterOptions} from './bigquery_analytics_writer.js';
+import {
+  AnalyticsEventType,
+  AnalyticsPayloadColumn,
+  validatePayloadColumnDenylist,
+} from './bigquery_analytics_schema.js';
+import type {
+  BigQueryAuthClient,
+  BigQueryRowWriterOptions,
+} from './bigquery_analytics_writer.js';
 
 /** Default configuration values, matching adk-python's `BigQueryLoggerConfig`. */
 const DEFAULT_TABLE_ID = 'agent_events';
@@ -17,12 +24,56 @@ const DEFAULT_BATCH_SIZE = 1;
 const DEFAULT_BATCH_FLUSH_INTERVAL_MS = 1000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10000;
 const DEFAULT_QUEUE_MAX_SIZE = 10000;
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_INITIAL_DELAY_SECONDS = 1;
+const DEFAULT_MULTIPLIER = 2;
+const DEFAULT_MAX_DELAY_SECONDS = 10;
+
+/** Suffix marking an allowlist entry as a prefix pattern rather than a key. */
+const PREFIX_WILDCARD = '*';
 
 /** Turns a payload into the value written to the `content` column. */
 export type AnalyticsContentFormatter = (
   content: unknown,
   eventType: string,
 ) => unknown;
+
+/**
+ * How a failed insert is retried.
+ *
+ * The field names and their seconds unit come from adk-python's
+ * `RetryConfig`, so a reader can compare the two one field at a time. They are
+ * the one place in this configuration that is not milliseconds:
+ * `batchFlushIntervalMs` and `shutdownTimeoutMs` already ship in milliseconds
+ * and renaming them would break a caller. The type carries an `Analytics`
+ * prefix because `RetryConfig` is already the workflow retry type.
+ */
+export interface AnalyticsRetryConfig {
+  /** Retries after the first attempt. Defaults to 3, so 4 attempts in all. */
+  maxRetries?: number;
+  /** Seconds before the first retry. Defaults to 1. */
+  initialDelay?: number;
+  /** Factor the delay grows by after each retry. Defaults to 2. */
+  multiplier?: number;
+  /** Longest delay between retries, in seconds. Defaults to 10. */
+  maxDelay?: number;
+}
+
+/** {@link AnalyticsRetryConfig} with every default filled in. */
+export interface ResolvedAnalyticsRetryConfig {
+  maxRetries: number;
+  initialDelay: number;
+  multiplier: number;
+  maxDelay: number;
+}
+
+/** The `custom_metadata` keys to capture, split into the two match kinds. */
+export interface CustomMetadataAllowlist {
+  /** Keys that match in full. */
+  exact: ReadonlySet<string>;
+  /** Prefixes from entries written with a trailing `*`. */
+  prefixes: readonly string[];
+}
 
 /**
  * Tuning for `BigQueryAgentAnalyticsPlugin`.
@@ -72,6 +123,25 @@ export interface BigQueryLoggerConfig {
    * false. The plugin opens no span of its own.
    */
   enableOtelCorrelation?: boolean;
+  /** How a failed insert is retried. Defaults to {@link AnalyticsRetryConfig}'s own defaults. */
+  retryConfig?: AnalyticsRetryConfig;
+  /**
+   * Whether an existing table gains the columns this schema version adds.
+   * Additive only: nothing is dropped, retyped or reordered. Defaults to true.
+   */
+  autoSchemaUpgrade?: boolean;
+  /**
+   * The `event.customMetadata` keys copied into `attributes.custom_metadata`.
+   * An entry ending in `*` matches by prefix; every other entry matches in
+   * full. Nothing is captured by default.
+   */
+  customMetadataAllowlist?: readonly string[];
+  /**
+   * Columns to leave out of the table and out of every row. Only `content`,
+   * `content_parts`, `attributes` and `latency_ms` may be listed; any other
+   * name throws at construction.
+   */
+  payloadColumnDenylist?: readonly string[];
 }
 
 /** Constructor parameters for `BigQueryAgentAnalyticsPlugin`. */
@@ -84,6 +154,12 @@ export interface BigQueryAgentAnalyticsPluginOptions {
   tableId?: string;
   /** BigQuery location for the client and the created table. Defaults to `US`. */
   location?: string;
+  /**
+   * Credentials for the BigQuery client. Application Default Credentials are
+   * used when this is omitted. A client carrying a quota project bills the
+   * requests to it.
+   */
+  credentials?: BigQueryAuthClient;
   /** Tuning, all of it optional. */
   config?: BigQueryLoggerConfig;
 }
@@ -101,19 +177,95 @@ export interface ResolvedConfig {
   finalResponseToolNames: readonly string[];
   flushOnRunEnd: boolean;
   enableOtelCorrelation: boolean;
+  /** Pre-parsed, so matching one key costs no reparsing on the hot path. */
+  customMetadataAllowlist: CustomMetadataAllowlist;
+  deniedColumns: ReadonlySet<AnalyticsPayloadColumn>;
+}
+
+/** Prefixes every configuration error with the option's owner. */
+function configError(message: string): Error {
+  return new Error(`BigQueryAgentAnalyticsPlugin: ${message}`);
 }
 
 /**
- * The options counting whole rows or whole milliseconds. Below 1 a plugin
- * builds but writes nothing useful: a queue of zero drops every row, a batch
- * of zero never fills, and a shutdown of zero drains nothing.
+ * Rejects a value that is not an integer of at least `minimum`. `undefined`
+ * passes, because the caller then takes the default.
  */
-const POSITIVE_INTEGER_KEYS = [
-  'batchSize',
-  'batchFlushIntervalMs',
-  'shutdownTimeoutMs',
-  'queueMaxSize',
-] as const satisfies ReadonlyArray<keyof BigQueryLoggerConfig>;
+function requireCount(
+  name: string,
+  value: number | undefined,
+  minimum: number,
+): void {
+  if (value !== undefined && (!Number.isInteger(value) || value < minimum)) {
+    throw configError(
+      `${name} must be an integer of at least ${minimum}, got ${String(value)}.`,
+    );
+  }
+}
+
+/**
+ * Rejects a value that is not a finite number of at least `minimum`.
+ *
+ * The finiteness test is the load-bearing half. `NaN < minimum` is false, so
+ * an ordered comparison on its own lets `NaN` through every range check and
+ * the option reaches the writer as a delay nothing ever waits out.
+ */
+function requireFinite(
+  name: string,
+  value: number | undefined,
+  minimum: number,
+): void {
+  if (value !== undefined && (!Number.isFinite(value) || value < minimum)) {
+    throw configError(
+      `${name} must be a finite number of at least ${minimum}, got ` +
+        `${String(value)}.`,
+    );
+  }
+}
+
+/** Rejects a value that is not a finite number greater than zero. */
+function requireFiniteAboveZero(name: string, value: number | undefined): void {
+  if (value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+    throw configError(
+      `${name} must be a finite number greater than 0, got ${String(value)}.`,
+    );
+  }
+}
+
+/** Rejects a content limit that is neither unlimited nor a usable length. */
+function requireContentLimit(limit: number | undefined): void {
+  if (
+    limit !== undefined &&
+    limit !== NO_LENGTH_LIMIT &&
+    (!Number.isInteger(limit) || limit < 1)
+  ) {
+    throw configError(
+      `maxContentLength must be an integer of at least 1, or ` +
+        `${NO_LENGTH_LIMIT} for no limit, got ${String(limit)}.`,
+    );
+  }
+}
+
+/**
+ * Rejects a retry configuration that cannot produce a working backoff.
+ *
+ * A zero delay is allowed: an immediate retry is a supported configuration and
+ * `maxRetries: 0, initialDelay: 0, maxDelay: 0` turns retrying off outright.
+ */
+function requireRetryConfig(retry: AnalyticsRetryConfig): void {
+  requireCount('retryConfig.maxRetries', retry.maxRetries, 0);
+  requireFinite('retryConfig.initialDelay', retry.initialDelay, 0);
+  requireFinite('retryConfig.multiplier', retry.multiplier, 1);
+  requireFinite('retryConfig.maxDelay', retry.maxDelay, 0);
+  const initialDelay = retry.initialDelay ?? DEFAULT_INITIAL_DELAY_SECONDS;
+  const maxDelay = retry.maxDelay ?? DEFAULT_MAX_DELAY_SECONDS;
+  if (maxDelay < initialDelay) {
+    throw configError(
+      `retryConfig.maxDelay must be at least retryConfig.initialDelay, got ` +
+        `maxDelay=${maxDelay} initialDelay=${initialDelay}.`,
+    );
+  }
+}
 
 /**
  * Rejects a configuration that cannot produce a working plugin.
@@ -123,42 +275,75 @@ const POSITIVE_INTEGER_KEYS = [
  * dropping every row is a worse answer than refusing to start.
  *
  * @param config The configuration to check.
- * @throws Error when a numeric option is not an integer in range.
+ * @throws Error when an option is out of range or names a protected column.
  */
 function validateConfig(config: BigQueryLoggerConfig): void {
-  for (const name of POSITIVE_INTEGER_KEYS) {
-    const value = config[name];
-    if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
-      throw new Error(
-        `BigQueryAgentAnalyticsPlugin: ${name} must be an integer of at ` +
-          `least 1, got ${String(value)}.`,
-      );
+  requireCount('batchSize', config.batchSize, 1);
+  requireCount('queueMaxSize', config.queueMaxSize, 1);
+  requireFiniteAboveZero('batchFlushIntervalMs', config.batchFlushIntervalMs);
+  requireFiniteAboveZero('shutdownTimeoutMs', config.shutdownTimeoutMs);
+  requireContentLimit(config.maxContentLength);
+  requireRetryConfig(config.retryConfig ?? {});
+}
+
+/**
+ * Splits the allowlist into the keys that match in full and the prefixes.
+ *
+ * A trailing `*` marks a prefix pattern and is stripped. Every other entry
+ * matches in full, so a plain key such as `citation_metadata` never behaves
+ * as a prefix.
+ *
+ * @param allowlist The caller's entries, if any.
+ * @return The two match kinds, ready for the hot path.
+ */
+export function parseCustomMetadataAllowlist(
+  allowlist: readonly string[] | undefined,
+): CustomMetadataAllowlist {
+  const exact = new Set<string>();
+  const prefixes: string[] = [];
+  for (const entry of allowlist ?? []) {
+    if (entry.endsWith(PREFIX_WILDCARD)) {
+      prefixes.push(entry.slice(0, -PREFIX_WILDCARD.length));
+    } else {
+      exact.add(entry);
     }
   }
-  const limit = config.maxContentLength;
-  if (
-    limit !== undefined &&
-    limit !== NO_LENGTH_LIMIT &&
-    (!Number.isInteger(limit) || limit < 1)
-  ) {
-    throw new Error(
-      `BigQueryAgentAnalyticsPlugin: maxContentLength must be an integer of ` +
-        `at least 1, or ${NO_LENGTH_LIMIT} for no limit, got ` +
-        `${String(limit)}.`,
+  return {exact, prefixes};
+}
+
+/** Whether the allowlist can match anything at all. */
+export function capturesCustomMetadata(
+  allowlist: CustomMetadataAllowlist,
+): boolean {
+  return allowlist.exact.size > 0 || allowlist.prefixes.length > 0;
+}
+
+/**
+ * Rejects a configuration that captures metadata into a column it also drops.
+ *
+ * The capture would be built, sanitized and then thrown away, and a truncated
+ * capture would still flip `is_truncated` on a row with no `attributes`.
+ */
+function requireCaptureIsWritable(
+  allowlist: CustomMetadataAllowlist,
+  denied: ReadonlySet<AnalyticsPayloadColumn>,
+): void {
+  if (denied.has('attributes') && capturesCustomMetadata(allowlist)) {
+    throw configError(
+      `customMetadataAllowlist captures into the attributes column, but ` +
+        `payloadColumnDenylist drops it, so the capture would be discarded. ` +
+        `Remove attributes from payloadColumnDenylist, or clear ` +
+        `customMetadataAllowlist.`,
     );
   }
 }
 
-/**
- * Fills every {@link BigQueryLoggerConfig} default in, rejecting a
- * configuration that cannot produce a working plugin.
- *
- * @param config The caller's configuration.
- * @return The same configuration with every default filled in.
- * @throws Error when a numeric option is not an integer in range.
- */
-export function resolveConfig(config: BigQueryLoggerConfig): ResolvedConfig {
-  validateConfig(config);
+/** Fills every {@link BigQueryLoggerConfig} default in. */
+function resolveConfig(
+  config: BigQueryLoggerConfig,
+  customMetadataAllowlist: CustomMetadataAllowlist,
+  deniedColumns: ReadonlySet<AnalyticsPayloadColumn>,
+): ResolvedConfig {
   return {
     enabled: config.enabled ?? true,
     eventAllowlist: config.eventAllowlist,
@@ -171,30 +356,77 @@ export function resolveConfig(config: BigQueryLoggerConfig): ResolvedConfig {
     finalResponseToolNames: config.finalResponseToolNames ?? [],
     flushOnRunEnd: config.flushOnRunEnd ?? true,
     enableOtelCorrelation: config.enableOtelCorrelation ?? false,
+    customMetadataAllowlist,
+    deniedColumns,
   };
 }
 
-/**
- * The table and queue settings the row writer needs, with every default
- * filled in.
- *
- * @param options The caller's constructor parameters.
- * @return The writer's options.
- */
-export function resolveWriterOptions(
+/** Fills every {@link AnalyticsRetryConfig} default in. */
+function resolveRetryConfig(
+  retry: AnalyticsRetryConfig,
+): ResolvedAnalyticsRetryConfig {
+  return {
+    maxRetries: retry.maxRetries ?? DEFAULT_MAX_RETRIES,
+    initialDelay: retry.initialDelay ?? DEFAULT_INITIAL_DELAY_SECONDS,
+    multiplier: retry.multiplier ?? DEFAULT_MULTIPLIER,
+    maxDelay: retry.maxDelay ?? DEFAULT_MAX_DELAY_SECONDS,
+  };
+}
+
+/** The table, queue and retry settings the row writer needs. */
+function resolveWriterOptions(
   options: BigQueryAgentAnalyticsPluginOptions,
+  config: BigQueryLoggerConfig,
+  deniedColumns: ReadonlySet<AnalyticsPayloadColumn>,
 ): BigQueryRowWriterOptions {
-  const config = options.config ?? {};
   return {
     projectId: options.projectId,
     datasetId: options.datasetId,
     tableId: options.tableId ?? DEFAULT_TABLE_ID,
     location: options.location ?? DEFAULT_LOCATION,
+    credentials: options.credentials,
     clusteringFields: config.clusteringFields ?? DEFAULT_CLUSTERING_FIELDS,
     batchSize: config.batchSize ?? DEFAULT_BATCH_SIZE,
     flushIntervalMs:
       config.batchFlushIntervalMs ?? DEFAULT_BATCH_FLUSH_INTERVAL_MS,
     shutdownTimeoutMs: config.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     queueMaxSize: config.queueMaxSize ?? DEFAULT_QUEUE_MAX_SIZE,
+    retry: resolveRetryConfig(config.retryConfig ?? {}),
+    autoSchemaUpgrade: config.autoSchemaUpgrade ?? true,
+    deniedColumns,
+  };
+}
+
+/** The plugin's resolved view of its options and its writer's. */
+export interface ResolvedPluginOptions {
+  config: ResolvedConfig;
+  writer: BigQueryRowWriterOptions;
+}
+
+/**
+ * Checks the caller's options and fills every default in.
+ *
+ * Validation happens here and only here, so the plugin and its writer can
+ * never disagree about whether a value was checked.
+ *
+ * @param options The caller's constructor parameters.
+ * @return The resolved configuration and the writer's options.
+ * @throws Error when an option is out of range or names a protected column.
+ */
+export function resolvePluginOptions(
+  options: BigQueryAgentAnalyticsPluginOptions,
+): ResolvedPluginOptions {
+  const config = options.config ?? {};
+  validateConfig(config);
+  const customMetadataAllowlist = parseCustomMetadataAllowlist(
+    config.customMetadataAllowlist,
+  );
+  const deniedColumns = validatePayloadColumnDenylist(
+    config.payloadColumnDenylist,
+  );
+  requireCaptureIsWritable(customMetadataAllowlist, deniedColumns);
+  return {
+    config: resolveConfig(config, customMetadataAllowlist, deniedColumns),
+    writer: resolveWriterOptions(options, config, deniedColumns),
   };
 }

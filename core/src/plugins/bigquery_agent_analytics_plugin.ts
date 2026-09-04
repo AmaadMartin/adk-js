@@ -32,9 +32,10 @@ import {isNodeErrorEvent} from '../workflow/node_error_event.js';
 import {BasePlugin} from './base_plugin.js';
 import {
   BigQueryAgentAnalyticsPluginOptions,
-  resolveConfig,
+  capturesCustomMetadata,
+  CustomMetadataAllowlist,
   ResolvedConfig,
-  resolveWriterOptions,
+  resolvePluginOptions,
 } from './bigquery_analytics_config.js';
 import {
   formatContentSummary,
@@ -261,13 +262,19 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
 
   constructor(options: BigQueryAgentAnalyticsPluginOptions) {
     super(PLUGIN_NAME);
-    this.config = resolveConfig(options.config ?? {});
-    this.writer = new BigQueryRowWriter(resolveWriterOptions(options));
+    const resolved = resolvePluginOptions(options);
+    this.config = resolved.config;
+    this.writer = new BigQueryRowWriter(resolved.writer);
   }
 
   /**
    * Returns how many rows were lost or degraded, keyed by reason. The counters
    * survive {@link shutdown}, so a host can export them after the run.
+   *
+   * A reason names a loss incident, not always a lost row.
+   * `formatter_failed` and `content_parse_failed` mean the row was written
+   * with a sentinel in place of its content. Every other reason means the row
+   * was never written.
    */
   getDropStats(): Record<string, number> {
     return this.writer.getDropStats();
@@ -845,7 +852,13 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   /** Builds one row and queues it. Never waits on the network. */
   private logEvent(params: LogEventParams): void {
     const {eventType, invocationContext, rawContent, data = {}} = params;
-    if (!this.config.enabled || this.shutDown || !this.isLogged(eventType)) {
+    if (!this.config.enabled || !this.isLogged(eventType)) {
+      return;
+    }
+    if (this.shutDown) {
+      // A callback still in flight when shutdown began produces a row nothing
+      // will write, so the loss is counted rather than left to the logs.
+      this.writer.countDrop(AnalyticsDropReason.SHUTDOWN_RACE);
       return;
     }
     const invocationId = invocationContext.invocationId;
@@ -973,6 +986,13 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     if (Object.keys(this.config.customTags).length > 0) {
       attributes['custom_tags'] = this.config.customTags;
     }
+    const captured = capturedCustomMetadata(
+      this.config.customMetadataAllowlist,
+      data.sourceEvent,
+    );
+    if (captured !== undefined) {
+      attributes['custom_metadata'] = captured;
+    }
     const otel = this.config.enableOtelCorrelation
       ? ambientOtelIds()
       : undefined;
@@ -993,6 +1013,45 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       latencyMs: elapsedSince(popped),
     };
   }
+}
+
+/** Whether `key` matches the allowlist in full or by one of its prefixes. */
+function isAllowedMetadataKey(
+  allowlist: CustomMetadataAllowlist,
+  key: string,
+): boolean {
+  return (
+    allowlist.exact.has(key) ||
+    allowlist.prefixes.some((prefix) => key.startsWith(prefix))
+  );
+}
+
+/**
+ * The allowlisted `customMetadata` entries of the row's source event, or
+ * undefined when there is nothing to capture.
+ *
+ * The captured object is merged into `attributes`, so it takes the same
+ * truncation, redaction and cycle handling as every other captured value and
+ * a truncated entry flips the row's `is_truncated`.
+ *
+ * @param allowlist The keys and prefixes the caller asked for.
+ * @param event The session event the row came from, when there was one.
+ * @return The captured entries, or undefined when none matched.
+ */
+function capturedCustomMetadata(
+  allowlist: CustomMetadataAllowlist,
+  event: Event | undefined,
+): Record<string, unknown> | undefined {
+  const metadata = event?.customMetadata;
+  if (metadata === undefined || !capturesCustomMetadata(allowlist)) {
+    return undefined;
+  }
+  const captured: Record<string, unknown> = Object.fromEntries(
+    Object.entries(metadata).filter(([key]) =>
+      isAllowedMetadataKey(allowlist, key),
+    ),
+  );
+  return Object.keys(captured).length > 0 ? captured : undefined;
 }
 
 /**

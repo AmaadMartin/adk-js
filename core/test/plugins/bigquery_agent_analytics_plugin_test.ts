@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {TableMetadata} from '@google-cloud/bigquery';
+import type {TableField, TableMetadata} from '@google-cloud/bigquery';
 import {
   AgentTool,
   AnalyticsEventType,
@@ -34,6 +34,8 @@ import type {AnalyticsRow} from '../../src/plugins/bigquery_analytics_schema.js'
 import {
   AnalyticsScopeKind,
   deriveScope,
+  EVENTS_TABLE_SCHEMA,
+  SCHEMA_VERSION,
 } from '../../src/plugins/bigquery_analytics_schema.js';
 import {ToolOrigin} from '../../src/plugins/bigquery_analytics_tools.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
@@ -55,6 +57,11 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     created: CreatedTable[];
     datasetsCreated: Array<{id: string; options: {location?: string}}>;
     getCalls: number;
+    metadataReads: number;
+    metadataUpdates: TableMetadata[];
+    liveSchema?: TableField[];
+    liveLabels: Record<string, string>;
+    metadataError?: Error;
     tableExists: boolean;
     datasetExists: boolean;
     clientError?: Error;
@@ -72,6 +79,9 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     created: [],
     datasetsCreated: [],
     getCalls: 0,
+    metadataReads: 0,
+    metadataUpdates: [],
+    liveLabels: {adk_schema_version: '2'},
     tableExists: false,
     datasetExists: true,
   };
@@ -86,6 +96,24 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     async get(): Promise<[FakeTable]> {
       fake.getCalls += 1;
       return [this];
+    }
+
+    async getMetadata(): Promise<[TableMetadata]> {
+      fake.metadataReads += 1;
+      return [
+        {
+          schema: {fields: fake.liveSchema ?? []},
+          labels: fake.liveLabels,
+        },
+      ];
+    }
+
+    async setMetadata(metadata: TableMetadata): Promise<[TableMetadata]> {
+      fake.metadataUpdates.push(metadata);
+      if (fake.metadataError !== undefined) {
+        throw fake.metadataError;
+      }
+      return [metadata];
     }
 
     async insert(
@@ -162,6 +190,11 @@ const SETUP_BACKOFF_MS = 1000;
 /** An error carrying the HTTP status BigQuery uses for "already exists". */
 function conflictError(): Error {
   return Object.assign(new Error('Already Exists: Table'), {code: 409});
+}
+
+/** A quota rejection: a real status, and one no retry can clear. */
+function quotaError(): Error {
+  return Object.assign(new Error('quota exceeded'), {code: 403});
 }
 
 /**
@@ -338,6 +371,13 @@ beforeEach(() => {
   fake.created = [];
   fake.datasetsCreated = [];
   fake.getCalls = 0;
+  fake.metadataReads = 0;
+  fake.metadataUpdates = [];
+  // A live table starts current, so the upgrade path is a no-op unless a test
+  // makes the table older on purpose.
+  fake.liveSchema = EVENTS_TABLE_SCHEMA;
+  fake.liveLabels = {adk_schema_version: SCHEMA_VERSION};
+  fake.metadataError = undefined;
   fake.tableExists = false;
   fake.datasetExists = true;
   fake.clientError = undefined;
@@ -389,6 +429,9 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     expect(fake.clientOptions[0]).toEqual({
       projectId: PROJECT_ID,
       location: 'EU',
+      authClient: undefined,
+      // The plugin owns the retry policy, so the client must not add its own.
+      retryOptions: {autoRetry: false},
     });
   });
 
@@ -602,8 +645,11 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
   it('starts every drop counter at zero', () => {
     expect(makePlugin().getDropStats()).toEqual({
       queue_full: 0,
-      write_failed: 0,
+      retry_exhausted: 0,
+      non_retryable: 0,
+      unexpected_error: 0,
       shutdown_timeout: 0,
+      shutdown_race: 0,
       setup_unavailable: 0,
       formatter_failed: 0,
       content_parse_failed: 0,
@@ -2277,24 +2323,24 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
   });
 
   it('counts a failed insert without throwing at the callback', async () => {
-    fake.insertError = new Error('quota exceeded');
+    fake.insertError = quotaError();
     const plugin = makePlugin();
     await expect(
       plugin.beforeRunCallback({invocationContext: makeInvocationContext()}),
     ).resolves.toBeUndefined();
     await plugin.flush();
-    expect(plugin.getDropStats()['write_failed']).toBe(1);
+    expect(plugin.getDropStats()['non_retryable']).toBe(1);
     expect(rows()).toHaveLength(0);
   });
 
   it('keeps the drop counters readable after shutdown', async () => {
-    fake.insertError = new Error('quota exceeded');
+    fake.insertError = quotaError();
     const plugin = makePlugin();
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
     await plugin.shutdown();
-    expect(plugin.getDropStats()['write_failed']).toBe(1);
+    expect(plugin.getDropStats()['non_retryable']).toBe(1);
   });
 
   it('counts rows still pending when the shutdown timeout expires', async () => {
@@ -2325,7 +2371,7 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
     fake.insertGate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    fake.insertError = new Error('quota exceeded');
+    fake.insertError = quotaError();
     const plugin = makePlugin({
       batchSize: 1,
       shutdownTimeoutMs: 50,
@@ -2343,7 +2389,7 @@ describe('BigQueryAgentAnalyticsPlugin batching and drops', () => {
     release();
     await vi.advanceTimersByTimeAsync(0);
     expect(plugin.getDropStats()['shutdown_timeout']).toBe(1);
-    expect(plugin.getDropStats()['write_failed']).toBe(0);
+    expect(plugin.getDropStats()['non_retryable']).toBe(0);
   });
 });
 
@@ -2417,8 +2463,11 @@ describe('BigQueryAgentAnalyticsPlugin end to end turn', () => {
     );
     expect(plugin.getDropStats()).toEqual({
       queue_full: 0,
-      write_failed: 0,
+      retry_exhausted: 0,
+      non_retryable: 0,
+      unexpected_error: 0,
       shutdown_timeout: 0,
+      shutdown_race: 0,
       setup_unavailable: 0,
       formatter_failed: 0,
       content_parse_failed: 0,
@@ -2489,12 +2538,17 @@ describe('BigQueryAgentAnalyticsPlugin configuration validation', () => {
   it.each<[string, BigQueryLoggerConfig]>([
     ['batchSize', {batchSize: 1.5}],
     ['queueMaxSize', {queueMaxSize: 2.7}],
-    ['batchFlushIntervalMs', {batchFlushIntervalMs: 10.5}],
-    ['shutdownTimeoutMs', {shutdownTimeoutMs: 10.5}],
   ])('refuses a fractional %s', (key, config) => {
     expect(() => makePlugin(config)).toThrow(
       `${key} must be an integer of at least 1`,
     );
+  });
+
+  it.each<[string, BigQueryLoggerConfig]>([
+    ['batchFlushIntervalMs', {batchFlushIntervalMs: 10.5}],
+    ['shutdownTimeoutMs', {shutdownTimeoutMs: 10.5}],
+  ])('accepts a fractional %s, as adk-python does', (_key, config) => {
+    expect(() => makePlugin(config)).not.toThrow();
   });
 
   it('refuses a fractional content limit', () => {
@@ -2506,7 +2560,7 @@ describe('BigQueryAgentAnalyticsPlugin configuration validation', () => {
 
   it('refuses a shutdown timeout of zero, which would drain nothing', () => {
     expect(() => makePlugin({shutdownTimeoutMs: 0})).toThrow(
-      'shutdownTimeoutMs must be an integer of at least 1, got 0.',
+      'shutdownTimeoutMs must be a finite number greater than 0, got 0.',
     );
   });
 });
@@ -2719,7 +2773,7 @@ describe('BigQueryAgentAnalyticsPlugin insert failures', () => {
       invocationContext: makeInvocationContext(),
     });
     await plugin.flush();
-    expect(plugin.getDropStats()['write_failed']).toBe(1);
+    expect(plugin.getDropStats()['unexpected_error']).toBe(1);
   });
 
   it('counts only the rejected rows of a partial failure', async () => {
@@ -2736,7 +2790,7 @@ describe('BigQueryAgentAnalyticsPlugin insert failures', () => {
     });
     await plugin.flush();
     expect(fake.insertCalls).toBe(1);
-    expect(plugin.getDropStats()['write_failed']).toBe(1);
+    expect(plugin.getDropStats()['non_retryable']).toBe(1);
   });
 
   it('opens the table once across two flushes', async () => {

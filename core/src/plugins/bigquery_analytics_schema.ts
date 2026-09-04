@@ -344,7 +344,7 @@ const CONTENT_PART_FIELDS: TableField[] = [
   },
 ];
 
-/** The 17 columns of the events table. */
+/** The 17 columns of the events table, before any projection. */
 export const EVENTS_TABLE_SCHEMA: TableField[] = [
   {
     name: 'timestamp',
@@ -466,3 +466,203 @@ export const EVENTS_TABLE_SCHEMA: TableField[] = [
       "Boolean flag indicating if the content or metadata payload was truncated because it exceeded the maximum allowed size. Set when 'content', captured 'custom_metadata', or A2A metadata is truncated; redaction of sensitive keys does not set this flag.",
   },
 ];
+
+/**
+ * The columns a caller may project out of the table.
+ *
+ * Every other column is an identity or correlation column that the execution
+ * tree is reconstructed from, so dropping one would break the join a consumer
+ * writes rather than merely shrink the row.
+ */
+export const PROJECTABLE_PAYLOAD_COLUMNS = [
+  'content',
+  'content_parts',
+  'attributes',
+  'latency_ms',
+] as const satisfies ReadonlyArray<keyof AnalyticsRow>;
+
+/** A column {@link PROJECTABLE_PAYLOAD_COLUMNS} allows a caller to drop. */
+export type AnalyticsPayloadColumn =
+  (typeof PROJECTABLE_PAYLOAD_COLUMNS)[number];
+
+/**
+ * Checks `denylist` and returns the columns to project out.
+ *
+ * A name outside {@link PROJECTABLE_PAYLOAD_COLUMNS} throws, so a typo and an
+ * attempt to drop a join key both fail at construction instead of producing
+ * rows a query cannot correlate.
+ *
+ * @param denylist The caller's column names, if any.
+ * @return The set of columns to omit from the schema and from every row.
+ * @throws Error when a name is protected or unknown.
+ */
+export function validatePayloadColumnDenylist(
+  denylist: readonly string[] | undefined,
+): ReadonlySet<AnalyticsPayloadColumn> {
+  const denied = new Set<AnalyticsPayloadColumn>();
+  const invalid: string[] = [];
+  for (const name of denylist ?? []) {
+    if (isProjectableColumn(name)) {
+      denied.add(name);
+    } else {
+      invalid.push(name);
+    }
+  }
+  if (invalid.length > 0) {
+    throw new Error(
+      `BigQueryAgentAnalyticsPlugin: payloadColumnDenylist may only contain ` +
+        `${PROJECTABLE_PAYLOAD_COLUMNS.join(', ')}; got ${invalid.join(', ')}. ` +
+        `The identity and correlation columns are protected because the ` +
+        `execution tree is reconstructed from them.`,
+    );
+  }
+  return denied;
+}
+
+/** Whether `name` is a column a caller may project out. */
+function isProjectableColumn(name: string): name is AnalyticsPayloadColumn {
+  return PROJECTABLE_PAYLOAD_COLUMNS.some((column) => column === name);
+}
+
+/** Whether `column` is one of the columns projected out. */
+function isDenied(
+  denied: ReadonlySet<AnalyticsPayloadColumn>,
+  column: string | undefined,
+): boolean {
+  return (
+    column !== undefined && isProjectableColumn(column) && denied.has(column)
+  );
+}
+
+/**
+ * Returns `schema` without the denied columns.
+ *
+ * Projection is schema-first: the created table, the upgrade diff and every
+ * row are all derived from this list, so no column can be written that the
+ * table does not have.
+ *
+ * @param schema The full column list.
+ * @param denied The columns to omit.
+ * @return The projected column list, or `schema` itself when nothing is denied.
+ */
+export function projectSchema(
+  schema: readonly TableField[],
+  denied: ReadonlySet<AnalyticsPayloadColumn>,
+): TableField[] {
+  return schema.filter((field) => !isDenied(denied, field.name));
+}
+
+/**
+ * Returns `row` without the denied columns.
+ *
+ * @param row The row as the plugin built it.
+ * @param denied The columns to omit.
+ * @return The row carrying only the columns the projected schema declares.
+ */
+export function projectRow(
+  row: AnalyticsRow,
+  denied: ReadonlySet<AnalyticsPayloadColumn>,
+): Partial<AnalyticsRow> {
+  if (denied.size === 0) {
+    return row;
+  }
+  const projected: Partial<AnalyticsRow> = {...row};
+  for (const column of denied) {
+    delete projected[column];
+  }
+  return projected;
+}
+
+/** The `type` value of a nested-record column. */
+const RECORD_TYPE = 'RECORD';
+
+/** Folds a schema field's type or mode to the case BigQuery reports it in. */
+function normalized(value: string | undefined): string {
+  return (value ?? '').toUpperCase();
+}
+
+/**
+ * Throws when a live column cannot hold what this schema version writes.
+ *
+ * A retype or a mode change is never applied automatically: it would rewrite
+ * data an earlier run already stored. The caller retries setup later, so a
+ * table someone fixes by hand recovers without a restart.
+ */
+function requireCompatibleField(
+  existing: TableField,
+  desired: TableField,
+  path: readonly string[],
+): void {
+  const existingShape = `${normalized(existing.type)}/${normalized(existing.mode)}`;
+  const desiredShape = `${normalized(desired.type)}/${normalized(desired.mode)}`;
+  if (existingShape !== desiredShape) {
+    throw new Error(
+      `BigQueryAgentAnalyticsPlugin: incompatible column ${path.join('.')}: ` +
+        `the table has ${existingShape} and this schema version writes ` +
+        `${desiredShape}.`,
+    );
+  }
+}
+
+/**
+ * Merges the sub-fields a record column gained, or returns undefined when it
+ * gained none.
+ */
+function mergeRecordField(
+  existing: TableField,
+  desired: TableField,
+  path: readonly string[],
+): TableField | undefined {
+  requireCompatibleField(existing, desired, path);
+  if (
+    normalized(desired.type) !== RECORD_TYPE ||
+    desired.fields === undefined
+  ) {
+    return undefined;
+  }
+  const fields = mergeSchemaFields(existing.fields ?? [], desired.fields, path);
+  return fields === undefined ? undefined : {...existing, fields};
+}
+
+/**
+ * Returns the live schema with every missing column added, or undefined when
+ * the live schema already holds them all.
+ *
+ * The merge is additive in both directions: a column the table has and this
+ * version does not is kept, and a record column gains only its new sub-fields.
+ * Nothing is dropped, retyped or reordered.
+ *
+ * @param existing The columns the table has now.
+ * @param desired The columns this schema version writes.
+ * @param path The record columns walked into so far, for the error message.
+ * @return The merged column list, or undefined when nothing must change.
+ * @throws Error when a shared column has a different type or mode.
+ */
+export function mergeSchemaFields(
+  existing: readonly TableField[],
+  desired: readonly TableField[],
+  path: readonly string[] = [],
+): TableField[] | undefined {
+  const desiredByName = new Map(desired.map((field) => [field.name, field]));
+  let changed = false;
+  const merged = existing.map((field) => {
+    const want = desiredByName.get(field.name);
+    if (want === undefined) {
+      return field;
+    }
+    const upgraded = mergeRecordField(field, want, [...path, field.name ?? '']);
+    if (upgraded === undefined) {
+      return field;
+    }
+    changed = true;
+    return upgraded;
+  });
+  const present = new Set(existing.map((field) => field.name));
+  for (const field of desired) {
+    if (!present.has(field.name)) {
+      merged.push(field);
+      changed = true;
+    }
+  }
+  return changed ? merged : undefined;
+}
