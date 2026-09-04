@@ -16,7 +16,7 @@ Versioned binary and text storage (`Part` payloads) scoped to an individual sess
 
 ### Optimization
 
-- [Agent optimization data types](optimization/data_types/index.md) - The contract between a sampler and an optimizer: per-example scores, a Pareto front of optimized agents, and the validators for a result that arrives as `unknown`.
+- [Agent optimization data types](optimization/data_types/index.md) - The contract between a sampler and an optimizer: per-example scores and a Pareto front of optimized agents.
 
 ### Planners
 
