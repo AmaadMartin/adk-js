@@ -10,7 +10,6 @@ import {
   EntityData,
   EntityManager,
   Index,
-  JsonType,
   ManyToOne,
   PrimaryKey,
   Property,
@@ -66,7 +65,7 @@ export const EVENTS_TIMESTAMP_INDEX_NAME = 'idx_events_app_user_session_ts';
  * snake_case (Python ADK) for Event objects, ensuring that nested
  * properties are converted correctly while preserving specific keys.
  */
-class CamelCaseToSnakeCaseJsonType extends JsonType {
+class CamelCaseToSnakeCaseJsonType extends DynamicJsonType {
   convertToDatabaseValue(value: Event): string {
     // A payload adk-python wrote can carry no `actions` at all, and MikroORM
     // runs this over such a payload to snapshot a row it has just read. The
@@ -284,7 +283,11 @@ export class StorageEvent {
   })
   sessionId!: string;
 
-  @Property({type: 'string', fieldName: 'invocation_id'})
+  @Property({
+    type: 'string',
+    fieldName: 'invocation_id',
+    length: DEFAULT_MAX_VARCHAR_LENGTH,
+  })
   invocationId!: string;
 
   @Property({type: PreciseTimestampType})
