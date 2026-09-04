@@ -62,7 +62,9 @@ export interface SampleAndScoreParams {
  * an optimizer. The optimizer calls {@link Sampler.sampleAndScore} to get
  * evaluation results for a candidate agent on a batch of examples.
  */
-export abstract class Sampler<SamplingResultT extends SamplingResult> {
+export abstract class Sampler<
+  SamplingResultT extends SamplingResult = SamplingResult,
+> {
   /** The example set used to search for a better agent. */
   static readonly TRAIN_SET = 'train';
 
