@@ -49,15 +49,18 @@ import {
   SCHEMA_VERSION_0_PICKLE,
   StorageAppState,
   StorageEvent,
+  storageEventFromEvent,
+  storageEventToEvent,
   StorageSession,
   StorageUserState,
+  toSession,
 } from './db/schema.js';
 import {
   ENTITIES_V0,
   StorageEventV0,
   storageEventV0ToEvent,
 } from './db/schema_v0.js';
-import {CompositeSessionKey, createSession, Session} from './session.js';
+import {CompositeSessionKey, Session} from './session.js';
 import {extractJsonSafeStateDelta} from './session_util.js';
 
 /**
@@ -451,13 +454,10 @@ export class DatabaseSessionService extends BaseSessionService {
       delta.session,
     );
 
-    return createSession({
-      id,
-      appName,
-      userId,
+    // `readRevision` refreshed the row in place, so `storageSession` already
+    // holds the `update_time` the marker was taken from.
+    return toSession(storageSession, {
       state: mergedState,
-      events: [],
-      lastUpdateTime: revision.lastUpdateTime,
       storageUpdateMarker: revision.marker,
     });
   }
@@ -509,13 +509,9 @@ export class DatabaseSessionService extends BaseSessionService {
       storageSession.state,
     );
 
-    return createSession({
-      id: sessionId,
-      appName,
-      userId,
+    return toSession(storageSession, {
       state: mergedState,
       events,
-      lastUpdateTime: storageSession.updateTime.getTime(),
       storageUpdateMarker: updateMarkerOf(storageSession),
     });
   }
@@ -570,7 +566,7 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const storageEvents = await em.find(StorageEvent, where, options);
     storageEvents.reverse();
-    return storageEvents.map((storageEvent) => storageEvent.eventData);
+    return storageEvents.map(storageEventToEvent);
   }
 
   async listSessions({
@@ -661,13 +657,8 @@ export class DatabaseSessionService extends BaseSessionService {
     const sessions = storageSessions.map((ss) => {
       const uState = userStateMap[ss.userId] || {};
       const merged = mergeStates(appState, uState, ss.state);
-      return createSession({
-        id: ss.id,
-        appName: ss.appName,
-        userId: ss.userId,
+      return toSession(ss, {
         state: merged,
-        events: [],
-        lastUpdateTime: ss.updateTime.getTime(),
         storageUpdateMarker: updateMarkerOf(ss),
       });
     });
@@ -795,15 +786,10 @@ export class DatabaseSessionService extends BaseSessionService {
         existingStorageEvent.timestamp = new Date(event.timestamp);
       } else {
         txEm.persist(
-          txEm.create(StorageEvent, {
-            id: event.id,
-            appName: session.appName,
-            userId: session.userId,
-            sessionId: session.id,
-            invocationId: event.invocationId,
-            timestamp: new Date(event.timestamp),
-            eventData: event,
-          }),
+          txEm.create(
+            StorageEvent,
+            storageEventFromEvent(storageSession, event),
+          ),
         );
       }
 

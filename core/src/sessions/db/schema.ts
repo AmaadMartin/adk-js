@@ -7,10 +7,14 @@
 import {
   Entity,
   EntityClass,
+  Index,
   JsonType,
+  ManyToOne,
   Platform,
   PrimaryKey,
   Property,
+  Ref,
+  RequiredEntityData,
   TransformContext,
 } from '@mikro-orm/core';
 import {
@@ -18,8 +22,12 @@ import {
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
 } from '../../events/event.js';
-import {serializeEventActions} from '../../events/event_actions.js';
+import {
+  createEventActions,
+  serializeEventActions,
+} from '../../events/event_actions.js';
 import {isRecord, safeJsonLoads} from '../../utils/json_utils.js';
+import {createSession, Session} from '../session.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
 /**
@@ -46,6 +54,9 @@ export const EVENT_DATA_COLUMN_NAME = 'event_data';
 /** The events column only the legacy layout has. */
 export const EVENT_ACTIONS_COLUMN_NAME = 'actions';
 
+/** The index `getSession` and `appendEvent` read a session's events through. */
+export const EVENTS_TIMESTAMP_INDEX_NAME = 'idx_events_app_user_session_ts';
+
 /**
  * Custom type for serializing and deserializing ADK Event objects.
  *
@@ -55,12 +66,14 @@ export const EVENT_ACTIONS_COLUMN_NAME = 'actions';
  */
 class CamelCaseToSnakeCaseJsonType extends JsonType {
   convertToDatabaseValue(value: Event): string {
-    return JSON.stringify(
-      transformToSnakeCaseEvent({
-        ...value,
-        actions: serializeEventActions(value.actions),
-      }),
-    );
+    // A payload adk-python wrote can carry no `actions` at all, and MikroORM
+    // runs this over such a payload to snapshot a row it has just read. The
+    // field is only rewritten when the event has one, so the snapshot stays
+    // equal to the stored text and the row does not read as modified.
+    const actions = value.actions
+      ? serializeEventActions(value.actions)
+      : value.actions;
+    return JSON.stringify(transformToSnakeCaseEvent({...value, actions}));
   }
 
   convertToJSValue(value: string | Record<string, unknown>): Event {
@@ -213,6 +226,19 @@ export class StorageSession {
   [PrimaryKey.name]?: [string, string, string];
 }
 
+/**
+ * MikroORM emits an `expression` index verbatim as its DDL statement, which is
+ * the only way to get the descending `timestamp` component adk-python declares;
+ * `properties` would produce an ascending index. The identifiers are unquoted
+ * because the quote character differs per dialect and MikroORM does not rewrite
+ * the expression.
+ */
+@Index({
+  name: EVENTS_TIMESTAMP_INDEX_NAME,
+  expression:
+    `create index ${EVENTS_TIMESTAMP_INDEX_NAME} on ${EVENTS_TABLE_NAME} ` +
+    `(app_name, user_id, session_id, timestamp desc)`,
+})
 @Entity({tableName: EVENTS_TABLE_NAME})
 export class StorageEvent {
   @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
@@ -245,10 +271,132 @@ export class StorageEvent {
   @Property({type: 'datetime', length: DATETIME_FRACTIONAL_DIGITS})
   timestamp!: Date;
 
-  @Property({type: CamelCaseToSnakeCaseJsonType, fieldName: 'event_data'})
-  eventData!: Event;
+  /**
+   * The serialized event, nullable as it is in adk-python's `v1.py`. A row
+   * another writer produced can leave it empty.
+   */
+  @Property({
+    type: CamelCaseToSnakeCaseJsonType,
+    fieldName: 'event_data',
+    nullable: true,
+  })
+  eventData!: Event | null;
+
+  /**
+   * The owning session, mapped onto the `app_name`, `user_id` and `session_id`
+   * primary-key columns the scalar properties above already declare.
+   *
+   * It carries the `events -> sessions ON DELETE CASCADE` constraint
+   * adk-python declares, so deleting a session row removes its events even when
+   * the caller never goes through {@link StorageEvent}.
+   *
+   * Both column lists follow {@link StorageSession}'s primary-key order, and
+   * must keep following it. MikroORM appends the relation to the WHERE clause
+   * of every UPDATE and DELETE as a tuple, and builds the right-hand side by
+   * serializing the referenced entity's primary key in its declared order. A
+   * list in any other order compares the two sides misaligned, so the
+   * statement matches no row and the write is dropped without an error.
+   *
+   * A database that already exists keeps its old tables: `updateSchema({safe:
+   * true})` adds the index but cannot add the constraint on sqlite, which has
+   * no `ALTER TABLE ADD CONSTRAINT`. Those databases still rely on
+   * `DatabaseSessionService.deleteSession` deleting the event rows itself.
+   */
+  @ManyToOne(() => StorageSession, {
+    primary: true,
+    fieldNames: ['session_id', 'app_name', 'user_id'],
+    referencedColumnNames: ['id', 'app_name', 'user_id'],
+    deleteRule: 'cascade',
+    updateRule: 'cascade',
+    ref: true,
+    index: false,
+  })
+  storageSession!: Ref<StorageSession>;
 
   [PrimaryKey.name]?: [string, string, string, string];
+}
+
+/** The parts of a {@link Session} that do not live on the session row. */
+export interface ToSessionOptions {
+  /** The state merged from the app, user and session rows. */
+  state: Record<string, unknown>;
+  /** The session's events, oldest first. */
+  events?: Event[];
+  /**
+   * The exact storage revision the caller read the row at, which
+   * `DatabaseSessionService` compares against on the next write.
+   */
+  storageUpdateMarker?: string;
+}
+
+/**
+ * Converts a session row into a {@link Session}.
+ *
+ * Mirrors adk-python's `StorageSession.to_session`. adk-python's
+ * `get_update_timestamp` returns seconds; adk-js measures
+ * `Session.lastUpdateTime` and `Event.timestamp` in milliseconds throughout, so
+ * `lastUpdateTime` keeps milliseconds.
+ */
+export function toSession(
+  row: StorageSession,
+  options: ToSessionOptions,
+): Session {
+  return createSession({
+    id: row.id,
+    appName: row.appName,
+    userId: row.userId,
+    state: options.state,
+    events: options.events ?? [],
+    lastUpdateTime: row.updateTime.getTime(),
+    storageUpdateMarker: options.storageUpdateMarker,
+  });
+}
+
+/**
+ * Builds the row for an event.
+ *
+ * adk-python's `StorageEvent.from_event` takes the `Session`; this takes the
+ * loaded `StorageSession` instead, because the row is what populates the
+ * `storageSession` relation. Leaving that relation unset lets MikroORM's
+ * snapshot comparator write a null over the foreign-key columns.
+ */
+export function storageEventFromEvent(
+  storageSession: StorageSession,
+  event: Event,
+): RequiredEntityData<StorageEvent> {
+  return {
+    id: event.id,
+    appName: storageSession.appName,
+    userId: storageSession.userId,
+    sessionId: storageSession.id,
+    invocationId: event.invocationId,
+    timestamp: new Date(event.timestamp),
+    eventData: event,
+    storageSession,
+  };
+}
+
+/**
+ * Converts an event row into an {@link Event}.
+ *
+ * Mirrors adk-python's `StorageEvent.to_event`. The stored payload already
+ * carries the event's exact epoch, so it wins over the `timestamp` column: that
+ * column holds a local datetime on some dialects, and rebuilding an epoch from
+ * it resolves an ambiguous local time — a daylight-saving fall-back repeats a
+ * whole hour — to the wrong instant.
+ *
+ * A row whose `event_data` is null still yields an `Event`, carrying the
+ * identity and timestamp the columns hold.
+ */
+export function storageEventToEvent(row: StorageEvent): Event {
+  const eventData = row.eventData;
+  return {
+    ...eventData,
+    actions: createEventActions(eventData?.actions),
+    id: row.id,
+    invocationId: row.invocationId,
+    timestamp: eventData?.timestamp ?? row.timestamp.getTime(),
+  };
 }
 
 /**

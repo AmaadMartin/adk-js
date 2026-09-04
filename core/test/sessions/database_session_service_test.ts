@@ -1128,6 +1128,33 @@ describe('DatabaseSessionService', () => {
       ).toBeUndefined();
     });
 
+    it('should overwrite a stored event when the same id is appended twice', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-upsert',
+      });
+
+      await service.appendEvent({
+        session,
+        event: createEvent({id: 'e1', timestamp: 1000, author: 'user'}),
+      });
+      await service.appendEvent({
+        session,
+        event: createEvent({id: 'e1', timestamp: 2000, author: 'model'}),
+      });
+
+      const reloaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-upsert',
+      });
+
+      expect(reloaded?.events).toHaveLength(1);
+      expect(reloaded?.events[0].timestamp).toBe(2000);
+      expect(reloaded?.events[0].author).toBe('model');
+    });
+
     it('should align session updateTime with event timestamp', async () => {
       const session = await service.createSession({
         appName: 'test-app',
