@@ -237,19 +237,15 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
 export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
 export {BuiltInPlanner, isBuiltInPlanner} from './planners/built_in_planner.js';
 export {PlanReActPlanner} from './planners/plan_re_act_planner.js';
-export {
-  createAgentWithScores,
-  createOptimizerResult,
-  createSamplingResult,
-  createUnstructuredSamplingResult,
-  type AgentWithScores,
-  type OptimizerResult,
-  type SamplingResult,
-  type UnstructuredSamplingResult,
-} from './optimization/data_types.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
