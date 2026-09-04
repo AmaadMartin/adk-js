@@ -94,6 +94,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Evaluation
 
+- [AppDetails](evaluation/app_details/index.md) - The eval system's projection
+  of a running app: its agents, their instructions, and the tools each
+  declared.
 - [EvalCase](evaluation/eval_case/index.md) - The gradable unit of an
   evaluation: a recorded conversation or a scenario, and the accessors that
   read a turn's tool trajectory.

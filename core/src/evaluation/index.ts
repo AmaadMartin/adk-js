@@ -14,6 +14,7 @@
  * and the user simulation half under `./simulation`.
  */
 
+export {getDeveloperInstructions, getToolsByAgentName} from './app_details.js';
 export type {AgentDetails, AppDetails} from './app_details.js';
 export {evalModel, optionalField} from './common.js';
 export type {
