@@ -316,4 +316,20 @@ describe('resolvePluginOptions target', () => {
       InputValidationError,
     );
   });
+
+  it('writes to config.tableId when the constructor names no table', () => {
+    expect(resolve({tableId: 'from_config'}).writer.tableId).toBe(
+      'from_config',
+    );
+  });
+
+  it("lets the constructor's tableId win over config.tableId", () => {
+    const resolved = resolvePluginOptions({
+      projectId: 'p',
+      datasetId: 'd',
+      tableId: 'from_options',
+      config: {tableId: 'from_config'},
+    });
+    expect(resolved.writer.tableId).toBe('from_options');
+  });
 });

@@ -14,8 +14,10 @@ import {
   MCPTool,
   RemoteA2AAgent,
 } from '@google/adk';
+import {type FunctionDeclaration, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
+  extractToolDeclarations,
   getToolOrigin,
   ToolOrigin,
 } from '../../src/plugins/bigquery_analytics_tools.js';
@@ -205,5 +207,165 @@ describe('getToolOrigin', () => {
       undefined,
     );
     expect(origin).toBe(ToolOrigin.TRANSFER_AGENT);
+  });
+});
+
+/** A tool returning whatever declaration a test hands it. */
+class DeclaredTool extends BaseTool {
+  constructor(
+    params: {name: string; description: string},
+    private readonly declaration: FunctionDeclaration | undefined,
+  ) {
+    super(params);
+  }
+
+  override _getDeclaration(): FunctionDeclaration | undefined {
+    return this.declaration;
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return 'done';
+  }
+}
+
+/** A tool whose declaration throws, as a built-in tool's can. */
+class UndeclarableTool extends BaseTool {
+  constructor() {
+    super({name: 'undeclarable', description: 'Cannot describe itself.'});
+  }
+
+  override _getDeclaration(): FunctionDeclaration | undefined {
+    throw new Error('no declaration available');
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return 'done';
+  }
+}
+
+/**
+ * Ported from adk-python
+ * tests/unittests/plugins/test_bigquery_agent_analytics_plugin.py @ main
+ * (`_extract_tool_declarations`).
+ */
+describe('extractToolDeclarations', () => {
+  it('emits the name and description of every tool, in registration order', () => {
+    expect(
+      extractToolDeclarations({
+        lookup: localTool('lookup'),
+        remote_lookup: mcpTool(),
+      }),
+    ).toEqual([
+      {
+        name: 'lookup',
+        description: 'Looks something up.',
+        parameters: {type: Type.OBJECT, properties: {}},
+      },
+      {
+        name: 'remote_lookup',
+        description: 'Looks up remotely.',
+        parameters: {type: Type.OBJECT, properties: {}},
+      },
+    ]);
+  });
+
+  it('prefers parametersJsonSchema over parameters', () => {
+    const tool = new DeclaredTool(
+      {name: 'search', description: 'Searches.'},
+      {
+        name: 'search',
+        parametersJsonSchema: {
+          type: 'object',
+          properties: {q: {type: 'string'}},
+        },
+        parameters: {type: Type.OBJECT},
+      },
+    );
+    expect(extractToolDeclarations({search: tool})[0].parameters).toEqual({
+      type: 'object',
+      properties: {q: {type: 'string'}},
+    });
+  });
+
+  it('falls back to parameters when the declaration has no JSON schema', () => {
+    const tool = new DeclaredTool(
+      {name: 'search', description: 'Searches.'},
+      {
+        name: 'search',
+        parameters: {type: Type.OBJECT},
+      },
+    );
+    expect(extractToolDeclarations({search: tool})[0].parameters).toEqual({
+      type: Type.OBJECT,
+    });
+  });
+
+  it('omits parameters when the declaration carries neither shape', () => {
+    const tool = new DeclaredTool(
+      {name: 'search', description: 'Searches.'},
+      {
+        name: 'search',
+      },
+    );
+    expect(extractToolDeclarations({search: tool})[0]).toEqual({
+      name: 'search',
+      description: 'Searches.',
+    });
+  });
+
+  it("takes the declaration's description when the tool has none", () => {
+    const tool = new DeclaredTool(
+      {name: 'search', description: ''},
+      {
+        name: 'search',
+        description: 'Described by the declaration.',
+      },
+    );
+    expect(extractToolDeclarations({search: tool})[0].description).toBe(
+      'Described by the declaration.',
+    );
+  });
+
+  it('omits the description when neither the tool nor its declaration has one', () => {
+    const tool = new DeclaredTool(
+      {name: 'search', description: ''},
+      {
+        name: 'search',
+        description: '',
+      },
+    );
+    expect(extractToolDeclarations({search: tool})[0]).toEqual({
+      name: 'search',
+    });
+  });
+
+  it('falls back to the map key when the tool name is falsy', () => {
+    const tool = new DeclaredTool(
+      {name: '', description: 'Unnamed.'},
+      undefined,
+    );
+    expect(extractToolDeclarations({registered_as: tool})[0].name).toBe(
+      'registered_as',
+    );
+  });
+
+  it('keeps a tool whose declaration throws, and every tool beside it', () => {
+    expect(
+      extractToolDeclarations({
+        undeclarable: new UndeclarableTool(),
+        lookup: localTool('lookup'),
+      }),
+    ).toEqual([
+      {name: 'undeclarable', description: 'Cannot describe itself.'},
+      {
+        name: 'lookup',
+        description: 'Looks something up.',
+        parameters: {type: Type.OBJECT, properties: {}},
+      },
+    ]);
+  });
+
+  it('emits nothing for a request offering no tools', () => {
+    expect(extractToolDeclarations({})).toEqual([]);
   });
 });
