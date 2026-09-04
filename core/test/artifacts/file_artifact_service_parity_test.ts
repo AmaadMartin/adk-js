@@ -537,6 +537,22 @@ describe('FileArtifactService adk-python parity', () => {
         ).rejects.toThrow(InputValidationError);
       });
     }
+
+    it('test_file_save_artifact_rejects_absolute_path_within_scope', async () => {
+      const absoluteInScope = path.join(
+        sessionArtifactDir(root, 'myapp', 'user123', 'sess123', 'diagram.png'),
+      );
+
+      await expect(
+        service.saveArtifact({
+          appName: 'myapp',
+          userId: 'user123',
+          sessionId: 'sess123',
+          filename: absoluteInScope,
+          artifact: {text: 'content'},
+        }),
+      ).rejects.toThrow(InputValidationError);
+    });
   });
 
   describe('canonical URI', () => {
