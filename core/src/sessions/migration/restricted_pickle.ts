@@ -122,6 +122,12 @@ const ALLOWED_GLOBALS: ReadonlyMap<string, PythonClassKind> = new Map<
   ['collections.defaultdict', 'map'],
   ['copyreg._reconstructor', 'newFromClassArg'],
   ['copyreg.__newobj__', 'newFromClassArg'],
+  // Protocol 2 records the Python 2 module names for these, whichever
+  // interpreter wrote the payload.
+  ['__builtin__.object', 'opaque'],
+  ['__builtin__.set', 'set'],
+  ['__builtin__.frozenset', 'set'],
+  ['copy_reg._reconstructor', 'newFromClassArg'],
   ['datetime.date', 'date'],
   ['datetime.datetime', 'datetime'],
   ['datetime.time', 'time'],
@@ -284,16 +290,16 @@ interface DatetimeParts {
 }
 
 /**
- * Decodes the packed byte state Python writes for `date`, `time` and
- * `datetime`, each of which omits the fields it does not carry.
+ * Decodes the packed byte state Python writes for a `date` (four bytes) or a
+ * `datetime` (ten), reading the fields a `date` omits as zero.
  */
-function datetimePartsOf(state: Uint8Array, offset: number): DatetimeParts {
-  const at = (index: number) => state[offset + index] ?? 0;
+function datetimePartsOf(state: Uint8Array): DatetimeParts {
+  const at = (index: number) => state[index] ?? 0;
   const microseconds = (at(7) << 16) | (at(8) << 8) | at(9);
   return {
-    year: offset === 0 ? (state[0] << 8) | state[1] : 1970,
-    month: offset === 0 ? at(2) : 1,
-    day: offset === 0 ? at(3) : 1,
+    year: (at(0) << 8) | at(1),
+    month: at(2),
+    day: at(3),
     hour: at(4),
     minute: at(5),
     second: at(6),
@@ -337,7 +343,7 @@ function toBytes(value: PickleValue): Uint8Array {
  * writer produced it.
  */
 function reconstructDatetime(args: PickleValue[]): Date {
-  const parts = datetimePartsOf(toBytes(args[0]), 0);
+  const parts = datetimePartsOf(toBytes(args[0]));
   const offsetMinutes = args[1];
   if (typeof offsetMinutes !== 'number') {
     return localDateOf(parts);
@@ -388,10 +394,15 @@ function reconstructFromClassArg(
 /**
  * Reconstructs a model class. `REDUCE(EnumClass, [value])` is what a
  * string-valued enum member pickles as, and its bare value is what
- * `model_dump(mode="json")` would have written.
+ * `model_dump(mode="json")` would have written. `NEWOBJ` never carries that
+ * shape, so `construct` tells the two apart.
  */
-function reconstructModel(pyClass: string, args: PickleValue[]): PickleValue {
-  if (args.length === 1 && typeof args[0] === 'string') {
+function reconstructModel(
+  pyClass: string,
+  args: PickleValue[],
+  construct: boolean,
+): PickleValue {
+  if (!construct && args.length === 1 && typeof args[0] === 'string') {
     return args[0];
   }
   return makePythonObject(pyClass);
@@ -401,8 +412,16 @@ function toSet(value: PickleValue): Set<PickleValue> {
   return new Set(Array.isArray(value) ? value : []);
 }
 
-/** Applies `REDUCE` / `NEWOBJ` semantics for a resolved class. */
-function instantiate(handle: PythonObject, args: PickleValue[]): PickleValue {
+/**
+ * Applies `REDUCE` / `NEWOBJ` semantics for a resolved class.
+ *
+ * @param construct Whether the opcode was `NEWOBJ` or `NEWOBJ_EX`.
+ */
+function instantiate(
+  handle: PythonObject,
+  args: PickleValue[],
+  construct: boolean,
+): PickleValue {
   const kind = classKindOf(handle);
   const pyClass = handle.pyClass;
   switch (kind) {
@@ -417,7 +436,7 @@ function instantiate(handle: PythonObject, args: PickleValue[]): PickleValue {
     case 'datetime':
       return reconstructDatetime(args);
     case 'date':
-      return localDateOf(datetimePartsOf(toBytes(args[0]), 0));
+      return localDateOf(datetimePartsOf(toBytes(args[0])));
     case 'time':
       return reconstructTime(args);
     case 'timedelta':
@@ -431,7 +450,7 @@ function instantiate(handle: PythonObject, args: PickleValue[]): PickleValue {
     case 'newFromClassArg':
       return reconstructFromClassArg(pyClass, args);
     case 'model':
-      return reconstructModel(pyClass, args);
+      return reconstructModel(pyClass, args, construct);
     default:
       return makePythonObject(pyClass);
   }
@@ -566,10 +585,11 @@ class PickleReader {
       case OP.STACK_GLOBAL:
         return this.pushStackGlobal();
       case OP.REDUCE:
+        return this.reduce(2, false);
       case OP.NEWOBJ:
-        return this.reduce(2);
+        return this.reduce(2, true);
       case OP.NEWOBJ_EX:
-        return this.reduce(3);
+        return this.reduce(3, true);
       case OP.BUILD:
         return this.build();
       default:
@@ -617,12 +637,12 @@ class PickleReader {
    * Applies `REDUCE`, `NEWOBJ` (two operands) or `NEWOBJ_EX` (three, the third
    * being the keyword dict this reader has no use for).
    */
-  private reduce(operands: number): void {
+  private reduce(operands: number, construct: boolean): void {
     const [handle, args] = this.popCount(operands);
     if (!isPythonObject(handle) || !Array.isArray(args)) {
       throw new UnpicklingError('REDUCE expects a class and an argument list.');
     }
-    this.push(instantiate(handle, args));
+    this.push(instantiate(handle, args, construct));
   }
 
   private build(): void {
