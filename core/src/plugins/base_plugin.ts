@@ -494,4 +494,22 @@ export abstract class BasePlugin {
   }): Promise<Record<string, unknown> | undefined> {
     return;
   }
+
+  /**
+   * Callback executed when an error escapes a run.
+   *
+   * This reports an error that already happened, so the value a plugin
+   * returns is ignored and the caller still propagates the original error. A
+   * plugin cannot suppress the error from here.
+   *
+   * @param params.invocationContext The context for the entire invocation.
+   * @param params.error The error that escaped the run.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async onRunErrorCallback(params: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    return;
+  }
 }

@@ -485,6 +485,32 @@ export class PluginManager {
   }
 
   /**
+   * Runs the `onRunErrorCallback` for all plugins.
+   *
+   * Unlike the other callbacks this one never exits early and never re-throws:
+   * a plugin that fails is logged and the next one still runs. The
+   * notification reports an error that already happened, so a failure here
+   * must not replace the error the caller is about to propagate.
+   */
+  async runOnRunErrorCallback({
+    invocationContext,
+    error,
+  }: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    for (const plugin of this.plugins) {
+      try {
+        await plugin.onRunErrorCallback({invocationContext, error});
+      } catch (e: unknown) {
+        logger.error(
+          `Error in plugin '${plugin.name}' during 'onRunErrorCallback' callback: ${formatError(e)}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Runs the `onToolErrorCallback` for all plugins.
    */
   async runOnToolErrorCallback({
