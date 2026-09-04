@@ -872,5 +872,51 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         mockClient.agentEnginesInternal.createInternal,
       ).toHaveBeenCalledTimes(2);
     });
+
+    it('rejects when the agent engine operation carries no resource name', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: true,
+        error: {code: 8, message: 'quota exceeded'},
+      });
+
+      await expect(
+        executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'print("hello")',
+            language: CodeExecutionLanguage.PYTHON,
+            inputFiles: [],
+          },
+        }),
+      ).rejects.toThrow(
+        'Agent Engine creation operation operations/create-engine-op finished with no resource name. Operation error: {"code":8,"message":"quota exceeded"}',
+      );
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the agent engine operation carries an empty response', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: true,
+        response: {},
+      });
+
+      await expect(
+        executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'print("hello")',
+            language: CodeExecutionLanguage.PYTHON,
+            inputFiles: [],
+          },
+        }),
+      ).rejects.toThrow('finished with no resource name');
+
+      expect(executor.agentEngineResourceName).toBeUndefined();
+    });
   });
 });

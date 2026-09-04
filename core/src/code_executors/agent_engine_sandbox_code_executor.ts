@@ -279,10 +279,16 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           );
         }
 
-        const response = apiResponse.response as {name?: string};
-        this.agentEngineResourceName = response.name;
-        logger.debug(`Created Agent Engine: ${this.agentEngineResourceName}`);
-        return this.agentEngineResourceName!;
+        const createdName = apiResponse.response?.name;
+        if (!createdName) {
+          throw new Error(
+            `Agent Engine creation operation ${operation.name} finished with no resource name. Operation error: ${JSON.stringify(apiResponse.error)}`,
+          );
+        }
+
+        this.agentEngineResourceName = createdName;
+        logger.debug(`Created Agent Engine: ${createdName}`);
+        return createdName;
       })();
 
       // The reference leaves its resource name unset when creation fails and
