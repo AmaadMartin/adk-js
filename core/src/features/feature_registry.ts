@@ -132,9 +132,18 @@ export interface FeatureConfig {
   defaultOn?: boolean;
 }
 
-// Central registry: FeatureName -> FeatureConfig. Every stored config carries
-// a concrete `defaultOn`; `registerFeature` fills it in when a caller omits it.
-const FEATURE_REGISTRY: Record<FeatureName, Required<FeatureConfig>> = {
+/**
+ * A feature configuration as the registry stores it.
+ *
+ * `registerFeature` fills in an omitted `defaultOn`, so a reader always sees a
+ * concrete boolean.
+ */
+export interface ResolvedFeatureConfig extends FeatureConfig {
+  defaultOn: boolean;
+}
+
+// Central registry: FeatureName -> ResolvedFeatureConfig.
+const FEATURE_REGISTRY: Record<FeatureName, ResolvedFeatureConfig> = {
   [FeatureName.AGENT_CONFIG]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
@@ -304,7 +313,7 @@ const FEATURE_OVERRIDES: Partial<Record<FeatureName, boolean>> = {};
  */
 export function getFeatureConfig(
   featureName: FeatureName,
-): FeatureConfig | undefined {
+): ResolvedFeatureConfig | undefined {
   return FEATURE_REGISTRY[featureName];
 }
 

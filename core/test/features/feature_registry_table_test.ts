@@ -91,4 +91,16 @@ describe('feature registry table', () => {
 
     expect(getFeatureConfig(name)?.defaultOn).toBe(false);
   });
+
+  it('returns a concrete defaultOn from a stored config', () => {
+    const stored = getFeatureConfig(FeatureName.PROGRESSIVE_SSE_STREAMING);
+    if (!stored) {
+      expect.fail('PROGRESSIVE_SSE_STREAMING is not registered.');
+    }
+
+    // Pins the return type: a `boolean | undefined` fails `npm run ts:check`.
+    const defaultOn: boolean = stored.defaultOn;
+
+    expect(defaultOn).toBe(true);
+  });
 });
