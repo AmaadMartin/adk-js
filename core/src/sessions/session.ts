@@ -52,6 +52,16 @@ export interface Session {
    * The last update time of the session.
    */
   lastUpdateTime: number;
+
+  /**
+   * The exact storage revision the session was read at.
+   *
+   * A database-backed service compares it against the row on the next write,
+   * so a session read by one process is not overwritten by a session another
+   * process read earlier. It is unset for a session that came from a service
+   * that does not track revisions.
+   */
+  storageUpdateMarker?: string;
 }
 
 /**
@@ -73,5 +83,6 @@ export function createSession(
     state: params.state || {},
     events: params.events || [],
     lastUpdateTime: params.lastUpdateTime || 0,
+    storageUpdateMarker: params.storageUpdateMarker,
   };
 }
