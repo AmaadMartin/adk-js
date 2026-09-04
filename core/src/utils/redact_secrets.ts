@@ -115,7 +115,9 @@ const HTTP_CREDENTIAL_KEYS: ReadonlySet<string> = new Set([
 
 /**
  * The `OAuth2Auth` fields that carry a secret. A bare `{clientId}` is not one
- * of them: it holds nothing to protect.
+ * of them: it holds nothing to protect. Every name here is also in
+ * {@link SENSITIVE_KEYS}, so a secret that sits in some other object is
+ * redacted by its key rather than by the shape of its parent.
  */
 const OAUTH2_SECRET_KEYS = [
   'clientSecret',
@@ -126,6 +128,20 @@ const OAUTH2_SECRET_KEYS = [
   'codeVerifier',
   'authResponseUri',
 ] as const;
+
+/** The complete field set of an `OAuth2Auth`. */
+const OAUTH2_KEYS: ReadonlySet<string> = new Set([
+  ...OAUTH2_SECRET_KEYS,
+  'clientId',
+  'authUri',
+  'nonce',
+  'state',
+  'redirectUri',
+  'expiresAt',
+  'expiresIn',
+  'audience',
+  'tokenEndpointAuthMethod',
+]);
 
 /**
  * How many of {@link HTTP_CREDENTIAL_KEYS} a value must carry before its shape
@@ -200,8 +216,17 @@ function isHttpCredentials(value: Record<string, unknown>): boolean {
   );
 }
 
+/**
+ * Whether the value is an `OAuth2Auth` rather than some caller's object that
+ * happens to carry a token. Every key must be an `OAuth2Auth` field, so a tool
+ * result of `{accessToken, rows}` keeps its `rows` and loses only the token,
+ * which {@link isSensitiveKey} redacts by name.
+ */
 function isOAuth2Auth(value: Record<string, unknown>): boolean {
-  return OAUTH2_SECRET_KEYS.some((key) => key in value);
+  return (
+    OAUTH2_SECRET_KEYS.some((key) => key in value) &&
+    Object.keys(value).every((key) => OAUTH2_KEYS.has(key))
+  );
 }
 
 /**

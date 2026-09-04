@@ -132,15 +132,15 @@ describe('DebugLoggingPlugin over a real Runner', () => {
       expect.fail('the debug document is not a mapping');
     }
 
-    expect(document['appName']).toBe(APP_NAME);
-    expect(document['sessionId']).toBe(session.id);
+    expect(document['app_name']).toBe(APP_NAME);
+    expect(document['session_id']).toBe(session.id);
 
     const entries = document['entries'];
     if (!Array.isArray(entries)) {
       expect.fail('the debug document holds no entries list');
     }
     const kinds = entries.map((entry) =>
-      isRecord(entry) ? entry['entryType'] : undefined,
+      isRecord(entry) ? entry['entry_type'] : undefined,
     );
 
     for (const expected of [

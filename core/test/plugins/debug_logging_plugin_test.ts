@@ -208,7 +208,7 @@ function entriesOfType(
   entryType: DebugEntryType,
 ): Array<Record<string, unknown>> {
   return entriesOf(document).filter(
-    (entry) => entry['entryType'] === entryType,
+    (entry) => entry['entry_type'] === entryType,
   );
 }
 
@@ -263,8 +263,8 @@ describe('TestDebugLoggingPluginInitialization', () => {
       onlyEntryData(document, DebugEntryType.LLM_REQUEST),
       'config',
     );
-    expect(config['systemInstruction']).toBeUndefined();
-    expect(config['systemInstructionLength']).toBe(28);
+    expect(config['system_instruction']).toBeUndefined();
+    expect(config['system_instruction_length']).toBe(28);
   });
 });
 
@@ -285,10 +285,10 @@ describe('TestDebugLoggingPluginCallbacks', () => {
 
     expect(result).toBeUndefined();
     const document = await readDocument();
-    expect(document['invocationId']).toBe('test-invocation-id');
-    expect(document['sessionId']).toBe('test-session-id');
+    expect(document['invocation_id']).toBe('test-invocation-id');
+    expect(document['session_id']).toBe('test-session-id');
     const entries = entriesOf(document);
-    expect(entries[0]['entryType']).toBe(DebugEntryType.INVOCATION_START);
+    expect(entries[0]['entry_type']).toBe(DebugEntryType.INVOCATION_START);
     expect(
       entriesOfType(document, DebugEntryType.INVOCATION_START),
     ).toHaveLength(1);
@@ -339,8 +339,8 @@ describe('TestDebugLoggingPluginCallbacks', () => {
       DebugEntryType.LLM_REQUEST,
     );
     expect(data['model']).toBe('gemini-2.5-flash');
-    expect(data['contentCount']).toBe(1);
-    expect(at(data, 'config')['systemInstruction']).toBe(
+    expect(data['content_count']).toBe(1);
+    expect(at(data, 'config')['system_instruction']).toBe(
       'You are a helpful assistant.',
     );
   });
@@ -363,7 +363,7 @@ describe('TestDebugLoggingPluginCallbacks', () => {
       await readDocument(),
       DebugEntryType.LLM_RESPONSE,
     );
-    expect(data['turnComplete']).toBe(true);
+    expect(data['turn_complete']).toBe(true);
     expect(at(data, 'content')['role']).toBe('model');
   });
 
@@ -379,7 +379,7 @@ describe('TestDebugLoggingPluginCallbacks', () => {
 
     expect(result).toBeUndefined();
     const data = onlyEntryData(await readDocument(), DebugEntryType.TOOL_CALL);
-    expect(data['toolName']).toBe('test_tool');
+    expect(data['tool_name']).toBe('test_tool');
     expect(at(data, 'args')['param1']).toBe('value1');
     expect(at(data, 'args')['param2']).toBe(42);
   });
@@ -400,7 +400,7 @@ describe('TestDebugLoggingPluginCallbacks', () => {
       await readDocument(),
       DebugEntryType.TOOL_RESPONSE,
     );
-    expect(data['toolName']).toBe('test_tool');
+    expect(data['tool_name']).toBe('test_tool');
     expect(at(data, 'result')['output']).toBe('success');
   });
 
@@ -418,7 +418,7 @@ describe('TestDebugLoggingPluginCallbacks', () => {
     const document = await readDocument();
     const data = onlyEntryData(document, DebugEntryType.EVENT);
     expect(data['author']).toBe('test-agent');
-    expect(data['eventId']).toBe(event.id);
+    expect(data['event_id']).toBe(event.id);
   });
 
   it('test_on_model_error_callback_logs_error', async () => {
@@ -440,8 +440,8 @@ describe('TestDebugLoggingPluginCallbacks', () => {
 
     expect(result).toBeUndefined();
     const data = onlyEntryData(await readDocument(), DebugEntryType.LLM_ERROR);
-    expect(data['errorType']).toBe('TypeError');
-    expect(data['errorMessage']).toBe('Test error message');
+    expect(data['error_type']).toBe('TypeError');
+    expect(data['error_message']).toBe('Test error message');
   });
 
   it('test_on_tool_error_callback_logs_error', async () => {
@@ -458,8 +458,8 @@ describe('TestDebugLoggingPluginCallbacks', () => {
 
     expect(result).toBeUndefined();
     const data = onlyEntryData(await readDocument(), DebugEntryType.TOOL_ERROR);
-    expect(data['toolName']).toBe('test_tool');
-    expect(data['errorType']).toBe('RangeError');
+    expect(data['tool_name']).toBe('test_tool');
+    expect(data['error_type']).toBe('RangeError');
   });
 });
 
@@ -476,8 +476,8 @@ describe('TestDebugLoggingPluginFileOutput', () => {
     await plugin.afterRunCallback({invocationContext});
 
     const document = await readDocument();
-    expect(document['invocationId']).toBe('test-invocation-id');
-    expect(document['sessionId']).toBe('test-session-id');
+    expect(document['invocation_id']).toBe('test-invocation-id');
+    expect(document['session_id']).toBe('test-session-id');
     expect(entriesOf(document).length).toBeGreaterThanOrEqual(2);
   });
 
@@ -528,8 +528,8 @@ describe('TestDebugLoggingPluginFileOutput', () => {
 
     const documents = await readDocuments();
     expect(documents).toHaveLength(2);
-    expect(documents[0]['invocationId']).toBe('invocation-1');
-    expect(documents[1]['invocationId']).toBe('invocation-2');
+    expect(documents[0]['invocation_id']).toBe('invocation-1');
+    expect(documents[1]['invocation_id']).toBe('invocation-2');
   });
 
   it('test_after_run_callback_cleans_up_state', async () => {
@@ -568,7 +568,7 @@ describe('TestDebugLoggingPluginSerialization', () => {
     expect(result).toEqual({
       role: 'model',
       parts: [
-        {functionCall: {id: 'fc-1', name: 'test_func', args: {arg1: 'val1'}}},
+        {function_call: {id: 'fc-1', name: 'test_func', args: {arg1: 'val1'}}},
       ],
     });
   });
@@ -683,7 +683,7 @@ describe('TestDebugLoggingPluginRedaction', () => {
     const stateDelta = at(
       onlyEntryData(await readDocument(), DebugEntryType.EVENT),
       'actions',
-      'stateDelta',
+      'state_delta',
     );
     expect(stateDelta['temp:oauth2_credential']).toBe(REDACTED);
     expect(stateDelta['counter']).toBe(7);
@@ -1022,7 +1022,7 @@ describe('TestDebugLoggingPluginSystemInstructionConfig', () => {
       await readDocument(),
       DebugEntryType.LLM_REQUEST,
     );
-    expect(at(data, 'config')['systemInstruction']).toBe(
+    expect(at(data, 'config')['system_instruction']).toBe(
       'Full system instruction text',
     );
   });
@@ -1051,8 +1051,88 @@ describe('TestDebugLoggingPluginSystemInstructionConfig', () => {
       onlyEntryData(await readDocument(), DebugEntryType.LLM_REQUEST),
       'config',
     );
-    expect(config['systemInstruction']).toBeUndefined();
-    expect(config['systemInstructionLength']).toBe(28);
+    expect(config['system_instruction']).toBeUndefined();
+    expect(config['system_instruction_length']).toBe(28);
+  });
+});
+
+describe('DebugLoggingPlugin document format', () => {
+  /** Every key a YAML 1.1 reader resolves to a boolean instead of a string. */
+  const YAML_11_BOOLEANS = ['yes', 'no', 'on', 'off', 'y', 'n'];
+
+  it('quotes a string a YAML 1.1 reader would read as a boolean', async () => {
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const invocationContext = makeInvocationContext(makeSession());
+    const toolArgs = Object.fromEntries(
+      YAML_11_BOOLEANS.map((word, index) => [`arg${index}`, word]),
+    );
+
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeToolCallback({
+      tool: makeTool('test_tool'),
+      toolArgs,
+      toolContext: makeToolContext(invocationContext),
+    });
+    await plugin.afterRunCallback({invocationContext});
+
+    // js-yaml reads YAML 1.2, where these are plain strings, so the file has
+    // to be inspected as text to prove a 1.1 reader sees a string too.
+    const text = await fs.readFile(outputFile, 'utf-8');
+    for (const word of YAML_11_BOOLEANS) {
+      expect(text).toContain(`'${word}'`);
+      expect(text).not.toMatch(new RegExp(`: ${word}$`, 'm'));
+    }
+    const args = at(
+      onlyEntryData(await readDocument(), DebugEntryType.TOOL_CALL),
+      'args',
+    );
+    expect(Object.values(args)).toEqual(YAML_11_BOOLEANS);
+  });
+
+  it('writes snake_case keys throughout the document', async () => {
+    const plugin = new DebugLoggingPlugin({outputPath: outputFile});
+    const invocationContext = makeInvocationContext(makeSession());
+    const callbackContext = makeCallbackContext(invocationContext);
+
+    await plugin.beforeRunCallback({invocationContext});
+    await plugin.beforeModelCallback({
+      callbackContext,
+      llmRequest: {
+        model: 'gemini-2.5-flash',
+        contents: [{role: 'user', parts: [{text: 'hi'}]}],
+        config: {systemInstruction: 'be brief', topP: 0.9, topK: 20},
+        liveConnectConfig: {},
+        toolsDict: {},
+      },
+    });
+    await plugin.afterModelCallback({
+      callbackContext,
+      llmResponse: {
+        content: {
+          role: 'model',
+          parts: [
+            {fileData: {fileUri: 'gs://b/o', mimeType: 'text/plain'}},
+            {inlineData: {mimeType: 'image/png', data: 'aGk='}},
+          ],
+        },
+        turnComplete: true,
+        finishReason: FinishReason.STOP,
+        usageMetadata: {promptTokenCount: 1, totalTokenCount: 2},
+        partial: false,
+      },
+    });
+    await plugin.afterRunCallback({invocationContext});
+
+    // The plugin authors every key in the file except the pass-through
+    // payloads, none of which this invocation carries.
+    const camelCased = [
+      ...(await fs.readFile(outputFile, 'utf-8')).matchAll(
+        /^\s*-?\s*([A-Za-z_][A-Za-z0-9_]*):/gm,
+      ),
+    ]
+      .map((match) => match[1])
+      .filter((key) => /[A-Z]/.test(key));
+    expect(camelCased).toEqual([]);
   });
 });
 
@@ -1078,7 +1158,7 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
       'content',
     );
     expect(listAt(content, 'parts')[0]).toEqual({text: 'Hello, world!'});
-    expect(entriesOf(document)[0]['entryType']).toBe(
+    expect(entriesOf(document)[0]['entry_type']).toBe(
       DebugEntryType.USER_MESSAGE,
     );
   });
@@ -1116,7 +1196,7 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
 
     const documents = await readDocuments();
     expect(documents).toHaveLength(1);
-    expect(documents[0]['invocationId']).toBe('inv-1');
+    expect(documents[0]['invocation_id']).toBe('inv-1');
     expect(documents[0]['incomplete']).toBe(true);
   });
 
@@ -1281,40 +1361,42 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
       'root.child',
     );
     expect(
-      entriesOfType(document, DebugEntryType.AGENT_END)[0]['agentName'],
+      entriesOfType(document, DebugEntryType.AGENT_END)[0]['agent_name'],
     ).toBe('test_agent');
 
     const request = onlyEntryData(document, DebugEntryType.LLM_REQUEST);
     expect(request['tools']).toEqual(['my_tool']);
     const config = at(request, 'config');
     expect(config['temperature']).toBe(0.5);
-    expect(config['topP']).toBe(0.9);
-    expect(config['topK']).toBe(20);
-    expect(config['maxOutputTokens']).toBe(1024);
-    expect(config['responseMimeType']).toBe('application/json');
-    expect(config['hasResponseSchema']).toBe(true);
+    expect(config['top_p']).toBe(0.9);
+    expect(config['top_k']).toBe(20);
+    expect(config['max_output_tokens']).toBe(1024);
+    expect(config['response_mime_type']).toBe('application/json');
+    expect(config['has_response_schema']).toBe(true);
 
     const response = onlyEntryData(document, DebugEntryType.LLM_RESPONSE);
-    expect(response['errorCode']).toBe('INTERNAL');
-    expect(response['errorMessage']).toBe('boom');
-    expect(at(response, 'usageMetadata')['cachedContentTokenCount']).toBe(2);
-    expect(response['hasGroundingMetadata']).toBe(true);
-    expect(response['finishReason']).toBe('STOP');
-    expect(response['modelVersion']).toBe('gemini-2.5-flash-001');
+    expect(response['error_code']).toBe('INTERNAL');
+    expect(response['error_message']).toBe('boom');
+    expect(at(response, 'usage_metadata')['cached_content_token_count']).toBe(
+      2,
+    );
+    expect(response['has_grounding_metadata']).toBe(true);
+    expect(response['finish_reason']).toBe('STOP');
+    expect(response['model_version']).toBe('gemini-2.5-flash-001');
 
     const event = onlyEntryData(document, DebugEntryType.EVENT);
     expect(event['branch']).toBe('root.child');
-    expect(event['errorCode']).toBe('INTERNAL');
-    expect(event['hasGroundingMetadata']).toBe(true);
-    expect(at(event, 'usageMetadata')['totalTokenCount']).toBe(3);
-    expect(event['longRunningToolIds']).toEqual(['lrt-1']);
+    expect(event['error_code']).toBe('INTERNAL');
+    expect(event['has_grounding_metadata']).toBe(true);
+    expect(at(event, 'usage_metadata')['total_token_count']).toBe(3);
+    expect(event['long_running_tool_ids']).toEqual(['lrt-1']);
     const actions = at(event, 'actions');
-    expect(actions['stateDelta']).toEqual({counter: 1});
-    expect(actions['artifactDelta']).toEqual({'report.pdf': 2});
-    expect(actions['transferToAgent']).toBe('other_agent');
+    expect(actions['state_delta']).toEqual({counter: 1});
+    expect(actions['artifact_delta']).toEqual({'report.pdf': 2});
+    expect(actions['transfer_to_agent']).toBe('other_agent');
     expect(actions['escalate']).toBe(true);
     // The count only: an auth config holds a credential.
-    expect(actions['requestedAuthConfigs']).toBe(1);
+    expect(actions['requested_auth_configs']).toBe(1);
   });
 
   it('omits the actions and config blocks when they carry nothing', async () => {
@@ -1394,8 +1476,8 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
       onlyEntryData(await readDocument(), DebugEntryType.LLM_REQUEST),
       'config',
     );
-    expect(config['hasSystemInstruction']).toBe(true);
-    expect(config['systemInstructionLength']).toBeUndefined();
+    expect(config['has_system_instruction']).toBe(true);
+    expect(config['system_instruction_length']).toBeUndefined();
   });
 
   it('records every part kind and never the inline bytes', () => {
@@ -1431,24 +1513,24 @@ describe('DebugLoggingPlugin adk-js behaviour', () => {
       parts: [
         {text: 'hello'},
         {
-          functionResponse: {
+          function_response: {
             id: 'fr-1',
             name: 'do_it',
             response: {'api_key': REDACTED, ok: true},
           },
         },
         {
-          inlineData: {
-            mimeType: 'image/png',
-            displayName: 'shot.png',
-            dataOmitted: true,
+          inline_data: {
+            mime_type: 'image/png',
+            display_name: 'shot.png',
+            _data_omitted: true,
           },
         },
-        {fileData: {fileUri: 'gs://bucket/o', mimeType: 'text/plain'}},
+        {file_data: {file_uri: 'gs://bucket/o', mime_type: 'text/plain'}},
         {
-          codeExecutionResult: {outcome: Outcome.OUTCOME_OK, output: '4'},
+          code_execution_result: {outcome: Outcome.OUTCOME_OK, output: '4'},
         },
-        {executableCode: {language: Language.PYTHON, code: 'print(2+2)'}},
+        {executable_code: {language: Language.PYTHON, code: 'print(2+2)'}},
       ],
     });
     expect(JSON.stringify(result)).not.toContain('aGVsbG8=');
