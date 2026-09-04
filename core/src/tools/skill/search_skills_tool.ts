@@ -7,20 +7,21 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
+import {SkillTool} from './skill_tool.js';
 import {SEARCH_SKILLS_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
-export class SearchSkillsTool extends BaseTool {
+export class SearchSkillsTool extends SkillTool {
   static readonly TOOL_NAME = SEARCH_SKILLS_TOOL_NAME;
 
-  constructor(private toolset: SkillToolset) {
+  constructor(toolset: SkillToolset) {
     if (!toolset.registry) {
       throw new Error('SearchSkillsTool requires a configured skill registry.');
     }
-    super({
+    super(toolset, {
       name: toolset.toolName(SearchSkillsTool.TOOL_NAME),
       description:
         toolset.registry.searchToolDescription?.() ||
