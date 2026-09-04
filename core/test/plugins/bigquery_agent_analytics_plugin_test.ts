@@ -765,7 +765,10 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       error_message: null,
       is_truncated: false,
     });
-    expect(row.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // A Date, not a string: the Storage Write API encoder converts only a Date
+    // into the microseconds a TIMESTAMP column takes.
+    expect(row.timestamp).toBeInstanceOf(Date);
+    expect(row.timestamp.getTime()).not.toBeNaN();
     expect(row.event_id).toMatch(/^[0-9a-f]{32}$/);
   });
 

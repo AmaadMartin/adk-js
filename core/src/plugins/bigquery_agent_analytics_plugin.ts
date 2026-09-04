@@ -746,7 +746,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
         : sanitizeErrorText(data.errorMessage, this.config.maxContentLength);
     const latency = buildLatency(data);
     const row: AnalyticsRow = {
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(),
       event_id: newHexId(),
       event_type: eventType,
       agent: invocationContext.agent?.name ?? data.sourceEvent?.author ?? null,

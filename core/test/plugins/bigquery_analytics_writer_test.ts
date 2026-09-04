@@ -255,7 +255,7 @@ function rowErrorStatus(rejected: number): {
 /** One well-formed row, distinguished by `id`. */
 function makeRow(id: string): AnalyticsRow {
   return {
-    timestamp: '2026-01-01T00:00:00.000Z',
+    timestamp: new Date('2026-01-01T00:00:00.000Z'),
     event_id: id,
     event_type: AnalyticsEventType.LLM_REQUEST,
     agent: 'agent',

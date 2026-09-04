@@ -247,7 +247,15 @@ export type AnalyticsContentPart = {
 
 /** One row of the events table, in the column order the schema declares. */
 export type AnalyticsRow = {
-  timestamp: string;
+  /**
+   * When the event happened.
+   *
+   * A `Date`, not an ISO-8601 string: the Storage Write API encodes a
+   * TIMESTAMP column as proto2 `int64` microseconds, and its JSON encoder
+   * converts only a `Date` into that. A string reaches protobuf's int64 writer
+   * unconverted and the append throws.
+   */
+  timestamp: Date;
   event_id: string;
   event_type: AnalyticsEventType;
   agent: string | null;
