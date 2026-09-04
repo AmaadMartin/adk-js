@@ -63,8 +63,14 @@ describe('session storage column types', () => {
     expect(dynamicJsonColumnType(PLATFORMS.mysql)).toBe('longtext');
   });
 
+  /**
+   * Diverges. The reference expects `TEXT` because SQLAlchemy has no portable
+   * JSON type. MikroORM has one, and adk-js already declares `json` here, so
+   * forcing `text` would alter every existing SQLite database for an affinity
+   * alias SQLite treats the same way.
+   */
   it('test_dynamic_json_load_dialect_impl[sqlite]', () => {
-    expect(dynamicJsonColumnType(PLATFORMS.sqlite)).toBe('text');
+    expect(dynamicJsonColumnType(PLATFORMS.sqlite)).toBe('json');
   });
 
   it('test_dynamic_json_serializes_to_json_text_for_non_postgresql', () => {
@@ -116,18 +122,25 @@ describe('session storage column types', () => {
     ).toBe(new DateTimeType().getColumnType(timestampProp, PLATFORMS.sqlite));
   });
 
+  /**
+   * Diverges. The reference reads a numeric column as POSIX seconds. MikroORM
+   * counts milliseconds: `BaseSqlitePlatform.processDateProperty` writes a
+   * `Date` as `+value`, and `Platform.parseDate` reads it back as
+   * `new Date(value)`. Multiplying by 1000 would place every stored instant
+   * about 50,000 years in the future.
+   */
   it('test_precise_timestamp_result_processor_reads_epoch_as_utc[float]', () => {
-    const raw = 1767322475.123456;
+    const raw = 1767322475123.456;
 
     expect(preciseTimestamp.convertToJSValue(raw, PLATFORMS.sqlite)).toEqual(
-      new Date(raw * 1000),
+      new Date(raw),
     );
   });
 
   it('test_precise_timestamp_result_processor_reads_epoch_as_utc[int]', () => {
     expect(
-      preciseTimestamp.convertToJSValue(1767322475, PLATFORMS.sqlite),
-    ).toEqual(new Date(1767322475000));
+      preciseTimestamp.convertToJSValue(1767322475123, PLATFORMS.sqlite),
+    ).toEqual(new Date('2026-01-02T02:54:35.123Z'));
   });
 
   it('test_precise_timestamp_result_processor_keeps_none', () => {
