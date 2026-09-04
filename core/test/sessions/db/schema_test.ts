@@ -155,11 +155,37 @@ describe('sessions storage schema', () => {
       const sql = await orm.schema.getCreateSchemaSQL();
 
       expect(sql).toContain(
-        'foreign key(`app_name`, `user_id`, `session_id`) references `sessions`(`app_name`, `user_id`, `id`) on delete cascade',
+        'foreign key(`session_id`, `app_name`, `user_id`) references `sessions`(`id`, `app_name`, `user_id`) on delete cascade',
       );
       expect(sql).toContain(
         'create index `idx_events_app_user_session_ts` on `events` (`app_name`, `user_id`, `session_id`, `timestamp`)',
       );
+    });
+
+    /**
+     * InnoDB rejects a foreign key whose referenced columns do not lead an
+     * index of the parent table, and the primary key is the only index
+     * `sessions` has. MySQL 8.0.45 fails the `alter table` with errno 1822
+     * when the two lists disagree, which no DDL string assertion can see.
+     */
+    it('references the sessions columns in primary key order', async () => {
+      const orm = await track(
+        await MikroORM.init({
+          dbName: ':memory:',
+          driver: SqliteDriver,
+          entities: ENTITIES,
+        }),
+      );
+      const metadata = orm.getMetadata();
+
+      const referenced = metadata.get(StorageEvent.name).properties['session']
+        .referencedColumnNames;
+      const sessionKey = metadata
+        .get(StorageSession.name)
+        .getPrimaryProps()
+        .flatMap((property) => property.fieldNames);
+
+      expect(referenced).toEqual(sessionKey);
     });
 
     it('keeps sub-second precision on every timestamp column on MySQL', async () => {
@@ -177,7 +203,7 @@ describe('sessions storage schema', () => {
       expect(sql).not.toContain('datetime not null');
       expect(sql.match(/datetime\(3\) not null/g)).toHaveLength(5);
       expect(sql).toContain(
-        'foreign key (`app_name`, `user_id`, `session_id`) references `sessions` (`app_name`, `user_id`, `id`) on update no action on delete cascade',
+        'foreign key (`session_id`, `app_name`, `user_id`) references `sessions` (`id`, `app_name`, `user_id`) on update no action on delete cascade',
       );
       expect(sql).toContain(
         'add index `idx_events_app_user_session_ts`(`app_name`, `user_id`, `session_id`, `timestamp`)',

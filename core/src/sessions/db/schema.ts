@@ -209,10 +209,18 @@ export class StorageEvent {
    * session takes its events with it. `ownColumns: []` leaves `appName`,
    * `userId` and `sessionId` owning their columns, because they are primary
    * keys that callers set by name; assigning this relation does not set them.
+   *
+   * The referenced columns are listed in the order of the `sessions` primary
+   * key. InnoDB only accepts a foreign key whose referenced columns lead an
+   * index of the parent table, and that primary key is the only index
+   * `sessions` has; MySQL 8.0 rejects any other order with errno 1822. A
+   * foreign key pairs columns rather than ordering them, so this is the
+   * constraint adk-python declares, written to fit the key adk-js declares.
+   * The schema test pins the two column lists to each other.
    */
   @ManyToOne(() => StorageSession, {
-    joinColumns: ['app_name', 'user_id', 'session_id'],
-    referencedColumnNames: ['app_name', 'user_id', 'id'],
+    joinColumns: ['session_id', 'app_name', 'user_id'],
+    referencedColumnNames: ['id', 'app_name', 'user_id'],
     deleteRule: 'cascade',
     updateRule: 'no action',
     ownColumns: [],
