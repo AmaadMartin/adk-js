@@ -894,6 +894,8 @@ export {
   PUBSUB_TOKEN_CACHE_KEY,
   PubSubCredentialsConfig,
 } from './tools/pubsub/pubsub_credentials.js';
+export {createPubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
+export type {PubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {GeminiEmbeddingModel} from './tools/retrieval/embedding_model.js';
