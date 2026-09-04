@@ -14,14 +14,11 @@ import {LlmResponse} from '../models/llm_response.js';
 import {BasePlugin} from './base_plugin.js';
 
 /**
- * Narrows a genai `ContentUnion` member to `Content`.
- *
- * `Content` is an interface, so the guard keys on the `parts` property instead
- * of a runtime class. The exported guard in `workflow/base_node.ts` also
- * requires `parts` to be an array, which would send a `Content` whose `parts`
- * is `undefined` down the `Part` branch.
+ * Separates the two object members of `ContentUnion`. A bare
+ * `'parts' in value` cannot: `Content.parts` is optional, so it leaves
+ * `Content` in the negative branch and `[prefix, existing]` stops compiling.
  */
-function isContent(value: Content | Part): value is Content {
+function hasParts(value: Content | Part): value is Content {
   return 'parts' in value;
 }
 
@@ -46,7 +43,7 @@ function prependInstruction(
   if (Array.isArray(existing)) {
     return [prefix, ...existing];
   }
-  if (isContent(existing)) {
+  if (hasParts(existing)) {
     return {
       ...existing,
       parts: [createPartFromText(prefix), ...(existing.parts ?? [])],

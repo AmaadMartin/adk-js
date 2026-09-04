@@ -296,10 +296,11 @@ describe('GlobalInstructionPlugin', () => {
     ]);
   });
 
-  // Ported from `tests/unittests/plugins/test_global_instruction_plugin.py`
-  // on `google/adk-python` main.
+  // Ported from `test_global_instruction_plugin_prepends_to_content` in
+  // `tests/unittests/plugins/test_global_instruction_plugin.py` on
+  // `google/adk-python` main.
   describe('Content system instruction', () => {
-    it('test_global_instruction_plugin_prepends_to_content', async () => {
+    it('prepends into a Content system instruction', async () => {
       const plugin = new GlobalInstructionPlugin('Global instruction.');
       const llmRequest: LlmRequest = {
         contents: [],
