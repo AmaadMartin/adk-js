@@ -60,13 +60,28 @@ async function openDatabase(databaseFile: string): Promise<MikroORM> {
   return orm;
 }
 
+/**
+ * Runs a query and names the shape of its rows.
+ *
+ * `Connection.execute` is declared as returning `QueryResult<T> | any | any[]`,
+ * so its own generic parameter cannot type the result.
+ */
+async function query<T>(
+  orm: MikroORM,
+  sql: string,
+  params?: string[],
+): Promise<T[]> {
+  const rows: T[] = await orm.em.getConnection().execute(sql, params);
+  return rows;
+}
+
 /** Columns of a sqlite index in index order, or `[]` when it is absent. */
 async function indexColumns(orm: MikroORM, name: string): Promise<string[]> {
-  const rows = await orm.em
-    .getConnection()
-    .execute<
-      Array<{name: string}>
-    >('select name from pragma_index_info(?) order by seqno', [name]);
+  const rows = await query<{name: string}>(
+    orm,
+    'select name from pragma_index_info(?) order by seqno',
+    [name],
+  );
   return rows.map((row) => row.name);
 }
 
@@ -178,9 +193,10 @@ describe('sessions storage schema', () => {
       await seedEvent(orm, 'e1');
       await seedEvent(orm, 'e2');
 
-      const pragma = await orm.em
-        .getConnection()
-        .execute<Array<{foreign_keys: number}>>('pragma foreign_keys');
+      const pragma = await query<{foreign_keys: number}>(
+        orm,
+        'pragma foreign_keys',
+      );
       expect(pragma[0].foreign_keys).toBe(1);
 
       const em = orm.em.fork();
