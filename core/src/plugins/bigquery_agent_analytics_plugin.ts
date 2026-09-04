@@ -898,7 +898,9 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     const spanId =
       data.spanIdOverride ?? this.spans.current(invocationId)?.spanId ?? null;
     const parentSpanId =
-      data.parentSpanIdOverride ?? this.spans.parentSpanId(invocationId) ?? null;
+      data.parentSpanIdOverride ??
+      this.spans.parentSpanId(invocationId) ??
+      null;
     const parsed = await this.parseContent(eventType, rawContent, {
       traceId,
       spanId,

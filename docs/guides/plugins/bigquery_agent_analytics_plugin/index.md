@@ -260,7 +260,7 @@ Two rules constrain when the offload runs. Text is sanitized before it is upload
 
 A part carrying `fileData.fileUri` is stored as `EXTERNAL_URI`, and the URI is redacted first. A signed URL is a credential written as a link, so every surface that can carry one is inspected: a parameter or path segment named after a credential keeps its name and loses its value, and the fragment takes the same pass.
 
-A URI that cannot be stored with any part intact becomes `[REDACTED_SENSITIVE_URI]`. That covers one carrying userinfo, one no URL parser accepts, one that is not a string, and one longer than 4,000,000 characters. Redaction sets the row's `is_truncated`.
+A URI that cannot be stored with any part intact becomes `[REDACTED_SENSITIVE_URI]`. That covers one carrying userinfo, one no URL parser accepts, one that is not a string, and one longer than 4,000,000 characters. It also covers a `data:`, `mailto:` or `blob:` URI whose path holds a credential: such a URL cannot be a base, so its path cannot be rewritten, and the whole URI is refused rather than stored with the credential still in it. Redaction sets the row's `is_truncated`.
 
 ## Failure modes
 
