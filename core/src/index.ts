@@ -84,7 +84,11 @@ export {
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
-export {SkillToolset} from './tools/skill/skill_toolset.js';
+export {
+  DEFAULT_SCRIPT_TIMEOUT_SECONDS,
+  SkillToolset,
+} from './tools/skill/skill_toolset.js';
+export type {SkillToolsetOptions} from './tools/skill/skill_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';

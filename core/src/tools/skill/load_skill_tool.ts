@@ -5,16 +5,22 @@
  */
 
 import {FunctionDeclaration, Type} from '@google/genai';
+import {injectSessionState} from '../../agents/instructions.js';
 import {requireAgent} from '../../agents/invocation_context.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {SkillErrorCode} from './skill_error_codes.js';
+import {detectSkillToolError} from './skill_error_detection.js';
+import {LOAD_SKILL_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
 export class LoadSkillTool extends BaseTool {
+  static readonly TOOL_NAME = LOAD_SKILL_TOOL_NAME;
+
   constructor(private toolset: SkillToolset) {
     super({
-      name: 'load_skill',
+      name: toolset.toolName(LoadSkillTool.TOOL_NAME),
       description: 'Loads the SKILL.md instructions for a given skill.',
     });
   }
@@ -44,7 +50,7 @@ export class LoadSkillTool extends BaseTool {
     if (!skillName) {
       return {
         error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
+        error_code: SkillErrorCode.MISSING_SKILL_NAME,
       };
     }
 
@@ -57,14 +63,14 @@ export class LoadSkillTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        error_code: 'REGISTRY_ERROR',
+        error_code: SkillErrorCode.REGISTRY_ERROR,
       };
     }
 
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
-        error_code: 'SKILL_NOT_FOUND',
+        error_code: SkillErrorCode.SKILL_NOT_FOUND,
       };
     }
 
@@ -77,11 +83,21 @@ export class LoadSkillTool extends BaseTool {
       toolContext.state.set(stateKey, [...currentActivated, skillName]);
     }
 
+    // A skill opts in to templating so an instruction that legitimately
+    // contains braces is not rewritten behind its author's back.
+    const instructions = skill.frontmatter.metadata?.['adk_inject_state']
+      ? await injectSessionState(skill.instructions, toolContext)
+      : skill.instructions;
+
     return {
       skill_name: skillName,
-      instructions: skill.instructions,
+      instructions,
       frontmatter: skill.frontmatter,
       resources: skill.resources,
     };
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return detectSkillToolError(response);
   }
 }

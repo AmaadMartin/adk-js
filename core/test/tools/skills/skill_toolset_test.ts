@@ -73,7 +73,11 @@ describe('skill_toolset', () => {
       const toolset = new SkillToolset([mockSkill]);
       const context = createMockContext();
       const tools = await toolset.getTools(context);
-      expect(tools.length).toBe(4);
+      // `run_skill_script` is now dropped when the context proves no backend
+      // can run a script. See
+      // skill_toolset_parity_test.ts:test_get_tools_keeps_run_skill_script_with_agent_executor
+      // for the case where the agent supplies one.
+      expect(tools.length).toBe(3);
     });
 
     it('does not expose the inline-script tool by default', async () => {
@@ -112,7 +116,11 @@ describe('skill_toolset', () => {
       expect(llmRequest.config?.systemInstruction).toContain(
         "You can use specialized 'skills'",
       );
-      expect(llmRequest.config?.systemInstruction).toContain(
+      // The skills catalogue is no longer inlined when `list_skills` survives
+      // the filter, since the model can call the tool instead. The XML branch
+      // is pinned by
+      // skill_toolset_parity_test.ts:test_process_llm_request_injects_skills_xml_when_list_skills_filtered.
+      expect(llmRequest.config?.systemInstruction).not.toContain(
         '<name>test-skill</name>',
       );
     });
