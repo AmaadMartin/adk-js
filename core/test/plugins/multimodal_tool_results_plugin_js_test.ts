@@ -54,7 +54,6 @@ function createContext(sessionState: Record<string, unknown> = {}): Context {
   });
 }
 
-/** See the note on the same helper in multimodal_tool_results_plugin_test.ts. */
 function callAfterTool(
   plugin: MultimodalToolResultsPlugin,
   toolContext: Context,
@@ -64,7 +63,7 @@ function callAfterTool(
     tool: TEST_TOOL,
     toolArgs: {},
     toolContext,
-    result: result as Record<string, unknown>,
+    result,
   });
 }
 

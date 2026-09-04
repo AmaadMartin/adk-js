@@ -55,15 +55,6 @@ function createContext(sessionState: Record<string, unknown>): Context {
   });
 }
 
-/**
- * Calls `afterToolCallback` with a raw tool return value.
- *
- * `BasePlugin` types `result` as a record, but `agents/functions.ts` hands the
- * raw tool return to the callback before it normalises it, so a real tool can
- * produce a `Part[]` here. The one widening cast lives at this single call
- * site; widening the `BasePlugin` signature itself is a public API change and
- * is out of scope for a parity port.
- */
 function callAfterTool(
   plugin: MultimodalToolResultsPlugin,
   toolContext: Context,
@@ -73,7 +64,7 @@ function callAfterTool(
     tool: TEST_TOOL,
     toolArgs: {},
     toolContext,
-    result: result as Record<string, unknown>,
+    result,
   });
 }
 

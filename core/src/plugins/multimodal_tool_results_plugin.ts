@@ -47,11 +47,6 @@ export const SESSION_UPDATED_KEY =
 /** How long tool-returned parts stay attached to model requests. */
 export type MultimodalToolResultsRetention = 'next_model_call' | 'session';
 
-const RETENTIONS: readonly MultimodalToolResultsRetention[] = [
-  'next_model_call',
-  'session',
-];
-
 /** Options for {@link MultimodalToolResultsPlugin}. */
 export interface MultimodalToolResultsPluginOptions {
   /**
@@ -164,7 +159,7 @@ export class MultimodalToolResultsPlugin extends BasePlugin {
       name = 'multimodal_tool_results_plugin',
       retention = 'next_model_call',
     } = options;
-    if (!RETENTIONS.includes(retention)) {
+    if (retention !== 'next_model_call' && retention !== 'session') {
       throw new InputValidationError(
         `retention must be 'next_model_call' or 'session', got ${retention}`,
       );
@@ -184,14 +179,14 @@ export class MultimodalToolResultsPlugin extends BasePlugin {
     tool: BaseTool;
     toolArgs: Record<string, unknown>;
     toolContext: Context;
-    result: Record<string, unknown>;
+    result: unknown;
   }): Promise<Record<string, unknown> | undefined> {
-    // The raw tool return reaches the plugin before normalisation, so it may be
-    // a `Part` or a `Part[]` despite the declared parameter type.
-    const raw: unknown = params.result;
-    const parts = extractParts(raw);
+    const parts = extractParts(params.result);
     if (!parts) {
-      return params.result;
+      // Mirrors adk-python: the tool's own result is handed back unchanged.
+      // `normalizeCallbackResponse` in `agents/functions.ts` accepts any value,
+      // so the declared record type is narrower than what actually flows here.
+      return params.result as Record<string, unknown>;
     }
 
     const state = params.toolContext.state;
@@ -202,18 +197,12 @@ export class MultimodalToolResultsPlugin extends BasePlugin {
 
     const sessionParts = parts.filter((part) => part.inlineData === undefined);
     if (sessionParts.length > 0) {
+      const serialized = sessionParts.map(toJsonPart);
       if (state.has(SESSION_UPDATED_KEY)) {
-        appendParts(
-          state,
-          SESSION_PARTS_RETURNED_BY_TOOLS_ID,
-          sessionParts.map(toJsonPart),
-        );
+        appendParts(state, SESSION_PARTS_RETURNED_BY_TOOLS_ID, serialized);
       } else {
         state.set(SESSION_UPDATED_KEY, true);
-        state.set(
-          SESSION_PARTS_RETURNED_BY_TOOLS_ID,
-          sessionParts.map(toJsonPart),
-        );
+        state.set(SESSION_PARTS_RETURNED_BY_TOOLS_ID, serialized);
       }
     }
     appendParts(state, CURRENT_TURN_PARTS_ID, parts);
@@ -245,9 +234,9 @@ export class MultimodalToolResultsPlugin extends BasePlugin {
     const sessionParts =
       state.get<Part[]>(SESSION_PARTS_RETURNED_BY_TOOLS_ID) ?? [];
     const currentParts = state.get<Part[]>(CURRENT_TURN_PARTS_ID) ?? [];
+    const currentJson = currentParts.map(toJsonPart);
     const unseenSessionParts = sessionParts.filter(
-      (saved) =>
-        !currentParts.some((current) => isEqual(toJsonPart(current), saved)),
+      (saved) => !currentJson.some((current) => isEqual(current, saved)),
     );
 
     if (currentParts.length > 0) {

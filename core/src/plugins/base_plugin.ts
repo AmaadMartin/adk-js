@@ -90,7 +90,7 @@ export enum ContextCompactionTrigger {
  *       tool: BaseTool,
  *       toolArgs: Record<string, unknown>,
  *       toolContext: Context,
- *       result: Record<string, unknown>,
+ *       result: unknown,
  *     },
  *   ): Promise<Record<string, unknown> | undefined> {
  *     this.logger.info(
@@ -433,7 +433,9 @@ export abstract class BasePlugin {
    * @param params.tool The tool instance that has just been executed.
    * @param params.toolArgs The original arguments that were passed to the tool.
    * @param params.toolContext The context specific to the tool execution.
-   * @param params.result The dictionary returned by the tool invocation.
+   * @param params.result The raw value the tool returned. It reaches this
+   *     callback before the framework normalizes it, and `BaseTool.runAsync`
+   *     returns `Promise<unknown>`, so it is not necessarily a dictionary.
    * @returns An optional dictionary. If a dictionary is returned, it will
    *     **replace** the original result from the tool. This allows for
    *     post-processing or altering tool outputs. Returning `undefined` uses
@@ -444,7 +446,7 @@ export abstract class BasePlugin {
     tool: BaseTool;
     toolArgs: Record<string, unknown>;
     toolContext: Context;
-    result: Record<string, unknown>;
+    result: unknown;
   }): Promise<Record<string, unknown> | undefined> {
     return;
   }
