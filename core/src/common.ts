@@ -165,6 +165,7 @@ export type {
 } from './evaluation/eval_case.js';
 export {
   DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
   DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
 } from './evaluation/eval_metrics.js';
