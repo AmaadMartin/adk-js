@@ -122,9 +122,7 @@ describe('detectErrorInResponse on the skill tools', () => {
   it('leaves list_skills without a hook, as adk-python does', () => {
     const {listSkills} = tools();
 
-    expect(
-      listSkills.detectErrorInResponse({error: 'boom', error_code: 'X'}),
-    ).toBeUndefined();
+    expect('detectErrorInResponse' in listSkills).toBe(false);
   });
 
   it('does not mutate the response it inspects', () => {
