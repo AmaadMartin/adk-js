@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  DatabaseSessionService,
-  InMemorySessionService,
-  LogLevel,
-  setLogLevel,
-} from '@google/adk';
+import {InMemorySessionService, LogLevel, setLogLevel} from '@google/adk';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -20,6 +15,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 import {serviceClassSource} from './service_class_fixture.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
@@ -260,17 +256,28 @@ describe('CLI Entrypoint', () => {
     });
 
     it('falls back to the core resolver for a scheme the registry does not claim', async () => {
-      // `postgres://` is served by core but is not a registered scheme, so it
-      // proves the fallback rather than the registry.
-      await parse([
-        'api_server',
-        agentsDir,
-        '--session_service_uri',
-        'postgres://user:pass@host/db',
-      ]);
+      // `vertexai://` is the only scheme the core resolver serves that no
+      // built-in factory claims, and core builds it with neither project nor
+      // location, so reaching core is what raises this error. Without the
+      // fallback the server would be handed `undefined` and start cleanly.
+      const error = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
 
-      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
-      expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
+      await expect(
+        parse([
+          'api_server',
+          agentsDir,
+          '--session_service_uri',
+          'vertexai://projects/p/locations/l',
+        ]),
+      ).rejects.toThrowError();
+
+      expect(error).toHaveBeenCalledWith(
+        'Error starting API server:',
+        'Project ID and Location are required.',
+      );
+      expect(AdkApiServer).not.toHaveBeenCalled();
     });
   });
 

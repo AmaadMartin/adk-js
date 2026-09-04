@@ -51,6 +51,7 @@ export default defineConfig({
           environment: 'node',
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
+            '@google/adk-devtools': path.resolve(__dirname, './dev/src'),
             '@google/adk-integrations': path.resolve(
               __dirname,
               './integrations/src',

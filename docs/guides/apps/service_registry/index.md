@@ -22,9 +22,9 @@ existing resolver unchanged, so every URI that worked before still works.
 
 There are two ways to add a scheme, and both live next to the agent rather than
 in ADK. Declare it in `services.yaml` when `new MyService({uri})` is enough.
-Write `services.js` when construction needs real logic. Both files may be
+Write `services.ts` when construction needs real logic. Both files may be
 present: the YAML file is processed first, so a scheme declared in both ends up
-bound to the factory `services.js` registers.
+bound to the factory the script registers.
 
 ## Get started
 
@@ -63,12 +63,12 @@ npx adk run my_agent/agent.ts --session_service_uri demo://local
 A runnable version of this example is in
 [`samples/service_registry/`](../../../../samples/service_registry/).
 
-## Registering from JavaScript
+## Registering from a script
 
-When the backend needs more than a constructor call, write `services.js` in the
-agent directory. ADK imports it for its side effects after the YAML file:
+When the backend needs more than a constructor call, write a services script in
+the agent directory. ADK imports it for its side effects after the YAML file:
 
-```js
+```ts
 import {getServiceRegistry} from '@google/adk-devtools';
 import {DemoSessionService} from './demo_session_service.js';
 
@@ -78,6 +78,11 @@ getServiceRegistry().registerSessionService(
 );
 ```
 
+ADK looks for `services.ts`, `services.js`, `services.mjs` and `services.cjs`,
+in that order, and loads the first one it finds. A `services.ts` is transpiled
+with esbuild before it runs, so it may use any TypeScript syntax and may import
+a sibling under its `.js` name the way TypeScript expects.
+
 `getServiceRegistry()` returns one registry for the whole process, so a
 registration made here is visible everywhere. Registering a scheme twice
 replaces the previous factory.
@@ -85,7 +90,7 @@ replaces the previous factory.
 A factory may be asynchronous. Return a promise when the backend has to connect
 before it can serve, and the registry awaits it:
 
-```js
+```ts
 getServiceRegistry().registerSessionService('demo', async (uri) => {
   const service = new DemoSessionService({uri});
   await service.connect();
@@ -171,9 +176,9 @@ broken services file should not stop the CLI from starting:
 
 - The directory does not exist: nothing is loaded.
 - `services.yaml` fails to parse or a declared class fails to import: the
-  loader warns and **stops**. It does not go on to `services.js`, so a
+  loader warns and **stops**. It does not go on to the script, so a
   half-registered directory is never silently completed.
 - A YAML entry missing `scheme`, `type` or `class`: the entry is skipped and
   the rest of the file is processed.
 - A YAML entry with an unknown `type`: nothing is registered for it.
-- `services.js` throws: the loader warns and continues.
+- The services script throws: the loader warns and continues.

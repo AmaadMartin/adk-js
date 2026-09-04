@@ -20,10 +20,10 @@
  *     class: '@acme/adk-redis#RedisSessionService'
  * ```
  *
- * 2. Register it in `services.js` next to your agent, when the backend needs
- *    more than `new MyService({uri})`:
+ * 2. Register it in `services.ts` (or `.js`, `.mjs`, `.cjs`) next to your
+ *    agent, when the backend needs more than `new MyService({uri})`:
  *
- * ```js
+ * ```ts
  * import {getServiceRegistry} from '@google/adk-devtools';
  * import {MySessionService} from './my_session_service.js';
  *
@@ -33,9 +33,9 @@
  * );
  * ```
  *
- * Both files may be present. The YAML file is processed first, then
- * `services.js`, so a scheme declared in both ends up bound to the factory
- * `services.js` registers.
+ * Both files may be present. The YAML file is processed first, then the
+ * script, so a scheme declared in both ends up bound to the factory the script
+ * registers.
  *
  * Ported from adk-python `src/google/adk/cli/service_registry.py`.
  */
@@ -62,14 +62,23 @@ import * as path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {isFileExists, isFolderExists} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
+import {importModuleFile} from '../utils/module_utils.js';
 
 const logger = new AdkLogger({label: 'ADK Service Registry'});
 
 /** The YAML files a services declaration may live in, in load order. */
 const SERVICE_YAML_FILES = ['services.yaml', 'services.yml'] as const;
 
-/** The JavaScript module that registers services imperatively. */
-const SERVICE_SCRIPT_FILE = 'services.js';
+/**
+ * The script that registers services imperatively, in the order ADK looks for
+ * it. The first one present is loaded and the rest are ignored.
+ */
+const SERVICE_SCRIPT_FILES = [
+  'services.ts',
+  'services.js',
+  'services.mjs',
+  'services.cjs',
+] as const;
 
 /** Matches the scheme of a URI, e.g. `postgresql+asyncpg` in `...://host`. */
 const URI_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):/;
@@ -284,8 +293,9 @@ export function registerBuiltinServices(registry: ServiceRegistry): void {
 /**
  * Registers the services declared beside the agent in `agentsDir`.
  *
- * Reads `services.yaml`/`services.yml` first, then executes
- * `services.js`. A YAML file that fails to load stops the whole load, so a
+ * Reads `services.yaml`/`services.yml` first, then executes the first of
+ * `services.ts`, `services.js`, `services.mjs` and `services.cjs` that is
+ * present. A YAML file that fails to load stops the whole load, so a
  * half-registered directory is never silently completed by the script.
  */
 export async function loadServicesModule(
@@ -316,21 +326,35 @@ export async function loadServicesModule(
     }
   }
 
-  const scriptPath = path.join(agentsDir, SERVICE_SCRIPT_FILE);
-  if (!(await isFileExists(scriptPath))) {
-    logger.debug(`${SERVICE_SCRIPT_FILE} not found in ${agentsDir}, skipping.`);
+  const scriptFile = await findServiceScript(agentsDir);
+  if (!scriptFile) {
+    logger.debug(
+      `None of ${SERVICE_SCRIPT_FILES.join(', ')} found in ${agentsDir}, skipping.`,
+    );
     return;
   }
   try {
-    await import(pathToFileURL(scriptPath).href);
+    await importModuleFile(path.join(agentsDir, scriptFile));
     logger.debug(
-      `Loaded ${SERVICE_SCRIPT_FILE} from ${agentsDir} for custom service registration.`,
+      `Loaded ${scriptFile} from ${agentsDir} for custom service registration.`,
     );
   } catch (e: unknown) {
     logger.warn(
-      `Failed to load ${SERVICE_SCRIPT_FILE} from ${agentsDir}: ${toError(e).message}`,
+      `Failed to load ${scriptFile} from ${agentsDir}: ${toError(e).message}`,
     );
   }
+}
+
+/** Returns the first services script present in `agentsDir`. */
+async function findServiceScript(
+  agentsDir: string,
+): Promise<string | undefined> {
+  for (const scriptFile of SERVICE_SCRIPT_FILES) {
+    if (await isFileExists(path.join(agentsDir, scriptFile))) {
+      return scriptFile;
+    }
+  }
+  return undefined;
 }
 
 async function createFromFactories<T>(

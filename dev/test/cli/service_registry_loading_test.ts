@@ -369,6 +369,79 @@ describe('loadServicesModule', () => {
     );
   });
 
+  it('loads a services.mjs', async () => {
+    write('script_session.js', serviceClassSource('ScriptSession', 'session'));
+    write('services.mjs', servicesScriptSource('frommjs', 'ScriptSession'));
+
+    await loadServicesModule(agentsDir, getServiceRegistry());
+
+    expect(
+      await getServiceRegistry().createSessionService('frommjs://x'),
+    ).toBeDefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('loads a services.cjs', async () => {
+    const marker = path.join(agentsDir, 'cjs-ran.txt');
+    write(
+      'services.cjs',
+      `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n`,
+    );
+
+    await loadServicesModule(agentsDir, registry);
+
+    expect(fs.existsSync(marker)).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('loads a services.ts', async () => {
+    write('script_session.js', serviceClassSource('ScriptSession', 'session'));
+    write('services.ts', servicesTypeScriptSource('fromts', 'ScriptSession'));
+
+    await loadServicesModule(agentsDir, getServiceRegistry());
+
+    expect(
+      await getServiceRegistry().createSessionService('fromts://x'),
+    ).toBeDefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('removes the file it transpiled a services.ts into', async () => {
+    write('script_session.js', serviceClassSource('ScriptSession', 'session'));
+    write(
+      'services.ts',
+      servicesTypeScriptSource('cleanedup', 'ScriptSession'),
+    );
+
+    await loadServicesModule(agentsDir, getServiceRegistry());
+
+    expect(fs.readdirSync(agentsDir).filter((n) => n.endsWith('.mjs'))).toEqual(
+      [],
+    );
+  });
+
+  it('loads only services.ts when services.js is present too', async () => {
+    write('script_session.js', serviceClassSource('ScriptSession', 'session'));
+    write('services.ts', servicesTypeScriptSource('winner', 'ScriptSession'));
+    write('services.js', servicesScriptSource('loser', 'ScriptSession'));
+
+    await loadServicesModule(agentsDir, getServiceRegistry());
+
+    const singleton = getServiceRegistry();
+    expect(await singleton.createSessionService('winner://x')).toBeDefined();
+    expect(await singleton.createSessionService('loser://x')).toBeUndefined();
+  });
+
+  it('warns when a services.ts does not compile', async () => {
+    write('services.ts', 'const broken: = ;\n');
+
+    await loadServicesModule(agentsDir, registry);
+
+    expect(String(warn.mock.calls[0]?.[0])).toContain(
+      'Failed to load services.ts',
+    );
+  });
+
   it('returns quietly when the path is not a directory', async () => {
     const filePath = write('services.yaml', 'services: []\n');
 
@@ -404,16 +477,28 @@ describe('getServiceRegistry', () => {
  * `scheme`, the way a user's file registers a service imperatively.
  */
 function servicesScriptSource(scheme: string, className: string): string {
-  const registryUrl = new URL(
-    '../../src/cli/service_registry.ts',
-    import.meta.url,
-  ).href;
-  return `import {getServiceRegistry} from ${JSON.stringify(registryUrl)};
+  return `import {getServiceRegistry} from '@google/adk-devtools';
 import {${className}} from './script_session.js';
 
 getServiceRegistry().registerSessionService(
   ${JSON.stringify(scheme)},
   (uri, options) => new ${className}({uri, ...options}),
 );
+`;
+}
+
+/**
+ * The same script in TypeScript, carrying an `enum`.
+ *
+ * An `enum` has to be compiled away rather than erased, so this source only
+ * runs if esbuild transpiled it. That keeps the test from passing on a Node
+ * that happens to strip types on its own.
+ */
+function servicesTypeScriptSource(scheme: string, className: string): string {
+  return `${servicesScriptSource(scheme, className)}
+enum Loaded {
+  Yes = 'yes',
+}
+export const loaded: Loaded = Loaded.Yes;
 `;
 }
