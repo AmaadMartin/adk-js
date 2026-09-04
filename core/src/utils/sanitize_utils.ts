@@ -384,6 +384,27 @@ function canonicalizeAsciiEscapes(text: string): string {
 }
 
 /**
+ * Replaces the credentials in `text`, or returns undefined when its decoded
+ * form carries one.
+ *
+ * Decoding is a detection step: an escape may decode to another escape
+ * introducer, so a source character has no single decoded counterpart and a
+ * replacement cannot be mapped back. The caller drops the whole string
+ * instead.
+ *
+ * @param text The free text to redact.
+ * @return The redacted text, or undefined when it must be dropped whole.
+ */
+function redactUnlessEncoded(text: string): string | undefined {
+  const redacted = redactFreeText(text);
+  const canonical = canonicalizeAsciiEscapes(redacted);
+  if (canonical !== redacted && redactFreeText(canonical) !== canonical) {
+    return undefined;
+  }
+  return redacted;
+}
+
+/**
  * Returns `text` with its credentials replaced and its length bounded.
  *
  * This is the pass for text that has no structure the caller can walk: an
@@ -393,13 +414,17 @@ function canonicalizeAsciiEscapes(text: string): string {
  * unchanged.
  *
  * Redaction runs before truncation, so a credential the length limit would
- * have cut in half is already gone. Only {@link MAX_INSPECT_CHARS} characters
- * are inspected, which bounds the work regardless of the caller's limit.
+ * have cut in half is already gone.
  *
  * A credential spelled in ASCII escapes survives pattern redaction, and
  * decoding it cannot be undone character by character. Such text is replaced
  * whole by {@link REDACTED_SENSITIVE_TEXT}. Text that decodes to nothing new —
  * a Windows path, a string the decoder cannot read — comes back byte-identical.
+ *
+ * Text past {@link MAX_INSPECT_CHARS} is never inspected whole: that costs
+ * unbounded synchronous time on a callback path. Only the prefix `maxLength`
+ * allows through is examined, and a caller that asked for no limit has no such
+ * prefix, so the value fails closed.
  *
  * @param text The free text to sanitize.
  * @param maxLength Maximum length of the result, or -1 for no limit.
@@ -409,17 +434,24 @@ export function sanitizeErrorText(
   text: string,
   maxLength: number,
 ): {text: string; truncated: boolean} {
-  const inspected = text.slice(0, MAX_INSPECT_CHARS);
-  const redacted = redactFreeText(inspected);
-  const canonical = canonicalizeAsciiEscapes(redacted);
-  if (canonical !== redacted && redactFreeText(canonical) !== canonical) {
+  if (text.length > MAX_INSPECT_CHARS) {
+    if (maxLength === NO_LENGTH_LIMIT || maxLength > MAX_INSPECT_CHARS) {
+      return {text: REDACTED_SENSITIVE_TEXT, truncated: true};
+    }
+    // Only this prefix can be emitted, so inspecting exactly it bounds the
+    // synchronous work an oversized payload buys. A trailing escape cut in
+    // half cannot reveal the characters that were dropped.
+    const emitted = redactUnlessEncoded(text.slice(0, maxLength));
+    if (emitted === undefined) {
+      return {text: REDACTED_SENSITIVE_TEXT, truncated: true};
+    }
+    return {text: truncateText(emitted, maxLength).text, truncated: true};
+  }
+  const redacted = redactUnlessEncoded(text);
+  if (redacted === undefined) {
     return {text: REDACTED_SENSITIVE_TEXT, truncated: true};
   }
-  const bounded = truncateText(redacted, maxLength);
-  return {
-    text: bounded.text,
-    truncated: bounded.truncated || inspected.length < text.length,
-  };
+  return truncateText(redacted, maxLength);
 }
 
 /** Whether `text` is shaped like a JSON object or array. */
