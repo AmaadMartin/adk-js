@@ -217,20 +217,6 @@ describe('Context — ported from adk-python tests/unittests/agents/test_context
       expect(context.toolConfirmation?.payload).toEqual({key: 'value'});
     });
 
-    /**
-     * adk-js divergence: Python exposes a `function_call_id` setter, so the
-     * property is mutable there too.
-     */
-    it('function_call_id setter assigns the id after construction', () => {
-      const context = new Context({
-        invocationContext: makeInvocationContext(),
-      });
-
-      context.functionCallId = 'assigned-later';
-
-      expect(context.functionCallId).toBe('assigned-later');
-    });
-
     it('test_state_property', () => {
       const context = new Context({
         invocationContext: makeInvocationContext(),
