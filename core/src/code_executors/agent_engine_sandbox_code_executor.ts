@@ -7,7 +7,7 @@
 import {Client} from '@google-cloud/vertexai';
 import {Chunk, Language} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {base64Encode} from '../utils/env_aware_utils.js';
-import {formatError} from '../utils/error_utils.js';
+import {formatError, isNotFoundError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
 
@@ -37,42 +37,14 @@ const DEFAULT_SANDBOX_DISPLAY_NAME = 'default_sandbox';
  */
 const SANDBOX_NAME_STATE_KEY = 'sandbox_name';
 
-const GRPC_NOT_FOUND = 5;
-const HTTP_NOT_FOUND = 404;
-
-/**
- * The payload adk-python hands to the Python SDK's
- * `sandboxes.execute_code(input_data=...)`. The JavaScript SDK exposes only the
- * lower-level `executeCodeInternal({inputs: Chunk[]})`, so this module performs
- * the translation the Python SDK performs internally.
- */
-interface SandboxInputData {
-  code: string;
-  files?: Array<{name: string; content: string; mimeType: string}>;
-}
-
-/**
- * True when the API reports the sandbox as missing, which is the signal to
- * create a replacement. Matched structurally rather than with `instanceof`:
- * `@google-cloud/vertexai` resolves its own copy of `@google/genai`, so its
- * `ApiError` is a different class object here. Mirrors the check in
- * `sessions/vertex_ai_session_service.ts`.
- */
-function isNotFoundError(error: unknown): boolean {
-  const err = error as {code?: number; status?: number} | null | undefined;
-  return (
-    err?.code === GRPC_NOT_FOUND ||
-    err?.code === HTTP_NOT_FOUND ||
-    err?.status === HTTP_NOT_FOUND
-  );
-}
-
 /**
  * Translates the execution request into the chunk list the sandbox API takes:
  * one JSON chunk carrying the code, then one chunk per input file carrying its
- * already base64-encoded content and its name.
+ * already base64-encoded content and its name. This is the translation the
+ * Python SDK performs internally for `execute_code(input_data=...)`; the
+ * JavaScript SDK exposes only the lower-level `executeCodeInternal`.
  */
-function toInputChunks({code, files}: SandboxInputData): Chunk[] {
+function toInputChunks(code: string, files: File[]): Chunk[] {
   const chunks: Chunk[] = [
     {
       mimeType: 'application/json',
@@ -80,7 +52,7 @@ function toInputChunks({code, files}: SandboxInputData): Chunk[] {
     },
   ];
 
-  for (const file of files ?? []) {
+  for (const file of files) {
     chunks.push({
       mimeType: file.mimeType,
       data: file.content,
@@ -210,17 +182,14 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
         language,
       ));
 
-    const inputData: SandboxInputData = {
-      code: codeExecutionInput.code,
-      // `File.content` is already base64-encoded.
-      files: codeExecutionInput.inputFiles,
-    };
-
     logger.debug(`Executing code in sandbox ${sandboxName}...`);
     const response =
       await this.client.agentEnginesInternal.sandboxes.executeCodeInternal({
         name: sandboxName,
-        inputs: toInputChunks(inputData),
+        inputs: toInputChunks(
+          codeExecutionInput.code,
+          codeExecutionInput.inputFiles,
+        ),
       });
 
     let stdout = '';
