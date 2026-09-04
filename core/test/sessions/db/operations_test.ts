@@ -8,8 +8,10 @@ import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  enableSqliteForeignKeys,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  parseSqliteUri,
   validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
@@ -19,6 +21,7 @@ import {
   STORAGE_KEY_COLUMN_LENGTH,
   StorageEvent,
   StorageMetadata,
+  StorageSession,
 } from '../../../src/sessions/db/schema.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
@@ -66,6 +69,45 @@ describe('operations', () => {
         return total + eventProperties[keyProperty].length! * 4;
       }, 0);
       expect(utf8mb4KeyBytes).toBeLessThanOrEqual(3072);
+    });
+
+    describe('state column decoding', () => {
+      /**
+       * The state type bound to `StorageSession.state`. A backend whose driver
+       * decodes a json column itself — Postgres, MySQL — hands this an object
+       * rather than text, and only sqlite is installed here, so the branch is
+       * driven through the bound type directly.
+       */
+      async function bindStateType() {
+        orm = await MikroORM.init({
+          dbName: ':memory:',
+          driver: SqliteDriver,
+          entities: ENTITIES,
+        });
+        const stateType = orm.getMetadata().get(StorageSession.name).properties[
+          'state'
+        ].customType;
+        if (!stateType) {
+          expect.fail('StorageSession.state has no state type bound');
+        }
+        return {stateType, platform: orm.em.getPlatform()};
+      }
+
+      it('accepts an object the driver already decoded', async () => {
+        const {stateType, platform} = await bindStateType();
+
+        expect(stateType.convertToJSValue({turns: 2}, platform)).toEqual({
+          turns: 2,
+        });
+      });
+
+      it('rejects a decoded value that is not an object', async () => {
+        const {stateType, platform} = await bindStateType();
+
+        expect(() => stateType.convertToJSValue([1, 2, 3], platform)).toThrow(
+          'Persisted session state must be a JSON object.',
+        );
+      });
     });
   });
 
@@ -139,6 +181,70 @@ describe('operations', () => {
       await expect(
         getConnectionOptionsFromUri('invalid://user:pass@localhost/db'),
       ).rejects.toThrow('Unsupported database URI');
+    });
+
+    it('turns foreign keys on for every sqlite connection the pool opens', async () => {
+      const options = await getConnectionOptionsFromUri('sqlite://:memory:');
+      expect(options.driverOptions?.['pool']).toEqual({
+        afterCreate: enableSqliteForeignKeys,
+      });
+    });
+
+    it('leaves a sqlite URI without a query string on the plain file name', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'sqlite:///tmp/test.db',
+      );
+      expect(options.driverOptions?.['connection']).toBeUndefined();
+    });
+
+    it('hands a sqlite query string to the driver as a file URI', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'sqlite://./sessions.db?mode=ro',
+      );
+      expect(options.dbName).toBe('./sessions.db');
+      expect(options.driverOptions?.['connection']).toEqual({
+        filename: 'file:./sessions.db?mode=ro',
+        flags: ['OPEN_URI'],
+      });
+    });
+  });
+
+  describe('parseSqliteUri', () => {
+    it.each([
+      ['sqlite://:memory:', ':memory:'],
+      ['sqlite://./sessions.db', './sessions.db'],
+      ['sqlite:///abs/path.db', '/abs/path.db'],
+      ['sqlite://my%20db.db', 'my%20db.db'],
+    ])('resolves %s to the same path it resolves to today', (uri, dbName) => {
+      expect(parseSqliteUri(uri)).toEqual({dbName, query: ''});
+    });
+
+    it('splits a trailing query string off the path', () => {
+      expect(parseSqliteUri('sqlite:///abs/path.db?mode=ro')).toEqual({
+        dbName: '/abs/path.db',
+        query: 'mode=ro',
+      });
+    });
+
+    it('percent-decodes the path once a query string is present', () => {
+      expect(parseSqliteUri('sqlite://my%20db.db?mode=ro')).toEqual({
+        dbName: 'my db.db',
+        query: 'mode=ro',
+      });
+    });
+
+    it('keeps every parameter of a multi-parameter query string', () => {
+      expect(parseSqliteUri('sqlite://a.db?mode=ro&cache=shared')).toEqual({
+        dbName: 'a.db',
+        query: 'mode=ro&cache=shared',
+      });
+    });
+
+    it('reports an empty query string for a bare trailing question mark', () => {
+      expect(parseSqliteUri('sqlite://a.db?')).toEqual({
+        dbName: 'a.db',
+        query: '',
+      });
     });
   });
 

@@ -13,9 +13,10 @@ import {
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {logger} from '../../src/utils/logger.js';
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -700,6 +701,78 @@ describe('DatabaseSessionService', () => {
       })) as {id: string; updateTime: Date};
 
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
+    });
+  });
+
+  describe('adk-python parity', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('generates an id when the caller supplies whitespace only', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: '   ',
+      });
+
+      expect(session.id.trim()).toBe(session.id);
+      expect(session.id).not.toBe('');
+    });
+
+    it('keeps a caller id that only has surrounding whitespace', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: '  padded  ',
+      });
+
+      expect(session.id).toBe('padded');
+    });
+
+    it('persists a BigInt state value as its digits, warning once', async () => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-bigint',
+        state: {retries: 3n},
+      });
+
+      expect(session.state['retries']).toBe('3');
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      const loaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-bigint',
+      });
+      expect(loaded?.state['retries']).toBe('3');
+    });
+
+    it('persists a state delta value JSON cannot represent', async () => {
+      vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-delta-coerce',
+      });
+
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({stateDelta: {onDone: () => {}}}),
+        }),
+      });
+
+      const loaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-delta-coerce',
+      });
+      expect(loaded?.state['onDone']).toBe('[Function: onDone]');
     });
   });
 });
