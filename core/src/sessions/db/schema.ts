@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Entity, JsonType, PrimaryKey, Property} from '@mikro-orm/core';
+import {Entity, PrimaryKey, Property} from '@mikro-orm/core';
 import {
   Event,
   transformToCamelCaseEvent,
@@ -27,7 +27,7 @@ export const STORAGE_KEY_COLUMN_LENGTH = 191;
  * snake_case (Python ADK) for Event objects, ensuring that nested
  * properties are converted correctly while preserving specific keys.
  */
-class CamelCaseToSnakeCaseJsonType extends JsonType {
+class CamelCaseToSnakeCaseJsonType extends DynamicJsonType {
   convertToDatabaseValue(value: Event): string {
     return JSON.stringify(transformToSnakeCaseEvent(value));
   }
@@ -166,7 +166,11 @@ export class StorageEvent {
   })
   sessionId!: string;
 
-  @Property({type: 'string', fieldName: 'invocation_id'})
+  @Property({
+    type: 'string',
+    fieldName: 'invocation_id',
+    length: DEFAULT_MAX_VARCHAR_LENGTH,
+  })
   invocationId!: string;
 
   @Property({type: PreciseTimestampType})
