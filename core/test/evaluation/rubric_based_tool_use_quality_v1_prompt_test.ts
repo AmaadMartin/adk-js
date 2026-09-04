@@ -139,6 +139,30 @@ describe('RubricBasedToolUseV1Evaluator prompt substitution', () => {
     }
   });
 
+  it('puts each value in the section the judge reads it from', () => {
+    const prompt = createEvaluator([
+      {rubricId: '1', rubricContent: {textProperty: 'Was a tool called?'}},
+    ]).formatAutoRaterPrompt(
+      createInvocation({
+        intermediateData: {
+          toolUses: [{name: 'test_func', args: {arg1: 'val1'}, id: 'call1'}],
+          toolResponses: [
+            {name: 'test_func', response: {result: 'ok'}, id: 'call1'},
+          ],
+          intermediateResponses: [],
+        },
+      }),
+    );
+
+    expect(prompt).toContain('<user_prompt>\nUser input here.\n</user_prompt>');
+    expect(prompt).toMatch(
+      /<response>\n\{\n {2}"tool_calls_and_response": \[[\s\S]*?\n\}\n<\/response>/,
+    );
+    expect(prompt).toContain(
+      '<properties>\n*  [id: 1] Was a tool called?\n</properties>',
+    );
+  });
+
   it('carries rubric text with replacement patterns through unchanged', () => {
     const textProperty = 'Does the reply keep $& and {user_input} verbatim?';
 
