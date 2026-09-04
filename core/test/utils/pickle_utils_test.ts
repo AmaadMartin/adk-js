@@ -22,6 +22,7 @@ import {
   PROTOCOL_2_WIDGET_PAYLOAD,
   PROTOCOL_5_DATA_PAYLOAD,
   REDUCE_VALUES_PAYLOAD,
+  SHARED_MODEL_PAYLOAD,
   SHARED_REFERENCE_PAYLOAD,
   SINGLE_APPEND_PAYLOAD,
   TUPLES_PAYLOAD,
@@ -322,6 +323,41 @@ describe('loadPickle', () => {
 
     expect(decoded).toEqual(new Map([['label', 'left']]));
     expect(seen).toHaveLength(1);
+  });
+
+  it('gives every reference to one model the state its BUILD applied', () => {
+    const decoded = load(SHARED_MODEL_PAYLOAD);
+
+    expect(Array.isArray(decoded)).toBe(true);
+    const [first, second] = decoded as unknown[];
+    // CPython memoizes the model before its BUILD, so the second element is a
+    // BINGET of the slot. Both have to name the finished model.
+    expect(first).toBe(second);
+    expect(asMap(second).get('__dict__')).toEqual(
+      new Map<unknown, unknown>([
+        ['label', 'left'],
+        ['size', 3],
+      ]),
+    );
+  });
+
+  it('re-points the memo when a factory replaces the instance', () => {
+    const decoded = loadPickle(
+      payloadBytes(SHARED_MODEL_PAYLOAD),
+      (): PickleObjectFactory => ({
+        create: () => new Map(),
+        setState: (_instance, state) => asMap(state).get('__dict__'),
+      }),
+    );
+
+    const [first, second] = decoded as unknown[];
+    expect(first).toBe(second);
+    expect(second).toEqual(
+      new Map<unknown, unknown>([
+        ['label', 'left'],
+        ['size', 3],
+      ]),
+    );
   });
 
   it('lets a factory apply the BUILD state itself', () => {

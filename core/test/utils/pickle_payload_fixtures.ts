@@ -45,6 +45,7 @@
  * emit("WIDGET_PAYLOAD", Widget(label="left", size=3))
  * emit("PROTOCOL_2_WIDGET_PAYLOAD", Widget(label="left", size=3), 2)
  * emit("PROTOCOL_5_DATA_PAYLOAD", {"proto": 5, "list": [1, 2]}, 5)
+ * emit("SHARED_MODEL_PAYLOAD", [widget, widget])
  * ```
  */
 
@@ -111,6 +112,18 @@ export const PROTOCOL_2_WIDGET_PAYLOAD =
 /** Protocol 5, whose `FRAME` opcode the reader has to skip. */
 export const PROTOCOL_5_DATA_PAYLOAD =
   'gAWVHgAAAAAAAAB9lCiMBXByb3RvlEsFjARsaXN0lF2UKEsBSwJldS4=';
+
+/**
+ * One pydantic model referenced twice.
+ *
+ * CPython writes `MEMOIZE` before the model's `BUILD` and mutates the instance
+ * in place, so the second reference is a `BINGET` of the memo slot.
+ */
+export const SHARED_MODEL_PAYLOAD =
+  'gASVogAAAAAAAABdlCiMDmV4YW1wbGUubW9kZWxzlIwGV2lkZ2V0lJOUKYGUfZQojAhf' +
+  'X2RpY3RfX5R9lCiMBWxhYmVslIwEbGVmdJSMBHNpemWUSwN1jBJfX3B5ZGFudGljX2V4' +
+  'dHJhX1+UTowXX19weWRhbnRpY19maWVsZHNfc2V0X1+Uj5QoaAhoCpCMFF9fcHlkYW50' +
+  'aWNfcHJpdmF0ZV9flE51YmgEZS4=';
 
 /** Decodes a base64 fixture into the bytes a database column would hold. */
 export function payloadBytes(base64Payload: string): Uint8Array {

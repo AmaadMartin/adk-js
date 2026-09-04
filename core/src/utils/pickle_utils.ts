@@ -91,6 +91,13 @@ export interface PickleObjectFactory {
    * Without it, a `BUILD` merges a dictionary state into an instance the
    * factory built as a `Map` — what Python's default `__dict__.update` does —
    * and fails for any other instance.
+   *
+   * Prefer mutating `instance` and returning it. CPython memoizes an instance
+   * before its `BUILD`, and mutates it in place, so a payload can already hold
+   * a reference to it — inside its own state, for a value that contains
+   * itself. The reader re-points its memo when this returns something else,
+   * which covers every reference the payload takes after the `BUILD`, but it
+   * cannot reach one already stored inside another container.
    */
   setState?(instance: unknown, state: unknown): unknown;
 }
@@ -464,7 +471,11 @@ class PickleReader {
       ? this.factories.get(instance)
       : undefined;
     if (factory?.setState) {
-      this.stack[this.stack.length - 1] = factory.setState(instance, state);
+      const built = factory.setState(instance, state);
+      if (built !== instance) {
+        this.repointMemo(instance, built);
+      }
+      this.stack[this.stack.length - 1] = built;
       return;
     }
     // Python's default `BUILD` updates the instance's attribute dictionary,
@@ -480,6 +491,22 @@ class PickleReader {
       'A pickle BUILD needs a factory that applies state, or a dictionary ' +
         'instance and a dictionary state.',
     );
+  }
+
+  /**
+   * Points every memo slot holding `instance` at the value a `BUILD` made.
+   *
+   * CPython writes `MEMOIZE` before `BUILD` and mutates the instance in place,
+   * so the slot names the finished object. A factory that returns a different
+   * value would otherwise leave the slot on the placeholder, and every later
+   * `BINGET` of it would read a half-built object.
+   */
+  private repointMemo(instance: unknown, built: unknown): void {
+    for (const [slot, value] of this.memo) {
+      if (value === instance) {
+        this.memo.set(slot, built);
+      }
+    }
   }
 
   private appendAll(values: readonly unknown[]): void {
