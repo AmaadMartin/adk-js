@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  FilterQuery,
-  LockMode as LockModeEnum,
-  MikroORM as MikroORMClass,
-} from '@mikro-orm/core';
+import type {FilterQuery, MikroORM as MikroORMClass} from '@mikro-orm/core';
 import type {MikroORMOptions as MikroDBOptions} from './db/operations.js';
 
 import {Event} from '../events/event.js';
@@ -34,7 +30,6 @@ type StorageEventEntity = InstanceType<SchemaModule['StorageEvent']>;
 type StorageSessionEntity = InstanceType<SchemaModule['StorageSession']>;
 
 let MikroORM: typeof MikroORMClass;
-let LockMode: typeof LockModeEnum;
 let ENTITIES: SchemaModule['ENTITIES'];
 let StorageAppState: SchemaModule['StorageAppState'];
 let StorageEvent: SchemaModule['StorageEvent'];
@@ -44,7 +39,7 @@ let ensureDatabaseCreated: OperationsModule['ensureDatabaseCreated'];
 let getConnectionOptionsFromUri: OperationsModule['getConnectionOptionsFromUri'];
 let getDatabaseBackend: OperationsModule['getDatabaseBackend'];
 let validateDatabaseSchemaVersion: OperationsModule['validateDatabaseSchemaVersion'];
-let supportsRowLevelLocking: DialectModule['supportsRowLevelLocking'];
+let sessionLockMode: DialectModule['sessionLockMode'];
 
 let mikroOrmLoad: Promise<void> | undefined;
 
@@ -69,7 +64,7 @@ async function importMikroOrm(): Promise<void> {
     import('./db/dialect.js'),
   ]);
 
-  ({MikroORM, LockMode} = core);
+  ({MikroORM} = core);
   ({ENTITIES, StorageAppState, StorageEvent, StorageSession, StorageUserState} =
     schema);
   ({
@@ -78,7 +73,7 @@ async function importMikroOrm(): Promise<void> {
     getDatabaseBackend,
     validateDatabaseSchemaVersion,
   } = operations);
-  ({supportsRowLevelLocking} = dialect);
+  ({sessionLockMode} = dialect);
 }
 
 /**
@@ -449,12 +444,7 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const trimmedEvent = trimTempDeltaState(event);
 
-    // sqlite compiles `FOR UPDATE` away and mssql turns it into a table hint
-    // adk-python never takes, so only the backends adk-python locks are asked
-    // for a row-level lock.
-    const lockMode = supportsRowLevelLocking(getDatabaseBackend(this.orm!))
-      ? LockMode.PESSIMISTIC_WRITE
-      : undefined;
+    const lockMode = sessionLockMode(getDatabaseBackend(this.orm!));
 
     await em.transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
