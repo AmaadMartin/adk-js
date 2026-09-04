@@ -14,6 +14,8 @@ import {ReadonlyContext} from './readonly_context.js';
 
 const TASK_COMPLETED_TOOL_NAME = 'task_completed';
 
+const TASK_COMPLETED_INSTRUCTION = `If you finished the user's request according to its description, call the ${TASK_COMPLETED_TOOL_NAME} function to exit so the next agents can take over. When calling this function, do not generate any text other than the function call.`;
+
 /**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all SequentialAgent instances.
@@ -95,9 +97,14 @@ export class SequentialAgent extends BaseAgent {
               execute: () => 'Task completion signaled.',
             }),
           );
-          subAgent.instruction += `If you finished the user's request according to its description, call the ${
-            TASK_COMPLETED_TOOL_NAME
-          } function to exit so the next agents can take over. When calling this function, do not generate any text other than the function call.`;
+          const {instruction} = subAgent;
+          subAgent.instruction =
+            typeof instruction === 'string'
+              ? instruction + TASK_COMPLETED_INSTRUCTION
+              : // A provider must stay callable: concatenating stringifies it.
+                async (readonlyContext: ReadonlyContext) =>
+                  (await instruction(readonlyContext)) +
+                  TASK_COMPLETED_INSTRUCTION;
         }
       }
     }
