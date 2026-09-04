@@ -232,8 +232,10 @@ describe('FileArtifactService', () => {
       expect((await service.loadArtifact(scope))?.text).toBe('from-uri');
     });
 
-    it('rejects a file:// root URI naming a remote host', () => {
-      expect(() => new FileArtifactService('file://remote-host/share')).toThrow(
+    it('rejects a file:// root URI that is not a path', () => {
+      // An encoded separator is rejected by fileURLToPath on every platform,
+      // unlike a remote host, which Windows accepts as a UNC path.
+      expect(() => new FileArtifactService('file:///a%2Fb')).toThrow(
         'Invalid root directory',
       );
     });
