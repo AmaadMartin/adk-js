@@ -37,6 +37,21 @@ Environment variables:
 | `ADK_ANALYTICS_TABLE`    | no       | `agent_events`    | Table the plugin writes to           |
 | `ADK_ANALYTICS_LOCATION` | no       | `US`              | BigQuery location of the new dataset |
 
+Two more variables turn on the Cloud Storage offload, which sends content too
+large to inline to a bucket and records a `gs://` reference in the row.
+
+| Variable                   | Required | Meaning                                          |
+| -------------------------- | -------- | ------------------------------------------------ |
+| `ADK_ANALYTICS_BUCKET`     | no       | Bucket receiving the offloaded content           |
+| `ADK_ANALYTICS_CONNECTION` | no       | BigQuery connection, as `location.connection_id` |
+
+The offload needs a second optional peer dependency and an existing bucket:
+
+```bash
+npm install @google-cloud/storage
+gcloud storage buckets create "gs://$ADK_ANALYTICS_BUCKET"
+```
+
 Grants, on the project in `GOOGLE_CLOUD_PROJECT`:
 
 ```bash
@@ -49,7 +64,8 @@ gcloud auth application-default login
 `roles/bigquery.dataEditor` carries `bigquery.datasets.create`,
 `bigquery.tables.create`, `bigquery.tables.update` and
 `bigquery.tables.updateData`, which is everything the plugin needs. Reading the
-rows back also needs `roles/bigquery.jobUser` to run the query.
+rows back also needs `roles/bigquery.jobUser` to run the query. The offload
+also needs `roles/storage.objectCreator` on the bucket.
 
 Then run the agent, ask it for the weather in a city, and query the rows:
 

@@ -88,7 +88,7 @@ When the table already exists, the plugin brings it up to the current schema ver
 `EVENTS_TABLE_SCHEMA` in `core/src/plugins/bigquery_analytics_schema.ts` is the authority on the 17 columns, and each carries the `description` a BigQuery user sees. Four are worth calling out because their shape is not obvious:
 
 - `content`, `attributes` and `latency_ms` are `JSON` columns supplied as JSON-encoded strings. Read them with `JSON_VALUE`.
-- `content_parts` is a repeated record, one entry per part of a multi-modal payload. Its `object_ref` field and the `GCS_REFERENCE` storage mode are declared so the table matches a Python-written one, but nothing populates them: this plugin does not offload large content to Cloud Storage.
+- `content_parts` is a repeated record, one entry per part of a multi-modal payload. Its `storage_mode` says where the content is: `INLINE` in the row, `EXTERNAL_URI` at a URI the caller supplied, or `GCS_REFERENCE` in a Cloud Storage object the plugin wrote. Only a `GCS_REFERENCE` part fills `object_ref`. See [Offloading large content to Cloud Storage](#offloading-large-content-to-cloud-storage).
 - `is_truncated` says a payload was cut. Redacting a credential does not set it.
 - `error_message` is also set on some `LLM_RESPONSE` rows whose `status` is `OK`, because a model can decline without failing.
 
@@ -219,6 +219,48 @@ const analytics = new BigQueryAgentAnalyticsPlugin({
 ```
 
 Only `content`, `content_parts`, `attributes` and `latency_ms` may be listed. Every other column is an identity or correlation column that the execution tree is reconstructed from, so naming one throws at construction rather than producing rows a query cannot correlate. The projection is applied to the schema first, so the table and the rows always carry the same columns. Dropping `attributes` while `customMetadataAllowlist` is set also throws, because the capture would be discarded.
+
+### Offloading large content to Cloud Storage
+
+An image or a long document does not belong in a BigQuery row. Set `gcsBucketName` and the plugin uploads such a part to Cloud Storage instead, then records where it went. `connectionId` names the BigQuery connection allowed to read those objects, written `location.connection_id`, and is copied onto every `object_ref`.
+
+```typescript
+const analytics = new BigQueryAgentAnalyticsPlugin({
+  projectId: 'my-project',
+  datasetId: 'agent_analytics',
+  config: {
+    gcsBucketName: 'my-agent-payloads',
+    connectionId: 'us.my-bq-connection',
+  },
+});
+```
+
+The bucket needs `@google-cloud/storage`, which is an optional peer dependency: `npm install @google-cloud/storage`. The plugin does not create the bucket, unlike the dataset and the table. Create it yourself and grant the agent's identity `storage.objects.create` on it.
+
+Two kinds of part are offloaded:
+
+- **Inline bytes** — any `inlineData` part. The row records `text = '[MEDIA OFFLOADED]'` and the part's own MIME type. Without a bucket the same part records `text = '[BINARY DATA]'` and nothing is uploaded.
+- **Text over either size limit** — text whose UTF-8 length exceeds 32 KiB, or whose character length exceeds `maxContentLength`. The two limits are counted in their own units, so a multi-byte payload is judged by bytes for storage and by characters for truncation. The row keeps the first 200 characters plus `... [OFFLOADED]`.
+
+An offloaded part carries `storage_mode = 'GCS_REFERENCE'`, a `gs://` `uri`, and an `object_ref` holding that URI, the connection, and the content type as JSON.
+
+```sql
+SELECT part.uri, JSON_VALUE(part.object_ref.details, '$.gcs_metadata.content_type') AS content_type
+FROM `my-project.agent_analytics.agent_events`, UNNEST(content_parts) AS part
+WHERE part.storage_mode = 'GCS_REFERENCE';
+```
+
+Object names are `<YYYY-MM-DD>/<trace_id>/<span_id>_<uid>_c<message>_p<part><ext>`, where `<uid>` is unique to one parse. The date and the trace group a run's objects together; the rest makes the name unique, because a part index restarts at each message. The upload is create-only, so a name that already exists fails the upload rather than rebinding a written row to another event's bytes.
+
+An offload failure never costs you the row. The plugin logs a warning and writes the row with `text = '[UPLOAD FAILED]'` for a binary part, or with the inline truncated text for a text part.
+
+Two rules constrain when the offload runs. Text is sanitized before it is uploaded, so the object holds the same redacted value the row does. And listing `content_parts` in `payloadColumnDenylist` disables the offload entirely: that column holds the reference, so an upload would cost storage with nothing pointing at it.
+
+### Redacting an external URI
+
+A part carrying `fileData.fileUri` is stored as `EXTERNAL_URI`, and the URI is redacted first. A signed URL is a credential written as a link, so every surface that can carry one is inspected: a parameter or path segment named after a credential keeps its name and loses its value, and the fragment takes the same pass.
+
+A URI that cannot be stored with any part intact becomes `[REDACTED_SENSITIVE_URI]`. That covers one carrying userinfo, one no URL parser accepts, one that is not a string, and one longer than 4,000,000 characters. Redaction sets the row's `is_truncated`.
 
 ## Failure modes
 

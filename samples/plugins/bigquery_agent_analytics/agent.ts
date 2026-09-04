@@ -12,6 +12,9 @@
  * run can be queried in SQL. The plugin creates the dataset and the table on
  * first use.
  *
+ * Set ADK_ANALYTICS_BUCKET to send content too large to inline to Cloud
+ * Storage instead of the row. The plugin does not create the bucket.
+ *
  * This sample writes to live BigQuery, so CI does not run it. The README next
  * to this file lists the environment variables and the grants it needs.
  *
@@ -55,6 +58,8 @@ const analytics = new BigQueryAgentAnalyticsPlugin({
     // match, so this sample keeps request bodies out of the table.
     eventDenylist: [AnalyticsEventType.LLM_REQUEST],
     customTags: {sample: 'bigquery_agent_analytics'},
+    gcsBucketName: process.env['ADK_ANALYTICS_BUCKET'],
+    connectionId: process.env['ADK_ANALYTICS_CONNECTION'],
   },
 });
 
