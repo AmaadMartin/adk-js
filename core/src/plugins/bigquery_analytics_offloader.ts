@@ -4,8 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Bucket, Storage, StorageOptions} from '@google-cloud/storage';
+import type {SaveOptions, StorageOptions} from '@google-cloud/storage';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
+
+/** The object one upload writes to. */
+export interface OffloadTarget {
+  save(data: Buffer | string, options: SaveOptions): Promise<void>;
+}
+
+/** The bucket holding the offloaded objects. */
+export interface OffloadBucket {
+  file(name: string): OffloadTarget;
+}
+
+/**
+ * The part of `@google-cloud/storage`'s `Storage` this module uses. Depending
+ * on the narrow shape lets a test supply a client that behaves, rather than
+ * one that merely satisfies the full class by assertion.
+ */
+export interface OffloadStorage {
+  bucket(name: string): OffloadBucket;
+}
 
 /** What {@link GcsOffloader} needs to reach a bucket. */
 export interface GcsOffloaderOptions {
@@ -14,7 +33,7 @@ export interface GcsOffloaderOptions {
   /** Bucket that receives the offloaded content. */
   bucketName: string;
   /** Client to use instead of one built from `projectId`. */
-  storage?: Storage;
+  storage?: OffloadStorage;
 }
 
 /**
@@ -27,8 +46,8 @@ export interface GcsOffloaderOptions {
 export class GcsOffloader {
   private readonly bucketName: string;
   private readonly storageOptions: StorageOptions;
-  private readonly storage?: Storage;
-  private bucketPromise?: Promise<Bucket>;
+  private readonly storage?: OffloadStorage;
+  private bucketPromise?: Promise<OffloadBucket>;
 
   constructor(options: GcsOffloaderOptions) {
     this.bucketName = options.bucketName;
@@ -66,7 +85,7 @@ export class GcsOffloader {
    * Resolves the bucket handle, loading the `@google-cloud/storage` optional
    * peer on first use.
    */
-  private getBucket(): Promise<Bucket> {
+  private getBucket(): Promise<OffloadBucket> {
     this.bucketPromise ??= this.getStorage().then((storage) =>
       storage.bucket(this.bucketName),
     );
@@ -74,7 +93,7 @@ export class GcsOffloader {
   }
 
   /** Returns the injected client, or builds one from the peer package. */
-  private async getStorage(): Promise<Storage> {
+  private async getStorage(): Promise<OffloadStorage> {
     if (this.storage !== undefined) {
       return this.storage;
     }
