@@ -116,6 +116,5 @@ carries an `EventCompaction` in `actions`. `adk-js` returns a distinct
 `CompactedEvent` type with its own `isCompacted` / `startTime` / `endTime`
 fields and type guards. The `null` contract is the same in both.
 
-One behaviour still differs: `LlmSummarizer` throws on an empty event list and
-on a model reply with no content, where `adk-python`'s `LlmEventSummarizer`
-returns `None` for both.
+`LlmSummarizer` declines with `null` on an empty event list and on a model
+reply with no content, which is what `adk-python`'s `LlmEventSummarizer` does.
