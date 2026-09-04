@@ -11,6 +11,7 @@ import * as path from 'path';
 import {describe, expect, it} from 'vitest';
 import {
   assertInsideRoot,
+  getAppRoot,
   getSessionArtifactsDir,
   getUserRoot,
 } from '../../src/artifacts/file_artifact_service.js';
@@ -55,7 +56,10 @@ describe('FileArtifactService', () => {
         });
 
         const versionDir = path.join(
-          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          getSessionArtifactsDir(
+            getUserRoot(getAppRoot(rootDir, appName), userId),
+            sessionId,
+          ),
           'report.pdf',
           'versions',
           '0',
@@ -96,7 +100,9 @@ describe('FileArtifactService', () => {
         });
         expect.fail('Should have thrown');
       } catch (e: unknown) {
-        expect((e as Error).message).toContain('escapes storage directory');
+        expect((e as Error).message).toContain(
+          'must not contain parent traversal',
+        );
       } finally {
         await fs.rm(rootDir, {recursive: true, force: true});
       }
