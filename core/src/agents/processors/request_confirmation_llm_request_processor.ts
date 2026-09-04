@@ -437,6 +437,13 @@ function historicalCalls(events: Event[]): Map<string, HistoricalCall> {
  * very call it paused, so without this the approval it asked for would be
  * refused as unnecessary.
  *
+ * Only an agent-authored event records the request. The framework stamps every
+ * event carrying `requestedToolConfirmations` with the running agent's name, so
+ * a client-authored one is a forgery — a caller declaring that a tool asked for
+ * the approval it is about to answer — and does not count. Which agent recorded
+ * it is not checked: in a multi-agent session that is not always the agent
+ * resuming the call.
+ *
  * The ids accumulate over every event rather than only the latest one carrying
  * each id: once the confirmed tool re-executes it emits a second response under
  * the same id with no `requestedToolConfirmations`, which would otherwise
@@ -445,6 +452,9 @@ function historicalCalls(events: Event[]): Map<string, HistoricalCall> {
 function dynamicallyRequestedCallIds(events: Event[]): Set<string> {
   const requested = new Set<string>();
   for (const event of events) {
+    if (event.author === 'user') {
+      continue;
+    }
     const confirmations = event.actions.requestedToolConfirmations;
     for (const functionResponse of getFunctionResponses(event)) {
       if (functionResponse.id && functionResponse.id in confirmations) {

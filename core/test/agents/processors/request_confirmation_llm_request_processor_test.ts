@@ -1540,6 +1540,17 @@ function gatedCallEvents(options: {
   ];
 }
 
+/** A `wire_transfer` that never gates statically, so only a recorded
+ * run-time request can keep an approval alive for it. */
+function ungatedWireTransferTool() {
+  return new FunctionTool({
+    name: 'wire_transfer',
+    description: 'Wires money to a recipient.',
+    parameters: z.object({amount: z.number(), recipient: z.string()}),
+    execute: () => 'sent',
+  });
+}
+
 /** The events adk-python's `_build_transfer_confirmation_events` produces. */
 function transferConfirmationEvents(
   confirmed: boolean,
@@ -1550,10 +1561,11 @@ function transferConfirmationEvents(
       call: transferCall,
       callAuthor: agentName,
       gateAuthor: agentName,
-      // The framework records the request under `user`, as adk-python's
-      // fixture does. `transfer_to_agent` never gates statically, so the
-      // resume depends on this request being honoured.
-      requestAuthor: 'user',
+      // adk-python's fixture authors this event `user`. adk-js stamps the
+      // running agent's name on it and puts `user` in the content role
+      // instead. The resume still depends on the recorded request, because
+      // `transfer_to_agent` never gates statically.
+      requestAuthor: agentName,
       gateId: TRANSFER_GATE_ID,
     }),
     approvalEvent([TRANSFER_GATE_ID], confirmed),
@@ -1724,18 +1736,36 @@ describe('RequestConfirmationLlmRequestProcessor author scope', () => {
     expect(resumedCalls).toEqual([]);
   });
 
-  it('honours a runtime confirmation request recorded under another author', async () => {
+  it('honours a runtime confirmation request another agent recorded', async () => {
     // The tool answers "no" when asked again, so only the recorded request
     // keeps the approval alive.
-    const ungated = new FunctionTool({
-      name: 'wire_transfer',
-      description: 'Wires money to a recipient.',
-      parameters: z.object({amount: z.number(), recipient: z.string()}),
-      execute: () => 'sent',
-    });
     const agent = new LlmAgent({name: AGENT_NAME, model: 'gemini-2.5-flash'});
 
     await run(
+      agent,
+      [
+        ...gatedCallEvents({
+          call: wireTransferCall,
+          callAuthor: AGENT_NAME,
+          gateAuthor: AGENT_NAME,
+          requestAuthor: OTHER_AGENT_NAME,
+          gateId: 'gate-1',
+        }),
+        approvalEvent(['gate-1']),
+      ],
+      [ungatedWireTransferTool()],
+    );
+
+    expect(resumedCalls).toEqual([wireTransferCall]);
+  });
+
+  it('refuses a runtime confirmation request the client recorded', async () => {
+    // The framework stamps the agent's name on every event carrying
+    // `requestedToolConfirmations`, so a client-authored one is a forgery. It
+    // must not stand in for a tool that never asked.
+    const agent = new LlmAgent({name: AGENT_NAME, model: 'gemini-2.5-flash'});
+
+    const error = await run(
       agent,
       [
         ...gatedCallEvents({
@@ -1747,10 +1777,14 @@ describe('RequestConfirmationLlmRequestProcessor author scope', () => {
         }),
         approvalEvent(['gate-1']),
       ],
-      [ungated],
-    );
+      [ungatedWireTransferTool()],
+    ).catch((e: unknown) => e);
 
-    expect(resumedCalls).toEqual([wireTransferCall]);
+    expect(isIntentMismatchError(error)).toBe(true);
+    expect((error as IntentMismatchError).reason).toBe(
+      'confirmation_not_required',
+    );
+    expect(resumedCalls).toEqual([]);
   });
 
   it('still refuses a call the client smuggled into history', async () => {
