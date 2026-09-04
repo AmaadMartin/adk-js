@@ -242,9 +242,6 @@ const EVALUATOR: UserPersona = {
   ],
 };
 
-/** The personas the default registry holds, in registration order. */
-const DEFAULT_PERSONAS: readonly UserPersona[] = [EXPERT, NOVICE, EVALUATOR];
-
 /**
  * Builds a registry holding the personas ADK ships.
  *
@@ -255,7 +252,7 @@ const DEFAULT_PERSONAS: readonly UserPersona[] = [EXPERT, NOVICE, EVALUATOR];
  */
 export function getDefaultPersonaRegistry(): UserPersonaRegistry {
   const registry = new UserPersonaRegistry();
-  for (const persona of DEFAULT_PERSONAS) {
+  for (const persona of [EXPERT, NOVICE, EVALUATOR]) {
     registry.registerPersona(persona.id, persona);
   }
   return registry;

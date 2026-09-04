@@ -7,8 +7,20 @@
 /**
  * Ported from adk-python
  * `tests/unittests/evaluation/simulation/test_pre_built_personas.py`
- * at ref a3bd1115. The test names are kept verbatim so a reader can find the
- * original.
+ * at ref a3bd1115. That file defines four tests and all four are here, with
+ * their names kept verbatim so a reader can find the original:
+ * `test_get_default_persona_registry` (L20),
+ * `test_pre_built_behavior_renders_instructions_and_rubrics` (L28),
+ * `test_pre_built_behaviors_have_no_enum_aliases` (L40) and
+ * `test_default_personas_compose_distinct_pre_built_behaviors` (L51).
+ *
+ * One of them asserts differently from the original. Python's `enum` collapses
+ * two members with equal values into an alias, so the original counts members
+ * to catch a duplicated behavior. A frozen record cannot alias, so
+ * `test_pre_built_behaviors_have_no_enum_aliases` asserts the same intent by
+ * comparing content. The other three assert what the original asserts.
+ *
+ * Tests that adk-js adds are in the sibling `pre_built_personas_own_test.ts`.
  */
 
 import {
