@@ -13,6 +13,7 @@
 import {
   createSession,
   InvocationContext,
+  LlmAgent,
   MCPConnectionParams,
   mcpInstructionProvider,
   PluginManager,
@@ -154,6 +155,21 @@ describe('mcpInstructionProvider behaviour', () => {
     const provider = mcpInstructionProvider(CONNECTION_PARAMS, PROMPT_NAME);
 
     await expect(provider(makeContext({}))).resolves.toBe('');
+  });
+
+  it('supplies an LlmAgent instruction that resolves through the server', async () => {
+    const agent = new LlmAgent({
+      name: 'support_agent',
+      model: 'gemini-2.5-flash',
+      instruction: mcpInstructionProvider(CONNECTION_PARAMS, PROMPT_NAME),
+    });
+
+    await expect(
+      agent.canonicalInstruction(makeContext({})),
+    ).resolves.toStrictEqual({
+      instruction: 'instruction',
+      requireStateInjection: false,
+    });
   });
 
   it('builds one session manager per factory call, not per invocation', async () => {
