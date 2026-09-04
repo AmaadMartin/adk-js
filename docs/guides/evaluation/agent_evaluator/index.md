@@ -199,20 +199,6 @@ Set `evalSetResultsManager` together with `appName` to persist the whole result
 of the run. The eval service saves the results before `AgentEvaluator` throws,
 so a failing run is still recorded.
 
-## Who plays the user
-
-An eval case records the turns a user took. Something has to replay those turns
-against the agent, and that something is a _user simulator_. `AgentEvaluator`
-hands the eval service a `UserSimulatorProvider`, which returns a fresh
-simulator for each eval case.
-
-The provider returns a `StaticUserSimulator`. It replays the case's recorded
-turns in order and stops when the script ends, so the agent's replies never
-change what the user says next. A case that carries no conversation is rejected
-with `InputValidationError`. adk-python also routes a case that describes a
-goal to a model-backed simulator; this SDK has no such simulator, so it rejects
-that case rather than guessing at it.
-
 ## Custom metrics
 
 An eval config can declare a metric scored by a function you wrote. Name it as
