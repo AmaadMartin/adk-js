@@ -21,34 +21,6 @@ export const DEFAULT_MAX_VARCHAR_LENGTH = 256;
 /** Fractional-second digits a timestamp column keeps. */
 const TIMESTAMP_FRACTIONAL_DIGITS = 6;
 
-/** The SQL type a JSON state column takes on the given platform. */
-export function dynamicJsonColumnType(platform: Platform): string {
-  const declared = platform.getJsonDeclarationSQL();
-  // PostgreSQL is the one supported backend with a native JSON column.
-  if (declared === 'jsonb') {
-    return declared;
-  }
-  // MikroORM v6 gives a `Platform` no dialect name, and an `instanceof` check
-  // would make the optional MySQL driver a static import of this module.
-  // `utf8mb4` is a MySQL character set, so only MySQL and MariaDB declare it,
-  // and SQLAlchemy reports MariaDB under its `mysql` dialect too. `longtext`
-  // is what adk-python picked so a large state does not overflow `TEXT`.
-  if (platform.getDefaultCharset() === 'utf8mb4') {
-    return 'longtext';
-  }
-  // adk-python falls back to `TEXT` here because SQLAlchemy has no portable
-  // JSON type. MikroORM has one, so a backend keeps the declaration it already
-  // uses: `json` on SQLite and Unicode `nvarchar(max)` on SQL Server.
-  return declared;
-}
-
-/** The SQL type a microsecond-precision timestamp column takes. */
-export function preciseTimestampColumnType(platform: Platform): string {
-  return platform.getDateTimeTypeDeclarationSQL({
-    length: TIMESTAMP_FRACTIONAL_DIGITS,
-  });
-}
-
 /**
  * Stores a JSON object in the widest JSON-capable column a backend supports.
  *
@@ -58,7 +30,20 @@ export function preciseTimestampColumnType(platform: Platform): string {
  */
 export class DynamicJsonType extends JsonType {
   override getColumnType(_prop: EntityProperty, platform: Platform): string {
-    return dynamicJsonColumnType(platform);
+    // MikroORM v6 gives a `Platform` no dialect name, and an `instanceof`
+    // check would make the optional MySQL driver a static import of this
+    // module. `utf8mb4` is a MySQL character set, so only MySQL and MariaDB
+    // declare it, and SQLAlchemy reports MariaDB under its `mysql` dialect
+    // too. `longtext` is what adk-python picked so a large state does not
+    // overflow `TEXT`.
+    if (platform.getDefaultCharset() === 'utf8mb4') {
+      return 'longtext';
+    }
+    // adk-python falls back to `TEXT` here because SQLAlchemy has no portable
+    // JSON type. MikroORM has one, so a backend keeps the declaration it
+    // already uses: `jsonb` on PostgreSQL, `json` on SQLite and Unicode
+    // `nvarchar(max)` on SQL Server.
+    return platform.getJsonDeclarationSQL();
   }
 
   override convertToJSValue(value: unknown): unknown {
@@ -92,7 +77,9 @@ export class PreciseTimestampType extends Type<
   string | number | Date | null
 > {
   override getColumnType(_prop: EntityProperty, platform: Platform): string {
-    return preciseTimestampColumnType(platform);
+    return platform.getDateTimeTypeDeclarationSQL({
+      length: TIMESTAMP_FRACTIONAL_DIGITS,
+    });
   }
 
   override convertToJSValue(

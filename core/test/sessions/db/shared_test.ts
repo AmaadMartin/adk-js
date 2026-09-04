@@ -23,8 +23,6 @@ import {ENTITIES, StorageSession} from '../../../src/sessions/db/schema.js';
 import {
   DynamicJsonType,
   PreciseTimestampType,
-  dynamicJsonColumnType,
-  preciseTimestampColumnType,
 } from '../../../src/sessions/db/shared.js';
 
 const PLATFORMS = {
@@ -38,7 +36,7 @@ describe('session storage column types', () => {
   const dynamicJson = new DynamicJsonType();
   const preciseTimestamp = new PreciseTimestampType();
   let orm: MikroORM;
-  let timestampProp: EntityProperty;
+  let columnProp: EntityProperty;
 
   beforeAll(async () => {
     orm = await MikroORM.init({
@@ -48,7 +46,7 @@ describe('session storage column types', () => {
       connect: false,
       allowGlobalContext: true,
     });
-    timestampProp = orm.getMetadata().get(StorageSession).properties.updateTime;
+    columnProp = orm.getMetadata().get(StorageSession).properties.updateTime;
   });
 
   afterAll(async () => {
@@ -56,11 +54,15 @@ describe('session storage column types', () => {
   });
 
   it('test_dynamic_json_load_dialect_impl[postgresql]', () => {
-    expect(dynamicJsonColumnType(PLATFORMS.postgresql)).toBe('jsonb');
+    expect(dynamicJson.getColumnType(columnProp, PLATFORMS.postgresql)).toBe(
+      'jsonb',
+    );
   });
 
   it('test_dynamic_json_load_dialect_impl[mysql]', () => {
-    expect(dynamicJsonColumnType(PLATFORMS.mysql)).toBe('longtext');
+    expect(dynamicJson.getColumnType(columnProp, PLATFORMS.mysql)).toBe(
+      'longtext',
+    );
   });
 
   /**
@@ -70,7 +72,9 @@ describe('session storage column types', () => {
    * alias SQLite treats the same way.
    */
   it('test_dynamic_json_load_dialect_impl[sqlite]', () => {
-    expect(dynamicJsonColumnType(PLATFORMS.sqlite)).toBe('json');
+    expect(dynamicJson.getColumnType(columnProp, PLATFORMS.sqlite)).toBe(
+      'json',
+    );
   });
 
   it('test_dynamic_json_serializes_to_json_text_for_non_postgresql', () => {
@@ -113,13 +117,15 @@ describe('session storage column types', () => {
   });
 
   it('test_precise_timestamp_load_dialect_impl_mysql_keeps_microseconds', () => {
-    expect(preciseTimestampColumnType(PLATFORMS.mysql)).toBe('datetime(6)');
+    expect(preciseTimestamp.getColumnType(columnProp, PLATFORMS.mysql)).toBe(
+      'datetime(6)',
+    );
   });
 
   it('test_precise_timestamp_load_dialect_impl_defaults_to_datetime', () => {
-    expect(
-      preciseTimestamp.getColumnType(timestampProp, PLATFORMS.sqlite),
-    ).toBe(new DateTimeType().getColumnType(timestampProp, PLATFORMS.sqlite));
+    expect(preciseTimestamp.getColumnType(columnProp, PLATFORMS.sqlite)).toBe(
+      new DateTimeType().getColumnType(columnProp, PLATFORMS.sqlite),
+    );
   });
 
   /**
@@ -169,6 +175,8 @@ describe('session storage column types', () => {
   });
 
   it('test_precise_timestamp_uses_datetime2_on_mssql', () => {
-    expect(preciseTimestampColumnType(PLATFORMS.mssql)).toBe('datetime2(6)');
+    expect(preciseTimestamp.getColumnType(columnProp, PLATFORMS.mssql)).toBe(
+      'datetime2(6)',
+    );
   });
 });

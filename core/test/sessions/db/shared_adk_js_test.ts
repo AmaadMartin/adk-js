@@ -11,20 +11,26 @@
  * each backend generates.
  */
 
-import {MikroORM, Options} from '@mikro-orm/core';
+import {EntityProperty, MikroORM, Options} from '@mikro-orm/core';
 import {MariaDbDriver, MariaDbPlatform} from '@mikro-orm/mariadb';
 import {MsSqlDriver} from '@mikro-orm/mssql';
 import {MySqlDriver} from '@mikro-orm/mysql';
 import {PostgreSqlDriver} from '@mikro-orm/postgresql';
 import {SqliteDriver, SqlitePlatform} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest';
 import {ENTITIES, StorageSession} from '../../../src/sessions/db/schema.js';
 import {
   DEFAULT_MAX_VARCHAR_LENGTH,
   DynamicJsonType,
   PreciseTimestampType,
-  dynamicJsonColumnType,
-  preciseTimestampColumnType,
 } from '../../../src/sessions/db/shared.js';
 
 /** The driver each backend uses, and the session columns it must declare. */
@@ -104,11 +110,34 @@ async function createSchemaSql(driver: Options['driver']): Promise<string> {
 }
 
 describe('session storage column types, beyond the reference suite', () => {
+  let orm: MikroORM;
+  let columnProp: EntityProperty;
+
+  beforeAll(async () => {
+    orm = await MikroORM.init({
+      dbName: 'metadata_only',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      connect: false,
+      allowGlobalContext: true,
+    });
+    // `getColumnType` ignores the property, so one serves both types.
+    columnProp = orm.getMetadata().get(StorageSession).properties.updateTime;
+  });
+
+  afterAll(async () => {
+    await orm.close();
+  });
+
   it('groups MariaDB with MySQL', () => {
     const mariadb = new MariaDbPlatform();
 
-    expect(dynamicJsonColumnType(mariadb)).toBe('longtext');
-    expect(preciseTimestampColumnType(mariadb)).toBe('datetime(6)');
+    expect(new DynamicJsonType().getColumnType(columnProp, mariadb)).toBe(
+      'longtext',
+    );
+    expect(new PreciseTimestampType().getColumnType(columnProp, mariadb)).toBe(
+      'datetime(6)',
+    );
   });
 
   it('reads a numeric column as milliseconds, the MikroORM epoch unit', () => {
