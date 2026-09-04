@@ -17,7 +17,6 @@ import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
 import {
-  A2AEvent,
   createTask,
   createTaskFailedEvent,
   createTaskWorkingEvent,
@@ -184,10 +183,12 @@ export class A2AAgentExecutor implements AgentExecutor {
       })) {
         adkEvents.push(adkEvent);
 
-        for (const a2aEvent of this.convertAdkEvent(
+        for (const a2aEvent of this.converters.adkEventConverter(
           adkEvent,
-          executorContext,
           agentsArtifacts,
+          ctx.taskId,
+          ctx.contextId,
+          this.converters.genAiPartConverter,
         )) {
           a2aEvent.metadata = {
             ...a2aEvent.metadata,
@@ -229,39 +230,6 @@ export class A2AAgentExecutor implements AgentExecutor {
   // Task cancellation is not supported in this implementation yet.
   async cancelTask(_taskId: string): Promise<void> {
     throw new Error('Task cancellation is not supported yet.');
-  }
-
-  /**
-   * Converts one ADK event through whichever converter slot is live.
-   *
-   * `eventConverter` takes the legacy shape and wins when the embedder set it.
-   * Otherwise `adkEventConverter` runs, which is the slot the built-in
-   * conversion fills.
-   */
-  private convertAdkEvent(
-    adkEvent: AdkEvent,
-    executorContext: ExecutorContext,
-    agentsArtifacts: Map<string, string>,
-  ): A2AEvent[] {
-    const {taskId, contextId} = executorContext.requestContext;
-    const {eventConverter, adkEventConverter, genAiPartConverter} =
-      this.converters;
-
-    return eventConverter
-      ? eventConverter(
-          adkEvent,
-          executorContext,
-          taskId,
-          contextId,
-          genAiPartConverter,
-        )
-      : adkEventConverter(
-          adkEvent,
-          agentsArtifacts,
-          taskId,
-          contextId,
-          genAiPartConverter,
-        );
   }
 
   /**

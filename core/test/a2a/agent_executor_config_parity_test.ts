@@ -12,9 +12,9 @@
  * - tests/unittests/a2a/executor/test_a2a_agent_executor.py
  *
  * The `it(...)` strings keep the Python test names so a reviewer can grep
- * them. adk-python has two executor classes and adk-js has one, so the impl
- * tests drive `adkEventConverter` and the legacy tests drive `eventConverter`
- * on the same `A2AAgentExecutor`.
+ * them. adk-python has two executor classes and one converter slot each;
+ * adk-js has one executor class and one slot, so both reference variants of a
+ * test map onto `adkEventConverter`.
  *
  * The request-converter half of the legacy `test_execute_success_new_task` is
  * not ported: `requestConverter` is out of scope on this branch.
@@ -31,7 +31,6 @@ import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
-  AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   BaseSessionService,
   createEvent,
@@ -179,35 +178,36 @@ describe('A2AAgentExecutor converter config (adk-python parity)', () => {
     });
   });
 
-  it('test_execute_success_new_task (legacy: event_converter arguments)', async () => {
+  it('test_execute_success_new_task (legacy: a converter that returns nothing publishes nothing)', async () => {
     const adkEvent = modelEvent('response');
     stubRunnerWith([adkEvent]);
 
     const genAiPartConverter = stubPartConverter();
-    const eventConverter: AdkEventToA2AEventsConverter = vi.fn(() => []);
     const adkEventConverter: AdkEventToA2AEventsConverterImpl = vi.fn(() => []);
 
     const executor = new A2AAgentExecutor({
       runner: runnerConfig(),
       genAiPartConverter,
-      eventConverter,
       adkEventConverter,
     });
     await executor.execute(createRequestContext(), mockEventBus);
 
-    expect(eventConverter).toHaveBeenCalledTimes(1);
-    expect(eventConverter).toHaveBeenCalledWith(
+    expect(adkEventConverter).toHaveBeenCalledTimes(1);
+    expect(adkEventConverter).toHaveBeenCalledWith(
       adkEvent,
-      expect.objectContaining({
-        appName: 'test-app',
-        userId: 'test-user',
-        sessionId: 'session-id',
-      }),
+      new Map(),
       TASK_ID,
       CONTEXT_ID,
       genAiPartConverter,
     );
-    expect(adkEventConverter).not.toHaveBeenCalled();
+
+    // Task + working + the final status update. Nothing for the ADK event.
+    const published = mockEventBus.publish.mock.calls.map((call) => call[0]);
+    expect(published.map((event) => event.kind)).toEqual([
+      'task',
+      'status-update',
+      'status-update',
+    ]);
   });
 
   it('test_execute_existing_task (legacy: converter arguments on a resumed task)', async () => {
@@ -216,14 +216,14 @@ describe('A2AAgentExecutor converter config (adk-python parity)', () => {
 
     const genAiPartConverter = stubPartConverter();
     const converted = workingStatusEvent();
-    const eventConverter: AdkEventToA2AEventsConverter = vi.fn(() => [
+    const adkEventConverter: AdkEventToA2AEventsConverterImpl = vi.fn(() => [
       converted,
     ]);
 
     const executor = new A2AAgentExecutor({
       runner: runnerConfig(),
       genAiPartConverter,
-      eventConverter,
+      adkEventConverter,
     });
     await executor.execute(
       createRequestContext({task: existingTask()}),
@@ -238,9 +238,9 @@ describe('A2AAgentExecutor converter config (adk-python parity)', () => {
       'status-update',
     ]);
 
-    expect(eventConverter).toHaveBeenCalledWith(
+    expect(adkEventConverter).toHaveBeenCalledWith(
       adkEvent,
-      expect.objectContaining({appName: 'test-app'}),
+      new Map(),
       TASK_ID,
       CONTEXT_ID,
       genAiPartConverter,

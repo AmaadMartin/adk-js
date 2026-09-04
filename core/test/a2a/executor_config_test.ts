@@ -7,23 +7,19 @@
 import {Part as A2APart, TaskArtifactUpdateEvent, TextPart} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
-  A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS,
   A2AAgentExecutor,
   A2aAgentExecutorConverterConfig,
   A2AEvent,
   Event as AdkEvent,
-  AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   BaseSessionService,
   createEvent,
   createEventActions,
   createSession,
-  ExecutorContext,
   GenAIPartToA2APartConverter,
   resolveA2aAgentExecutorConfig,
   Runner,
   RunnerConfig,
-  toA2AArtifactUpdateEvents,
   toA2AArtifactUpdateEventsFromArtifactMap,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
@@ -59,7 +55,7 @@ const modelEvent = (
 const {
   a2aPartConverter: defaultA2aPartConverter,
   genAiPartConverter: defaultGenAiPartConverter,
-} = A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS;
+} = resolveA2aAgentExecutorConfig({});
 
 /** Asserts the converter produced exactly one artifact update, and returns it. */
 const onlyArtifactUpdate = (events: A2AEvent[]): TaskArtifactUpdateEvent => {
@@ -70,20 +66,29 @@ const onlyArtifactUpdate = (events: A2AEvent[]): TaskArtifactUpdateEvent => {
   return event;
 };
 
-const noopEventConverter: AdkEventToA2AEventsConverter = () => [];
 const noopAdkEventConverter: AdkEventToA2AEventsConverterImpl = () => [];
 
 describe('resolveA2aAgentExecutorConfig', () => {
-  it('fills every slot from the declared defaults', () => {
+  it('fills every slot with the default the config declares', () => {
     const resolved = resolveA2aAgentExecutorConfig({});
 
-    expect(resolved.a2aPartConverter).toBe(defaultA2aPartConverter);
-    expect(resolved.genAiPartConverter).toBe(defaultGenAiPartConverter);
-    expect(resolved.eventConverter).toBeUndefined();
     expect(resolved.adkEventConverter).toBe(
       toA2AArtifactUpdateEventsFromArtifactMap,
     );
-    expect(resolved).toEqual({...A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS});
+    expect(resolved.a2aPartConverter({kind: 'text', text: 'hi'})).toEqual({
+      text: 'hi',
+      thought: false,
+    });
+    expect(resolved.genAiPartConverter({text: 'hi'})).toEqual({
+      kind: 'text',
+      text: 'hi',
+      metadata: undefined,
+    });
+    expect(Object.keys(resolved).sort()).toEqual([
+      'a2aPartConverter',
+      'adkEventConverter',
+      'genAiPartConverter',
+    ]);
   });
 
   it('keeps every supplied converter', () => {
@@ -93,13 +98,11 @@ describe('resolveA2aAgentExecutorConfig', () => {
     const resolved = resolveA2aAgentExecutorConfig({
       a2aPartConverter,
       genAiPartConverter,
-      eventConverter: noopEventConverter,
       adkEventConverter: noopAdkEventConverter,
     });
 
     expect(resolved.a2aPartConverter).toBe(a2aPartConverter);
     expect(resolved.genAiPartConverter).toBe(genAiPartConverter);
-    expect(resolved.eventConverter).toBe(noopEventConverter);
     expect(resolved.adkEventConverter).toBe(noopAdkEventConverter);
   });
 
@@ -107,11 +110,10 @@ describe('resolveA2aAgentExecutorConfig', () => {
     const resolved = resolveA2aAgentExecutorConfig({
       a2aPartConverter: undefined,
       genAiPartConverter: undefined,
-      eventConverter: undefined,
       adkEventConverter: undefined,
     });
 
-    expect(resolved).toEqual({...A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS});
+    expect(resolved).toEqual(resolveA2aAgentExecutorConfig({}));
   });
 
   it('does not mutate the config it was given', () => {
@@ -124,8 +126,7 @@ describe('resolveA2aAgentExecutorConfig', () => {
 
   it.each([
     ['a2aPartConverter', 'number', 3],
-    ['genAiPartConverter', 'string', 'nope'],
-    ['eventConverter', 'null', null],
+    ['genAiPartConverter', 'null', null],
     ['adkEventConverter', 'object', {}],
   ])('rejects a %s that is a %s', (field, described, value) => {
     expect(() =>
@@ -245,78 +246,24 @@ describe('toA2AArtifactUpdateEventsFromArtifactMap', () => {
     expect((event.artifact.parts[0] as TextPart).text).toBe('original');
   });
 
-  it('rejects an undefined artifact map, as adk-python rejects None', () => {
-    expect(() =>
+  it('keys an authorless event under one bucket of its own', () => {
+    const agentsArtifacts = new Map<string, string>();
+
+    onlyArtifactUpdate(
       toA2AArtifactUpdateEventsFromArtifactMap(
-        modelEvent('original'),
-        undefined,
-        TASK_ID,
-        CONTEXT_ID,
-        defaultGenAiPartConverter,
-      ),
-    ).toThrow('A2A executor artifact map cannot be undefined');
-  });
-});
-
-describe('toA2AArtifactUpdateEvents', () => {
-  const executorContextFor = (sessionId: string): ExecutorContext => ({
-    userId: 'user',
-    sessionId,
-    appName: 'app',
-    readonlyState: {},
-    events: [],
-    userContent: {role: 'user', parts: [{text: 'hi'}]},
-    requestContext: {
-      taskId: TASK_ID,
-      contextId: CONTEXT_ID,
-    } as unknown as RequestContext,
-  });
-
-  it('reuses one artifact id across the chunks of one execution', () => {
-    const executorContext = executorContextFor('session-1');
-
-    const first = onlyArtifactUpdate(
-      toA2AArtifactUpdateEvents(
-        modelEvent('chunk 1', true),
-        executorContext,
-        TASK_ID,
-        CONTEXT_ID,
-        defaultGenAiPartConverter,
-      ),
-    );
-    const second = onlyArtifactUpdate(
-      toA2AArtifactUpdateEvents(
-        modelEvent('chunk 2', true),
-        executorContext,
+        createEvent({
+          content: {role: 'model', parts: [{text: 'chunk 1'}]},
+          partial: true,
+          actions: createEventActions(),
+        }),
+        agentsArtifacts,
         TASK_ID,
         CONTEXT_ID,
         defaultGenAiPartConverter,
       ),
     );
 
-    expect(first.artifact.artifactId).toBe(second.artifact.artifactId);
-  });
-
-  it('keeps two executions apart', () => {
-    const first = onlyArtifactUpdate(
-      toA2AArtifactUpdateEvents(
-        modelEvent('chunk 1', true),
-        executorContextFor('session-1'),
-        TASK_ID,
-        CONTEXT_ID,
-        defaultGenAiPartConverter,
-      ),
-    );
-    const second = onlyArtifactUpdate(
-      toA2AArtifactUpdateEvents(
-        modelEvent('chunk 1', true),
-        executorContextFor('session-2'),
-        TASK_ID,
-        CONTEXT_ID,
-      ),
-    );
-
-    expect(first.artifact.artifactId).not.toBe(second.artifact.artifactId);
+    expect([...agentsArtifacts.keys()]).toEqual(['']);
   });
 });
 
@@ -375,7 +322,7 @@ describe('A2AAgentExecutor converter routing', () => {
     );
   };
 
-  it('runs the impl converter when only adkEventConverter is set', async () => {
+  it('runs the configured adkEventConverter instead of the default', async () => {
     stubRunnerWithGate(async () => {});
     const adkEventConverter: AdkEventToA2AEventsConverterImpl = vi.fn(() => []);
 
@@ -386,22 +333,9 @@ describe('A2AAgentExecutor converter routing', () => {
     await executor.execute(requestContext('a'), mockEventBus);
 
     expect(adkEventConverter).toHaveBeenCalledTimes(2);
-  });
-
-  it('lets eventConverter win over adkEventConverter', async () => {
-    stubRunnerWithGate(async () => {});
-    const eventConverter: AdkEventToA2AEventsConverter = vi.fn(() => []);
-    const adkEventConverter: AdkEventToA2AEventsConverterImpl = vi.fn(() => []);
-
-    const executor = new A2AAgentExecutor({
-      runner: runnerConfig(),
-      eventConverter,
-      adkEventConverter,
-    });
-    await executor.execute(requestContext('a'), mockEventBus);
-
-    expect(eventConverter).toHaveBeenCalledTimes(2);
-    expect(adkEventConverter).not.toHaveBeenCalled();
+    // Nothing was published for either ADK event.
+    const kinds = mockEventBus.publish.mock.calls.map(([event]) => event.kind);
+    expect(kinds).toEqual(['task', 'status-update', 'status-update']);
   });
 
   it('converts the inbound message with the configured a2aPartConverter', async () => {

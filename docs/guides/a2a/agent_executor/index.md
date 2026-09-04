@@ -1,7 +1,7 @@
 # A2AAgentExecutor converter configuration
 
 `A2AAgentExecutor` translates one Agent2Agent (A2A) request into an ADK run,
-and the run's ADK events back into A2A events. Four converter slots on its
+and the run's ADK events back into A2A events. Three converter slots on its
 config decide how that translation happens. Reach for them when the built-in
 conversion is close but not what you want to publish.
 
@@ -12,20 +12,13 @@ Every executor holds a converter for each direction of the boundary:
 - `a2aPartConverter` turns one inbound A2A part into a GenAI part.
 - `genAiPartConverter` turns one outbound GenAI part into an A2A part.
 - `adkEventConverter` turns one ADK event into the A2A events that represent
-  it, and takes the artifact map of the execution in progress.
-- `eventConverter` does the same, but takes the executor context instead of the
-  artifact map.
+  it, and takes the artifact map of the execution in progress. It is the
+  counterpart of `adk_event_converter` on adk-python's
+  `A2aAgentExecutorConfig`.
 
-An unset slot takes its declared default from
-`A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS`. The executor resolves the whole set once,
-in its constructor, so a config it accepts cannot fail later in the middle of a
-live stream.
-
-The two event slots exist because adk-python declares two, one per executor
-class. adk-js has one executor class, so it routes by which slot you set:
-`eventConverter` runs when you supply it, and `adkEventConverter` runs
-otherwise. `adkEventConverter` carries the built-in conversion, which is a
-single artifact update per event.
+An unset slot takes the default named below. The executor resolves the whole
+set once, in its constructor, so a config it accepts cannot fail later in the
+middle of a live stream.
 
 The executor stamps ADK metadata — the app, user and session ids, the
 invocation id, the author, the branch — onto every event a converter returns.
@@ -90,18 +83,10 @@ Returning an empty array publishes nothing for that ADK event.
 | -------------------- | ------------------------------------------ |
 | `a2aPartConverter`   | `toGenAIPart`                              |
 | `genAiPartConverter` | `toA2APart`                                |
-| `eventConverter`     | unset                                      |
 | `adkEventConverter`  | `toA2AArtifactUpdateEventsFromArtifactMap` |
 
-`resolveA2aAgentExecutorConfig` applies that table, and you can call it
-yourself to see what an executor would use:
-
-```ts
-import {resolveA2aAgentExecutorConfig} from '@google/adk';
-
-const resolved = resolveA2aAgentExecutorConfig({});
-// resolved.genAiPartConverter === A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS.genAiPartConverter
-```
+`resolveA2aAgentExecutorConfig` applies those defaults. The executor calls it
+in its constructor.
 
 ## The artifact map
 
@@ -120,7 +105,7 @@ constructed:
 
 ```ts
 // TypeScript rejects this literal at compile time. A value that reaches the
-// config from JavaScript, or from a configuration document, is rejected here:
+// config from untyped JavaScript is rejected here instead:
 new A2AAgentExecutor({runner, genAiPartConverter: 'nope'});
 // Error: A2A executor config field "genAiPartConverter" must be a function,
 //        received string
@@ -129,6 +114,3 @@ new A2AAgentExecutor({runner, genAiPartConverter: 'nope'});
 `undefined` selects the default. `null` is a supplied value of the wrong type
 and is rejected. The message names the field, and with several wrong fields it
 names the first one in the order listed above.
-
-`toA2AArtifactUpdateEventsFromArtifactMap` also rejects an undefined artifact
-map, which matches `convert_event_to_a2a_events` in adk-python.
