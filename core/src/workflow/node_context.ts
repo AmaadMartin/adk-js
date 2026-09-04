@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {context} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event} from '../events/event.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
 import {State} from '../sessions/state.js';
+import {TelemetryContext} from '../telemetry/node_telemetry_context.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import type {SchemaLike} from '../utils/schema.js';
 import type {BaseNode} from './base_node.js';
@@ -19,6 +21,7 @@ import type {
   ScheduleDynamicNodeOptions,
 } from './schedule_dynamic_node.js';
 import {buildNode} from './utils/workflow_graph_utils.js';
+import {isWorkflow} from './workflow.js';
 
 /**
  * The result of running a node: the fields a caller (and the engine's
@@ -52,6 +55,10 @@ export interface NodeContextOptions {
   nodePath: string;
   /** Deterministic run id of the owning node. */
   runId: string;
+  /** The context of the node that started this one, if it has one. */
+  parentCtx?: NodeContext;
+  /** The node this context belongs to. */
+  node?: BaseNode;
   /** Responses for resuming interrupted child nodes, keyed by interrupt id. */
   resumeInputs?: Record<string, unknown>;
   /** Scope tag isolating this node's events from peer scopes. */
@@ -72,12 +79,26 @@ export interface NodeContextOptions {
  * It exposes `ctx.runNode(...)` for programmatic child execution, `ctx.state`
  * for delta-aware session state, `ctx.emit(...)` to stream an event, and the
  * mutable `output`/`route`/`interruptIds` a node sets while running.
+ *
+ * That one Python class covers two roles, and adk-js splits them. This class is
+ * the workflow half. The callback and tool half — artifacts, credentials,
+ * memory, auth and tool confirmations — is `Context` in
+ * `core/src/agents/context.ts`. A member missing here is likely to live there.
  */
 export class NodeContext {
   readonly invocationContext: InvocationContext;
   readonly channel: AsyncQueue<Event>;
   readonly nodePath: string;
   readonly runId: string;
+
+  /** The context of the node that started this one, if it has one. */
+  readonly parentCtx?: NodeContext;
+
+  /** The node this context belongs to. */
+  readonly node?: BaseNode;
+
+  /** Telemetry state for this node run, captured when the context is built. */
+  readonly telemetryContext: TelemetryContext;
 
   /**
    * Node paths whose output this node's output also becomes: its parent's if
@@ -99,14 +120,26 @@ export class NodeContext {
   resumeInputs: Record<string, unknown>;
   isolationScope?: string;
 
-  /** The structured output produced by the node during its run. */
-  output: unknown = undefined;
-
   /** The route key(s) emitted by the node, if any (array = multi-route). */
   route?: RouteValue | RouteValue[];
 
   /** Interrupt ids the node is currently blocked on (HITL). */
   interruptIds: string[] = [];
+
+  /**
+   * The failure that ended this node's run, recorded by the runner before the
+   * error propagates, so a caller holding the child context can read it.
+   */
+  error?: Error;
+
+  /** The path of the node the {@link error} came from; empty when none did. */
+  errorNodePath = '';
+
+  /**
+   * Author stamped on the events this node emits, overriding the node's own
+   * name. Empty means the node name is used. Inherited from `parentCtx`.
+   */
+  eventAuthor: string;
 
   /**
    * The failure a node reported by emitting an error event rather than by
@@ -144,6 +177,7 @@ export class NodeContext {
    */
   readonly stateSchema?: SchemaLike;
 
+  private outputValue: unknown = undefined;
   private readonly _state: State;
   private readonly dynamicRunCounters = new Map<string, number>();
   /** Run ids this context handed out automatically, per node name. */
@@ -160,6 +194,10 @@ export class NodeContext {
     this.channel = opts.channel;
     this.nodePath = opts.nodePath;
     this.runId = opts.runId;
+    this.parentCtx = opts.parentCtx;
+    this.node = opts.node;
+    this.eventAuthor = opts.parentCtx?.eventAuthor ?? '';
+    this.telemetryContext = new TelemetryContext(context.active());
     this.resumeInputs = opts.resumeInputs ?? {};
     this.isolationScope = opts.isolationScope;
     this.actions = opts.actions ?? createEventActions();
@@ -173,6 +211,65 @@ export class NodeContext {
       this.actions.stateDelta,
       opts.stateSchema,
     );
+  }
+
+  /**
+   * The structured output produced by the node during its run.
+   *
+   * A node produces at most one, so a second assignment throws rather than
+   * silently replacing the first (Python `Context.output`).
+   */
+  get output(): unknown {
+    return this.outputValue;
+  }
+
+  set output(value: unknown) {
+    if (this.outputValue !== undefined) {
+      throw new Error(
+        'Output already set. A node can produce at most one output.',
+      );
+    }
+    this.outputValue = value;
+  }
+
+  /**
+   * Writes the output on the engine's behalf, skipping the single-output
+   * check.
+   *
+   * That check exists to catch a node body producing two results. The engine's
+   * own writes are not that: a plugin replacing the output, and the handover of
+   * a `useAsOutput` child's output onto its caller, both legitimately overwrite
+   * a value that is already there.
+   *
+   * @internal Not part of the node-facing API.
+   */
+  setEngineOutput(value: unknown): void {
+    this.outputValue = value;
+  }
+
+  /**
+   * Clears everything a failed attempt can leave behind, so a retry starts
+   * clean: the output, route, interrupt ids, reported error, AND the state
+   * writes. A node that calls `ctx.state.set(...)` and then throws would
+   * otherwise leave the failed attempt's writes in the delta, to be committed
+   * alongside the successful attempt's. The `State` is built over this exact
+   * `stateDelta` object in the constructor, so the keys are cleared in place
+   * rather than the object being reassigned.
+   *
+   * Events already pushed through the channel on a failed attempt are
+   * downstream and cannot be retracted, so a node that emits N events and then
+   * fails re-emits those N on retry.
+   *
+   * @internal Called by the node runner between attempts.
+   */
+  resetForAttempt(): void {
+    this.outputValue = undefined;
+    this.route = undefined;
+    this.interruptIds = [];
+    this.reportedError = undefined;
+    for (const key of Object.keys(this.actions.stateDelta)) {
+      delete this.actions.stateDelta[key];
+    }
   }
 
   /** Delta-aware session state; writes accumulate in `actions.stateDelta`. */
@@ -255,6 +352,36 @@ export class NodeContext {
     options?: RunNodeOptions,
   ): Promise<NodeContext | NodeResult> {
     const node = buildNode(nodeLike);
+    if (options?.useAsOutput) {
+      this.assertNoOutputDelegate();
+    }
+    const run = this.startNode(node, input, options);
+    if (options?.raiseOnWait) {
+      return raiseIfWaiting(run, node);
+    }
+    return run;
+  }
+
+  /**
+   * Refuses a second `useAsOutput` child: the node would then have two
+   * results, and the first child's output event already answered for it. A
+   * `Workflow` is exempt, as in Python — it delegates on behalf of whichever
+   * of its nodes is terminal, which can legitimately happen more than once.
+   */
+  private assertNoOutputDelegate(): void {
+    if (this.outputDelegated && !isWorkflow(this.node)) {
+      throw new Error(
+        `Node ${this.nodePath} already has a use_as_output delegate.`,
+      );
+    }
+  }
+
+  /** The body of {@link runNode}: routes the child through the scheduler or runs it directly. */
+  private startNode(
+    node: BaseNode,
+    input: unknown,
+    options?: RunNodeOptions,
+  ): Promise<NodeContext | NodeResult> {
     if (this.scheduler) {
       const nodeName = options?.nodeName ?? node.name;
       let runId = options?.runId;
@@ -307,6 +434,26 @@ export class NodeContext {
     }
     return child;
   }
+}
+
+/**
+ * Surfaces a child that came back waiting as a {@link NodeInterruptedError},
+ * for a caller that passed `raiseOnWait`.
+ *
+ * A node declaring `waitForOutput`, and a `Workflow`, can finish a turn with no
+ * output because they are still waiting for one. Returning that as a plain
+ * `undefined` would let the caller be recorded COMPLETED on a result it never
+ * got; throwing records it as waiting instead.
+ */
+async function raiseIfWaiting(
+  run: Promise<NodeContext | NodeResult>,
+  node: BaseNode,
+): Promise<NodeContext | NodeResult> {
+  const child = await run;
+  if (child.output === undefined && (isWorkflow(node) || node.waitForOutput)) {
+    throw new NodeInterruptedError();
+  }
+  return child;
 }
 
 /** Returns the set stored under `key`, creating it on first use. */

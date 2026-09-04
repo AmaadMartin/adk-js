@@ -56,6 +56,11 @@ export interface RunNodeOptions {
    * resume). Defaults to `${parent.nodePath}.${nodeName}`.
    */
   overrideNodePath?: string;
+  /**
+   * If true, raise `NodeInterruptedError` when the child comes back with no
+   * output because it is still waiting for one, instead of returning it.
+   */
+  raiseOnWait?: boolean;
 }
 
 /** Parameters for {@link executeChildNode}. */
@@ -188,6 +193,8 @@ async function runChildNode({
     channel: parent.channel,
     nodePath,
     runId,
+    parentCtx: parent,
+    node,
     resumeInputs: resumeInputs ?? parent.resumeInputs,
     isolationScope,
     // A node's own schema wins; otherwise it answers to its parent's.
@@ -244,7 +251,7 @@ async function runChildNode({
     let succeeded = false;
     let inputRecorded = false;
     while (!succeeded) {
-      resetState(child);
+      child.resetForAttempt();
       child.attemptCount = nodeState.attemptCount;
       try {
         inputRecorded = await runAttempt({
@@ -312,18 +319,19 @@ async function runChildNode({
         output: child.output,
       });
       if (replacedOutput !== undefined) {
-        child.output = replacedOutput;
+        child.setEngineOutput(replacedOutput);
       }
     }
 
     if (options.useAsOutput) {
-      parent.output = child.output;
+      parent.setEngineOutput(child.output);
       parent.route = child.route;
       parent.outputDelegated = true;
     }
 
     return child;
   } catch (err) {
+    recordFailure(child, err);
     traceNodeExecution({
       nodePath,
       runId,
@@ -414,28 +422,18 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
 }
 
 /**
- * Reset per-attempt state so a retry starts clean. This covers everything a
- * failed attempt can leave behind on the child context: its output/route,
- * interrupt ids, AND its state writes. A node that calls `ctx.state.set(...)`
- * and then throws would otherwise leave the failed attempt's writes in the
- * delta, to be committed alongside the successful attempt's. `NodeContext`
- * builds its `State` over this exact `stateDelta` object once (in its
- * constructor), so we clear the keys in place rather than reassigning it.
+ * Records the failure on the child context before it propagates, so a caller
+ * holding that context can read what went wrong without catching the throw.
+ * The throw itself is unchanged.
  *
- * Note: events already pushed through the channel on a failed attempt are
- * downstream and cannot be retracted, so a node that emits N events and
- * then fails re-emits those N on retry (see the note on `executeChildNode`).
- *
- * @param childNodeContext Node context to reset
+ * A failure from a `ctx.runNode` grandchild already names the node it came
+ * from, so that path is preserved rather than overwritten with this node's.
  */
-function resetState(childNodeContext: NodeContext): void {
-  childNodeContext.output = undefined;
-  childNodeContext.route = undefined;
-  childNodeContext.interruptIds = [];
-  childNodeContext.reportedError = undefined;
-  for (const key of Object.keys(childNodeContext.actions.stateDelta)) {
-    delete childNodeContext.actions.stateDelta[key];
-  }
+function recordFailure(child: NodeContext, err: unknown): void {
+  child.error = err instanceof Error ? err : new Error(String(err));
+  child.errorNodePath = isDynamicNodeFailError(err)
+    ? err.errorNodePath
+    : child.nodePath;
 }
 
 interface RunOnceParams {
@@ -479,6 +477,7 @@ async function runOnce({
   let inputRecorded = false;
   const consume = (event: Event): void => {
     enrichEvent({event, child, nodeName, branch, isolationScope});
+    child.telemetryContext.addEvent(event);
     // An event can carry a state delta that never went through `ctx.state`,
     // so the schema is enforced here too rather than only on the setter.
     const emittedDelta = event.actions?.stateDelta;
@@ -486,7 +485,10 @@ async function runOnce({
       child.state.validateDelta(emittedDelta);
     }
     if (event.output !== undefined) {
-      child.output = event.output;
+      // Engine write: a generator node yields one event per item and the last
+      // output wins (`function_node_test.ts`), so this is not the repeated
+      // assignment `ctx.output`'s setter refuses.
+      child.setEngineOutput(event.output);
       if (child.outputDelegated) {
         const stateDelta = event.actions?.stateDelta;
         if (!stateDelta || Object.keys(stateDelta).length === 0) {
@@ -663,6 +665,9 @@ interface EnrichEventParams {
  * them unset, so a node can override them. `path` is different: it is
  * engine-owned and always set to the child's real node path — a node must not be
  * able to misreport where it ran.
+ *
+ * The default author is `ctx.eventAuthor` when the orchestrator set one, and
+ * the node's own name otherwise.
  */
 function enrichEvent({
   event,
@@ -672,7 +677,7 @@ function enrichEvent({
   isolationScope,
 }: EnrichEventParams): void {
   if (!event.author) {
-    event.author = nodeName;
+    event.author = child.eventAuthor || nodeName;
   }
   if (!event.invocationId) {
     event.invocationId = child.invocationId;
