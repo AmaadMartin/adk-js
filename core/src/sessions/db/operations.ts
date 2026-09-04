@@ -6,9 +6,8 @@
 
 import {FlushMode, MikroORM, Options as MikroORMOptions} from '@mikro-orm/core';
 import {
-  isMissingModule,
   loadOptionalPeer,
-  OptionalPeer,
+  MissingOptionalPeerError,
 } from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {
@@ -19,12 +18,21 @@ import {
 } from './schema.js';
 
 /** A connection URI scheme split into backend and (optional) named driver. */
-export interface DatabaseUriScheme {
+interface DatabaseUriScheme {
   /** The backend the URI names, lowercased, empty when there is no scheme. */
   backend: string;
   /** The driver a SQLAlchemy-style `backend+driver://` scheme names. */
   driver?: string;
 }
+
+/** The optional driver package backing one backend. */
+interface DatabaseDriverPeer {
+  packageName: string;
+  load(): Promise<MikroORMOptions['driver']>;
+}
+
+/** Separates the scheme from the rest of a connection URI. */
+const SCHEME_SEPARATOR = '://';
 
 /** Backend name this module normalizes the sqlite dialect to. */
 const SQLITE_BACKEND = 'sqlite';
@@ -32,18 +40,44 @@ const SQLITE_BACKEND = 'sqlite';
 /** Dialect name the sqlite driver reports through knex. */
 const SQLITE_KNEX_DIALECT = 'sqlite3';
 
-/** The only sqlite URI that opens a database held in memory. */
-const SQLITE_MEMORY_URI = 'sqlite://:memory:';
+/** The sqlite database name that opens a database held in memory. */
+const SQLITE_MEMORY_DATABASE = ':memory:';
+
+/**
+ * The driver package each supported backend needs. Every `import()` keeps its
+ * specifier literal so that bundlers and `vi.mock` still see it.
+ */
+const DRIVER_PEERS: Readonly<Record<string, DatabaseDriverPeer>> = {
+  postgres: {
+    packageName: '@mikro-orm/postgresql',
+    load: async () => (await import('@mikro-orm/postgresql')).PostgreSqlDriver,
+  },
+  postgresql: {
+    packageName: '@mikro-orm/postgresql',
+    load: async () => (await import('@mikro-orm/postgresql')).PostgreSqlDriver,
+  },
+  mysql: {
+    packageName: '@mikro-orm/mysql',
+    load: async () => (await import('@mikro-orm/mysql')).MySqlDriver,
+  },
+  mariadb: {
+    packageName: '@mikro-orm/mariadb',
+    load: async () => (await import('@mikro-orm/mariadb')).MariaDbDriver,
+  },
+  mssql: {
+    packageName: '@mikro-orm/mssql',
+    load: async () => (await import('@mikro-orm/mssql')).MsSqlDriver,
+  },
+  [SQLITE_BACKEND]: {
+    packageName: '@mikro-orm/sqlite',
+    load: async () => (await import('@mikro-orm/sqlite')).SqliteDriver,
+  },
+};
 
 /** Backends a connection URI may name. */
-const SUPPORTED_BACKENDS: ReadonlySet<string> = new Set([
-  'postgres',
-  'postgresql',
-  'mysql',
-  'mariadb',
-  'mssql',
-  SQLITE_BACKEND,
-]);
+const SUPPORTED_BACKENDS: ReadonlySet<string> = new Set(
+  Object.keys(DRIVER_PEERS),
+);
 
 /**
  * Backends whose dialect implements `SELECT ... FOR UPDATE`, matching
@@ -56,46 +90,10 @@ const ROW_LEVEL_LOCKING_BACKENDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Statement that turns on sqlite's foreign-key enforcement. */
-export const SQLITE_FOREIGN_KEYS_PRAGMA = 'PRAGMA foreign_keys = ON';
+const SQLITE_FOREIGN_KEYS_PRAGMA = 'PRAGMA foreign_keys = ON';
 
 /** Statement the pool runs to check a connection is still usable. */
-export const LIVENESS_PROBE_SQL = 'select 1';
-
-/** Describes the optional driver peer backing a connection-string scheme. */
-function driverPeer(packageName: string, scheme: string): OptionalPeer {
-  return {
-    packageName,
-    feature: `DatabaseSessionService with a "${scheme}" connection string`,
-  };
-}
-
-function invalidUrlMessage(uri: string): string {
-  return `Invalid database URL format or argument '${redactUriPassword(uri)}'.`;
-}
-
-function unsupportedBackendMessage(uri: string): string {
-  return `Unsupported database URI: ${redactUriPassword(uri)}`;
-}
-
-function namedDriverMessage(
-  uri: string,
-  backend: string,
-  driver: string,
-): string {
-  return (
-    `Database URL '${redactUriPassword(uri)}' names the '${driver}' driver ` +
-    `in its scheme. adk-js selects its own driver, so use a ` +
-    `'${backend}://' URL instead.`
-  );
-}
-
-function missingDriverMessage(uri: string): string {
-  return `Database related module not found for URL '${redactUriPassword(uri)}'.`;
-}
-
-function engineCreationMessage(uri: string): string {
-  return `Failed to create database engine for URL '${redactUriPassword(uri)}'`;
-}
+const LIVENESS_PROBE_SQL = 'select 1';
 
 /**
  * Splits a connection URI into the backend it names and, when the scheme
@@ -105,7 +103,7 @@ function engineCreationMessage(uri: string): string {
  * @returns The parsed scheme. `backend` is empty when `uri` has no `://`.
  */
 export function schemeOf(uri: string): DatabaseUriScheme {
-  const separator = uri.indexOf('://');
+  const separator = uri.indexOf(SCHEME_SEPARATOR);
   if (separator === -1) {
     return {backend: ''};
   }
@@ -137,15 +135,20 @@ export function namesSupportedDatabaseBackend(uri: string): boolean {
  */
 export function assertSupportedDatabaseUri(uri: string): void {
   const {backend, driver} = schemeOf(uri);
+  const redacted = redactUriPassword(uri);
 
   if (!backend) {
-    throw new Error(invalidUrlMessage(uri));
+    throw new Error(`Invalid database URL format or argument '${redacted}'.`);
   }
   if (!SUPPORTED_BACKENDS.has(backend)) {
-    throw new Error(unsupportedBackendMessage(uri));
+    throw new Error(`Unsupported database URI: ${redacted}`);
   }
   if (driver) {
-    throw new Error(namedDriverMessage(uri, backend, driver));
+    throw new Error(
+      `Database URL '${redacted}' names the '${driver}' driver in its ` +
+        `scheme. adk-js selects its own driver, so use a '${backend}://' ` +
+        `URL instead.`,
+    );
   }
 }
 
@@ -155,7 +158,7 @@ export interface SqliteConnectionHandle {
 }
 
 /** knex's callback reporting that an `afterCreate` pool hook finished. */
-export type PoolConnectCallback = (
+type PoolConnectCallback = (
   error: Error | null,
   connection: SqliteConnectionHandle,
 ) => void;
@@ -290,24 +293,31 @@ export function forkForWrite(orm: MikroORM) {
 }
 
 /**
- * Loads a driver package, reporting a missing one against the URI that needs
- * it.
+ * Loads the driver package a backend needs, reporting a missing one against
+ * the URI that needs it.
  */
-async function loadDriver<T>(
+async function loadDriver(
   uri: string,
-  peer: OptionalPeer,
-  load: () => Promise<T>,
-): Promise<T> {
+  backend: string,
+  peer: DatabaseDriverPeer,
+): Promise<MikroORMOptions['driver']> {
   try {
-    return await loadOptionalPeer(peer, load);
+    return await loadOptionalPeer(
+      {
+        packageName: peer.packageName,
+        feature: `DatabaseSessionService with a "${backend}" connection string`,
+      },
+      peer.load,
+    );
   } catch (error: unknown) {
-    if (
-      error instanceof Error &&
-      isMissingModule(error.cause, peer.packageName)
-    ) {
-      throw new Error(`${missingDriverMessage(uri)} ${error.message}`, {
-        cause: error,
-      });
+    // `loadOptionalPeer` raises this type only for a package that is not
+    // installed, and rethrows every other load failure unchanged.
+    if (error instanceof MissingOptionalPeerError) {
+      throw new Error(
+        `Database related module not found for URL ` +
+          `'${redactUriPassword(uri)}'. ${error.message}`,
+        {cause: error},
+      );
     }
     throw error;
   }
@@ -333,7 +343,10 @@ export async function openDatabaseOrm(
     if (uri === undefined) {
       throw error;
     }
-    throw new Error(engineCreationMessage(uri), {cause: error});
+    throw new Error(
+      `Failed to create database engine for URL '${redactUriPassword(uri)}'`,
+      {cause: error},
+    );
   }
 }
 
@@ -344,16 +357,11 @@ export async function openDatabaseOrm(
  * hands out connections onto separate empty databases. adk-python pins the
  * same case with SQLAlchemy's `StaticPool`.
  */
-function sqlitePoolOptions(uri: string): Partial<MikroORMOptions> {
+function sqlitePoolOptions(dbName: string): Partial<MikroORMOptions> {
   return {
-    ...(uri === SQLITE_MEMORY_URI ? {pool: {min: 1, max: 1}} : {}),
+    ...(dbName === SQLITE_MEMORY_DATABASE ? {pool: {min: 1, max: 1}} : {}),
     driverOptions: {pool: {afterCreate: enableSqliteForeignKeys}},
   };
-}
-
-/** Pool settings for every backend other than sqlite. */
-function prePingPoolOptions(): Partial<MikroORMOptions> {
-  return {driverOptions: {pool: {validate: connectionIsAlive}}};
 }
 
 /**
@@ -369,56 +377,23 @@ export async function getConnectionOptionsFromUri(
   uri: string,
   overrides?: Partial<MikroORMOptions>,
 ): Promise<MikroORMOptions> {
-  let driver: unknown;
-
-  if (uri.startsWith('postgres://') || uri.startsWith('postgresql://')) {
-    const {PostgreSqlDriver} = await loadDriver(
-      uri,
-      driverPeer('@mikro-orm/postgresql', 'postgres'),
-      () => import('@mikro-orm/postgresql'),
-    );
-    driver = PostgreSqlDriver;
-  } else if (uri.startsWith('mysql://')) {
-    const {MySqlDriver} = await loadDriver(
-      uri,
-      driverPeer('@mikro-orm/mysql', 'mysql'),
-      () => import('@mikro-orm/mysql'),
-    );
-    driver = MySqlDriver;
-  } else if (uri.startsWith('mariadb://')) {
-    const {MariaDbDriver} = await loadDriver(
-      uri,
-      driverPeer('@mikro-orm/mariadb', 'mariadb'),
-      () => import('@mikro-orm/mariadb'),
-    );
-    driver = MariaDbDriver;
-  } else if (uri.startsWith('sqlite://')) {
-    const {SqliteDriver} = await loadDriver(
-      uri,
-      driverPeer('@mikro-orm/sqlite', 'sqlite'),
-      () => import('@mikro-orm/sqlite'),
-    );
-    driver = SqliteDriver;
-  } else if (uri.startsWith('mssql://')) {
-    const {MsSqlDriver} = await loadDriver(
-      uri,
-      driverPeer('@mikro-orm/mssql', 'mssql'),
-      () => import('@mikro-orm/mssql'),
-    );
-    driver = MsSqlDriver;
-  } else {
-    throw new Error(unsupportedBackendMessage(uri));
+  const {backend} = schemeOf(uri);
+  const peer = DRIVER_PEERS[backend];
+  if (!peer) {
+    throw new Error(`Unsupported database URI: ${redactUriPassword(uri)}`);
   }
 
-  if (uri.startsWith('sqlite://')) {
+  const driver = await loadDriver(uri, backend, peer);
+
+  if (backend === SQLITE_BACKEND) {
+    const dbName = uri.slice(
+      uri.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length,
+    );
     return {
       entities: ENTITIES,
-      dbName:
-        uri === SQLITE_MEMORY_URI
-          ? ':memory:'
-          : uri.substring('sqlite://'.length),
+      dbName,
       driver,
-      ...sqlitePoolOptions(uri),
+      ...sqlitePoolOptions(dbName),
       ...overrides,
     } as MikroORMOptions;
   }
@@ -427,7 +402,7 @@ export async function getConnectionOptionsFromUri(
     entities: ENTITIES,
     clientUrl: uri,
     driver,
-    ...prePingPoolOptions(),
+    driverOptions: {pool: {validate: connectionIsAlive}},
     ...overrides,
   } as MikroORMOptions;
 }

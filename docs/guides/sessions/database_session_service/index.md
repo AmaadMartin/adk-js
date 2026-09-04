@@ -29,7 +29,7 @@ names: `@mikro-orm/sqlite`, `@mikro-orm/postgresql`, `@mikro-orm/mysql`,
 ```ts
 import {DatabaseSessionService} from '@google/adk';
 
-await using service = new DatabaseSessionService('sqlite:///./sessions.db');
+await using service = new DatabaseSessionService('sqlite://./sessions.db');
 
 const session = await service.createSession({
   appName: 'my-app',
@@ -47,7 +47,7 @@ const restored = await service.getSession({
 `close()` yourself:
 
 ```ts
-const service = new DatabaseSessionService('sqlite:///./sessions.db');
+const service = new DatabaseSessionService('sqlite://./sessions.db');
 try {
   await service.createSession({appName: 'my-app', userId: 'user-1'});
 } finally {

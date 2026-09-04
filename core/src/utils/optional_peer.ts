@@ -37,7 +37,7 @@ export interface OptionalPeer {
  * the module (a syntax error, a failing side effect, a missing transitive
  * dependency), which must be surfaced unchanged.
  */
-export function isMissingModule(err: unknown, packageName: string): boolean {
+function isMissingModule(err: unknown, packageName: string): boolean {
   if (!(err instanceof Error)) {
     return false;
   }
@@ -47,6 +47,27 @@ export function isMissingModule(err: unknown, packageName: string): boolean {
     MODULE_NOT_FOUND_CODES.has(code) &&
     err.message.includes(packageName)
   );
+}
+
+/**
+ * Raised when an optional peer dependency is not installed, so a caller can
+ * add its own context without re-classifying the failure.
+ */
+export class MissingOptionalPeerError extends Error {
+  constructor(
+    readonly peer: OptionalPeer,
+    options: {cause: unknown},
+  ) {
+    super(
+      `${peer.feature} requires the optional peer dependency ` +
+        `"${peer.packageName}", which is not installed. It is optional so ` +
+        `that applications that do not use ${peer.feature} are not made to ` +
+        `download it. Install it with:\n\n` +
+        `  npm install ${peer.packageName}\n`,
+      options,
+    );
+    this.name = 'MissingOptionalPeerError';
+  }
 }
 
 /**
@@ -82,13 +103,6 @@ export async function loadOptionalPeer<T>(
     if (!isMissingModule(err, peer.packageName)) {
       throw err;
     }
-    throw new Error(
-      `${peer.feature} requires the optional peer dependency ` +
-        `"${peer.packageName}", which is not installed. It is optional so ` +
-        `that applications that do not use ${peer.feature} are not made to ` +
-        `download it. Install it with:\n\n` +
-        `  npm install ${peer.packageName}\n`,
-      {cause: err},
-    );
+    throw new MissingOptionalPeerError(peer, {cause: err});
   }
 }

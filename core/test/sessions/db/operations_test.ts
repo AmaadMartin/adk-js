@@ -184,6 +184,21 @@ describe('operations', () => {
       });
     });
 
+    it('resolves a driver for an uppercase scheme, as the constructor accepts', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'POSTGRES://user:pass@localhost:5432/db',
+      );
+
+      expect(options.driver).toBeDefined();
+    });
+
+    it('pins the pool for an uppercase sqlite in-memory URI', async () => {
+      const options = await getConnectionOptionsFromUri('SQLITE://:memory:');
+
+      expect(options.dbName).toBe(':memory:');
+      expect(options.pool).toEqual({min: 1, max: 1});
+    });
+
     it('lets an override replace the derived pool settings', async () => {
       const options = await getConnectionOptionsFromUri(
         'postgres://user:pass@localhost:5432/db',
