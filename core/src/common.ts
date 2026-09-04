@@ -622,6 +622,11 @@ export type {
   FingerprintCacheMetadata,
 } from './models/cache_metadata.js';
 export type {LlmCapabilities} from './models/capabilities.js';
+export {GeminiContextCacheManager} from './models/gemini_context_cache_manager.js';
+export type {
+  CacheClient,
+  CacheScope,
+} from './models/gemini_context_cache_manager.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export {LiteLlm} from './models/lite_llm.js';
@@ -671,6 +676,19 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export {
+  AgentOptimizer,
+  isAgentOptimizer,
+} from './optimization/agent_optimizer.js';
+export type {OptimizeParams} from './optimization/agent_optimizer.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export {Sampler, isSampler} from './optimization/sampler.js';
+export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
 export type {
   BuildPlanningInstructionParams,
@@ -688,19 +706,6 @@ export {
 } from './planners/plan_re_act_planner.js';
 export {createThread, setThreadFactory} from './platform/thread.js';
 export type {Thread, ThreadFactory, ThreadTarget} from './platform/thread.js';
-export {
-  AgentOptimizer,
-  isAgentOptimizer,
-} from './optimization/agent_optimizer.js';
-export type {OptimizeParams} from './optimization/agent_optimizer.js';
-export type {
-  AgentWithScores,
-  OptimizerResult,
-  SamplingResult,
-  UnstructuredSamplingResult,
-} from './optimization/data_types.js';
-export {Sampler, isSampler} from './optimization/sampler.js';
-export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
