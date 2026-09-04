@@ -68,6 +68,9 @@ class QuietPlugin extends BasePlugin {
   }
 }
 
+/** Leaves `onRunErrorCallback` at its default, so the base body runs. */
+class IndifferentPlugin extends BasePlugin {}
+
 /** Fails while being told about the run error. */
 class FailingPlugin extends BasePlugin {
   notified = false;
@@ -157,7 +160,7 @@ describe('PluginManager.runOnRunErrorCallback', () => {
   });
 
   it('resolves for a plugin that does not override the hook', async () => {
-    const manager = new PluginManager([new ErrorTrackingPlugin('p1')]);
+    const manager = new PluginManager([new IndifferentPlugin('p1')]);
 
     await expect(
       manager.runOnRunErrorCallback({
