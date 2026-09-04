@@ -8,7 +8,28 @@ import {AgentCard, TransportProtocol} from '@a2a-js/sdk';
 
 export const AGENT_REGISTRY_BASE_URL =
   'https://agentregistry.googleapis.com/v1alpha';
+
 export const GCP_MCP_SERVER_DESTINATION_ID = 'gcp.mcp.server.destination.id';
+
+/** Search mode accepted by the registry `:search` verbs. */
+export type SearchType = 'KEYWORD' | 'SEMANTIC';
+
+/** Options common to `searchAgents` and `searchMcpServers`. */
+export interface SearchOptions {
+  searchString?: string;
+  searchType?: SearchType;
+  filterStr?: string;
+  orderBy?: string;
+  pageSize?: number;
+  pageToken?: string;
+}
+
+/** Per-request overrides for `AgentRegistry.makeRequest`. */
+export interface MakeRequestOptions {
+  method?: 'GET' | 'POST';
+  /** JSON request body. Sent only for POST. */
+  body?: unknown;
+}
 
 export enum ProtocolType {
   TYPE_UNSPECIFIED = 'TYPE_UNSPECIFIED',
@@ -30,13 +51,6 @@ export interface Endpoint {
   createTime?: string;
   updateTime?: string;
   attributes?: Record<string, unknown>;
-}
-
-export interface GcpAuthProviderScheme {
-  type: 'gcpAuthProviderScheme';
-  name: string;
-  scopes?: string[];
-  continueUri?: string;
 }
 
 export interface McpServer {
