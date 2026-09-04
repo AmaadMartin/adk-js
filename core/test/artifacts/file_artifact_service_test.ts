@@ -15,6 +15,7 @@ import {
   getAppRoot,
   getSessionArtifactsDir,
   getUserRoot,
+  iterateArtifactDirs,
   reserveVersionDir,
 } from '../../src/artifacts/file_artifact_service.js';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
@@ -322,6 +323,31 @@ describe('FileArtifactService', () => {
       await expect(
         service.listArtifactKeys({appName, userId, sessionId}),
       ).resolves.toEqual(['ghost']);
+    });
+
+    it('walks each artifact directory exactly once', async () => {
+      // 'doc' is an artifact and also the parent of 'doc/nested', so the walk
+      // both yields it and descends into it. listArtifactKeys dedupes through
+      // a Set, so only the walk itself shows a directory visited twice.
+      for (const filename of ['doc', 'doc/nested']) {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: filename},
+        });
+      }
+
+      const walked: string[] = [];
+      for await (const dir of iterateArtifactDirs(artifactDir())) {
+        walked.push(dir);
+      }
+
+      expect(walked).toEqual([
+        artifactDir('doc'),
+        artifactDir('doc', 'nested'),
+      ]);
     });
   });
 });

@@ -199,7 +199,9 @@ export class FileArtifactService implements BaseArtifactService {
       });
       await fs.rename(stagingDir, versionDir);
     } catch (e: unknown) {
-      await fs.rm(stagingDir, {recursive: true, force: true});
+      // Reported rather than raised, so a cleanup failure cannot replace the
+      // error that caused it.
+      await removeQuietly(stagingDir);
       throw e;
     }
 
@@ -567,6 +569,20 @@ function resolveScopedArtifactPath(
   return artifactDir;
 }
 
+/**
+ * Removes a file or directory tree on a failure path.
+ *
+ * A cleanup failure is logged rather than raised, so it cannot replace the
+ * error that led here.
+ */
+async function removeQuietly(target: string): Promise<void> {
+  try {
+    await fs.rm(target, {recursive: true, force: true});
+  } catch (e: unknown) {
+    logger.warn(`[FileArtifactService] Failed to remove ${target}`, e);
+  }
+}
+
 /** Reports whether a filesystem entry exists at `target`. */
 async function pathExists(target: string): Promise<boolean> {
   try {
@@ -681,12 +697,15 @@ async function writeMetadata(
   const serialized = JSON.stringify(metadata);
 
   // Write via a uniquely named temporary file in the same directory and rename
-  // it into place, so readers never observe a partial document. A temporary
-  // file left behind by a failed write goes with the staging directory that
-  // holds it, which the caller removes on any error.
+  // it into place, so readers never observe a partial document.
   const tmpPath = path.join(path.dirname(metadataPath), `.${randomUUID()}.tmp`);
-  await fs.writeFile(tmpPath, serialized, 'utf-8');
-  await fs.rename(tmpPath, metadataPath);
+  try {
+    await fs.writeFile(tmpPath, serialized, 'utf-8');
+    await fs.rename(tmpPath, metadataPath);
+  } catch (e: unknown) {
+    await removeQuietly(tmpPath);
+    throw e;
+  }
 }
 
 /**
@@ -835,16 +854,10 @@ async function readDirEntries(dir: string): Promise<Dirent[]> {
  *
  * @param dir The directory to walk.
  */
-async function* iterateArtifactDirs(dir: string): AsyncGenerator<string> {
+export async function* iterateArtifactDirs(
+  dir: string,
+): AsyncGenerator<string> {
   const entries = await readDirEntries(dir);
-  if (
-    entries.some(
-      (entry) => entry.isDirectory() && entry.name === VERSIONS_DIRNAME,
-    )
-  ) {
-    yield dir;
-  }
-
   if (
     entries.some(
       (entry) => entry.isDirectory() && entry.name === VERSIONS_DIRNAME,

@@ -93,8 +93,10 @@ These raise `InputValidationError` rather than being sanitized:
 - `metadata.json` in any casing, at any depth. The payload is stored under the
   artifact's own name, so that name would overwrite the metadata document.
 
-`appName`, `userId` and `sessionId` are validated as single path segments on
-every call, not only on save.
+`appName` and `userId` are validated as single path segments on every call, not
+only on save. `sessionId` is validated whenever it contributes one, which is
+every session-scoped call. A `user:` filename is stored outside the session, so
+`sessionId` forms no part of its path and is not checked.
 
 These checks operate on the supplied string. They stop a caller from naming a
 path outside the root, but they are not a sandbox: they do not survive symlinks,
