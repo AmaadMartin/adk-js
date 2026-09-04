@@ -18,14 +18,7 @@ import {
   EvalStatus,
   InputValidationError,
   LLMRegistry,
-  Label,
   PerTurnUserSimulatorQualityV1,
-  aggregateConversationResults,
-  aggregateSamples,
-  convertLlmResponseToScore,
-  evaluateFirstTurn,
-  formatConversationHistory,
-  parseIsValidLabel,
   type BaseLlmConnection,
   type ConversationScenario,
   type EvalMetric,
@@ -34,6 +27,15 @@ import {
   type UserPersona,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {Label} from '../../../src/evaluation/llm_as_judge_utils.js';
+import {
+  aggregateConversationResults,
+  aggregateSamples,
+  convertLlmResponseToScore,
+  evaluateFirstTurn,
+  formatConversationHistory,
+  parseIsValidLabel,
+} from '../../../src/evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 
 import {
   FAKE_JUDGE_MODEL,
@@ -171,6 +173,16 @@ describe('convertLlmResponseToScore', () => {
 });
 
 describe('formatConversationHistory', () => {
+  it('reads no text out of a part that carries none', () => {
+    const history = formatConversationHistory([
+      {
+        userContent: {parts: [{functionCall: {name: 'lookup'}}, {text: 'hi'}]},
+      },
+    ]);
+
+    expect(history).toBe('user: hi');
+  });
+
   it('names an agent reply that carries no role `model`', () => {
     const history = formatConversationHistory([
       {
@@ -262,6 +274,51 @@ describe('PerTurnUserSimulatorQualityV1', () => {
     expect(() => new PerTurnUserSimulatorQualityV1({evalMetric})).toThrow(
       InputValidationError,
     );
+  });
+
+  it('rejects a criterion that is not an object', () => {
+    const evalMetric: EvalMetric = JSON.parse(
+      '{"metricName": "per_turn_user_simulator_quality_v1",' +
+        ' "criterion": "high"}',
+    );
+
+    expect(() => new PerTurnUserSimulatorQualityV1({evalMetric})).toThrow(
+      InputValidationError,
+    );
+  });
+
+  it('reads a criterion adk-python wrote, in snake_case', async () => {
+    const evalMetric: EvalMetric = JSON.parse(
+      '{"metric_name": "per_turn_user_simulator_quality_v1",' +
+        ' "criterion": {"threshold": 1.0, "stop_signal": "STOP",' +
+        ' "judge_model_options": {"num_samples": 1}}}',
+    );
+    const judge = new FakeJudgeLlm([VALID_REPLY]);
+
+    await new PerTurnUserSimulatorQualityV1({
+      evalMetric,
+      judgeModel: judge,
+    }).evaluateInvocations([TWO_TURNS[0]], undefined, scenario());
+
+    const prompt = judge.requests[0].contents[0].parts?.[0].text ?? '';
+    expect(prompt).toContain('# Generated User Response\nSTOP');
+  });
+
+  it('prefers the camelCase spelling when a criterion carries both', async () => {
+    const evalMetric: EvalMetric = JSON.parse(
+      '{"metricName": "per_turn_user_simulator_quality_v1",' +
+        ' "criterion": {"threshold": 1.0, "stopSignal": "CAMEL",' +
+        ' "stop_signal": "SNAKE", "judgeModelOptions": {"numSamples": 1}}}',
+    );
+    const judge = new FakeJudgeLlm([VALID_REPLY]);
+
+    await new PerTurnUserSimulatorQualityV1({
+      evalMetric,
+      judgeModel: judge,
+    }).evaluateInvocations([TWO_TURNS[0]], undefined, scenario());
+
+    const prompt = judge.requests[0].contents[0].parts?.[0].text ?? '';
+    expect(prompt).toContain('# Generated User Response\nCAMEL');
   });
 
   it('resolves the judge model through the registry when none is supplied', async () => {

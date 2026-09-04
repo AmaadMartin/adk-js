@@ -9,23 +9,12 @@ import {InputValidationError} from '../errors/input_validation_error.js';
 import {toSnakeCaseKey} from '../utils/object_notation_utils.js';
 
 /** How an eval model treats a key its shape does not name. */
-export type ExtraKeysPolicy = 'forbid' | 'allow';
+type ExtraKeysPolicy = 'forbid' | 'allow';
 
 /** Options for {@link evalModel}. */
-export interface EvalModelOptions {
+interface EvalModelOptions {
   /** The model name, used in validation error messages. */
   readonly name: string;
-
-  /**
-   * Wire aliases for fields whose alias is not the snake_case form of the
-   * property name.
-   *
-   * A digit segment needs one: adk-python aliases the field `metric_name_1`
-   * to `metricName1`, whose snake_case form is `metric_name1`. Map
-   * `metricName1` back to `metric_name_1` to accept and emit what adk-python
-   * writes.
-   */
-  readonly aliases?: Readonly<Record<string, string>>;
 
   /**
    * Whether an unrecognized key is an error. Defaults to `'forbid'`, matching
@@ -33,12 +22,6 @@ export interface EvalModelOptions {
    * `BaseCriterion`.
    */
   readonly extraKeys?: ExtraKeysPolicy;
-}
-
-/** Options for {@link EvalModel.dump}. */
-export interface EvalDumpOptions {
-  /** Emits snake_case alias keys instead of the canonical camelCase ones. */
-  readonly byAlias?: boolean;
 }
 
 /** An evaluation model: the shared validation configuration, applied. */
@@ -55,21 +38,6 @@ export interface EvalModel<T extends object> {
    * @throws {InputValidationError} If the value is not a valid `T`.
    */
   parse(raw: unknown): T;
-
-  /** Renders a validated value as JSON. */
-  dump(value: T, options?: EvalDumpOptions): Record<string, unknown>;
-}
-
-/**
- * Wraps a schema as an optional field that also accepts an explicit `null`.
- *
- * adk-python declares these fields `Optional[...]`, so it writes `null` where
- * the value is absent. Both spellings read back as `undefined`.
- */
-export function optionalField<T extends NonNullable<unknown>>(
-  schema: z.ZodType<T>,
-): z.ZodType<T | undefined> {
-  return schema.nullish().transform((value) => value ?? undefined);
 }
 
 /**
@@ -87,16 +55,9 @@ export function evalModel<Shape extends z.ZodRawShape>(
   shape: Shape,
   options: EvalModelOptions,
 ): EvalModel<z.infer<z.ZodObject<Shape>>> {
-  const aliases = new Map<string, string>();
-  for (const property of Object.keys(shape)) {
-    aliases.set(
-      property,
-      options.aliases?.[property] ?? toSnakeCaseKey(property),
-    );
-  }
   const properties = new Map<string, string>();
-  for (const [property, alias] of aliases) {
-    properties.set(alias, property);
+  for (const property of Object.keys(shape)) {
+    properties.set(toSnakeCaseKey(property), property);
   }
 
   const object =
@@ -104,10 +65,8 @@ export function evalModel<Shape extends z.ZodRawShape>(
       ? z.looseObject(shape)
       : z.strictObject(shape);
   const schema = z
-    .codec(z.looseObject({}), z.looseObject({}), {
-      decode: (raw) => renameKeys(raw, properties),
-      encode: (value) => renameKeys(value, aliases),
-    })
+    .looseObject({})
+    .transform((raw) => renameKeys(raw, properties))
     .pipe(object);
 
   return {
@@ -122,18 +81,15 @@ export function evalModel<Shape extends z.ZodRawShape>(
       }
       return result.data;
     },
-    dump(value, dumpOptions) {
-      return dumpOptions?.byAlias ? schema.encode(value) : {...value};
-    },
   };
 }
 
 /**
- * Renames the keys of `source` through `replacements`.
+ * Renames the wire keys of `source` to their canonical property names.
  *
- * A key keeps its spelling when the replacement is already present, so an
+ * A key keeps its spelling when the canonical name is already present, so an
  * alias populates a field only if the canonical spelling is absent. Supplying
- * both spellings therefore leaves the alias in place, and the strict object
+ * both spellings therefore leaves the alias in place, and a strict object
  * reports it as an unrecognized key.
  */
 function renameKeys(

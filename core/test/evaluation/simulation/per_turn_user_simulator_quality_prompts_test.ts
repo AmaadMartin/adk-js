@@ -122,9 +122,9 @@ describe('GetPerTurnUserSimulatorQualityPrompt', () => {
   });
 
   it('test_get_per_turn_user_simulator_quality_prompt_blocks_unsafe_persona_templates', () => {
-    // adk-python raises a Jinja `SecurityError` here. nunjucks has no sandbox,
-    // so a persona field is substituted rather than compiled, and an
-    // expression that is not a plain dotted path renders empty.
+    // adk-python raises a Jinja `SecurityError` here. This port substitutes a
+    // persona field rather than compiling it, so an expression that is not a
+    // plain dotted path renders empty.
     const prompt = renderPrompt({
       id: 'test_persona',
       description: 'Test persona description.',

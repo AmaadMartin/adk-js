@@ -18,15 +18,7 @@
 
 import {
   EvalStatus,
-  Label,
   PerTurnUserSimulatorQualityV1,
-  aggregateConversationResults,
-  aggregateSamples,
-  convertLlmResponseToScore,
-  evaluateFirstTurn,
-  formatConversationHistory,
-  formatPerTurnUserSimulatorPrompt,
-  parseIsValidLabel,
   type ConversationScenario,
   type EvalMetric,
   type Invocation,
@@ -34,6 +26,16 @@ import {
   type UserPersona,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {Label} from '../../../src/evaluation/llm_as_judge_utils.js';
+import {
+  aggregateConversationResults,
+  aggregateSamples,
+  convertLlmResponseToScore,
+  evaluateFirstTurn,
+  formatConversationHistory,
+  formatPerTurnUserSimulatorPrompt,
+  parseIsValidLabel,
+} from '../../../src/evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 
 import {FakeJudgeLlm} from '../fake_judge_llm.js';
 

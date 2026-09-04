@@ -107,9 +107,6 @@ shape, or none at all, is rejected by the constructor with an
 | `judgeModelOptions.judgeModel` | The judge. Defaults to `gemini-2.5-flash`.                                                                                    |
 | `judgeModelOptions.numSamples` | How many times each turn is judged. Defaults to 5. Zero leaves every later turn `NOT_EVALUATED`.                              |
 
-`judgeModelOptions.parallelismLimit` is read but not honoured here: the samples
-are taken one after another, matching adk-python. `LlmAsJudge` does honour it.
-
 ## Reading the result
 
 `perInvocationResults` carries exactly one entry per turn in
@@ -127,7 +124,8 @@ you tell a stop-signal failure from an ordinary one.
 
 ## Cost
 
-One judge call per sample per turn, taken sequentially. A conversation of
+One judge call per sample per turn, taken one after another, matching
+adk-python. A conversation of
 `n` turns at `numSamples` samples costs `n * numSamples` serial calls: the
 `n - 1` later turns plus the stop-signal turn. Lower `numSamples` for a long
 conversation.

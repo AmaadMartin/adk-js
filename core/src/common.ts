@@ -166,59 +166,33 @@ export type {
 } from './evaluation/eval_case.js';
 export {
   DEFAULT_JUDGE_NUM_SAMPLES,
-  DEFAULT_JUDGE_PARALLELISM_LIMIT,
   DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
-  PrebuiltMetrics,
-  ToolTrajectoryMatchType,
-  getMetricThreshold,
-  normalizeToolTrajectoryMatchType,
-  parseLlmBackedUserSimulatorCriterion,
-  resolveJudgeModelOptions,
 } from './evaluation/eval_metrics.js';
 export type {
   BaseCriterion,
   EvalMetric,
   EvalMetricCriterion,
-  HallucinationsCriterion,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
   LlmBackedUserSimulatorCriterion,
+  ParsedLlmBackedUserSimulatorCriterion,
   ResolvedJudgeModelOptions,
-  RubricsBasedCriterion,
-  ToolTrajectoryCriterion,
+  Threshold,
 } from './evaluation/eval_metrics.js';
 export type {
   Rubric,
   RubricContent,
   RubricScore,
 } from './evaluation/eval_rubrics.js';
-export {
-  emptyEvaluationResult,
-  getEvalStatus,
-  getTextFromContent,
-} from './evaluation/evaluator.js';
 export type {
+  AutoRaterScore,
   EvaluationResult,
   Evaluator,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
-export type {AutoRaterScore} from './evaluation/llm_as_judge.js';
-export {
-  Label,
-  PARTIALLY_VALID_LABELS,
-} from './evaluation/llm_as_judge_utils.js';
 export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
-export {
-  PerTurnUserSimulatorQualityV1,
-  aggregateConversationResults,
-  aggregateSamples,
-  convertLlmResponseToScore,
-  evaluateFirstTurn,
-  formatConversationHistory,
-  formatPerTurnUserSimulatorPrompt,
-  parseIsValidLabel,
-} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
+export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export type {
   UserBehavior,

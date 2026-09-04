@@ -12,15 +12,14 @@ import {LLMRegistry} from '../../models/registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {ConversationScenario, Invocation} from '../eval_case.js';
 import {
-  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalMetric,
   EvalStatus,
-  LlmBackedUserSimulatorCriterion,
+  ParsedLlmBackedUserSimulatorCriterion,
   ResolvedJudgeModelOptions,
   parseLlmBackedUserSimulatorCriterion,
-  resolveJudgeModelOptions,
 } from '../eval_metrics.js';
 import {
+  AutoRaterScore,
   EvaluationResult,
   Evaluator,
   PerInvocationResult,
@@ -28,7 +27,6 @@ import {
   getEvalStatus,
   getTextFromContent,
 } from '../evaluator.js';
-import {AutoRaterScore, parseMetricCriterion} from '../llm_as_judge.js';
 import {Label, PARTIALLY_VALID_LABELS} from '../llm_as_judge_utils.js';
 import {addDefaultRetryOptionsIfNotPresent} from '../retry_options_utils.js';
 import {getPerTurnUserSimulatorQualityPrompt} from './per_turn_user_simulator_quality_prompts.js';
@@ -50,6 +48,9 @@ const VALID_LABELS: ReadonlySet<string> = new Set<string>([
   Label.VALID,
   Label.TRUE,
 ]);
+
+/** The criterion type this metric accepts, named in the error that rejects one. */
+const CRITERION_TYPE_NAME = 'LlmBackedUserSimulatorCriterion';
 
 /** The invocation id of the turn that asks whether the conversation ended. */
 const STOP_SIGNAL_INVOCATION_ID = 'stop_signal_proxy_invocation';
@@ -265,6 +266,29 @@ export function aggregateConversationResults(
   };
 }
 
+/**
+ * Validates the criterion of a metric, reporting the type it expects.
+ *
+ * @throws {InputValidationError} When the metric carries no criterion, or one
+ *   this metric does not accept.
+ */
+function parseCriterion(
+  evalMetric: EvalMetric,
+): ParsedLlmBackedUserSimulatorCriterion {
+  const message =
+    `\`${evalMetric.metricName}\` metric expects a criterion of type ` +
+    `\`${CRITERION_TYPE_NAME}\`.`;
+
+  if (evalMetric.criterion === undefined) {
+    throw new InputValidationError(message);
+  }
+  try {
+    return parseLlmBackedUserSimulatorCriterion(evalMetric.criterion);
+  } catch (error) {
+    throw new InputValidationError(message, {cause: error});
+  }
+}
+
 /** The proxy turn that asks whether the conversation should have ended. */
 function stopSignalInvocation(stopSignal: string): Invocation {
   return {
@@ -306,16 +330,10 @@ export class PerTurnUserSimulatorQualityV1 implements Evaluator {
    *   one that is not an `LlmBackedUserSimulatorCriterion`.
    */
   constructor(options: PerTurnUserSimulatorQualityV1Options) {
-    const criterion: LlmBackedUserSimulatorCriterion = parseMetricCriterion(
-      options.evalMetric,
-      parseLlmBackedUserSimulatorCriterion,
-    );
+    const criterion = parseCriterion(options.evalMetric);
     this.threshold = criterion.threshold;
-    this.judgeModelOptions = resolveJudgeModelOptions(
-      criterion.judgeModelOptions,
-    );
-    this.stopSignal =
-      criterion.stopSignal ?? DEFAULT_USER_SIMULATOR_STOP_SIGNAL;
+    this.judgeModelOptions = criterion.judgeModelOptions;
+    this.stopSignal = criterion.stopSignal;
     this.judgeModel =
       options.judgeModel ??
       LLMRegistry.newLlm(this.judgeModelOptions.judgeModel);
@@ -380,8 +398,6 @@ export class PerTurnUserSimulatorQualityV1 implements Evaluator {
    * Grades one turn against the turns that came before it.
    *
    * The samples are taken one after another, matching adk-python.
-   * `judgeModelOptions.parallelismLimit` is therefore not honoured here, where
-   * `LlmAsJudge` does honour it.
    */
   private async evaluateIntermediateTurn(
     invocationAtStep: Invocation,
