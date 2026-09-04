@@ -48,9 +48,9 @@ export interface InjectedError {
  */
 export interface InjectionConfig {
   /**
-   * How often the rule fires. Defaults to
-   * {@link DEFAULT_INJECTION_PROBABILITY}. adk-python declares no bounds on
-   * this field, so neither does adk-js.
+   * How often the rule fires. Defaults to 1, so the rule fires on every
+   * call. adk-python declares no bounds on this field, so neither does
+   * adk-js.
    */
   injectionProbability: number;
 
@@ -62,8 +62,8 @@ export interface InjectionConfig {
 
   /**
    * Latency added before the injected value is returned, in seconds. Defaults
-   * to 0 and may not exceed {@link MAX_INJECTED_LATENCY_SECONDS}. It may be
-   * inexact when the interceptor runs as an after-tool callback.
+   * to 0 and may not exceed 120. It may be inexact when the interceptor runs
+   * as an after-tool callback.
    */
   injectedLatencySeconds: number;
 
@@ -149,7 +149,7 @@ export interface EnvironmentSimulationConfig {
 
   /**
    * The model the simulator calls to analyze tools and mock responses.
-   * Defaults to {@link DEFAULT_SIMULATION_MODEL}.
+   * Defaults to `gemini-2.5-flash`.
    */
   simulationModel: string;
 
@@ -355,9 +355,8 @@ export function createInjectedError(params: InjectedError): InjectedError {
  * @returns A validated, freshly built {@link InjectionConfig}.
  * @throws {Error} When the `ENVIRONMENT_SIMULATION` feature is disabled.
  * @throws {InputValidationError} When neither or both of `injectedError` and
- *     `injectedResponse` are set, when `injectedLatencySeconds` exceeds
- *     {@link MAX_INJECTED_LATENCY_SECONDS}, or when `params` carries an
- *     unknown key.
+ *     `injectedResponse` are set, when `injectedLatencySeconds` exceeds 120,
+ *     or when `params` carries an unknown key.
  */
 export function createInjectionConfig(
   params: Partial<InjectionConfig> = {},
