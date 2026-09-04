@@ -16,18 +16,6 @@
  */
 
 import {
-  ActiveCacheMetadata,
-  CacheMetadata,
-  ContextCacheConfig,
-  GeminiContextCacheManager,
-  LlmRequest,
-  LlmResponse,
-  QualifiedCacheScope,
-  findCountOfContentsToCache,
-  generateCacheFingerprint,
-  validActiveCache,
-} from '@google/adk';
-import {
   CachedContent,
   Content,
   CreateCachedContentParameters,
@@ -40,6 +28,20 @@ import {
   Type,
 } from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {ContextCacheConfig} from '../../src/agents/context_cache_config.js';
+import {
+  ActiveCacheMetadata,
+  CacheMetadata,
+} from '../../src/models/cache_metadata.js';
+import {
+  GeminiContextCacheManager,
+  QualifiedCacheScope,
+  findCountOfContentsToCache,
+  generateCacheFingerprint,
+  validActiveCache,
+} from '../../src/models/gemini_context_cache_manager.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
 
 const CACHE_CONFIG: ContextCacheConfig = {
   cacheIntervals: 10,

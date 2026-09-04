@@ -216,21 +216,10 @@ export type {
   CacheMetadata,
   FingerprintCacheMetadata,
 } from './models/cache_metadata.js';
-export {
-  GeminiContextCacheManager,
-  applyCacheToRequest,
-  estimateCacheablePrefixTokens,
-  estimateRequestTokens,
-  findCountOfContentsToCache,
-  generateCacheFingerprint,
-  minimumCacheTokens,
-  populateCacheMetadataInResponse,
-  validActiveCache,
-} from './models/gemini_context_cache_manager.js';
+export {GeminiContextCacheManager} from './models/gemini_context_cache_manager.js';
 export type {
   CacheClient,
   CacheScope,
-  QualifiedCacheScope,
 } from './models/gemini_context_cache_manager.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';

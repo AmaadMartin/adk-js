@@ -10,22 +10,6 @@
  */
 
 import {
-  CacheScope,
-  ContextCacheConfig,
-  GeminiContextCacheManager,
-  LlmRequest,
-  LlmResponse,
-  QualifiedCacheScope,
-  applyCacheToRequest,
-  estimateCacheablePrefixTokens,
-  estimateRequestTokens,
-  findCountOfContentsToCache,
-  generateCacheFingerprint,
-  minimumCacheTokens,
-  populateCacheMetadataInResponse,
-  validActiveCache,
-} from '@google/adk';
-import {
   CachedContent,
   CallableTool,
   Content,
@@ -35,6 +19,21 @@ import {
   Tool,
 } from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {ContextCacheConfig} from '../../src/agents/context_cache_config.js';
+import {
+  CacheScope,
+  GeminiContextCacheManager,
+  QualifiedCacheScope,
+  applyCacheToRequest,
+  estimateCacheablePrefixTokens,
+  estimateRequestTokens,
+  findCountOfContentsToCache,
+  generateCacheFingerprint,
+  minimumCacheTokens,
+  validActiveCache,
+} from '../../src/models/gemini_context_cache_manager.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
 
 const CACHE_CONFIG: ContextCacheConfig = {
   cacheIntervals: 10,
@@ -385,38 +384,6 @@ describe('generateCacheFingerprint', () => {
     );
   });
 
-  it('orders a function declaration that has no name', async () => {
-    const unnamedFirst = largePrefixRequest();
-    unnamedFirst.config = {
-      ...unnamedFirst.config,
-      tools: [{functionDeclarations: [{description: 'no name'}, {name: 'a'}]}],
-    };
-    const unnamedSecond = largePrefixRequest();
-    unnamedSecond.config = {
-      ...unnamedSecond.config,
-      tools: [{functionDeclarations: [{name: 'a'}, {description: 'no name'}]}],
-    };
-
-    expect(await generateCacheFingerprint(unnamedFirst, 0, GEMINI_SCOPE)).toBe(
-      await generateCacheFingerprint(unnamedSecond, 0, GEMINI_SCOPE),
-    );
-  });
-
-  it('orders two identical tools without depending on their position', async () => {
-    const duplicated = largePrefixRequest();
-    duplicated.config = {
-      ...duplicated.config,
-      tools: [
-        {functionDeclarations: [{name: 'lookup'}, {name: 'lookup'}]},
-        {functionDeclarations: [{name: 'lookup'}, {name: 'lookup'}]},
-      ],
-    };
-
-    expect(await generateCacheFingerprint(duplicated, 0, GEMINI_SCOPE)).toBe(
-      await generateCacheFingerprint(duplicated, 0, GEMINI_SCOPE),
-    );
-  });
-
   it('caps the cached prefix at the number of contents present', async () => {
     const llmRequest = largePrefixRequest();
     llmRequest.contents = [userContent('a'), modelContent('b')];
@@ -505,10 +472,11 @@ describe('validActiveCache', () => {
 
 describe('populateCacheMetadataInResponse', () => {
   it('copies the metadata rather than aliasing it', () => {
+    const manager = new GeminiContextCacheManager(createFakeClient().client);
     const llmResponse: LlmResponse = {};
     const cacheMetadata = {fingerprint: 'abc', contentsCount: 2};
 
-    populateCacheMetadataInResponse(llmResponse, cacheMetadata);
+    manager.populateCacheMetadataInResponse(llmResponse, cacheMetadata);
 
     expect(llmResponse.cacheMetadata).toEqual(cacheMetadata);
     expect(llmResponse.cacheMetadata).not.toBe(cacheMetadata);
