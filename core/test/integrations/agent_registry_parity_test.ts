@@ -46,6 +46,7 @@ vi.mock('../../src/a2a/a2a_remote_agent.js', async (importOriginal) => {
 
 let quotaProjectId: string | undefined;
 let getClientError: Error | undefined;
+let getRequestHeadersError: Error | undefined;
 
 vi.mock('google-auth-library', () => ({
   GoogleAuth: vi.fn().mockImplementation(() => ({
@@ -54,7 +55,12 @@ vi.mock('google-auth-library', () => ({
         throw getClientError;
       }
       return {
-        getRequestHeaders: async () => ({'Authorization': 'Bearer token'}),
+        getRequestHeaders: async () => {
+          if (getRequestHeadersError) {
+            throw getRequestHeadersError;
+          }
+          return {'Authorization': 'Bearer token'};
+        },
         quotaProjectId,
       };
     },
@@ -179,6 +185,7 @@ describe('TestAgentRegistry', () => {
   beforeEach(() => {
     quotaProjectId = undefined;
     getClientError = undefined;
+    getRequestHeadersError = undefined;
     remoteAgentConfigs.length = 0;
     fetchMock.mockReset();
     globalThis.fetch = fetchMock;
@@ -283,6 +290,13 @@ describe('TestAgentRegistry', () => {
     getClientError = new Error('Could not load the default credentials');
     await expect(registry.getAuthHeaders()).rejects.toThrow(
       'Failed to get default Google Cloud credentials: Could not load the default credentials',
+    );
+  });
+
+  it('getAuthHeaders names a token refresh failure separately', async () => {
+    getRequestHeadersError = new Error('invalid_grant');
+    await expect(registry.getAuthHeaders()).rejects.toThrow(
+      'Failed to refresh Google Cloud credentials: invalid_grant',
     );
   });
 
@@ -501,6 +515,7 @@ describe('TestAgentRegistryMtls', () => {
   beforeEach(() => {
     quotaProjectId = undefined;
     getClientError = undefined;
+    getRequestHeadersError = undefined;
     fetchMock.mockReset();
     globalThis.fetch = fetchMock;
   });
