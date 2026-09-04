@@ -14,7 +14,7 @@ of conversations, and it lets the same goal be replayed against an agent that
 answers differently each run.
 
 A scenario document is written by hand or by a generator, so it arrives as
-untrusted JSON. `parseConversationScenarios` validates it and returns a value
+untrusted JSON. `conversationScenariosModel.parse` validates it and returns a value
 you can read without further checks. It accepts both key spellings: the
 camelCase names adk-js uses, and the snake_case names adk-python writes, so a
 document crosses between the two SDKs unchanged.
@@ -28,7 +28,7 @@ always holds the persona itself. A name the registry does not know is a
 ## Get started
 
 ```typescript
-import {parseConversationScenarios} from '@google/adk';
+import {conversationScenariosModel} from '@google/adk';
 
 const document = {
   scenarios: [
@@ -42,15 +42,15 @@ const document = {
   ],
 };
 
-const scenarios = parseConversationScenarios(document);
+const scenarios = conversationScenariosModel.parse(document);
 const scenario = scenarios.scenarios[0];
 
 scenario.userPersona?.id; // 'EXPERT'
 scenario.userPersona?.behaviors.length; // 6
 ```
 
-`parseConversationScenarios({})` gives `{scenarios: []}`, so an empty document
-is valid.
+`conversationScenariosModel.parse({})` gives `{scenarios: []}`, so an empty
+document is valid.
 
 ## The default personas
 
@@ -94,9 +94,9 @@ Every parser throws rather than returning a partial value.
 | A persona id is not in the default registry | `NotFoundError` reading `<id> not found in registry.`                           |
 
 ```typescript
-import {parseConversationScenario} from '@google/adk';
+import {conversationScenarioModel} from '@google/adk';
 
-parseConversationScenario({
+conversationScenarioModel.parse({
   startingPrompt: 'hi',
   conversationPlan: 'chat',
   userPersona: 'NO_SUCH_PERSONA',
@@ -109,22 +109,20 @@ rather inspect a result than catch an error.
 
 ## Rendering a document
 
-`conversationScenariosModel.dump(value)` writes the camelCase names, and
-`dump(value, {byAlias: true})` writes the snake_case names adk-python reads.
-Both forms parse back to the same value, and a resolved persona is written out
-in full rather than collapsed back to its id.
+A parsed value already holds the camelCase names, so writing it needs nothing
+more than `JSON.stringify`. `conversationScenariosModel.dumpByAlias(value)`
+writes the snake_case names adk-python reads instead. Both spellings parse back
+to the same value, and a resolved persona is written out in full rather than
+collapsed back to its id.
 
 ```typescript
-import {
-  conversationScenariosModel,
-  parseConversationScenarios,
-} from '@google/adk';
+import {conversationScenariosModel} from '@google/adk';
 
-const scenarios = parseConversationScenarios({
+const scenarios = conversationScenariosModel.parse({
   scenarios: [{startingPrompt: 'hi', conversationPlan: 'chat'}],
 });
 
-conversationScenariosModel.dump(scenarios, {byAlias: true});
+conversationScenariosModel.dumpByAlias(scenarios);
 // {scenarios: [{starting_prompt: 'hi', conversation_plan: 'chat'}]}
 ```
 
@@ -139,9 +137,9 @@ carries the config so a document written for adk-python's generator parses
 here; it does not ship the generator itself.
 
 ```typescript
-import {parseConversationGenerationConfig} from '@google/adk';
+import {conversationGenerationConfigModel} from '@google/adk';
 
-parseConversationGenerationConfig({
+conversationGenerationConfigModel.parse({
   count: 5,
   model_name: 'gemini-2.5-flash',
   generation_instruction: 'Cover the refund flow.',

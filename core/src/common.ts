@@ -159,19 +159,11 @@ export {
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
 export {evalModel, optionalField} from './evaluation/common.js';
-export type {
-  EvalDumpOptions,
-  EvalModel,
-  EvalModelOptions,
-  ExtraKeysPolicy,
-} from './evaluation/common.js';
+export type {EvalModel, EvalModelOptions} from './evaluation/common.js';
 export {
   conversationGenerationConfigModel,
   conversationScenarioModel,
   conversationScenariosModel,
-  parseConversationGenerationConfig,
-  parseConversationScenario,
-  parseConversationScenarios,
 } from './evaluation/conversation_scenarios.js';
 export type {
   ConversationGenerationConfig,
@@ -185,6 +177,8 @@ export {
 export {
   UserPersonaRegistry,
   behaviorInstructionsToString,
+  userBehaviorModel,
+  userPersonaModel,
   violationRubricsToString,
 } from './evaluation/simulation/user_simulator_personas.js';
 export type {

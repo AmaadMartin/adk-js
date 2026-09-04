@@ -7,9 +7,9 @@
 import {z} from 'zod';
 import {evalModel, optionalField, type EvalModel} from './common.js';
 import {getDefaultPersonaRegistry} from './simulation/pre_built_personas.js';
-import type {
-  UserBehavior,
-  UserPersona,
+import {
+  userPersonaModel,
+  type UserPersona,
 } from './simulation/user_simulator_personas.js';
 
 /**
@@ -75,25 +75,6 @@ export interface ConversationGenerationConfig {
   modelName: string;
 }
 
-const userBehaviorModel: EvalModel<UserBehavior> = evalModel(
-  {
-    name: z.string(),
-    description: z.string(),
-    behaviorInstructions: z.array(z.string()),
-    violationRubrics: z.array(z.string()),
-  },
-  {name: 'UserBehavior'},
-);
-
-const userPersonaModel: EvalModel<UserPersona> = evalModel(
-  {
-    id: z.string(),
-    description: z.string(),
-    behaviors: z.array(userBehaviorModel.schema),
-  },
-  {name: 'UserPersona'},
-);
-
 /**
  * Accepts a persona or a persona id, and yields the persona.
  *
@@ -146,39 +127,3 @@ export const conversationGenerationConfigModel: EvalModel<ConversationGeneration
     },
     {name: 'ConversationGenerationConfig'},
   );
-
-/**
- * Validates a scenario payload written in either the adk-python spelling
- * (`starting_prompt`) or the adk-js one (`startingPrompt`).
- *
- * @throws {InputValidationError} When the payload is not a valid scenario.
- * @throws {NotFoundError} When `userPersona` names no default persona.
- */
-export function parseConversationScenario(raw: unknown): ConversationScenario {
-  return conversationScenarioModel.parse(raw);
-}
-
-/**
- * Validates a scenarios document.
- *
- * @throws {InputValidationError} When the document is not a valid scenario
- *   list.
- * @throws {NotFoundError} When a scenario's `userPersona` names no default
- *   persona.
- */
-export function parseConversationScenarios(
-  raw: unknown,
-): ConversationScenarios {
-  return conversationScenariosModel.parse(raw);
-}
-
-/**
- * Validates a scenario generation config.
- *
- * @throws {InputValidationError} When the payload is not a valid config.
- */
-export function parseConversationGenerationConfig(
-  raw: unknown,
-): ConversationGenerationConfig {
-  return conversationGenerationConfigModel.parse(raw);
-}

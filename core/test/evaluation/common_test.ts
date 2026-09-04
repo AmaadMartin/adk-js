@@ -36,18 +36,6 @@ const evalCase = evalModel(
   {name: 'EvalCase'},
 );
 
-// `metric_name_1` aliases to `metricName1` in adk-python, whose snake_case
-// form is `metric_name1`. The override restores the adk-python spelling.
-const metricResult = evalModel(
-  {metricName1: z.string()},
-  {name: 'MetricResult', aliases: {metricName1: 'metric_name_1'}},
-);
-
-const derivedAliasMetricResult = evalModel(
-  {metricName1: z.string()},
-  {name: 'DerivedMetricResult'},
-);
-
 function evalCaseFixture(finalResponse: Content) {
   return {
     caseId: 'case-1',
@@ -232,22 +220,19 @@ describe('evalModel nesting', () => {
 describe('evalModel dumping', () => {
   const finalResponse: Content = {role: 'model', parts: [{text: 'Booked.'}]};
 
-  it('emits canonical camelCase keys by default', () => {
+  it('leaves the canonical camelCase keys on the parsed value', () => {
     const parsed = conversationScenario.parse({
       starting_prompt: 'hi',
       conversation_plan: 'chat',
     });
 
-    expect(conversationScenario.dump(parsed)).toEqual({
-      startingPrompt: 'hi',
-      conversationPlan: 'chat',
-    });
+    expect(parsed).toEqual({startingPrompt: 'hi', conversationPlan: 'chat'});
   });
 
-  it('emits snake_case alias keys with byAlias, at every level', () => {
+  it('emits snake_case alias keys at every level', () => {
     const parsed = evalCase.parse(evalCaseFixture(finalResponse));
 
-    expect(evalCase.dump(parsed, {byAlias: true})).toEqual({
+    expect(evalCase.dumpByAlias(parsed)).toEqual({
       case_id: 'case-1',
       root_scenario: {
         starting_prompt: 'I need to book a flight.',
@@ -271,7 +256,7 @@ describe('evalModel dumping', () => {
     };
     const parsed = evalCase.parse(evalCaseFixture(opaque));
 
-    const dumped = evalCase.dump(parsed, {byAlias: true});
+    const dumped = evalCase.dumpByAlias(parsed);
 
     expect(dumped['final_response']).toEqual({
       role: 'user',
@@ -279,43 +264,11 @@ describe('evalModel dumping', () => {
     });
   });
 
-  it('round trips through both dump forms', () => {
+  it('round trips through both spellings', () => {
     const parsed = evalCase.parse(evalCaseFixture(finalResponse));
 
-    expect(evalCase.parse(evalCase.dump(parsed))).toEqual(parsed);
-    expect(evalCase.parse(evalCase.dump(parsed, {byAlias: true}))).toEqual(
-      parsed,
-    );
-  });
-});
-
-describe('evalModel aliases', () => {
-  it('derives an alias that does not split a digit segment', () => {
-    expect(derivedAliasMetricResult.parse({metric_name1: 'safety'})).toEqual({
-      metricName1: 'safety',
-    });
-
-    const error = expectInputValidationError(() =>
-      derivedAliasMetricResult.parse({metric_name_1: 'safety'}),
-    );
-    expect(error.message).toContain('metric_name_1');
-  });
-
-  it('lets an explicit alias override the derived one', () => {
-    expect(metricResult.parse({metric_name_1: 'safety'})).toEqual({
-      metricName1: 'safety',
-    });
-    expect(metricResult.dump({metricName1: 'safety'}, {byAlias: true})).toEqual(
-      {metric_name_1: 'safety'},
-    );
-  });
-
-  it('no longer accepts the derived alias once overridden', () => {
-    const error = expectInputValidationError(() =>
-      metricResult.parse({metric_name1: 'safety'}),
-    );
-
-    expect(error.message).toContain('metric_name1');
+    expect(evalCase.parse({...parsed})).toEqual(parsed);
+    expect(evalCase.parse(evalCase.dumpByAlias(parsed))).toEqual(parsed);
   });
 });
 
@@ -433,18 +386,6 @@ describe('evalModel', () => {
     );
 
     expect(error.message).toBe('Invalid Sample: Unrecognized key: "surprise"');
-  });
-
-  it('keeps an unrecognized key when extraKeys allows it', () => {
-    const loose = evalModel(
-      {textProperty: z.string()},
-      {name: 'Loose', extraKeys: 'allow'},
-    );
-
-    expect(loose.parse({textProperty: 'a', surprise: 1})).toEqual({
-      textProperty: 'a',
-      surprise: 1,
-    });
   });
 
   it('passes a custom field through by reference', () => {

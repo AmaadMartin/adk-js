@@ -12,12 +12,11 @@
  */
 
 import {
+  conversationScenarioModel,
   conversationScenariosModel,
   getDefaultPersonaRegistry,
   InputValidationError,
   NotFoundError,
-  parseConversationScenario,
-  parseConversationScenarios,
   type ConversationScenarios,
   type UserPersona,
 } from '@google/adk';
@@ -40,7 +39,7 @@ function customPersona(): UserPersona {
 
 describe('ConversationScenario', () => {
   it('test_user_persona_given_as_id_resolves_to_default_persona', () => {
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       startingPrompt: 'I need to book a flight.',
       conversationPlan: 'Book SFO to LAX.',
       userPersona: 'EXPERT',
@@ -54,7 +53,7 @@ describe('ConversationScenario', () => {
 
   it('test_user_persona_given_as_unknown_id_raises_not_found', () => {
     const parse = () =>
-      parseConversationScenario({
+      conversationScenarioModel.parse({
         startingPrompt: 'hi',
         conversationPlan: 'chat',
         userPersona: 'NO_SUCH_PERSONA',
@@ -67,7 +66,7 @@ describe('ConversationScenario', () => {
   it('test_user_persona_given_as_object_is_kept_verbatim', () => {
     const persona = customPersona();
 
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       startingPrompt: 'hi',
       conversationPlan: 'chat',
       userPersona: persona,
@@ -77,7 +76,7 @@ describe('ConversationScenario', () => {
   });
 
   it('test_user_persona_defaults_to_none', () => {
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       startingPrompt: 'hi',
       conversationPlan: 'chat',
     });
@@ -88,7 +87,7 @@ describe('ConversationScenario', () => {
 
   it('test_conversation_scenario_rejects_unknown_field', () => {
     const parse = () =>
-      parseConversationScenario({
+      conversationScenarioModel.parse({
         startingPrompt: 'I need to book a flight.',
         conversationPlan: 'Book SFO to LAX.',
         userPersonaa: 'EXPERT',
@@ -101,11 +100,11 @@ describe('ConversationScenario', () => {
 
 describe('ConversationScenarios', () => {
   it('test_conversation_scenarios_defaults_to_empty_list', () => {
-    expect(parseConversationScenarios({})).toEqual({scenarios: []});
+    expect(conversationScenariosModel.parse({})).toEqual({scenarios: []});
   });
 
   it('test_conversation_scenarios_round_trips_through_json', () => {
-    const scenarios: ConversationScenarios = parseConversationScenarios({
+    const scenarios: ConversationScenarios = conversationScenariosModel.parse({
       scenarios: [
         {
           startingPrompt: 'I need to book a flight.',
@@ -120,10 +119,10 @@ describe('ConversationScenarios', () => {
     });
 
     for (const dumped of [
-      conversationScenariosModel.dump(scenarios),
-      conversationScenariosModel.dump(scenarios, {byAlias: true}),
+      {...scenarios},
+      conversationScenariosModel.dumpByAlias(scenarios),
     ]) {
-      const restored = parseConversationScenarios(
+      const restored = conversationScenariosModel.parse(
         JSON.parse(JSON.stringify(dumped)),
       );
 
@@ -134,7 +133,7 @@ describe('ConversationScenarios', () => {
   });
 
   it('test_conversation_scenarios_parses_camel_case_json', () => {
-    const camelCase = parseConversationScenarios({
+    const camelCase = conversationScenariosModel.parse({
       scenarios: [
         {
           startingPrompt: 'I need to book a flight.',
@@ -151,7 +150,7 @@ describe('ConversationScenarios', () => {
 
     // adk-python writes the snake_case spelling, so the same document in that
     // spelling must give the same value.
-    const snakeCase = parseConversationScenarios({
+    const snakeCase = conversationScenariosModel.parse({
       scenarios: [
         {
           starting_prompt: 'I need to book a flight.',

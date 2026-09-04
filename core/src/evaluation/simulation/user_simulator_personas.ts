@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {z} from 'zod';
 import {NotFoundError} from '../../errors/not_found_error.js';
 import {logger} from '../../utils/logger.js';
+import {evalModel, type EvalModel} from '../common.js';
 
 /** One behavior a simulated user follows. */
 export interface UserBehavior {
@@ -39,6 +41,27 @@ export interface UserPersona {
   /** The behaviors that make up the persona. */
   behaviors: UserBehavior[];
 }
+
+/** Validates a {@link UserBehavior} payload. */
+export const userBehaviorModel: EvalModel<UserBehavior> = evalModel(
+  {
+    name: z.string(),
+    description: z.string(),
+    behaviorInstructions: z.array(z.string()),
+    violationRubrics: z.array(z.string()),
+  },
+  {name: 'UserBehavior'},
+);
+
+/** Validates a {@link UserPersona} payload. */
+export const userPersonaModel: EvalModel<UserPersona> = evalModel(
+  {
+    id: z.string(),
+    description: z.string(),
+    behaviors: z.array(userBehaviorModel.schema),
+  },
+  {name: 'UserPersona'},
+);
 
 /** Renders a behavior's instructions as one bulleted block. */
 export function behaviorInstructionsToString(behavior: UserBehavior): string {
