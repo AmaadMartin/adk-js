@@ -5,11 +5,10 @@
  */
 
 /**
- * What a node context records about its own run: the failure that ended it and
- * where that failure started, the author its events carry, and the ids of the
- * events it emitted. adk-python keeps the same three on `Context`
- * (`agents/context.py`: `error`, `error_node_path`, `event_author`,
- * `telemetry_context`).
+ * What a node context records about its own run: the failure that ended it,
+ * where that failure started, and the author its events carry. adk-python keeps
+ * the same fields on `Context` (`agents/context.py`: `error`,
+ * `error_node_path`, `event_author`).
  */
 
 import {beforeEach, describe, expect, it} from 'vitest';
@@ -17,7 +16,6 @@ import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent, Event} from '../../src/events/event.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
-import {BaseNode} from '../../src/workflow/base_node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {RequestInput} from '../../src/workflow/request_input.js';
@@ -102,28 +100,6 @@ describe('NodeContext failure record', () => {
     expect(child.output).toBe('recovered');
     expect(ctxSeen?.error).toBeUndefined();
     expect(ctxSeen?.errorNodePath).toBe('');
-  });
-
-  it('reports a returned child failure as a dynamic node failure', async () => {
-    // The engine normally propagates a node failure by throwing. A scheduler
-    // that answers with a context carrying `error` instead is reported here.
-    const failedChild = new NodeContext({
-      invocationContext: ic,
-      channel,
-      nodePath: 'wf.child@1',
-      runId: '1',
-    });
-    failedChild.error = new Error('recorded, not thrown');
-    failedChild.errorNodePath = 'wf.child@1';
-
-    const caller = new FnNode('caller', async (ctx) => {
-      ctx.scheduler = {schedule: async () => failedChild};
-      await ctx.runNode(new FnNode('child', () => 'unused'));
-    });
-
-    await expect(rootCtx().runNode(caller)).rejects.toThrow(
-      'Dynamic node child failed',
-    );
   });
 });
 
@@ -213,47 +189,5 @@ describe('NodeContext.eventAuthor', () => {
 
     expect(child.eventAuthor).toBe('billing');
     expect(rootCtx().eventAuthor).toBe('');
-  });
-});
-
-describe('NodeContext.telemetryContext', () => {
-  it('collects the ids of the events the node yielded, in order', async () => {
-    let seen: NodeContext | undefined;
-    class ChattyNode extends BaseNode {
-      protected async *runImpl(
-        ctx: NodeContext,
-      ): AsyncGenerator<Event, void, void> {
-        seen = ctx;
-        for (const text of ['one', 'two', 'three']) {
-          yield createEvent({
-            author: 'chatty',
-            invocationId: ctx.invocationId,
-            content: {role: 'model', parts: [{text}]},
-          });
-        }
-      }
-    }
-
-    const drained: Event[] = [];
-    const root = rootCtx();
-    const settle = root
-      .runNode(new ChattyNode({name: 'chatty'}))
-      .then(() => channel.close());
-    for await (const event of channel) {
-      drained.push(event);
-    }
-    await settle;
-
-    expect(drained).toHaveLength(3);
-    expect(seen?.telemetryContext.associatedEventIds).toEqual(
-      drained.map((event) => event.id),
-    );
-  });
-
-  it('starts empty and captures the OTel context active at construction', () => {
-    const ctx = rootCtx();
-
-    expect(ctx.telemetryContext.associatedEventIds).toEqual([]);
-    expect(ctx.telemetryContext.otelContext).toBeDefined();
   });
 });

@@ -67,17 +67,6 @@ export type {
   ScheduleDynamicNodeOptions,
 } from './schedule_dynamic_node.js';
 
-// --- Agent transfer ---
-export {
-  MAX_PARENT_DEPTH,
-  agentNamesInTree,
-  resolveAndDeriveTransferContext,
-} from './utils/transfer_utils.js';
-export type {
-  ResolveTransferParams,
-  TransferResolution,
-} from './utils/transfer_utils.js';
-
 // --- HITL ---
 export {RequestInput, isRequestInput} from './request_input.js';
 export type {RequestInputParams} from './request_input.js';

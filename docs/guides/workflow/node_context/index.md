@@ -57,20 +57,7 @@ from that child's checkpoint instead of running again. adk-python refuses to run
 a dynamic child from a parent without the flag; adk-js does not refuse, because
 its scheduler replays a completed child either way.
 
-## One output per run
-
-A node produces at most one output. The second write throws rather than
-replacing the first.
-
-```ts
-const once = node(
-  (ctx: NodeContext) => {
-    ctx.output = 'first';
-    ctx.output = 'second'; // Error: Output already set.
-  },
-  {name: 'once'},
-);
-```
+## Delegating the output
 
 Pass `useAsOutput` to make a child's output this node's output as well. The
 child's event is then annotated as answering for both, so the result is not
@@ -135,28 +122,10 @@ interrupt ids, the call throws `NodeInterruptedError` after copying those ids
 onto the calling context — so the engine records the caller as waiting, and the
 rest of the caller's body does not run on a missing answer.
 
-Pass `raiseOnWait: true` to get the same unwinding for a child that finished
-without asking anything, but also without producing a result:
-
-```ts
-const collectApproval = new Workflow({
-  name: 'collect_approval',
-  edges: [['START', node(() => undefined, {name: 'ask'})]],
-});
-
-const caller = node(
-  async (ctx: NodeContext) => {
-    await ctx.runNode(collectApproval, undefined, {raiseOnWait: true});
-    // not reached while `collectApproval` still has no output
-  },
-  {name: 'caller', rerunOnResume: true},
-);
-```
-
-It applies to a child that is a `Workflow` or that declares `waitForOutput`, and
-only when the child produced no output and requested no transfer.
-`waitForOutput` is a `BaseNodeConfig` field, so a node declares it by
-subclassing rather than through `node()`.
+A child that finishes without asking anything, but also without producing a
+result, does not unwind the caller. Read `child.output` and decide what to do.
+A `Workflow` and a node declaring `waitForOutput` are already recorded as
+waiting by the engine when they produce nothing.
 
 A root context built by a driver rather than by the engine — what
 `runNodeAsInvocation` and `NodeTool` build — is exempt from all of this. Such a
@@ -179,10 +148,6 @@ Three fields say what happened during the run.
   carries an author keeps it. adk-python also has `Workflow` set this to its own
   name; adk-js does not, because it attributes events to the node that emitted
   them.
-- `telemetryContext` — the OTel context active when the node started, plus the
-  ids of the events the node yielded, in order. The list lives and dies with the
-  node context.
-
 `parentCtx` and `node` link a context back to the context that ran it and to the
 node it belongs to. The transfer resolver walks that chain; both are `undefined`
 on a root context.

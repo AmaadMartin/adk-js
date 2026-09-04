@@ -26,18 +26,15 @@ export interface ResolveTransferParams {
   /** The context the current agent just ran in. */
   currCtx: NodeContext;
   /** The context that ran {@link currCtx}. */
-  currParentCtx?: NodeContext;
+  currParentCtx: NodeContext;
 }
 
 /** Where a transfer resolves to. */
 export interface TransferResolution {
-  /** The target agent, absent when the tree holds no agent of that name. */
-  targetAgent?: BaseAgent;
-  /**
-   * The context the target must run under. Absent when the target exists but
-   * has no routing relationship with the current agent.
-   */
-  nextParentCtx?: NodeContext;
+  /** The agent to run next. */
+  targetAgent: BaseAgent;
+  /** The context that agent runs under. */
+  nextParentCtx: NodeContext;
 }
 
 /**
@@ -51,11 +48,10 @@ export interface TransferResolution {
  * parent context, and a parent climbs the context chain back to the context
  * that ran it.
  *
- * @return The target and its parent context. Both absent when no agent of that
- *     name exists; `nextParentCtx` alone absent when the target exists but the
- *     transfer cannot be routed.
- * @throws Error When the target is the current agent, or when the current agent
- *     forbids the transfer.
+ * @return The target and the context it runs under.
+ * @throws Error When the tree holds no agent of that name, when the target is
+ *     the current agent, when the current agent forbids the transfer, or when
+ *     the two agents have no routing relationship.
  */
 export function resolveAndDeriveTransferContext({
   targetName,
@@ -66,7 +62,7 @@ export function resolveAndDeriveTransferContext({
 }: ResolveTransferParams): TransferResolution {
   const targetAgent = rootAgent.findAgent(targetName);
   if (!targetAgent) {
-    return {};
+    throw new Error(`Transfer target agent '${targetName}' not found.`);
   }
 
   if (targetAgent.name === currentAgent.name) {
@@ -98,10 +94,17 @@ export function resolveAndDeriveTransferContext({
           `'${targetName}': disallowTransferToParent is set.`,
       );
     }
-    return {targetAgent, nextParentCtx: contextThatRan(currCtx, targetName)};
+    const nextParentCtx = contextThatRan(currCtx, targetName);
+    if (nextParentCtx) {
+      return {targetAgent, nextParentCtx};
+    }
   }
 
-  return {targetAgent};
+  throw new Error(
+    `Cannot transfer from '${currentAgent.name}' to unrelated agent ` +
+      `'${targetName}'.\nAvailable agents: ` +
+      `${agentNamesInTree(rootAgent).join(', ')}`,
+  );
 }
 
 /**
@@ -140,6 +143,6 @@ function contextThatRan(
  * Every agent name in the tree rooted at `agent`, depth first, for an error
  * message that tells the caller which names it could have used.
  */
-export function agentNamesInTree(agent: BaseAgent): string[] {
+function agentNamesInTree(agent: BaseAgent): string[] {
   return [agent.name, ...agent.subAgents.flatMap(agentNamesInTree)];
 }

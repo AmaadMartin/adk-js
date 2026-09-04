@@ -162,7 +162,7 @@ describe('Context.runNode transfer loop', () => {
       transferTo: 'agent_b',
     });
     const childCtxB = makeCtx({node: agentB, parentCtx: rootCtx});
-    childCtxB.setOutputInternal('b_output');
+    childCtxB.output = 'b_output';
 
     const scheduler = new RecordingScheduler([childCtxA, childCtxB]);
     scheduler.attach(rootCtx, childCtxA, childCtxB);
@@ -194,7 +194,7 @@ describe('Context.runNode transfer loop', () => {
     const parentCtx = makeCtx({node: parent, parentCtx: rootCtx});
     const childCtx = makeCtx({node: child, parentCtx, transferTo: 'parent'});
     const parentCtx2 = makeCtx({node: parent, parentCtx: rootCtx, runId: '2'});
-    parentCtx2.setOutputInternal('parent_output');
+    parentCtx2.output = 'parent_output';
 
     const scheduler = new RecordingScheduler([childCtx, parentCtx2]);
     scheduler.attach(rootCtx, parentCtx, childCtx, parentCtx2);
@@ -241,7 +241,7 @@ describe('Context.runNode transfer loop', () => {
       transferTo: 'child',
     });
     const childRunCtx = makeCtx({node: child, parentCtx: parentRunCtx});
-    childRunCtx.setOutputInternal('child_output');
+    childRunCtx.output = 'child_output';
 
     const scheduler = new RecordingScheduler([parentRunCtx, childRunCtx]);
     scheduler.attach(parentCtx, parentRunCtx, childRunCtx);
@@ -288,7 +288,7 @@ describe('Context.runNode transfer loop', () => {
       transferTo: 'root',
     });
     const rootRunCtx2 = makeCtx({node: root, parentCtx: rootCtx, runId: '2'});
-    rootRunCtx2.setOutputInternal('final_root_output');
+    rootRunCtx2.output = 'final_root_output';
 
     const scheduler = new RecordingScheduler([
       rootRunCtx,
@@ -340,7 +340,7 @@ describe('Context.runNode transfer loop', () => {
       transferTo: 'root',
     });
     const rootRunCtx2 = makeCtx({node: root, parentCtx: rootCtx, runId: '2'});
-    rootRunCtx2.setOutputInternal('final_output');
+    rootRunCtx2.output = 'final_output';
 
     const scheduler = new RecordingScheduler([
       rootRunCtx1,

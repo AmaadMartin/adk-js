@@ -21,7 +21,6 @@ import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {BaseNode} from '../../src/workflow/base_node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {
-  agentNamesInTree,
   MAX_PARENT_DEPTH,
   resolveAndDeriveTransferContext,
 } from '../../src/workflow/utils/transfer_utils.js';
@@ -58,18 +57,19 @@ function agent(
 }
 
 describe('resolveAndDeriveTransferContext', () => {
-  it('resolves nothing when the tree holds no agent of that name', () => {
+  it('rejects a target the tree does not hold', () => {
     const only = agent('only');
     const ctx = makeCtx(only);
 
-    expect(
+    expect(() =>
       resolveAndDeriveTransferContext({
         targetName: 'ghost',
         currentAgent: only,
         rootAgent: only,
         currCtx: ctx,
+        currParentCtx: ctx,
       }),
-    ).toEqual({});
+    ).toThrow("Transfer target agent 'ghost' not found.");
   });
 
   it('rejects an agent transferring to itself', () => {
@@ -82,6 +82,7 @@ describe('resolveAndDeriveTransferContext', () => {
         currentAgent: self,
         rootAgent: self,
         currCtx: ctx,
+        currParentCtx: ctx,
       }),
     ).toThrow("Agent 'self' cannot transfer to itself.");
   });
@@ -197,14 +198,14 @@ describe('resolveAndDeriveTransferContext', () => {
     ).toEqual({targetAgent: parent, nextParentCtx: rootCtx});
   });
 
-  it('finds an unrelated agent but routes it nowhere', () => {
+  it('rejects a target with no routing relationship, and lists the names', () => {
     const nephew = agent('nephew');
     const uncle = agent('uncle', [nephew]);
     const stranger = agent('stranger');
     const root = agent('root', [stranger, uncle]);
     const rootCtx = makeCtx(root);
 
-    expect(
+    expect(() =>
       resolveAndDeriveTransferContext({
         targetName: 'nephew',
         currentAgent: stranger,
@@ -212,7 +213,10 @@ describe('resolveAndDeriveTransferContext', () => {
         currCtx: makeCtx(stranger, rootCtx),
         currParentCtx: rootCtx,
       }),
-    ).toEqual({targetAgent: nephew, nextParentCtx: undefined});
+    ).toThrow(
+      "Cannot transfer from 'stranger' to unrelated agent 'nephew'.\n" +
+        'Available agents: root, stranger, uncle, nephew',
+    );
   });
 
   it('stops walking the context chain at the depth cap', () => {
@@ -237,21 +241,5 @@ describe('resolveAndDeriveTransferContext', () => {
     // The fallback walk gave up at the cap rather than reaching chain[0].
     expect(nextParentCtx).toBe(chain[chain.length - 1 - MAX_PARENT_DEPTH]);
     expect(nextParentCtx).not.toBe(chain[0]);
-  });
-});
-
-describe('agentNamesInTree', () => {
-  it('lists every agent in the tree, depth first', () => {
-    const grandchild = agent('grandchild');
-    const first = agent('first', [grandchild]);
-    const second = agent('second');
-    const root = agent('root', [first, second]);
-
-    expect(agentNamesInTree(root)).toEqual([
-      'root',
-      'first',
-      'grandchild',
-      'second',
-    ]);
   });
 });

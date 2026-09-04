@@ -4,26 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {context} from '@opentelemetry/api';
-
-import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
+import {isBaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event} from '../events/event.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
 import {State} from '../sessions/state.js';
-import {
-  createTelemetryContext,
-  TelemetryContext,
-} from '../telemetry/node_tracing.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import type {SchemaLike} from '../utils/schema.js';
 import type {BaseNode} from './base_node.js';
-import {DynamicNodeFailError, NodeInterruptedError} from './errors.js';
+import {NodeInterruptedError} from './errors.js';
 import type {RouteValue, RunnableNode} from './graph.js';
 import {executeChildNode, RunNodeOptions} from './node_runner.js';
 import type {ScheduleDynamicNode} from './schedule_dynamic_node.js';
 import {
-  agentNamesInTree,
   MAX_PARENT_DEPTH,
   resolveAndDeriveTransferContext,
 } from './utils/transfer_utils.js';
@@ -119,6 +112,9 @@ export class NodeContext {
   resumeInputs: Record<string, unknown>;
   isolationScope?: string;
 
+  /** The structured output produced by the node during its run. */
+  output: unknown = undefined;
+
   /** The route key(s) emitted by the node, if any (array = multi-route). */
   route?: RouteValue | RouteValue[];
 
@@ -139,15 +135,12 @@ export class NodeContext {
   errorNodePath = '';
 
   /**
-   * The author stamped on events this node emits, overriding the node's own
-   * name. A `Workflow` sets it to its own name so a reader grouping events by
-   * author sees one workflow rather than N anonymous nodes. Inherited from
+   * The author stamped on events this node leaves unattributed, in place of the
+   * node's own name. An agent run as a node records its own author here, so a
+   * later event it emits without one still reads as the agent's. Inherited from
    * {@link parentCtx}; empty means "use the node's name".
    */
   eventAuthor: string;
-
-  /** Telemetry state tied to this node's span. */
-  readonly telemetryContext: TelemetryContext;
 
   /**
    * The failure a node reported by emitting an error event rather than by
@@ -196,8 +189,6 @@ export class NodeContext {
    */
   private readonly numericCustomRunIds = new Map<string, Set<string>>();
 
-  private outputValue: unknown;
-
   constructor(opts: NodeContextOptions) {
     this.invocationContext = opts.invocationContext;
     this.channel = opts.channel;
@@ -206,10 +197,6 @@ export class NodeContext {
     this.parentCtx = opts.parentCtx;
     this.node = opts.node;
     this.eventAuthor = opts.parentCtx?.eventAuthor ?? '';
-    // Captured here rather than when the node starts: `runChildNode` builds the
-    // child inside its `execute_node` span, so the active context is the node's
-    // own span.
-    this.telemetryContext = createTelemetryContext(context.active());
     this.resumeInputs = opts.resumeInputs ?? {};
     this.isolationScope = opts.isolationScope;
     this.actions = opts.actions ?? createEventActions();
@@ -223,37 +210,6 @@ export class NodeContext {
       this.actions.stateDelta,
       opts.stateSchema,
     );
-  }
-
-  /**
-   * The structured output produced by the node during its run.
-   *
-   * A node produces at most one output, so a second assignment throws instead
-   * of silently replacing the first. The engine writes the value through
-   * {@link setOutputInternal}, which is exempt.
-   */
-  get output(): unknown {
-    return this.outputValue;
-  }
-
-  set output(value: unknown) {
-    if (this.outputValue !== undefined) {
-      throw new Error(
-        'Output already set. A node can produce at most one output.',
-      );
-    }
-    this.outputValue = value;
-  }
-
-  /**
-   * Writes the output without the at-most-one check.
-   *
-   * @internal The engine writes the field more than once by design — clearing
-   * it before a retry, replacing it from an `afterNode` plugin, adopting a
-   * child's value under `useAsOutput`. Node bodies use the `output` setter.
-   */
-  setOutputInternal(value: unknown): void {
-    this.outputValue = value;
   }
 
   /** Delta-aware session state; writes accumulate in `actions.stateDelta`. */
@@ -395,19 +351,23 @@ export class NodeContext {
 
       const childCtx = isNodeContext(child) ? child : undefined;
       const transferTo = childCtx?.actions.transferToAgent;
-      currParentCtx.validateChildRun(child, currNode, options, transferTo);
+      currParentCtx.raiseIfChildInterrupted(child);
       if (childCtx === undefined || transferTo === undefined) {
         return child;
       }
 
-      const next = resolveTransfer(
-        transferTo,
-        currNode,
-        childCtx,
+      if (!isBaseAgent(currNode)) {
+        throw new Error('Only agents can request an agent transfer.');
+      }
+      const next = resolveAndDeriveTransferContext({
+        targetName: transferTo,
+        currentAgent: currNode,
+        rootAgent: currNode.rootAgent,
+        currCtx: childCtx,
         currParentCtx,
-      );
-      currParentCtx = next.parentCtx;
-      currNode = next.agent;
+      });
+      currParentCtx = next.nextParentCtx;
+      currNode = next.targetAgent;
       currRunId = undefined;
       currInput = undefined;
     }
@@ -467,15 +427,13 @@ export class NodeContext {
   }
 
   /**
-   * Raises whatever a finished child leaves this node unable to continue past:
-   * its failure, its unanswered interrupt, or — under `raiseOnWait` — its
-   * having produced nothing while it waits for output.
+   * Raises when a finished child leaves this node unable to continue: it
+   * stopped to ask the user and nobody has answered yet.
    *
-   * A node body must not run on past a child that stopped to ask the user:
-   * everything after the call would run on a missing answer, and would run
-   * again when the turn resumes. Copying the child's interrupt ids here first
-   * is what lets the runner catching the throw record this node as waiting
-   * rather than failed.
+   * A node body must not run on past such a child: everything after the call
+   * would run on a missing answer, and would run again when the turn resumes.
+   * Copying the child's interrupt ids here first is what lets the runner
+   * catching the throw record this node as waiting rather than failed.
    *
    * A root context has no {@link node} and is therefore not a node body but a
    * driver — `runNodeAsInvocation`, `NodeTool`, a caller of its own — which
@@ -483,38 +441,16 @@ export class NodeContext {
    * turn a paused run into a failed one, so it is skipped there. This is the
    * split adk-python spells `return_ctx` on `Context._run_node_internal`.
    */
-  private validateChildRun(
-    child: NodeContext | NodeResult,
-    node: BaseNode,
-    options: RunNodeOptions,
-    transferTo: string | undefined,
-  ): void {
-    if (!this.node) {
+  private raiseIfChildInterrupted(child: NodeContext | NodeResult): void {
+    if (!this.node || child.interruptIds.length === 0) {
       return;
     }
-    if (isNodeContext(child) && child.error) {
-      throw new DynamicNodeFailError({
-        message: `Dynamic node ${node.name} failed`,
-        error: child.error,
-        errorNodePath: child.errorNodePath,
-      });
-    }
-    if (child.interruptIds.length > 0) {
-      for (const id of child.interruptIds) {
-        if (!this.interruptIds.includes(id)) {
-          this.interruptIds.push(id);
-        }
+    for (const id of child.interruptIds) {
+      if (!this.interruptIds.includes(id)) {
+        this.interruptIds.push(id);
       }
-      throw new NodeInterruptedError();
     }
-    if (
-      options.raiseOnWait &&
-      child.output === undefined &&
-      transferTo === undefined &&
-      (isWorkflow(node) || node.waitForOutput)
-    ) {
-      throw new NodeInterruptedError();
-    }
+    throw new NodeInterruptedError();
   }
 }
 
@@ -525,39 +461,6 @@ export class NodeContext {
  */
 function isNodeContext(child: NodeContext | NodeResult): child is NodeContext {
   return 'actions' in child;
-}
-
-/**
- * Resolves an agent transfer requested by `node` into the agent to run next and
- * the context to run it under.
- */
-function resolveTransfer(
-  targetName: string,
-  node: BaseNode,
-  childCtx: NodeContext,
-  currParentCtx: NodeContext,
-): {agent: BaseAgent; parentCtx: NodeContext} {
-  if (!isBaseAgent(node)) {
-    throw new Error('Only agents can request an agent transfer.');
-  }
-  const {targetAgent, nextParentCtx} = resolveAndDeriveTransferContext({
-    targetName,
-    currentAgent: node,
-    rootAgent: node.rootAgent,
-    currCtx: childCtx,
-    currParentCtx,
-  });
-  if (!targetAgent) {
-    throw new Error(`Transfer target agent '${targetName}' not found.`);
-  }
-  if (!nextParentCtx) {
-    throw new Error(
-      `Cannot transfer from '${node.name}' to unrelated agent ` +
-        `'${targetName}'.\nAvailable agents: ` +
-        `${agentNamesInTree(node.rootAgent).join(', ')}`,
-    );
-  }
-  return {agent: targetAgent, parentCtx: nextParentCtx};
 }
 
 /** Returns the set stored under `key`, creating it on first use. */
