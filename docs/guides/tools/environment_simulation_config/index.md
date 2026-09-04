@@ -152,10 +152,11 @@ Distinct names keep the order you gave them.
 `injectedLatencySeconds` may not exceed 120. `injectionProbability` has no
 bounds, because adk-python declares none.
 
-Every factory rejects a key it does not know, which is what adk-python's
-`extra='forbid'` does. The two SDKs disagree on the spelling: adk-python
-accepts `tool_simulation_configs`, adk-js accepts `toolSimulationConfigs` and
-rejects the snake_case form.
+Every factory rejects a key it does not know. adk-js is stricter than
+adk-python here: adk-python's models take pydantic's default, so they drop an
+unknown key without saying anything. The two SDKs also disagree on the
+spelling, so `tool_simulation_configs` is one of the keys adk-js rejects. Use
+`toolSimulationConfigs`.
 
 ## The deprecated AgentSimulatorConfig name
 

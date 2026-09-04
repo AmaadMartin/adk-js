@@ -192,16 +192,6 @@ export interface EnvironmentSimulationConfigParams {
   environmentData?: string;
 }
 
-const INJECTED_VALUE_MESSAGE =
-  'Either injectedError or injectedResponse must be set, but not both, and' +
-  ' not neither.';
-
-const NOTHING_TO_SIMULATE_MESSAGE =
-  'If injectionConfigs is empty, mockStrategyType cannot be' +
-  ' MOCK_STRATEGY_UNSPECIFIED.';
-
-const EMPTY_TOOL_CONFIGS_MESSAGE = 'toolSimulationConfigs must be provided.';
-
 /**
  * Reports whether the rule injects an error or a response, but not both.
  *
@@ -232,8 +222,12 @@ function isSimulatable(config: {
 }
 
 // The schemas below stay module-private: the interfaces and the factories are
-// the public surface. `strictObject` rejects unknown keys, which is what
-// adk-python's `extra='forbid'` does.
+// the public surface.
+//
+// `strictObject` rejects an unknown key. That is deliberately stricter than
+// adk-python, whose models are plain `BaseModel` and therefore drop an unknown
+// key in silence. A factory that also receives parsed JSON is the wrong place
+// to swallow a misspelled field.
 
 const injectedErrorSchema = z.strictObject({
   injectedHttpErrorCode: z.int(),
@@ -252,7 +246,11 @@ const injectionConfigSchema = z
     injectedError: injectedErrorSchema.optional(),
     injectedResponse: z.record(z.string(), z.unknown()).optional(),
   })
-  .refine(hasExactlyOneInjectedValue, {error: INJECTED_VALUE_MESSAGE});
+  .refine(hasExactlyOneInjectedValue, {
+    error:
+      'Either injectedError or injectedResponse must be set, but not both,' +
+      ' and not neither.',
+  });
 
 const toolSimulationConfigSchema = z
   .strictObject({
@@ -262,7 +260,11 @@ const toolSimulationConfigSchema = z
       .enum(MockStrategy)
       .default(MockStrategy.MOCK_STRATEGY_UNSPECIFIED),
   })
-  .refine(isSimulatable, {error: NOTHING_TO_SIMULATE_MESSAGE});
+  .refine(isSimulatable, {
+    error:
+      'If injectionConfigs is empty, mockStrategyType cannot be' +
+      ' MOCK_STRATEGY_UNSPECIFIED.',
+  });
 
 // Only the object-ness of the model configuration is checked, so the genai SDK
 // stays the single source of truth for its field list.
@@ -318,7 +320,8 @@ function assertToolSimulationConfigsUsable(
 ): void {
   if (configs.length === 0) {
     throw new InputValidationError(
-      `Invalid EnvironmentSimulationConfig: ${EMPTY_TOOL_CONFIGS_MESSAGE}`,
+      'Invalid EnvironmentSimulationConfig: toolSimulationConfigs must be' +
+        ' provided.',
     );
   }
   const seenToolNames = new Set<string>();
