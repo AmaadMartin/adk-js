@@ -249,9 +249,9 @@ describe('TokenBasedContextCompactor', () => {
   });
 
   // Ported from adk-python
-  // tests/unittests/apps/test_compaction.py:421 (main). Keeps the reference
-  // name so the two suites can be lined up.
-  it('test_run_compaction_for_sliding_window_no_compaction_event_returned', async () => {
+  // tests/unittests/apps/test_compaction.py:421
+  // test_run_compaction_for_sliding_window_no_compaction_event_returned.
+  it('should leave history untouched when the summarizer declines with null', async () => {
     const summarizer = new NullSummarizer();
     const compactor = new TokenBasedContextCompactor({
       tokenThreshold: 10,
