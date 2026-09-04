@@ -25,10 +25,15 @@ import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {version} from '../version.js';
+import {
+  ADK_SCOPE_NAME,
+  CONVERSATION_ID_ATTRIBUTE,
+  INVOCATION_ID_ATTRIBUTE,
+  SESSION_ID_ATTRIBUTE,
+} from './semconv.js';
 
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
 const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
-const GEN_AI_CONVERSATION_ID = 'gen_ai.conversation.id';
 const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
 const GEN_AI_TOOL_CALL_ID = 'gen_ai.tool.call.id';
 const GEN_AI_TOOL_DESCRIPTION = 'gen_ai.tool.description';
@@ -42,7 +47,7 @@ const ADK_NODE_ATTEMPT = 'adk.node.attempt';
 const ADK_NODE_STATUS = 'adk.node.status';
 const ADK_NODE_INTERRUPT_COUNT = 'adk.node.interrupt_count';
 
-export const tracer = trace.getTracer('gcp.vertex.agent', version);
+export const tracer = trace.getTracer(ADK_SCOPE_NAME, version);
 
 /**
  * Convert any JavaScript object to a JSON-serializable string.
@@ -93,7 +98,7 @@ export function traceAgentInvocation({
     // Conditionally Required
     [GEN_AI_AGENT_DESCRIPTION]: agent.description,
     [GEN_AI_AGENT_NAME]: agent.name,
-    [GEN_AI_CONVERSATION_ID]: invocationContext.session.id,
+    [CONVERSATION_ID_ATTRIBUTE]: invocationContext.session.id,
   });
 }
 
@@ -113,7 +118,7 @@ export function traceWorkflowInvocation({
 
   span.setAttributes({
     [GEN_AI_OPERATION_NAME]: 'invoke_workflow',
-    [GEN_AI_CONVERSATION_ID]: sessionId,
+    [CONVERSATION_ID_ATTRIBUTE]: sessionId,
     [ADK_WORKFLOW_NAME]: workflowName,
     [ADK_NODE_PATH]: nodePath,
   });
@@ -278,13 +283,13 @@ export function traceCallLlm({
   if (!span) return;
 
   span.setAttributes({
-    'gen_ai.system': 'gcp.vertex.agent',
+    'gen_ai.system': ADK_SCOPE_NAME,
     'gen_ai.request.model': llmRequest.model,
     ...(invocationContext.agent?.name
       ? {[GEN_AI_AGENT_NAME]: invocationContext.agent.name}
       : {}),
-    'gcp.vertex.agent.invocation_id': invocationContext.invocationId,
-    'gcp.vertex.agent.session_id': invocationContext.session.id,
+    [INVOCATION_ID_ATTRIBUTE]: invocationContext.invocationId,
+    [SESSION_ID_ATTRIBUTE]: invocationContext.session.id,
     'gcp.vertex.agent.event_id': eventId,
     // Consider removing once GenAI SDK provides a way to record this info.
     'gcp.vertex.agent.llm_request': shouldAddRequestResponseToSpans()
@@ -359,7 +364,7 @@ export function traceSendData({
   if (!span) return;
 
   span.setAttributes({
-    'gcp.vertex.agent.invocation_id': invocationContext.invocationId,
+    [INVOCATION_ID_ATTRIBUTE]: invocationContext.invocationId,
     'gcp.vertex.agent.event_id': eventId,
   });
 
