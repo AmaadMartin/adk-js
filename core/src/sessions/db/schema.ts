@@ -5,14 +5,10 @@
  */
 
 import {
-  Cascade,
-  Collection,
   Entity,
-  EntityManager,
   Index,
   JsonType,
   ManyToOne,
-  OneToMany,
   PrimaryKey,
   Property,
   Ref,
@@ -147,16 +143,8 @@ export class StorageSession {
     type: 'datetime',
     fieldName: 'update_time',
     onCreate: () => new Date(),
-    onUpdate: (row: StorageSession, em: EntityManager) =>
-      hasAssignedUpdateTime(em, row) ? row.updateTime : new Date(),
   })
   updateTime: Date = new Date();
-
-  @OneToMany(() => StorageEvent, (event) => event.storageSession, {
-    orphanRemoval: true,
-    cascade: [Cascade.ALL],
-  })
-  storageEvents = new Collection<StorageEvent>(this);
 
   [PrimaryKey.name]?: [string, string, string];
 }
@@ -206,8 +194,16 @@ export class StorageEvent {
   @Property({type: 'datetime'})
   timestamp!: Date;
 
-  @Property({type: CamelCaseToSnakeCaseJsonType, fieldName: 'event_data'})
-  eventData!: Event;
+  /**
+   * The serialized event, nullable as it is in adk-python's `v1.py`. A row
+   * another writer produced can leave it empty.
+   */
+  @Property({
+    type: CamelCaseToSnakeCaseJsonType,
+    fieldName: 'event_data',
+    nullable: true,
+  })
+  eventData!: Event | null;
 
   /**
    * The owning session, mapped onto the `app_name`, `user_id` and `session_id`
@@ -243,55 +239,10 @@ export class StorageEvent {
   [PrimaryKey.name]?: [string, string, string, string];
 }
 
-/**
- * Reports whether the caller assigned `updateTime` since the row was loaded.
- *
- * SQLAlchemy applies `onupdate` only to columns the UPDATE statement does not
- * already set, so an explicit assignment wins. MikroORM runs the hook
- * unconditionally and overwrites whatever the caller assigned, so the hook has
- * to make that check itself.
- *
- * MikroORM snapshots a datetime column as the `Date` it hydrated on load, and
- * as whatever `Platform.processDateProperty` returns after a flush — epoch
- * milliseconds on sqlite. Both forms compare as an epoch.
- */
-function hasAssignedUpdateTime(
-  em: EntityManager,
-  row: StorageSession,
-): boolean {
-  const loaded = em.getUnitOfWork().getOriginalEntityData(row)?.updateTime;
-  const loadedEpoch =
-    loaded instanceof Date ? loaded.getTime() : Number(loaded);
-  return loadedEpoch !== row.updateTime.getTime();
-}
-
-/**
- * Returns the session's last update time in milliseconds since the epoch.
- *
- * adk-python's `StorageSession.get_update_timestamp` returns seconds; adk-js
- * measures `Session.lastUpdateTime` and `Event.timestamp` in milliseconds
- * throughout, so this keeps milliseconds.
- */
-export function getUpdateTimestamp(row: StorageSession): number {
-  return row.updateTime.getTime();
-}
-
-/**
- * Returns a stable revision marker for optimistic concurrency checks.
- *
- * adk-python's `StorageSession.get_update_marker` formats with microsecond
- * precision and keeps a naive value naive. A JS `Date` has neither a naive form
- * nor microseconds, so the marker is always the UTC ISO-8601 rendering at
- * millisecond precision.
- */
-export function getUpdateMarker(row: StorageSession): string {
-  return row.updateTime.toISOString();
-}
-
-/** Optional parts of a {@link Session} that do not live on the session row. */
+/** The parts of a {@link Session} that do not live on the session row. */
 export interface ToSessionOptions {
   /** The state merged from the app, user and session rows. */
-  state?: Record<string, unknown>;
+  state: Record<string, unknown>;
   /** The session's events, oldest first. */
   events?: Event[];
 }
@@ -299,20 +250,22 @@ export interface ToSessionOptions {
 /**
  * Converts a session row into a {@link Session}.
  *
- * Mirrors adk-python's `StorageSession.to_session`.
+ * Mirrors adk-python's `StorageSession.to_session`. adk-python's
+ * `get_update_timestamp` returns seconds; adk-js measures
+ * `Session.lastUpdateTime` and `Event.timestamp` in milliseconds throughout, so
+ * `lastUpdateTime` keeps milliseconds.
  */
 export function toSession(
   row: StorageSession,
-  options: ToSessionOptions = {},
+  options: ToSessionOptions,
 ): Session {
   return createSession({
     id: row.id,
     appName: row.appName,
     userId: row.userId,
-    state: options.state ?? {},
+    state: options.state,
     events: options.events ?? [],
-    lastUpdateTime: getUpdateTimestamp(row),
-    storageUpdateMarker: getUpdateMarker(row),
+    lastUpdateTime: row.updateTime.getTime(),
   });
 }
 
@@ -349,17 +302,17 @@ export function storageEventFromEvent(
  * it resolves an ambiguous local time — a daylight-saving fall-back repeats a
  * whole hour — to the wrong instant.
  *
- * `event_data` is nullable in adk-python, so a row another writer produced can
- * read back as null here even though the column is declared NOT NULL.
+ * A row whose `event_data` is null still yields an `Event`, carrying the
+ * identity and timestamp the columns hold.
  */
 export function storageEventToEvent(row: StorageEvent): Event {
-  const eventData: Partial<Event> = row.eventData ?? {};
+  const eventData = row.eventData;
   return {
     ...eventData,
-    actions: createEventActions(eventData.actions),
+    actions: createEventActions(eventData?.actions),
     id: row.id,
     invocationId: row.invocationId,
-    timestamp: eventData.timestamp ?? row.timestamp.getTime(),
+    timestamp: eventData?.timestamp ?? row.timestamp.getTime(),
   };
 }
 

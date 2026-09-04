@@ -19,8 +19,6 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {
   ENTITIES,
   EVENTS_TIMESTAMP_INDEX_NAME,
-  getUpdateMarker,
-  getUpdateTimestamp,
   StorageEvent,
   storageEventFromEvent,
   storageEventToEvent,
@@ -86,7 +84,7 @@ async function readRows(
 
 describe('schema converters', () => {
   it('test_to_session_without_arguments_yields_empty_state_and_events', () => {
-    const session = toSession(sessionRow(NAIVE_UPDATE_TIME));
+    const session = toSession(sessionRow(NAIVE_UPDATE_TIME), {state: {}});
 
     expect(session.appName).toBe('my_app');
     expect(session.userId).toBe('u1');
@@ -113,27 +111,19 @@ describe('schema converters', () => {
     // is an absolute instant with no naive form, so there is nothing to pin.
     const row = sessionRow(NAIVE_UPDATE_TIME);
 
-    const session = toSession(row);
+    const session = toSession(row, {state: {}});
 
     expect(session.lastUpdateTime).toBe(row.updateTime.getTime());
-    expect(session.storageUpdateMarker).toBe('2026-01-02T03:04:05.123Z');
   });
 
   it('test_to_session_normalizes_aware_update_time_marker_to_utc', () => {
+    // Only the instant half of the adk-python case ports. adk-js has no
+    // revision marker to normalize, because nothing here reads one.
     const row = sessionRow(AWARE_UPDATE_TIME);
 
-    const session = toSession(row);
+    const session = toSession(row, {state: {}});
 
     expect(session.lastUpdateTime).toBe(AWARE_UPDATE_TIME.getTime());
-    expect(session.storageUpdateMarker).toBe('2026-01-01T22:04:05.123Z');
-  });
-
-  it('gives two rows one millisecond apart different markers', () => {
-    const earlier = sessionRow(new Date(1730613600000));
-    const later = sessionRow(new Date(1730613600001));
-
-    expect(getUpdateMarker(earlier)).not.toBe(getUpdateMarker(later));
-    expect(getUpdateTimestamp(later) - getUpdateTimestamp(earlier)).toBe(1);
   });
 
   it('test_get_session_keeps_exact_epoch_across_a_repeated_local_hour', () => {
@@ -322,47 +312,12 @@ describe('schema behaviour on sqlite', () => {
 
     expect(await em.count(StorageEvent, {sessionId: 's1'})).toBe(0);
   });
-
-  it('advances update_time when only the state changes', async () => {
-    orm = await openOrm();
-    await orm.schema.createSchema();
-    const seeded = new Date(FIRST_REPEATED_HOUR_EPOCH);
-    await seedSession(seeded);
-
-    const em = orm.em.fork();
-    const row = await em.findOneOrFail(StorageSession, {id: 's1'});
-    row.state = {changed: true};
-    await em.flush();
-
-    const reloaded = await orm.em
-      .fork()
-      .findOneOrFail(StorageSession, {id: 's1'});
-    expect(reloaded.updateTime.getTime()).toBeGreaterThan(seeded.getTime());
-  });
-
-  it('keeps an explicitly assigned update_time', async () => {
-    orm = await openOrm();
-    await orm.schema.createSchema();
-    await seedSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
-
-    const em = orm.em.fork();
-    const row = await em.findOneOrFail(StorageSession, {id: 's1'});
-    row.state = {changed: true};
-    row.updateTime = new Date(SECOND_REPEATED_HOUR_EPOCH);
-    await em.flush();
-
-    const reloaded = await orm.em
-      .fork()
-      .findOneOrFail(StorageSession, {id: 's1'});
-    expect(reloaded.updateTime.getTime()).toBe(SECOND_REPEATED_HOUR_EPOCH);
-  });
 });
 
 /**
- * adk-python declares `events.event_data` nullable and writes no timestamp into
- * the payload of an event that has none, so a database it produced holds rows
- * adk-js's own DDL would reject. These build that table by hand and read it
- * back through the entity.
+ * adk-python writes rows adk-js never produces: an event with no payload at
+ * all, and a payload that carries no timestamp of its own. Both are read back
+ * through the entity here.
  */
 describe('rows written by adk-python', () => {
   let orm: MikroORM;
@@ -373,34 +328,34 @@ describe('rows written by adk-python', () => {
     }
   });
 
-  async function createLegacyTables(): Promise<void> {
-    const connection = orm.em.getConnection();
-    await connection.execute(
-      'create table sessions (id text not null, app_name text not null, ' +
-        'user_id text not null, state json not null, ' +
-        'create_time datetime not null, update_time datetime not null, ' +
-        'primary key (app_name, user_id, id))',
-    );
-    await connection.execute(
-      'create table events (id text not null, app_name text not null, ' +
-        'user_id text not null, session_id text not null, ' +
-        'invocation_id text not null, timestamp datetime not null, ' +
-        'event_data json null, ' +
-        'primary key (id, app_name, user_id, session_id))',
-    );
-  }
-
-  it('reads a row whose event_data is null', async () => {
-    orm = await openOrm();
-    await createLegacyTables();
+  async function insertEvent(
+    timestampColumn: number,
+    eventData: string | null,
+  ): Promise<StorageEvent> {
+    await orm.schema.createSchema();
+    const em = orm.em.fork();
+    em.create(StorageSession, {
+      id: 's1',
+      appName: 'my_app',
+      userId: 'u1',
+      state: {},
+      createTime: new Date(timestampColumn),
+      updateTime: new Date(timestampColumn),
+    });
+    await em.flush();
     await orm.em
       .getConnection()
       .execute(
         "insert into events values ('e1', 'my_app', 'u1', 's1', 'inv1', " +
-          `${FIRST_REPEATED_HOUR_EPOCH}, null)`,
+          `${timestampColumn}, ${eventData === null ? 'null' : `'${eventData}'`})`,
       );
+    return orm.em.fork().findOneOrFail(StorageEvent, {id: 'e1'});
+  }
 
-    const row = await orm.em.fork().findOneOrFail(StorageEvent, {id: 'e1'});
+  it('reads a row whose event_data is null', async () => {
+    orm = await openOrm();
+    const row = await insertEvent(FIRST_REPEATED_HOUR_EPOCH, null);
+
     const event = storageEventToEvent(row);
 
     expect(row.eventData).toBeNull();
@@ -412,15 +367,11 @@ describe('rows written by adk-python', () => {
 
   it('falls back to the timestamp column when the payload has none', async () => {
     orm = await openOrm();
-    await createLegacyTables();
-    await orm.em
-      .getConnection()
-      .execute(
-        "insert into events values ('e1', 'my_app', 'u1', 's1', 'inv1', " +
-          `${SECOND_REPEATED_HOUR_EPOCH}, '{"author": "user"}')`,
-      );
+    const row = await insertEvent(
+      SECOND_REPEATED_HOUR_EPOCH,
+      '{"author": "user"}',
+    );
 
-    const row = await orm.em.fork().findOneOrFail(StorageEvent, {id: 'e1'});
     const event = storageEventToEvent(row);
 
     expect(event.author).toBe('user');

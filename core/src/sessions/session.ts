@@ -52,16 +52,6 @@ export interface Session {
    * The last update time of the session.
    */
   lastUpdateTime: number;
-
-  /**
-   * The exact storage revision this session was loaded at, set by persistent
-   * session services.
-   *
-   * A persistent service compares it against the row it is about to write to
-   * detect a concurrent update. It is absent for a session that never came from
-   * storage.
-   */
-  storageUpdateMarker?: string;
 }
 
 /**
@@ -83,6 +73,5 @@ export function createSession(
     state: params.state || {},
     events: params.events || [],
     lastUpdateTime: params.lastUpdateTime || 0,
-    storageUpdateMarker: params.storageUpdateMarker,
   };
 }
