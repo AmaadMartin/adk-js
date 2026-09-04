@@ -203,6 +203,56 @@ describe('LoadSkillResourceTool', () => {
     );
   });
 
+  it('injects a binary reference in processLlmRequest', async () => {
+    const skillWithBinaryReference: Skill = {
+      frontmatter: {name: 'test-skill', description: 'desc'},
+      instructions: 'inst',
+      resources: {
+        references: {
+          'diagram.png': Buffer.from('fake diagram data'),
+        },
+      },
+    };
+    const toolset = new SkillToolset([skillWithBinaryReference]);
+    const tool = new LoadSkillResourceTool(toolset);
+
+    const llmRequest: LlmRequest = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'load_skill_resource',
+                response: {
+                  skill_name: 'test-skill',
+                  path: 'references/diagram.png',
+                  status:
+                    'Binary file detected. The content has been injected into the conversation history for you to analyze.',
+                },
+              },
+            },
+          ],
+        },
+      ],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    await tool.processLlmRequest({
+      toolContext: createMockContext(),
+      llmRequest,
+    });
+
+    expect(llmRequest.contents.length).toBe(2);
+    expect(llmRequest.contents[1].parts?.[1]?.inlineData?.data).toBe(
+      Buffer.from('fake diagram data').toString('base64'),
+    );
+    expect(llmRequest.contents[1].parts?.[1]?.inlineData?.mimeType).toBe(
+      'image/png',
+    );
+  });
+
   it('uses default mime type for unknown extension in processLlmRequest', async () => {
     const mockSkillWithUnknownExt: Skill = {
       frontmatter: {name: 'test-skill', description: 'desc'},
