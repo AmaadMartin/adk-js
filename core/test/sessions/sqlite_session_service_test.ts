@@ -89,9 +89,12 @@ describe('SqliteSessionService, SQLite-specific reference tests', () => {
   });
 
   it('test_sqlite_session_service_accepts_absolute_sqlite_urls', async () => {
+    // SQLAlchemy spells an absolute path by leaving it whole after the empty
+    // authority, so POSIX gets four slashes and Windows three plus a drive
+    // letter. One template produces both.
     const absolutePath = join(dir, 'absolute.db');
     const service = new SqliteSessionService(
-      `sqlite+aiosqlite:////${absolutePath.replace(/^\/+/, '')}`,
+      `sqlite+aiosqlite:///${absolutePath}`,
     );
     await service.createSession({appName: 'app', userId: 'user'});
 
@@ -102,20 +105,25 @@ describe('SqliteSessionService, SQLite-specific reference tests', () => {
   });
 
   it('test_sqlite_session_service_preserves_uri_query_parameters', async () => {
-    const dbPath = join(dir, 'readonly.db');
-    // Seed the file so the read-only open finds a database to attach to.
-    await new SqliteSessionService(dbPath).createSession({
-      appName: 'app',
-      userId: 'user',
-    });
+    const previous = process.cwd();
+    process.chdir(dir);
+    try {
+      // Seed the file so the read-only open finds a database to attach to.
+      await new SqliteSessionService('readonly.db').createSession({
+        appName: 'app',
+        userId: 'user',
+      });
 
-    const service = new SqliteSessionService(
-      `sqlite+aiosqlite:///${dbPath}?mode=ro`,
-    );
-    // `mode=ro` opens the database read-only, so the write must fail.
-    await expect(
-      service.createSession({appName: 'app', userId: 'user2'}),
-    ).rejects.toThrow(/readonly/);
+      const service = new SqliteSessionService(
+        'sqlite+aiosqlite:///readonly.db?mode=ro',
+      );
+      // `mode=ro` opens the database read-only, so the write must fail.
+      await expect(
+        service.createSession({appName: 'app', userId: 'user2'}),
+      ).rejects.toThrow(/readonly/);
+    } finally {
+      process.chdir(previous);
+    }
   });
 
   it('test_sqlite_create_session_concurrent_same_id_raises_already_exists_error', async () => {

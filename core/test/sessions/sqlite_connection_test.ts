@@ -48,6 +48,14 @@ describe('parseSqliteDbPath', () => {
     ['sqlite://', 'sqlite://', 'sqlite://', false],
     // The opaque form carries no authority and no leading slash to strip.
     ['sqlite:opaque.db', 'opaque.db', 'opaque.db', false],
+    // A Windows absolute path takes three slashes, not four, because the
+    // drive letter stands where the leading slash would.
+    [
+      'sqlite:///C:\\Users\\a\\adk.db',
+      'C:\\Users\\a\\adk.db',
+      'C:\\Users\\a\\adk.db',
+      false,
+    ],
   ])('parses %s', (input, filePath, connectPath, useUri) => {
     expect(parseSqliteDbPath(input)).toEqual({
       filePath,
@@ -239,16 +247,21 @@ describe('SqliteDatabase', () => {
   });
 
   it('closes the handle when schema creation fails', async () => {
-    const dbPath = join(dir, 'readonly.db');
-    await execRaw(dbPath, 'CREATE TABLE t (id INTEGER)');
+    // A relative name keeps the URI free of a drive letter and backslashes.
+    const previous = process.cwd();
+    process.chdir(dir);
+    try {
+      await execRaw('readonly.db', 'CREATE TABLE t (id INTEGER)');
 
-    const database = new SqliteDatabase(`sqlite:///${dbPath}?mode=ro`);
-    await expect(database.connect()).rejects.toThrow(/readonly/);
+      const database = new SqliteDatabase('sqlite:///readonly.db?mode=ro');
+      await expect(database.connect()).rejects.toThrow(/readonly/);
 
-    // The failed attempt must not leave the file locked for the next writer.
-    const writable = new SqliteDatabase(dbPath);
-    const connection = await writable.connect();
-    await connection.run('INSERT INTO t VALUES (1)');
-    await connection.close();
+      // The failed attempt must not leave the file locked for the next writer.
+      const connection = await new SqliteDatabase('readonly.db').connect();
+      await connection.run('INSERT INTO t VALUES (1)');
+      await connection.close();
+    } finally {
+      process.chdir(previous);
+    }
   });
 });
