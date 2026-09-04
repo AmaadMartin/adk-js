@@ -11,7 +11,6 @@
  * in the pull request body.
  */
 
-import {InMemoryTaskStore} from '@a2a-js/sdk/server';
 import {
   BaseArtifactService,
   BaseMemoryService,
@@ -159,18 +158,14 @@ describe('ServiceRegistry', () => {
     });
 
     it('test_create_session_service_sqlite_ignores_unsupported_kwargs', async () => {
+      // Not portable: adk-js constructors take typed option objects, so there
+      // are no kwargs to drop. `agentsDir` still must not reach the URI.
       await builtinRegistry().createSessionService('sqlite:///test.db', {
         agentsDir: 'foo',
-        extra: {poolSize: 10},
       });
 
       expect(mockedDatabaseSession).toHaveBeenCalledWith('sqlite:///test.db');
-      const message = String(warn.mock.calls[0]?.[0]);
-      expect(message).toContain(
-        'DatabaseSessionService does not support additional options',
-      );
-      expect(message).toContain('poolSize');
-      expect(message).not.toContain('agentsDir');
+      expect(warn).not.toHaveBeenCalled();
     });
 
     it('builds an in-memory session service for sqlite:// with no path', async () => {
@@ -288,19 +283,11 @@ describe('ServiceRegistry', () => {
     it('test_create_artifact_service_gcs', async () => {
       await builtinRegistry().createArtifactService(
         'gs://my-bucket/path/prefix',
-        {
-          agentsDir: 'foo',
-          extra: {otherOption: 'bar'},
-        },
+        {agentsDir: 'foo'},
       );
 
       expect(mockedGcsArtifact).toHaveBeenCalledWith('my-bucket');
-      const message = String(warn.mock.calls[0]?.[0]);
-      expect(message).toContain(
-        'GcsArtifactService does not support additional options',
-      );
-      expect(message).toContain('otherOption');
-      expect(message).not.toContain('agentsDir');
+      expect(warn).not.toHaveBeenCalled();
     });
 
     it('builds an in-memory artifact service for memory://', async () => {
@@ -430,41 +417,6 @@ describe('ServiceRegistry', () => {
     });
   });
 
-  describe('task stores', () => {
-    it('test_create_task_store_memory', async () => {
-      expect(
-        await builtinRegistry().createTaskStoreService('memory://'),
-      ).toBeInstanceOf(InMemoryTaskStore);
-    });
-
-    it('test_create_task_store_postgresql', async () => {
-      // Not portable: `@a2a-js/sdk` ships no `DatabaseTaskStore`, so the
-      // driver-suffixed schemes stay unregistered.
-      await expect(
-        builtinRegistry().createTaskStoreService(
-          'postgresql+asyncpg://user:pass@host/db',
-        ),
-      ).rejects.toThrowError(
-        "Unsupported A2A task store URI scheme: 'postgresql+asyncpg'. Supported schemes: memory",
-      );
-    });
-
-    it('names an empty scheme when the task store URI has none', async () => {
-      await expect(
-        builtinRegistry().createTaskStoreService('no-scheme'),
-      ).rejects.toThrowError("Unsupported A2A task store URI scheme: ''.");
-    });
-
-    it('lists the supported task store schemes in sorted order', async () => {
-      const registry = builtinRegistry();
-      registry.registerTaskStoreService('alpha', () => new InMemoryTaskStore());
-
-      await expect(
-        registry.createTaskStoreService('nope://x'),
-      ).rejects.toThrowError('Supported schemes: alpha, memory');
-    });
-  });
-
   describe('scheme routing', () => {
     it('test_unsupported_scheme', async () => {
       const registry = builtinRegistry();
@@ -478,9 +430,6 @@ describe('ServiceRegistry', () => {
       expect(
         await registry.createMemoryService('unsupported://foo'),
       ).toBeUndefined();
-      await expect(
-        registry.createTaskStoreService('unsupported://foo'),
-      ).rejects.toThrowError('Unsupported A2A task store URI scheme');
       expect(mockedDatabaseSession).not.toHaveBeenCalled();
       expect(mockedVertexSession).not.toHaveBeenCalled();
       expect(mockedGcsArtifact).not.toHaveBeenCalled();
@@ -564,9 +513,6 @@ describe('ServiceRegistry', () => {
         await registry.createArtifactService('shared://x'),
       ).toBeUndefined();
       expect(await registry.createMemoryService('shared://x')).toBeUndefined();
-      await expect(
-        registry.createTaskStoreService('shared://x'),
-      ).rejects.toThrowError('Unsupported A2A task store URI scheme');
       expect(calls).toEqual([]);
       expect(await registry.createSessionService('shared://x')).toBe(
         sessionService,

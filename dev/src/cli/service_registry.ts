@@ -7,9 +7,9 @@
 /**
  * ADK service registry.
  *
- * The registry maps a URI scheme to a factory that builds a session, artifact,
- * memory or A2A task store service. ADK seeds it with the backends it ships
- * with. You can add a scheme of your own in two ways.
+ * The registry maps a URI scheme to a factory that builds a session, artifact
+ * or memory service. ADK seeds it with the backends it ships with. You can
+ * add a scheme of your own in two ways.
  *
  * 1. Declare it in `services.yaml` (or `services.yml`) next to your agent:
  *
@@ -40,7 +40,6 @@
  * Ported from adk-python `src/google/adk/cli/service_registry.py`.
  */
 
-import {InMemoryTaskStore, TaskStore} from '@a2a-js/sdk/server';
 import {
   BaseArtifactService,
   BaseMemoryService,
@@ -104,9 +103,8 @@ const DATABASE_SESSION_SCHEMES = [
 /**
  * Everything a factory receives besides the URI.
  *
- * adk-python passes these as `**kwargs`. A named interface keeps them typed,
- * and `extra` is a field rather than an index signature so that a typo in a
- * known option stays a compile error.
+ * adk-python passes these as `**kwargs`. adk-js constructors take typed option
+ * objects, so this carries the one option a factory can act on.
  */
 export interface ServiceFactoryOptions {
   /**
@@ -114,8 +112,6 @@ export interface ServiceFactoryOptions {
    * location read `<agentsDir>/.env` before the ambient environment.
    */
   agentsDir?: string;
-  /** Backend-specific options. Built-in factories do not accept any. */
-  extra?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -131,7 +127,7 @@ export type ServiceFactory<T> = (
 ) => T | Promise<T>;
 
 /** The service kinds a `services.yaml` entry can declare. */
-export type ServiceType = 'session' | 'artifact' | 'memory' | 'task_store';
+export type ServiceType = 'session' | 'artifact' | 'memory';
 
 /** The single argument a class declared in `services.yaml` is constructed with. */
 export interface DeclaredServiceOptions extends ServiceFactoryOptions {
@@ -157,10 +153,6 @@ export class ServiceRegistry {
   private readonly memoryFactories = new Map<
     string,
     ServiceFactory<BaseMemoryService>
-  >();
-  private readonly taskStoreFactories = new Map<
-    string,
-    ServiceFactory<TaskStore>
   >();
 
   /**
@@ -190,14 +182,6 @@ export class ServiceRegistry {
     this.memoryFactories.set(scheme, factory);
   }
 
-  /** Binds an A2A task store URI scheme to a factory. */
-  registerTaskStoreService(
-    scheme: string,
-    factory: ServiceFactory<TaskStore>,
-  ): void {
-    this.taskStoreFactories.set(scheme, factory);
-  }
-
   /**
    * Builds the session service for `uri`, or resolves `undefined` when no
    * factory claims its scheme so the caller can fall back.
@@ -224,31 +208,6 @@ export class ServiceRegistry {
   ): Promise<BaseMemoryService | undefined> {
     return createFromFactories(this.memoryFactories, uri, options);
   }
-
-  /**
-   * Builds the A2A task store for `uri`.
-   *
-   * @throws If no factory claims the scheme. A task store has no fallback
-   *   resolver, so an unknown scheme is an error rather than a miss.
-   */
-  async createTaskStoreService(
-    uri: string,
-    options?: ServiceFactoryOptions,
-  ): Promise<TaskStore> {
-    const taskStore = await createFromFactories(
-      this.taskStoreFactories,
-      uri,
-      options,
-    );
-    if (taskStore) {
-      return taskStore;
-    }
-    const supported = [...this.taskStoreFactories.keys()].sort().join(', ');
-    throw new Error(
-      `Unsupported A2A task store URI scheme: '${parseUriScheme(uri) ?? ''}'.` +
-        ` Supported schemes: ${supported}`,
-    );
-  }
 }
 
 let serviceRegistryInstance: ServiceRegistry | undefined;
@@ -269,7 +228,7 @@ export function getServiceRegistry(): ServiceRegistry {
  * registry that custom registrations cannot leak out of.
  */
 export function registerBuiltinServices(registry: ServiceRegistry): void {
-  registry.registerSessionService('memory', createInMemorySessionService);
+  registry.registerSessionService('memory', () => new InMemorySessionService());
   registry.registerSessionService('sqlite', createSqliteSessionService);
   for (const scheme of DATABASE_SESSION_SCHEMES) {
     registry.registerSessionService(scheme, createDatabaseSessionService);
@@ -279,15 +238,16 @@ export function registerBuiltinServices(registry: ServiceRegistry): void {
     createAgentEngineSessionService,
   );
 
-  registry.registerArtifactService('memory', createInMemoryArtifactService);
+  registry.registerArtifactService(
+    'memory',
+    () => new InMemoryArtifactService(),
+  );
   registry.registerArtifactService('gs', createGcsArtifactService);
   registry.registerArtifactService('file', createFileArtifactService);
 
-  registry.registerMemoryService('memory', createInMemoryMemoryService);
+  registry.registerMemoryService('memory', () => new InMemoryMemoryService());
   registry.registerMemoryService('rag', createRagMemoryService);
   registry.registerMemoryService('agentengine', createAgentEngineMemoryService);
-
-  registry.registerTaskStoreService('memory', createInMemoryTaskStoreService);
 }
 
 /**
@@ -389,23 +349,15 @@ function splitUriAuthority(uri: string): {authority: string; path: string} {
     : {authority: remainder.slice(0, slash), path: remainder.slice(slash)};
 }
 
-function createInMemorySessionService(): BaseSessionService {
-  return new InMemorySessionService();
-}
-
 function createDatabaseSessionService(uri: string): BaseSessionService {
   return new DatabaseSessionService(uri);
 }
 
-function createSqliteSessionService(
-  uri: string,
-  options?: ServiceFactoryOptions,
-): BaseSessionService {
+function createSqliteSessionService(uri: string): BaseSessionService {
   const {authority, path: dbPath} = splitUriAuthority(uri);
   if (!authority && !dbPath) {
-    return createInMemorySessionService();
+    return new InMemorySessionService();
   }
-  warnIgnoredOptions('DatabaseSessionService', options);
   return new DatabaseSessionService(uri);
 }
 
@@ -418,15 +370,7 @@ function createAgentEngineSessionService(
   );
 }
 
-function createInMemoryArtifactService(): BaseArtifactService {
-  return new InMemoryArtifactService();
-}
-
-function createGcsArtifactService(
-  uri: string,
-  options?: ServiceFactoryOptions,
-): BaseArtifactService {
-  warnIgnoredOptions('GcsArtifactService', options);
+function createGcsArtifactService(uri: string): BaseArtifactService {
   return new GcsArtifactService(splitUriAuthority(uri).authority);
 }
 
@@ -443,14 +387,6 @@ function createFileArtifactService(uri: string): BaseArtifactService {
   return new FileArtifactService(fileURLToPath(new URL(uri)));
 }
 
-function createInMemoryMemoryService(): BaseMemoryService {
-  return new InMemoryMemoryService();
-}
-
-function createInMemoryTaskStoreService(): TaskStore {
-  return new InMemoryTaskStore();
-}
-
 function createAgentEngineMemoryService(
   uri: string,
   options?: ServiceFactoryOptions,
@@ -465,11 +401,6 @@ interface RagMemoryServiceOptions {
   /** `projects/{project}/locations/{location}/ragCorpora/{corpus}`. */
   ragCorpus: string;
 }
-
-/** The class {@link resolveRagMemoryService} looks up in `@google/adk`. */
-type RagMemoryServiceConstructor = new (
-  options: RagMemoryServiceOptions,
-) => unknown;
 
 async function createRagMemoryService(
   uri: string,
@@ -496,17 +427,19 @@ async function createRagMemoryService(
 }
 
 /**
- * Reads the RAG memory service out of `@google/adk` at call time.
+ * Reads `VertexAiRagMemoryService` out of `@google/adk` at call time.
  *
- * `dev` declares `@google/adk` as a version range, and the service is newer
- * than the low end of it. A static import would therefore fail to compile
- * against an older core package, so `rag://` resolves the class on the call
- * that needs it and reports a usable error when it is missing.
+ * The class is not in `@google/adk` 2.0.0, so a static import does not compile
+ * against the version `dev` depends on, and `rag://` has to look it up by name
+ * on the call that needs it. An installation without it gets an error naming
+ * the scheme to use instead.
  */
-async function resolveRagMemoryService(): Promise<RagMemoryServiceConstructor> {
+async function resolveRagMemoryService(): Promise<
+  new (options: RagMemoryServiceOptions) => unknown
+> {
   const adk: unknown = await import('@google/adk');
   const exported = readProperty(adk, 'VertexAiRagMemoryService');
-  if (!isRagMemoryServiceConstructor(exported)) {
+  if (!isConstructorOf<RagMemoryServiceOptions>(exported)) {
     throw new Error(
       'rag:// needs VertexAiRagMemoryService, which the installed @google/adk' +
         ' does not export. Use agentengine:// for Agent Engine memory instead.',
@@ -577,26 +510,6 @@ function loadGcpConfig(
   return {projectId, location};
 }
 
-/**
- * Warns that a built-in factory drops `extra`.
- *
- * A built-in factory forwards only what its adk-js constructor declares, so an
- * unrecognised option would otherwise disappear without a trace. Register your
- * own factory for the scheme when you need to pass backend options.
- */
-function warnIgnoredOptions(
-  serviceName: string,
-  options?: ServiceFactoryOptions,
-): void {
-  const ignored = Object.keys(options?.extra ?? {});
-  if (ignored.length > 0) {
-    logger.warn(
-      `${serviceName} does not support additional options.` +
-        ` The following parameters will be ignored: ${ignored.join(', ')}`,
-    );
-  }
-}
-
 async function registerServicesFromYamlConfig(
   config: unknown,
   registry: ServiceRegistry,
@@ -652,12 +565,6 @@ function registerDeclaredService(
         declaredFactory(constructor, classPath, 'memory', isMemoryService),
       );
       break;
-    case 'task_store':
-      registry.registerTaskStoreService(
-        scheme,
-        declaredFactory(constructor, classPath, 'task_store', isTaskStore),
-      );
-      break;
     default:
       logger.warn(`Unknown service type in YAML: ${serviceType}`);
   }
@@ -677,11 +584,7 @@ function declaredFactory<T>(
   isService: (value: unknown) => value is T,
 ): ServiceFactory<T> {
   return (uri, options) => {
-    const service = new constructor({
-      uri,
-      agentsDir: options?.agentsDir,
-      extra: options?.extra,
-    });
+    const service = new constructor({uri, agentsDir: options?.agentsDir});
     if (!isService(service)) {
       throw new Error(
         `Class ${classPath} declared for service type '${serviceType}' does not implement it.`,
@@ -713,7 +616,7 @@ async function importServiceClass(
       resolveModuleSpecifier(specifier, agentsDir)
     );
     const exported = readProperty(imported, exportName);
-    if (!isDeclaredServiceConstructor(exported)) {
+    if (!isConstructorOf<DeclaredServiceOptions>(exported)) {
       throw new Error(`export '${exportName}' is not a class`);
     }
     return exported;
@@ -767,15 +670,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isDeclaredServiceConstructor(
+function isConstructorOf<T>(
   value: unknown,
-): value is DeclaredServiceConstructor {
-  return typeof value === 'function' && 'prototype' in value;
-}
-
-function isRagMemoryServiceConstructor(
-  value: unknown,
-): value is RagMemoryServiceConstructor {
+): value is new (options: T) => unknown {
   return typeof value === 'function' && 'prototype' in value;
 }
 
@@ -807,10 +704,6 @@ function isArtifactService(value: unknown): value is BaseArtifactService {
 
 function isMemoryService(value: unknown): value is BaseMemoryService {
   return hasMethods(value, ['addSessionToMemory', 'searchMemory']);
-}
-
-function isTaskStore(value: unknown): value is TaskStore {
-  return hasMethods(value, ['save', 'load']);
 }
 
 function toError(value: unknown): Error {

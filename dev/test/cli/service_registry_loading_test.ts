@@ -66,7 +66,6 @@ describe('loadServicesModule', () => {
     );
     write('demo_artifact.js', serviceClassSource('DemoArtifact', 'artifact'));
     write('demo_memory.js', serviceClassSource('DemoMemory', 'memory'));
-    write('demo_tasks.js', serviceClassSource('DemoTasks', 'task_store'));
     write(
       'services.yaml',
       `services:
@@ -79,9 +78,6 @@ describe('loadServicesModule', () => {
   - scheme: demomemory
     type: memory
     class: './demo_memory.js#DemoMemory'
-  - scheme: demotasks
-    type: task_store
-    class: './demo_tasks.js#DemoTasks'
 `,
     );
 
@@ -94,9 +90,6 @@ describe('loadServicesModule', () => {
       await registry.createArtifactService('demoartifact://x'),
     ).toBeDefined();
     expect(await registry.createMemoryService('demomemory://x')).toBeDefined();
-    expect(
-      await registry.createTaskStoreService('demotasks://x'),
-    ).toBeDefined();
     expect(warn).not.toHaveBeenCalled();
 
     const recorded: unknown = JSON.parse(fs.readFileSync(recordPath, 'utf-8'));

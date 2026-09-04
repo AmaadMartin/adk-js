@@ -1,7 +1,7 @@
 # ServiceRegistry
 
-`ServiceRegistry` maps a URI scheme to the session, artifact, memory or A2A
-task store service that serves it. The ADK CLI consults it before its built-in
+`ServiceRegistry` maps a URI scheme to the session, artifact or memory service
+that serves it. The ADK CLI consults it before its built-in
 resolvers, so `adk web`, `adk api_server` and `adk run` can reach a backend ADK
 does not ship with. Reach for it when you want `--session_service_uri
 myscheme://…` to build your own service.
@@ -37,7 +37,7 @@ services:
     class: './demo_session_service.js#DemoSessionService'
 ```
 
-`type` is one of `session`, `artifact`, `memory` or `task_store`. `class` is a
+`type` is one of `session`, `artifact` or `memory`. `class` is a
 module specifier, a `#`, and the export name; the export name defaults to
 `default`. A relative specifier resolves against the agent directory.
 
@@ -118,8 +118,6 @@ something before it can hand back a service.
 `createSessionService`, `createArtifactService` and `createMemoryService`
 resolve `undefined` when no factory claims the scheme, which is how a caller
 tells "not my scheme, fall back" from "your URI is broken".
-`createTaskStoreService` rejects instead, because a task store has no fallback
-resolver.
 
 Pass `agentsDir` when you can. Factories that need a Google Cloud project and
 location read `<agentsDir>/.env` before the ambient environment.
@@ -138,7 +136,6 @@ location read `<agentsDir>/.env` before the ambient environment.
 | memory       | `memory://`                                                          | `InMemoryMemoryService`                                                               |
 | memory       | `rag://`                                                             | `VertexAiRagMemoryService`, corpus taken from the authority                           |
 | memory       | `agentengine://`                                                     | `VertexAiMemoryBankService`                                                           |
-| task store   | `memory://`                                                          | `InMemoryTaskStore`                                                                   |
 
 `agentengine://` accepts a bare id (`agentengine://123`, which needs
 `agentsDir` and `GOOGLE_CLOUD_PROJECT`/`GOOGLE_CLOUD_LOCATION`) or a full
@@ -149,14 +146,12 @@ resource name
 `projects/{project}/locations/{location}/ragCorpora/my-corpus`, so it needs
 `agentsDir` and the same two environment variables. It resolves
 `VertexAiRagMemoryService` from `@google/adk` on the call that needs it,
-because the class is newer than the oldest `@google/adk` this package accepts.
-Against an older core package the call fails with a message telling you to use
-`agentengine://` instead.
+because the class is not in `@google/adk` 2.0.0. An installation without it
+fails with a message telling you to use `agentengine://` instead.
 
-A built-in factory forwards only what its constructor declares. The `sqlite://`
-and `gs://` factories log a warning naming the keys in `extra` that they drop;
-the others ignore it silently. Register your own factory for the scheme when
-you need to pass backend options.
+A built-in factory passes its adk-js constructor exactly what that constructor
+declares. Register your own factory for the scheme when you need to give a
+backend anything else.
 
 ## What a declared class may name
 
