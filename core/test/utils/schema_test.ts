@@ -9,6 +9,7 @@ import {describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {
+  formatSchemaValidationError,
   objectSchemaFields,
   parseWithSchema,
   toJsonSchema,
@@ -231,5 +232,43 @@ describe('objectSchemaFields', () => {
   it('returns undefined for a schema that is not an object', () => {
     expect(fieldsOf(z4.string())).toBeUndefined();
     expect(fieldsOf(z3.string())).toBeUndefined();
+  });
+});
+
+describe('formatSchemaValidationError', () => {
+  it('renders one line per issue, path first', () => {
+    const result = z4.object({age: z4.number()}).safeParse({age: 'x'});
+    expect(result.success).toBe(false);
+    expect(formatSchemaValidationError(result.error)).toMatch(/^age: /);
+  });
+
+  it('keeps the index of a failing array element in the path', () => {
+    const result = z4
+      .array(z4.object({id: z4.number()}))
+      .safeParse([{id: 'x'}]);
+    expect(result.success).toBe(false);
+    expect(formatSchemaValidationError(result.error)).toContain('0.id: ');
+  });
+
+  it('joins multiple issues with a newline', () => {
+    const result = z4
+      .object({a: z4.number(), b: z4.number()})
+      .safeParse({a: 'x', b: 'y'});
+    expect(result.success).toBe(false);
+    expect(formatSchemaValidationError(result.error).split('\n')).toHaveLength(
+      2,
+    );
+  });
+
+  it('renders a Zod v3 failure the same way', () => {
+    const result = z3.object({age: z3.number()}).safeParse({age: 'x'});
+    expect(result.success).toBe(false);
+    expect(formatSchemaValidationError(result.error)).toMatch(/^age: /);
+  });
+
+  it('falls back to the string form of an error carrying no issues', () => {
+    expect(formatSchemaValidationError(new Error('boom'))).toBe('Error: boom');
+    expect(formatSchemaValidationError('plain')).toBe('plain');
+    expect(formatSchemaValidationError(null)).toBe('null');
   });
 });

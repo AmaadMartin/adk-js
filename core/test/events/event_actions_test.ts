@@ -253,3 +253,45 @@ describe('mergeEventActions', () => {
     expect(result.stateDelta).toEqual({x: 1});
   });
 });
+
+describe('EventActions.setModelResponse', () => {
+  it('defaults to undefined and is reported as a default actions object', () => {
+    const actions = createEventActions();
+    expect(actions.setModelResponse).toBeUndefined();
+    expect(isDefaultEventActions(actions)).toBe(true);
+  });
+
+  it('makes the actions non-default once set', () => {
+    const actions = createEventActions({setModelResponse: {name: 'Alice'}});
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
+
+  it('treats an explicit null response as non-default', () => {
+    const actions = createEventActions({setModelResponse: null});
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
+
+  it('merges last-writer-wins', () => {
+    const result = mergeEventActions([
+      createEventActions({setModelResponse: {step: 1}}),
+      createEventActions({setModelResponse: {step: 2}}),
+    ]);
+    expect(result.setModelResponse).toEqual({step: 2});
+  });
+
+  it('does not clear a set value with a later undefined', () => {
+    const result = mergeEventActions([
+      createEventActions({setModelResponse: {step: 1}}),
+      createEventActions(),
+    ]);
+    expect(result.setModelResponse).toEqual({step: 1});
+  });
+
+  it('carries the value over from the merge target', () => {
+    const target: EventActions = createEventActions({
+      setModelResponse: {step: 0},
+    });
+    const result = mergeEventActions([createEventActions()], target);
+    expect(result.setModelResponse).toEqual({step: 0});
+  });
+});
