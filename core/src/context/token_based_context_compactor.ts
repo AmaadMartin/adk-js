@@ -114,6 +114,10 @@ export class TokenBasedContextCompactor implements BaseContextCompactor {
 
     const compactedEvent = await this.summarizer.summarize(eventsToCompact);
 
+    if (!compactedEvent) {
+      return;
+    }
+
     // Provide default actions and metadata if the summarizer omits it
     if (!compactedEvent.actions) {
       compactedEvent.actions = {

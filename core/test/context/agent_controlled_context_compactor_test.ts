@@ -187,4 +187,33 @@ describe('AgentControlledContextCompactor', () => {
     expect(context.session.events.length).toBe(2); // no compacted event appended
     expect(context.session.state['temp:consolidate_context']).toBeUndefined();
   });
+
+  it('clears flags and appends nothing when the summarizer declines', async () => {
+    const decliningSummarizer: BaseSummarizer = {
+      async summarize(): Promise<CompactedEvent | null> {
+        return null;
+      },
+    };
+    const compactor = new AgentControlledContextCompactor({
+      summarizer: decliningSummarizer,
+    });
+
+    const events = [
+      createMockEvent('1'),
+      createMockEvent('2', true, 'consolidate_context'),
+    ];
+    const state = {
+      'temp:consolidate_context': true,
+      'temp:consolidate_context_detail': 'some detail',
+    };
+    const context = createMockInvocationContext(events, state);
+
+    await compactor.compact(context);
+
+    expect(context.session.events.length).toBe(2);
+    expect(context.session.state['temp:consolidate_context']).toBeUndefined();
+    expect(
+      context.session.state['temp:consolidate_context_detail'],
+    ).toBeUndefined();
+  });
 });
