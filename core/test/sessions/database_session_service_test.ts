@@ -1112,19 +1112,18 @@ describe('DatabaseSessionService lifecycle', () => {
   });
 
   it('closes the service at the end of an await using block', async () => {
-    const closed: DatabaseSessionService[] = [];
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    // The spy calls through, so the block exit also releases the database
+    // file. A stub would leave it open, which Windows cannot then unlink.
+    const close = vi.spyOn(service, 'close');
+
     {
-      await using service = new DatabaseSessionService(
-        `sqlite://${databaseFile}`,
-      );
-      vi.spyOn(service, 'close').mockImplementation(async () => {
-        closed.push(service);
-      });
-      await service.init();
-      expect(closed).toEqual([]);
+      await using disposable = service;
+      await disposable.init();
+      expect(close).not.toHaveBeenCalled();
     }
 
-    expect(closed).toHaveLength(1);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
 
