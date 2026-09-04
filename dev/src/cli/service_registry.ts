@@ -74,7 +74,7 @@ const SERVICE_SCRIPT_FILE = 'services.js';
 /** Matches the scheme of a URI, e.g. `postgresql+asyncpg` in `...://host`. */
 const URI_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):/;
 
-const URI_AUTHORITY_SEPARATOR = '://';
+const URI_AUTHORITY_PREFIX = '//';
 
 /**
  * Everything a factory receives besides the URI.
@@ -330,13 +330,11 @@ function parseUriScheme(uri: string): string | undefined {
  * invents a `/` path for an authority-only URI.
  */
 function splitUriAuthority(uri: string): {authority: string; path: string} {
-  const start = uri.indexOf(URI_AUTHORITY_SEPARATOR);
-  if (start === -1) {
-    return {authority: '', path: ''};
+  const afterScheme = uri.slice(uri.indexOf(':') + 1).split(/[?#]/)[0];
+  if (!afterScheme.startsWith(URI_AUTHORITY_PREFIX)) {
+    return {authority: '', path: afterScheme};
   }
-  const remainder = uri
-    .slice(start + URI_AUTHORITY_SEPARATOR.length)
-    .split(/[?#]/)[0];
+  const remainder = afterScheme.slice(URI_AUTHORITY_PREFIX.length);
   const slash = remainder.indexOf('/');
   return slash === -1
     ? {authority: remainder, path: ''}
@@ -611,7 +609,7 @@ async function importServiceClass(
     const imported: unknown = await import(
       resolveModuleSpecifier(specifier, agentsDir)
     );
-    const exported = isRecord(imported) ? imported[exportName] : undefined;
+    const exported = readProperty(imported, exportName);
     if (!isDeclaredServiceConstructor(exported)) {
       throw new Error(`export '${exportName}' is not a class`);
     }
@@ -653,11 +651,12 @@ function isRelativeOrAbsolutePath(specifier: string): boolean {
   );
 }
 
+function readProperty(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
+
 function readStringField(entry: unknown, field: string): string | undefined {
-  if (!isRecord(entry)) {
-    return undefined;
-  }
-  const value = entry[field];
+  const value = readProperty(entry, field);
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
@@ -672,10 +671,9 @@ function isDeclaredServiceConstructor(
 }
 
 function hasMethods(value: unknown, methods: readonly string[]): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return methods.every((method) => typeof value[method] === 'function');
+  return methods.every(
+    (method) => typeof readProperty(value, method) === 'function',
+  );
 }
 
 function isSessionService(value: unknown): value is BaseSessionService {
