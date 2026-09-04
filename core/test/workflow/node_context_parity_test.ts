@@ -13,12 +13,34 @@
 
 import {createEvent, Event} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {BasePlugin} from '../../src/plugins/base_plugin.js';
+import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
+import {BaseNode} from '../../src/workflow/base_node.js';
 import {isNodeInterruptedError} from '../../src/workflow/errors.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
+import {RequestInput} from '../../src/workflow/request_input.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {createIc, driveNode, driveWorkflow, FnNode} from './test_helpers.js';
+
+/** Short-circuits one named node with a canned output, skipping its body. */
+class SkippingPlugin extends BasePlugin {
+  constructor(
+    private readonly nodeName: string,
+    private readonly skipOutput: unknown,
+  ) {
+    super('skipper');
+  }
+
+  override async beforeNodeCallback({
+    node,
+  }: {
+    node: BaseNode;
+  }): Promise<unknown> {
+    return node.name === this.nodeName ? this.skipOutput : undefined;
+  }
+}
 
 /** A root context with no owning node, as the runner builds for an entrypoint. */
 function rootContext(): NodeContext {
@@ -120,6 +142,31 @@ describe('NodeContext — error and errorNodePath', () => {
     await driveWorkflow(wf, 'x');
 
     expect(midCtx?.errorNodePath).toBe('wf.mid@1.boom@1');
+  });
+
+  it('leaves error unset when a child stopped to ask the user', async () => {
+    let midCtx: NodeContext | undefined;
+    const asker = new FunctionNode('asker', () => {
+      return new RequestInput({interruptId: 'confirm', message: 'confirm?'});
+    });
+    const mid = new FunctionNode('mid', async (ctx, input) => {
+      midCtx = ctx;
+      await ctx.runNode(asker, input);
+      return 'unreachable';
+    });
+    const wf = new Workflow({
+      name: 'wf',
+      dynamicEntry: async (ctx, input) => {
+        await ctx.runNode(mid, input).catch(() => undefined);
+        return undefined;
+      },
+    });
+
+    const {interruptIds} = await driveWorkflow(wf, 'x');
+
+    expect(interruptIds).toContain('confirm');
+    expect(midCtx?.error).toBeUndefined();
+    expect(midCtx?.errorNodePath).toBe('');
   });
 
   it('leaves error unset when the node succeeds', async () => {
@@ -323,6 +370,39 @@ describe('NodeContext — use_as_output delegation', () => {
     });
 
     expect((await driveWorkflow(wf, 'x')).output).toBe('b');
+  });
+
+  it('lets a dynamicEntry delegate and return the same output', async () => {
+    const inner = new FunctionNode('inner', () => 'inner-value');
+    const wf = new Workflow({
+      name: 'wf',
+      dynamicEntry: async (ctx, input) => {
+        const child = await ctx.runNode(inner, input, {useAsOutput: true});
+        return child.output;
+      },
+    });
+
+    expect((await driveWorkflow(wf, 'x')).output).toBe('inner-value');
+  });
+
+  it('lets a plugin-skipped delegate replace an earlier one', async () => {
+    const first = new FunctionNode('first', () => 'a');
+    const second = new FunctionNode('second', () => 'fresh');
+    const wf = new Workflow({
+      name: 'wf',
+      dynamicEntry: async (ctx, input) => {
+        await ctx.runNode(first, input, {useAsOutput: true});
+        await ctx.runNode(second, input, {useAsOutput: true});
+        return undefined;
+      },
+    });
+    const ic = createIc().clone({
+      pluginManager: new PluginManager([
+        new SkippingPlugin('second', 'cached-value'),
+      ]),
+    });
+
+    expect((await driveWorkflow(wf, 'x', {ic})).output).toBe('cached-value');
   });
 });
 
