@@ -7,7 +7,6 @@
 import type {Content} from '@google/genai';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import type {Invocation} from './eval_case.js';
-import type {BaseCriterion} from './eval_metrics.js';
 import {EvalStatus} from './eval_metrics.js';
 import type {RubricScore} from './eval_rubrics.js';
 
@@ -65,26 +64,6 @@ export interface Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
   ): EvaluationResult | Promise<EvaluationResult>;
-}
-
-/**
- * The runtime handle for the criterion type a metric accepts.
- *
- * A criterion arrives untyped, from a user-authored eval config file. The
- * metric names the type it accepts, and that type turns the raw value into a
- * criterion or rejects it.
- */
-export interface CriterionType<C extends BaseCriterion = BaseCriterion> {
-  /** The type name reported when a criterion does not fit. */
-  readonly name: string;
-
-  /**
-   * Returns the value as a criterion of this type.
-   *
-   * @throws {InputValidationError} When the value is not a criterion of this
-   *   type.
-   */
-  validate(value: unknown): C;
 }
 
 /** The result returned when nothing could be evaluated. */

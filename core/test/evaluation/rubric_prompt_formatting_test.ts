@@ -14,7 +14,9 @@ import {
   EvalMetric,
   EvalStatus,
   formatPromptTemplate,
+  InputValidationError,
   Invocation,
+  parseRubricsBasedCriterion,
   PrebuiltMetrics,
   Rubric,
   RubricBasedFinalResponseQualityV1Evaluator,
@@ -297,5 +299,29 @@ describe('evaluateInvocations against a scripted judge', () => {
       EvalStatus.NOT_EVALUATED,
     );
     expect(result.overallScore).toBeUndefined();
+  });
+});
+
+describe('criterion validation', () => {
+  it('names the offending property when a judge option has the wrong type', () => {
+    expect(() =>
+      parseRubricsBasedCriterion({
+        threshold: 0.5,
+        judge_model_options: {num_samples: 'three'},
+      }),
+    ).toThrow(
+      new InputValidationError(
+        'Invalid RubricsBasedCriterion: judgeModelOptions.numSamples:' +
+          ' Invalid input: expected number, received string',
+      ),
+    );
+  });
+
+  it('applies the judge model defaults a criterion leaves out', () => {
+    const criterion = parseRubricsBasedCriterion({threshold: 0.5});
+
+    expect(criterion.judgeModelOptions.numSamples).toBe(5);
+    expect(criterion.judgeModelOptions.parallelismLimit).toBe(1);
+    expect(criterion.rubrics).toEqual([]);
   });
 });

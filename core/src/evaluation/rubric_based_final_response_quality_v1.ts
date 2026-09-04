@@ -12,8 +12,8 @@ import {
   Invocation,
   isInvocationEvents,
 } from './eval_case.js';
-import {EvalMetric, RubricsBasedCriterion} from './eval_metrics.js';
-import {CriterionType, getTextFromContent} from './evaluator.js';
+import {EvalMetric} from './eval_metrics.js';
+import {getTextFromContent} from './evaluator.js';
 import {
   formatPromptTemplate,
   getGroundingMetadataAsJsonStr,
@@ -21,10 +21,7 @@ import {
   getToolCallsAndResponsesAsJsonStr,
   getToolDeclarationsAsJsonStr,
 } from './llm_as_judge_utils.js';
-import {
-  RUBRICS_BASED_CRITERION_TYPE,
-  RubricBasedEvaluator,
-} from './rubric_based_evaluator.js';
+import {RubricBasedEvaluator} from './rubric_based_evaluator.js';
 
 /** What the judge is told when the app declares no tools. */
 const NO_TOOLS_TEXT = 'Agent has no tools.';
@@ -292,10 +289,6 @@ function developerInstructionsFor(
  */
 @experimental
 export class RubricBasedFinalResponseQualityV1Evaluator extends RubricBasedEvaluator {
-  /** The criterion type this metric accepts. */
-  static readonly criterionType: CriterionType<RubricsBasedCriterion> =
-    RUBRICS_BASED_CRITERION_TYPE;
-
   /** The type of the invocation rubrics this metric grades. */
   static readonly RUBRIC_TYPE = 'FINAL_RESPONSE_QUALITY';
 

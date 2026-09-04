@@ -17,10 +17,8 @@ import {
   CriterionParser,
   EvalMetric,
   EvalStatus,
-  LlmAsAJudgeCriterion,
-  ResolvedJudgeModelOptions,
+  ParsedLlmAsAJudgeCriterion,
   getMetricThreshold,
-  resolveJudgeModelOptions,
 } from './eval_metrics.js';
 import {RubricScore} from './eval_rubrics.js';
 import {
@@ -43,7 +41,9 @@ export interface AutoRaterScore {
 }
 
 /** How a {@link LlmAsJudge} is configured. */
-export interface LlmAsJudgeOptions<CriterionT extends LlmAsAJudgeCriterion> {
+export interface LlmAsJudgeOptions<
+  CriterionT extends ParsedLlmAsAJudgeCriterion,
+> {
   evalMetric: EvalMetric;
 
   /**
@@ -87,7 +87,7 @@ interface SettledInvocation {
  * @throws {InputValidationError} When the metric carries no criterion, or one
  *   the parser rejects.
  */
-function parseMetricCriterion<CriterionT extends LlmAsAJudgeCriterion>(
+function parseMetricCriterion<CriterionT extends ParsedLlmAsAJudgeCriterion>(
   evalMetric: EvalMetric,
   parseCriterion: CriterionParser<CriterionT>,
 ): CriterionT {
@@ -149,16 +149,10 @@ function groupSettledSamples(
  */
 @experimental
 export abstract class LlmAsJudge<
-  CriterionT extends LlmAsAJudgeCriterion,
+  CriterionT extends ParsedLlmAsAJudgeCriterion,
 > implements Evaluator {
   protected readonly criterion: CriterionT;
 
-  /**
-   * The criterion's judge model options, with every default applied. The
-   * criterion carries them optionally, so a judge reads them through
-   * {@link resolveJudgeModelOptions} rather than off the criterion.
-   */
-  protected readonly judgeModelOptions: ResolvedJudgeModelOptions;
   protected readonly threshold: number;
   protected readonly judgeModel: BaseLlm;
   private readonly expectedInvocationsRequired: boolean;
@@ -170,13 +164,10 @@ export abstract class LlmAsJudge<
       options.evalMetric,
       options.parseCriterion,
     );
-    this.judgeModelOptions = resolveJudgeModelOptions(
-      this.criterion.judgeModelOptions,
-    );
     this.threshold = getMetricThreshold(options.evalMetric);
     this.judgeModel =
       options.judgeModel ??
-      LLMRegistry.newLlm(this.judgeModelOptions.judgeModel);
+      LLMRegistry.newLlm(this.criterion.judgeModelOptions.judgeModel);
   }
 
   /** Formats the auto-rater prompt that grades the given invocation. */
@@ -207,7 +198,7 @@ export abstract class LlmAsJudge<
    * Grades every actual invocation, optionally against a golden one.
    *
    * Every sample of every invocation shares one parallelism budget, so at
-   * most `judgeModelOptions.parallelismLimit` judge calls are ever in flight.
+   * most `criterion.judgeModelOptions.parallelismLimit` judge calls are ever in flight.
    * A sample that fails is logged and marks its own invocation
    * `NOT_EVALUATED`; the other invocations are graded as usual.
    *
@@ -228,7 +219,7 @@ export abstract class LlmAsJudge<
     const samples = this.buildSamples(actualInvocations, expectedInvocations);
     const settled = await mapWithConcurrency(
       samples,
-      this.judgeModelOptions.parallelismLimit,
+      this.criterion.judgeModelOptions.parallelismLimit,
       (sample) => this.evaluateSingleSample(sample),
     );
     const byInvocation = groupSettledSamples(samples, settled);
@@ -281,7 +272,7 @@ export abstract class LlmAsJudge<
             parts: [{text: this.formatAutoRaterPrompt(actual, expected)}],
           },
         ],
-        config: this.judgeModelOptions.judgeModelConfig ?? {},
+        config: this.criterion.judgeModelOptions.judgeModelConfig ?? {},
         liveConnectConfig: {},
         toolsDict: {},
       };
@@ -289,7 +280,7 @@ export abstract class LlmAsJudge<
 
       for (
         let sample = 0;
-        sample < this.judgeModelOptions.numSamples;
+        sample < this.criterion.judgeModelOptions.numSamples;
         sample++
       ) {
         samples.push({invocationIndex, llmRequest, actual, expected});

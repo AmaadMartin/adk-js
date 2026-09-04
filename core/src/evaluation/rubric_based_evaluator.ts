@@ -11,12 +11,11 @@ import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {
   EvalMetric,
-  RubricsBasedCriterion,
+  ParsedRubricsBasedCriterion,
   parseRubricsBasedCriterion,
 } from './eval_metrics.js';
 import {Rubric, RubricScore} from './eval_rubrics.js';
 import {
-  CriterionType,
   EvaluationResult,
   PerInvocationResult,
   getEvalStatus,
@@ -24,13 +23,6 @@ import {
 } from './evaluator.js';
 import {AutoRaterScore, LlmAsJudge} from './llm_as_judge.js';
 import {getAverageRubricScore} from './llm_as_judge_utils.js';
-
-/** The criterion type every rubric-based metric accepts. */
-export const RUBRICS_BASED_CRITERION_TYPE: CriterionType<RubricsBasedCriterion> =
-  {
-    name: parseRubricsBasedCriterion.criterionName,
-    validate: parseRubricsBasedCriterion,
-  };
 
 /** One rubric's verdict, as read out of the auto-rater's response text. */
 export interface RubricResponse {
@@ -277,21 +269,8 @@ const SMART_CHARS: Record<string, string> = {
   '\u2014': '-',
 };
 const SMART_CHARS_PATTERN = /[\u2018\u2019\u201c\u201d\u2013\u2014]/g;
-const DECORATION_CHARS = ' *_`#>-\u2022"\'';
 const WHITESPACE_PATTERN = /\s+/g;
-
-/** Removes every leading and trailing character in `chars`. */
-function trimChars(text: string, chars: string): string {
-  let start = 0;
-  let end = text.length;
-  while (start < end && chars.includes(text[start])) {
-    start++;
-  }
-  while (end > start && chars.includes(text[end - 1])) {
-    end--;
-  }
-  return text.slice(start, end);
-}
+const DECORATION_PATTERN = /^[ *_`#>\-\u2022"']+|[ *_`#>\-\u2022"']+$/g;
 
 /**
  * Returns a normalized form of a rubric property, for matching one the judge
@@ -305,13 +284,12 @@ function normalizeText(text?: string): string {
   if (text === undefined) {
     return '';
   }
-  const withPlainChars = text
+  return text
     .normalize('NFKC')
-    .replace(SMART_CHARS_PATTERN, (char) => SMART_CHARS[char]);
-  return trimChars(
-    withPlainChars.replace(WHITESPACE_PATTERN, ' '),
-    DECORATION_CHARS,
-  ).toLowerCase();
+    .replace(SMART_CHARS_PATTERN, (char) => SMART_CHARS[char])
+    .replace(WHITESPACE_PATTERN, ' ')
+    .replace(DECORATION_PATTERN, '')
+    .toLowerCase();
 }
 
 /** How a {@link RubricBasedEvaluator} is configured. */
@@ -345,7 +323,7 @@ export interface RubricBasedEvaluatorOptions {
  * the rubrics that were assessed.
  */
 @experimental
-export abstract class RubricBasedEvaluator extends LlmAsJudge<RubricsBasedCriterion> {
+export abstract class RubricBasedEvaluator extends LlmAsJudge<ParsedRubricsBasedCriterion> {
   private readonly rubricType?: string;
   private readonly autoRaterResponseParser: AutoRaterResponseParser;
   private readonly perInvocationResultsAggregator: PerInvocationResultsAggregator;
@@ -372,7 +350,7 @@ export abstract class RubricBasedEvaluator extends LlmAsJudge<RubricsBasedCriter
     this.invocationResultsSummarizer =
       options.invocationResultsSummarizer ??
       new MeanInvocationResultsSummarizer();
-    this.criterionRubrics = this.criterion.rubrics ?? [];
+    this.criterionRubrics = this.criterion.rubrics;
   }
 
   /**

@@ -30,7 +30,6 @@ export {
   PrebuiltMetrics,
   getMetricThreshold,
   parseRubricsBasedCriterion,
-  resolveJudgeModelOptions,
 } from './eval_metrics.js';
 export type {
   BaseCriterion,
@@ -39,6 +38,8 @@ export type {
   EvalMetricCriterion,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
+  ParsedLlmAsAJudgeCriterion,
+  ParsedRubricsBasedCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
   Threshold,
@@ -51,7 +52,6 @@ export {
   validateInvocationLengths,
 } from './evaluator.js';
 export type {
-  CriterionType,
   EvaluationResult,
   Evaluator,
   PerInvocationResult,
@@ -70,7 +70,6 @@ export {
   DefaultAutoRaterResponseParser,
   MajorityVotePerInvocationResultsAggregator,
   MeanInvocationResultsSummarizer,
-  RUBRICS_BASED_CRITERION_TYPE,
   RubricBasedEvaluator,
 } from './rubric_based_evaluator.js';
 export type {

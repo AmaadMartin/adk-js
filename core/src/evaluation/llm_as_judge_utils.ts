@@ -25,15 +25,11 @@ const NO_GROUNDING_METADATA_TEXT = 'No grounding metadata was provided.';
 const JSON_INDENT = 2;
 
 /**
- * Keys whose value is an opaque payload rather than a typed field, so its own
- * keys keep the spelling the agent used instead of being converted.
+ * A tool call's arguments and a tool response's payload are agent data, not
+ * typed fields, so their own keys keep the spelling the agent used.
  */
-const OPAQUE_PAYLOAD_KEYS: ReadonlySet<string> = new Set(['args', 'response']);
-
-/** Serializes a genai value the way adk-python's judge prompts do. */
-function toPromptJson(value: unknown): unknown {
-  return toSnakeCase(value, [], OPAQUE_PAYLOAD_KEYS);
-}
+const TOOL_CALL_PAYLOAD_KEYS = ['args'];
+const TOOL_RESPONSE_PAYLOAD_KEYS = ['response'];
 
 /**
  * Fills a prompt template, replacing every `{name}` with the matching value
@@ -81,7 +77,7 @@ export function getToolDeclarationsAsJsonStr(appDetails: AppDetails): string {
   const toolsByAgentName = getToolsByAgentName(appDetails);
   const declarations: Record<string, unknown> = {};
   for (const [agentName, tools] of Object.entries(toolsByAgentName)) {
-    declarations[agentName] = toPromptJson(tools);
+    declarations[agentName] = toSnakeCase(tools);
   }
   return JSON.stringify({tool_declarations: declarations}, null, JSON_INDENT);
 }
@@ -102,8 +98,10 @@ export function getToolCallsAndResponsesAsJsonStr(
   const entries = toolCallsWithResponses.map(
     ([toolCall, toolResponse], step) => ({
       step,
-      tool_call: toPromptJson(toolCall),
-      tool_response: toolResponse ? toPromptJson(toolResponse) : 'None',
+      tool_call: toSnakeCase(toolCall, TOOL_CALL_PAYLOAD_KEYS),
+      tool_response: toolResponse
+        ? toSnakeCase(toolResponse, TOOL_RESPONSE_PAYLOAD_KEYS)
+        : 'None',
     }),
   );
   return JSON.stringify({tool_calls_and_response: entries}, null, JSON_INDENT);
@@ -130,7 +128,7 @@ export function getGroundingMetadataAsJsonStr(
           {
             step,
             author: event.author,
-            grounding_metadata: toPromptJson(event.groundingMetadata),
+            grounding_metadata: toSnakeCase(event.groundingMetadata),
           },
         ],
   );

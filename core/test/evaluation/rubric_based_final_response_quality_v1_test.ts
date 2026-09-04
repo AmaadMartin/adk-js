@@ -20,6 +20,7 @@ import {
   PrebuiltMetrics,
   Rubric,
   RubricBasedFinalResponseQualityV1Evaluator,
+  parseRubricsBasedCriterion,
 } from '@google/adk';
 import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -220,7 +221,7 @@ describe('RubricBasedFinalResponseQualityV1Evaluator', () => {
 
 describe('RubricBasedFinalResponseQualityV1Evaluator prompt edge cases', () => {
   it('names the criterion type and rubric type it grades', () => {
-    expect(RubricBasedFinalResponseQualityV1Evaluator.criterionType.name).toBe(
+    expect(parseRubricsBasedCriterion.criterionName).toBe(
       'RubricsBasedCriterion',
     );
     expect(RubricBasedFinalResponseQualityV1Evaluator.RUBRIC_TYPE).toBe(

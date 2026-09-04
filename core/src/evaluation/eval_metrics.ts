@@ -91,50 +91,6 @@ export interface ResolvedJudgeModelOptions {
   parallelismLimit: number;
 }
 
-function requireInteger(field: string, value: number): number {
-  if (!Number.isInteger(value)) {
-    throw new InputValidationError(
-      `judgeModelOptions.${field} must be an integer, but got ${value}.`,
-    );
-  }
-  return value;
-}
-
-/**
- * Applies the judge model defaults and rejects options a judge cannot honour.
- *
- * adk-python applies these defaults and this validation in the
- * `JudgeModelOptions` constructor. A TypeScript interface is erased at run
- * time, so a caller reads its options through this function instead.
- *
- * @throws {InputValidationError} When `numSamples` or `parallelismLimit` is
- *   not an integer, or `parallelismLimit` is below 1.
- */
-export function resolveJudgeModelOptions(
-  options?: JudgeModelOptions,
-): ResolvedJudgeModelOptions {
-  const parallelismLimit = requireInteger(
-    'parallelismLimit',
-    options?.parallelismLimit ?? DEFAULT_JUDGE_PARALLELISM_LIMIT,
-  );
-  if (parallelismLimit < MIN_JUDGE_PARALLELISM_LIMIT) {
-    throw new InputValidationError(
-      `judgeModelOptions.parallelismLimit must be at least ` +
-        `${MIN_JUDGE_PARALLELISM_LIMIT}, but got ${parallelismLimit}.`,
-    );
-  }
-
-  return {
-    judgeModel: options?.judgeModel ?? DEFAULT_JUDGE_MODEL,
-    judgeModelConfig: options?.judgeModelConfig,
-    numSamples: requireInteger(
-      'numSamples',
-      options?.numSamples ?? DEFAULT_JUDGE_NUM_SAMPLES,
-    ),
-    parallelismLimit,
-  };
-}
-
 /**
  * The criterion a metric is judged against.
  *
@@ -161,16 +117,29 @@ export interface LlmAsAJudgeCriterion extends BaseCriterion {
 }
 
 /** Criterion for a metric that scores a response against rubrics. */
-export interface RubricsBasedCriterion extends BaseCriterion {
-  /** Options for the judge model. */
-  judgeModelOptions?: JudgeModelOptions;
-
+export interface RubricsBasedCriterion extends LlmAsAJudgeCriterion {
   /**
    * The rubrics the metric applies. Defaults to an empty list. A metric that
    * needs rubrics rejects a criterion that names none; a metric that does not
    * use rubrics ignores the field.
    */
   rubrics?: Rubric[];
+}
+
+/**
+ * An {@link LlmAsAJudgeCriterion} that has been validated, so its judge model
+ * options carry every default and a judge can read them off the criterion.
+ */
+export interface ParsedLlmAsAJudgeCriterion extends LlmAsAJudgeCriterion {
+  judgeModelOptions: ResolvedJudgeModelOptions;
+}
+
+/**
+ * A {@link RubricsBasedCriterion} that has been validated, so its judge model
+ * options and its rubric list are both set.
+ */
+export interface ParsedRubricsBasedCriterion extends ParsedLlmAsAJudgeCriterion {
+  rubrics: Rubric[];
 }
 
 /** Every criterion shape this metric's config can carry. */
@@ -244,21 +213,21 @@ const llmAsAJudgeCriterionShape = {
 };
 
 /** Validates a {@link RubricsBasedCriterion} payload. */
-const rubricsBasedCriterionModel: EvalModel<RubricsBasedCriterion> = evalModel(
-  {
-    ...llmAsAJudgeCriterionShape,
-    rubrics: z.array(rubricModel.schema).default(() => []),
-  },
-  {...CRITERION_OPTIONS, name: 'RubricsBasedCriterion'},
-);
+const rubricsBasedCriterionModel: EvalModel<ParsedRubricsBasedCriterion> =
+  evalModel(
+    {
+      ...llmAsAJudgeCriterionShape,
+      rubrics: z.array(rubricModel.schema).default(() => []),
+    },
+    {...CRITERION_OPTIONS, name: 'RubricsBasedCriterion'},
+  );
 
 /**
  * A function that validates a criterion read from a config file, and applies
  * its defaults.
  *
  * {@link LlmAsJudge} takes one of these so that it can name the criterion type
- * its metric expects when the criterion does not fit. It is the callable form
- * of {@link CriterionType}, which an evaluator class declares instead.
+ * its metric expects when the criterion does not fit.
  */
 export interface CriterionParser<CriterionT extends BaseCriterion> {
   (raw: unknown): CriterionT;
@@ -275,7 +244,7 @@ export interface CriterionParser<CriterionT extends BaseCriterion> {
  */
 export function parseRubricsBasedCriterion(
   raw: unknown,
-): RubricsBasedCriterion {
+): ParsedRubricsBasedCriterion {
   return rubricsBasedCriterionModel.parse(raw);
 }
 parseRubricsBasedCriterion.criterionName = 'RubricsBasedCriterion';
