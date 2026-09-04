@@ -23,6 +23,7 @@ import {
   aggregateConversationResults,
   aggregateSamples,
   convertLlmResponseToScore,
+  evaluateFirstTurn,
   formatConversationHistory,
   parseIsValidLabel,
   type BaseLlmConnection,
@@ -147,6 +148,19 @@ describe('parseIsValidLabel', () => {
     expect(parseIsValidLabel('the judge said nothing useful')).toBe(
       Label.NOT_FOUND,
     );
+  });
+});
+
+describe('evaluateFirstTurn', () => {
+  it('ignores whitespace around the starting prompt', () => {
+    const result = evaluateFirstTurn(
+      turn(`  ${STARTING_PROMPT}\n`, 'Sure, where to?'),
+      scenario(),
+      1.0,
+    );
+
+    expect(result.score).toBe(1);
+    expect(result.evalStatus).toBe(EvalStatus.PASSED);
   });
 });
 

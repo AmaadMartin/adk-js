@@ -61,6 +61,14 @@ describe('getPerTurnUserSimulatorQualityPrompt', () => {
     );
   });
 
+  it('renders a persona field indexing into an array as empty', () => {
+    // Only a path of plain identifiers is substituted, so an index reaches
+    // nothing even though the property is there.
+    expect(
+      renderWithBehaviorName('{{ persona.behaviors.0.description }}'),
+    ).toContain('## Criteria: \n');
+  });
+
   it('keeps an empty persona field empty', () => {
     expect(renderWithBehaviorName('')).toContain('## Criteria: \n');
   });
