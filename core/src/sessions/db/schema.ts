@@ -6,6 +6,8 @@
 
 import {
   Entity,
+  EntityData,
+  EntityManager,
   Index,
   JsonType,
   ManyToOne,
@@ -143,10 +145,33 @@ export class StorageSession {
     type: 'datetime',
     fieldName: 'update_time',
     onCreate: () => new Date(),
+    onUpdate: (row: StorageSession, em: EntityManager) =>
+      nextSessionUpdateTime(
+        row,
+        em.getUnitOfWork().getOriginalEntityData(row)!,
+      ),
   })
   updateTime: Date = new Date();
 
   [PrimaryKey.name]?: [string, string, string];
+}
+
+/**
+ * The value `sessions.update_time` takes on an update.
+ *
+ * adk-python declares `onupdate=func.now()`, which SQLAlchemy applies only to
+ * an update that leaves the column alone; `append_event` assigns the column
+ * itself and keeps its own value. MikroORM runs its `onUpdate` hook on every
+ * update change set instead, so this compares the row against the snapshot it
+ * was loaded with and keeps a value the caller assigned.
+ */
+function nextSessionUpdateTime(
+  row: StorageSession,
+  original: EntityData<StorageSession>,
+): Date {
+  return Number(original.updateTime) === row.updateTime.getTime()
+    ? new Date()
+    : row.updateTime;
 }
 
 /**
@@ -248,12 +273,33 @@ export interface ToSessionOptions {
 }
 
 /**
+ * The revision a session row is currently at.
+ *
+ * Mirrors adk-python's `get_update_marker`. The string is an opaque equality
+ * token: a caller only compares it against another marker this function
+ * produced, and it never crosses the SDK boundary. adk-python renders
+ * microseconds where a JavaScript `Date` renders milliseconds, so the two SDKs
+ * do not produce the same string for one instant.
+ */
+export function getUpdateMarker(row: StorageSession): string {
+  return row.updateTime.toISOString();
+}
+
+/**
+ * The session row's update time, in milliseconds since the epoch.
+ *
+ * Mirrors adk-python's `get_update_timestamp`, which returns seconds. adk-js
+ * measures `Session.lastUpdateTime` and `Event.timestamp` in milliseconds
+ * throughout, so this keeps milliseconds.
+ */
+export function getUpdateTimestamp(row: StorageSession): number {
+  return row.updateTime.getTime();
+}
+
+/**
  * Converts a session row into a {@link Session}.
  *
- * Mirrors adk-python's `StorageSession.to_session`. adk-python's
- * `get_update_timestamp` returns seconds; adk-js measures
- * `Session.lastUpdateTime` and `Event.timestamp` in milliseconds throughout, so
- * `lastUpdateTime` keeps milliseconds.
+ * Mirrors adk-python's `StorageSession.to_session`.
  */
 export function toSession(
   row: StorageSession,
@@ -265,7 +311,8 @@ export function toSession(
     userId: row.userId,
     state: options.state,
     events: options.events ?? [],
-    lastUpdateTime: row.updateTime.getTime(),
+    lastUpdateTime: getUpdateTimestamp(row),
+    storageUpdateMarker: getUpdateMarker(row),
   });
 }
 

@@ -19,6 +19,8 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {
   ENTITIES,
   EVENTS_TIMESTAMP_INDEX_NAME,
+  getUpdateMarker,
+  getUpdateTimestamp,
   StorageEvent,
   storageEventFromEvent,
   storageEventToEvent,
@@ -117,13 +119,13 @@ describe('schema converters', () => {
   });
 
   it('test_to_session_normalizes_aware_update_time_marker_to_utc', () => {
-    // Only the instant half of the adk-python case ports. adk-js has no
-    // revision marker to normalize, because nothing here reads one.
     const row = sessionRow(AWARE_UPDATE_TIME);
 
     const session = toSession(row, {state: {}});
 
     expect(session.lastUpdateTime).toBe(AWARE_UPDATE_TIME.getTime());
+    // The row names 03:04:05.123 in a zone five hours ahead of UTC.
+    expect(session.storageUpdateMarker).toBe('2026-01-01T22:04:05.123Z');
   });
 
   it('test_get_session_keeps_exact_epoch_across_a_repeated_local_hour', () => {
@@ -376,5 +378,89 @@ describe('rows written by adk-python', () => {
 
     expect(event.author).toBe('user');
     expect(event.timestamp).toBe(SECOND_REPEATED_HOUR_EPOCH);
+  });
+});
+
+describe('session update time and revision marker', () => {
+  let orm: MikroORM | undefined;
+  const originalTimeZone = process.env.TZ;
+
+  afterEach(async () => {
+    if (originalTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTimeZone;
+    }
+    if (orm) {
+      await orm.close();
+      orm = undefined;
+    }
+  });
+
+  async function storeSession(updateTime: Date): Promise<void> {
+    orm = await openOrm();
+    await orm.schema.createSchema();
+    const em = orm.em.fork();
+    em.create(StorageSession, {
+      id: 's1',
+      appName: 'my_app',
+      userId: 'u1',
+      state: {},
+      createTime: updateTime,
+      updateTime,
+    });
+    await em.flush();
+  }
+
+  async function reloadSession(): Promise<StorageSession> {
+    return orm!.em.fork().findOneOrFail(StorageSession, {id: 's1'});
+  }
+
+  it('renders the marker as a UTC instant, to the millisecond', () => {
+    expect(getUpdateMarker(sessionRow(NAIVE_UPDATE_TIME))).toBe(
+      '2026-01-02T03:04:05.123Z',
+    );
+  });
+
+  it('reports the update time in milliseconds', () => {
+    expect(getUpdateTimestamp(sessionRow(NAIVE_UPDATE_TIME))).toBe(
+      NAIVE_UPDATE_TIME.getTime(),
+    );
+  });
+
+  it('reads back the instant it wrote under a non-UTC process zone', async () => {
+    process.env.TZ = 'America/Los_Angeles';
+    await storeSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const row = await reloadSession();
+
+    expect(getUpdateTimestamp(row)).toBe(FIRST_REPEATED_HOUR_EPOCH);
+  });
+
+  it('stamps update_time on an update that leaves the column alone', async () => {
+    await storeSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const em = orm!.em.fork();
+    const row = await em.findOneOrFail(StorageSession, {id: 's1'});
+    row.state = {k: 'v'};
+    await em.flush();
+
+    expect((await reloadSession()).updateTime.getTime()).toBeGreaterThan(
+      FIRST_REPEATED_HOUR_EPOCH,
+    );
+  });
+
+  it('keeps an update_time the caller assigned', async () => {
+    await storeSession(new Date(FIRST_REPEATED_HOUR_EPOCH));
+
+    const em = orm!.em.fork();
+    const row = await em.findOneOrFail(StorageSession, {id: 's1'});
+    row.state = {k: 'v'};
+    row.updateTime = new Date(SECOND_REPEATED_HOUR_EPOCH);
+    await em.flush();
+
+    expect((await reloadSession()).updateTime.getTime()).toBe(
+      SECOND_REPEATED_HOUR_EPOCH,
+    );
   });
 });
