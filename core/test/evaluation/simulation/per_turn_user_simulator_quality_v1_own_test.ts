@@ -253,17 +253,15 @@ describe('PerTurnUserSimulatorQualityV1', () => {
   });
 
   it('rejects a criterion that names no threshold', () => {
-    expect(
-      () =>
-        new PerTurnUserSimulatorQualityV1({
-          evalMetric: {
-            metricName: 'per_turn_user_simulator_quality_v1',
-            criterion: {stopSignal: STOP_SIGNAL} as unknown as {
-              threshold: number;
-            },
-          },
-        }),
-    ).toThrow(InputValidationError);
+    // A criterion is read from a config document, so it arrives in any shape.
+    const evalMetric: EvalMetric = JSON.parse(
+      '{"metricName": "per_turn_user_simulator_quality_v1",' +
+        ' "criterion": {"stopSignal": "test stop signal"}}',
+    );
+
+    expect(() => new PerTurnUserSimulatorQualityV1({evalMetric})).toThrow(
+      InputValidationError,
+    );
   });
 
   it('resolves the judge model through the registry when none is supplied', async () => {
