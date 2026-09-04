@@ -163,7 +163,7 @@ copies of that package are not interchangeable.
 ## Clients and cleanup
 
 The toolset caches one publisher client and one subscriber client per
-credential and operation. A cached client is reused for 30 minutes, and the
+credential and project. A cached client is reused for 30 minutes, and the
 publisher cache holds at most 10 clients, evicting the least recently used.
 Both bounds match adk-python.
 
