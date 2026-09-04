@@ -129,41 +129,41 @@ function serializePart(part: Part): Record<string, unknown> {
     data['text'] = part.text;
   }
   if (part.functionCall) {
-    data['functionCall'] = {
+    data['function_call'] = {
       id: part.functionCall.id,
       name: part.functionCall.name,
       args: safeSerialize(part.functionCall.args),
     };
   }
   if (part.functionResponse) {
-    data['functionResponse'] = {
+    data['function_response'] = {
       id: part.functionResponse.id,
       name: part.functionResponse.name,
       response: safeSerialize(part.functionResponse.response),
     };
   }
   if (part.inlineData) {
-    data['inlineData'] = {
-      mimeType: part.inlineData.mimeType,
-      displayName: part.inlineData.displayName,
+    data['inline_data'] = {
+      mime_type: part.inlineData.mimeType,
+      display_name: part.inlineData.displayName,
       // The bytes are omitted to keep the file readable.
-      dataOmitted: true,
+      _data_omitted: true,
     };
   }
   if (part.fileData) {
-    data['fileData'] = {
-      fileUri: part.fileData.fileUri,
-      mimeType: part.fileData.mimeType,
+    data['file_data'] = {
+      file_uri: part.fileData.fileUri,
+      mime_type: part.fileData.mimeType,
     };
   }
   if (part.codeExecutionResult) {
-    data['codeExecutionResult'] = {
+    data['code_execution_result'] = {
       outcome: part.codeExecutionResult.outcome,
       output: part.codeExecutionResult.output,
     };
   }
   if (part.executableCode) {
-    data['executableCode'] = {
+    data['executable_code'] = {
       language: part.executableCode.language,
       code: part.executableCode.code,
     };
@@ -207,30 +207,30 @@ function serializeRequestConfig(
   const systemInstruction = config.systemInstruction;
   if (systemInstruction) {
     if (includeSystemInstruction) {
-      data['systemInstruction'] = safeSerialize(systemInstruction);
+      data['system_instruction'] = safeSerialize(systemInstruction);
     } else if (typeof systemInstruction === 'string') {
-      data['systemInstructionLength'] = systemInstruction.length;
+      data['system_instruction_length'] = systemInstruction.length;
     } else {
-      data['hasSystemInstruction'] = true;
+      data['has_system_instruction'] = true;
     }
   }
   if (config.temperature !== undefined) {
     data['temperature'] = config.temperature;
   }
   if (config.topP !== undefined) {
-    data['topP'] = config.topP;
+    data['top_p'] = config.topP;
   }
   if (config.topK !== undefined) {
-    data['topK'] = config.topK;
+    data['top_k'] = config.topK;
   }
   if (config.maxOutputTokens !== undefined) {
-    data['maxOutputTokens'] = config.maxOutputTokens;
+    data['max_output_tokens'] = config.maxOutputTokens;
   }
   if (config.responseMimeType) {
-    data['responseMimeType'] = config.responseMimeType;
+    data['response_mime_type'] = config.responseMimeType;
   }
   if (config.responseSchema) {
-    data['hasResponseSchema'] = true;
+    data['has_response_schema'] = true;
   }
   return Object.keys(data).length > 0 ? data : undefined;
 }
@@ -242,15 +242,15 @@ function serializeEventActions(
   const actions = event.actions;
   const data: Record<string, unknown> = {};
   if (Object.keys(actions.stateDelta).length > 0) {
-    data['stateDelta'] = safeSerializeRecord(actions.stateDelta);
+    data['state_delta'] = safeSerializeRecord(actions.stateDelta);
   }
   if (Object.keys(actions.artifactDelta).length > 0) {
     // The filename -> version mapping is what makes an artifact write
     // traceable.
-    data['artifactDelta'] = {...actions.artifactDelta};
+    data['artifact_delta'] = {...actions.artifactDelta};
   }
   if (actions.transferToAgent) {
-    data['transferToAgent'] = actions.transferToAgent;
+    data['transfer_to_agent'] = actions.transferToAgent;
   }
   if (actions.escalate) {
     data['escalate'] = actions.escalate;
@@ -258,7 +258,7 @@ function serializeEventActions(
   const requestedAuthConfigs = Object.keys(actions.requestedAuthConfigs).length;
   if (requestedAuthConfigs > 0) {
     // The count only: an auth config holds a credential.
-    data['requestedAuthConfigs'] = requestedAuthConfigs;
+    data['requested_auth_configs'] = requestedAuthConfigs;
   }
   return Object.keys(data).length > 0 ? data : undefined;
 }
@@ -266,12 +266,12 @@ function serializeEventActions(
 /** Builds the payload of an `event` entry. */
 function serializeEvent(event: Event): Record<string, unknown> {
   const data: Record<string, unknown> = {
-    eventId: event.id,
+    event_id: event.id,
     author: event.author,
     content: serializeContent(event.content),
-    isFinalResponse: isFinalResponse(event),
+    is_final_response: isFinalResponse(event),
     partial: event.partial,
-    turnComplete: event.turnComplete,
+    turn_complete: event.turnComplete,
     branch: event.branch,
   };
   const actions = serializeEventActions(event);
@@ -279,21 +279,21 @@ function serializeEvent(event: Event): Record<string, unknown> {
     data['actions'] = actions;
   }
   if (event.groundingMetadata) {
-    data['hasGroundingMetadata'] = true;
+    data['has_grounding_metadata'] = true;
   }
   if (event.usageMetadata) {
-    data['usageMetadata'] = {
-      promptTokenCount: event.usageMetadata.promptTokenCount,
-      candidatesTokenCount: event.usageMetadata.candidatesTokenCount,
-      totalTokenCount: event.usageMetadata.totalTokenCount,
+    data['usage_metadata'] = {
+      prompt_token_count: event.usageMetadata.promptTokenCount,
+      candidates_token_count: event.usageMetadata.candidatesTokenCount,
+      total_token_count: event.usageMetadata.totalTokenCount,
     };
   }
   if (event.errorCode) {
-    data['errorCode'] = event.errorCode;
-    data['errorMessage'] = event.errorMessage;
+    data['error_code'] = event.errorCode;
+    data['error_message'] = event.errorMessage;
   }
   if (event.longRunningToolIds && event.longRunningToolIds.length > 0) {
-    data['longRunningToolIds'] = [...event.longRunningToolIds];
+    data['long_running_tool_ids'] = [...event.longRunningToolIds];
   }
   return data;
 }
@@ -305,45 +305,67 @@ function serializeLlmResponse(
   const data: Record<string, unknown> = {
     content: serializeContent(llmResponse.content),
     partial: llmResponse.partial,
-    turnComplete: llmResponse.turnComplete,
+    turn_complete: llmResponse.turnComplete,
   };
   if (llmResponse.errorCode) {
-    data['errorCode'] = llmResponse.errorCode;
-    data['errorMessage'] = llmResponse.errorMessage;
+    data['error_code'] = llmResponse.errorCode;
+    data['error_message'] = llmResponse.errorMessage;
   }
   if (llmResponse.usageMetadata) {
-    data['usageMetadata'] = {
-      promptTokenCount: llmResponse.usageMetadata.promptTokenCount,
-      candidatesTokenCount: llmResponse.usageMetadata.candidatesTokenCount,
-      totalTokenCount: llmResponse.usageMetadata.totalTokenCount,
-      cachedContentTokenCount:
+    data['usage_metadata'] = {
+      prompt_token_count: llmResponse.usageMetadata.promptTokenCount,
+      candidates_token_count: llmResponse.usageMetadata.candidatesTokenCount,
+      total_token_count: llmResponse.usageMetadata.totalTokenCount,
+      cached_content_token_count:
         llmResponse.usageMetadata.cachedContentTokenCount,
     };
   }
   if (llmResponse.groundingMetadata) {
-    data['hasGroundingMetadata'] = true;
+    data['has_grounding_metadata'] = true;
   }
   if (llmResponse.finishReason) {
-    data['finishReason'] = llmResponse.finishReason;
+    data['finish_reason'] = llmResponse.finishReason;
   }
   if (llmResponse.modelVersion) {
-    data['modelVersion'] = llmResponse.modelVersion;
+    data['model_version'] = llmResponse.modelVersion;
   }
   return data;
 }
 
 /**
+ * Renders one entry as the mapping written to the file.
+ *
+ * `agentName` is left as `undefined` for an entry recorded outside an agent.
+ * js-yaml drops a mapping key whose value is `undefined`, so no `agent_name`
+ * key reaches the file.
+ */
+function toEntryDocument(entry: DebugEntry): Record<string, unknown> {
+  return {
+    timestamp: entry.timestamp,
+    entry_type: entry.entryType,
+    invocation_id: entry.invocationId,
+    agent_name: entry.agentName,
+    data: entry.data,
+  };
+}
+
+/**
  * Renders one buffered invocation as the mapping written to the file.
  *
- * `incomplete` is lifted out of the header so that it reads just above the
- * entries it qualifies, wherever it was set.
+ * The keys are renamed to snake_case here, and only here: the file is read by
+ * the same tools that read adk-python's dump, so it keeps the reference
+ * spelling even though the TypeScript API is camelCase.
  */
-function toDocument({
-  incomplete,
-  entries,
-  ...header
-}: InvocationDebugState): Record<string, unknown> {
-  return {...header, ...(incomplete ? {incomplete: true} : {}), entries};
+function toDocument(state: InvocationDebugState): Record<string, unknown> {
+  return {
+    invocation_id: state.invocationId,
+    session_id: state.sessionId,
+    app_name: state.appName,
+    user_id: state.userId,
+    start_time: state.startTime,
+    ...(state.incomplete ? {incomplete: true} : {}),
+    entries: state.entries.map(toEntryDocument),
+  };
 }
 
 /**
@@ -378,9 +400,10 @@ function toDocument({
  * ```
  */
 export class DebugLoggingPlugin extends BasePlugin {
-  private readonly outputPath: string;
-  private readonly includeSessionState: boolean;
-  private readonly includeSystemInstruction: boolean;
+  /** Where the plugin appends its documents. */
+  readonly outputPath: string;
+  readonly includeSessionState: boolean;
+  readonly includeSystemInstruction: boolean;
   private readonly maxBufferedInvocations: number;
   private readonly invocationStates = new Map<string, InvocationDebugState>();
   private warnedAboutOutputMode = false;
@@ -465,7 +488,7 @@ export class DebugLoggingPlugin extends BasePlugin {
   }): Promise<LlmResponse | undefined> {
     const data: Record<string, unknown> = {
       model: llmRequest.model,
-      contentCount: llmRequest.contents.length,
+      content_count: llmRequest.contents.length,
       contents: llmRequest.contents.map(serializeContent),
     };
     const toolNames = Object.keys(llmRequest.toolsDict);
@@ -518,8 +541,8 @@ export class DebugLoggingPlugin extends BasePlugin {
       DebugEntryType.LLM_ERROR,
       callbackContext.agentName,
       {
-        errorType: error.name,
-        errorMessage: error.message,
+        error_type: error.name,
+        error_message: error.message,
         model: llmRequest.model,
       },
     );
@@ -540,8 +563,8 @@ export class DebugLoggingPlugin extends BasePlugin {
       DebugEntryType.TOOL_CALL,
       toolContext.agentName,
       {
-        toolName: tool.name,
-        functionCallId: toolContext.functionCallId,
+        tool_name: tool.name,
+        function_call_id: toolContext.functionCallId,
         args: safeSerializeRecord(toolArgs),
       },
     );
@@ -563,8 +586,8 @@ export class DebugLoggingPlugin extends BasePlugin {
       DebugEntryType.TOOL_RESPONSE,
       toolContext.agentName,
       {
-        toolName: tool.name,
-        functionCallId: toolContext.functionCallId,
+        tool_name: tool.name,
+        function_call_id: toolContext.functionCallId,
         result: safeSerializeRecord(result),
       },
     );
@@ -587,11 +610,11 @@ export class DebugLoggingPlugin extends BasePlugin {
       DebugEntryType.TOOL_ERROR,
       toolContext.agentName,
       {
-        toolName: tool.name,
-        functionCallId: toolContext.functionCallId,
+        tool_name: tool.name,
+        function_call_id: toolContext.functionCallId,
         args: safeSerializeRecord(toolArgs),
-        errorType: error.name,
-        errorMessage: error.message,
+        error_type: error.name,
+        error_message: error.message,
       },
     );
     return undefined;
@@ -635,7 +658,7 @@ export class DebugLoggingPlugin extends BasePlugin {
         undefined,
         {
           state: safeSerializeRecord(session.state),
-          eventCount: session.events.length,
+          event_count: session.events.length,
         },
       );
     }
@@ -708,8 +731,6 @@ export class DebugLoggingPlugin extends BasePlugin {
       timestamp: new Date().toISOString(),
       entryType,
       invocationId,
-      // js-yaml drops a mapping key whose value is undefined, so an entry
-      // recorded outside an agent simply carries no `agentName`.
       agentName,
       data: safeSerializeRecord(data),
     });
@@ -727,7 +748,6 @@ export class DebugLoggingPlugin extends BasePlugin {
               sortKeys: false,
               lineWidth: YAML_LINE_WIDTH,
               noRefs: true,
-              noCompatMode: true,
             }),
         );
       } finally {
