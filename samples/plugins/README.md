@@ -15,6 +15,9 @@ type-checks them with the rest of `samples/`:
 npm run ts:check:samples
 ```
 
+See [Running](../workflows/README.md#running) for how `npm run sample`
+works, and how to script a run.
+
 ## `bigquery_agent_analytics`
 
 Writes one BigQuery row per lifecycle event of a weather agent. The plugin
@@ -74,3 +77,20 @@ SELECT event_type, agent, status, timestamp
 FROM `<project>.agent_analytics.agent_events`
 ORDER BY timestamp;
 ```
+
+## `debug_logging`
+
+Records every invocation of a city agent to a YAML file in the system
+temporary directory. The plugin writes the LLM requests and responses, the tool
+calls and their results, the events, and the session state. It redacts
+credentials, so you can attach the file to a bug report.
+
+Environment variables:
+
+| Variable         | Required | Default | Meaning                           |
+| ---------------- | -------- | ------- | --------------------------------- |
+| `GEMINI_API_KEY` | yes      | —       | Key for the model the agent calls |
+
+Run the agent and ask it for the population of a city. The agent prints the
+path of the file. Each turn appends another `---` document, so a
+multi-document YAML loader reads the whole file.

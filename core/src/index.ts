@@ -82,6 +82,12 @@ export type {
 export {AnalyticsEventType} from './plugins/bigquery_analytics_schema.js';
 export {AnalyticsDropReason} from './plugins/bigquery_analytics_writer.js';
 export type {BigQueryCredentials} from './plugins/bigquery_analytics_writer.js';
+export {
+  DEFAULT_DEBUG_OUTPUT_PATH,
+  DebugEntryType,
+  DebugLoggingPlugin,
+  type DebugLoggingPluginOptions,
+} from './plugins/debug_logging_plugin.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {ENTITIES as SESSION_STORAGE_ENTITIES} from './sessions/db/schema.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
