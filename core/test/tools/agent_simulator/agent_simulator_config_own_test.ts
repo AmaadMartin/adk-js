@@ -18,7 +18,6 @@ import {
   createEnvironmentSimulationConfig,
   overrideFeatureEnabled,
 } from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AgentSimulatorConfig,
   MockStrategy as ReExportedMockStrategy,
@@ -26,8 +25,9 @@ import {
   createInjectedError as reExportedCreateInjectedError,
   createInjectionConfig as reExportedCreateInjectionConfig,
   createToolSimulationConfig as reExportedCreateToolSimulationConfig,
-} from '../../../src/tools/agent_simulator/agent_simulator_config.js';
-import {resetDeprecationWarnings} from '../../../src/utils/deprecated.js';
+} from '@google/adk/tools/agent_simulator/agent_simulator_config.js';
+import {resetDeprecationWarnings} from '@google/adk/utils/deprecated.js';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const NOT_ENABLED_MESSAGE = 'Feature ENVIRONMENT_SIMULATION is not enabled.';
 
@@ -56,10 +56,10 @@ describe('agent_simulator_config module', () => {
   // is what makes the second evaluation visible.
   it('warns that the module has moved when it is evaluated', async () => {
     vi.resetModules();
-    const {logger: freshLogger} = await import('../../../src/utils/logger.js');
+    const {logger: freshLogger} = await import('@google/adk/utils/logger.js');
     const warnSpy = vi.spyOn(freshLogger, 'warn').mockImplementation(() => {});
 
-    await import('../../../src/tools/agent_simulator/agent_simulator_config.js');
+    await import('@google/adk/tools/agent_simulator/agent_simulator_config.js');
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('agent_simulator_config'),

@@ -14,15 +14,15 @@
  * so the warning assertions read the logger instead of a warning filter.
  *
  * The module under test is deliberately outside the `@google/adk` barrel, so
- * that importing the package does not emit its deprecation warning. That is
- * why it is imported by a relative path here.
+ * that importing the package does not emit its deprecation warning. It is
+ * imported here by the subpath a caller uses.
  */
 
 import {MockStrategy, ToolSimulationConfigParams} from '@google/adk';
+import {createAgentSimulatorConfig} from '@google/adk/tools/agent_simulator/agent_simulator_config.js';
+import {resetDeprecationWarnings} from '@google/adk/utils/deprecated.js';
+import {logger} from '@google/adk/utils/logger.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {createAgentSimulatorConfig} from '../../../src/tools/agent_simulator/agent_simulator_config.js';
-import {resetDeprecationWarnings} from '../../../src/utils/deprecated.js';
-import {logger} from '../../../src/utils/logger.js';
 
 function spyOnLoggerWarn() {
   return vi.spyOn(logger, 'warn').mockImplementation(() => {});
