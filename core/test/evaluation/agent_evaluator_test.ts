@@ -1268,6 +1268,24 @@ describe('AgentEvaluator.evaluate', () => {
       'app_name is required when eval_set_results_manager is provided.',
     );
   });
+
+  // Ported from adk-python's
+  // test_evaluate_passes_results_manager_and_app_name.
+  it('passes the results manager and the app name on', async () => {
+    const testFile = await write('a.test.json', evalSetFile('set-a'));
+    const evalSetResultsManager = new RecordingEvalSetResultsManager();
+
+    await AgentEvaluator.evaluate({
+      agentModule: createAgentModule(),
+      evalDatasetFilePathOrDir: testFile,
+      appName: 'weather_app',
+      evalSetResultsManager,
+      numRuns: 1,
+    });
+
+    expect(runtime.params?.evalSetResultsManager).toBe(evalSetResultsManager);
+    expect(evalSetResultsManager.saved).toHaveLength(1);
+  });
 });
 
 describe('AgentEvaluator.migrateEvalDataToNewSchema', () => {
