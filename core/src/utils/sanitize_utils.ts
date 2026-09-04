@@ -176,8 +176,11 @@ const CREDENTIAL_HEADER_PATTERN =
  * scheme name goes with the token, so an inline `Authorization: Bearer x`
  * leaves one marker: the key-value pass below skips a value that already opens
  * a bracket.
+ *
+ * The lookahead spares `the bearer of bad news`, the one English phrase common
+ * enough to redact ordinary prose.
  */
-const BEARER_PATTERN = /\bbearer[ \t]+[^\s,;"']+/gi;
+const BEARER_PATTERN = /\bbearer[ \t]+(?!of(?:\s|$))[^\s,;"']+/gi;
 
 /**
  * A `Basic` credential, wherever it appears without its header name. The token

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   recursiveSmartTruncate,
   sanitizeErrorText,
@@ -429,5 +429,112 @@ describe('recursiveSmartTruncate on strings', () => {
     const inner = JSON.stringify({api_key: 'AIzaSyC7'});
     const result = recursiveSmartTruncate({body: JSON.stringify({inner})}, -1);
     expect(JSON.stringify(result.value)).not.toContain('AIzaSyC7');
+  });
+});
+
+/**
+ * Ported from adk-python
+ * tests/unittests/plugins/test_bigquery_agent_analytics_plugin.py @ main
+ *
+ * Each case below keeps its Python test name so a reviewer can grep the
+ * original. A case with no Python counterpart says so in its own name.
+ */
+describe('fail-closed sanitizing, ported from adk-python', () => {
+  it.each([
+    'access%5Ftoken=SECRET',
+    'access%255Ftoken%253DSECRET',
+    '\\u0061ccess_token=SECRET',
+    'refresh%5Ftoken=SECRET',
+  ])('redacts text whose encoded form carries a credential: %s', (text) => {
+    const result = sanitizeErrorText(text, -1);
+    expect(result).toEqual({
+      text: '[REDACTED_SENSITIVE_TEXT]',
+      truncated: true,
+    });
+    expect(result.text).not.toContain('SECRET');
+  });
+
+  it.each([
+    String.raw`C:\Users\secret\project\file.json`,
+    String.raw`Invalid \escape at position 4`,
+    String.raw`can't decode \x5c in position 2`,
+    'the bearer of bad news',
+    'a basic principle',
+    'a basic test',
+    'design=balanced',
+    'signal=strong',
+    'progress%3D100%25 complete',
+    'literal%2525value',
+  ])(
+    'test_sensitive_text_preserves_safe_slashes_and_encoded_prose_exactly: %s',
+    (value) => {
+      expect(sanitizeErrorText(value, -1)).toEqual({
+        text: value,
+        truncated: false,
+      });
+    },
+  );
+
+  it.each([
+    '{"access\\u005ftoken":"SECRET-TRAIL"} trailing',
+    '{"access_token":"SECRET-MALFORMED"',
+    '[{"api_key":"SECRET-ARRAY"}, oops]',
+  ])('test_malformed_container_blobs_fail_closed: %s', (blob) => {
+    const result = recursiveSmartTruncate({blob}, 10_000);
+    expect(result.value).toEqual({blob: '[UNPARSEABLE_JSON_BLOB]'});
+    expect(JSON.stringify(result.value)).not.toContain('SECRET');
+  });
+
+  it('test_deep_json_blob_fails_closed', () => {
+    const deep = '['.repeat(10_000) + ']'.repeat(10_000);
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const result = recursiveSmartTruncate({blob: deep}, 512_000);
+      expect(result.value).toEqual({blob: '[UNPARSEABLE_JSON_BLOB]'});
+      expect(result.truncated).toBe(true);
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('test_json_nesting_limit_ignores_brackets_inside_strings', () => {
+    const blob = JSON.stringify({
+      note: `prose ${'['.repeat(1001)}${']'.repeat(1001)}`,
+    });
+    const result = recursiveSmartTruncate({blob}, 512_000);
+    expect(result.value).toEqual({blob});
+    expect(result.truncated).toBe(false);
+  });
+
+  it('test_over_limit_blob_never_parsed', () => {
+    const overLimit = `{"k": "${'x'.repeat(4_000_000)}"}`;
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const result = recursiveSmartTruncate({blob: overLimit}, -1);
+      expect(result.value).toEqual({blob: '[UNPARSEABLE_JSON_BLOB]'});
+      expect(result.truncated).toBe(true);
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it('re-serializes a blob whose duplicate key hides a secret (no Python counterpart)', () => {
+    const result = recursiveSmartTruncate(
+      {blob: '{"note":"SECRET-DUPLICATE","note":"benign"}'},
+      -1,
+    );
+    expect(result.value).toEqual({blob: '{"note":"benign"}'});
+    expect(JSON.stringify(result.value)).not.toContain('SECRET-DUPLICATE');
+  });
+
+  it('re-serializes a duplicate credential key so the earlier copy is dropped', () => {
+    const result = recursiveSmartTruncate(
+      {blob: '{"access_token":"SECRET-FIRST","access_token":"x"}'},
+      -1,
+    );
+    expect(result.value).toEqual({blob: '{"access_token":"[REDACTED]"}'});
+    expect(JSON.stringify(result.value)).not.toContain('SECRET-FIRST');
   });
 });
