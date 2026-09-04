@@ -254,7 +254,10 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
     }
 
     if (!this.agentEngineCreationPromise) {
-      const creation = (async () => {
+      // The reference leaves its resource name unset when creation fails and
+      // retries on the next execution. Dropping the memo keeps that behaviour;
+      // a cached rejection would fail every later call on this executor.
+      this.agentEngineCreationPromise = (async () => {
         logger.debug(
           'No Agent Engine resource name provided. Creating a new one...',
         );
@@ -279,16 +282,17 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           );
         }
 
-        const response = apiResponse.response as {name?: string};
-        this.agentEngineResourceName = response.name;
-        logger.debug(`Created Agent Engine: ${this.agentEngineResourceName}`);
-        return this.agentEngineResourceName!;
-      })();
+        const createdName = apiResponse.response?.name;
+        if (!createdName) {
+          throw new Error(
+            `Agent Engine creation operation ${operation.name} finished with no resource name. Operation error: ${JSON.stringify(apiResponse.error)}`,
+          );
+        }
 
-      // The reference leaves its resource name unset when creation fails and
-      // retries on the next execution. Dropping the memo keeps that behaviour;
-      // a cached rejection would fail every later call on this executor.
-      this.agentEngineCreationPromise = creation.catch((error: unknown) => {
+        this.agentEngineResourceName = createdName;
+        logger.debug(`Created Agent Engine: ${createdName}`);
+        return createdName;
+      })().catch((error: unknown) => {
         this.agentEngineCreationPromise = undefined;
         throw error;
       });
@@ -316,13 +320,15 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
             name: sandboxName,
           });
         // adk-js binds a sandbox to one language, so a cached sandbox that
-        // does not declare the requested one cannot serve this request.
+        // declares a different one cannot serve this request. adk-python
+        // creates its sandbox with an empty code execution environment and
+        // declares no language, so an undeclared language is reused.
         const cachedLanguage =
           sandbox?.spec?.codeExecutionEnvironment?.codeLanguage;
         if (
           !sandbox ||
           sandbox.state !== 'STATE_RUNNING' ||
-          cachedLanguage !== language
+          (cachedLanguage && cachedLanguage !== language)
         ) {
           createNewSandbox = true;
         }
