@@ -60,20 +60,6 @@ function messageOf(err: unknown): string {
 }
 
 /**
- * Presents a resolved GCP auth provider scheme as an {@link AuthScheme}.
- *
- * `AuthScheme` is the OpenAPI 3.0 security-scheme union, which does not name
- * `GcpAuthProviderScheme`. Widening that union belongs to the auth module, so
- * the conversion stays in this one function and every consumer still receives
- * a checked `AuthScheme`.
- */
-function asAuthScheme(
-  scheme: GcpAuthProviderScheme | undefined,
-): AuthScheme | undefined {
-  return scheme as AuthScheme | undefined;
-}
-
-/**
  * Client for interacting with the Google Cloud Agent Registry service.
  *
  * Unlike a standard REST client library, this class provides higher-level
@@ -413,13 +399,11 @@ export class AgentRegistry {
 
     const authScheme =
       options?.authScheme ??
-      asAuthScheme(
-        await this.resolveAuthProviderScheme(
-          mcpServerId,
-          `MCP Server ${mcpServerName}`,
-          options?.continueUri,
-        ),
-      );
+      (await this.resolveAuthProviderScheme(
+        mcpServerId,
+        `MCP Server ${mcpServerName}`,
+        options?.continueUri,
+      ));
 
     const connectionParams: StreamableHTTPConnectionParams = {
       type: 'StreamableHTTPConnectionParams',
