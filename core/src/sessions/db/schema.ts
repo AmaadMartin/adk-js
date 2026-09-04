@@ -54,7 +54,13 @@ export const EVENT_DATA_COLUMN_NAME = 'event_data';
 /** The events column only the legacy layout has. */
 export const EVENT_ACTIONS_COLUMN_NAME = 'actions';
 
-/** The index `getSession` and `appendEvent` read a session's events through. */
+/**
+ * The index `getSession` and `appendEvent` read a session's events through.
+ *
+ * The name is the one adk-python declares. Both SDKs read the same database,
+ * so sharing the name stops the two of them creating two indexes for one
+ * access path.
+ */
 export const EVENTS_TIMESTAMP_INDEX_NAME = 'idx_events_app_user_session_ts';
 
 /**
@@ -291,11 +297,17 @@ export class StorageEvent {
    * the caller never goes through {@link StorageEvent}.
    *
    * Both column lists follow {@link StorageSession}'s primary-key order, and
-   * must keep following it. MikroORM appends the relation to the WHERE clause
-   * of every UPDATE and DELETE as a tuple, and builds the right-hand side by
-   * serializing the referenced entity's primary key in its declared order. A
-   * list in any other order compares the two sides misaligned, so the
-   * statement matches no row and the write is dropped without an error.
+   * must keep following it, for two reasons. MikroORM appends the relation to
+   * the WHERE clause of every UPDATE and DELETE as a tuple, and builds the
+   * right-hand side by serializing the referenced entity's primary key in its
+   * declared order. A list in any other order compares the two sides
+   * misaligned, so the statement matches no row and the write is dropped
+   * without an error. InnoDB then only accepts a foreign key whose referenced
+   * columns lead an index of the parent table, and that primary key is the
+   * only index `sessions` has; MySQL 8.0 rejects any other order with errno
+   * 1822. A foreign key pairs columns rather than ordering them, so this is
+   * the constraint adk-python declares, written to fit the key adk-js
+   * declares. The schema test pins the two column lists to each other.
    *
    * A database that already exists keeps its old tables: `updateSchema({safe:
    * true})` adds the index but cannot add the constraint on sqlite, which has

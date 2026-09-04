@@ -6,7 +6,7 @@
 
 /**
  * The `test_*` cases below keep the names of the adk-python tests they port:
- * `tests/unittests/sessions/test_storage_session.py`, the index half of
+ * `tests/unittests/sessions/test_storage_session.py`,
  * `tests/unittests/sessions/migration/test_database_schema.py`, and
  * `test_get_session_keeps_exact_epoch_across_a_repeated_local_hour` in
  * `tests/unittests/sessions/test_session_service.py`.
@@ -14,8 +14,17 @@
 
 import {createEvent} from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
+import {MySqlDriver} from '@mikro-orm/mysql';
 import {SqliteDriver} from '@mikro-orm/sqlite';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
+import {
+  ensureDatabaseCreated,
+  getConnectionOptionsFromUri,
+  validateDatabaseSchemaVersion,
+} from '../../../src/sessions/db/operations.js';
 import {
   ENTITIES,
   EVENTS_TIMESTAMP_INDEX_NAME,
@@ -25,6 +34,11 @@ import {
   StorageSession,
   toSession,
 } from '../../../src/sessions/db/schema.js';
+
+const APP_NAME = 'my_app';
+const USER_ID = 'u1';
+const SESSION_ID = 's1';
+const INVOCATION_ID = 'inv1';
 
 /** A naive stored timestamp, as sqlite and PostgreSQL hand it back. */
 const NAIVE_UPDATE_TIME = new Date(Date.UTC(2026, 0, 2, 3, 4, 5, 123));
@@ -39,11 +53,32 @@ const AWARE_UPDATE_TIME = new Date('2026-01-02T03:04:05.123+05:00');
 const FIRST_REPEATED_HOUR_EPOCH = 1730613600000;
 const SECOND_REPEATED_HOUR_EPOCH = 1730615400000;
 
+const INDEX_COLUMNS = ['app_name', 'user_id', 'session_id', 'timestamp'];
+/** The literal name adk-python declares, so a rename here fails the tests. */
+const INDEX_NAME = 'idx_events_app_user_session_ts';
+
+/** The `create index` statement the entity's `expression` index emits. */
+const INDEX_STATEMENT =
+  `create index ${INDEX_NAME} on events ` +
+  `(app_name, user_id, session_id, timestamp desc)`;
+
+/**
+ * The schema adk-js emitted before this change: no foreign key on `events`
+ * and no `idx_events_app_user_session_ts`.
+ */
+const PRE_CHANGE_DDL = [
+  'create table `adk_internal_metadata` (`key` text not null, `value` text not null, primary key (`key`))',
+  'create table `app_states` (`app_name` text not null, `state` json not null, `update_time` datetime not null, primary key (`app_name`))',
+  'create table `user_states` (`app_name` text not null, `user_id` text not null, `state` json not null, `update_time` datetime not null, primary key (`app_name`, `user_id`))',
+  'create table `sessions` (`id` text not null, `app_name` text not null, `user_id` text not null, `state` json not null, `create_time` datetime not null, `update_time` datetime not null, primary key (`id`, `app_name`, `user_id`))',
+  'create table `events` (`id` text not null, `app_name` text not null, `user_id` text not null, `session_id` text not null, `invocation_id` text not null, `timestamp` datetime not null, `event_data` json not null, primary key (`id`, `app_name`, `user_id`, `session_id`))',
+];
+
 function sessionRow(updateTime: Date): StorageSession {
   const row = new StorageSession();
-  row.appName = 'my_app';
-  row.userId = 'u1';
-  row.id = 's1';
+  row.appName = APP_NAME;
+  row.userId = USER_ID;
+  row.id = SESSION_ID;
   row.state = {};
   row.updateTime = updateTime;
   return row;
@@ -52,10 +87,10 @@ function sessionRow(updateTime: Date): StorageSession {
 function eventRow(id: string, timestamp: Date, payloadEpoch: number) {
   const row = new StorageEvent();
   row.id = id;
-  row.appName = 'my_app';
-  row.userId = 'u1';
-  row.sessionId = 's1';
-  row.invocationId = 'inv1';
+  row.appName = APP_NAME;
+  row.userId = USER_ID;
+  row.sessionId = SESSION_ID;
+  row.invocationId = INVOCATION_ID;
   row.timestamp = timestamp;
   row.eventData = createEvent({id, timestamp: payloadEpoch});
   return row;
@@ -70,6 +105,16 @@ async function openOrm(): Promise<MikroORM> {
   });
 }
 
+/** Opens a sqlite database the way `DatabaseSessionService.init()` does. */
+async function openDatabase(databaseFile: string): Promise<MikroORM> {
+  const orm = await MikroORM.init(
+    await getConnectionOptionsFromUri(`sqlite://${databaseFile}`),
+  );
+  await ensureDatabaseCreated(orm);
+  await validateDatabaseSchemaVersion(orm);
+  return orm;
+}
+
 /** Runs a statement whose rows the sqlite driver hands back untyped. */
 async function readRows(
   orm: MikroORM,
@@ -80,6 +125,69 @@ async function readRows(
     return expect.fail(`${sql} returned no rows`);
   }
   return rows;
+}
+
+/**
+ * Runs a query and names the shape of its rows.
+ *
+ * `Connection.execute` is declared as returning `QueryResult<T> | any | any[]`,
+ * so its own generic parameter cannot type the result.
+ */
+async function query<T>(
+  orm: MikroORM,
+  sql: string,
+  params?: string[],
+): Promise<T[]> {
+  const rows: T[] = await orm.em.getConnection().execute(sql, params);
+  return rows;
+}
+
+/** Columns of a sqlite index in index order, or `[]` when it is absent. */
+async function indexColumns(orm: MikroORM, name: string): Promise<string[]> {
+  const rows = await query<{name: string}>(
+    orm,
+    'select name from pragma_index_info(?) order by seqno',
+    [name],
+  );
+  return rows.map((row) => row.name);
+}
+
+function seedSessionRow(orm: MikroORM, sessionId = SESSION_ID) {
+  const em = orm.em.fork();
+  em.create(StorageSession, {
+    id: sessionId,
+    appName: APP_NAME,
+    userId: USER_ID,
+    state: {},
+    createTime: new Date(),
+    updateTime: new Date(),
+  });
+  return em.flush();
+}
+
+function seedEventRow(orm: MikroORM, eventId: string, sessionId = SESSION_ID) {
+  const timestamp = new Date('2026-01-02T03:04:05.123Z');
+  const em = orm.em.fork();
+  em.create(StorageEvent, {
+    id: eventId,
+    appName: APP_NAME,
+    userId: USER_ID,
+    sessionId,
+    invocationId: INVOCATION_ID,
+    timestamp,
+    eventData: createEvent({
+      id: eventId,
+      author: 'user',
+      invocationId: INVOCATION_ID,
+      timestamp: timestamp.getTime(),
+    }),
+    storageSession: em.getReference(StorageSession, [
+      sessionId,
+      APP_NAME,
+      USER_ID,
+    ]),
+  });
+  return em.flush();
 }
 
 describe('schema converters', () => {
@@ -187,12 +295,7 @@ describe('schema DDL', () => {
     );
     const indexed = columns.filter((column) => column['key'] === 1);
 
-    expect(indexed.map((column) => column['name'])).toEqual([
-      'app_name',
-      'user_id',
-      'session_id',
-      'timestamp',
-    ]);
+    expect(indexed.map((column) => column['name'])).toEqual(INDEX_COLUMNS);
     expect(indexed.map((column) => column['desc'])).toEqual([0, 0, 0, 1]);
   });
 
@@ -214,6 +317,166 @@ describe('schema DDL', () => {
     expect(eventsTable).toContain(
       'primary key (`id`, `app_name`, `user_id`, `session_id`)',
     );
+  });
+
+  it('gives events a cascading foreign key and the lookup index on sqlite', async () => {
+    orm = await openOrm();
+
+    const sql = await orm.schema.getCreateSchemaSQL();
+
+    expect(sql).toContain(
+      'foreign key(`session_id`, `app_name`, `user_id`) references ' +
+        '`sessions`(`id`, `app_name`, `user_id`) on delete cascade',
+    );
+    expect(sql).toContain(INDEX_STATEMENT);
+  });
+
+  /**
+   * InnoDB rejects a foreign key whose referenced columns do not lead an
+   * index of the parent table, and the primary key is the only index
+   * `sessions` has. MySQL 8.0.45 fails the `alter table` with errno 1822 when
+   * the two lists disagree, which no DDL string assertion can see.
+   */
+  it('references the sessions columns in primary key order', async () => {
+    orm = await openOrm();
+    const metadata = orm.getMetadata();
+
+    const referenced = metadata.get(StorageEvent.name).properties[
+      'storageSession'
+    ].referencedColumnNames;
+    const sessionKey = metadata
+      .get(StorageSession.name)
+      .getPrimaryProps()
+      .flatMap((property) => property.fieldNames);
+
+    expect(referenced).toEqual(sessionKey);
+  });
+
+  it('keeps sub-second precision on every timestamp column on MySQL', async () => {
+    orm = await MikroORM.init({
+      dbName: 'adk',
+      driver: MySqlDriver,
+      entities: ENTITIES,
+      connect: false,
+    });
+
+    const sql = await orm.schema.getCreateSchemaSQL();
+
+    expect(sql).not.toContain('datetime not null');
+    expect(sql.match(/datetime\(3\) not null/g)).toHaveLength(5);
+    expect(sql).toContain(
+      'foreign key (`session_id`, `app_name`, `user_id`) references ' +
+        '`sessions` (`id`, `app_name`, `user_id`) on update cascade ' +
+        'on delete cascade',
+    );
+    expect(sql).toContain(INDEX_STATEMENT);
+  });
+});
+
+describe('foreign key enforcement on sqlite', () => {
+  const openOrms: MikroORM[] = [];
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const orm of openOrms.splice(0)) {
+      await orm.close();
+    }
+    for (const dir of tempDirs.splice(0)) {
+      await fs.rm(dir, {recursive: true, force: true});
+    }
+  });
+
+  async function track(orm: MikroORM): Promise<MikroORM> {
+    openOrms.push(orm);
+    return orm;
+  }
+
+  async function tempDatabaseFile(name: string): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-schema-'));
+    tempDirs.push(dir);
+    return path.join(dir, name);
+  }
+
+  it('deletes the events of a session that is deleted directly', async () => {
+    const databaseFile = await tempDatabaseFile('cascade.db');
+    const orm = await track(await openDatabase(databaseFile));
+    await seedSessionRow(orm);
+    await seedEventRow(orm, 'e1');
+    await seedEventRow(orm, 'e2');
+
+    const pragma = await query<{foreign_keys: number}>(
+      orm,
+      'pragma foreign_keys',
+    );
+    expect(pragma[0].foreign_keys).toBe(1);
+
+    const em = orm.em.fork();
+    await em.nativeDelete(StorageSession, {
+      id: SESSION_ID,
+      appName: APP_NAME,
+      userId: USER_ID,
+    });
+
+    expect(await em.count(StorageEvent, {})).toBe(0);
+  });
+
+  it('rejects an event whose session does not exist', async () => {
+    const databaseFile = await tempDatabaseFile('orphan.db');
+    const orm = await track(await openDatabase(databaseFile));
+
+    await expect(seedEventRow(orm, 'e1', 'no-such-session')).rejects.toThrow(
+      /FOREIGN KEY constraint failed/,
+    );
+    expect(await orm.em.fork().count(StorageEvent, {})).toBe(0);
+  });
+
+  describe('index creation', () => {
+    it('names the index the way adk-python names it', () => {
+      expect(EVENTS_TIMESTAMP_INDEX_NAME).toBe(INDEX_NAME);
+    });
+
+    // test_new_db_uses_latest_schema
+    it('creates the events index on a new database', async () => {
+      const databaseFile = await tempDatabaseFile('new_db.db');
+      const orm = await track(await openDatabase(databaseFile));
+
+      expect(await indexColumns(orm, INDEX_NAME)).toEqual(INDEX_COLUMNS);
+    });
+
+    // test_prepare_tables_recreates_missing_latest_events_index
+    it('recreates the events index that a database has lost', async () => {
+      const databaseFile = await tempDatabaseFile('missing_index.db');
+      const first = await openDatabase(databaseFile);
+      await seedSessionRow(first);
+      await first.em.getConnection().execute(`drop index ${INDEX_NAME}`);
+      expect(await indexColumns(first, INDEX_NAME)).toEqual([]);
+      await first.close();
+
+      const reopened = await track(await openDatabase(databaseFile));
+
+      expect(
+        await reopened.em.fork().findOne(StorageSession, {id: SESSION_ID}),
+      ).not.toBeNull();
+      expect(await indexColumns(reopened, INDEX_NAME)).toEqual(INDEX_COLUMNS);
+    });
+
+    it('adds the index to a database written before this change, keeping its rows', async () => {
+      const databaseFile = await tempDatabaseFile('pre_change.db');
+      const legacy = await MikroORM.init(
+        await getConnectionOptionsFromUri(`sqlite://${databaseFile}`),
+      );
+      for (const statement of PRE_CHANGE_DDL) {
+        await legacy.em.getConnection().execute(statement);
+      }
+      await seedSessionRow(legacy);
+      await seedEventRow(legacy, 'e1');
+      await legacy.close();
+
+      const orm = await track(await openDatabase(databaseFile));
+
+      expect(await orm.em.fork().count(StorageEvent, {})).toBe(1);
+      expect(await indexColumns(orm, INDEX_NAME)).toEqual(INDEX_COLUMNS);
+    });
   });
 });
 
