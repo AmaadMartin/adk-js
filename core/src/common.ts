@@ -275,6 +275,8 @@ export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
+export {BaseGoogleCredentialsConfig} from './tools/_google_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/_google_credentials.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
@@ -324,6 +326,11 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
+export {
+  PUBSUB_DEFAULT_SCOPE,
+  PUBSUB_TOKEN_CACHE_KEY,
+  PubSubCredentialsConfig,
+} from './tools/pubsub/pubsub_credentials.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
