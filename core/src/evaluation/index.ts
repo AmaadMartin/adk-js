@@ -10,7 +10,8 @@
  * accessors that read a recorded trajectory, the contract every metric
  * evaluator implements, the `ResponseEvaluator`, `LlmAsJudge`,
  * `FinalResponseMatchV2Evaluator` and `SafetyEvaluatorV1` evaluators that
- * stand on it, and the user simulation half under `./simulation`.
+ * stand on it, the metric info providers that describe each prebuilt metric,
+ * and the user simulation half under `./simulation`.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
@@ -50,15 +51,20 @@ export {
   PrebuiltMetrics,
   getMetricThreshold,
   parseLlmAsAJudgeCriterion,
+  parseMetricInfo,
   parseRubricsBasedCriterion,
 } from './eval_metrics.js';
 export type {
   BaseCriterion,
   CriterionParser,
   EvalMetric,
+  Interval,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
   LlmAsAJudgeMetric,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
 } from './eval_metrics.js';
@@ -93,6 +99,20 @@ export {
   PARTIALLY_VALID_LABELS,
   getTextFromInvocation,
 } from './llm_as_judge_utils.js';
+export {
+  FinalResponseMatchV2EvaluatorMetricInfoProvider,
+  HallucinationsV1EvaluatorMetricInfoProvider,
+  MultiTurnTaskSuccessV1MetricInfoProvider,
+  MultiTurnToolUseQualityV1MetricInfoProvider,
+  MultiTurnTrajectoryQualityV1MetricInfoProvider,
+  PerTurnUserSimulatorQualityV1MetricInfoProvider,
+  ResponseEvaluatorMetricInfoProvider,
+  RubricBasedFinalResponseQualityV1EvaluatorMetricInfoProvider,
+  RubricBasedMultiTurnTrajectoryMetricInfoProvider,
+  RubricBasedToolUseV1EvaluatorMetricInfoProvider,
+  SafetyEvaluatorV1MetricInfoProvider,
+  TrajectoryEvaluatorMetricInfoProvider,
+} from './metric_info_providers.js';
 export {ResponseEvaluator} from './response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';

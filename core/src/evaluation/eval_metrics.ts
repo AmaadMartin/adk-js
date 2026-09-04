@@ -751,7 +751,7 @@ export function parseMetricValueInfo(raw: unknown): MetricValueInfo {
  * Validates a metric info payload.
  *
  * @throws {InputValidationError} When the payload omits `metricName` or
- *   `metricValueInfo`.
+ *   `metricValueInfo`, or carries a key the shape does not declare.
  */
 export function parseMetricInfo(raw: unknown): MetricInfo {
   return metricInfoModel.parse(raw);
