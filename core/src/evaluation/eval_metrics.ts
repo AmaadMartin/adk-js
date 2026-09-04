@@ -277,6 +277,15 @@ export interface ToolTrajectoryCriterion extends BaseCriterion {
   ignoreArgs?: boolean;
 }
 
+/**
+ * A {@link ToolTrajectoryCriterion} that has been validated, so its match type
+ * is a member of the enum and its `ignoreArgs` is set.
+ */
+export interface ParsedToolTrajectoryCriterion extends ToolTrajectoryCriterion {
+  matchType: ToolTrajectoryMatchType;
+  ignoreArgs: boolean;
+}
+
 /** Every criterion shape an eval config can carry. */
 export type EvalMetricCriterion =
   | BaseCriterion
@@ -492,7 +501,7 @@ const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimulatorCrit
   );
 
 /** Validates a {@link ToolTrajectoryCriterion} payload. */
-const toolTrajectoryCriterionModel: EvalModel<ToolTrajectoryCriterion> =
+const toolTrajectoryCriterionModel: EvalModel<ParsedToolTrajectoryCriterion> =
   evalModel(
     {
       ...baseCriterionShape,
@@ -580,7 +589,7 @@ export function parseLlmBackedUserSimulatorCriterion(
  */
 export function parseToolTrajectoryCriterion(
   raw: unknown,
-): ToolTrajectoryCriterion {
+): ParsedToolTrajectoryCriterion {
   return toolTrajectoryCriterionModel.parse(raw);
 }
 
