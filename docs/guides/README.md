@@ -146,6 +146,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [gemini_llm_connection](models/gemini_llm_connection/index.md) - Driving a Gemini Live session: replaying history, sending turns and realtime input, and reading responses.
 - [Gemini request and response logging](models/gemini_logging/index.md) - Reading the debug dump of a Gemini call, and what it keeps out of the log.
+- [Interactions API conversation chaining](models/interactions_api/index.md) - Chaining a turn onto the previous one by id, and how branch scoping decides which events the scan can see.
 - [LiteLlm](models/lite_llm/index.md) - Running an agent on a non-Gemini model over the OpenAI chat-completions protocol.
 - [LlmRequest](models/llm_request/index.md) - The request object ADK builds for one model call, and the rules that keep it valid for the provider.
 

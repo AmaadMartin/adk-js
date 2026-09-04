@@ -7,9 +7,55 @@
 import {Event} from '../../events/event.js';
 import {isGemini} from '../../models/google_llm.js';
 import {LlmRequest} from '../../models/llm_request.js';
+import {isEventInBranch} from '../../utils/branch_trie.js';
+import {logger} from '../../utils/logger.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
+
+/** The interaction ids carried by the most recent matching event. */
+export interface PreviousInteractionState {
+  interactionId?: string;
+  environmentId?: string;
+}
+
+/**
+ * Finds the interaction ids of the most recent event authored by `agentName`.
+ *
+ * Scans `events` in reverse, skips events outside `currentBranch`, and returns
+ * the ids from the first event that this agent authored and that carries an
+ * interaction id. Both ids are absent when no event matches.
+ */
+export function findPreviousInteractionState(
+  events: Event[],
+  agentName: string,
+  currentBranch?: string,
+): PreviousInteractionState {
+  logger.debug(
+    `Finding previous_interaction_id: agent=${agentName}, ` +
+      `branch=${currentBranch}, num_events=${events.length}`,
+  );
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (!isEventInBranch(currentBranch, event)) {
+      logger.debug(
+        `Skipping event not in branch: author=${event.author}, ` +
+          `branch=${event.branch}, current=${currentBranch}`,
+      );
+      continue;
+    }
+    if (event.author === agentName && event.interactionId) {
+      logger.debug(
+        `Found interaction_id from agent ${agentName}: ${event.interactionId}`,
+      );
+      return {
+        interactionId: event.interactionId,
+        environmentId: event.environmentId,
+      };
+    }
+  }
+  return {};
+}
 
 /**
  * Request processor for Gemini Interactions API.
@@ -28,18 +74,13 @@ export class InteractionsRequestProcessor implements BaseLlmRequestProcessor {
 
     const model = agent.canonicalModel;
     if (isGemini(model) && model.useInteractionsApi) {
-      const events = invocationContext.session.events;
-      for (let i = events.length - 1; i >= 0; i--) {
-        const event = events[i];
-        // Skip events not belonging to the current branch or author
-        if (
-          event.branch === invocationContext.branch &&
-          event.author === agent.name &&
-          event.interactionId
-        ) {
-          llmRequest.previousInteractionId = event.interactionId;
-          break;
-        }
+      const {interactionId} = findPreviousInteractionState(
+        invocationContext.session.events,
+        agent.name,
+        invocationContext.branch,
+      );
+      if (interactionId) {
+        llmRequest.previousInteractionId = interactionId;
       }
     }
   }
