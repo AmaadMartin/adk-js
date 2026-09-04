@@ -171,11 +171,14 @@ export type {
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './integrations/langchain/langchain_tool.js';
 export * from './integrations/secret_manager/secret_client.js';
+// Exported here rather than from `common.ts`, which also feeds the web build:
+// these tools reach the network through `google-auth-library`.
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/bigtable`, which does not evaluate the
 // rest of this barrel.
 export * from './tools/bigtable/index.js';
+export * from './tools/data_agent/index.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
 // of this barrel.
 export * from './tools/mcp/index.js';
