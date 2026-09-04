@@ -52,7 +52,9 @@ interface HistoricalCall {
 
 /** An agent-raised gate that an approval answers and nothing has spent yet. */
 interface GateCandidate {
-  /** The call pinned when the gate was raised. */
+  /** The id of the `adk_request_confirmation` call that raised the gate. */
+  gateId: string;
+  /** The call pinned when the gate was raised, not yet validated. */
   pinned: FunctionCall;
   /** The decision the user gave for it. */
   confirmation: ToolConfirmation;
@@ -286,6 +288,12 @@ function parseToolConfirmation(
  * checked: in a multi-agent session one agent can raise the gate for a call
  * another agent issued, and {@link bindApprovedCalls} is where the call's own
  * author decides who resumes it.
+ *
+ * Apart from that forgery check the pass reads the pinned payload without
+ * validating it, so a spent approval is dropped here whatever it pins. Mirrors
+ * adk-python's `_map_confirmation_to_original_fc_ids`, which leaves every
+ * refusal to the strict pass. An unreadable payload the session has already
+ * moved past is then a no-op instead of an aborted invocation.
  */
 function collectGateCandidates(
   events: Event[],
@@ -296,9 +304,11 @@ function collectGateCandidates(
 
   for (const [index, event] of events.entries()) {
     for (const functionCall of getFunctionCalls(event)) {
-      const confirmation = functionCall.id
-        ? approvals.get(functionCall.id)
-        : undefined;
+      const gateId = functionCall.id;
+      if (!gateId) {
+        continue;
+      }
+      const confirmation = approvals.get(gateId);
       if (!confirmation) {
         continue;
       }
@@ -308,23 +318,19 @@ function collectGateCandidates(
       if (event.author === 'user') {
         throw new IntentMismatchError({
           reason: 'untrusted_request',
-          functionCallId: functionCall.id,
+          functionCallId: gateId,
         });
       }
       const pinned = pinnedCall(functionCall);
       if (!pinned) {
         continue;
       }
-      if (!pinned.id || !pinned.name) {
-        throw new IntentMismatchError({
-          reason: 'malformed_request',
-          functionCallId: functionCall.id,
-        });
-      }
-      if (hasRespondedAfter(events, pinned.id, index, agentName)) {
+      // A pin with no id cannot be matched against a response, so it cannot be
+      // deduped either. It goes through to the strict pass, which refuses it.
+      if (pinned.id && hasRespondedAfter(events, pinned.id, index, agentName)) {
         continue;
       }
-      candidates.push({pinned, confirmation});
+      candidates.push({gateId, pinned, confirmation});
     }
   }
 
@@ -336,11 +342,11 @@ function collectGateCandidates(
  * id, and refuses anything that does not line up.
  *
  * Pinning the action when the gate goes up only helps if the pin is
- * trustworthy. These checks establish that: the action was one this agent
- * actually asked to run, it is still a tool this agent has, that tool really
- * does gate on approval, and what is about to run is byte-for-byte what the
- * human was shown. A mismatch aborts the invocation — the caller asked to run
- * something nobody approved. Mirrors adk-python's
+ * trustworthy. These checks establish that: the pin names a call at all, the
+ * action was one this agent actually asked to run, it is still a tool this
+ * agent has, that tool really does gate on approval, and what is about to run
+ * is byte-for-byte what the human was shown. A mismatch aborts the invocation —
+ * the caller asked to run something nobody approved. Mirrors adk-python's
  * `_resolve_confirmation_targets`.
  */
 async function bindApprovedCalls(options: {
@@ -352,11 +358,18 @@ async function bindApprovedCalls(options: {
 }): Promise<Map<string, ResumableCall>> {
   const {candidates, events, toolsDict, agentName, invocationContext} = options;
   const history = historicalCalls(events);
-  const dynamicallyRequested = dynamicallyRequestedCallIds(events);
+  const dynamicallyRequested = dynamicallyRequestedCallIds(events, agentName);
   const resumable = new Map<string, ResumableCall>();
 
-  for (const {pinned, confirmation} of candidates) {
-    const pinnedId = pinned.id!;
+  for (const {gateId, pinned, confirmation} of candidates) {
+    if (!pinned.id || !pinned.name) {
+      throw new IntentMismatchError({
+        reason: 'malformed_request',
+        functionCallId: gateId,
+      });
+    }
+    const pinnedId = pinned.id;
+    const pinnedName = pinned.name;
     const refuse = (reason: IntentMismatchReason): IntentMismatchError =>
       new IntentMismatchError({reason, functionCallId: pinnedId});
 
@@ -374,11 +387,11 @@ async function bindApprovedCalls(options: {
       );
       continue;
     }
-    const tool = toolsDict[pinned.name!];
+    const tool = toolsDict[pinnedName];
     if (!tool) {
       throw refuse('unregistered_tool');
     }
-    if (original.call.name !== pinned.name) {
+    if (original.call.name !== pinnedName) {
       throw refuse('tool_name_mismatch');
     }
     if (!isEqual(original.call.args ?? {}, pinned.args ?? {})) {
@@ -437,22 +450,25 @@ function historicalCalls(events: Event[]): Map<string, HistoricalCall> {
  * very call it paused, so without this the approval it asked for would be
  * refused as unnecessary.
  *
- * Only an agent-authored event records the request. The framework stamps every
- * event carrying `requestedToolConfirmations` with the running agent's name, so
- * a client-authored one is a forgery — a caller declaring that a tool asked for
- * the approval it is about to answer — and does not count. Which agent recorded
- * it is not checked: in a multi-agent session that is not always the agent
- * resuming the call.
+ * Only an event this agent authored records the request. The framework stamps
+ * `toolEventAuthor` — the running agent's name — on every event carrying
+ * `requestedToolConfirmations`, and {@link bindApprovedCalls} resumes only a
+ * call this same agent issued, so the request and the call always share an
+ * author. An event from anyone else claiming a tool asked for approval is a
+ * forgery, and honouring it would execute a tool that never gates.
  *
  * The ids accumulate over every event rather than only the latest one carrying
  * each id: once the confirmed tool re-executes it emits a second response under
  * the same id with no `requestedToolConfirmations`, which would otherwise
  * shadow the original request.
  */
-function dynamicallyRequestedCallIds(events: Event[]): Set<string> {
+function dynamicallyRequestedCallIds(
+  events: Event[],
+  agentName: string,
+): Set<string> {
   const requested = new Set<string>();
   for (const event of events) {
-    if (event.author === 'user') {
+    if (event.author !== agentName) {
       continue;
     }
     const confirmations = event.actions.requestedToolConfirmations;
