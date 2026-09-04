@@ -66,7 +66,7 @@ class StateJsonType extends JsonType {
   }
 
   override convertToJSValue(
-    value: string | unknown,
+    value: unknown,
     platform: Platform,
     context?: TransformContext,
   ): Record<string, unknown> {

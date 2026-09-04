@@ -20,7 +20,7 @@ import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {existsSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {isAbsolute, join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {ENTITIES} from '../../src/sessions/db/schema.js';
 
@@ -61,7 +61,7 @@ describe('SqliteSessionService parity', () => {
 
   it('test_sqlite_session_service_accepts_absolute_sqlite_urls', async () => {
     const absDbPath = join(tempDir, 'absolute.db');
-    expect(absDbPath.startsWith('/')).toBe(true);
+    expect(isAbsolute(absDbPath)).toBe(true);
     const service = open(`sqlite://${absDbPath}`);
 
     await service.createSession({appName: 'app', userId: 'user'});
