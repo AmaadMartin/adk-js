@@ -8,37 +8,10 @@ import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {toSnakeCaseKey} from '../utils/object_notation_utils.js';
 
-/** How an eval model treats a key its shape does not name. */
-export type ExtraKeysPolicy = 'forbid' | 'allow';
-
 /** Options for {@link evalModel}. */
-export interface EvalModelOptions {
+interface EvalModelOptions {
   /** The model name, used in validation error messages. */
   readonly name: string;
-
-  /**
-   * Wire aliases for fields whose alias is not the snake_case form of the
-   * property name.
-   *
-   * A digit segment needs one: adk-python aliases the field `metric_name_1`
-   * to `metricName1`, whose snake_case form is `metric_name1`. Map
-   * `metricName1` back to `metric_name_1` to accept and emit what adk-python
-   * writes.
-   */
-  readonly aliases?: Readonly<Record<string, string>>;
-
-  /**
-   * Whether an unrecognized key is an error. Defaults to `'forbid'`, matching
-   * adk-python's `EvalBaseModel`. `'allow'` keeps the key, matching
-   * `BaseCriterion`.
-   */
-  readonly extraKeys?: ExtraKeysPolicy;
-}
-
-/** Options for {@link EvalModel.dump}. */
-export interface EvalDumpOptions {
-  /** Emits snake_case alias keys instead of the canonical camelCase ones. */
-  readonly byAlias?: boolean;
 }
 
 /** An evaluation model: the shared validation configuration, applied. */
@@ -55,9 +28,6 @@ export interface EvalModel<T extends object> {
    * @throws {InputValidationError} If the value is not a valid `T`.
    */
   parse(raw: unknown): T;
-
-  /** Renders a validated value as JSON. */
-  dump(value: T, options?: EvalDumpOptions): Record<string, unknown>;
 }
 
 /**
@@ -78,37 +48,21 @@ export function optionalField<T extends NonNullable<unknown>>(
  * Every evaluation model shares one validation configuration, the counterpart
  * of adk-python's `EvalBaseModel`: canonical property names are camelCase,
  * both spellings are accepted on the wire, and an unrecognized key is an error
- * rather than a silently dropped field unless {@link
- * EvalModelOptions.extraKeys} allows it. A field declared with `z.custom`
- * holds a value the schema does not describe and passes it through by
- * reference, which is what adk-python's `arbitrary_types_allowed` does.
+ * rather than a silently dropped field.
  */
 export function evalModel<Shape extends z.ZodRawShape>(
   shape: Shape,
   options: EvalModelOptions,
 ): EvalModel<z.infer<z.ZodObject<Shape>>> {
-  const aliases = new Map<string, string>();
-  for (const property of Object.keys(shape)) {
-    aliases.set(
-      property,
-      options.aliases?.[property] ?? toSnakeCaseKey(property),
-    );
-  }
   const properties = new Map<string, string>();
-  for (const [property, alias] of aliases) {
-    properties.set(alias, property);
+  for (const property of Object.keys(shape)) {
+    properties.set(toSnakeCaseKey(property), property);
   }
 
-  const object =
-    options.extraKeys === 'allow'
-      ? z.looseObject(shape)
-      : z.strictObject(shape);
   const schema = z
-    .codec(z.looseObject({}), z.looseObject({}), {
-      decode: (raw) => renameKeys(raw, properties),
-      encode: (value) => renameKeys(value, aliases),
-    })
-    .pipe(object);
+    .looseObject({})
+    .transform((raw) => renameKeys(raw, properties))
+    .pipe(z.strictObject(shape));
 
   return {
     schema,
@@ -121,9 +75,6 @@ export function evalModel<Shape extends z.ZodRawShape>(
         );
       }
       return result.data;
-    },
-    dump(value, dumpOptions) {
-      return dumpOptions?.byAlias ? schema.encode(value) : {...value};
     },
   };
 }

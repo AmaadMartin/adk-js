@@ -38,7 +38,7 @@ export interface ConversationScenario {
 
   /**
    * The persona the user simulator adopts. A scenario document may name a
-   * built-in persona by its id instead; {@link parseConversationScenario}
+   * built-in persona by its id instead; {@link conversationScenarioModel}
    * resolves that id through the default persona registry.
    */
   userPersona?: UserPersona;
@@ -82,7 +82,12 @@ const userPersonaField = z.preprocess(
   userPersonaModel.schema,
 );
 
-/** Validates a {@link ConversationScenario} payload. */
+/**
+ * Validates a {@link ConversationScenario} payload, resolving a persona id.
+ *
+ * `parse` throws {@link InputValidationError} for a malformed payload, and
+ * `NotFoundError` when `userPersona` names an unknown persona.
+ */
 export const conversationScenarioModel: EvalModel<ConversationScenario> =
   evalModel(
     {
@@ -111,36 +116,3 @@ export const conversationGenerationConfigModel: EvalModel<ConversationGeneration
     },
     {name: 'ConversationGenerationConfig'},
   );
-
-/**
- * Validates a conversation scenario payload, resolving a persona id.
- *
- * @throws {InputValidationError} When the payload is not a valid scenario.
- * @throws {NotFoundError} When `userPersona` names an unknown persona.
- */
-export function parseConversationScenario(raw: unknown): ConversationScenario {
-  return conversationScenarioModel.parse(raw);
-}
-
-/**
- * Validates a conversation scenarios document.
- *
- * @throws {InputValidationError} When the payload is not a valid document.
- * @throws {NotFoundError} When a scenario names an unknown persona.
- */
-export function parseConversationScenarios(
-  raw: unknown,
-): ConversationScenarios {
-  return conversationScenariosModel.parse(raw);
-}
-
-/**
- * Validates a conversation generation config payload.
- *
- * @throws {InputValidationError} When the payload is not a valid config.
- */
-export function parseConversationGenerationConfig(
-  raw: unknown,
-): ConversationGenerationConfig {
-  return conversationGenerationConfigModel.parse(raw);
-}

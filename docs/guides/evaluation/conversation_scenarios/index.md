@@ -17,8 +17,8 @@ simulated user follows — how it advances, which questions it answers, whether
 it corrects the agent, how it ends the conversation, and what tone it uses.
 Writing one out is long, so the module ships three built-in personas that a
 scenario names by id: `EXPERT`, `NOVICE` and `EVALUATOR`.
-`parseConversationScenario` resolves the id, and the parsed scenario always
-holds a whole `UserPersona`. An id that no persona answers to raises
+`conversationScenarioModel.parse` resolves the id, and the parsed scenario
+always holds a whole `UserPersona`. An id that no persona answers to raises
 `NotFoundError` at parse time rather than yielding a scenario with no persona.
 
 `ConversationGenerationConfig` is the other half: it describes how many
@@ -31,7 +31,7 @@ scenario generation service.
 Parse a scenarios document that names a built-in persona by id.
 
 ```typescript
-import {parseConversationScenarios} from '@google/adk';
+import {conversationScenariosModel} from '@google/adk';
 
 const document = {
   scenarios: [
@@ -43,7 +43,7 @@ const document = {
   ],
 };
 
-const scenarios = parseConversationScenarios(document);
+const scenarios = conversationScenariosModel.parse(document);
 const persona = scenarios.scenarios[0].userPersona;
 
 console.log(persona?.id); // 'EXPERT'
@@ -73,10 +73,10 @@ console.log(novice.description);
 An unknown id is an error, not a silent `undefined`:
 
 ```typescript
-import {NotFoundError, parseConversationScenario} from '@google/adk';
+import {conversationScenarioModel, NotFoundError} from '@google/adk';
 
 try {
-  parseConversationScenario({
+  conversationScenarioModel.parse({
     startingPrompt: 'hi',
     conversationPlan: 'chat',
     userPersona: 'NO_SUCH_PERSONA',
@@ -135,9 +135,9 @@ console.log(behaviorInstructionsText(PRE_BUILT_BEHAVIORS.CORRECT_AGENT));
 
 ## Validation failures
 
-`parseConversationScenario`, `parseConversationScenarios` and
-`parseConversationGenerationConfig` throw `InputValidationError` when the
-document is malformed, naming the property at fault. A misspelled key is
+`conversationScenarioModel.parse`, `conversationScenariosModel.parse` and
+`conversationGenerationConfigModel.parse` throw `InputValidationError` when
+the document is malformed, naming the property at fault. A misspelled key is
 rejected rather than dropped, so `userPersonaa` fails instead of silently
 producing a scenario with no persona. The one exception is an unknown persona
 id, which raises `NotFoundError` as shown above.

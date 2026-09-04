@@ -12,7 +12,7 @@
 
 import {
   behaviorInstructionsText,
-  isInputValidationError,
+  InputValidationError,
   userBehaviorModel,
   userPersonaModel,
   violationRubricsText,
@@ -60,7 +60,7 @@ describe('userBehaviorModel', () => {
       caught = error;
     }
 
-    if (!isInputValidationError(caught)) {
+    if (!(caught instanceof InputValidationError)) {
       expect.fail(`expected an InputValidationError, got ${String(caught)}`);
     }
     expect(caught.message).toContain('behaviourInstructions');
@@ -80,7 +80,7 @@ describe('userPersonaModel', () => {
       caught = error;
     }
 
-    if (!isInputValidationError(caught)) {
+    if (!(caught instanceof InputValidationError)) {
       expect.fail(`expected an InputValidationError, got ${String(caught)}`);
     }
     expect(caught.message).toContain('behaviors.0');

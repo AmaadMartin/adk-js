@@ -11,12 +11,11 @@
  */
 
 import {
+  conversationScenarioModel,
   conversationScenariosModel,
   getDefaultPersonaRegistry,
-  isInputValidationError,
+  InputValidationError,
   NotFoundError,
-  parseConversationScenario,
-  parseConversationScenarios,
   type UserPersona,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -38,7 +37,7 @@ function customPersona(): UserPersona {
 
 describe('ConversationScenario', () => {
   it('test_user_persona_given_as_id_resolves_to_default_persona', () => {
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       startingPrompt: 'I need to book a flight.',
       conversationPlan: 'Book SFO to LAX.',
       userPersona: 'EXPERT',
@@ -51,7 +50,7 @@ describe('ConversationScenario', () => {
 
   it('test_user_persona_given_as_unknown_id_raises_not_found', () => {
     expect(() =>
-      parseConversationScenario({
+      conversationScenarioModel.parse({
         startingPrompt: 'hi',
         conversationPlan: 'chat',
         userPersona: 'NO_SUCH_PERSONA',
@@ -67,7 +66,7 @@ describe('ConversationScenario', () => {
   it('test_user_persona_given_as_object_is_kept_verbatim', () => {
     const persona = customPersona();
 
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       startingPrompt: 'hi',
       conversationPlan: 'chat',
       userPersona: persona,
@@ -77,7 +76,7 @@ describe('ConversationScenario', () => {
   });
 
   it('test_user_persona_defaults_to_none', () => {
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       startingPrompt: 'hi',
       conversationPlan: 'chat',
     });
@@ -88,7 +87,7 @@ describe('ConversationScenario', () => {
   it('test_conversation_scenario_rejects_unknown_field', () => {
     let caught: unknown;
     try {
-      parseConversationScenario({
+      conversationScenarioModel.parse({
         startingPrompt: 'I need to book a flight.',
         conversationPlan: 'Book SFO to LAX.',
         userPersonaa: 'EXPERT',
@@ -97,7 +96,7 @@ describe('ConversationScenario', () => {
       caught = error;
     }
 
-    if (!isInputValidationError(caught)) {
+    if (!(caught instanceof InputValidationError)) {
       expect.fail(`expected an InputValidationError, got ${String(caught)}`);
     }
     expect(caught.message).toContain('userPersonaa');
@@ -107,11 +106,11 @@ describe('ConversationScenario', () => {
 
 describe('ConversationScenarios', () => {
   it('test_conversation_scenarios_defaults_to_empty_list', () => {
-    expect(parseConversationScenarios({}).scenarios).toEqual([]);
+    expect(conversationScenariosModel.parse({}).scenarios).toEqual([]);
   });
 
   it('test_conversation_scenarios_round_trips_through_json', () => {
-    const scenarios = parseConversationScenarios({
+    const scenarios = conversationScenariosModel.parse({
       scenarios: [
         {
           startingPrompt: 'I need to book a flight.',
@@ -125,8 +124,8 @@ describe('ConversationScenarios', () => {
       ],
     });
 
-    const restored = parseConversationScenarios(
-      JSON.parse(JSON.stringify(conversationScenariosModel.dump(scenarios))),
+    const restored = conversationScenariosModel.parse(
+      JSON.parse(JSON.stringify(scenarios)),
     );
 
     expect(restored).toEqual(scenarios);
@@ -135,7 +134,7 @@ describe('ConversationScenarios', () => {
   });
 
   it('test_conversation_scenarios_parses_camel_case_json', () => {
-    const scenarios = parseConversationScenarios({
+    const scenarios = conversationScenariosModel.parse({
       scenarios: [
         {
           startingPrompt: 'I need to book a flight.',
@@ -155,7 +154,7 @@ describe('ConversationScenarios', () => {
 describe('NotFoundError propagation', () => {
   it('surfaces the registry error unwrapped from a nested scenario', () => {
     expect(() =>
-      parseConversationScenarios({
+      conversationScenariosModel.parse({
         scenarios: [
           {
             startingPrompt: 'hi',

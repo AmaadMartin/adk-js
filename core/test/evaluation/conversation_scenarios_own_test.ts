@@ -11,10 +11,10 @@
  */
 
 import {
-  isInputValidationError,
-  parseConversationGenerationConfig,
-  parseConversationScenario,
-  parseConversationScenarios,
+  conversationGenerationConfigModel,
+  conversationScenarioModel,
+  conversationScenariosModel,
+  InputValidationError,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -22,7 +22,7 @@ function messageOf(parse: () => unknown): string {
   try {
     parse();
   } catch (error: unknown) {
-    if (!isInputValidationError(error)) {
+    if (!(error instanceof InputValidationError)) {
       expect.fail(`expected an InputValidationError, got ${String(error)}`);
     }
     return error.message;
@@ -32,7 +32,7 @@ function messageOf(parse: () => unknown): string {
 
 describe('ConversationScenario wire aliases', () => {
   it('populates the camelCase properties from snake_case keys', () => {
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       starting_prompt: 'I need to book a flight.',
       conversation_plan: 'Book SFO to LAX.',
       user_persona: 'EXPERT',
@@ -44,7 +44,7 @@ describe('ConversationScenario wire aliases', () => {
   });
 
   it('normalizes an explicit null persona to undefined', () => {
-    const scenario = parseConversationScenario({
+    const scenario = conversationScenarioModel.parse({
       startingPrompt: 'hi',
       conversationPlan: 'chat',
       userPersona: null,
@@ -55,7 +55,7 @@ describe('ConversationScenario wire aliases', () => {
 
   it('rejects a persona object whose behavior list is malformed', () => {
     const message = messageOf(() =>
-      parseConversationScenario({
+      conversationScenarioModel.parse({
         startingPrompt: 'hi',
         conversationPlan: 'chat',
         userPersona: {
@@ -70,7 +70,7 @@ describe('ConversationScenario wire aliases', () => {
   });
 
   it('names the missing property when a required field is absent', () => {
-    expect(messageOf(() => parseConversationScenario({}))).toContain(
+    expect(messageOf(() => conversationScenarioModel.parse({}))).toContain(
       'startingPrompt',
     );
   });
@@ -79,7 +79,7 @@ describe('ConversationScenario wire aliases', () => {
 describe('ConversationScenarios', () => {
   it('names the scenario index when a nested scenario is invalid', () => {
     const message = messageOf(() =>
-      parseConversationScenarios({
+      conversationScenariosModel.parse({
         scenarios: [
           {startingPrompt: 'hi', conversationPlan: 'chat'},
           {
@@ -98,7 +98,7 @@ describe('ConversationScenarios', () => {
 
 describe('ConversationGenerationConfig', () => {
   it('round trips every field', () => {
-    const config = parseConversationGenerationConfig({
+    const config = conversationGenerationConfigModel.parse({
       count: 5,
       generationInstruction: 'Cover the refund flow.',
       environmentContext: 'The catalog holds two models.',
@@ -114,7 +114,7 @@ describe('ConversationGenerationConfig', () => {
   });
 
   it('populates the camelCase properties from snake_case keys', () => {
-    const config = parseConversationGenerationConfig({
+    const config = conversationGenerationConfigModel.parse({
       count: 2,
       generation_instruction: 'Cover the refund flow.',
       environment_context: 'The catalog holds two models.',
@@ -127,7 +127,7 @@ describe('ConversationGenerationConfig', () => {
   });
 
   it('leaves both optional fields undefined when they are absent', () => {
-    const config = parseConversationGenerationConfig({
+    const config = conversationGenerationConfigModel.parse({
       count: 1,
       modelName: 'gemini-2.5-flash',
     });
@@ -139,21 +139,23 @@ describe('ConversationGenerationConfig', () => {
   it('requires count', () => {
     expect(
       messageOf(() =>
-        parseConversationGenerationConfig({modelName: 'gemini-2.5-flash'}),
+        conversationGenerationConfigModel.parse({
+          modelName: 'gemini-2.5-flash',
+        }),
       ),
     ).toContain('count');
   });
 
   it('requires modelName', () => {
     expect(
-      messageOf(() => parseConversationGenerationConfig({count: 3})),
+      messageOf(() => conversationGenerationConfigModel.parse({count: 3})),
     ).toContain('modelName');
   });
 
   it('rejects a non-integer count', () => {
     expect(
       messageOf(() =>
-        parseConversationGenerationConfig({
+        conversationGenerationConfigModel.parse({
           count: 2.5,
           modelName: 'gemini-2.5-flash',
         }),
