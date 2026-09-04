@@ -11,6 +11,7 @@ import {SequentialAgent} from '../../src/agents/sequential_agent.js';
 import {
   deprecated,
   resetDeprecationWarnings,
+  warnDeprecatedOnce,
 } from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -85,5 +86,40 @@ describe('the composite shell agents are deprecated', () => {
     );
     // The constructor is wrapped, so the reported class name has to survive it.
     expect(agent.constructor.name).toBe(name);
+  });
+});
+
+describe('warnDeprecatedOnce', () => {
+  beforeEach(() => {
+    resetDeprecationWarnings();
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetDeprecationWarnings();
+  });
+
+  it('warns once per key, however often it is called', () => {
+    warnDeprecatedOnce('moved-module', 'moved-module has moved.');
+    warnDeprecatedOnce('moved-module', 'moved-module has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('moved-module has moved.');
+  });
+
+  it('warns separately for each key', () => {
+    warnDeprecatedOnce('first', 'first has moved.');
+    warnDeprecatedOnce('second', 'second has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares the registry with the class decorator, so a reset clears both', () => {
+    warnDeprecatedOnce('shared-key', 'shared-key has moved.');
+    resetDeprecationWarnings();
+    warnDeprecatedOnce('shared-key', 'shared-key has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
   });
 });
