@@ -152,6 +152,20 @@ export interface BigQueryLoggerConfig {
    * is `v_tool_completed`. Defaults to `v`. An empty prefix throws.
    */
   viewPrefix?: string;
+  /**
+   * The Cloud Storage bucket that receives content too large to inline. When
+   * this is set, a binary part and an oversized text part are uploaded and the
+   * row carries a `gs://` URI instead of the bytes. The plugin does not create
+   * the bucket. Nothing is offloaded when this is omitted.
+   */
+  gcsBucketName?: string;
+  /**
+   * The BigQuery connection authorizing reads of the offloaded objects,
+   * written `location.connection_id`. It is recorded on each `object_ref` and
+   * is only read on the offload path, so it does nothing without
+   * {@link BigQueryLoggerConfig.gcsBucketName}.
+   */
+  connectionId?: string;
 }
 
 /** Constructor parameters for `BigQueryAgentAnalyticsPlugin`. */
@@ -189,6 +203,8 @@ export interface ResolvedConfig {
   /** Pre-parsed, so matching one key costs no reparsing on the hot path. */
   customMetadataAllowlist: CustomMetadataAllowlist;
   deniedColumns: ReadonlySet<AnalyticsPayloadColumn>;
+  gcsBucketName?: string;
+  connectionId?: string;
 }
 
 /** Prefixes every configuration error with the option's owner. */
@@ -292,6 +308,13 @@ function requireNonEmpty(name: string, value: string): void {
   }
 }
 
+/** Rejects an empty optional string. `undefined` passes, and stays unset. */
+function requireNonEmptyIfSet(name: string, value: string | undefined): void {
+  if (value !== undefined) {
+    requireNonEmpty(name, value);
+  }
+}
+
 /**
  * Rejects an empty view prefix, which would name a view after the event type
  * alone and so let it collide with an ordinary table in the dataset.
@@ -310,6 +333,8 @@ function validateConfig(config: BigQueryLoggerConfig): void {
   requireContentLimit(config.maxContentLength);
   requireRetryConfig(config.retryConfig ?? {});
   requireViewPrefix(config);
+  requireNonEmptyIfSet('gcsBucketName', config.gcsBucketName);
+  requireNonEmptyIfSet('connectionId', config.connectionId);
 }
 
 /**
@@ -384,6 +409,8 @@ function resolveConfig(
     enableOtelCorrelation: config.enableOtelCorrelation ?? false,
     customMetadataAllowlist,
     deniedColumns,
+    gcsBucketName: config.gcsBucketName,
+    connectionId: config.connectionId,
   };
 }
 

@@ -227,6 +227,22 @@ export function deriveScope(value: unknown): AnalyticsScope | null {
 export enum AnalyticsStorageMode {
   INLINE = 'INLINE',
   EXTERNAL_URI = 'EXTERNAL_URI',
+  GCS_REFERENCE = 'GCS_REFERENCE',
+}
+
+/**
+ * The `content_parts.object_ref` column: a BigQuery `ObjectRef` naming the
+ * Cloud Storage object that holds one part's content.
+ */
+export interface AnalyticsObjectRef {
+  /** The `gs://` URI of the object. */
+  uri: string;
+  /** Always null: the plugin never pins a reference to one generation. */
+  version: null;
+  /** The BigQuery connection authorized to read the object. */
+  authorizer: string | null;
+  /** JSON-encoded, because BigQuery `JSON` columns are supplied as strings. */
+  details: string;
 }
 
 /** One entry of the repeated `content_parts` column. */
@@ -234,11 +250,10 @@ export interface AnalyticsContentPart {
   mime_type: string;
   uri: string | null;
   /**
-   * Always null. The column exists so the table matches a Python-written one;
-   * populating it needs the Cloud Storage offload path, which this plugin does
-   * not implement.
+   * Set when the part's content went to Cloud Storage, null otherwise. Only a
+   * plugin configured with `gcsBucketName` ever offloads a part.
    */
-  object_ref: null;
+  object_ref: AnalyticsObjectRef | null;
   text: string | null;
   part_index: number;
   part_attributes: string;

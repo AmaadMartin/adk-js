@@ -42,7 +42,7 @@ const REDACTED = '[REDACTED]';
  * Longest string this module parses as JSON. A longer one takes the free-text
  * pass instead, which bounds the work a single adversarial payload can cause.
  */
-const MAX_INSPECT_CHARS = 4_000_000;
+export const MAX_INSPECT_CHARS = 4_000_000;
 
 /**
  * Recursion bound. A value nested deeper than this is replaced, which turns an
@@ -122,7 +122,7 @@ interface SanitizeState {
  * @param key The property name to classify.
  * @return True when the value under `key` must be redacted.
  */
-function isSensitiveKey(key: string): boolean {
+export function isSensitiveKey(key: string): boolean {
   const normalized = toSnakeCaseName(key);
   return (
     SENSITIVE_KEYS.has(normalized) || normalized.startsWith(TEMP_KEY_PREFIX)
