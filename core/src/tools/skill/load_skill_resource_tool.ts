@@ -13,6 +13,13 @@ import {
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from '../base_tool.js';
+import {SkillErrorCode} from './skill_error_codes.js';
+import {detectSkillToolError} from './skill_error_detection.js';
+import {
+  countInvocationFailure,
+  RESOURCE_NOT_FOUND_COUNTER_PREFIX,
+} from './skill_failure_counter.js';
+import {LOAD_SKILL_RESOURCE_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 const BINARY_FILE_DETECTED_MSG =
@@ -20,9 +27,11 @@ const BINARY_FILE_DETECTED_MSG =
 
 @experimental
 export class LoadSkillResourceTool extends BaseTool {
+  static readonly TOOL_NAME = LOAD_SKILL_RESOURCE_TOOL_NAME;
+
   constructor(private toolset: SkillToolset) {
     super({
-      name: 'load_skill_resource',
+      name: toolset.toolName(LoadSkillResourceTool.TOOL_NAME),
       description:
         'Loads a resource file (from references/, assets/, or scripts/) from within a skill.',
     });
@@ -60,13 +69,13 @@ export class LoadSkillResourceTool extends BaseTool {
     if (!skillName) {
       return {
         error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
+        error_code: SkillErrorCode.MISSING_SKILL_NAME,
       };
     }
     if (!resourcePath) {
       return {
         error: 'Resource path is required.',
-        error_code: 'MISSING_RESOURCE_PATH',
+        error_code: SkillErrorCode.MISSING_RESOURCE_PATH,
       };
     }
 
@@ -81,14 +90,14 @@ export class LoadSkillResourceTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        error_code: 'REGISTRY_ERROR',
+        error_code: SkillErrorCode.REGISTRY_ERROR,
       };
     }
 
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
-        error_code: 'SKILL_NOT_FOUND',
+        error_code: SkillErrorCode.SKILL_NOT_FOUND,
       };
     }
 
@@ -110,14 +119,29 @@ export class LoadSkillResourceTool extends BaseTool {
     } else {
       return {
         error: "Path must start with 'references/', 'assets/', or 'scripts/'.",
-        error_code: 'INVALID_RESOURCE_PATH',
+        error_code: SkillErrorCode.INVALID_RESOURCE_PATH,
       };
     }
 
     if (content === undefined) {
+      // Counts every miss in the invocation, not misses of this path, so the
+      // guard still fires when the model invents a fresh path each retry.
+      const failCount = countInvocationFailure(
+        toolContext,
+        RESOURCE_NOT_FOUND_COUNTER_PREFIX,
+      );
+      if (failCount > 1) {
+        return {
+          error:
+            `Resource '${resourcePath}' not found in skill '${skillName}'.` +
+            ` This is resource lookup failure #${failCount} this invocation.` +
+            ' Do not retry any path — report the error to the user and stop.',
+          error_code: SkillErrorCode.RESOURCE_NOT_FOUND_FATAL,
+        };
+      }
       return {
         error: `Resource '${resourcePath}' not found in skill '${skillName}'.`,
-        error_code: 'RESOURCE_NOT_FOUND',
+        error_code: SkillErrorCode.RESOURCE_NOT_FOUND,
       };
     }
 
@@ -134,6 +158,10 @@ export class LoadSkillResourceTool extends BaseTool {
       path: resourcePath,
       content,
     };
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return detectSkillToolError(response);
   }
 
   override async processLlmRequest(
