@@ -71,6 +71,27 @@ describe('LoadSkillResourceTool', () => {
     });
   });
 
+  it.each([
+    'references/constructor',
+    'references/__proto__',
+    'assets/toString',
+    'scripts/constructor',
+  ])(
+    'reports %s as not found rather than an inherited member',
+    async (resourcePath) => {
+      const toolset = new SkillToolset([mockSkill]);
+      const tool = new LoadSkillResourceTool(toolset);
+      const result = await tool.runAsync({
+        args: {skill_name: 'test-skill', path: resourcePath},
+        toolContext: createMockContext(),
+      });
+      expect(result).toEqual({
+        error: `Resource '${resourcePath}' not found in skill 'test-skill'.`,
+        error_code: 'RESOURCE_NOT_FOUND',
+      });
+    },
+  );
+
   it('handles binary files by returning status', async () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillResourceTool(toolset);
