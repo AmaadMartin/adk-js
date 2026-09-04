@@ -128,20 +128,17 @@ function routeFetch(routes: Record<string, unknown>): void {
 }
 
 /** The single fetch call the test made. */
-function onlyCall(): {url: string; init: RequestInit} {
+function onlyCall() {
   expect(fetchMock).toHaveBeenCalledOnce();
   const [input, init] = fetchMock.mock.calls[0];
-  return {url: String(input), init: init ?? {}};
+  return {url: String(input), init};
 }
 
 /** The headers of the request at `index`, keyed by lowercase name. */
 function headersOfCall(index: number): Record<string, string> {
-  const init = fetchMock.mock.calls[index][1] ?? {};
+  const headers = fetchMock.mock.calls[index][1]?.headers ?? {};
   return Object.fromEntries(
-    Object.entries(init.headers ?? {}).map(([k, v]) => [
-      k.toLowerCase(),
-      String(v),
-    ]),
+    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), String(v)]),
   );
 }
 
@@ -204,7 +201,7 @@ describe('TestAgentRegistry', () => {
   it('test_list_agents', async () => {
     routeFetch({agents: {agents: []}});
     await expect(registry.listAgents()).resolves.toEqual({agents: []});
-    expect(onlyCall().init.method).toBe('GET');
+    expect(onlyCall().init?.method).toBe('GET');
   });
 
   it('test_search_agents', async () => {
@@ -224,8 +221,8 @@ describe('TestAgentRegistry', () => {
     expect(url).toBe(
       'https://agentregistry.googleapis.com/v1alpha/projects/test-project/locations/global/agents:search',
     );
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(String(init.body))).toEqual({
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
       searchString: 'test-agent',
       searchType: 'KEYWORD',
       filter: 'display_name:test',
@@ -252,8 +249,8 @@ describe('TestAgentRegistry', () => {
     expect(url).toBe(
       'https://agentregistry.googleapis.com/v1alpha/projects/test-project/locations/global/mcpServers:search',
     );
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(String(init.body))).toEqual({
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
       searchString: 'test-mcp',
       searchType: 'KEYWORD',
       filter: 'display_name:test',
@@ -269,8 +266,8 @@ describe('TestAgentRegistry', () => {
     await registry.searchAgents();
 
     const {init} = onlyCall();
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(String(init.body))).toEqual({});
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({});
   });
 
   it('test_get_mcp_server', async () => {
