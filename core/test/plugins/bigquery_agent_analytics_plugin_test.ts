@@ -48,9 +48,10 @@ interface CreatedTable {
   metadata: TableMetadata;
 }
 
-const {BigQueryMock, fake} = vi.hoisted(() => {
+const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
   interface FakeBigQuery {
     clientOptions: unknown[];
+    streamOptions: unknown[];
     inserted: AnalyticsRow[];
     insertIds: string[];
     insertCalls: number;
@@ -68,11 +69,13 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     createError?: Error;
     datasetCreateError?: Error;
     insertError?: unknown;
+    insertStatus?: {code: number; message: string; rowErrors: unknown[]};
     insertGate?: Promise<void>;
   }
 
   const fake: FakeBigQuery = {
     clientOptions: [],
+    streamOptions: [],
     inserted: [],
     insertIds: [],
     insertCalls: 0,
@@ -114,22 +117,6 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
         throw fake.metadataError;
       }
       return [metadata];
-    }
-
-    async insert(
-      rows: Array<{insertId: string; json: AnalyticsRow}>,
-    ): Promise<void> {
-      fake.insertCalls += 1;
-      if (fake.insertGate !== undefined) {
-        await fake.insertGate;
-      }
-      if (fake.insertError !== undefined) {
-        throw fake.insertError;
-      }
-      for (const row of rows) {
-        fake.insertIds.push(row.insertId);
-        fake.inserted.push(row.json);
-      }
     }
   }
 
@@ -176,10 +163,77 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     }
   }
 
-  return {BigQueryMock, fake};
+  class FakeStreamConnection {
+    close(): void {}
+  }
+
+  class FakeJSONWriter {
+    appendRows(rows: AnalyticsRow[]): {
+      getResult: () => Promise<{error?: unknown}>;
+    } {
+      fake.insertCalls += 1;
+      const gate = fake.insertGate;
+      return {
+        getResult: async () => {
+          if (gate !== undefined) {
+            await gate;
+          }
+          if (fake.insertError !== undefined) {
+            throw fake.insertError;
+          }
+          if (fake.insertStatus !== undefined) {
+            const {code, message, rowErrors} = fake.insertStatus;
+            return {error: {code, message}, rowErrors};
+          }
+          for (const row of rows) {
+            fake.insertIds.push(row.event_id);
+            fake.inserted.push(row);
+          }
+          return {};
+        },
+      };
+    }
+
+    close(): void {}
+  }
+
+  class FakeWriterClient {
+    constructor(clientOptions: unknown) {
+      fake.streamOptions.push(clientOptions);
+    }
+
+    async getWriteStream(): Promise<{tableSchema: unknown}> {
+      return {tableSchema: {fields: []}};
+    }
+
+    async createStreamConnection(): Promise<FakeStreamConnection> {
+      return new FakeStreamConnection();
+    }
+
+    close(): void {}
+  }
+
+  const storageMock = {
+    managedwriter: {
+      WriterClient: FakeWriterClient,
+      JSONWriter: FakeJSONWriter,
+      DefaultStream: 'DEFAULT',
+    },
+    adapt: {
+      convertStorageSchemaToProto2Descriptor: () => ({name: 'root'}),
+    },
+    protos: {
+      google: {
+        cloud: {bigquery: {storage: {v1: {WriteStreamView: {FULL: 2}}}}},
+      },
+    },
+  };
+
+  return {BigQueryMock, storageMock, fake};
 });
 
 vi.mock('@google-cloud/bigquery', () => ({BigQuery: BigQueryMock}));
+vi.mock('@google-cloud/bigquery-storage', () => storageMock);
 
 const PROJECT_ID = 'test-project';
 const DATASET_ID = 'agent_analytics';
@@ -384,6 +438,7 @@ beforeEach(() => {
   fake.createError = undefined;
   fake.datasetCreateError = undefined;
   fake.insertError = undefined;
+  fake.insertStatus = undefined;
   fake.insertGate = undefined;
 });
 
@@ -2943,11 +2998,12 @@ describe('BigQueryAgentAnalyticsPlugin insert failures', () => {
     expect(plugin.getDropStats()['unexpected_error']).toBe(1);
   });
 
-  it('counts only the rejected rows of a partial failure', async () => {
-    fake.insertError = Object.assign(new Error('some rows failed'), {
-      name: 'PartialFailureError',
-      errors: [{row: {}, errors: [{reason: 'invalid'}]}],
-    });
+  it('counts only the rows the service singled out of a batch', async () => {
+    fake.insertStatus = {
+      code: 3,
+      message: 'some rows failed',
+      rowErrors: [{index: 0, code: 'FIELDS_ERROR'}],
+    };
     const plugin = makePlugin({batchSize: 5, flushOnRunEnd: false});
     const invocationContext = makeInvocationContext();
     await plugin.beforeRunCallback({invocationContext});

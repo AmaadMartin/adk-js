@@ -230,7 +230,7 @@ export enum AnalyticsStorageMode {
 }
 
 /** One entry of the repeated `content_parts` column. */
-export interface AnalyticsContentPart {
+export type AnalyticsContentPart = {
   mime_type: string;
   uri: string | null;
   /**
@@ -243,10 +243,10 @@ export interface AnalyticsContentPart {
   part_index: number;
   part_attributes: string;
   storage_mode: AnalyticsStorageMode;
-}
+};
 
 /** One row of the events table, in the column order the schema declares. */
-export interface AnalyticsRow {
+export type AnalyticsRow = {
   timestamp: string;
   event_id: string;
   event_type: AnalyticsEventType;
@@ -267,7 +267,7 @@ export interface AnalyticsRow {
   status: AnalyticsStatus;
   error_message: string | null;
   is_truncated: boolean;
-}
+};
 
 /** Sub-fields of the repeated `content_parts` column. */
 const CONTENT_PART_FIELDS: TableField[] = [

@@ -21,7 +21,7 @@ import {InMemorySessionService} from '../../src/sessions/in_memory_session_servi
 import {FunctionTool} from '../../src/tools/function_tool.js';
 import {ScriptedLlm} from '../workflow/test_helpers.js';
 
-const {BigQueryMock, inserted, liveTable} = vi.hoisted(() => {
+const {BigQueryMock, storageMock, inserted, liveTable} = vi.hoisted(() => {
   const inserted: Array<Partial<AnalyticsRow>> = [];
   const liveTable: {schema: unknown; labels: Record<string, string>} = {
     schema: {fields: []},
@@ -39,12 +39,6 @@ const {BigQueryMock, inserted, liveTable} = vi.hoisted(() => {
 
     async setMetadata(metadata: unknown): Promise<[unknown]> {
       return [metadata];
-    }
-
-    async insert(rows: Array<{json: Partial<AnalyticsRow>}>): Promise<void> {
-      for (const row of rows) {
-        inserted.push(row.json);
-      }
     }
   }
 
@@ -64,10 +58,56 @@ const {BigQueryMock, inserted, liveTable} = vi.hoisted(() => {
     }
   }
 
-  return {BigQueryMock, inserted, liveTable};
+  class FakeStreamConnection {
+    close(): void {}
+  }
+
+  class FakeJSONWriter {
+    appendRows(rows: Array<Partial<AnalyticsRow>>): {
+      getResult: () => Promise<{error?: unknown}>;
+    } {
+      return {
+        getResult: async () => {
+          inserted.push(...rows);
+          return {};
+        },
+      };
+    }
+
+    close(): void {}
+  }
+
+  class FakeWriterClient {
+    async getWriteStream(): Promise<{tableSchema: unknown}> {
+      return {tableSchema: {fields: []}};
+    }
+
+    async createStreamConnection(): Promise<FakeStreamConnection> {
+      return new FakeStreamConnection();
+    }
+
+    close(): void {}
+  }
+
+  const storageMock = {
+    managedwriter: {
+      WriterClient: FakeWriterClient,
+      JSONWriter: FakeJSONWriter,
+      DefaultStream: 'DEFAULT',
+    },
+    adapt: {convertStorageSchemaToProto2Descriptor: () => ({name: 'root'})},
+    protos: {
+      google: {
+        cloud: {bigquery: {storage: {v1: {WriteStreamView: {FULL: 2}}}}},
+      },
+    },
+  };
+
+  return {BigQueryMock, storageMock, inserted, liveTable};
 });
 
 vi.mock('@google-cloud/bigquery', () => ({BigQuery: BigQueryMock}));
+vi.mock('@google-cloud/bigquery-storage', () => storageMock);
 
 const APP_NAME = 'analytics_runner_app';
 const USER_ID = 'u1';
