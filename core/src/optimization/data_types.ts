@@ -9,6 +9,9 @@ import type {LlmAgent} from '../agents/llm_agent.js';
 /**
  * Base shape for evaluation results of a candidate agent on a batch of
  * examples.
+ *
+ * A sampler may extend this interface to carry the extra data an optimizer
+ * needs.
  */
 export interface SamplingResult {
   /**
@@ -23,7 +26,7 @@ export interface UnstructuredSamplingResult extends SamplingResult {
   /**
    * A map from example UID to JSON-serializable evaluation data useful for
    * agent optimization. Recommended contents include inputs, trajectories and
-   * metrics. Must be provided if the optimizer requested it.
+   * metrics. A sampler must provide it when the optimizer asks for it.
    */
   data?: Record<string, Record<string, unknown>>;
 }
@@ -31,7 +34,8 @@ export interface UnstructuredSamplingResult extends SamplingResult {
 /**
  * An optimized agent with its scores.
  *
- * Optimizers may return custom metrics by extending this interface.
+ * An optimizer that reports custom metrics extends this interface and
+ * parameterizes {@link OptimizerResult} on the subtype.
  */
 export interface AgentWithScores {
   /** The optimized agent. */
@@ -47,7 +51,8 @@ export interface OptimizerResult<
 > {
   /**
    * Optimized agents that cannot be considered strictly better than one
-   * another (a Pareto front), along with their scores.
+   * another (a Pareto front, see
+   * https://en.wikipedia.org/wiki/Pareto_front), along with their scores.
    */
   optimizedAgents: AgentWithScoresT[];
 }

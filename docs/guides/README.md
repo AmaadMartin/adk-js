@@ -166,6 +166,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [LiteLlm](models/lite_llm/index.md) - Running an agent on a non-Gemini model over the OpenAI chat-completions protocol.
 - [LlmRequest](models/llm_request/index.md) - The request object ADK builds for one model call, and the rules that keep it valid for the provider.
 
+### Optimization
+
+- [Agent optimization data types](optimization/data_types/index.md) - The vocabulary a sampler and an optimizer share: per-example scores and a Pareto front of optimized agents.
+
 ### Planners
 
 - [BasePlanner](planners/planner/index.md) - Applying an agent's planner to the model request, and splitting the reply into a plan and an answer.
