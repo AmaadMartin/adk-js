@@ -24,6 +24,12 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {
+  DEFAULT_DEBUG_OUTPUT_PATH,
+  DebugEntryType,
+  DebugLoggingPlugin,
+  type DebugLoggingPluginOptions,
+} from './plugins/debug_logging_plugin.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
