@@ -61,6 +61,12 @@
       "require": "./dist/cjs/telemetry/google_cloud.js",
       "default": "./dist/esm/telemetry/google_cloud.js"
     },
+    "./tools/agent_simulator/agent_simulator_config": {
+      "types": "./dist/types/tools/agent_simulator/agent_simulator_config.d.ts",
+      "import": "./dist/esm/tools/agent_simulator/agent_simulator_config.js",
+      "require": "./dist/cjs/tools/agent_simulator/agent_simulator_config.js",
+      "default": "./dist/esm/tools/agent_simulator/agent_simulator_config.js"
+    },
     "./tools/bigtable": {
       "types": "./dist/types/tools/bigtable/index.d.ts",
       "import": "./dist/esm/tools/bigtable/index.js",

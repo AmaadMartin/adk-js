@@ -228,6 +228,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [BigtableToolset](tools/bigtable_toolset/index.md) - Read-only Bigtable tools for an agent: instance, table and cluster metadata, plus GoogleSQL queries under a row cap.
 - [ConnectionsClient](tools/connections_client/index.md) - Reading Integration Connectors metadata and building the connector OpenAPI spec from it.
 - [DataAgentToolset](tools/data_agent_toolset/index.md) - Ask a Conversational Analytics data agent questions in plain language, and manage those data agents.
+- [Environment simulation config](tools/environment_simulation_config/index.md) - Declaring how a tool is simulated instead of called: injection rules, mock strategies, and the deprecated `AgentSimulatorConfig` name.
 - [ExampleTool.fromConfig](tools/example_tool/index.md) - Building an ExampleTool from a configuration record, and naming an example provider that user code exports.
 - [FunctionTool parameters and the sync-callable runner](tools/function_tool/index.md) - How a tool's parameter declaration is built, and how a host keeps a blocking tool body off the event loop.
 - [GoogleApiToolset](tools/google_api_toolset/index.md) - Turning a Google API Discovery document into callable tools, and the credentials they run under.
