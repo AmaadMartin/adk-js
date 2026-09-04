@@ -9,7 +9,7 @@
  * `google/adk-python`, branch `main`. Each `it()` keeps the reference test's
  * name, so a reviewer can grep for the original. Tests that adk-js needs but
  * the reference does not have live in
- * `migrate_from_sqlalchemy_pickle_extra_test.ts`.
+ * `migrate_from_sqlalchemy_pickle_row_reading_test.ts`.
  */
 
 import {MikroORM} from '@mikro-orm/core';

@@ -5,9 +5,10 @@
  */
 
 /**
- * Migration cases `google/adk-python`'s test suite does not have, because they
- * are specific to how adk-js reads a column or reports a failure. The ported
- * reference tests live in `migrate_from_sqlalchemy_pickle_test.ts`.
+ * How the migration reads a source row, and what it reports when it cannot:
+ * the column shapes a Node database driver produces, and the failure paths.
+ * These are specific to adk-js and have no counterpart in the reference suite.
+ * The ported reference tests live in `migrate_from_sqlalchemy_pickle_test.ts`.
  */
 
 import {MikroORM} from '@mikro-orm/core';
@@ -95,9 +96,49 @@ describe('migrate reports a missing table', () => {
     const written = info.mock.calls.flat().join('\n');
     expect(written).toContain("No 'app_states' table found in source db.");
     expect(written).toContain("No 'user_states' table found in source db.");
-    // The reference words the events line differently from the other three.
-    expect(written).toContain("No 'events' table found in source database.");
+    expect(written).toContain("No 'events' table found in source db.");
     expect(written).toContain('Migrated 1 sessions.');
+  });
+});
+
+describe('migrate tells an absent table from an unreadable one', () => {
+  it('aborts when a table exists but cannot be read', async () => {
+    vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const {source, dest} = databasePaths('unreadable-table');
+    await createV0Database(source, {omitTables: ['events']});
+    // An `events` relation that exists but fails on read, the way a locked
+    // database or a corrupt page does. Reporting this as an absent table
+    // would drop every event and still report success.
+    const raw = await openRawDatabase(source);
+    try {
+      await raw.execute(
+        'CREATE VIEW events AS SELECT no_such_function(1) AS id',
+      );
+    } finally {
+      await raw.close();
+    }
+
+    await expect(
+      migrate({
+        sourceDbUrl: `sqlite://${source}`,
+        destDbUrl: `sqlite://${dest}`,
+      }),
+    ).rejects.toThrow('no such function');
+  });
+
+  it('skips a table the dialect reports as absent', async () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => {});
+    const {source, dest} = databasePaths('absent-table');
+    await createV0Database(source, {omitTables: ['events']});
+
+    await migrate({
+      sourceDbUrl: `sqlite://${source}`,
+      destDbUrl: `sqlite://${dest}`,
+    });
+
+    expect(info.mock.calls.flat().join('\n')).toContain(
+      "No 'events' table found in source db.",
+    );
   });
 });
 

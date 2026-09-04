@@ -80,6 +80,22 @@ const OUTPUT_TRANSCRIPTION_COLUMN = 'output_transcription';
 /** Author recorded for a v0 event row that has none, matching the reference. */
 const DEFAULT_AUTHOR = 'agent';
 
+/**
+ * How each dialect adk-js connects to reports that a table does not exist.
+ *
+ * Only these mean "not there". Every other read failure - a locked database,
+ * a permission error, a corrupt page - is re-thrown, because reporting one of
+ * those as an empty table would migrate nothing and still claim success. A
+ * server that reports in another language falls on the safe side of that
+ * split: the migration aborts rather than skipping the table silently.
+ */
+const MISSING_TABLE_PATTERNS: readonly RegExp[] = [
+  /no such table/i, // SQLite
+  /relation "[^"]*" does not exist/i, // PostgreSQL
+  /doesn't exist/i, // MySQL and MariaDB
+  /invalid object name/i, // SQL Server
+];
+
 /** The two shapes SQLAlchemy's SQLite dialect writes a naive datetime in. */
 const SQL_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?$/;
@@ -359,8 +375,13 @@ function readText(value: unknown): string | undefined {
 /**
  * Reads every row of one source table.
  *
- * @return The rows, or `undefined` when the table cannot be read at all,
- *   which for a v0 database means it is not there.
+ * A v0 database written before app and user state existed has no `app_states`
+ * or `user_states` table, so an absent table is skipped rather than being an
+ * error. Only the dialect's own "no such table" report counts as absent; see
+ * {@link MISSING_TABLE_PATTERNS} for why everything else has to abort.
+ *
+ * @return The rows, or `undefined` when the table is not there.
+ * @throws The read error, when the table exists but cannot be read.
  */
 async function readTable(
   source: MikroORM,
@@ -373,9 +394,17 @@ async function readTable(
       .execute(`SELECT * FROM ${table}`);
     return Array.isArray(rows) ? rows.filter(isRecord) : [];
   } catch (err: unknown) {
-    logger.debug(`Reading '${table}' failed: ${formatError(err)}`);
+    if (!isMissingTable(err)) {
+      throw err;
+    }
     return undefined;
   }
+}
+
+/** Returns whether a failed read means the table is not there. */
+function isMissingTable(err: unknown): boolean {
+  const message = formatError(err);
+  return MISSING_TABLE_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 /**
@@ -388,14 +417,13 @@ async function migrateTable<T extends object>(
   source: MikroORM,
   em: EntityManager,
   table: string,
-  absentMessage: string,
   entity: EntityName<T>,
   toEntityData: (row: Record<string, unknown>) => EntityData<T> | undefined,
 ): Promise<void> {
   logger.info(`Migrating ${table}...`);
   const rows = await readTable(source, table);
   if (rows === undefined) {
-    logger.info(absentMessage);
+    logger.info(`No '${table}' table found in source db.`);
     return;
   }
   const migrated = rows
@@ -419,24 +447,16 @@ async function copyTables(
   });
   logger.info('Created metadata table in destination database.');
 
-  await migrateTable(
-    source,
-    em,
-    APP_STATES_TABLE,
-    `No '${APP_STATES_TABLE}' table found in source db.`,
-    StorageAppState,
-    (row) => ({
-      appName: requireString(row, 'app_name', APP_STATES_TABLE),
-      state: getStateObject(row['state']),
-      updateTime: requireDate(row, 'update_time', APP_STATES_TABLE),
-    }),
-  );
+  await migrateTable(source, em, APP_STATES_TABLE, StorageAppState, (row) => ({
+    appName: requireString(row, 'app_name', APP_STATES_TABLE),
+    state: getStateObject(row['state']),
+    updateTime: requireDate(row, 'update_time', APP_STATES_TABLE),
+  }));
 
   await migrateTable(
     source,
     em,
     USER_STATES_TABLE,
-    `No '${USER_STATES_TABLE}' table found in source db.`,
     StorageUserState,
     (row) => ({
       appName: requireString(row, 'app_name', USER_STATES_TABLE),
@@ -446,30 +466,17 @@ async function copyTables(
     }),
   );
 
-  await migrateTable(
-    source,
-    em,
-    SESSIONS_TABLE,
-    `No '${SESSIONS_TABLE}' table found in source db.`,
-    StorageSession,
-    (row) => ({
-      id: requireString(row, 'id', SESSIONS_TABLE),
-      appName: requireString(row, 'app_name', SESSIONS_TABLE),
-      userId: requireString(row, 'user_id', SESSIONS_TABLE),
-      state: getStateObject(row['state']),
-      createTime: requireDate(row, 'create_time', SESSIONS_TABLE),
-      updateTime: requireDate(row, 'update_time', SESSIONS_TABLE),
-    }),
-  );
+  await migrateTable(source, em, SESSIONS_TABLE, StorageSession, (row) => ({
+    id: requireString(row, 'id', SESSIONS_TABLE),
+    appName: requireString(row, 'app_name', SESSIONS_TABLE),
+    userId: requireString(row, 'user_id', SESSIONS_TABLE),
+    state: getStateObject(row['state']),
+    createTime: requireDate(row, 'create_time', SESSIONS_TABLE),
+    updateTime: requireDate(row, 'update_time', SESSIONS_TABLE),
+  }));
 
-  await migrateTable(
-    source,
-    em,
-    EVENTS_TABLE,
-    // The reference words this one differently from the other three.
-    `No '${EVENTS_TABLE}' table found in source database.`,
-    StorageEvent,
-    (row) => toStorageEvent(row, options),
+  await migrateTable(source, em, EVENTS_TABLE, StorageEvent, (row) =>
+    toStorageEvent(row, options),
   );
 }
 
