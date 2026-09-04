@@ -10,6 +10,7 @@ import {
   MissingOptionalPeerError,
 } from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
+import {naiveDatetimeOptions} from './dialect.js';
 import {
   ENTITIES,
   SCHEMA_VERSION_1_JSON,
@@ -394,6 +395,7 @@ export async function getConnectionOptionsFromUri(
       dbName,
       driver,
       ...sqlitePoolOptions(dbName),
+      ...naiveDatetimeOptions(backend),
       ...overrides,
     } as MikroORMOptions;
   }
@@ -403,6 +405,7 @@ export async function getConnectionOptionsFromUri(
     clientUrl: uri,
     driver,
     driverOptions: {pool: {validate: connectionIsAlive}},
+    ...naiveDatetimeOptions(backend),
     ...overrides,
   } as MikroORMOptions;
 }

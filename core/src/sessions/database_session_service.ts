@@ -94,9 +94,12 @@ export class DatabaseSessionService extends BaseSessionService {
         throw new Error('Driver is required when passing options object.');
       }
 
+      // Every backend adk-js supports drops the zone, so UTC is the default
+      // here as it is for a URI. A caller's own value wins.
       this.options = {
         ...connectionStringOrOptions,
         entities: ENTITIES,
+        forceUtcTimezone: connectionStringOrOptions.forceUtcTimezone ?? true,
       };
     }
   }
