@@ -7,9 +7,10 @@
 import type {SaveOptions} from '@google-cloud/storage';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  buildObjectRef,
+  fileExtension,
   GcsOffloader,
-  OffloadBucket,
-  OffloadStorage,
+  objectPath,
 } from '../../src/plugins/bigquery_analytics_offloader.js';
 
 /** One recorded `file(...).save(...)` call. */
@@ -20,65 +21,51 @@ interface SavedObject {
   options: SaveOptions;
 }
 
-const {StorageMock, peerCalls} = vi.hoisted(() => {
-  const peerCalls: unknown[] = [];
+const {StorageMock, saved, clientOptions, bucketCalls, failure} = vi.hoisted(
+  () => {
+    const saved: SavedObject[] = [];
+    const clientOptions: unknown[] = [];
+    const bucketCalls: string[] = [];
+    const failure: {error?: Error} = {};
 
-  class StorageMock {
-    constructor(options: unknown) {
-      peerCalls.push(options);
+    class StorageMock {
+      constructor(options: unknown) {
+        clientOptions.push(options);
+      }
+
+      bucket(name: string) {
+        bucketCalls.push(name);
+        return {
+          file: (path: string) => ({
+            save: async (data: Buffer | string, options: SaveOptions) => {
+              saved.push({bucket: name, path, data, options});
+              if (failure.error !== undefined) {
+                throw failure.error;
+              }
+            },
+          }),
+        };
+      }
     }
 
-    bucket(name: string): OffloadBucket {
-      return {
-        file: (path: string) => ({
-          save: async () => {
-            peerCalls.push({name, path});
-          },
-        }),
-      };
-    }
-  }
-
-  return {StorageMock, peerCalls};
-});
+    return {StorageMock, saved, clientOptions, bucketCalls, failure};
+  },
+);
 
 vi.mock('@google-cloud/storage', () => ({Storage: StorageMock}));
 
-/** A client that records every save instead of reaching Cloud Storage. */
-function fakeStorage(
-  saved: SavedObject[],
-  saveError?: Error,
-): {storage: OffloadStorage; bucketCalls: string[]} {
-  const bucketCalls: string[] = [];
-  const storage: OffloadStorage = {
-    bucket(name: string): OffloadBucket {
-      bucketCalls.push(name);
-      return {
-        file: (path: string) => ({
-          save: async (data: Buffer | string, options: SaveOptions) => {
-            saved.push({bucket: name, path, data, options});
-            if (saveError !== undefined) {
-              throw saveError;
-            }
-          },
-        }),
-      };
-    },
-  };
-  return {storage, bucketCalls};
-}
-
 describe('GcsOffloader', () => {
   beforeEach(() => {
-    peerCalls.length = 0;
+    saved.length = 0;
+    clientOptions.length = 0;
+    bucketCalls.length = 0;
+    failure.error = undefined;
   });
 
   it('writes the object and returns its gs:// URI', async () => {
-    const saved: SavedObject[] = [];
     const offloader = new GcsOffloader({
-      projectId: 'p',
+      projectId: 'my-project',
       bucketName: 'my-bucket',
-      storage: fakeStorage(saved).storage,
     });
 
     const uri = await offloader.uploadContent(
@@ -88,6 +75,7 @@ describe('GcsOffloader', () => {
     );
 
     expect(uri).toBe('gs://my-bucket/2026-01-02/trace/span_p0.png');
+    expect(clientOptions).toEqual([{projectId: 'my-project'}]);
     expect(saved).toHaveLength(1);
     expect(saved[0].bucket).toBe('my-bucket');
     expect(saved[0].path).toBe('2026-01-02/trace/span_p0.png');
@@ -95,12 +83,7 @@ describe('GcsOffloader', () => {
   });
 
   it('uploads create-only, so a name collision fails the upload', async () => {
-    const saved: SavedObject[] = [];
-    const offloader = new GcsOffloader({
-      projectId: 'p',
-      bucketName: 'b',
-      storage: fakeStorage(saved).storage,
-    });
+    const offloader = new GcsOffloader({projectId: 'p', bucketName: 'b'});
 
     await offloader.uploadContent('text', 'text/plain', 'a.txt');
 
@@ -111,46 +94,74 @@ describe('GcsOffloader', () => {
   });
 
   it('resolves the bucket once and reuses it', async () => {
-    const saved: SavedObject[] = [];
-    const {storage, bucketCalls} = fakeStorage(saved);
-    const offloader = new GcsOffloader({
-      projectId: 'p',
-      bucketName: 'b',
-      storage,
-    });
+    const offloader = new GcsOffloader({projectId: 'p', bucketName: 'b'});
 
     await offloader.uploadContent('one', 'text/plain', 'a.txt');
     await offloader.uploadContent('two', 'text/plain', 'b.txt');
 
     expect(bucketCalls).toEqual(['b']);
+    expect(clientOptions).toHaveLength(1);
     expect(saved.map((object) => object.path)).toEqual(['a.txt', 'b.txt']);
   });
 
   it('propagates an upload failure to the caller', async () => {
-    const saved: SavedObject[] = [];
-    const offloader = new GcsOffloader({
-      projectId: 'p',
-      bucketName: 'b',
-      storage: fakeStorage(saved, new Error('precondition failed')).storage,
-    });
+    failure.error = new Error('precondition failed');
+    const offloader = new GcsOffloader({projectId: 'p', bucketName: 'b'});
 
     await expect(
       offloader.uploadContent('text', 'text/plain', 'a.txt'),
     ).rejects.toThrow('precondition failed');
   });
+});
 
-  it('builds a client from the peer package when none is injected', async () => {
-    const offloader = new GcsOffloader({
-      projectId: 'my-project',
-      bucketName: 'peer-bucket',
+describe('fileExtension', () => {
+  it('maps a known MIME type, whatever its case', () => {
+    expect(fileExtension('image/png')).toBe('.png');
+    expect(fileExtension('IMAGE/JPEG')).toBe('.jpg');
+    expect(fileExtension('text/plain')).toBe('.txt');
+  });
+
+  it('falls back to .bin for a MIME type it does not know', () => {
+    expect(fileExtension('model/gltf-binary')).toBe('.bin');
+    expect(fileExtension('')).toBe('.bin');
+  });
+});
+
+describe('objectPath', () => {
+  it('names an object by date, trace, span, parse and part', () => {
+    const path = objectPath(
+      {
+        traceId: 'trace-1',
+        spanId: 'span-1',
+        parseUid: 'f'.repeat(32),
+        contentOrdinal: 3,
+        partIndex: 2,
+      },
+      '.png',
+    );
+
+    const date = new Date();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    expect(path).toBe(
+      `${date.getFullYear()}-${month}-${day}/trace-1/span-1_${'f'.repeat(32)}_c3_p2.png`,
+    );
+  });
+});
+
+describe('buildObjectRef', () => {
+  it('records the connection that authorizes the object', () => {
+    expect(buildObjectRef('gs://b/a.png', 'image/png', 'us.conn')).toEqual({
+      uri: 'gs://b/a.png',
+      version: null,
+      authorizer: 'us.conn',
+      details: '{"gcs_metadata":{"content_type":"image/png"}}',
     });
+  });
 
-    const uri = await offloader.uploadContent('text', 'text/plain', 'a.txt');
-
-    expect(uri).toBe('gs://peer-bucket/a.txt');
-    expect(peerCalls).toEqual([
-      {projectId: 'my-project'},
-      {name: 'peer-bucket', path: 'a.txt'},
-    ]);
+  it('records a null authorizer when no connection is configured', () => {
+    expect(
+      buildObjectRef('gs://b/a.txt', 'text/plain', undefined),
+    ).toMatchObject({authorizer: null});
   });
 });

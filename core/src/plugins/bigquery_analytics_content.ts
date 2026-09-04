@@ -8,17 +8,23 @@ import type {Blob, Content, Part} from '@google/genai';
 import type {LlmRequest} from '../models/llm_request.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {isRecord} from '../utils/object_utils.js';
+import {sanitizeExternalUri} from '../utils/redact_uri.js';
 import {
   NO_LENGTH_LIMIT,
   recursiveSmartTruncate,
   sanitizeErrorText,
   truncateText,
 } from '../utils/sanitize_utils.js';
-import {sanitizeExternalUri} from '../utils/uri_sanitize_utils.js';
-import type {ContentOffloader} from './bigquery_analytics_offloader.js';
+import {
+  buildObjectRef,
+  ContentOffloader,
+  fileExtension,
+  objectPath,
+  TEXT_EXTENSION,
+} from './bigquery_analytics_offloader.js';
 import {
   AnalyticsContentPart,
-  AnalyticsObjectRef,
   AnalyticsStorageMode,
 } from './bigquery_analytics_schema.js';
 import {newHexId} from './bigquery_analytics_spans.js';
@@ -69,33 +75,6 @@ const TEXT_MIME_TYPE = 'text/plain';
 
 /** MIME type recorded for inline bytes that declare none. */
 const DEFAULT_BINARY_MIME_TYPE = 'application/octet-stream';
-
-/** Object-name extension for a MIME type this module does not recognize. */
-const DEFAULT_EXTENSION = '.bin';
-
-/** Object-name extension of an offloaded text object. */
-const TEXT_EXTENSION = '.txt';
-
-/**
- * Extensions for the MIME types an agent turn actually carries. Node has no
- * MIME database of its own, and one small map is cheaper than a dependency.
- */
-const EXTENSION_BY_MIME_TYPE: ReadonlyMap<string, string> = new Map([
-  ['application/json', '.json'],
-  ['application/pdf', '.pdf'],
-  ['audio/mpeg', '.mp3'],
-  ['audio/ogg', '.ogg'],
-  ['audio/wav', '.wav'],
-  ['image/gif', '.gif'],
-  ['image/jpeg', '.jpg'],
-  ['image/png', '.png'],
-  ['image/webp', '.webp'],
-  ['text/csv', '.csv'],
-  ['text/html', '.html'],
-  ['text/plain', '.txt'],
-  ['video/mp4', '.mp4'],
-  ['video/webm', '.webm'],
-]);
 
 /** The Cloud Storage destination one parse call writes to. */
 export interface AnalyticsOffload {
@@ -161,11 +140,6 @@ interface PartScope {
   partIndex: number;
 }
 
-/** Narrows an arbitrary value to an indexable record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /**
  * Returns whether `value` is an {@link LlmRequest}. A shape check rather than
  * `instanceof`, which misidentifies objects built by a second copy of the
@@ -206,45 +180,22 @@ function baseContentPart(index: number): AnalyticsContentPart {
   };
 }
 
-/** Today's date in the local zone, as `YYYY-MM-DD`. */
-function localDate(): string {
-  const now = new Date();
-  const month = `${now.getMonth() + 1}`.padStart(2, '0');
-  const day = `${now.getDate()}`.padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
-/** The object-name extension for `mimeType`. */
-function fileExtension(mimeType: string): string {
-  return (
-    EXTENSION_BY_MIME_TYPE.get(mimeType.toLowerCase()) ?? DEFAULT_EXTENSION
-  );
-}
-
-/** The object name one part's content is written under. */
-function objectPath(
+/** The object name for one part, from its event and its position. */
+function pathFor(
   offload: AnalyticsOffload,
   scope: PartScope,
   extension: string,
 ): string {
-  return (
-    `${localDate()}/${offload.traceId}/${offload.spanId}` +
-    `_${scope.parseUid}_c${scope.contentOrdinal}_p${scope.partIndex}${extension}`
+  return objectPath(
+    {
+      traceId: offload.traceId,
+      spanId: offload.spanId,
+      parseUid: scope.parseUid,
+      contentOrdinal: scope.contentOrdinal,
+      partIndex: scope.partIndex,
+    },
+    extension,
   );
-}
-
-/** The `object_ref` column value for an object at `uri`. */
-function buildObjectRef(
-  uri: string,
-  contentType: string,
-  connectionId: string | undefined,
-): AnalyticsObjectRef {
-  return {
-    uri,
-    version: null,
-    authorizer: connectionId ?? null,
-    details: JSON.stringify({gcs_metadata: {content_type: contentType}}),
-  };
 }
 
 /**
@@ -297,7 +248,7 @@ async function buildInlineDataPart(
     // genai carries inline bytes base64-encoded; the object holds the bytes.
     Buffer.from(inlineData.data ?? '', 'base64'),
     mimeType,
-    objectPath(offload, scope, fileExtension(mimeType)),
+    pathFor(offload, scope, fileExtension(mimeType)),
   );
   if (uri === undefined) {
     record.text = UPLOAD_FAILED;
@@ -335,7 +286,7 @@ async function buildTextPart(
       offload,
       safeText,
       TEXT_MIME_TYPE,
-      objectPath(offload, scope, TEXT_EXTENSION),
+      pathFor(offload, scope, TEXT_EXTENSION),
     );
     if (uri !== undefined) {
       record.storage_mode = AnalyticsStorageMode.GCS_REFERENCE;

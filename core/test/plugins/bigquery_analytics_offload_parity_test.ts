@@ -16,7 +16,6 @@
  */
 
 import type {TableMetadata} from '@google-cloud/bigquery';
-import type {SaveOptions} from '@google-cloud/storage';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {Context} from '../../src/agents/context.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
@@ -32,19 +31,10 @@ import {
 import {
   ContentOffloader,
   GcsOffloader,
-  OffloadBucket,
-  OffloadStorage,
 } from '../../src/plugins/bigquery_analytics_offloader.js';
 import type {AnalyticsRow} from '../../src/plugins/bigquery_analytics_schema.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
-
-/** One recorded `file(...).save(...)` call. */
-interface SavedObject {
-  path: string;
-  data: Buffer | string;
-  options: SaveOptions;
-}
 
 const {BigQueryMock, StorageMock, inserted, saved} = vi.hoisted(() => {
   const inserted: AnalyticsRow[] = [];
@@ -181,6 +171,11 @@ function onlyRow(): AnalyticsRow {
   expect(inserted).toHaveLength(1);
   return inserted[0];
 }
+
+beforeEach(() => {
+  inserted.length = 0;
+  saved.length = 0;
+});
 
 describe('adk-python TestOffloadUnitSeparation', () => {
   it('test_multibyte_text_offloaded_by_byte_limit', async () => {
@@ -422,22 +417,14 @@ describe('adk-python offload object names', () => {
     expect(uid).toHaveLength(32);
 
     // And the upload path passes create-only semantics.
-    const objects: SavedObject[] = [];
-    const storage: OffloadStorage = {
-      bucket: (): OffloadBucket => ({
-        file: (path: string) => ({
-          save: async (data: Buffer | string, options: SaveOptions) => {
-            objects.push({path, data, options});
-          },
-        }),
-      }),
-    };
     await new GcsOffloader({
       projectId: PROJECT_ID,
       bucketName: 'b',
-      storage,
     }).uploadContent(Buffer.from('data'), 'image/png', 'p');
-    expect(objects[0].options.preconditionOpts).toEqual({ifGenerationMatch: 0});
+    expect(saved).toHaveLength(1);
+    expect(saved[0].options).toMatchObject({
+      preconditionOpts: {ifGenerationMatch: 0},
+    });
   });
 });
 
@@ -547,11 +534,6 @@ describe('adk-python external URI redaction', () => {
 });
 
 describe('adk-python plugin-level offload', () => {
-  beforeEach(() => {
-    inserted.length = 0;
-    saved.length = 0;
-  });
-
   it('test_offloading_with_connection_id', async () => {
     const plugin = makePlugin({
       gcsBucketName: 'my-bucket',
