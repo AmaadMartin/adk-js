@@ -17,7 +17,6 @@
 
 import {
   AuthConfig,
-  AuthScheme,
   BaseMemoryService,
   Context,
   InMemoryArtifactService,
@@ -205,7 +204,7 @@ describe('Context.functionCallId', () => {
     const context = makeContext();
     const authConfig: AuthConfig = {
       credentialKey: 'key1',
-      authScheme: {} as AuthScheme,
+      authScheme: {type: 'apiKey', name: 'X-Api-Key', in: 'header'},
     };
     expect(() => context.requestCredential(authConfig)).toThrow(
       'functionCallId is not set.',
