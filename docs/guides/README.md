@@ -175,6 +175,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Plugin agent callbacks](plugins/agent_callbacks/index.md) - The agent lifecycle hooks a plugin gets, their precedence over an agent's own callbacks, and the agent error notification.
 - [Plugin close lifecycle](plugins/plugin_close_lifecycle/index.md) - Releasing
   the resources a plugin holds, and the timeout that bounds each shutdown.
+- [Run error notifications](plugins/run_error_notifications/index.md) - Telling
+  every plugin that an error escaped a run, without letting a plugin replace
+  it.
 
 ### Runner
 

@@ -18,6 +18,7 @@ import {
 import {Content} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {ContextCompactionTrigger} from '../../src/plugins/base_plugin.js';
+import {formatError} from '../../src/utils/error_utils.js';
 
 type PluginCallbackName = keyof BasePlugin;
 
@@ -287,6 +288,27 @@ describe('PluginManager', () => {
         "Error in plugin 'plugin1' during 'beforeRunCallback' callback",
       );
     }
+  });
+
+  it('should chain the original plugin exception as the cause', async () => {
+    const originalException = new Error(
+      'Something went wrong inside the plugin!',
+    );
+    plugin1.exceptionsToRaise['beforeRunCallback'] = originalException;
+    service.registerPlugin(plugin1);
+
+    const caught = await service
+      .runBeforeRunCallback({invocationContext: mockInvocationContext})
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).cause).toBe(originalException);
+    expect(formatError(caught)).toContain(
+      'Something went wrong inside the plugin!',
+    );
   });
 
   it('should support all callbacks', async () => {

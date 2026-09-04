@@ -140,3 +140,71 @@ describe('PluginManager.close', () => {
     ).resolves.toBe('still waiting');
   });
 });
+
+/**
+ * Ported from `tests/unittests/plugins/test_plugin_manager.py` in
+ * `google/adk-python`, at `main`.
+ *
+ * | Test below | Reference test |
+ * | --- | --- |
+ * | closes nothing once the switch is on | `test_close_is_noop_after_set_skip_closing_plugins` |
+ * | returns before any close timeout starts | `test_set_skip_closing_plugins_bypasses_close_timeout` |
+ * | closes again once the switch is off | `test_set_skip_closing_plugins_false_reverts_to_closing` |
+ */
+describe('PluginManager.setSkipClosingPlugins', () => {
+  afterEach(() => {
+    closeOrder.length = 0;
+    vi.useRealTimers();
+  });
+
+  it('closes the plugins when the switch was never set', async () => {
+    const plugin = new ClosablePlugin('owned');
+    const manager = new PluginManager([plugin]);
+
+    await manager.close();
+
+    expect(plugin.closeCount).toBe(1);
+  });
+
+  it('closes nothing once the switch is on', async () => {
+    const plugin = new ClosablePlugin('borrowed');
+    const manager = new PluginManager([plugin]);
+
+    manager.setSkipClosingPlugins(true);
+    await manager.close();
+
+    expect(plugin.closeCount).toBe(0);
+  });
+
+  it('returns before any close timeout starts', async () => {
+    const stuck = new ClosablePlugin('stuck', 'hang');
+    const manager = new PluginManager([stuck], 0.01);
+
+    manager.setSkipClosingPlugins(true);
+    await expect(manager.close()).resolves.toBeUndefined();
+
+    // A guard placed after the loop would also resolve, but only after the
+    // stuck plugin had been closed and had timed out.
+    expect(stuck.closeCount).toBe(0);
+  });
+
+  it('closes again once the switch is off', async () => {
+    const plugin = new ClosablePlugin('borrowed');
+    const manager = new PluginManager([plugin]);
+
+    manager.setSkipClosingPlugins(true);
+    await manager.close();
+    manager.setSkipClosingPlugins(false);
+    await manager.close();
+
+    expect(plugin.closeCount).toBe(1);
+  });
+
+  it('resolves with the switch on and no plugin registered', async () => {
+    const manager = new PluginManager();
+
+    manager.setSkipClosingPlugins(true);
+
+    await expect(manager.close()).resolves.toBeUndefined();
+  });
+});

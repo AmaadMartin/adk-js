@@ -60,7 +60,7 @@ try {
 
 ## The close timeout
 
-`pluginCloseTimeoutSeconds` bounds how long each plugin gets. It defaults to 5 seconds, and it applies to each plugin separately rather than to the whole shutdown.
+`pluginCloseTimeoutSeconds` bounds how long each plugin gets. It defaults to `DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS`, which is 5 seconds, and it applies to each plugin separately rather than to the whole shutdown.
 
 ```typescript
 const runner = new Runner({
@@ -71,9 +71,25 @@ const runner = new Runner({
 });
 ```
 
+A `PluginManager` you build yourself takes the same timeout as its second constructor argument: `new PluginManager([new MetricsPlugin()], 10)`.
+
 A value of zero or less waits indefinitely. Use it only when a plugin must finish, because one plugin that never settles then blocks the whole shutdown.
 
 JavaScript cannot cancel a promise, so an expired timeout abandons the plugin rather than stopping its work. The manager stops waiting and moves to the next plugin.
+
+## Sharing plugins with another component
+
+A component that borrows another component's plugin list must not close those plugins: the owner is still using them. Call `setSkipClosingPlugins(true)` on the borrower's manager, and its `close()` does nothing.
+
+```typescript
+const borrowed = new PluginManager(ownerPlugins);
+borrowed.setSkipClosingPlugins(true);
+
+// Does nothing. The owner still holds live plugins.
+await borrowed.close();
+```
+
+The switch is checked before the first plugin, so a borrowed plugin that never finishes closing cannot delay the borrower either. It is reversible: pass `false` to close normally again.
 
 ## Failures
 
@@ -102,3 +118,4 @@ A timed-out plugin is reported the same way, with the message `Closing plugin '<
 - Plugins close in registration order, one at a time.
 - `Runner.close()` closes each plugin once. A second call closes the toolsets again, because a run reopens them, and leaves the plugins alone.
 - An override must be idempotent too, because a plugin registered on two runners is closed by each of them.
+- `PluginManager.close()` does nothing at all after `setSkipClosingPlugins(true)`.
