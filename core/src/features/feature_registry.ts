@@ -76,10 +76,14 @@ export enum FeatureName {
    * `ADK_DISABLE_MCP_GRACEFUL_ERROR_HANDLING=1` to restore the throwing
    * behaviour.
    *
+   * The leading underscore marks the member private, as adk-python marks it.
+   * Only the member name carries it; the string value, and so the environment
+   * variable, is unchanged.
+   *
    * @internal A temporary kill-switch, not supported API. Do not read it by
    * name from outside this package.
    */
-  MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
+  _MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
   /**
    * Flushes streamed parts as they arrive instead of aggregating them into one
    * response.
@@ -244,7 +248,7 @@ const FEATURE_REGISTRY: Record<FeatureName, ResolvedFeatureConfig> = {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },
-  [FeatureName.MCP_GRACEFUL_ERROR_HANDLING]: {
+  [FeatureName._MCP_GRACEFUL_ERROR_HANDLING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },

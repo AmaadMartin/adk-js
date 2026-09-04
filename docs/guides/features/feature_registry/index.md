@@ -155,6 +155,11 @@ registerFeature('MY_FEATURE' as FeatureName, {stage: FeatureStage.WIP});
 - **The flag set is not stable across releases.** Members are added and removed
   as features graduate. A variable naming a flag that no longer exists is
   ignored, with no warning and no error.
+- **A member whose name starts with `_` is internal.** It is a temporary kill
+  switch that ADK may remove without a major version bump, so do not read it by
+  name. Only the member name carries the underscore, so
+  `FeatureName._MCP_GRACEFUL_ERROR_HANDLING` is set with
+  `ADK_ENABLE_MCP_GRACEFUL_ERROR_HANDLING=1`.
 - **When a flag is read is feature-specific.** Setting a variable after the
   object that reads it exists may have no effect.
 - **The warning has no per-flag switch.** It goes through the ADK logger at the
