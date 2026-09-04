@@ -4,51 +4,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OAuth2Client} from 'google-auth-library';
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {AuthCredentialTypes} from '../../auth/auth_credential.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
-import {PubSubAuthClient} from './client.js';
+import type {PubSubSdkCredentials, ServiceAccountCredentials} from './sdk.js';
 
 /** OAuth scopes the Pub/Sub tools request when the config names none. */
 export const PUBSUB_DEFAULT_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/pubsub',
 ];
 
-/** Session-state key under which the resolved Pub/Sub token is cached. */
+/** Session-state key under which the resolved Pub/Sub grant is cached. */
 export const PUBSUB_TOKEN_CACHE_KEY = 'pubsub_token_cache';
 
 const GOOGLE_AUTHORIZATION_URL = 'https://accounts.google.com/o/oauth2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /**
- * How the Pub/Sub tools obtain credentials. Exactly one of three shapes is
- * valid, which TypeScript cannot express, so the {@link PubSubToolset}
- * constructor enforces it at runtime:
+ * How the Pub/Sub tools obtain credentials.
  *
- *   1. `authClient` alone — one identity for every end user.
- *   2. `externalAccessTokenKey` alone — a token another component already
- *      minted and wrote to session state.
- *   3. `clientId` and `clientSecret` (and optionally `scopes`) — each end user
- *      goes through the OAuth authorization-code flow.
+ * Leave every field unset to use Application Default Credentials, which is
+ * one identity for every end user. Name a service account to pin that
+ * identity explicitly. Name an OAuth client to send each end user through the
+ * authorization-code flow instead, so each one reaches only their own topics.
+ *
+ * A service account and an OAuth client cannot both be named; the
+ * {@link PubSubToolset} constructor rejects that.
  */
 export interface PubSubCredentialsConfig {
-  /**
-   * An auth client the caller already built: Application Default Credentials,
-   * a service-account key, or workload identity. Every end user then shares
-   * this one identity, so set it only when it may reach every user's topics
-   * and subscriptions.
-   *
-   * ```ts
-   * const authClient = await new GoogleAuth({
-   *   scopes: [...PUBSUB_DEFAULT_SCOPES],
-   * }).getClient();
-   * ```
-   */
-  authClient?: PubSubAuthClient;
-  /** Session-state key holding an access token minted elsewhere. */
-  externalAccessTokenKey?: string;
+  /** A service-account key, as the SDK reads it. */
+  credentials?: ServiceAccountCredentials;
+  /** Path to a service-account key file, as the SDK reads it. */
+  keyFilename?: string;
   /** The OAuth client id to use. */
   clientId?: string;
   /** The OAuth client secret to use. */
@@ -57,7 +45,7 @@ export interface PubSubCredentialsConfig {
   scopes?: string[];
 }
 
-/** An OAuth access token, as cached in session state. */
+/** An OAuth grant, as cached in one end user's session state. */
 export interface PubSubAccessToken {
   accessToken: string;
   refreshToken?: string;
@@ -65,54 +53,46 @@ export interface PubSubAccessToken {
   expiresAt?: number;
 }
 
+/** The credential fields one tool call builds its Pub/Sub client with. */
+export interface ResolvedPubSubCredentials {
+  credentials?: PubSubSdkCredentials;
+  keyFilename?: string;
+  scopes: string[];
+}
+
 /**
- * Rejects a config that sets more than one of the three credential sources.
- * The messages match adk-python's `BaseGoogleCredentialsConfig.__post_init__`,
- * because they reach the developer who wrote the config.
+ * Rejects a config that names both a service credential and an OAuth client,
+ * or half an OAuth client.
  *
  * @param config The credentials configuration to check.
- * @throws Error if the config names no credential source, or more than one.
+ * @throws Error if the config cannot authenticate.
  */
 export function validatePubSubCredentialsConfig(
   config: PubSubCredentialsConfig,
 ): void {
-  const {authClient, externalAccessTokenKey, clientId, clientSecret, scopes} =
-    config;
-  if (authClient) {
-    if (externalAccessTokenKey || clientId || clientSecret || scopes) {
-      throw new Error(
-        'If credentials are provided, external_access_token_key, client_id,' +
-          ' client_secret, and scopes must not be provided.',
-      );
-    }
-    return;
+  const {credentials, keyFilename, clientId, clientSecret} = config;
+  if (credentials && keyFilename) {
+    throw new Error('Provide either credentials or keyFilename, not both.');
   }
-  if (externalAccessTokenKey) {
-    if (clientId || clientSecret || scopes) {
-      throw new Error(
-        'If external_access_token_key is provided, client_id,' +
-          ' client_secret, and scopes must not be provided.',
-      );
-    }
-    return;
-  }
-  if (!clientId || !clientSecret) {
+  if ((credentials || keyFilename) && (clientId || clientSecret)) {
     throw new Error(
-      'Must provide one of credentials, external_access_token_key, or' +
-        ' client_id and client_secret pair.',
+      'If a service account is provided, client_id and client_secret must' +
+        ' not be provided.',
+    );
+  }
+  if (Boolean(clientId) !== Boolean(clientSecret)) {
+    throw new Error(
+      'Must provide the client_id and client_secret pair together, or' +
+        ' neither.',
     );
   }
 }
 
-/** Whether a cached token can still authenticate a call. */
+/** Whether a cached grant can still authenticate a call. */
 function isUsable(token: PubSubAccessToken): boolean {
-  // A refresh token lets google-auth-library mint a new access token itself,
-  // so an expired access token is not a reason to re-run the OAuth flow.
-  return (
-    Boolean(token.refreshToken) ||
-    token.expiresAt === undefined ||
-    token.expiresAt > Date.now()
-  );
+  // Only the refresh token authenticates a Pub/Sub client, and it outlives
+  // the access token it minted.
+  return Boolean(token.refreshToken);
 }
 
 /** Describes the scopes for the OpenAPI security scheme. */
@@ -123,59 +103,40 @@ function scopeDescriptions(scopes: readonly string[]): Record<string, string> {
 }
 
 /**
- * Builds an auth client that presents `token` to Pub/Sub.
- *
- * @param token The access token, and the refresh token when there is one.
- * @param clientId The OAuth client id the refresh token is renewed against.
- * @param clientSecret The matching OAuth client secret.
- * @return The auth client.
- */
-function createTokenAuthClient(
-  token: PubSubAccessToken,
-  clientId?: string,
-  clientSecret?: string,
-): OAuth2Client {
-  const client = new OAuth2Client({clientId, clientSecret});
-  client.setCredentials({
-    access_token: token.accessToken,
-    refresh_token: token.refreshToken,
-    expiry_date: token.expiresAt,
-  });
-  return client;
-}
-
-/**
  * Resolves the credentials the Pub/Sub tools call the API with.
  *
- * One manager serves every end user: {@link getAuthClient} reads and writes
- * the caller's own session state, so two users of the same agent never share
- * a token.
+ * One manager serves every end user: {@link resolve} reads and writes the
+ * caller's own session state, so two users of the same agent never share a
+ * grant.
  */
 export class PubSubCredentialsManager {
-  private readonly scopes: readonly string[];
+  private readonly scopes: string[];
 
   constructor(private readonly config: PubSubCredentialsConfig) {
-    this.scopes = config.scopes ?? PUBSUB_DEFAULT_SCOPES;
+    this.scopes = [...(config.scopes ?? PUBSUB_DEFAULT_SCOPES)];
   }
 
   /**
-   * Returns the auth client for this end user, or `undefined` when the user
+   * Returns the credentials for this end user, or `undefined` when the user
    * must still complete the OAuth flow. In that case the manager has already
    * asked for the credential through `context.requestCredential`.
    *
-   * @param context The calling tool's context. Only a configured `authClient`
-   *   resolves without one; the other two sources read session state.
-   * @return The auth client, or nothing while the user has not authorized.
-   * @throws Error if the configuration needs a context and there is none, or
-   *   if `externalAccessTokenKey` names a key session state does not hold.
+   * @param context The calling tool's context. Only the OAuth flow needs one.
+   * @return The credentials, or nothing while the user has not authorized.
+   * @throws Error if the OAuth flow has no context to read session state
+   *   from, or if the grant carries no refresh token.
    */
-  async getAuthClient(
-    context?: Context,
-  ): Promise<PubSubAuthClient | undefined> {
-    const {externalAccessTokenKey, authClient} = this.config;
-    if (authClient) {
-      // google-auth-library refreshes on use, so there is nothing to renew.
-      return authClient;
+  resolve(context?: Context): ResolvedPubSubCredentials | undefined {
+    const {credentials, keyFilename, clientId} = this.config;
+    if (credentials) {
+      return {credentials, scopes: this.scopes};
+    }
+    if (keyFilename) {
+      return {keyFilename, scopes: this.scopes};
+    }
+    if (!clientId) {
+      // Application Default Credentials.
+      return {scopes: this.scopes};
     }
     if (!context) {
       throw new Error(
@@ -183,27 +144,15 @@ export class PubSubCredentialsManager {
           ' session state. Call the tool through an agent.',
       );
     }
-    if (externalAccessTokenKey) {
-      return this.readExternalToken(context, externalAccessTokenKey);
-    }
     return this.runOAuthFlow(context);
   }
 
-  private readExternalToken(context: Context, key: string): PubSubAuthClient {
-    const accessToken = context.state.get<string>(key);
-    if (!accessToken) {
-      throw new Error(
-        'external_access_token_key is provided but no access token found in' +
-          ` tool_context.state with key ${key}.`,
-      );
-    }
-    return this.buildClient({accessToken});
-  }
-
-  private runOAuthFlow(context: Context): PubSubAuthClient | undefined {
+  private runOAuthFlow(
+    context: Context,
+  ): ResolvedPubSubCredentials | undefined {
     const cached = context.state.get<PubSubAccessToken>(PUBSUB_TOKEN_CACHE_KEY);
     if (cached && isUsable(cached)) {
-      return this.buildClient(cached);
+      return this.authorizedUser(cached);
     }
 
     const authConfig = this.authConfig();
@@ -219,7 +168,32 @@ export class PubSubCredentialsManager {
       expiresAt: oauth2.expiresAt,
     };
     context.state.set(PUBSUB_TOKEN_CACHE_KEY, token);
-    return this.buildClient(token);
+    return this.authorizedUser(token);
+  }
+
+  /**
+   * Turns one end user's grant into the credentials the SDK reads.
+   *
+   * @throws Error if the grant carries no refresh token. The SDK mints its
+   *   own access tokens and cannot present one it was handed.
+   */
+  private authorizedUser(token: PubSubAccessToken): ResolvedPubSubCredentials {
+    const {clientId, clientSecret} = this.config;
+    if (!token.refreshToken || !clientId || !clientSecret) {
+      throw new Error(
+        'The authorization did not return a refresh token, which Pub/Sub' +
+          ' needs to authenticate as this user. Request offline access.',
+      );
+    }
+    return {
+      credentials: {
+        type: 'authorized_user',
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: token.refreshToken,
+      },
+      scopes: this.scopes,
+    };
   }
 
   private authConfig(): AuthConfig {
@@ -244,10 +218,5 @@ export class PubSubCredentialsManager {
       },
       credentialKey: PUBSUB_TOKEN_CACHE_KEY,
     };
-  }
-
-  private buildClient(token: PubSubAccessToken): PubSubAuthClient {
-    const {clientId, clientSecret} = this.config;
-    return createTokenAuthClient(token, clientId, clientSecret);
   }
 }

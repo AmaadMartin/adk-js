@@ -28,8 +28,8 @@ import {
   PluginManager,
 } from '@google/adk';
 import {PubSubCredentialsConfig} from '@google/adk/tools/pubsub';
-import {OAuth2Client} from 'google-auth-library';
 import {expect} from 'vitest';
+import {ResolvedPubSubCredentials} from '../../../src/tools/pubsub/pubsub_credentials.js';
 
 /** A message body, in every shape the wire can carry it. */
 export type FakeMessageData = Uint8Array | string | null;
@@ -52,16 +52,9 @@ export interface FakeReceivedMessage {
   } | null;
 }
 
-/** The options a topic was opened with. */
-export interface RecordedTopic {
-  name: string;
-  batching?: {maxMessages?: number};
-  messageOrdering?: boolean;
-}
-
 /** One message the tools published. */
 export interface RecordedPublish {
-  topicName: string;
+  topic: string;
   data?: FakeMessageData;
   attributes?: Record<string, string>;
   orderingKey?: string;
@@ -92,12 +85,11 @@ export interface FakeFailures {
 export class FakePubSubState {
   readonly publisherOptions: Array<Record<string, unknown>> = [];
   readonly subscriberOptions: Array<Record<string, unknown>> = [];
-  readonly topics: RecordedTopic[] = [];
   readonly publishes: RecordedPublish[] = [];
   readonly pulls: RecordedPull[] = [];
   readonly acknowledgements: RecordedAcknowledge[] = [];
 
-  messageId = 'message_id';
+  messageIds: string[] | undefined = ['message_id'];
   /** `undefined` reproduces a pull response that omits the field. */
   receivedMessages: FakeReceivedMessage[] | undefined = [];
   failures: FakeFailures = {};
@@ -107,24 +99,14 @@ export class FakePubSubState {
   reset(): void {
     this.publisherOptions.length = 0;
     this.subscriberOptions.length = 0;
-    this.topics.length = 0;
     this.publishes.length = 0;
     this.pulls.length = 0;
     this.acknowledgements.length = 0;
-    this.messageId = 'message_id';
+    this.messageIds = ['message_id'];
     this.receivedMessages = [];
     this.failures = {};
     this.closedPublishers = 0;
     this.closedSubscribers = 0;
-  }
-
-  /** The last topic the tools opened. */
-  lastTopic(): RecordedTopic {
-    const topic = this.topics.at(-1);
-    if (!topic) {
-      return expect.fail('no topic was opened');
-    }
-    return topic;
   }
 
   /** The last message the tools published. */
@@ -140,39 +122,31 @@ export class FakePubSubState {
 /** The fake every mocked Pub/Sub client in a test file drives. */
 export const pubsubFake = new FakePubSubState();
 
-/** The message shape `Topic.publishMessage` receives. */
-interface FakeMessageOptions {
-  data?: FakeMessageData;
-  attributes?: Record<string, string>;
-  orderingKey?: string;
+/** The request `v1.PublisherClient.publish` receives. */
+interface FakePublishRequest {
+  topic: string;
+  messages: Array<{
+    data?: FakeMessageData;
+    attributes?: Record<string, string>;
+    orderingKey?: string;
+  }>;
 }
 
-/** The options `PubSub.topic` receives. */
-interface FakePublishOptions {
-  batching?: {maxMessages?: number};
-  messageOrdering?: boolean;
-}
-
-class FakeTopic {
-  constructor(private readonly name: string) {}
-
-  async publishMessage(message: FakeMessageOptions): Promise<string> {
-    pubsubFake.publishes.push({topicName: this.name, ...message});
-    if (pubsubFake.failures.publish) {
-      throw pubsubFake.failures.publish;
-    }
-    return pubsubFake.messageId;
-  }
-}
-
-class FakePubSub {
+class FakePublisherClient {
   constructor(options: Record<string, unknown>) {
     pubsubFake.publisherOptions.push(options);
   }
 
-  topic(name: string, options?: FakePublishOptions): FakeTopic {
-    pubsubFake.topics.push({name, ...options});
-    return new FakeTopic(name);
+  async publish(
+    request: FakePublishRequest,
+  ): Promise<[{messageIds: string[] | undefined}]> {
+    for (const message of request.messages) {
+      pubsubFake.publishes.push({topic: request.topic, ...message});
+    }
+    if (pubsubFake.failures.publish) {
+      throw pubsubFake.failures.publish;
+    }
+    return [{messageIds: pubsubFake.messageIds}];
   }
 
   async close(): Promise<void> {
@@ -215,8 +189,10 @@ class FakeSubscriberClient {
 
 /** The module shape `vi.mock('@google-cloud/pubsub', ...)` returns. */
 export const fakePubSubModule = {
-  PubSub: FakePubSub,
-  v1: {SubscriberClient: FakeSubscriberClient},
+  v1: {
+    PublisherClient: FakePublisherClient,
+    SubscriberClient: FakeSubscriberClient,
+  },
 };
 
 /** Id of the function call every tool context below answers for. */
@@ -233,14 +209,30 @@ export function makeToolContext(): Context {
   return new Context({invocationContext, functionCallId: FUNCTION_CALL_ID});
 }
 
-/** An auth client the Pub/Sub clients accept. */
-export function testAuthClient(): OAuth2Client {
-  return new OAuth2Client();
+/** A service-account key, as the SDK reads it. */
+export function testServiceAccount(id = 'agent'): {
+  client_email: string;
+  private_key: string;
+} {
+  return {
+    client_email: `${id}@example.test.iam.gserviceaccount.com`,
+    private_key: `private-key-${id}`,
+  };
 }
 
-/** The simplest valid credentials config: one identity for every user. */
-export function testCredentialsConfig(): PubSubCredentialsConfig {
-  return {authClient: testAuthClient()};
+/** A service-account credentials config: one identity for every user. */
+export function testCredentialsConfig(id = 'agent'): PubSubCredentialsConfig {
+  return {credentials: testServiceAccount(id)};
+}
+
+/** Credentials as the client layer receives them, distinct per `id`. */
+export function testResolvedCredentials(
+  id = 'agent',
+): ResolvedPubSubCredentials {
+  return {
+    credentials: testServiceAccount(id),
+    scopes: ['https://www.googleapis.com/auth/pubsub'],
+  };
 }
 
 /**

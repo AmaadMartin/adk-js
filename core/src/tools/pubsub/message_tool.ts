@@ -12,12 +12,14 @@ import {FunctionTool} from '../function_tool.js';
 import {
   getPublisherClient,
   getSubscriberClient,
-  PubSubAuthClient,
   PubSubClientRequest,
 } from './client.js';
 import {PubSubToolConfig} from './config.js';
 import {PulledMessage, toPulledMessage} from './message_codec.js';
-import {PubSubCredentialsManager} from './pubsub_credentials.js';
+import {
+  PubSubCredentialsManager,
+  ResolvedPubSubCredentials,
+} from './pubsub_credentials.js';
 
 /** What a Pub/Sub tool answers with when the call fails. */
 export interface PubSubErrorResult {
@@ -110,22 +112,22 @@ function userAgent(projectId: string | undefined, operation: string): string[] {
  * @param credentials The manager that reads the user's session state.
  * @param toolName The tool asking, named in the authorization message.
  * @param context The calling tool's context.
- * @return The auth client to call Pub/Sub with.
+ * @return The credentials to call Pub/Sub with.
  * @throws Error if the user has not completed the authorization flow.
  */
-async function resolveAuthClient(
+function resolveCredentials(
   credentials: PubSubCredentialsManager,
   toolName: string,
   context?: Context,
-): Promise<PubSubAuthClient> {
-  const authClient = await credentials.getAuthClient(context);
-  if (!authClient) {
+): ResolvedPubSubCredentials {
+  const resolved = credentials.resolve(context);
+  if (!resolved) {
     throw new Error(
       'User authorization is required to access Google services for' +
         ` ${toolName}. Please complete the authorization flow.`,
     );
   }
-  return authClient;
+  return resolved;
 }
 
 /**
@@ -172,24 +174,27 @@ export function createPublishMessageTool(
       return runPubSubTool(
         `Failed to publish message to topic '${args.topic_name}'`,
         async () => {
-          const request = await clientRequest(
+          const request = clientRequest(
             credentials,
             settings,
             name,
             toolContext,
           );
           const client = await getPublisherClient(request);
-          // Batching is disabled because the tool publishes one message and
-          // waits for it, so a batch window would only add delay.
-          const topic = client.topic(args.topic_name, {
-            batching: {maxMessages: 1},
-            messageOrdering: Boolean(args.ordering_key),
+          const [response] = await client.publish({
+            topic: args.topic_name,
+            messages: [
+              {
+                data: Buffer.from(args.message, 'utf-8'),
+                attributes: args.attributes,
+                orderingKey: args.ordering_key,
+              },
+            ],
           });
-          const messageId = await topic.publishMessage({
-            data: Buffer.from(args.message, 'utf-8'),
-            attributes: args.attributes,
-            orderingKey: args.ordering_key,
-          });
+          const messageId = response.messageIds?.[0];
+          if (!messageId) {
+            throw new Error('Pub/Sub accepted the message but returned no id.');
+          }
           const result: PublishMessageResult = {message_id: messageId};
           return result;
         },
@@ -221,7 +226,7 @@ export function createPullMessagesTool(
       return runPubSubTool(
         `Failed to pull messages from subscription '${subscription}'`,
         async () => {
-          const request = await clientRequest(
+          const request = clientRequest(
             credentials,
             settings,
             name,
@@ -270,7 +275,7 @@ export function createAcknowledgeMessagesTool(
       return runPubSubTool(
         `Failed to acknowledge messages on subscription '${subscription}'`,
         async () => {
-          const request = await clientRequest(
+          const request = clientRequest(
             credentials,
             settings,
             name,
@@ -295,14 +300,14 @@ export function createAcknowledgeMessagesTool(
  * @param context The calling tool's context.
  * @return The client request.
  */
-async function clientRequest(
+function clientRequest(
   credentials: PubSubCredentialsManager,
   settings: PubSubToolConfig,
   operation: string,
   context?: Context,
-): Promise<PubSubClientRequest> {
+): PubSubClientRequest {
   return {
-    authClient: await resolveAuthClient(credentials, operation, context),
+    credentials: resolveCredentials(credentials, operation, context),
     projectId: settings.projectId,
     userAgent: userAgent(settings.projectId, operation),
   };

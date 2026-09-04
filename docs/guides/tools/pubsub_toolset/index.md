@@ -33,12 +33,7 @@ barrel never reaches the peer.
 
 ```ts
 import {LlmAgent} from '@google/adk';
-import {PUBSUB_DEFAULT_SCOPES, PubSubToolset} from '@google/adk/tools/pubsub';
-import {GoogleAuth} from 'google-auth-library';
-
-const authClient = await new GoogleAuth({
-  scopes: [...PUBSUB_DEFAULT_SCOPES],
-}).getClient();
+import {PubSubToolset} from '@google/adk/tools/pubsub';
 
 const agent = new LlmAgent({
   name: 'pubsub_agent',
@@ -48,12 +43,15 @@ const agent = new LlmAgent({
     ' subscription.',
   tools: [
     new PubSubToolset({
-      credentialsConfig: {authClient},
+      credentialsConfig: {},
       pubsubToolConfig: {projectId: 'my-project'},
     }),
   ],
 });
 ```
+
+An empty `credentialsConfig` uses Application Default Credentials, so the
+agent runs as whatever identity the environment provides.
 
 To try it against a real project:
 
@@ -77,8 +75,9 @@ Then ask the agent to publish a message to
 These are the names the model sees, and they match adk-python.
 
 `publish_message` takes `topic_name`, `message`, optional `attributes` and an
-optional `ordering_key`. A non-empty ordering key turns on client-side message
-ordering for that publish. It answers with `{"message_id": "..."}`.
+optional `ordering_key`. The ordering key is sent with the message, and the
+topic delivers messages that share one in the order it received them. The tool
+answers with `{"message_id": "..."}`.
 
 `pull_messages` takes `subscription_name`, `max_messages` (default 1) and
 `auto_ack` (default false). It answers with `{"messages": [...]}`, where each
@@ -99,7 +98,7 @@ adk-python.
 
 ```ts
 new PubSubToolset({
-  credentialsConfig: {authClient},
+  credentialsConfig: {},
   pubsubToolConfig: {projectId: 'my-project'},
   toolFilter: ['pull_messages', 'acknowledge_messages'],
 });
@@ -115,42 +114,51 @@ only affects client construction.
 
 ## Credentials
 
-`credentialsConfig` is required, and names exactly one of three sources.
+`credentialsConfig` is required, and reaches the Pub/Sub client as data. It
+names one identity for every end user, or one identity per end user.
 
-An auth client you already built — Application Default Credentials, a service
-account key, or workload identity. Every end user then shares this one identity,
-so set it only when it may reach every user's topics:
+Application Default Credentials, which is the environment's identity:
 
 ```ts
-{
-  authClient;
-}
+new PubSubToolset({credentialsConfig: {}});
 ```
 
-A session-state key holding an access token another component already minted:
+A service account, named inline or by key file:
 
 ```ts
-{
-  externalAccessTokenKey: 'my_access_token';
-}
+new PubSubToolset({
+  credentialsConfig: {keyFilename: process.env.PUBSUB_KEY_FILE},
+});
 ```
 
 An OAuth client pair, so each end user authorizes the agent against their own
 Pub/Sub access through the authorization-code flow:
 
 ```ts
-{clientId: process.env.OAUTH_CLIENT_ID, clientSecret: process.env.OAUTH_CLIENT_SECRET}
+new PubSubToolset({
+  credentialsConfig: {
+    clientId: process.env.OAUTH_CLIENT_ID,
+    clientSecret: process.env.OAUTH_CLIENT_SECRET,
+  },
+});
 ```
 
 The flow needs one round trip. The first tool call answers with the `ERROR`
 envelope saying authorization is required, and asks the runner for the
-credential. Once the user authorizes, the token is cached in that user's own
-session state, so two users never share one.
+credential. Once the user authorizes, the grant is cached in that user's own
+session state, so two users never share one. The grant must carry a refresh
+token: the Pub/Sub client mints its own access tokens and cannot present one
+it was handed. Request offline access, or the tool reports that as an `ERROR`.
 
-Naming more than one source, or none, throws from the `PubSubToolset`
-constructor. Scopes default to `PUBSUB_DEFAULT_SCOPES`, which is the single
-scope `https://www.googleapis.com/auth/pubsub`, and only the OAuth pair accepts
-a `scopes` override.
+Naming a service account and an OAuth pair together, or half an OAuth pair,
+throws from the `PubSubToolset` constructor. Scopes default to
+`PUBSUB_DEFAULT_SCOPES`, the single scope
+`https://www.googleapis.com/auth/pubsub`.
+
+The toolset does not take an auth client object. `@google-cloud/pubsub` types
+that field against the copy of `google-auth-library` that `google-gax` pins,
+which is a different major version from the one adk-js depends on, and two
+copies of that package are not interchangeable.
 
 ## Clients and cleanup
 

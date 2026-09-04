@@ -22,6 +22,7 @@ import {
   resultOf,
   runTool,
   testCredentialsConfig,
+  testServiceAccount,
 } from './pubsub_test_utils.js';
 
 vi.mock('@google-cloud/pubsub', async () => {
@@ -84,14 +85,12 @@ describe('publish_message', () => {
     });
 
     expect(resultOf(result)).toEqual({message_id: 'message_id'});
-    expect(pubsubFake.lastTopic()).toEqual({
-      name: TOPIC,
-      batching: {maxMessages: 1},
-      messageOrdering: false,
+    expect(pubsubFake.lastPublish()).toEqual({
+      topic: TOPIC,
+      data: Buffer.from('Hello World', 'utf-8'),
+      attributes: undefined,
+      orderingKey: '',
     });
-    expect(pubsubFake.lastPublish().data).toEqual(
-      Buffer.from('Hello World', 'utf-8'),
-    );
   });
 
   it('test_publish_message_with_ordering_key', async () => {
@@ -102,7 +101,6 @@ describe('publish_message', () => {
     });
 
     expect(resultOf(result)).toEqual({message_id: 'message_id'});
-    expect(pubsubFake.lastTopic().messageOrdering).toBe(true);
     expect(pubsubFake.lastPublish().orderingKey).toBe('key1');
   });
 
@@ -117,6 +115,23 @@ describe('publish_message', () => {
       key1: 'value1',
       key2: 'value2',
     });
+  });
+
+  it.each([
+    {label: 'an empty list', messageIds: []},
+    {label: 'no list at all', messageIds: undefined},
+  ])('reports a publish that answered with $label', async ({messageIds}) => {
+    pubsubFake.messageIds = messageIds;
+
+    const result = await runTool(makeToolset(), 'publish_message', {
+      topic_name: TOPIC,
+      message: 'Hello World',
+    });
+
+    expect(errorOf(result)).toBe(
+      `Failed to publish message to topic '${TOPIC}':` +
+        ' Pub/Sub accepted the message but returned no id.',
+    );
   });
 
   it('test_publish_message_exception', async () => {
@@ -263,7 +278,8 @@ describe('beyond the adk-python suite', () => {
 
     expect(pubsubFake.publisherOptions[0]).toEqual({
       projectId: 'my_project_id',
-      authClient: expect.anything(),
+      credentials: testServiceAccount(),
+      scopes: ['https://www.googleapis.com/auth/pubsub'],
       libName: 'adk-pubsub-tool google-adk',
       libVersion: version,
     });

@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {ClientConfig, PubSub, v1} from '@google-cloud/pubsub';
+import {createHash} from 'node:crypto';
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
-import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {version} from '../../version.js';
-
-/** The package and the feature named when the peer is not installed. */
-const PUBSUB_PEER = {
-  packageName: '@google-cloud/pubsub',
-  feature: 'PubSubToolset',
-};
+import type {ResolvedPubSubCredentials} from './pubsub_credentials.js';
+import {
+  loadPubSubSdk,
+  PubSubPublisherClient,
+  PubSubSdkOptions,
+  PubSubSubscriberClient,
+} from './sdk.js';
 
 /**
  * Attribution sent to Pub/Sub, matching adk-python's
@@ -32,34 +32,9 @@ export const CACHE_TTL_MS = 30 * 60 * 1000;
  */
 export const CACHE_MAX_SIZE = 10;
 
-/** The synchronous pull and acknowledge client. */
-export type SubscriberClient = InstanceType<typeof v1.SubscriberClient>;
-
-/**
- * An auth client the Pub/Sub clients accept. Read off the SDK's own options
- * rather than imported from `google-auth-library`, because
- * `@google-cloud/pubsub` types this field with the copy of that package
- * `google-gax` pins.
- */
-export type PubSubAuthClient = NonNullable<ClientConfig['authClient']>;
-
-/**
- * The options both clients are built with.
- *
- * `libName` and `libVersion` reach the `x-goog-api-client` header through gax,
- * but `@google-cloud/pubsub` does not declare them on `ClientConfig`. The two
- * fields that are declared are picked from it rather than restated, and the
- * rest is left out because `ClientConfig` and the generated client's options
- * type disagree on `port`.
- */
-type PubSubClientOptions = Pick<ClientConfig, 'projectId' | 'authClient'> & {
-  libName: string;
-  libVersion: string;
-};
-
 /** Which identity a client speaks as, and how it identifies itself. */
 export interface PubSubClientRequest {
-  authClient: PubSubAuthClient;
+  credentials: ResolvedPubSubCredentials;
   projectId?: string;
   /**
    * Extra components identifying the call: the project id and the operation
@@ -156,90 +131,65 @@ class ClientCache<T extends Closeable> {
 }
 
 /**
- * Serial numbers standing in for adk-python's `id(credentials)`.
+ * The cache key for one request, standing in for adk-python's
+ * `id(credentials)`.
  *
- * The map is weak, so an auth client that goes out of scope takes its number
- * with it. Two configs never collide on one number.
- */
-const credentialIds = new WeakMap<object, number>();
-let nextCredentialId = 0;
-
-/** The stable number identifying one auth client. */
-function credentialId(authClient: PubSubAuthClient): number {
-  const known = credentialIds.get(authClient);
-  if (known !== undefined) {
-    return known;
-  }
-  nextCredentialId += 1;
-  credentialIds.set(authClient, nextCredentialId);
-  return nextCredentialId;
-}
-
-/**
- * The cache key for one request. JSON keeps two components apart that a
- * plain join would merge.
+ * The credentials are hashed rather than used directly, because they carry a
+ * private key or a refresh token and a cache key outlives the call. Two end
+ * users therefore get their own client without their secrets sitting in a map
+ * key that a heap dump would expose.
  */
 function cacheKey(request: PubSubClientRequest): string {
-  return JSON.stringify([
-    credentialId(request.authClient),
+  const identity = JSON.stringify([
+    request.credentials,
+    request.projectId ?? '',
     request.userAgent ?? [],
   ]);
+  return createHash('sha256').update(identity).digest('hex');
 }
 
 /** The options every Pub/Sub client is built with. */
-function clientOptions(request: PubSubClientRequest): PubSubClientOptions {
+function clientOptions(request: PubSubClientRequest): PubSubSdkOptions {
   return {
     projectId: request.projectId,
-    authClient: request.authClient,
+    ...request.credentials,
     libName: PUBSUB_USER_AGENT,
     libVersion: version,
   };
 }
 
-const publisherCache = new ClientCache<PubSub>(CACHE_MAX_SIZE);
+const publisherCache = new ClientCache<PubSubPublisherClient>(CACHE_MAX_SIZE);
 // Unbounded, matching adk-python, whose subscriber cache is a plain dict with
 // a TTL while its publisher cache is a bounded `OrderedDict`.
-const subscriberCache = new ClientCache<SubscriberClient>();
+const subscriberCache = new ClientCache<PubSubSubscriberClient>();
 
 /**
  * Returns the publisher client for one credential, building it on first use.
- *
- * `@google-cloud/pubsub` is an optional peer dependency and is imported only
- * here, so that importing `@google/adk` never resolves it.
  *
  * @param request Which identity to publish as.
  * @return The cached client.
  */
 export function getPublisherClient(
   request: PubSubClientRequest,
-): Promise<PubSub> {
+): Promise<PubSubPublisherClient> {
   return publisherCache.get(cacheKey(request), async () => {
-    const {PubSub: PubSubClient} = await loadOptionalPeer(
-      PUBSUB_PEER,
-      () => import('@google-cloud/pubsub'),
-    );
-    return new PubSubClient(clientOptions(request));
+    const {v1} = await loadPubSubSdk();
+    return new v1.PublisherClient(clientOptions(request));
   });
 }
 
 /**
  * Returns the subscriber client for one credential, building it on first use.
  *
- * The high-level `Subscription` class only streams, so the synchronous pull
- * and acknowledge calls go through the generated `v1.SubscriberClient`.
- *
  * @param request Which identity to pull as.
  * @return The cached client.
  */
 export function getSubscriberClient(
   request: PubSubClientRequest,
-): Promise<SubscriberClient> {
+): Promise<PubSubSubscriberClient> {
   return subscriberCache.get(cacheKey(request), async () => {
-    const {v1: generated} = await loadOptionalPeer(
-      PUBSUB_PEER,
-      () => import('@google-cloud/pubsub'),
-    );
-    return new generated.SubscriberClient(clientOptions(request));
+    const {v1} = await loadPubSubSdk();
+    return new v1.SubscriberClient(clientOptions(request));
   });
 }
 

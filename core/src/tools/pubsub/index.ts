@@ -16,7 +16,6 @@
 // Only what a caller configuring or reading a `PubSubToolset` names. The
 // credentials manager, the client cache and the tool factories stay internal
 // to this module.
-export type {PubSubAuthClient} from './client.js';
 export type {PubSubToolConfig} from './config.js';
 export type {PulledMessage} from './message_codec.js';
 export type {
@@ -28,3 +27,4 @@ export type {
 export {PUBSUB_DEFAULT_SCOPES} from './pubsub_credentials.js';
 export type {PubSubCredentialsConfig} from './pubsub_credentials.js';
 export * from './pubsub_toolset.js';
+export type {ServiceAccountCredentials} from './sdk.js';

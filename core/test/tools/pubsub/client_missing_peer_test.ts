@@ -19,7 +19,7 @@ import {
   getPublisherClient,
   getSubscriberClient,
 } from '../../../src/tools/pubsub/client.js';
-import {testAuthClient} from './pubsub_test_utils.js';
+import {testResolvedCredentials} from './pubsub_test_utils.js';
 
 vi.mock('../../../src/utils/optional_peer.js', async (importOriginal) => {
   const actual =
@@ -42,7 +42,7 @@ describe('the Pub/Sub client module without its peer dependency', () => {
   ])(
     '$label names @google-cloud/pubsub and the install command',
     async ({get}) => {
-      const promise = get({authClient: testAuthClient()});
+      const promise = get({credentials: testResolvedCredentials()});
 
       await expect(promise).rejects.toThrow(/PubSubToolset requires/);
       await expect(promise).rejects.toThrow(

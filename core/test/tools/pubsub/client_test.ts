@@ -11,8 +11,6 @@
  */
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {logger} from '../../../src/utils/logger.js';
-import {version} from '../../../src/version.js';
 // The client cache is internal to the module, so it is imported from source.
 import {
   CACHE_MAX_SIZE,
@@ -23,12 +21,26 @@ import {
   publisherCacheSize,
   PUBSUB_USER_AGENT,
 } from '../../../src/tools/pubsub/client.js';
-import {pubsubFake, testAuthClient} from './pubsub_test_utils.js';
+import {logger} from '../../../src/utils/logger.js';
+import {version} from '../../../src/version.js';
+import {
+  pubsubFake,
+  testResolvedCredentials,
+  testServiceAccount,
+} from './pubsub_test_utils.js';
 
 vi.mock('@google-cloud/pubsub', async () => {
   const {fakePubSubModule} = await import('./pubsub_test_utils.js');
   return fakePubSubModule;
 });
+
+let nextIdentity = 0;
+
+/** Credentials for an end user no other call in this file uses. */
+function someone() {
+  nextIdentity += 1;
+  return testResolvedCredentials(`user-${nextIdentity}`);
+}
 
 beforeEach(() => {
   pubsubFake.reset();
@@ -42,9 +54,8 @@ afterEach(async () => {
 
 describe('the cache bounds', () => {
   // The bounded-cache tests below read these constants, so they prove the
-  // mechanism and not the values. adk-python fixes both, and a client that
-  // outlives its credential or a cache that grows without bound is the
-  // failure they prevent.
+  // mechanism and not the values. adk-python fixes both, and a cache that
+  // grows without bound is the failure they prevent.
   it('match adk-python _CACHE_MAX_SIZE and _CACHE_TTL', () => {
     expect(CACHE_MAX_SIZE).toBe(10);
     expect(CACHE_TTL_MS).toBe(1800 * 1000);
@@ -57,14 +68,13 @@ describe('the cache bounds', () => {
 
 describe('getPublisherClient', () => {
   it('test_get_publisher_client', async () => {
-    const authClient = testAuthClient();
-
-    await getPublisherClient({authClient});
+    await getPublisherClient({credentials: testResolvedCredentials('agent')});
 
     expect(pubsubFake.publisherOptions).toEqual([
       {
         projectId: undefined,
-        authClient,
+        credentials: testServiceAccount('agent'),
+        scopes: ['https://www.googleapis.com/auth/pubsub'],
         libName: PUBSUB_USER_AGENT,
         libVersion: version,
       },
@@ -72,10 +82,8 @@ describe('getPublisherClient', () => {
   });
 
   it('test_get_publisher_client_with_options', async () => {
-    const authClient = testAuthClient();
-
     await getPublisherClient({
-      authClient,
+      credentials: someone(),
       projectId: 'my-project',
       userAgent: ['my-project', 'publish_message'],
     });
@@ -84,11 +92,11 @@ describe('getPublisherClient', () => {
   });
 
   it('test_get_publisher_client_caching', async () => {
-    const authClient = testAuthClient();
+    const credentials = someone();
 
-    const first = await getPublisherClient({authClient});
-    const second = await getPublisherClient({authClient});
-    const other = await getPublisherClient({authClient: testAuthClient()});
+    const first = await getPublisherClient({credentials});
+    const second = await getPublisherClient({credentials});
+    const other = await getPublisherClient({credentials: someone()});
 
     expect(second).toBe(first);
     expect(other).not.toBe(first);
@@ -96,12 +104,10 @@ describe('getPublisherClient', () => {
   });
 
   it('test_get_publisher_client_caching_equivalent_options', async () => {
-    const authClient = testAuthClient();
-
     // A fresh options object per call, as the tools build one per message.
     const request = () =>
       getPublisherClient({
-        authClient,
+        credentials: testResolvedCredentials('agent'),
         projectId: 'my-project',
         userAgent: ['my-project', 'publish_message'],
       });
@@ -116,14 +122,14 @@ describe('getPublisherClient', () => {
   });
 
   it('test_get_publisher_client_caching_different_options', async () => {
-    const authClient = testAuthClient();
+    const credentials = someone();
 
     const publishing = await getPublisherClient({
-      authClient,
+      credentials,
       userAgent: ['publish_message'],
     });
     const pulling = await getPublisherClient({
-      authClient,
+      credentials,
       userAgent: ['pull_messages'],
     });
 
@@ -135,7 +141,7 @@ describe('getPublisherClient', () => {
     const total = CACHE_MAX_SIZE + 5;
 
     for (let call = 0; call < total; call++) {
-      await getPublisherClient({authClient: testAuthClient()});
+      await getPublisherClient({credentials: someone()});
     }
 
     expect(pubsubFake.publisherOptions).toHaveLength(total);
@@ -143,34 +149,44 @@ describe('getPublisherClient', () => {
   });
 
   it('test_get_publisher_client_cache_evicts_least_recently_used', async () => {
-    const authClients = Array.from({length: CACHE_MAX_SIZE}, testAuthClient);
-    for (const authClient of authClients) {
-      await getPublisherClient({authClient});
+    const users = Array.from({length: CACHE_MAX_SIZE}, someone);
+    for (const credentials of users) {
+      await getPublisherClient({credentials});
     }
 
     // Re-touch the oldest entry, then overflow the cache by one.
-    const oldest = await getPublisherClient({authClient: authClients[0]});
-    await getPublisherClient({authClient: testAuthClient()});
+    const oldest = await getPublisherClient({credentials: users[0]});
+    await getPublisherClient({credentials: someone()});
     const built = pubsubFake.publisherOptions.length;
 
     // The re-touched entry survived, and the one after it was evicted.
-    expect(await getPublisherClient({authClient: authClients[0]})).toBe(oldest);
+    expect(await getPublisherClient({credentials: users[0]})).toBe(oldest);
     expect(pubsubFake.publisherOptions).toHaveLength(built);
-    await getPublisherClient({authClient: authClients[1]});
+    await getPublisherClient({credentials: users[1]});
     expect(pubsubFake.publisherOptions).toHaveLength(built + 1);
+  });
+
+  it('keeps two end users on their own client', async () => {
+    const alice = await getPublisherClient({
+      credentials: testResolvedCredentials('alice'),
+    });
+    const bob = await getPublisherClient({
+      credentials: testResolvedCredentials('bob'),
+    });
+
+    expect(bob).not.toBe(alice);
   });
 });
 
 describe('getSubscriberClient', () => {
   it('test_get_subscriber_client', async () => {
-    const authClient = testAuthClient();
-
-    await getSubscriberClient({authClient});
+    await getSubscriberClient({credentials: testResolvedCredentials('agent')});
 
     expect(pubsubFake.subscriberOptions).toEqual([
       {
         projectId: undefined,
-        authClient,
+        credentials: testServiceAccount('agent'),
+        scopes: ['https://www.googleapis.com/auth/pubsub'],
         libName: PUBSUB_USER_AGENT,
         libVersion: version,
       },
@@ -178,11 +194,11 @@ describe('getSubscriberClient', () => {
   });
 
   it('test_get_subscriber_client_caching', async () => {
-    const authClient = testAuthClient();
+    const credentials = someone();
 
-    const first = await getSubscriberClient({authClient});
-    const second = await getSubscriberClient({authClient});
-    const other = await getSubscriberClient({authClient: testAuthClient()});
+    const first = await getSubscriberClient({credentials});
+    const second = await getSubscriberClient({credentials});
+    const other = await getSubscriberClient({credentials: someone()});
 
     expect(second).toBe(first);
     expect(other).not.toBe(first);
@@ -191,23 +207,23 @@ describe('getSubscriberClient', () => {
 
   it('holds more clients than the bounded publisher cache', async () => {
     for (let call = 0; call < CACHE_MAX_SIZE + 5; call++) {
-      await getSubscriberClient({authClient: testAuthClient()});
+      await getSubscriberClient({credentials: someone()});
     }
-    const authClient = testAuthClient();
-    const first = await getSubscriberClient({authClient});
+    const credentials = someone();
+    const first = await getSubscriberClient({credentials});
 
-    expect(await getSubscriberClient({authClient})).toBe(first);
+    expect(await getSubscriberClient({credentials})).toBe(first);
   });
 });
 
 describe('beyond the adk-python suite', () => {
   it('rebuilds a client whose entry has expired', async () => {
     vi.useFakeTimers();
-    const authClient = testAuthClient();
-    const first = await getPublisherClient({authClient});
+    const credentials = someone();
+    const first = await getPublisherClient({credentials});
 
     vi.setSystemTime(Date.now() + CACHE_TTL_MS + 1);
-    const second = await getPublisherClient({authClient});
+    const second = await getPublisherClient({credentials});
 
     expect(second).not.toBe(first);
     expect(pubsubFake.publisherOptions).toHaveLength(2);
@@ -215,20 +231,20 @@ describe('beyond the adk-python suite', () => {
 
   it('reuses a client that has not expired yet', async () => {
     vi.useFakeTimers();
-    const authClient = testAuthClient();
-    const first = await getPublisherClient({authClient});
+    const credentials = someone();
+    const first = await getPublisherClient({credentials});
 
     vi.setSystemTime(Date.now() + CACHE_TTL_MS - 1);
 
-    expect(await getPublisherClient({authClient})).toBe(first);
+    expect(await getPublisherClient({credentials})).toBe(first);
   });
 
   it('opens one client when two calls race for it', async () => {
-    const authClient = testAuthClient();
+    const credentials = someone();
 
     const [first, second] = await Promise.all([
-      getPublisherClient({authClient}),
-      getPublisherClient({authClient}),
+      getPublisherClient({credentials}),
+      getPublisherClient({credentials}),
     ]);
 
     expect(second).toBe(first);
@@ -236,8 +252,8 @@ describe('beyond the adk-python suite', () => {
   });
 
   it('closes every cached client and empties both caches', async () => {
-    await getPublisherClient({authClient: testAuthClient()});
-    await getSubscriberClient({authClient: testAuthClient()});
+    await getPublisherClient({credentials: someone()});
+    await getSubscriberClient({credentials: someone()});
 
     await cleanupClients();
 
@@ -247,7 +263,7 @@ describe('beyond the adk-python suite', () => {
   });
 
   it('is a no-op when called a second time', async () => {
-    await getPublisherClient({authClient: testAuthClient()});
+    await getPublisherClient({credentials: someone()});
 
     await cleanupClients();
     await cleanupClients();
@@ -257,8 +273,8 @@ describe('beyond the adk-python suite', () => {
 
   it('closes the remaining clients when one of them fails to close', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => logger);
-    await getPublisherClient({authClient: testAuthClient()});
-    await getSubscriberClient({authClient: testAuthClient()});
+    await getPublisherClient({credentials: someone()});
+    await getSubscriberClient({credentials: someone()});
     pubsubFake.failures.closePublisher = new Error('channel is wedged');
 
     await cleanupClients();

@@ -19,7 +19,6 @@ import {
   LlmResponse,
 } from '@google/adk';
 import {PubSubCredentialsConfig, PubSubToolset} from '@google/adk/tools/pubsub';
-import {OAuth2Client} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {createRunner} from '../test_case_utils.js';
 
@@ -28,7 +27,12 @@ const SUBSCRIPTION = 'projects/test-project/subscriptions/orders-sub';
 
 /** One identity for every end user, the simplest valid configuration. */
 function credentialsConfig(): PubSubCredentialsConfig {
-  return {authClient: new OAuth2Client()};
+  return {
+    credentials: {
+      client_email: 'agent@example.test.iam.gserviceaccount.com',
+      private_key: 'private-key-agent',
+    },
+  };
 }
 
 /**
@@ -41,17 +45,19 @@ function credentialsConfig(): PubSubCredentialsConfig {
 const pubsub = vi.hoisted(() => {
   const published: Array<{data: Uint8Array; ackId: string}> = [];
 
-  class FakePubSub {
-    topic(name: string) {
-      return {
-        async publishMessage({data}: {data: Uint8Array}): Promise<string> {
-          if (name !== TOPIC) {
-            throw new Error(`Topic not found: ${name}`);
-          }
-          published.push({data, ackId: `ack-${published.length}`});
-          return `msg-${published.length}`;
-        },
-      };
+  class FakePublisherClient {
+    async publish(request: {
+      topic: string;
+      messages: Array<{data: Uint8Array}>;
+    }): Promise<[{messageIds: string[]}]> {
+      if (request.topic !== TOPIC) {
+        throw new Error(`Topic not found: ${request.topic}`);
+      }
+      const ids = request.messages.map(({data}) => {
+        published.push({data, ackId: `ack-${published.length}`});
+        return `msg-${published.length}`;
+      });
+      return [{messageIds: ids}];
     }
 
     async close(): Promise<void> {}
@@ -85,14 +91,16 @@ const pubsub = vi.hoisted(() => {
 
   return {
     published,
-    PubSub: FakePubSub,
+    PublisherClient: FakePublisherClient,
     SubscriberClient: FakeSubscriberClient,
   };
 });
 
 vi.mock('@google-cloud/pubsub', () => ({
-  PubSub: pubsub.PubSub,
-  v1: {SubscriberClient: pubsub.SubscriberClient},
+  v1: {
+    PublisherClient: pubsub.PublisherClient,
+    SubscriberClient: pubsub.SubscriberClient,
+  },
 }));
 
 /** Publishes one message, then pulls the subscription, then answers. */
@@ -252,9 +260,9 @@ describe('PubSubToolset in an LlmAgent', () => {
     const {run} = await createRunner(
       makeAgent(new PublishThenPullLlm('order 42 is ready'), toolset),
     );
-    vi.spyOn(pubsub.PubSub.prototype, 'topic').mockReturnValue({
-      publishMessage: () => Promise.reject(new Error('Topic not found')),
-    });
+    vi.spyOn(pubsub.PublisherClient.prototype, 'publish').mockRejectedValue(
+      new Error('Topic not found'),
+    );
 
     const responses = await toolResponses(
       run,

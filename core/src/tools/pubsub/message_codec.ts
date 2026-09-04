@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {protos} from '@google-cloud/pubsub';
-
-/** A published message, as the wire carries it. */
-type ReceivedMessage = protos.google.pubsub.v1.IReceivedMessage;
-
-/** A protobuf timestamp: whole seconds plus nanoseconds. */
-type Timestamp = protos.google.protobuf.ITimestamp;
+import type {PubSubReceivedMessage, PubSubTimestamp} from './sdk.js';
 
 /**
  * One pulled message, as the model reads it.
@@ -73,7 +67,7 @@ export function decodeMessageData(
  * @return The formatted timestamp, or the empty string when there is none.
  */
 export function formatPublishTime(
-  timestamp: Timestamp | null | undefined,
+  timestamp: PubSubTimestamp | null | undefined,
 ): string {
   if (!timestamp) {
     return '';
@@ -98,7 +92,9 @@ export function formatPublishTime(
  * @param received The message and its acknowledgement id.
  * @return The message as the `pull_messages` tool reports it.
  */
-export function toPulledMessage(received: ReceivedMessage): PulledMessage {
+export function toPulledMessage(
+  received: PubSubReceivedMessage,
+): PulledMessage {
   const message = received.message ?? {};
   return {
     message_id: message.messageId ?? '',

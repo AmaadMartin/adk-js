@@ -17,8 +17,9 @@ import {getPublisherClient} from '../../../src/tools/pubsub/client.js';
 import {
   makeToolContext,
   pubsubFake,
-  testAuthClient,
   testCredentialsConfig,
+  testResolvedCredentials,
+  testServiceAccount,
 } from './pubsub_test_utils.js';
 
 vi.mock('@google-cloud/pubsub', async () => {
@@ -112,11 +113,8 @@ describe('beyond the adk-python suite', () => {
     expect(await toolNames(toolset)).toEqual(ALL_TOOL_NAMES);
   });
 
-  it('rejects a credentials config naming no credential source', () => {
-    expect(() => new PubSubToolset({credentialsConfig: {}})).toThrow(
-      'Must provide one of credentials, external_access_token_key, or' +
-        ' client_id and client_secret pair.',
-    );
+  it('accepts an empty credentials config, meaning default credentials', () => {
+    expect(() => new PubSubToolset({credentialsConfig: {}})).not.toThrow();
   });
 
   it('rejects a credentials config naming two credential sources', () => {
@@ -124,19 +122,20 @@ describe('beyond the adk-python suite', () => {
       () =>
         new PubSubToolset({
           credentialsConfig: {
-            authClient: testAuthClient(),
-            externalAccessTokenKey: 'pubsub_token',
+            credentials: testServiceAccount(),
+            clientId: 'abc',
+            clientSecret: 'def',
           },
         }),
     ).toThrow(
-      'If credentials are provided, external_access_token_key, client_id,' +
-        ' client_secret, and scopes must not be provided.',
+      'If a service account is provided, client_id and client_secret must' +
+        ' not be provided.',
     );
   });
 
   it('closes the clients the tools opened', async () => {
     const toolset = makeToolset();
-    await getPublisherClient({authClient: testAuthClient()});
+    await getPublisherClient({credentials: testResolvedCredentials()});
 
     await toolset.close();
 
