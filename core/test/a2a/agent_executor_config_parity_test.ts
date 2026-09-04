@@ -36,10 +36,10 @@ import {
   BaseSessionService,
   createEvent,
   createEventActions,
+  createSession,
   GenAIPartToA2APartConverter,
   Runner,
   RunnerConfig,
-  Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
 
@@ -77,14 +77,13 @@ describe('A2AAgentExecutor converter config (adk-python parity)', () => {
 
     mockEventBus = {publish: vi.fn()} as unknown as Mocked<ExecutionEventBus>;
 
-    const session = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(session);
+    mockSessionService.getSession.mockResolvedValue(
+      createSession({
+        id: 'session-id',
+        userId: 'test-user',
+        appName: 'test-app',
+      }),
+    );
   });
 
   const createRequestContext = (overrides = {}): RequestContext =>
@@ -95,11 +94,10 @@ describe('A2AAgentExecutor converter config (adk-python parity)', () => {
       ...overrides,
     }) as unknown as RequestContext;
 
-  const runnerConfig = () =>
-    ({
-      appName: 'test-app',
-      sessionService: mockSessionService,
-    }) as unknown as RunnerConfig;
+  const runnerConfig = (): RunnerConfig => ({
+    appName: 'test-app',
+    sessionService: mockSessionService,
+  });
 
   const stubRunnerWith = (adkEvents: AdkEvent[]) => {
     async function* runAsync() {
