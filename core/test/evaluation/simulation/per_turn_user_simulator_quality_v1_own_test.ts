@@ -493,6 +493,17 @@ describe('convertLlmResponseToScore', () => {
 });
 
 describe('evaluateFirstTurn', () => {
+  it('ignores the whitespace around the starting prompt', () => {
+    const result = evaluateFirstTurn(
+      createInvocation(`  ${SCENARIO.startingPrompt}\n`, 'model 1.'),
+      SCENARIO,
+      1.0,
+    );
+
+    expect(result.score).toBe(1);
+    expect(result.evalStatus).toBe(EvalStatus.PASSED);
+  });
+
   it('does not evaluate a first turn whose only part carries no text', () => {
     const result = evaluateFirstTurn(
       {userContent: {parts: [{inlineData: {mimeType: 'audio/wav'}}]}},
