@@ -274,3 +274,46 @@ describe('resolvePluginOptions error type', () => {
     expect(() => resolve(config)).toThrow(InputValidationError);
   });
 });
+
+describe('resolvePluginOptions views', () => {
+  it('creates views under the default prefix', () => {
+    expect(resolve({}).writer).toMatchObject({
+      createViews: true,
+      viewPrefix: 'v',
+    });
+  });
+
+  it('keeps the caller prefix', () => {
+    expect(resolve({viewPrefix: 'agent'}).writer.viewPrefix).toBe('agent');
+  });
+
+  it('turns the views off when asked', () => {
+    expect(resolve({createViews: false}).writer.createViews).toBe(false);
+  });
+
+  it.each(['', '   '])('refuses the empty view prefix %o', (viewPrefix) => {
+    expect(() => resolve({viewPrefix})).toThrow(
+      'viewPrefix must not be empty.',
+    );
+  });
+});
+
+describe('resolvePluginOptions target', () => {
+  it.each(['', '  '])('refuses the empty projectId %o', (projectId) => {
+    expect(() => resolvePluginOptions({projectId, datasetId: 'd'})).toThrow(
+      'projectId must not be empty.',
+    );
+  });
+
+  it.each(['', '  '])('refuses the empty datasetId %o', (datasetId) => {
+    expect(() => resolvePluginOptions({projectId: 'p', datasetId})).toThrow(
+      'datasetId must not be empty.',
+    );
+  });
+
+  it('throws InputValidationError, not a bare Error', () => {
+    expect(() => resolvePluginOptions({projectId: '', datasetId: 'd'})).toThrow(
+      InputValidationError,
+    );
+  });
+});

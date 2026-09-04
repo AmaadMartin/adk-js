@@ -19,6 +19,7 @@ import {
   SCHEMA_VERSION,
   SCHEMA_VERSION_LABEL_KEY,
 } from '../../src/plugins/bigquery_analytics_schema.js';
+import {EVENT_VIEW_DEFS} from '../../src/plugins/bigquery_analytics_views.js';
 import {
   AnalyticsDropReason,
   BigQueryRowWriter,
@@ -36,6 +37,8 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     liveSchema: TableField[];
     liveLabels: Record<string, string>;
     tableExists: boolean;
+    queries: string[];
+    queryError?: Error;
   }
 
   const fake: FakeBigQuery = {
@@ -48,6 +51,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     liveSchema: [],
     liveLabels: {},
     tableExists: true,
+    queries: [],
   };
 
   class FakeTable {
@@ -111,6 +115,14 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     dataset(): FakeDataset {
       return new FakeDataset();
     }
+
+    async query(sql: string): Promise<[unknown[]]> {
+      fake.queries.push(sql);
+      if (fake.queryError !== undefined) {
+        throw fake.queryError;
+      }
+      return [[]];
+    }
   }
 
   return {BigQueryMock, fake};
@@ -169,6 +181,8 @@ function makeWriter(options?: {
   autoSchemaUpgrade?: boolean;
   payloadColumnDenylist?: string[];
   batchSize?: number;
+  createViews?: boolean;
+  viewPrefix?: string;
 }): BigQueryRowWriter {
   const resolved = resolvePluginOptions({
     projectId: 'test-project',
@@ -204,6 +218,8 @@ beforeEach(() => {
   fake.liveSchema = EVENTS_TABLE_SCHEMA;
   fake.liveLabels = {[SCHEMA_VERSION_LABEL_KEY]: SCHEMA_VERSION};
   fake.tableExists = true;
+  fake.queries = [];
+  fake.queryError = undefined;
 });
 
 describe('retryDelayMs', () => {
@@ -505,5 +521,63 @@ describe('BigQueryRowWriter queue bounds', () => {
     expect(writer.getDropStats()[AnalyticsDropReason.QUEUE_FULL]).toBe(1);
     await writer.flush();
     expect(fake.insertCalls[0]).toHaveLength(1);
+  });
+});
+
+describe('BigQueryRowWriter analytics views', () => {
+  it('creates one view per event type alongside an existing table', async () => {
+    await writeOneRow(makeWriter());
+    expect(fake.queries).toHaveLength(EVENT_VIEW_DEFS.size);
+    expect(
+      fake.queries.every((sql) => sql.startsWith('CREATE OR REPLACE VIEW')),
+    ).toBe(true);
+  });
+
+  it('creates the views on a table it just created', async () => {
+    fake.tableExists = false;
+    await writeOneRow(makeWriter());
+    expect(fake.created).toHaveLength(1);
+    expect(fake.queries).toHaveLength(EVENT_VIEW_DEFS.size);
+  });
+
+  it('creates no view when the caller turned them off', async () => {
+    await writeOneRow(makeWriter({createViews: false}));
+    expect(fake.queries).toEqual([]);
+  });
+
+  it('names the views with the configured prefix', async () => {
+    await writeOneRow(makeWriter({viewPrefix: 'agent'}));
+    expect(
+      fake.queries.some((sql) => sql.includes('.agent_llm_request`')),
+    ).toBe(true);
+  });
+
+  it('writes the row even when every view fails to create', async () => {
+    fake.queryError = new Error('permission denied on views');
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    expect(fake.queries.length).toBeGreaterThan(0);
+    expect(fake.insertCalls).toHaveLength(1);
+    expect(writer.getDropStats()[AnalyticsDropReason.SETUP_UNAVAILABLE]).toBe(
+      0,
+    );
+  });
+
+  it('creates the views once, however many batches are written', async () => {
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    await writeOneRow(writer);
+    expect(fake.insertCalls).toHaveLength(2);
+    expect(fake.queries).toHaveLength(EVENT_VIEW_DEFS.size);
+  });
+
+  it('leaves a denied column out of the view SQL', async () => {
+    await writeOneRow(makeWriter({payloadColumnDenylist: ['latency_ms']}));
+    const llmResponse = fake.queries.find((sql) =>
+      sql.includes("event_type = 'LLM_RESPONSE'"),
+    );
+    expect(llmResponse).toBeDefined();
+    expect(llmResponse).not.toContain('ttft_ms');
+    expect(llmResponse).toContain('usage_prompt_tokens');
   });
 });
