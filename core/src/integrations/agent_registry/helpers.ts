@@ -4,12 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * Reports whether a URL names a Google API endpoint reachable over https.
+ *
+ * The scheme check is what keeps a caller from attaching an Application
+ * Default Credentials bearer token to a plaintext endpoint.
+ */
 export function isGoogleApi(url: string): boolean {
   try {
     const parsed = new URL(url);
     return (
-      parsed.hostname === 'googleapis.com' ||
-      parsed.hostname.endsWith('.googleapis.com')
+      parsed.protocol === 'https:' &&
+      (parsed.hostname === 'googleapis.com' ||
+        parsed.hostname.endsWith('.googleapis.com'))
     );
   } catch {
     return false;
