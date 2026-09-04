@@ -65,7 +65,10 @@ import {
   SpanTracker,
   timeToFirstToken,
 } from './bigquery_analytics_spans.js';
-import {getToolOrigin} from './bigquery_analytics_tools.js';
+import {
+  extractToolDeclarations,
+  getToolOrigin,
+} from './bigquery_analytics_tools.js';
 import {
   AnalyticsDropReason,
   BigQueryRowWriter,
@@ -206,7 +209,7 @@ function requestAttributes(llmRequest: LlmRequest): Record<string, unknown> {
       attributes['labels'] = config.labels;
     }
   }
-  const tools = Object.keys(llmRequest.toolsDict);
+  const tools = extractToolDeclarations(llmRequest.toolsDict);
   if (tools.length > 0) {
     attributes['tools'] = tools;
   }

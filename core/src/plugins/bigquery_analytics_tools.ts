@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {FunctionDeclaration} from '@google/genai';
 import {isRemoteA2AAgent} from '../a2a/a2a_remote_agent.js';
 import {BaseAgent} from '../agents/base_agent.js';
 import {isAgentTool} from '../tools/agent_tool.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {isFunctionTool} from '../tools/function_tool.js';
 import {isMCPTool} from '../tools/mcp/mcp_tool.js';
+import {formatError} from '../utils/error_utils.js';
+import {logger} from '../utils/logger.js';
 
 /**
  * Where a tool call runs, written to the `tool_origin` key of a tool row's
@@ -137,4 +140,74 @@ export function getToolOrigin(
     return ToolOrigin.LOCAL;
   }
   return ToolOrigin.UNKNOWN;
+}
+
+/** One tool as it is written to `attributes.tools` on an `LLM_REQUEST` row. */
+export interface ToolDeclaration {
+  /** The tool's own name, or the key it is registered under. */
+  name: string;
+  /** The tool's description, or its declaration's. Omitted when both are empty. */
+  description?: string;
+  /**
+   * The parameter schema, taken from the declaration. `parametersJsonSchema`
+   * wins over `parameters`: several tool families populate only the former,
+   * and the model adapters read it first.
+   */
+  parameters?: unknown;
+}
+
+/**
+ * Reads `tool`'s declaration, or returns undefined when it has none or throws.
+ *
+ * A tool that cannot describe itself contributes its name alone. Dropping the
+ * whole list instead would lose every other tool in the request.
+ */
+function readDeclaration(tool: BaseTool): FunctionDeclaration | undefined {
+  try {
+    return tool._getDeclaration();
+  } catch (error: unknown) {
+    logger.debug(
+      `BigQuery analytics could not read the declaration of tool ${tool.name}:`,
+      formatError(error),
+    );
+    return undefined;
+  }
+}
+
+/** Describes one tool, falling back to `key` when the tool has no name. */
+function describeTool(key: string, tool: BaseTool): ToolDeclaration {
+  const entry: ToolDeclaration = {name: tool.name || key};
+  if (tool.description) {
+    entry.description = tool.description;
+  }
+  const declaration = readDeclaration(tool);
+  if (declaration === undefined) {
+    return entry;
+  }
+  if (entry.description === undefined && declaration.description) {
+    entry.description = declaration.description;
+  }
+  const parameters = declaration.parametersJsonSchema ?? declaration.parameters;
+  if (parameters !== undefined) {
+    entry.parameters = parameters;
+  }
+  return entry;
+}
+
+/**
+ * Describes the tools a request offers the model.
+ *
+ * The row records what the model was allowed to call, which is what makes a
+ * later `TOOL_ERROR` readable: a name alone does not say whether the model was
+ * given the wrong schema.
+ *
+ * @param toolsDict The request's tools, keyed by the name they are called by.
+ * @return One entry per tool, in registration order.
+ */
+export function extractToolDeclarations(
+  toolsDict: Readonly<Record<string, BaseTool>>,
+): ToolDeclaration[] {
+  return Object.entries(toolsDict).map(([key, tool]) =>
+    describeTool(key, tool),
+  );
 }

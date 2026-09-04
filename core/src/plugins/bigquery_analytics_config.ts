@@ -91,6 +91,11 @@ export interface BigQueryLoggerConfig {
   eventDenylist?: AnalyticsEventType[];
   /** Maximum length of a captured string, or -1 for no limit. */
   maxContentLength?: number;
+  /**
+   * The events table. Defaults to `agent_events`. The constructor's own
+   * `tableId` option wins over this one, matching adk-python.
+   */
+  tableId?: string;
   /** Columns the events table is clustered by. */
   clusteringFields?: string[];
   /** Whether the `content_parts` column is populated. Defaults to true. */
@@ -435,7 +440,7 @@ function resolveWriterOptions(
   return {
     projectId: options.projectId,
     datasetId: options.datasetId,
-    tableId: options.tableId ?? DEFAULT_TABLE_ID,
+    tableId: options.tableId ?? config.tableId ?? DEFAULT_TABLE_ID,
     location: options.location ?? DEFAULT_LOCATION,
     credentials: options.credentials,
     clusteringFields: config.clusteringFields ?? DEFAULT_CLUSTERING_FIELDS,
