@@ -234,35 +234,25 @@ export class AgentRegistry {
   /**
    * Executes a `:search` request for one resource type.
    *
-   * Only the options the caller supplied reach the request body, so the
-   * service applies its own default for every other field.
+   * `JSON.stringify` drops an undefined-valued key, so only the options the
+   * caller supplied reach the request body and the service applies its own
+   * default for every other field.
    */
   private async search<T>(
     resourceType: string,
     options: SearchOptions,
   ): Promise<T> {
-    const body: Record<string, string | number> = {};
-    if (options.searchString !== undefined) {
-      body['searchString'] = options.searchString;
-    }
-    if (options.searchType !== undefined) {
-      body['searchType'] = options.searchType;
-    }
-    if (options.filterStr !== undefined) {
-      body['filter'] = options.filterStr;
-    }
-    if (options.orderBy !== undefined) {
-      body['orderBy'] = options.orderBy;
-    }
-    if (options.pageSize !== undefined) {
-      body['pageSize'] = options.pageSize;
-    }
-    if (options.pageToken !== undefined) {
-      body['pageToken'] = options.pageToken;
-    }
+    const {
+      searchString,
+      searchType,
+      filterStr: filter,
+      orderBy,
+      pageSize,
+      pageToken,
+    } = options;
     return this.makeRequest<T>(`${resourceType}:search`, undefined, {
       method: 'POST',
-      body,
+      body: {searchString, searchType, filter, orderBy, pageSize, pageToken},
     });
   }
 
@@ -536,31 +526,18 @@ export class AgentRegistry {
   /**
    * Creates a {@link RemoteA2AAgent} for a registered A2A Agent.
    *
-   * When `options.authScheme` is omitted, the scheme is resolved from the
-   * agent's IAM bindings. An explicitly supplied scheme skips that lookup.
+   * adk-python also resolves the agent's auth provider binding here and hands
+   * the scheme to `RemoteA2aAgent`. `RemoteA2AAgent` has no way to apply a
+   * credential yet, so this does not resolve a scheme it could not use.
    */
   async getRemoteA2AAgent(
     agentName: string,
     options?: {
       client?: Client;
       clientFactory?: ClientFactory;
-      authScheme?: AuthScheme;
-      authCredential?: AuthCredential;
-      continueUri?: string;
     },
   ): Promise<RemoteA2AAgent> {
     const agentInfo = await this.getAgentInfo(agentName);
-
-    const authScheme =
-      options?.authScheme ??
-      asAuthScheme(
-        await this.resolveAuthProviderScheme(
-          agentInfo.agentId,
-          agentName,
-          options?.continueUri,
-        ),
-      );
-    const authCredential = options?.authCredential;
 
     // Try to use the full agent card if available
     const card = agentInfo.card || {};
@@ -575,8 +552,6 @@ export class AgentRegistry {
         description: agentCard.description,
         client: options?.client,
         clientFactory: options?.clientFactory,
-        authScheme,
-        authCredential,
       });
     }
 
@@ -626,8 +601,6 @@ export class AgentRegistry {
       description,
       client: options?.client,
       clientFactory: options?.clientFactory,
-      authScheme,
-      authCredential,
     });
   }
 }

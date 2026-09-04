@@ -24,12 +24,32 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
- * OpenIdConnectWithConfig.
+ * A flexible base for custom authentication schemes.
+ *
+ * Extend it to declare a scheme outside the OpenAPI 3.0 set. The extending
+ * interface fixes `type` to its own literal, which is what lets a consumer tell
+ * one custom scheme from another:
+ *
+ * ```ts
+ * interface MyProviderScheme extends CustomAuthScheme {
+ *   type: 'myProviderScheme';
+ *   name: string;
+ * }
+ * ```
+ */
+export interface CustomAuthScheme {
+  /** The scheme type, outside the OpenAPI 3.0 set. */
+  type: string;
+}
+
+/**
+ * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
+ * OpenIdConnectWithConfig, and any {@link CustomAuthScheme}.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | CustomAuthScheme;
 
 /**
  * Represents the OAuth2 flow (or grant type).
