@@ -9,6 +9,7 @@ import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 
 import {sanitizeSchemaFormatsForGemini} from '../utils/gemini_schema_util.js';
+import {stripNullish} from '../utils/object_utils.js';
 import {
   formatSchemaValidationError,
   parseWithSchema,
@@ -62,47 +63,8 @@ function isGenaiSchema(schema: SchemaLike): schema is Schema {
   return !isZodV3Schema(schema) && !isZodV4Schema(schema);
 }
 
-/**
- * Returns the wrapper parameter a schema needs, or `undefined` when the schema
- * is already an object and its fields can be the parameters directly.
- *
- * An array of objects uses `items` and everything else uses `response`, which
- * is the distinction adk-python draws between `list[BaseModel]` and
- * `list[str]` / `dict[str, int]`.
- */
-function wrapperKeyFor(schema: SchemaLike): WrapperKey | undefined {
-  if (isZodObject(schema)) {
-    return undefined;
-  }
-  if (isGenaiSchema(schema) && schema.type === Type.OBJECT) {
-    return undefined;
-  }
-  const document = toJsonSchema(schema);
-  return document['type'] === 'array' && isObjectSchema(document['items'])
-    ? 'items'
-    : 'response';
-}
-
-/**
- * Builds the declaration parameters for a schema, wrapping it under
- * `wrapperKey` when it is not an object schema.
- */
-function buildParameters(
-  schema: SchemaLike,
-  wrapperKey: WrapperKey | undefined,
-): Schema {
-  if (wrapperKey === undefined) {
-    return isZodObject(schema) ? zodObjectToSchema(schema) : (schema as Schema);
-  }
-  // Wrapping in a Zod object of the same major version keeps the field's
-  // descriptions, defaults and nested items, which a hand-built genai wrapper
-  // would have to re-derive.
-  if (isZodV4Schema(schema)) {
-    return zodObjectToSchema(z4.object({[wrapperKey]: schema}));
-  }
-  if (isZodV3Schema(schema)) {
-    return zodObjectToSchema(z3.object({[wrapperKey]: schema}));
-  }
+/** Declares `schema` as the single named parameter of an object schema. */
+function wrapInObject(schema: Schema, wrapperKey: WrapperKey): Schema {
   return {
     type: Type.OBJECT,
     properties: {[wrapperKey]: schema},
@@ -110,36 +72,47 @@ function buildParameters(
   };
 }
 
-/** Whether the value is an object literal rather than a class instance. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+/**
+ * Wraps a non-object Zod schema in a Zod object of the same major version,
+ * which keeps the field's descriptions, defaults and nested items that a
+ * hand-built genai wrapper would have to re-derive.
+ */
+function wrapZodInObject(
+  schema: z3.ZodType | z4.ZodType,
+  wrapperKey: WrapperKey,
+): Schema {
+  return isZodV4Schema(schema)
+    ? zodObjectToSchema(z4.object({[wrapperKey]: schema}))
+    : zodObjectToSchema(z3.object({[wrapperKey]: schema}));
 }
 
 /**
- * Returns `value` without its `null` and `undefined` fields, recursively,
- * reproducing adk-python's `model_dump(exclude_none=True)`.
+ * Classifies an output schema into the parameters the model sees and the
+ * wrapper parameter its value travels under.
  *
- * Array entries all survive: `exclude_none` drops model fields, not list
- * entries, so a `list[str | None]` field keeps its nulls. A class instance a
- * validator produced (a `Date`, say) is returned as it is rather than rebuilt.
- * The argument is never mutated.
+ * `wrapperKey` is `undefined` when the schema is an object and its fields are
+ * the parameters. An array of objects uses `items` and everything else uses
+ * `response`, which is the distinction adk-python draws between
+ * `list[BaseModel]` and `list[str]` / `dict[str, int]`.
  */
-function stripNullish(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => stripNullish(entry));
+function resolveSchemaForm(schema: SchemaLike): {
+  wrapperKey?: WrapperKey;
+  parameters: Schema;
+} {
+  if (isZodObject(schema)) {
+    return {parameters: zodObjectToSchema(schema)};
   }
-  if (!isPlainObject(value)) {
-    return value;
+  if (isGenaiSchema(schema)) {
+    return schema.type === Type.OBJECT
+      ? {parameters: schema}
+      : {wrapperKey: 'response', parameters: wrapInObject(schema, 'response')};
   }
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([, entry]) => entry !== null && entry !== undefined)
-      .map(([key, entry]) => [key, stripNullish(entry)]),
-  );
+  const document = toJsonSchema(schema);
+  const wrapperKey: WrapperKey =
+    document['type'] === 'array' && isObjectSchema(document['items'])
+      ? 'items'
+      : 'response';
+  return {wrapperKey, parameters: wrapZodInObject(schema, wrapperKey)};
 }
 
 /**
@@ -169,29 +142,29 @@ export class SetModelResponseTool extends BaseTool {
   /** The declaration parameters before any variant-specific filtering. */
   private readonly parameters: Schema;
 
-  /**
-   * The parameters per variant. The variant comes from the environment and can
-   * change between turns, so both forms are kept rather than one being frozen
-   * at construction time.
-   */
-  private readonly parametersByVariant = new Map<GoogleLLMVariant, Schema>();
-
   constructor(outputSchema: SchemaLike) {
     super({
       name: SET_MODEL_RESPONSE_TOOL_NAME,
       description: SET_MODEL_RESPONSE_TOOL_DESCRIPTION,
     });
     this.outputSchema = outputSchema;
-    this.wrapperKey = wrapperKeyFor(outputSchema);
-    this.parameters = buildParameters(outputSchema, this.wrapperKey);
+    const {wrapperKey, parameters} = resolveSchemaForm(outputSchema);
+    this.wrapperKey = wrapperKey;
+    this.parameters = parameters;
   }
 
   override _getDeclaration(): FunctionDeclaration {
+    // The variant comes from the environment, so it is read per call rather
+    // than frozen at construction time.
     const variant = this.apiVariant;
     const declaration: FunctionDeclaration = {
       name: this.name,
       description: this.description,
-      parameters: this.parametersFor(variant),
+      // A Zod string validator renders as a `format` the Gemini API rejects.
+      parameters:
+        variant === GoogleLLMVariant.GEMINI_API
+          ? sanitizeSchemaFormatsForGemini(this.parameters)
+          : this.parameters,
     };
     if (variant === GoogleLLMVariant.VERTEX_AI) {
       // adk-python synthesizes `set_model_response() -> str`, and its
@@ -225,21 +198,9 @@ export class SetModelResponseTool extends BaseTool {
       }
     }
     toolContext.actions.setModelResponse = result;
+    // The published value is the answer, so the agent promotes it instead of
+    // asking the model to summarize the call.
+    toolContext.actions.skipSummarization = true;
     return result;
-  }
-
-  /** The parameters the model sees under `variant`, built once per variant. */
-  private parametersFor(variant: GoogleLLMVariant): Schema {
-    const cached = this.parametersByVariant.get(variant);
-    if (cached) {
-      return cached;
-    }
-    // A Zod string validator renders as a `format` the Gemini API rejects.
-    const parameters =
-      variant === GoogleLLMVariant.GEMINI_API
-        ? sanitizeSchemaFormatsForGemini(this.parameters)
-        : this.parameters;
-    this.parametersByVariant.set(variant, parameters);
-    return parameters;
   }
 }
