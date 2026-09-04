@@ -185,4 +185,26 @@ describe('recording and replaying one test case', () => {
       testInfo.recordings.recordings[1].toolRecording?.toolCall?.args,
     ).toEqual({num_sides: 6});
   });
+
+  it('refuses to replay an LLM recording that holds no response', async () => {
+    const replay = new ReplayPlugin(
+      [
+        {
+          userMessageIndex: 0,
+          agentName: 'dice_agent',
+          llmRecording: {llmResponses: []},
+        },
+      ],
+      {userMessageIndex: 0},
+    );
+
+    await expect(
+      replay.beforeModelCallback({
+        callbackContext: new Context({
+          invocationContext: makeInvocationContext({}),
+        }),
+        llmRequest: llmRequest('roll a die'),
+      }),
+    ).rejects.toThrow('No LLM recording found for agent dice_agent at turn 0');
+  });
 });
