@@ -372,44 +372,53 @@ describe('FileArtifactService', () => {
       ).toEqual(['stub.txt']);
     });
 
-    it('surfaces an error other than EEXIST while reserving a version', async () => {
-      const versionsDir = path.join(artifactDirOf('locked.txt'), 'versions');
-      await fs.mkdir(versionsDir, {recursive: true});
-      await fs.chmod(versionsDir, 0o500);
+    // POSIX only: `fs.chmod` does not remove write access to a directory on
+    // Windows, so the reservation would succeed there.
+    it.skipIf(process.platform === 'win32')(
+      'surfaces an error other than EEXIST while reserving a version',
+      async () => {
+        const versionsDir = path.join(artifactDirOf('locked.txt'), 'versions');
+        await fs.mkdir(versionsDir, {recursive: true});
+        await fs.chmod(versionsDir, 0o500);
 
-      try {
-        await expect(
-          service.saveArtifact({
-            appName,
-            userId,
+        try {
+          await expect(
+            service.saveArtifact({
+              appName,
+              userId,
+              sessionId,
+              filename: 'locked.txt',
+              artifact: {text: 'body'},
+            }),
+          ).rejects.toThrow('EACCES');
+        } finally {
+          await fs.chmod(versionsDir, 0o700);
+        }
+      },
+    );
+
+    // POSIX only, for the same reason as the test above.
+    it.skipIf(process.platform === 'win32')(
+      'treats an unreadable directory as empty when listing keys',
+      async () => {
+        const blocked = path.join(
+          getSessionArtifactsDir(
+            getUserRoot(getAppRoot(errorRoot, appName), userId),
             sessionId,
-            filename: 'locked.txt',
-            artifact: {text: 'body'},
-          }),
-        ).rejects.toThrow('EACCES');
-      } finally {
-        await fs.chmod(versionsDir, 0o700);
-      }
-    });
+          ),
+          'blocked',
+        );
+        await fs.mkdir(blocked, {recursive: true});
+        await fs.chmod(blocked, 0o000);
 
-    it('treats an unreadable directory as empty when listing keys', async () => {
-      const blocked = path.join(
-        getSessionArtifactsDir(
-          getUserRoot(getAppRoot(errorRoot, appName), userId),
-          sessionId,
-        ),
-        'blocked',
-      );
-      await fs.mkdir(blocked, {recursive: true});
-      await fs.chmod(blocked, 0o000);
-
-      try {
-        expect(
-          await service.listArtifactKeys({appName, userId, sessionId}),
-        ).toEqual([]);
-      } finally {
-        await fs.chmod(blocked, 0o700);
-      }
-    });
+        try {
+          expect(
+            await service.listArtifactKeys({appName, userId, sessionId}),
+          ).toEqual([]);
+        } finally {
+          await fs.chmod(blocked, 0o700);
+        }
+      },
+    );
   });
 });
