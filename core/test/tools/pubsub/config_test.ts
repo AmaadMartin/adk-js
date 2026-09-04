@@ -104,13 +104,13 @@ describe('Pub/Sub tool config', () => {
       });
     });
 
-    it('returns a fresh object per call', () => {
-      const first = createPubSubToolConfig({projectId: 'my-project'});
-      first.projectId = 'another-project';
+    it('returns a fresh object, not the caller object', () => {
+      const params: PubSubToolConfig = {projectId: 'my-project'};
 
-      expect(createPubSubToolConfig({projectId: 'my-project'}).projectId).toBe(
-        'my-project',
-      );
+      const config = createPubSubToolConfig(params);
+      config.projectId = 'another-project';
+
+      expect(params.projectId).toBe('my-project');
     });
 
     it('rejects an unknown key', () => {
