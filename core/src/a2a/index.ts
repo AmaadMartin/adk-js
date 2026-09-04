@@ -34,14 +34,11 @@ export {
 export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
 export {
-  A2A_AGENT_EXECUTOR_CONFIG_DEFAULTS,
   resolveA2aAgentExecutorConfig,
-  toA2AArtifactUpdateEvents,
   toA2AArtifactUpdateEventsFromArtifactMap,
 } from './executor_config.js';
 export type {
   A2aAgentExecutorConverterConfig,
-  AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   ResolvedA2aAgentExecutorConfig,
 } from './executor_config.js';
