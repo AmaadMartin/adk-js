@@ -49,6 +49,12 @@
       "require": "./dist/cjs/sessions/database_session_service.js",
       "default": "./dist/esm/sessions/database_session_service.js"
     },
+    "./sessions/migration": {
+      "types": "./dist/types/sessions/migration/migrate_from_sqlalchemy_pickle.d.ts",
+      "import": "./dist/esm/sessions/migration/migrate_from_sqlalchemy_pickle.js",
+      "require": "./dist/cjs/sessions/migration/migrate_from_sqlalchemy_pickle.js",
+      "default": "./dist/esm/sessions/migration/migrate_from_sqlalchemy_pickle.js"
+    },
     "./telemetry/gcp": {
       "types": "./dist/types/telemetry/google_cloud.d.ts",
       "import": "./dist/esm/telemetry/google_cloud.js",

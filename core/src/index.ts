@@ -25,6 +25,11 @@ export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
+// Also available as `@google/adk/sessions/migration`, which does not evaluate
+// the rest of this barrel. It stays out of `common.ts`, whose exports reach
+// the browser bundle through `index_web.ts`.
+export {migrate} from './sessions/migration/migrate_from_sqlalchemy_pickle.js';
+export type {MigrateOptions} from './sessions/migration/migrate_from_sqlalchemy_pickle.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
 export type {
