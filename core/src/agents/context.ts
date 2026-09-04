@@ -32,14 +32,7 @@ export class Context extends ReadonlyContext {
   private readonly _state: State;
 
   readonly eventActions: EventActions;
-  /**
-   * The function call id of the current tool call.
-   *
-   * Writable, matching adk-python's `Context.function_call_id` setter: a caller
-   * that builds the context before the model reports the call id fills it in
-   * afterwards instead of rebuilding the context.
-   */
-  functionCallId?: string;
+  readonly functionCallId?: string;
   toolConfirmation?: ToolConfirmation;
   readonly resumeInputs: ResumeInputs;
   readonly abortSignal?: AbortSignal;
@@ -89,17 +82,6 @@ export class Context extends ReadonlyContext {
 
   get actions(): EventActions {
     return this.eventActions;
-  }
-
-  /**
-   * The isolation scope of the current invocation, if it runs under one.
-   *
-   * See `Event.isolationScope` for the format. Read-only here: the scope
-   * belongs to the invocation, which every sibling context of the run shares.
-   * The workflow half owns the writable one, on `NodeContext`.
-   */
-  get isolationScope(): string | undefined {
-    return this.invocationContext.isolationScope;
   }
 
   /**

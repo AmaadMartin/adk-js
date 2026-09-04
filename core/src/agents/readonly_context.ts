@@ -67,4 +67,15 @@ export class ReadonlyContext {
   get a2aMetadata(): Record<string, unknown> | undefined {
     return this.invocationContext.a2aMetadata;
   }
+
+  /**
+   * The isolation scope of the current invocation, if it runs under one.
+   *
+   * See `Event.isolationScope` for the format. Read-only here: the scope
+   * belongs to the invocation, which every sibling context of the run shares.
+   * The workflow half owns the writable one, on `NodeContext`.
+   */
+  get isolationScope(): string | undefined {
+    return this.invocationContext.isolationScope;
+  }
 }

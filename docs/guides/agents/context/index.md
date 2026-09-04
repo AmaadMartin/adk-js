@@ -77,22 +77,13 @@ const found = await ctx.searchMemory('umbrella');
 `InMemoryMemoryService` drops events with no content parts when it ingests a
 session, so an event carrying only actions is not recalled.
 
-## The invocation's scope and the tool call id
+## The invocation's scope
 
 `ctx.isolationScope` reports the isolation scope of the invocation, or
-`undefined` when it runs under none. It is read-only here, because the scope
-belongs to the invocation that every sibling context of the run shares. The
-workflow half owns the writable one, on `NodeContext`.
-
-`ctx.functionCallId` identifies the tool call being served.
-`requestCredential` and `requestConfirmation` key their entries by it and throw
-when it is unset. It is writable, so a caller that builds the context before
-the model reports the id fills it in afterwards:
-
-```ts
-ctx.functionCallId = 'call-42';
-ctx.requestCredential(authConfig);
-```
+`undefined` when it runs under none. It lives on `ReadonlyContext`, so an
+instruction provider and a toolset filter read it too. It is read-only, because
+the scope belongs to the invocation that every sibling context of the run
+shares. The workflow half owns the writable one, on `NodeContext`.
 
 ## Differences from adk-python
 

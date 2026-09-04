@@ -200,17 +200,17 @@ describe('Context.isolationScope', () => {
 });
 
 describe('Context.functionCallId', () => {
-  it('is writable after construction', () => {
-    const context = makeContext();
+  it('keys a credential request, and gates it when unset', () => {
     const authConfig: AuthConfig = {
       credentialKey: 'key1',
       authScheme: {type: 'apiKey', name: 'X-Api-Key', in: 'header'},
     };
-    expect(() => context.requestCredential(authConfig)).toThrow(
+
+    expect(() => makeContext().requestCredential(authConfig)).toThrow(
       'functionCallId is not set.',
     );
 
-    context.functionCallId = 'call-42';
+    const context = makeContext({functionCallId: 'call-42'});
     context.requestCredential(authConfig);
 
     expect(Object.keys(context.actions.requestedAuthConfigs)).toStrictEqual([
