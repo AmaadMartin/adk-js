@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, ContentUnion, createPartFromText, Part} from '@google/genai';
 import {Context} from '../agents/context.js';
 import {injectSessionState} from '../agents/instructions.js';
 import {InstructionProvider} from '../agents/llm_agent.js';
@@ -11,6 +12,48 @@ import {ReadonlyContext} from '../agents/readonly_context.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BasePlugin} from './base_plugin.js';
+
+/**
+ * Narrows a genai `ContentUnion` member to `Content`.
+ *
+ * `Content` is an interface, so the guard keys on the `parts` property instead
+ * of a runtime class. The exported guard in `workflow/base_node.ts` also
+ * requires `parts` to be an array, which would send a `Content` whose `parts`
+ * is `undefined` down the `Part` branch.
+ */
+function isContent(value: Content | Part): value is Content {
+  return 'parts' in value;
+}
+
+/**
+ * Prepends `prefix` to `existing`, preserving the SDK content shape it arrives
+ * in.
+ *
+ * A `Content` keeps its `role` and its other parts and gains a leading text
+ * part. Every other shape becomes a string or a `PartUnion[]`. The caller's
+ * `Content` is never mutated.
+ *
+ * Mirrors `_prepend_instruction` in `google/adk-python`
+ * `src/google/adk/plugins/global_instruction_plugin.py`.
+ */
+function prependInstruction(
+  prefix: string,
+  existing: ContentUnion,
+): ContentUnion {
+  if (typeof existing === 'string') {
+    return `${prefix}\n\n${existing}`;
+  }
+  if (Array.isArray(existing)) {
+    return [prefix, ...existing];
+  }
+  if (isContent(existing)) {
+    return {
+      ...existing,
+      parts: [createPartFromText(prefix), ...(existing.parts ?? [])],
+    };
+  }
+  return [prefix, existing];
+}
 
 /**
  * Plugin that provides global instructions functionality at the App level.
@@ -74,19 +117,10 @@ export class GlobalInstructionPlugin extends BasePlugin {
       return;
     }
 
-    if (typeof existingInstruction === 'string') {
-      params.llmRequest.config.systemInstruction = `${finalGlobalInstruction}\n\n${existingInstruction}`;
-    } else if (Array.isArray(existingInstruction)) {
-      params.llmRequest.config.systemInstruction = [
-        finalGlobalInstruction,
-        ...existingInstruction,
-      ];
-    } else {
-      params.llmRequest.config.systemInstruction = [
-        finalGlobalInstruction,
-        existingInstruction,
-      ] as unknown as string[];
-    }
+    params.llmRequest.config.systemInstruction = prependInstruction(
+      finalGlobalInstruction,
+      existingInstruction,
+    );
 
     return;
   }
