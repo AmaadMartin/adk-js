@@ -22,6 +22,8 @@ Planning for an `LlmAgent` through its `planner` option: the model's built-in th
 
 ### Tools
 
+- [Environment simulation config](tools/environment_simulation_config/index.md) - Declaring how a tool is simulated instead of called: injection rules, mock strategies, and the deprecated `AgentSimulatorConfig` name.
+
 #### Retrieval
 
 Client-side retrieval tools. The agent calls a one-argument search function, your code answers it, and you choose the store, the chunking and the ranking. Start with `BaseRetrievalTool` if you are deciding between these and server-side retrieval.
