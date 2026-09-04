@@ -19,7 +19,7 @@ import {
   NodeReportedError,
   NodeTimeoutError,
 } from './errors.js';
-import {NodeContext} from './node_context.js';
+import {NodeContext, SET_ENGINE_OUTPUT} from './node_context.js';
 import {claimNodeErrorReport, isNodeErrorEvent} from './node_error_event.js';
 import {createNodeState, NodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
@@ -230,7 +230,7 @@ async function runChildNode({
         input,
       });
       if (skipOutput !== undefined) {
-        child.setEngineOutput(skipOutput);
+        child[SET_ENGINE_OUTPUT](skipOutput);
         // A skipped node still fills its slot in the trace, so record it as
         // completed rather than leaving an attribute-less span behind.
         traceNodeExecution({
@@ -241,7 +241,7 @@ async function runChildNode({
           interruptCount: child.interruptIds.length,
         });
         if (options.useAsOutput) {
-          parent.setEngineOutput(child.output);
+          parent[SET_ENGINE_OUTPUT](child.output);
           parent.route = child.route;
         }
         return child;
@@ -319,12 +319,12 @@ async function runChildNode({
         output: child.output,
       });
       if (replacedOutput !== undefined) {
-        child.setEngineOutput(replacedOutput);
+        child[SET_ENGINE_OUTPUT](replacedOutput);
       }
     }
 
     if (options.useAsOutput) {
-      parent.setEngineOutput(child.output);
+      parent[SET_ENGINE_OUTPUT](child.output);
       parent.route = child.route;
       parent.outputDelegated = true;
     }
@@ -480,7 +480,6 @@ async function runOnce({
   let inputRecorded = false;
   const consume = (event: Event): void => {
     enrichEvent({event, child, nodeName, branch, isolationScope});
-    child.telemetryContext.addEvent(event);
     // An event can carry a state delta that never went through `ctx.state`,
     // so the schema is enforced here too rather than only on the setter.
     const emittedDelta = event.actions?.stateDelta;
@@ -491,7 +490,7 @@ async function runOnce({
       // Engine write: a generator node yields one event per item and the last
       // output wins (`function_node_test.ts`), so this is not the repeated
       // assignment `ctx.output`'s setter refuses.
-      child.setEngineOutput(event.output);
+      child[SET_ENGINE_OUTPUT](event.output);
       if (child.outputDelegated) {
         const stateDelta = event.actions?.stateDelta;
         if (!stateDelta || Object.keys(stateDelta).length === 0) {

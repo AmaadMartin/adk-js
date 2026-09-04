@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {context} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event} from '../events/event.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
 import {State} from '../sessions/state.js';
-import {TelemetryContext} from '../telemetry/node_telemetry_context.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import type {SchemaLike} from '../utils/schema.js';
 import type {BaseNode} from './base_node.js';
@@ -22,6 +20,15 @@ import type {
 } from './schedule_dynamic_node.js';
 import {buildNode} from './utils/workflow_graph_utils.js';
 import {isWorkflow} from './workflow.js';
+
+/**
+ * Key of the engine's own output write on {@link NodeContext}.
+ *
+ * Deliberately not re-exported from the package entry points: engine code
+ * imports it from this module, and node code outside adk-js has no way to name
+ * it, so the single-output check on `ctx.output` cannot be sidestepped.
+ */
+export const SET_ENGINE_OUTPUT = Symbol('adk.workflow.setEngineOutput');
 
 /**
  * The result of running a node: the fields a caller (and the engine's
@@ -78,7 +85,8 @@ export interface NodeContextOptions {
  *
  * It exposes `ctx.runNode(...)` for programmatic child execution, `ctx.state`
  * for delta-aware session state, `ctx.emit(...)` to stream an event, and the
- * mutable `output`/`route`/`interruptIds` a node sets while running.
+ * `route`/`interruptIds` a node sets while running plus the one `output` it
+ * may produce.
  *
  * That one Python class covers two roles, and adk-js splits them. This class is
  * the workflow half. The callback and tool half — artifacts, credentials,
@@ -96,9 +104,6 @@ export class NodeContext {
 
   /** The node this context belongs to. */
   readonly node?: BaseNode;
-
-  /** Telemetry state for this node run, captured when the context is built. */
-  readonly telemetryContext: TelemetryContext;
 
   /**
    * Node paths whose output this node's output also becomes: its parent's if
@@ -197,7 +202,6 @@ export class NodeContext {
     this.parentCtx = opts.parentCtx;
     this.node = opts.node;
     this.eventAuthor = opts.parentCtx?.eventAuthor ?? '';
-    this.telemetryContext = new TelemetryContext(context.active());
     this.resumeInputs = opts.resumeInputs ?? {};
     this.isolationScope = opts.isolationScope;
     this.actions = opts.actions ?? createEventActions();
@@ -241,9 +245,12 @@ export class NodeContext {
    * a `useAsOutput` child's output onto its caller, both legitimately overwrite
    * a value that is already there.
    *
-   * @internal Not part of the node-facing API.
+   * Keyed by the module-private `SET_ENGINE_OUTPUT` symbol rather than named,
+   * so it is reachable only from a module that imports that symbol. The package
+   * does not re-export it, so a node body cannot call this and slip past the
+   * check.
    */
-  setEngineOutput(value: unknown): void {
+  [SET_ENGINE_OUTPUT](value: unknown): void {
     this.outputValue = value;
   }
 

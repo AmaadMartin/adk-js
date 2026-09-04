@@ -255,35 +255,6 @@ describe('NodeContext — eventAuthor', () => {
   });
 });
 
-describe('NodeContext — telemetryContext', () => {
-  it('captures an otel context when the node context is built', () => {
-    const root = rootContext();
-
-    expect(root.telemetryContext).toBeDefined();
-    expect(root.telemetryContext.otelContext).toBeDefined();
-    expect(root.telemetryContext.associatedEventIds).toEqual([]);
-  });
-
-  it('accumulates the ids of the events the node emitted', async () => {
-    let nodeCtx: NodeContext | undefined;
-    const worker = new FnNode('worker', (ctx) => {
-      nodeCtx = ctx;
-      ctx.emit(
-        createEvent({author: 'worker', content: {parts: [{text: 'a'}]}}),
-      );
-      return 'ok';
-    });
-
-    const {events} = await driveNode(worker, 'x');
-
-    // `emit` pushes straight to the channel, so only the yielded output event
-    // goes through the runner's tracking seam.
-    expect(nodeCtx?.telemetryContext.associatedEventIds).toEqual([
-      events[1].id,
-    ]);
-  });
-});
-
 describe('NodeContext — single output', () => {
   it('refuses a second assignment to ctx.output', async () => {
     const greedy = new FnNode('greedy', (ctx) => {

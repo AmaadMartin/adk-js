@@ -39,12 +39,7 @@ export class Context extends ReadonlyContext {
   private readonly _state: State;
 
   readonly eventActions: EventActions;
-  /**
-   * The function call id of the current tool call. Settable, mirroring Python's
-   * `Context.function_call_id` setter, so a caller that builds a context before
-   * the call id is known can fill it in.
-   */
-  functionCallId?: string;
+  readonly functionCallId?: string;
   toolConfirmation?: ToolConfirmation;
   readonly resumeInputs: ResumeInputs;
   readonly abortSignal?: AbortSignal;

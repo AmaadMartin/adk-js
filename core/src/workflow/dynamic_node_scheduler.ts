@@ -10,7 +10,7 @@ import {
   isDynamicNodeFailError,
   isNodeInterruptedError,
 } from './errors.js';
-import {NodeContext, NodeResult} from './node_context.js';
+import {NodeContext, NodeResult, SET_ENGINE_OUTPUT} from './node_context.js';
 import {executeChildNode} from './node_runner.js';
 import {createNodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
@@ -177,7 +177,7 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     options: ScheduleDynamicNodeOptions,
   ): NodeResult {
     if (options.useAsOutput) {
-      ctx.setEngineOutput(result.output);
+      ctx[SET_ENGINE_OUTPUT](result.output);
       ctx.route = result.route;
     }
     return result;
