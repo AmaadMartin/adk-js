@@ -32,6 +32,12 @@ export interface AgentToolConfig {
    * Whether to skip summarization of the agent output.
    */
   skipSummarization?: boolean;
+
+  /**
+   * Whether to publish the wrapped agent's grounding metadata to the caller's
+   * state under `temp:_adk_grounding_metadata`. Defaults to false.
+   */
+  propagateGroundingMetadata?: boolean;
 }
 
 /**
@@ -39,6 +45,12 @@ export interface AgentToolConfig {
  * Defined once and shared by all BaseTool instances.
  */
 const AGENT_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.agentTool');
+
+/**
+ * The state key the wrapped agent's grounding metadata is published under.
+ * Spelled exactly as adk-python spells it, so both SDKs agree on the key.
+ */
+const GROUNDING_METADATA_STATE_KEY = `${State.TEMP_PREFIX}_adk_grounding_metadata`;
 
 /**
  * Type guard to check if an object is an instance of BaseTool.
@@ -71,6 +83,8 @@ export class AgentTool extends BaseTool {
 
   private readonly skipSummarization: boolean;
 
+  private readonly propagateGroundingMetadata: boolean;
+
   constructor(config: AgentToolConfig) {
     super({
       name: config.agent.name,
@@ -78,6 +92,8 @@ export class AgentTool extends BaseTool {
     });
     this.agent = config.agent;
     this.skipSummarization = config.skipSummarization || false;
+    this.propagateGroundingMetadata =
+      config.propagateGroundingMetadata ?? false;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -204,6 +220,15 @@ export class AgentTool extends BaseTool {
       .map((part) => part.text)
       .filter((text) => text)
       .join('\n');
+
+    // `lastEvent` is content-bearing here, so its metadata is the metadata of
+    // the last content-bearing event — what adk-python publishes.
+    if (this.propagateGroundingMetadata && lastEvent.groundingMetadata) {
+      toolContext.state.set(
+        GROUNDING_METADATA_STATE_KEY,
+        lastEvent.groundingMetadata,
+      );
+    }
 
     // TODO - b/425992518: In case of output schema, the output should be
     // validated. Consider similar logic to one we have in Python ADK.
