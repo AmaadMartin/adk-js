@@ -70,11 +70,14 @@ describe('LlmSummarizer', () => {
     ];
 
     const compactedEvent = await summarizer.summarize(events);
+    if (!compactedEvent) {
+      expect.fail('summarize() declined to summarize the events');
+    }
 
     expect(compactedEvent.isCompacted).toBe(true);
     expect(compactedEvent.startTime).toBe(1000);
     expect(compactedEvent.endTime).toBe(2000);
-    expect(compactedEvent.author).toBe('system');
+    expect(compactedEvent.author).toBe('user');
     expect(compactedEvent.content?.role).toBe('model');
     expect(compactedEvent.compactedContent).toBe(
       'This is the summarized content from the LLM.',
@@ -85,7 +88,7 @@ describe('LlmSummarizer', () => {
     expect(compactedEvent.id).toBeDefined();
   });
 
-  it('should throw an error if the LLM fails to return valid summary', async () => {
+  it('should return null if the LLM fails to return valid summary', async () => {
     const mockLlm = new MockLlm([
       {
         // empty content
@@ -106,17 +109,13 @@ describe('LlmSummarizer', () => {
       }),
     ];
 
-    await expect(summarizer.summarize(events)).rejects.toThrow(
-      'LLM failed to return a valid summary.',
-    );
+    await expect(summarizer.summarize(events)).resolves.toBeNull();
   });
 
-  it('should throw an error when called with empty events list', async () => {
+  it('should return null when called with empty events list', async () => {
     const mockLlm = new MockLlm([]);
     const summarizer = new LlmSummarizer({llm: mockLlm as unknown as BaseLlm});
 
-    await expect(summarizer.summarize([])).rejects.toThrow(
-      'Cannot summarize an empty list of events.',
-    );
+    await expect(summarizer.summarize([])).resolves.toBeNull();
   });
 });
