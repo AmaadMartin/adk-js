@@ -43,14 +43,14 @@ const REDACTED = '[REDACTED]';
  * credentials: one that will not parse, one past an inspection ceiling, or one
  * nested past {@link MAX_JSON_NESTING_DEPTH}.
  */
-export const UNPARSEABLE_JSON_BLOB = '[UNPARSEABLE_JSON_BLOB]';
+const UNPARSEABLE_JSON_BLOB = '[UNPARSEABLE_JSON_BLOB]';
 
 /**
  * Replaces free text whose decoded form carries a credential. Decoding is a
  * detection step only, so the credential cannot be replaced in place without
  * rewriting text the caller supplied; the whole string goes instead.
  */
-export const REDACTED_SENSITIVE_TEXT = '[REDACTED_SENSITIVE_TEXT]';
+const REDACTED_SENSITIVE_TEXT = '[REDACTED_SENSITIVE_TEXT]';
 
 /**
  * Longest string this module parses as JSON. A longer one takes the free-text
@@ -367,7 +367,7 @@ function readTrailingEscape(
  * @param text The text to decode.
  * @return The decoded form, equal to `text` when it holds no ASCII escape.
  */
-export function canonicalizeAsciiEscapes(text: string): string {
+function canonicalizeAsciiEscapes(text: string): string {
   const output: string[] = [];
   for (const char of text) {
     output.push(char);
@@ -381,21 +381,6 @@ export function canonicalizeAsciiEscapes(text: string): string {
     }
   }
   return output.join('');
-}
-
-/**
- * Returns whether `text` carries a credential construct, literally or behind
- * ASCII escapes.
- *
- * @param text The text to classify.
- * @return True when redaction would change either form of `text`.
- */
-export function containsCredentialConstruct(text: string): boolean {
-  if (redactFreeText(text) !== text) {
-    return true;
-  }
-  const canonical = canonicalizeAsciiEscapes(text);
-  return canonical !== text && redactFreeText(canonical) !== canonical;
 }
 
 /**
@@ -427,7 +412,7 @@ export function sanitizeErrorText(
   const inspected = text.slice(0, MAX_INSPECT_CHARS);
   const redacted = redactFreeText(inspected);
   const canonical = canonicalizeAsciiEscapes(redacted);
-  if (canonical !== redacted && containsCredentialConstruct(canonical)) {
+  if (canonical !== redacted && redactFreeText(canonical) !== canonical) {
     return {text: REDACTED_SENSITIVE_TEXT, truncated: true};
   }
   const bounded = truncateText(redacted, maxLength);

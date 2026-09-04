@@ -14,6 +14,7 @@ Three properties are worth knowing before you enable it:
 
 - **It never breaks a run.** Every callback catches its own failures and logs them. A BigQuery outage costs you rows, not requests.
 - **It redacts credentials.** A property named `apiKey`, `access_token`, `Authorization` or anything under `temp:` is replaced with `[REDACTED]`. Free text is redacted by pattern: an `Authorization` header, a bearer token, an API key in a URL query, and a `name=value` pair whose name is one of those names. A secret in a shape none of these match is written like any other text, so deny `LLM_REQUEST` when your prompts can carry one.
+- **It fails closed on a payload it cannot read.** See [Payload the sanitizer refuses](#payload-the-sanitizer-refuses).
 - **It is bounded.** The row queue, the string lengths, the sanitizer's depth and the per-invocation span bookkeeping all have caps, so a runaway payload cannot grow the process without limit.
 
 ## Get started
@@ -261,6 +262,16 @@ Two rules constrain when the offload runs. Text is sanitized before it is upload
 A part carrying `fileData.fileUri` is stored as `EXTERNAL_URI`, and the URI is redacted first. A signed URL is a credential written as a link, so every surface that can carry one is inspected: a parameter or path segment named after a credential keeps its name and loses its value, and the fragment takes the same pass.
 
 A URI that cannot be stored with any part intact becomes `[REDACTED_SENSITIVE_URI]`. That covers one carrying userinfo, one no URL parser accepts, one that is not a string, and one longer than 4,000,000 characters. Redaction sets the row's `is_truncated`.
+
+### Payload the sanitizer refuses
+
+Pattern redaction reads the characters in front of it. Two payload shapes defeat that, so the plugin writes a sentinel instead of the value and sets the row's `is_truncated`. adk-python does the same, under the same two sentinel names.
+
+`[UNPARSEABLE_JSON_BLOB]` replaces a string that opens with `{` or `[` and that the sanitizer cannot walk. A JSON string escape spells a credential key without its characters ever appearing, so `{"access\u005ftoken":"..."} trailing` hides `access_token` from any scan of the raw text. The plugin therefore parses such a string or discards it. The four cases are a string that does not parse, one longer than 4,000,000 characters, one nested past 1,000 levels, and one whose trailing garbage breaks the parse.
+
+The cost is real: an ordinary payload that merely opens with a bracket goes too. `[INFO] request finished` and `[urgent] find flights to SFO` both become the sentinel. A bracket inside a JSON string is payload rather than structure, so it does not count toward the nesting limit and a legitimate document survives. The `error_message` column takes the diagnostic pass instead, which keeps bracketed prose byte-identical.
+
+`[REDACTED_SENSITIVE_TEXT]` replaces free text whose decoded form carries a credential. `access%5Ftoken=SECRET` holds no literal `access_token`, and decoding `%5F` exposes it. Decoding cannot be reversed character by character, so the plugin drops the whole string rather than guess where the credential sat. Text that decodes to nothing dangerous is untouched: a Windows path, a decoder error message, and encoded prose such as `progress%3D100%25 complete` all come back byte-identical.
 
 ## Failure modes
 
