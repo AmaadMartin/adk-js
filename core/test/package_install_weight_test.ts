@@ -110,6 +110,7 @@ describe('core/package.json subpath exports', () => {
       './a2a',
       './artifacts/gcs',
       './sessions/database',
+      './sessions/migration',
       './telemetry/gcp',
       './tools/mcp',
     ]);
