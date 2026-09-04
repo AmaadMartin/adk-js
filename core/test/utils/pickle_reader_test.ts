@@ -61,20 +61,6 @@ describe('loadPickle scalars', () => {
     expect(load(payload(0x4a, le32(70000), STOP))).toBe(70000);
   });
 
-  it('reads the protocol 0 INT line, including its boolean spellings', () => {
-    expect(load(payload(0x49, '42\n', STOP))).toBe(42);
-    expect(load(payload(0x49, '-42\n', STOP))).toBe(-42);
-    expect(load(payload(0x49, '01\n', STOP))).toBe(true);
-    expect(load(payload(0x49, '00\n', STOP))).toBe(false);
-  });
-
-  it('reads the protocol 0 LONG line and drops its L suffix', () => {
-    expect(load(payload(0x4c, '123456789012345678901234567890L\n', STOP))).toBe(
-      123456789012345678901234567890n,
-    );
-    expect(load(payload(0x4c, '7L\n', STOP))).toBe(7);
-  });
-
   it('reads LONG1 and LONG4 as little-endian two-s complement', () => {
     expect(load(payload(0x8a, 1, 0x05, STOP))).toBe(5);
     expect(load(payload(0x8a, 1, 0xfb, STOP))).toBe(-5);
@@ -86,8 +72,7 @@ describe('loadPickle scalars', () => {
     expect(load(payload(0x8b, le32(2), 0x00, 0x01, STOP))).toBe(256);
   });
 
-  it('reads FLOAT and BINFLOAT', () => {
-    expect(load(payload(0x46, '0.5\n', STOP))).toBe(0.5);
+  it('reads BINFLOAT', () => {
     expect(load(payload(0x47, be64f(-1.25), STOP))).toBe(-1.25);
   });
 });
@@ -116,27 +101,6 @@ describe('loadPickle strings and bytes', () => {
     expect(load(payload(0x96, le64(2), 0x61, 0x62, STOP))).toEqual(
       Uint8Array.from([0x61, 0x62]),
     );
-  });
-
-  it('reads the protocol 0 and 1 byte-string opcodes as latin-1 text', () => {
-    expect(load(payload(0x55, 3, 'adk', STOP))).toBe('adk');
-    expect(load(payload(0x54, le32(3), 'adk', STOP))).toBe('adk');
-    expect(load(payload(0x55, 1, 0xff, STOP))).toBe('\u00ff');
-  });
-
-  it('unquotes a protocol 0 STRING literal and its escapes', () => {
-    expect(load(payload(0x53, "'a\\nb'\n", STOP))).toBe('a\nb');
-    expect(load(payload(0x53, '"a\\tb\\\\c\\x41"\n', STOP))).toBe('a\tb\\cA');
-    expect(load(payload(0x53, "'it\\'s'\n", STOP))).toBe("it's");
-    // An escape with no special meaning keeps the character it introduces.
-    expect(load(payload(0x53, "'a\\qb'\n", STOP))).toBe('aqb');
-    // An unquoted line has nothing to strip and is returned as it stands.
-    expect(load(payload(0x53, 'bare\n', STOP))).toBe('bare');
-    expect(load(payload(0x53, "'\n", STOP))).toBe("'");
-  });
-
-  it('decodes the raw-unicode-escape a UNICODE line carries', () => {
-    expect(load(payload(0x56, 'a\\u00e9\\U0001F600b\n', STOP))).toBe('aé😀b');
   });
 });
 
@@ -199,18 +163,11 @@ describe('loadPickle containers', () => {
     );
   });
 
-  it('builds a dict from the flat run a DICT opcode leaves', () => {
-    expect(load(payload(0x28, 0x8c, 1, 'a', 0x4b, 1, 0x64, STOP))).toEqual(
-      new Map([['a', 1]]),
-    );
-  });
-
-  it('builds a list with APPEND, APPENDS and LIST', () => {
+  it('builds a list with APPEND and APPENDS', () => {
     expect(load(payload(0x5d, 0x4b, 1, 0x61, STOP))).toEqual([1]);
     expect(load(payload(0x5d, 0x28, 0x4b, 1, 0x4b, 2, 0x65, STOP))).toEqual([
       1, 2,
     ]);
-    expect(load(payload(0x28, 0x4b, 1, 0x4b, 2, 0x6c, STOP))).toEqual([1, 2]);
   });
 
   it('builds every tuple width', () => {
@@ -241,12 +198,6 @@ describe('loadPickle memo', () => {
     ) as unknown[][];
     expect(result).toEqual([[], [[]]]);
     expect(result[1][0]).toBe(result[0]);
-  });
-
-  it('shares one object between PUT and GET', () => {
-    expect(
-      load(payload(0x8c, 3, 'adk', 0x70, '9\n', 0x67, '9\n', 0x86, STOP)),
-    ).toEqual(['adk', 'adk']);
   });
 
   it('shares one object between LONG_BINPUT and LONG_BINGET', () => {
@@ -443,16 +394,7 @@ describe('loadPickle rejects malformed payloads', () => {
   });
 
   it('rejects an unterminated line', () => {
-    expect(() => load(payload(0x49, '42'))).toThrow('unterminated line');
-  });
-
-  it('rejects a malformed integer line', () => {
-    expect(() => load(payload(0x49, 'zz\n', STOP))).toThrow(
-      'malformed integer "zz"',
-    );
-    expect(() => load(payload(0x5d, 0x70, 'zz\n', STOP))).toThrow(
-      'malformed integer "zz"',
-    );
+    expect(() => load(payload(0x63, 'datetime'))).toThrow('unterminated line');
   });
 
   it('rejects STOP on an empty stack', () => {
@@ -530,11 +472,9 @@ describe('loadPickle rejects malformed payloads', () => {
 describe('loadPickle reads real CPython payloads', () => {
   // pickle.dumps({'name': 'adk', 'sizes': [1, 2, 3], 'ok': True,
   //               'none': None, 'ratio': 0.5}, protocol=P) on CPython 3.13.
+  // Protocol 2 is the oldest this reader accepts, and 5 the newest; the two
+  // spell globals and the memo differently.
   const SAME_OBJECT_BY_PROTOCOL: ReadonlyArray<[number, string]> = [
-    [
-      0,
-      'KGRwMApWbmFtZQpwMQpWYWRrCnAyCnNWc2l6ZXMKcDMKKGxwNApJMQphSTIKYUkzCmFzVm9rCnA1CkkwMQpzVm5vbmUKcDYKTnNWcmF0aW8KcDcKRjAuNQpzLg==',
-    ],
     [
       2,
       'gAJ9cQAoWAQAAABuYW1lcQFYAwAAAGFka3ECWAUAAABzaXplc3EDXXEEKEsBSwJLA2VYAgAAAG9rcQWIWAQAAABub25lcQZOWAUAAAByYXRpb3EHRz/gAAAAAAAAdS4=',

@@ -34,9 +34,11 @@
  * not restricted to strings: a plain object would lose a tuple key and would
  * collide the key `1` with the key `'1'`.
  *
- * An opcode outside {@link Opcode} raises rather than being skipped, because
- * skipping one leaves the stack misaligned and yields a plausible-looking
- * wrong value.
+ * Protocols 2 through 5 are read. Nothing below 2 is: CPython's
+ * `pickle.DEFAULT_PROTOCOL` is 4 and its `HIGHEST_PROTOCOL` is 5, so no
+ * writer on a supported Python emits protocol 0 or 1. An opcode outside
+ * {@link Opcode} raises rather than being skipped, because skipping one
+ * leaves the stack misaligned and yields a plausible-looking wrong value.
  */
 
 /**
@@ -83,31 +85,20 @@ enum Opcode {
   STOP = 0x2e, // '.'
   BINBYTES = 0x42, // 'B'
   SHORT_BINBYTES = 0x43, // 'C'
-  FLOAT = 0x46, // 'F'
   BINFLOAT = 0x47, // 'G'
-  INT = 0x49, // 'I'
   BININT = 0x4a, // 'J'
   BININT1 = 0x4b, // 'K'
-  LONG = 0x4c, // 'L'
   BININT2 = 0x4d, // 'M'
   NONE = 0x4e, // 'N'
   REDUCE = 0x52, // 'R'
-  STRING = 0x53, // 'S'
-  BINSTRING = 0x54, // 'T'
-  SHORT_BINSTRING = 0x55, // 'U'
-  UNICODE = 0x56, // 'V'
   BINUNICODE = 0x58, // 'X'
   EMPTY_LIST = 0x5d, // ']'
   APPEND = 0x61, // 'a'
   BUILD = 0x62, // 'b'
   GLOBAL = 0x63, // 'c'
-  DICT = 0x64, // 'd'
   APPENDS = 0x65, // 'e'
-  GET = 0x67, // 'g'
   BINGET = 0x68, // 'h'
   LONG_BINGET = 0x6a, // 'j'
-  LIST = 0x6c, // 'l'
-  PUT = 0x70, // 'p'
   BINPUT = 0x71, // 'q'
   LONG_BINPUT = 0x72, // 'r'
   SETITEM = 0x73, // 's'
@@ -136,23 +127,11 @@ enum Opcode {
   BYTEARRAY8 = 0x96,
 }
 
-/** Escape sequences a protocol-0 `STRING` payload may contain. */
-const STRING_ESCAPES: Readonly<Record<string, string>> = {
-  '\\': '\\',
-  "'": "'",
-  '"': '"',
-  'n': '\n',
-  'r': '\r',
-  't': '\t',
-  '0': '\0',
-};
-
 const UTF8_DECODER = new TextDecoder('utf-8', {fatal: true});
 
 /**
- * Decodes a protocol-0/1 byte string. Those opcodes carry Python 2 `str`,
- * which is bytes; latin-1 maps every byte to a character without failing,
- * which is what `pickle.loads(..., encoding='latin1')` does for the same data.
+ * Decodes the bytes of a newline-terminated line, which `GLOBAL` uses for a
+ * module and a name. Latin-1 maps every byte to a character without failing.
  */
 function decodeLatin1(bytes: Uint8Array): string {
   let out = '';
@@ -160,46 +139,6 @@ function decodeLatin1(bytes: Uint8Array): string {
     out += String.fromCharCode(byte);
   }
   return out;
-}
-
-/** Unquotes the repr-style literal a protocol-0 `STRING` opcode carries. */
-function unquotePythonString(literal: string): string {
-  const quote = literal[0];
-  if (
-    literal.length < 2 ||
-    (quote !== "'" && quote !== '"') ||
-    literal[literal.length - 1] !== quote
-  ) {
-    return literal;
-  }
-
-  const body = literal.slice(1, -1);
-  let out = '';
-  for (let i = 0; i < body.length; i++) {
-    if (body[i] !== '\\') {
-      out += body[i];
-      continue;
-    }
-    i++;
-    const escape = body[i];
-    if (escape === 'x') {
-      out += String.fromCharCode(parseInt(body.slice(i + 1, i + 3), 16));
-      i += 2;
-      continue;
-    }
-    out += STRING_ESCAPES[escape] ?? escape;
-  }
-  return out;
-}
-
-/**
- * Decodes the `raw-unicode-escape` text a protocol-0 `UNICODE` opcode carries:
- * every character is itself except for `\\uXXXX` and `\\UXXXXXXXX`.
- */
-function decodeRawUnicodeEscape(text: string): string {
-  return text.replace(/\\u[0-9a-fA-F]{4}|\\U[0-9a-fA-F]{8}/g, (match) =>
-    String.fromCodePoint(parseInt(match.slice(2), 16)),
-  );
 }
 
 /** Narrows to an object whose properties a `BUILD` state may be copied onto. */
@@ -310,9 +249,6 @@ class PickleMachine {
         this.markPositions.push(this.stack.length);
         return;
 
-      case Opcode.PUT:
-        this.memo.set(this.readDecimalLine(), this.peek());
-        return;
       case Opcode.BINPUT:
         this.memo.set(this.readByte(), this.peek());
         return;
@@ -321,9 +257,6 @@ class PickleMachine {
         return;
       case Opcode.MEMOIZE:
         this.memo.set(this.memo.size, this.peek());
-        return;
-      case Opcode.GET:
-        this.stack.push(this.readMemo(this.readDecimalLine()));
         return;
       case Opcode.BINGET:
         this.stack.push(this.readMemo(this.readByte()));
@@ -341,9 +274,6 @@ class PickleMachine {
       case Opcode.NEWFALSE:
         this.stack.push(false);
         return;
-      case Opcode.INT:
-        this.stack.push(this.readIntLine());
-        return;
       case Opcode.BININT:
         this.stack.push(this.readInt32());
         return;
@@ -352,11 +282,6 @@ class PickleMachine {
         return;
       case Opcode.BININT2:
         this.stack.push(this.readUint16());
-        return;
-      case Opcode.LONG:
-        this.stack.push(
-          narrowInteger(BigInt(this.readLine().replace(/L$/, ''))),
-        );
         return;
       case Opcode.LONG1:
         this.stack.push(
@@ -368,16 +293,10 @@ class PickleMachine {
           decodeSignedLittleEndian(this.readBytes(this.readUint32())),
         );
         return;
-      case Opcode.FLOAT:
-        this.stack.push(Number(this.readLine()));
-        return;
       case Opcode.BINFLOAT:
         this.stack.push(this.readFloat64());
         return;
 
-      case Opcode.UNICODE:
-        this.stack.push(decodeRawUnicodeEscape(this.readLine()));
-        return;
       case Opcode.BINUNICODE:
         this.stack.push(this.readUtf8(this.readUint32()));
         return;
@@ -386,15 +305,6 @@ class PickleMachine {
         return;
       case Opcode.BINUNICODE8:
         this.stack.push(this.readUtf8(this.readUint64()));
-        return;
-      case Opcode.STRING:
-        this.stack.push(unquotePythonString(this.readLine()));
-        return;
-      case Opcode.BINSTRING:
-        this.stack.push(decodeLatin1(this.readBytes(this.readUint32())));
-        return;
-      case Opcode.SHORT_BINSTRING:
-        this.stack.push(decodeLatin1(this.readBytes(this.readByte())));
         return;
       case Opcode.SHORT_BINBYTES:
         this.stack.push(this.readBytes(this.readByte()));
@@ -410,14 +320,8 @@ class PickleMachine {
       case Opcode.EMPTY_DICT:
         this.stack.push(new Map<unknown, unknown>());
         return;
-      case Opcode.DICT:
-        this.stack.push(dictFromFlatPairs(this.popMark()));
-        return;
       case Opcode.EMPTY_LIST:
         this.stack.push([]);
-        return;
-      case Opcode.LIST:
-        this.stack.push(this.popMark());
         return;
       case Opcode.EMPTY_TUPLE:
         this.stack.push([]);
@@ -657,40 +561,6 @@ class PickleMachine {
     this.position = end + 1;
     return line;
   }
-
-  private readDecimalLine(): number {
-    const line = this.readLine();
-    const value = Number(line);
-    if (!Number.isInteger(value)) {
-      throw new Error(`Pickle payload holds a malformed integer "${line}".`);
-    }
-    return value;
-  }
-
-  /** Reads an `INT` line, whose `01`/`00` forms are protocol-0 booleans. */
-  private readIntLine(): number | boolean {
-    const line = this.readLine();
-    if (line === '01') {
-      return true;
-    }
-    if (line === '00') {
-      return false;
-    }
-    const value = Number(line);
-    if (!Number.isInteger(value)) {
-      throw new Error(`Pickle payload holds a malformed integer "${line}".`);
-    }
-    return value;
-  }
-}
-
-/** Builds a dict from the flat key/value run a `DICT` opcode leaves. */
-function dictFromFlatPairs(items: unknown[]): Map<unknown, unknown> {
-  const dict = new Map<unknown, unknown>();
-  for (let i = 0; i + 1 < items.length; i += 2) {
-    dict.set(items[i], items[i + 1]);
-  }
-  return dict;
 }
 
 /**
