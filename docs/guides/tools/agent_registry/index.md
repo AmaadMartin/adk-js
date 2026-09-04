@@ -15,8 +15,8 @@ find the auth provider the resource is bound to, and attach a credential.
 `AgentRegistry` does that assembly. `getMcpToolset` returns an
 `AgentRegistrySingleMCPToolset` you can hand straight to an agent's `tools`, and
 `getRemoteA2AAgent` returns a `RemoteA2AAgent` you can use as a sub-agent. Both
-resolve the endpoint URL and the auth scheme from the registry, so the calling
-code names a resource and nothing else.
+resolve the endpoint URL from the registry, so the calling code names a
+resource and nothing else.
 
 Reach for `AgentRegistry` when the servers and agents you depend on are
 registered centrally. When you already know an MCP server's URL, construct
@@ -69,20 +69,24 @@ const {agents} = await registry.searchAgents({
 
 ## Authentication
 
-A registered resource can be bound to an auth provider through an IAM binding.
-When you do not pass an `authScheme`, the registry reads the bindings and uses
-the provider bound to that resource. `continueUri` overrides the redirect the
-provider declares.
+A registered MCP server can be bound to an auth provider through an IAM
+binding. When you do not pass an `authScheme`, `getMcpToolset` reads the
+bindings and uses the provider bound to that server. `continueUri` overrides
+the redirect the provider declares.
 
 ```ts
-const remoteAgent = await registry.getRemoteA2AAgent('my-agent', {
+const toolset = await registry.getMcpToolset('my-server', {
   continueUri: 'https://my-app.example/continue',
 });
 ```
 
 Passing an `authScheme` yourself skips the bindings request entirely. A
 bindings lookup that fails, returns nothing, or matches no target leaves the
-resource unauthenticated and logs a warning; it does not throw.
+server unauthenticated and logs a warning; it does not throw.
+
+`getRemoteA2AAgent` does not resolve a binding. `RemoteA2AAgent` has no way to
+apply a credential to its outgoing calls yet, so a scheme resolved for it would
+have no effect. Pass an already-authenticated `client` instead.
 
 For an MCP server on a `*.googleapis.com` host reached over https, and only
 when no auth scheme and no credential apply, the registry attaches its own
