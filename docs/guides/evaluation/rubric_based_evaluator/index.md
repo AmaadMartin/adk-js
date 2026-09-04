@@ -92,8 +92,8 @@ evaluator.createEffectiveRubricsList(actualInvocations[0].rubrics);
 const result = await evaluator.evaluateInvocations(actualInvocations);
 ```
 
-`result.overallRubricScores` holds one entry per rubric, and each
-`perInvocationResults` entry holds that invocation's own rubric scores.
+`result.overallRubricScores` holds one entry per rubric the judge graded, and
+each `perInvocationResults` entry holds that invocation's own rubric scores.
 
 ## How a response is parsed
 
