@@ -184,6 +184,26 @@ describe('SkillToolset against a real LocalEnvironment', () => {
     await fs.rm(workspace, {recursive: true, force: true});
   });
 
+  it('brings an environment nobody initialized up before it runs', async () => {
+    const environment = new LocalEnvironment({workingDir: workspace});
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([SKILL], {environment}),
+    );
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'skill1',
+        script_path: 'run.sh',
+        command: 'sh skills/skill1/scripts/run.sh',
+      },
+      toolContext: createConfirmedContext(),
+    })) as {stdout: string; exit_code: number};
+
+    expect(environment.isInitialized).toBe(true);
+    expect(result.stdout.trim()).toBe('hello');
+    expect(result.exit_code).toBe(0);
+  });
+
   it('materializes the skill and runs its script', async () => {
     const environment = new LocalEnvironment({workingDir: workspace});
     const toolset = new SkillToolset([SKILL], {environment});
