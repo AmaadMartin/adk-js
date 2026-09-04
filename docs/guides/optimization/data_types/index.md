@@ -3,7 +3,7 @@
 These four types are the contract between a sampler and an optimizer.
 A sampler scores a candidate agent on a batch of examples. An optimizer reads
 those scores and returns better agents. Reach for these types when you write
-either side, or when you read a result back from storage.
+either side.
 
 ## Introduction
 
@@ -25,16 +25,14 @@ Both roles are pluggable, and both sides of the contract are extensible.
 reports its own metrics extends `AgentWithScores` and names the subtype. A
 sampler that reports its own fields extends `SamplingResult` the same way.
 
-The compiler checks a value that TypeScript built. It cannot check one that
-arrives as `unknown` — a result restored from persisted JSON, or returned by a
-sampler that a caller supplied. Each type therefore has a `parse` function
-that validates such a value and throws `InputValidationError` if it is wrong.
-Use the interface when you build a value, and the `parse` function when you
-receive one.
+This module is types only. TypeScript erases the types at compile time, so they
+carry no runtime validation. A value that arrives as `unknown` — read from
+persisted JSON, or returned by a caller-supplied sampler — is not checked for
+you. Validate it at the point you receive it.
 
 ## Get started
 
-Build a sampling result in code. The compiler checks it, so no validation runs.
+Build a sampling result. The compiler checks the shape.
 
 ```typescript
 import {
@@ -57,24 +55,6 @@ const candidate: AgentWithScores = {
 const front: OptimizerResult = {optimizedAgents: [candidate]};
 ```
 
-Validate a result that arrives as `unknown`.
-
-```typescript
-import {
-  InputValidationError,
-  parseUnstructuredSamplingResult,
-} from '@google/adk';
-
-try {
-  const restored = parseUnstructuredSamplingResult(JSON.parse(text));
-  // restored.scores is a Record<string, number>.
-} catch (error) {
-  if (error instanceof InputValidationError) {
-    // The stored result is not a valid sampling result.
-  }
-}
-```
-
 Report a custom metric by extending `AgentWithScores` and naming the subtype.
 
 ```typescript
@@ -93,30 +73,32 @@ function bestOf(
 }
 ```
 
-## What each validator rejects
+## Field reference
 
-Every validator throws `InputValidationError`. The message names the field that
-failed.
+| Type                         | Field             | Meaning                                                               |
+| ---------------------------- | ----------------- | --------------------------------------------------------------------- |
+| `SamplingResult`             | `scores`          | A map from example UID to that example's score. Higher is better.     |
+| `UnstructuredSamplingResult` | `data`            | Optional. A map from example UID to evaluation data for that example. |
+| `AgentWithScores`            | `optimizedAgent`  | The optimized agent.                                                  |
+| `AgentWithScores`            | `overallScore`    | Optional. The agent's overall score.                                  |
+| `OptimizerResult<T>`         | `optimizedAgents` | The Pareto front of optimized agents.                                 |
 
-| Validator                         | Rejects                                                                                                     |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `parseSamplingResult`             | A missing `scores`, a `scores` that is not an object, or a score that is not a number.                      |
-| `parseUnstructuredSamplingResult` | Everything above, plus a `data` that is not a map of objects.                                               |
-| `parseAgentWithScores`            | An `optimizedAgent` that is not an `LlmAgent`, or an `overallScore` that is not a number.                   |
-| `parseOptimizerResult`            | A missing `optimizedAgents`, one that is not an array, or an element that is not a valid `AgentWithScores`. |
+`data` and `overallScore` are optional, so both read as `undefined` when unset.
+An `overallScore` of `0` is a real score, not an absent one.
 
-Three behaviours are worth knowing before you rely on a validator.
+## Relationship to ADK Python
 
-- **An optional field reads back as `undefined`.** `data` and `overallScore` are
-  optional. ADK Python writes an unset optional field as `null`, so both `null`
-  and an absent key become `undefined`. An `overallScore` of `0` survives; it is
-  a real score, not an absent one.
-- **An undeclared key survives.** A subtype's extra fields are not deleted, so
-  `parseAgentWithScores` keeps `toolCallAccuracy`. The validator checks the
-  declared fields and passes the rest through.
-- **A value is never coerced.** A score of `'0.5'` is rejected, not converted.
-  ADK Python's models coerce a numeric string; these validators do not.
+These types mirror `google.adk.optimization.data_types` field for field, under
+the names TypeScript uses. ADK Python builds them as pydantic models, which
+validate on construction. The TypeScript types are interfaces, so the compiler
+checks them and nothing runs at runtime.
 
-`parseAgentWithScores` passes `optimizedAgent` through by reference, so the
-agent you get back is the agent you supplied. No validator freezes its result,
-because an optimizer mutates the result it builds.
+| ADK Python                   | ADK TypeScript               |
+| ---------------------------- | ---------------------------- |
+| `SamplingResult`             | `SamplingResult`             |
+| `UnstructuredSamplingResult` | `UnstructuredSamplingResult` |
+| `AgentWithScores`            | `AgentWithScores`            |
+| `OptimizerResult[T]`         | `OptimizerResult<T>`         |
+| `optimized_agent`            | `optimizedAgent`             |
+| `overall_score`              | `overallScore`               |
+| `optimized_agents`           | `optimizedAgents`            |
