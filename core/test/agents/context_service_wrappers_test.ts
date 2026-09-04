@@ -111,6 +111,14 @@ describe('Context.saveArtifact', () => {
     const stored = await context.getArtifactVersion('report.txt');
     expect(stored?.customMetadata).toBeUndefined();
   });
+
+  it('rejects when the artifact service is missing', async () => {
+    const context = makeContext();
+
+    await expect(
+      context.saveArtifact('report.txt', TEXT_ARTIFACT, {source: 'unit-test'}),
+    ).rejects.toThrow('Artifact service is not initialized.');
+  });
 });
 
 describe('Context.getArtifactVersion', () => {
