@@ -47,9 +47,10 @@ export const TRUNCATION_SUFFIX = '...[truncated]';
  * `constructor.name` can stand in for one: two copies of a driver package in
  * one runtime defeat the first, and a bundler defeats the second. MySQL and
  * MariaDB are exactly the platforms MikroORM defaults to `utf8mb4`, so their
- * charset is the identity this type dispatches on. A schema test pins the
- * mapping across every supported platform, so a change in MikroORM fails the
- * build rather than silently restoring the 64 KiB column.
+ * charset is the identity this type dispatches on. A test pins the mapping
+ * against the real `MySqlPlatform`, which ships in the shared knex package;
+ * the other platforms live in driver packages this repository does not
+ * install, so their tests describe a platform by the two values it returns.
  */
 const MYSQL_FAMILY_DEFAULT_CHARSET = 'utf8mb4';
 
