@@ -37,7 +37,7 @@ export interface OptionalPeer {
  * the module (a syntax error, a failing side effect, a missing transitive
  * dependency), which must be surfaced unchanged.
  */
-function isMissingModule(err: unknown, packageName: string): boolean {
+export function isMissingModule(err: unknown, packageName: string): boolean {
   if (!(err instanceof Error)) {
     return false;
   }
