@@ -152,10 +152,10 @@ describe('BigQueryAgentAnalyticsPlugin driven by the real Runner', () => {
   it('writes no agent row, because adk-js never fires the agent hooks', async () => {
     const rows = await runOneTurn();
     expect(
-      rows.filter((row) => row.event_type.startsWith('AGENT_STARTING')),
+      rows.filter((row) => row.event_type?.startsWith('AGENT_STARTING')),
     ).toEqual([]);
     expect(
-      rows.filter((row) => row.event_type.startsWith('AGENT_COMPLETED')),
+      rows.filter((row) => row.event_type?.startsWith('AGENT_COMPLETED')),
     ).toEqual([]);
   });
 
@@ -186,7 +186,7 @@ describe('BigQueryAgentAnalyticsPlugin driven by the real Runner', () => {
 
   it('records the tool call and its result on the tool rows', async () => {
     const rows = await runOneTurn();
-    const toolRows = rows.filter((row) => row.event_type.startsWith('TOOL_'));
+    const toolRows = rows.filter((row) => row.event_type?.startsWith('TOOL_'));
     expect(toolRows.map((row) => row.event_type)).toEqual([
       'TOOL_STARTING',
       'TOOL_COMPLETED',
