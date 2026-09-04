@@ -161,6 +161,22 @@ const analytics = new BigQueryAgentAnalyticsPlugin({
 
 The default `batchSize` of 1 writes each row as it is produced, which is the simplest behaviour to reason about and the slowest. Raise it, and `batchFlushIntervalMs` bounds how long a partial batch waits.
 
+### The views
+
+The events table keeps its payload in three JSON columns, which is what lets one table hold every event type. A query then has to know the JSON path for the type it is reading. On first use the plugin creates one view per event type that does this once: each selects the rows of a single `event_type` and lifts that type's fields out of the JSON into typed columns.
+
+A view is named `<viewPrefix>_<event_type in lower case>`, so `TOOL_COMPLETED` becomes `v_tool_completed`. Querying the tool failure rate above becomes:
+
+```sql
+SELECT tool_origin, COUNTIF(status = 'ERROR') / COUNT(*) AS error_rate
+FROM `my-project.agent_analytics.v_tool_completed`
+GROUP BY tool_origin;
+```
+
+The statements are `CREATE OR REPLACE VIEW`, so the pass is safe to repeat, and it runs once per process. A view that cannot be created is logged and skipped: the table already holds every row, so a reporting problem must not stop the writes. Set `createViews` to false to skip the pass, and `viewPrefix` to rename the views. An empty prefix throws at construction, because a view would then be named after the event type alone and could collide with an ordinary table in the dataset.
+
+The column expressions match adk-python's, so a query written against a Python-created view works here unchanged. Projection applies: a derived column that reads a column you put in `payloadColumnDenylist` is left out of the view rather than failing its creation, and the identity and correlation columns are always kept.
+
 ### Credentials
 
 The client uses Application Default Credentials. Pass `credentials` to authenticate as a particular service account instead.
@@ -231,7 +247,7 @@ Writes use `table.insert()`, which is `tabledata.insertAll`, with the insert id 
 
 ### Retrying a failed write
 
-`retryConfig` decides how often a failed insert is attempted, and it is the only thing that does: the plugin turns the client's own automatic retry off so there is one policy rather than two multiplying together.
+`retryConfig` decides how often a failed insert is attempted. The plugin turns the client's own request-level automatic retry off, so a rate limit or a server error is retried on this schedule and no other. One client retry remains outside it: `insertAll` re-sends the rows a partial failure rejected, up to three times, before the plugin's classifier sees the error at all.
 
 ```typescript
 const analytics = new BigQueryAgentAnalyticsPlugin({
@@ -240,14 +256,14 @@ const analytics = new BigQueryAgentAnalyticsPlugin({
   config: {
     retryConfig: {
       maxRetries: 5, // retries after the first attempt, so 6 attempts in all
-      initialDelay: 0.5, // seconds
+      initialDelayMs: 500,
       multiplier: 2,
-      maxDelay: 10, // seconds
+      maxDelayMs: 10000,
     },
   },
 });
 ```
 
-The delay before retry `n` is `min(initialDelay * multiplier ** n, maxDelay)`. The fields are seconds and carry adk-python's names, so the two configurations read the same field by field; the rest of this configuration is milliseconds. Setting `maxRetries: 0` turns retrying off.
+The delay before retry `n` is `min(initialDelayMs * multiplier ** n, maxDelayMs)`. The delays are milliseconds, like every other duration here; adk-python's `RetryConfig` counts float seconds, so its `initial_delay: 1.0` is `initialDelayMs: 1000`. Setting `maxRetries: 0` turns retrying off.
 
 Only a rate limit or a server-side condition is retried: HTTP 429, 500, 502 and 503, and the gRPC codes 4, 13 and 14. Anything else is counted and dropped without a wait. A partial failure is definitive — BigQuery accepted the rest of the batch and named the rows it rejected — so only those rows are charged, and they are not sent again.
