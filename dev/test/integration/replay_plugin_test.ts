@@ -757,4 +757,57 @@ describe('ReplayPlugin constructor-injected replay', () => {
 
     expect(errorMessage(caught)).toContain('No tool recording found');
   });
+
+  it('applies the transfer_to_agent side effect of a recorded call', async () => {
+    const plugin = new ReplayPlugin(
+      [
+        {
+          userMessageIndex: 0,
+          agentName: 'agent_a',
+          toolRecording: {
+            toolCall: {name: 'transfer_to_agent', args: {agentName: 'agent_b'}},
+            toolResponse: {name: 'transfer_to_agent', response: {}},
+          },
+        },
+      ],
+      {userMessageIndex: 0},
+    );
+    const {contexts} = makeInvocation();
+    const toolContext = contexts.get('agent_a')!;
+
+    await plugin.beforeToolCallback({
+      tool: new SpyTool('transfer_to_agent'),
+      toolArgs: {agentName: 'agent_b'},
+      toolContext,
+    });
+
+    expect(toolContext.actions.transferToAgent).toBe('agent_b');
+  });
+
+  it('replays the injected LLM response and consumes it once', async () => {
+    const modelRecordings: Recording[] = [
+      {
+        userMessageIndex: 0,
+        agentName: 'agent_a',
+        llmRecording: {
+          llmResponse: {content: {role: 'model', parts: [{text: 'ok'}]}},
+        },
+      },
+    ];
+    const plugin = new ReplayPlugin(modelRecordings, {userMessageIndex: 0});
+    const {contexts} = makeInvocation();
+    const callbackContext = contexts.get('agent_a')!;
+    const llmRequest = {contents: [], liveConnectConfig: {}, toolsDict: {}};
+
+    const replayed = await plugin.beforeModelCallback({
+      callbackContext,
+      llmRequest,
+    });
+    const caught = await rejection(
+      plugin.beforeModelCallback({callbackContext, llmRequest}),
+    );
+
+    expect(replayed).toEqual({content: {role: 'model', parts: [{text: 'ok'}]}});
+    expect(errorMessage(caught)).toContain('No LLM recording found');
+  });
 });
