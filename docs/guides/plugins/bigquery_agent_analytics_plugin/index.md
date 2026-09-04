@@ -73,9 +73,17 @@ GROUP BY event_type
 ORDER BY rows_written DESC;
 ```
 
+To try it against a real project by hand: create a project, set `GOOGLE_CLOUD_PROJECT`, grant your credentials `roles/bigquery.dataEditor` on it, run the agent above, then run
+
+```sql
+SELECT event_type, COUNT(*) FROM `my-project.agent_analytics.agent_events` GROUP BY 1;
+```
+
 ## The table
 
 On first use the plugin looks the table up and, when it is absent, creates it with day partitioning on `timestamp`, clustering on the configured fields, and the label `adk_schema_version: 2`. If another process wins the race, the plugin re-reads the existing table instead of failing.
+
+When the table already exists, the plugin brings it up to the current schema version. The upgrade is additive only: it adds the columns and the record sub-fields this version writes and the table lacks, and it never drops, retypes or reorders anything. A column whose type or mode differs is an error, not a rewrite — the plugin counts the setup as unavailable and tries again later, so a table you fix by hand recovers without a restart. The `adk_schema_version` label gates the work, so a table that is already current costs one metadata read per process. Set `autoSchemaUpgrade` to false to skip the path entirely.
 
 `EVENTS_TABLE_SCHEMA` in `core/src/plugins/bigquery_analytics_schema.ts` is the authority on the 17 columns, and each carries the `description` a BigQuery user sees. Four are worth calling out because their shape is not obvious:
 
@@ -136,7 +144,8 @@ Span state is keyed by invocation id, so two invocations running at once never m
 
 - The duration options carry an `Ms` suffix and take milliseconds. adk-python's equivalents take float seconds; the rename exists so that `batchFlushIntervalMs: 1000` cannot silently mean sixteen minutes.
 - Redaction is deliberately not configurable. It is a fixed set of credential names, matched after folding case, `-`/`_` and camel humps together, plus every key beginning `temp:`.
-- Each numeric option must be a whole number of rows or milliseconds, and the constructor throws on a fractional or out-of-range value rather than dropping every row later.
+- `batchSize` and `queueMaxSize` count whole rows and must be integers of at least 1. The duration options take any finite number greater than zero, so a fractional millisecond is accepted, matching adk-python's float seconds. `NaN` and `Infinity` are rejected explicitly, because an ordered comparison alone lets `NaN` past every range check.
+- The constructor throws on an out-of-range value rather than dropping every row later.
 
 Set `enableOtelCorrelation` to capture the ambient OpenTelemetry span into `attributes.otel.span_id` and `attributes.otel.trace_id`, which joins a row to a Cloud Trace export. It is off by default, and the plugin opens no span of its own. An unsampled span is absent from the export, so treat the join as best effort.
 
@@ -152,16 +161,93 @@ const analytics = new BigQueryAgentAnalyticsPlugin({
 
 The default `batchSize` of 1 writes each row as it is produced, which is the simplest behaviour to reason about and the slowest. Raise it, and `batchFlushIntervalMs` bounds how long a partial batch waits.
 
+### Credentials
+
+The client uses Application Default Credentials. Pass `credentials` to authenticate as a particular service account instead.
+
+```typescript
+const analytics = new BigQueryAgentAnalyticsPlugin({
+  projectId: 'my-project',
+  datasetId: 'agent_analytics',
+  credentials: {
+    client_email: process.env.ANALYTICS_CLIENT_EMAIL!,
+    private_key: process.env.ANALYTICS_PRIVATE_KEY!,
+  },
+});
+```
+
+### Capturing custom metadata
+
+`customMetadataAllowlist` copies chosen `event.customMetadata` keys into `attributes.custom_metadata`. An entry ending in `*` matches by prefix; every other entry matches in full, so a plain key never behaves as a prefix. Nothing is captured by default.
+
+```typescript
+const analytics = new BigQueryAgentAnalyticsPlugin({
+  projectId: 'my-project',
+  datasetId: 'agent_analytics',
+  config: {customMetadataAllowlist: ['a2a:*', 'tenant_id']},
+});
+```
+
+A captured value takes the same safety pass as every other captured value: long strings are truncated, credential-bearing keys are replaced, and a reference back to an ancestor becomes `[CIRCULAR_REFERENCE]`. A truncated capture sets the row's `is_truncated`.
+
+### Dropping payload columns
+
+`payloadColumnDenylist` leaves a column out of the created table and out of every row, which is how you keep prompt and response bodies out of the dataset while still counting turns, latencies and failures.
+
+```typescript
+const analytics = new BigQueryAgentAnalyticsPlugin({
+  projectId: 'my-project',
+  datasetId: 'agent_analytics',
+  config: {payloadColumnDenylist: ['content', 'content_parts']},
+});
+```
+
+Only `content`, `content_parts`, `attributes` and `latency_ms` may be listed. Every other column is an identity or correlation column that the execution tree is reconstructed from, so naming one throws at construction rather than producing rows a query cannot correlate. The projection is applied to the schema first, so the table and the rows always carry the same columns. Dropping `attributes` while `customMetadataAllowlist` is set also throws, because the capture would be discarded.
+
 ## Failure modes
 
 Nothing here throws at your agent. Every loss is counted, and `getDropStats()` returns the counters — they survive `shutdown()`, so you can export them after the run.
 
 ```typescript
 const dropped = analytics.getDropStats();
-// {queue_full: 0, write_failed: 0, shutdown_timeout: 0,
-//  setup_unavailable: 0, formatter_failed: 0, content_parse_failed: 0}
+// {queue_full: 0, retry_exhausted: 0, non_retryable: 0, unexpected_error: 0,
+//  shutdown_timeout: 0, shutdown_race: 0, setup_unavailable: 0,
+//  formatter_failed: 0, content_parse_failed: 0}
 ```
 
-The reasons split in two. `setup_unavailable`, `queue_full`, `write_failed` and `shutdown_timeout` mean the row never landed; after the first of those the next event retries the setup. `formatter_failed` and `content_parse_failed` mean the row **did** land, with its payload replaced by `[FORMATTER_FAILED]` or `[CONTENT_PARSE_FAILED]`. Those two log a fixed message that never includes the payload, the exception text or a type name, because all three can be attacker-supplied.
+The reasons split in two. `formatter_failed` and `content_parse_failed` mean the row **did** land, with its payload replaced by `[FORMATTER_FAILED]` or `[CONTENT_PARSE_FAILED]`. Those two log a fixed message that never includes the payload, the exception text or a type name, because all three can be attacker-supplied. Every other reason means the row never landed:
 
-Writes use `table.insert()`, which is `tabledata.insertAll`, with the insert id set to the row's `event_id`. That gives best-effort de-duplication, not the exactly-once delivery that adk-python gets from Storage Write API streams. `@google-cloud/bigquery` retries on its own, and the plugin adds no retry loop on top. BigQuery can also reject the first rows written to a table it created moments earlier, until that new table propagates; those rows count as `write_failed`.
+| Reason              | What happened                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `queue_full`        | The row arrived at a queue already holding `queueMaxSize` rows.                                |
+| `setup_unavailable` | The client or the table could not be opened. The next event retries the setup.                 |
+| `retry_exhausted`   | Every attempt the retry budget allowed failed.                                                 |
+| `non_retryable`     | BigQuery rejected the rows for a reason another attempt cannot fix, such as a schema mismatch. |
+| `unexpected_error`  | The insert threw something carrying no status at all.                                          |
+| `shutdown_timeout`  | The row was still pending when the shutdown timeout expired.                                   |
+| `shutdown_race`     | A callback produced the row after `shutdown()` began.                                          |
+
+Writes use `table.insert()`, which is `tabledata.insertAll`, with the insert id set to the row's `event_id`. That gives best-effort de-duplication, not the exactly-once delivery that adk-python gets from Storage Write API streams. BigQuery can also reject the first rows written to a table it created moments earlier, until that new table propagates; that rejection is retryable, so the configured backoff covers it.
+
+### Retrying a failed write
+
+`retryConfig` decides how often a failed insert is attempted, and it is the only thing that does: the plugin turns the client's own automatic retry off so there is one policy rather than two multiplying together.
+
+```typescript
+const analytics = new BigQueryAgentAnalyticsPlugin({
+  projectId: 'my-project',
+  datasetId: 'agent_analytics',
+  config: {
+    retryConfig: {
+      maxRetries: 5, // retries after the first attempt, so 6 attempts in all
+      initialDelay: 0.5, // seconds
+      multiplier: 2,
+      maxDelay: 10, // seconds
+    },
+  },
+});
+```
+
+The delay before retry `n` is `min(initialDelay * multiplier ** n, maxDelay)`. The fields are seconds and carry adk-python's names, so the two configurations read the same field by field; the rest of this configuration is milliseconds. Setting `maxRetries: 0` turns retrying off.
+
+Only a rate limit or a server-side condition is retried: HTTP 429, 500, 502 and 503, and the gRPC codes 4, 13 and 14. Anything else is counted and dropped without a wait. A partial failure is definitive — BigQuery accepted the rest of the batch and named the rows it rejected — so only those rows are charged, and they are not sent again.
