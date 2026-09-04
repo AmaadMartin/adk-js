@@ -30,6 +30,12 @@ const BUSY_TIMEOUT_MS = 5000;
 /** SQLite's result code for a violated primary key or other constraint. */
 const SQLITE_CONSTRAINT = 'SQLITE_CONSTRAINT';
 
+/** The driver package, and the feature its missing-package error names. */
+export const SQLITE3_PEER = {
+  packageName: 'sqlite3',
+  feature: 'SqliteSessionService',
+};
+
 /**
  * Splits a SQLAlchemy-style SQLite URL into its path and query.
  *
@@ -349,7 +355,7 @@ export class SqliteDatabase {
   private async loadDriver(): Promise<Sqlite3Module> {
     if (this.driver === undefined) {
       const mod = await loadOptionalPeer(
-        {packageName: 'sqlite3', feature: 'SqliteSessionService'},
+        SQLITE3_PEER,
         (): Promise<Sqlite3Module & {default?: Sqlite3Module}> =>
           import('sqlite3'),
       );

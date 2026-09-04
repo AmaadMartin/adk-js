@@ -189,6 +189,23 @@ function extractJsonSafeStateDelta(
 }
 
 /**
+ * Coerces the event's state delta in place, so one value a JSON column cannot
+ * hold cannot fail the whole append.
+ *
+ * `trimTempDeltaState` has already rebuilt the delta map by the time this
+ * runs, so the caller's own delta object keeps its values.
+ */
+function makeDeltaJsonSafe(event: Event): void {
+  const stateDelta = event.actions?.stateDelta;
+  if (!stateDelta) {
+    return;
+  }
+  for (const [key, value] of Object.entries(stateDelta)) {
+    stateDelta[key] = toJsonSafe(key, value);
+  }
+}
+
+/**
  * Copies the event's `temp:` state onto the in-memory session, so a later
  * agent in the same invocation reads what an earlier one wrote. The keys are
  * trimmed out of the event before it is persisted.
@@ -606,6 +623,7 @@ export class SqliteSessionService extends BaseSessionService {
 
     applyTempState(session, event);
     event = trimTempDeltaState(event);
+    makeDeltaJsonSafe(event);
 
     const key: CompositeSessionKey = {
       appName: session.appName,
