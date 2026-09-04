@@ -608,9 +608,6 @@ const evalMetricModel: EvalModel<EvalMetric> = evalModel(evalMetricShape, {
 /**
  * Validates an eval metric payload.
  *
- * The result never carries a config-declared custom function path, whatever
- * the payload named. See {@link setConfigCustomFunctionPath}.
- *
  * @throws {InputValidationError} When the payload names an unrecognized key or
  *   omits `metricName`.
  */
@@ -644,31 +641,6 @@ const evalMetricResultModel: EvalModel<EvalMetricResult> = evalModel(
  */
 export function parseEvalMetricResult(raw: unknown): EvalMetricResult {
   return evalMetricResultModel.parse(raw);
-}
-
-const configCustomFunctionPaths = new WeakMap<EvalMetric, string>();
-
-/**
- * Records the custom function path an eval config declared for this metric.
- *
- * The path is kept off the metric's own shape so a metric parsed from an
- * inbound payload cannot carry one: the public {@link EvalMetric.customFunctionPath}
- * field is settable by whoever built that payload, this is not. It is keyed by
- * the metric object rather than by metric name, so two apps in one process can
- * declare the same metric name and each still resolves its own function.
- */
-export function setConfigCustomFunctionPath(
-  evalMetric: EvalMetric,
-  customFunctionPath: string,
-): void {
-  configCustomFunctionPaths.set(evalMetric, customFunctionPath);
-}
-
-/** Returns the path an eval config declared for this metric, if any. */
-export function getConfigCustomFunctionPath(
-  evalMetric: EvalMetric,
-): string | undefined {
-  return configCustomFunctionPaths.get(evalMetric);
 }
 
 /**

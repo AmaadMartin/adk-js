@@ -10,7 +10,6 @@ import {
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
   DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
-  getConfigCustomFunctionPath,
   getMetricThreshold,
   InputValidationError,
   normalizeToolTrajectoryMatchType,
@@ -28,7 +27,6 @@ import {
   parseToolTrajectoryCriterion,
   PrebuiltMetrics,
   resolveJudgeModelOptions,
-  setConfigCustomFunctionPath,
   ToolTrajectoryMatchType,
   type EvalMetricResult,
   type HallucinationsCriterion,
@@ -827,35 +825,6 @@ describe('parseEvalMetric', () => {
     ).toThrow(
       'Invalid EvalMetric: Unrecognized key: "configCustomFunctionPath"',
     );
-  });
-});
-
-describe('the config declared custom function path', () => {
-  it('is absent on a metric built from a payload', () => {
-    const metric = parseEvalMetric({
-      metric_name: 'x',
-      threshold: 0.5,
-      custom_function_path: 'math.floor',
-    });
-
-    expect(getConfigCustomFunctionPath(metric)).toBeUndefined();
-  });
-
-  it('is readable once an eval config declares it', () => {
-    const metric = parseEvalMetric({metric_name: 'x', threshold: 0.5});
-
-    setConfigCustomFunctionPath(metric, 'math.sqrt');
-
-    expect(getConfigCustomFunctionPath(metric)).toBe('math.sqrt');
-  });
-
-  it('does not carry to another config metric of the same name', () => {
-    const mine = parseEvalMetric({metric_name: 'x', threshold: 0.5});
-    const theirs = parseEvalMetric({metric_name: 'x', threshold: 0.5});
-
-    setConfigCustomFunctionPath(mine, 'math.sqrt');
-
-    expect(getConfigCustomFunctionPath(theirs)).toBeUndefined();
   });
 });
 

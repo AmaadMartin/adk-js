@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  evalModel,
-  InputValidationError,
-  isInputValidationError,
-} from '@google/adk';
+import {evalModel, InputValidationError} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z, ZodError} from 'zod';
@@ -392,18 +388,6 @@ const model = evalModel(
   {name: 'Sample'},
 );
 
-function catchValidationError(run: () => unknown): InputValidationError {
-  try {
-    run();
-  } catch (e: unknown) {
-    if (isInputValidationError(e)) {
-      return e;
-    }
-    expect.fail(`Expected an InputValidationError, got ${String(e)}.`);
-  }
-  expect.fail('Expected an InputValidationError, but nothing was thrown.');
-}
-
 describe('evalModel', () => {
   it('accepts the camelCase spelling of a field', () => {
     expect(model.parse({textProperty: 'a'})).toEqual({
@@ -420,7 +404,7 @@ describe('evalModel', () => {
   });
 
   it('rejects a payload that supplies both spellings of one field', () => {
-    const error = catchValidationError(() =>
+    const error = expectInputValidationError(() =>
       model.parse({textProperty: 'a', text_property: 'b'}),
     );
 
@@ -428,7 +412,7 @@ describe('evalModel', () => {
   });
 
   it('rejects an unrecognized key by default', () => {
-    const error = catchValidationError(() =>
+    const error = expectInputValidationError(() =>
       model.parse({textProperty: 'a', surprise: 1}),
     );
 
@@ -456,7 +440,9 @@ describe('evalModel', () => {
   });
 
   it('rejects a payload that is not an object', () => {
-    const error = catchValidationError(() => model.parse('not an object'));
+    const error = expectInputValidationError(() =>
+      model.parse('not an object'),
+    );
 
     expect(error.message).toContain('Invalid Sample: ');
   });
@@ -466,7 +452,9 @@ describe('evalModel', () => {
   });
 
   it('names the field path of a failing value', () => {
-    const error = catchValidationError(() => model.parse({textProperty: 7}));
+    const error = expectInputValidationError(() =>
+      model.parse({textProperty: 7}),
+    );
 
     expect(error.message).toBe(
       'Invalid Sample: textProperty: Invalid input: expected string, received number',
@@ -474,7 +462,7 @@ describe('evalModel', () => {
   });
 
   it('joins several issues with a semicolon', () => {
-    const error = catchValidationError(() =>
+    const error = expectInputValidationError(() =>
       model.parse({textProperty: 7, numSamples: 'many'}),
     );
 
@@ -484,7 +472,7 @@ describe('evalModel', () => {
   });
 
   it('sets the cause to the underlying ZodError', () => {
-    const error = catchValidationError(() => model.parse({}));
+    const error = expectInputValidationError(() => model.parse({}));
 
     expect(error.cause).toBeInstanceOf(ZodError);
   });

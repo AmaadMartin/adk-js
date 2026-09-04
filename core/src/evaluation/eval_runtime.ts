@@ -58,10 +58,10 @@ export interface EvalServiceParams {
    * config declares, so registering them leaves the process-wide default
    * registry untouched.
    */
-  metricEvaluatorRegistry?: MetricEvaluatorRegistry;
+  metricEvaluatorRegistry: MetricEvaluatorRegistry;
 
   /** Supplies the simulator that plays the user for each eval case. */
-  userSimulatorProvider?: UserSimulatorProvider;
+  userSimulatorProvider: UserSimulatorProvider;
 
   /** Loads the artifacts the eval cases reach for. */
   artifactService?: BaseArtifactService;

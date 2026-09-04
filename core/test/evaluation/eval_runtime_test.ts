@@ -5,12 +5,14 @@
  */
 
 import {
+  defaultMetricEvaluatorRegistry,
   EvalServiceParams,
   getEvalRuntime,
   InMemoryEvalSetsManager,
   LlmAgent,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
   setEvalRuntime,
+  UserSimulatorProvider,
 } from '@google/adk';
 import {afterEach, describe, expect, it} from 'vitest';
 import {StubEvalRuntime} from './stub_eval_service.js';
@@ -20,6 +22,8 @@ function createParams(): EvalServiceParams {
     rootAgent: new LlmAgent({name: 'root_agent'}),
     evalSetsManager: new InMemoryEvalSetsManager(),
     evalConfig: {criteria: {}},
+    metricEvaluatorRegistry: defaultMetricEvaluatorRegistry().fork(),
+    userSimulatorProvider: new UserSimulatorProvider(),
   };
 }
 
