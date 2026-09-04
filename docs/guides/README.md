@@ -114,6 +114,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Running an eval locally](evaluation/local_eval_service/index.md) - Running an
   agent over an eval set in your own process, scoring the invocations it
   produced, and registering the metric that scores them.
+- [PerTurnUserSimulatorQualityV1](evaluation/per_turn_user_simulator_quality_v1/index.md) - Grading the simulated user that drove an eval case: the starting prompt, the conversation plan, and where the conversation should have ended.
 - [ResponseEvaluator](evaluation/response_evaluator/index.md) - Scoring an agent's final answer against a golden answer, or against the Vertex AI coherence metric.
 - [SafetyEvaluatorV1](evaluation/safety_evaluator/index.md) - Scoring how
   harmless an agent's answer is, with the Vertex AI safety metric.

@@ -236,6 +236,16 @@ export interface LlmBackedUserSimulatorCriterion extends LlmAsAJudgeCriterion {
 }
 
 /**
+ * An {@link LlmBackedUserSimulatorCriterion} with every default applied, which
+ * is the shape a validated criterion takes. A metric reading one never has to
+ * re-apply a default.
+ */
+export interface ParsedLlmBackedUserSimulatorCriterion extends LlmBackedUserSimulatorCriterion {
+  judgeModelOptions: ResolvedJudgeModelOptions;
+  stopSignal: string;
+}
+
+/**
  * How actual tool calls are matched against the expected trajectory.
  *
  * The members carry their own names as values, where adk-python's `MatchType`
@@ -491,7 +501,7 @@ const hallucinationsCriterionModel: EvalModel<HallucinationsCriterion> =
   );
 
 /** Validates an {@link LlmBackedUserSimulatorCriterion} payload. */
-const llmBackedUserSimulatorCriterionModel: EvalModel<LlmBackedUserSimulatorCriterion> =
+const llmBackedUserSimulatorCriterionModel: EvalModel<ParsedLlmBackedUserSimulatorCriterion> =
   evalModel(
     {
       ...llmAsAJudgeCriterionShape,
@@ -571,13 +581,13 @@ export function parseHallucinationsCriterion(
 }
 
 /**
- * Validates a user simulator criterion payload.
+ * Validates a user simulator criterion payload, applying every default.
  *
  * @throws {InputValidationError} When the payload is not a valid criterion.
  */
 export function parseLlmBackedUserSimulatorCriterion(
   raw: unknown,
-): LlmBackedUserSimulatorCriterion {
+): ParsedLlmBackedUserSimulatorCriterion {
   return llmBackedUserSimulatorCriterionModel.parse(raw);
 }
 

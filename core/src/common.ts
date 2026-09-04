@@ -416,6 +416,7 @@ export type {
   MetricInfo,
   MetricInfoProvider,
   MetricValueInfo,
+  ParsedLlmBackedUserSimulatorCriterion,
   ParsedToolTrajectoryCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
@@ -462,6 +463,7 @@ export type {
 export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
 export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
+export type {AutoRaterScore} from './evaluation/llm_as_judge.js';
 export {LocalEvalRuntime} from './evaluation/local_eval_runtime.js';
 export {LocalEvalService} from './evaluation/local_eval_service.js';
 export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
@@ -470,6 +472,9 @@ export {
   defaultMetricEvaluatorRegistry,
 } from './evaluation/metric_evaluator_registry.js';
 export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
+export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
+export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
+export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   UserSimulatorStatus,
@@ -479,6 +484,10 @@ export type {
   NextUserMessage,
   UserSimulator,
 } from './evaluation/simulation/user_simulator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
