@@ -94,6 +94,38 @@ describe('NodeContext.runNode internals', () => {
   });
 });
 
+describe('NodeContext parent and node links', () => {
+  it('links a child context to the node it runs and to its caller', async () => {
+    let innerCtx: NodeContext | undefined;
+    let outerCtx: NodeContext | undefined;
+    const inner = new FunctionNode('inner', (ctx) => {
+      innerCtx = ctx;
+      return 'done';
+    });
+    const outer = new FunctionNode('outer', async (ctx) => {
+      outerCtx = ctx;
+      await ctx.runNode(inner);
+      return 'done';
+    });
+    const root = new NodeContext({
+      invocationContext: ic,
+      channel,
+      nodePath: '',
+      runId: '1',
+    });
+
+    await root.runNode(outer);
+
+    expect(outerCtx?.node).toBe(outer);
+    expect(outerCtx?.parentCtx).toBe(root);
+    expect(innerCtx?.node).toBe(inner);
+    expect(innerCtx?.parentCtx).toBe(outerCtx);
+    // A root context built by a driver has neither.
+    expect(root.node).toBeUndefined();
+    expect(root.parentCtx).toBeUndefined();
+  });
+});
+
 describe('scheduler derivation', () => {
   // adk-python derives the scheduler in a `_derive_scheduler` free function
   // called from `Context.__init__`; adk-js propagates it in `runChildNode`
