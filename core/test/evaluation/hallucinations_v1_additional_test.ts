@@ -398,4 +398,23 @@ describe('evaluateNlResponse', () => {
     expect(judge.requests[0].model).toBe(judge.model);
     expect(judge.requests[0].config?.temperature).toBe(0);
   });
+
+  it('keeps a context that names a placeholder out of the substitution', async () => {
+    const judge = new FakeJudgeLlm([
+      {critique: '<sentence>One.</sentence>'},
+      {silent: true},
+    ]);
+    // A tool output, an instruction or a prior response can hold this text.
+    const context = 'The tool returned the literal string {sentences}.';
+
+    await evaluateNlResponse(judge, {}, 'nl', context);
+
+    const validatorPrompt =
+      judge.requests[1].contents[0].parts?.[0].text ?? expect.fail('no prompt');
+    expect(validatorPrompt).toContain(context);
+    expect(validatorPrompt).toContain(
+      '**Sentences Begin**\n<sentence>One.</sentence>\n**Sentences End**',
+    );
+    expect(validatorPrompt.split('<sentence>One.</sentence>')).toHaveLength(2);
+  });
 });

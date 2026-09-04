@@ -36,7 +36,10 @@ import {
   type Evaluator,
   type PerInvocationResult,
 } from './evaluator.js';
-import {getToolDeclarationsAsJsonStr} from './llm_as_judge_utils.js';
+import {
+  formatPromptTemplate,
+  getToolDeclarationsAsJsonStr,
+} from './llm_as_judge_utils.js';
 import {addDefaultRetryOptionsIfNotPresent} from './retry_options_utils.js';
 
 /**
@@ -448,7 +451,7 @@ export async function evaluateNlResponse(
     const segmenterText = await askJudge(
       judgeModel,
       modelConfig,
-      SEGMENTER_PROMPT.replace('{response}', () => nlResponse),
+      formatPromptTemplate(SEGMENTER_PROMPT, {response: nlResponse}),
     );
     if (segmenterText === undefined) {
       return {details: 'Segmenter returned no text.'};
@@ -471,10 +474,10 @@ export async function evaluateNlResponse(
     const validatorText = await askJudge(
       judgeModel,
       modelConfig,
-      VALIDATOR_PROMPT.replace('{context}', () => context).replace(
-        '{sentences}',
-        () => sentencesStr,
-      ),
+      formatPromptTemplate(VALIDATOR_PROMPT, {
+        context,
+        sentences: sentencesStr,
+      }),
     );
     if (validatorText === undefined) {
       return {details: 'Sentence validator returned no text.'};

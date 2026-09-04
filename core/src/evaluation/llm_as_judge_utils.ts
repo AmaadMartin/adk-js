@@ -41,6 +41,28 @@ export const PARTIALLY_VALID_LABELS: readonly string[] = [
 ];
 
 /**
+ * Fills a prompt template, replacing every `{name}` with the matching value
+ * and every `{{` or `}}` with the single brace it stands for.
+ *
+ * A `{name}` the values do not cover is left in place. The replacement is a
+ * function, so a value containing `$&` or `$1` reaches the model unchanged.
+ */
+export function formatPromptTemplate(
+  template: string,
+  values: Record<string, string>,
+): string {
+  return template.replace(
+    /\{\{|\}\}|\{(\w+)\}/g,
+    (match: string, name: string | undefined) => {
+      if (name === undefined) {
+        return match === '{{' ? '{' : '}';
+      }
+      return values[name] ?? match;
+    },
+  );
+}
+
+/**
  * Returns the tools of every agent in the app as a JSON string, for a judge
  * model to read.
  */

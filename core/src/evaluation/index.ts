@@ -72,7 +72,10 @@ export type {
   NlResponseEvaluation,
   SentenceValidationResult,
 } from './hallucinations_v1.js';
-export {getToolDeclarationsAsJsonStr} from './llm_as_judge_utils.js';
+export {
+  formatPromptTemplate,
+  getToolDeclarationsAsJsonStr,
+} from './llm_as_judge_utils.js';
 export type {
   UserBehavior,
   UserPersona,
