@@ -15,12 +15,19 @@ import {
   assertSupportedDatabaseUri,
   connectionIsAlive,
   detectDatabaseSchemaVersion,
+  dialectOf,
   enableSqliteForeignKeys,
   ensureDatabaseCreated,
+  forkForRead,
+  forkForWrite,
   getConnectionOptionsFromUri,
+  getDatabaseBackend,
   getOrCreateRow,
   namesSupportedDatabaseBackend,
+  openDatabaseOrm,
   parseSqliteUri,
+  schemeOf,
+  supportsRowLevelLocking,
   validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
@@ -229,6 +236,21 @@ describe('operations', () => {
       await expect(
         getConnectionOptionsFromUri('invalid://user:pass@localhost/db'),
       ).rejects.toThrow('Unsupported database URI');
+    });
+
+    it('resolves a driver for an uppercase scheme, as the constructor accepts', async () => {
+      const options = await getConnectionOptionsFromUri(
+        'POSTGRES://user:pass@localhost:5432/db',
+      );
+
+      expect(options.driver).toBeDefined();
+    });
+
+    it('pins the pool for an uppercase sqlite in-memory URI', async () => {
+      const options = await getConnectionOptionsFromUri('SQLITE://:memory:');
+
+      expect(options.dbName).toBe(':memory:');
+      expect(options.pool).toEqual({min: 1, max: 1});
     });
 
     it('pins the sqlite in-memory pool to a single connection', async () => {
@@ -1224,6 +1246,166 @@ describe('operations', () => {
         ),
       ).rejects.toThrow(/unique/i);
       expect(await orm.em.fork().count(StorageAppState, {})).toBe(1);
+    });
+  });
+
+  describe('schemeOf', () => {
+    it('splits a backend and a driver suffix, lowercased', () => {
+      expect(schemeOf('PostgreSQL+AsyncPG://host/db')).toEqual({
+        backend: 'postgresql',
+        driver: 'asyncpg',
+      });
+    });
+
+    it('reports no driver for a plain scheme', () => {
+      expect(schemeOf('sqlite:///tmp/x.db')).toEqual({backend: 'sqlite'});
+    });
+
+    it('reports an empty backend for a string with no scheme', () => {
+      expect(schemeOf('definitely not a url')).toEqual({backend: ''});
+    });
+  });
+
+  describe('supportsRowLevelLocking', () => {
+    it('locks on the dialects adk-python locks', () => {
+      expect(supportsRowLevelLocking('mysql')).toBe(true);
+      expect(supportsRowLevelLocking('mariadb')).toBe(true);
+      expect(supportsRowLevelLocking('postgresql')).toBe(true);
+    });
+
+    it('does not lock on sqlite or mssql', () => {
+      expect(supportsRowLevelLocking('sqlite')).toBe(false);
+      expect(supportsRowLevelLocking('mssql')).toBe(false);
+      expect(supportsRowLevelLocking('')).toBe(false);
+    });
+  });
+
+  describe('getDatabaseBackend', () => {
+    let orm: MikroORM;
+
+    afterEach(async () => {
+      if (orm) {
+        await orm.close();
+      }
+    });
+
+    it("maps the driver's sqlite3 dialect onto sqlite", async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+
+      expect(getDatabaseBackend(orm)).toBe('sqlite');
+    });
+  });
+
+  describe('dialectOf', () => {
+    it('reports an empty backend for a connection exposing no knex handle', () => {
+      expect(dialectOf({})).toBe('');
+    });
+
+    it('reports an empty backend when the knex handle carries no client', () => {
+      expect(dialectOf({getKnex: () => ({})})).toBe('');
+    });
+
+    it('reports an empty backend when the knex client names no dialect', () => {
+      expect(dialectOf({getKnex: () => ({client: {}})})).toBe('');
+    });
+
+    it('passes a non-sqlite dialect through unchanged', () => {
+      const connection = {getKnex: () => ({client: {dialect: 'postgresql'}})};
+
+      expect(dialectOf(connection)).toBe('postgresql');
+    });
+  });
+
+  describe('openDatabaseOrm', () => {
+    /** Options MikroORM rejects during discovery, before it connects. */
+    class UndecoratedEntity {}
+    const unopenableOptions = {
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: [UndecoratedEntity],
+    };
+
+    it('leaves an options-object failure unchanged, having no URL to name', async () => {
+      await expect(openDatabaseOrm(unopenableOptions)).rejects.toThrow(
+        /Only abstract entities were discovered/,
+      );
+    });
+
+    it('names the redacted URL when the engine cannot be created', async () => {
+      const password = 'hunter2';
+      const original = await openDatabaseOrm(unopenableOptions).catch(
+        (error: unknown) => error,
+      );
+      if (!(original instanceof Error)) {
+        expect.fail('the unopenable options were expected to throw an Error');
+      }
+
+      const thrown = await openDatabaseOrm(
+        unopenableOptions,
+        `postgres://user:${password}@localhost:5432/db`,
+      ).catch((error: unknown) => error);
+      if (!(thrown instanceof Error)) {
+        expect.fail('the unopenable options were expected to throw an Error');
+      }
+
+      expect(thrown.message).toBe(
+        'Failed to create database engine for URL ' +
+          "'postgres://user:***@localhost:5432/db'",
+      );
+      expect(thrown.message).not.toContain(password);
+      expect(thrown.cause).toBeInstanceOf(Error);
+      expect((thrown.cause as Error).message).toBe(original.message);
+    });
+  });
+
+  describe('forkForRead and forkForWrite', () => {
+    let orm: MikroORM;
+
+    beforeEach(async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+      await orm.schema.updateSchema();
+    });
+
+    afterEach(async () => {
+      await orm.close();
+    });
+
+    it('hands out a separate unit of work per call', () => {
+      const read = forkForRead(orm);
+      const write = forkForWrite(orm);
+
+      expect(read).not.toBe(write);
+      expect(read).not.toBe(orm.em);
+      expect(write).not.toBe(orm.em);
+    });
+
+    it('keeps a read fork from flushing a change to storage', async () => {
+      const read = forkForRead(orm);
+      read.create(StorageMetadata, {key: 'from-read', value: 'x'});
+
+      // An implicit flush would run here under the default flush mode.
+      await read.find(StorageMetadata, {});
+
+      const inspector = forkForRead(orm);
+      expect(await inspector.find(StorageMetadata, {})).toEqual([]);
+    });
+
+    it('lets a write fork flush a change to storage', async () => {
+      const write = forkForWrite(orm);
+      write.create(StorageMetadata, {key: 'from-write', value: 'y'});
+      await write.flush();
+
+      const inspector = forkForRead(orm);
+      const stored = await inspector.find(StorageMetadata, {});
+      expect(stored.map((row) => row.key)).toEqual(['from-write']);
     });
   });
 });

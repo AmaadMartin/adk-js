@@ -17,11 +17,12 @@ import {
   StaleSessionError,
   State,
 } from '@google/adk';
-import {MikroORM} from '@mikro-orm/core';
+import {EntityManager, LockMode, MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import {
   afterEach,
   beforeEach,
@@ -32,7 +33,13 @@ import {
   vi,
 } from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
-import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {
+  forkForRead,
+  forkForWrite,
+  getConnectionOptionsFromUri,
+  getDatabaseBackend,
+  validateDatabaseSchemaVersion,
+} from '../../src/sessions/db/operations.js';
 import {
   ENTITIES,
   METADATA_TABLE_NAME,
@@ -42,6 +49,22 @@ import {
 } from '../../src/sessions/db/schema.js';
 import {ENTITIES_V0, StorageEventV0} from '../../src/sessions/db/schema_v0.js';
 import {logger} from '../../src/utils/logger.js';
+
+// The read/write split is observable only through which fork the service
+// asks for, so those two seams and the backend probe are spied on while every
+// other export keeps its real behaviour.
+vi.mock('../../src/sessions/db/operations.js', async (importOriginal) => {
+  const original =
+    await importOriginal<
+      typeof import('../../src/sessions/db/operations.js')
+    >();
+  return {
+    ...original,
+    forkForRead: vi.fn(original.forkForRead),
+    forkForWrite: vi.fn(original.forkForWrite),
+    getDatabaseBackend: vi.fn(original.getDatabaseBackend),
+  };
+});
 
 /** Opens a service that records every statement MikroORM sends. */
 async function createLoggingService(): Promise<{
@@ -2965,5 +2988,396 @@ describe('DatabaseSessionService v0 schema', () => {
 
     await expect(supplied.init()).rejects.toThrow('legacy v0 session schema');
     await orm.close();
+  });
+});
+
+describe('DatabaseSessionService read and write entity managers', () => {
+  let service: DatabaseSessionService;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    service = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+    await service.init();
+    await service.createSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await service.close();
+  });
+
+  it('reads a session through the read entity manager', async () => {
+    await service.getSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+
+    expect(forkForRead).toHaveBeenCalledTimes(1);
+    expect(forkForWrite).not.toHaveBeenCalled();
+  });
+
+  it('lists sessions through the read entity manager', async () => {
+    await service.listSessions({appName: 'split-app'});
+
+    expect(forkForRead).toHaveBeenCalledTimes(1);
+    expect(forkForWrite).not.toHaveBeenCalled();
+  });
+
+  it('creates a session through the write entity manager', async () => {
+    await service.createSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'written-session',
+    });
+
+    expect(forkForWrite).toHaveBeenCalledTimes(1);
+    expect(forkForRead).not.toHaveBeenCalled();
+  });
+
+  it('deletes a session through the write entity manager', async () => {
+    await service.deleteSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+
+    expect(forkForWrite).toHaveBeenCalledTimes(1);
+    expect(forkForRead).not.toHaveBeenCalled();
+  });
+
+  it('appends an event through the write entity manager', async () => {
+    const session = await service.getSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+    if (!session) {
+      expect.fail('the seeded session was expected to exist');
+    }
+    vi.clearAllMocks();
+
+    await service.appendEvent({
+      session,
+      event: createEvent({author: 'user', invocationId: 'inv-1'}),
+    });
+
+    expect(forkForWrite).toHaveBeenCalledTimes(1);
+    expect(forkForRead).not.toHaveBeenCalled();
+  });
+
+  it('stays usable after a read throws', async () => {
+    const broken = vi.mocked(forkForRead).mockImplementationOnce(() => {
+      throw new Error('read entity manager unavailable');
+    });
+
+    await expect(
+      service.getSession({
+        appName: 'split-app',
+        userId: 'split-user',
+        sessionId: 'split-session',
+      }),
+    ).rejects.toThrow('read entity manager unavailable');
+    expect(broken).toHaveBeenCalledTimes(1);
+
+    const recovered = await service.getSession({
+      appName: 'split-app',
+      userId: 'split-user',
+      sessionId: 'split-session',
+    });
+    expect(recovered?.id).toBe('split-session');
+  });
+});
+
+describe('DatabaseSessionService row-level locking', () => {
+  /**
+   * Appends one event with the backend probe stubbed, and reports the lock
+   * modes `appendEvent` asked for when it loaded the session row.
+   */
+  async function lockModesForBackend(
+    backend: string,
+  ): Promise<Array<LockMode | undefined>> {
+    vi.mocked(getDatabaseBackend).mockReturnValue(backend);
+    const service = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+    const session = await service.createSession({
+      appName: 'lock-app',
+      userId: 'lock-user',
+      sessionId: 'lock-session',
+    });
+
+    const findOne = vi.spyOn(EntityManager.prototype, 'findOne');
+    try {
+      await service.appendEvent({
+        session,
+        event: createEvent({author: 'user', invocationId: 'inv-lock'}),
+      });
+      // `mockRestore` also clears the recorded calls, so read them first.
+      return findOne.mock.calls
+        .filter(([entityName]) => entityName === StorageSession)
+        .map(([, , options]) => options?.lockMode);
+    } finally {
+      findOne.mockRestore();
+      await service.close();
+    }
+  }
+
+  it('takes no row-level lock on sqlite', async () => {
+    expect(await lockModesForBackend('sqlite')).toEqual([undefined]);
+  });
+
+  it('takes no row-level lock on mssql', async () => {
+    expect(await lockModesForBackend('mssql')).toEqual([undefined]);
+  });
+
+  it('takes a row-level write lock on postgresql', async () => {
+    expect(await lockModesForBackend('postgresql')).toEqual([
+      LockMode.PESSIMISTIC_WRITE,
+    ]);
+  });
+});
+
+/** The pooled sqlite connection the test reads its pragma from. */
+interface PooledSqliteConnection {
+  get(
+    sql: string,
+    callback: (error: Error | null, row?: {foreign_keys?: number}) => void,
+  ): void;
+}
+
+interface KnexBackedConnection {
+  getKnex(): {
+    client: {
+      acquireConnection(): Promise<PooledSqliteConnection>;
+      releaseConnection(connection: PooledSqliteConnection): void;
+    };
+  };
+}
+
+function isKnexBackedConnection(value: object): value is KnexBackedConnection {
+  return 'getKnex' in value && typeof value.getKnex === 'function';
+}
+
+function readForeignKeys(connection: PooledSqliteConnection): Promise<number> {
+  return new Promise((resolve, reject) => {
+    connection.get('pragma foreign_keys', (error, row) => {
+      if (error || row?.foreign_keys === undefined) {
+        reject(error ?? new Error('the pragma returned no row'));
+        return;
+      }
+      resolve(row.foreign_keys);
+    });
+  });
+}
+
+/**
+ * Opens a two-connection pool against `databaseFile` and reports the
+ * `foreign_keys` setting each of its connections carries.
+ */
+async function foreignKeysPerConnection(
+  databaseFile: string,
+  withPragmaHook: boolean,
+): Promise<number[]> {
+  const orm = await MikroORM.init(
+    await getConnectionOptionsFromUri(`sqlite://${databaseFile}`, {
+      pool: {min: 2, max: 2},
+      ...(withPragmaHook ? {} : {driverOptions: {}}),
+    }),
+  );
+  const connection = orm.em.getConnection();
+  if (!isKnexBackedConnection(connection)) {
+    expect.fail('the sqlite connection was expected to expose a knex handle');
+  }
+
+  const {client} = connection.getKnex();
+  const pooled = [
+    await client.acquireConnection(),
+    await client.acquireConnection(),
+  ];
+  try {
+    return [await readForeignKeys(pooled[0]), await readForeignKeys(pooled[1])];
+  } finally {
+    pooled.forEach((one) => client.releaseConnection(one));
+    await orm.close();
+  }
+}
+
+describe('DatabaseSessionService lifecycle on a database file', () => {
+  let databaseFile: string;
+
+  beforeEach(() => {
+    databaseFile = join(
+      mkdtempSync(join(tmpdir(), 'adk-session-db-')),
+      'sessions.db',
+    );
+  });
+
+  afterEach(() => {
+    rmSync(dirname(databaseFile), {recursive: true, force: true});
+  });
+
+  it('closes before init without throwing', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('closes twice without throwing', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    await service.init();
+
+    await expect(service.close()).resolves.toBeUndefined();
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('closes after a failed init without throwing', async () => {
+    // A regular file where the database directory should be, so the driver
+    // cannot create the database.
+    writeFileSync(join(dirname(databaseFile), 'blocked'), '');
+    const service = new DatabaseSessionService(
+      `sqlite://${join(dirname(databaseFile), 'blocked', 'x.db')}`,
+    );
+    await expect(service.init()).rejects.toThrow(
+      /^Failed to create database engine for URL 'sqlite:/,
+    );
+
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it('retries a failed init', async () => {
+    writeFileSync(join(dirname(databaseFile), 'blocked2'), '');
+    const blockedPath = join(dirname(databaseFile), 'blocked2');
+    const service = new DatabaseSessionService(
+      `sqlite://${join(blockedPath, 'x.db')}`,
+    );
+    await expect(service.init()).rejects.toThrow(
+      'Failed to create database engine for URL',
+    );
+
+    rmSync(blockedPath);
+    await expect(service.init()).resolves.toBeUndefined();
+    await service.close();
+  });
+
+  it('releases the database so another service can reopen it', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    const session = await service.createSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({author: 'user', invocationId: 'inv-file'}),
+    });
+    await service.close();
+
+    const reopened = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    const restored = await reopened.getSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    expect(restored?.events.map((event) => event.invocationId)).toEqual([
+      'inv-file',
+    ]);
+
+    await reopened.deleteSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    const deleted = await reopened.getSession({
+      appName: 'file-app',
+      userId: 'file-user',
+      sessionId: 'file-session',
+    });
+    expect(deleted).toBeUndefined();
+    await reopened.close();
+  });
+
+  it('turns foreign keys on for every sqlite connection the pool opens', async () => {
+    // The sqlite driver runs the pragma once while connecting, so only the
+    // first pooled connection gets it. The control below pins that, and is
+    // what makes the assertion above it meaningful.
+    expect(await foreignKeysPerConnection(databaseFile, true)).toEqual([1, 1]);
+    expect(await foreignKeysPerConnection(databaseFile, false)).toEqual([1, 0]);
+  });
+
+  it('reopens the database when init follows close', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    await service.createSession({
+      appName: 'reuse-app',
+      userId: 'reuse-user',
+      sessionId: 'reuse-session',
+    });
+    await service.close();
+
+    await service.init();
+    const restored = await service.getSession({
+      appName: 'reuse-app',
+      userId: 'reuse-user',
+      sessionId: 'reuse-session',
+    });
+    expect(restored?.id).toBe('reuse-session');
+    await service.close();
+  });
+
+  it('closes the service at the end of an await using block', async () => {
+    const service = new DatabaseSessionService(`sqlite://${databaseFile}`);
+    // The spy calls through, so the block exit also releases the database
+    // file. A stub would leave it open, which Windows cannot then unlink.
+    const close = vi.spyOn(service, 'close');
+
+    {
+      await using disposable = service;
+      await disposable.init();
+      expect(close).not.toHaveBeenCalled();
+    }
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DatabaseSessionService construction diagnostics', () => {
+  const password = 'hunter2';
+
+  it('rejects a driver named in the scheme, with the password masked', () => {
+    expect(
+      () =>
+        new DatabaseSessionService(
+          `postgresql+asyncpg://user:${password}@db:5432/app`,
+        ),
+    ).toThrow(
+      "Database URL 'postgresql+asyncpg://user:***@db:5432/app' names the " +
+        "'asyncpg' driver in its scheme.",
+    );
+  });
+
+  it('rejects a string that is not a URL', () => {
+    expect(() => new DatabaseSessionService('definitely not a url')).toThrow(
+      'Invalid database URL format or argument',
+    );
+  });
+
+  it('rejects overrides combined with an options object', () => {
+    expect(
+      () =>
+        new DatabaseSessionService(
+          {dbName: ':memory:', driver: SqliteDriver},
+          {pool: {min: 2, max: 4}},
+        ),
+    ).toThrow('Overrides cannot be combined with an options object');
   });
 });

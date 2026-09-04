@@ -84,9 +84,20 @@ describe('SqliteSessionService parity', () => {
   it('surfaces the SQLite error for an unusable query parameter', async () => {
     const service = open(`sqlite://${join(tempDir, 'bad.db')}?mode=bogus`);
 
-    await expect(
-      service.createSession({appName: 'app', userId: 'user'}),
-    ).rejects.toThrow(/no such access mode: bogus/);
+    // The service reports an engine failure against the URL it came from, and
+    // carries the driver's own message as the cause.
+    const thrown = await service
+      .createSession({appName: 'app', userId: 'user'})
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    if (!(thrown instanceof Error)) {
+      expect.fail('the unusable query parameter was expected to throw');
+    }
+
+    expect(thrown.message).toMatch(
+      /^Failed to create database engine for URL 'sqlite:/,
+    );
+    expect(String(thrown.cause)).toMatch(/no such access mode: bogus/);
   });
 
   it('test_sqlite_create_session_concurrent_same_id_raises_already_exists_error', async () => {

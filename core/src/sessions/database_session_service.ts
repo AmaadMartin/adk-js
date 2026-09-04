@@ -39,9 +39,14 @@ import {
   assertSupportedDatabaseUri,
   detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
+  forkForRead,
+  forkForWrite,
   getConnectionOptionsFromUri,
+  getDatabaseBackend,
   getOrCreateRow,
   namesSupportedDatabaseBackend,
+  openDatabaseOrm,
+  supportsRowLevelLocking,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
@@ -217,9 +222,10 @@ export class DatabaseSessionService extends BaseSessionService {
   /**
    * @param source A connection string, a MikroORM options object, or a
    *     MikroORM instance the caller already initialized and continues to own.
-   * @param overrides Options merged over the ones the connection string or the
-   *     options object implies. They cannot be combined with a MikroORM
-   *     instance.
+   * @param overrides Options merged over the ones the connection string
+   *     implies, for example a wider pool or a replacement liveness probe.
+   *     They cannot be combined with an options object or with a MikroORM
+   *     instance, because both already carry them.
    * @throws Error if the connection string is not one this service supports.
    */
   constructor(
@@ -257,10 +263,16 @@ export class DatabaseSessionService extends BaseSessionService {
       return;
     }
 
+    if (overrides) {
+      throw new Error(
+        'Overrides cannot be combined with an options object. Apply them to' +
+          ' the options directly.',
+      );
+    }
     if (!source.driver) {
       throw new Error('Driver is required when passing options object.');
     }
-    this.options = {...source, ...overrides, entities: ENTITIES};
+    this.options = {...source, entities: ENTITIES};
     this.ownsOrm = true;
   }
 
@@ -291,7 +303,10 @@ export class DatabaseSessionService extends BaseSessionService {
     // Hold the instance locally: a `close()` that lands while this is in
     // flight clears the field, and the rest of the method would then run
     // against nothing.
-    const orm = (this.orm ??= await MikroORM.init(await this.resolveOptions()));
+    const orm = (this.orm ??= await openDatabaseOrm(
+      await this.resolveOptions(),
+      this.connectionString,
+    ));
 
     // Detect before creating anything: `ensureDatabaseCreated` adds the v1
     // `event_data` column to a legacy `events` table, which erases the
@@ -336,6 +351,11 @@ export class DatabaseSessionService extends BaseSessionService {
     await orm?.close();
   }
 
+  /** Closes the service at the end of an `await using` block. */
+  async [Symbol.asyncDispose](): Promise<void> {
+    return this.close();
+  }
+
   /**
    * Swaps the current entity set for the legacy one.
    *
@@ -363,7 +383,10 @@ export class DatabaseSessionService extends BaseSessionService {
     this.orm = undefined;
     await previous.close();
 
-    this.orm = await MikroORM.init({...options, entities: ENTITIES_V0});
+    this.orm = await openDatabaseOrm(
+      {...options, entities: ENTITIES_V0},
+      this.connectionString,
+    );
     this.legacySchema = true;
   }
 
@@ -401,11 +424,11 @@ export class DatabaseSessionService extends BaseSessionService {
   }: CreateSessionRequest): Promise<Session> {
     await this.init();
     this.assertWritable();
-    const em = this.orm!.em.fork();
+    const em = forkForWrite(this.orm!);
 
     const id = sessionId?.trim() || randomUUID();
     const now = new Date();
-    if (sessionId && (await this.sessionExists({appName, userId, id}))) {
+    if (sessionId && (await this.sessionExists(em, {appName, userId, id}))) {
       throw new AlreadyExistsError(`Session with id ${id} already exists.`);
     }
 
@@ -443,7 +466,11 @@ export class DatabaseSessionService extends BaseSessionService {
       // A concurrent createSession can commit this id between the probe above
       // and this write. Drivers report that as a unique-constraint violation
       // whose class differs per dialect, so the row itself is the evidence.
-      if (await this.sessionExists({appName, userId, id})) {
+      // On its own fork: `em` holds the write that just failed, and reusing
+      // it would flush that write again.
+      if (
+        await this.sessionExists(forkForRead(this.orm!), {appName, userId, id})
+      ) {
         throw new AlreadyExistsError(`Session with id ${id} already exists.`);
       }
       throw error;
@@ -463,12 +490,11 @@ export class DatabaseSessionService extends BaseSessionService {
     });
   }
 
-  private async sessionExists(key: {
-    appName: string;
-    userId: string;
-    id: string;
-  }): Promise<boolean> {
-    return (await this.orm!.em.fork().count(StorageSession, key)) > 0;
+  private async sessionExists(
+    em: EntityManager,
+    key: {appName: string; userId: string; id: string},
+  ): Promise<boolean> {
+    return (await em.count(StorageSession, key)) > 0;
   }
 
   async getSession({
@@ -480,7 +506,7 @@ export class DatabaseSessionService extends BaseSessionService {
     validateGetSessionConfig(config);
 
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForRead(this.orm!);
 
     const storageSession = await em.findOne(StorageSession, {
       appName,
@@ -522,7 +548,7 @@ export class DatabaseSessionService extends BaseSessionService {
     userId,
   }: GetUserStateRequest): Promise<Record<string, unknown>> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForRead(this.orm!);
 
     const userStateModel = await em.findOne(StorageUserState, {
       appName,
@@ -579,7 +605,7 @@ export class DatabaseSessionService extends BaseSessionService {
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForRead(this.orm!);
 
     const where: FilterQuery<StorageSession> = {appName};
     // An empty user id is a user id. Falsiness here returned every user's
@@ -673,7 +699,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForWrite(this.orm!);
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
     if (this.legacySchema) {
@@ -733,12 +759,16 @@ export class DatabaseSessionService extends BaseSessionService {
   ): Promise<{lastUpdateTime: number; marker: string}> {
     const hasAppDelta = Object.keys(delta.app).length > 0;
     const hasUserDelta = Object.keys(delta.user).length > 0;
+    // sqlite compiles `FOR UPDATE` away, and mssql turns it into a table hint
+    // adk-python never takes. Only the dialects adk-python locks are asked
+    // for a row-level lock.
+    const locks = supportsRowLevelLocking(getDatabaseBackend(this.orm!));
 
-    return this.orm!.em.fork().transactional(async (txEm) => {
+    return forkForWrite(this.orm!).transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
         StorageSession,
         {appName: session.appName, userId: session.userId, id: session.id},
-        writeLock(true),
+        writeLock(locks),
       );
       if (!storageSession) {
         throw new SessionNotFoundError(`Session ${session.id} not found.`);
@@ -747,7 +777,7 @@ export class DatabaseSessionService extends BaseSessionService {
       const storageAppState = await txEm.findOne(
         StorageAppState,
         {appName: session.appName},
-        writeLock(hasAppDelta),
+        writeLock(locks && hasAppDelta),
       );
       if (!storageAppState) {
         throw new Error(
@@ -759,7 +789,7 @@ export class DatabaseSessionService extends BaseSessionService {
       const storageUserState = await txEm.findOne(
         StorageUserState,
         {appName: session.appName, userId: session.userId},
-        writeLock(hasUserDelta),
+        writeLock(locks && hasUserDelta),
       );
       if (!storageUserState) {
         throw new Error(

@@ -8,12 +8,16 @@ import {
   EntityManager,
   EntityName,
   FilterQuery,
+  FlushMode,
   MikroORM,
   Options as MikroORMOptions,
   RequiredEntityData,
 } from '@mikro-orm/core';
 import {logger} from '../../utils/logger.js';
-import {loadOptionalPeer} from '../../utils/optional_peer.js';
+import {
+  loadOptionalPeer,
+  MissingOptionalPeerError,
+} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {
   ENTITIES,
@@ -32,6 +36,18 @@ const SQLITE_BACKEND = 'sqlite';
 const SQLITE_URI_PREFIX = 'sqlite://';
 /** The path a sqlite connection string uses to name an in-memory database. */
 const SQLITE_MEMORY_DB_NAME = ':memory:';
+/** Dialect name the sqlite driver reports through knex. */
+const SQLITE_KNEX_DIALECT = 'sqlite3';
+
+/**
+ * Backends whose dialect implements `SELECT ... FOR UPDATE`, matching
+ * adk-python's `_supports_row_level_locking`.
+ */
+const ROW_LEVEL_LOCKING_BACKENDS: ReadonlySet<string> = new Set([
+  'mariadb',
+  'mysql',
+  'postgresql',
+]);
 
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
@@ -104,7 +120,7 @@ interface DatabaseUriScheme {
  * carrying no `://` yields an empty backend, which no loader answers to. The
  * scheme is lowercased, so `POSTGRES://host/db` names the same backend.
  */
-function schemeOf(uri: string): DatabaseUriScheme {
+export function schemeOf(uri: string): DatabaseUriScheme {
   const schemeEnd = uri.indexOf('://');
   if (schemeEnd <= 0) {
     return {backend: ''};
@@ -257,6 +273,135 @@ export async function connectionIsAlive(connection: unknown): Promise<boolean> {
   });
 }
 
+/** The part of a MikroORM SQL connection that reports the active dialect. */
+interface KnexBackedConnection {
+  getKnex(): {client?: {dialect?: unknown}};
+}
+
+function isKnexBackedConnection(value: object): value is KnexBackedConnection {
+  return 'getKnex' in value && typeof value.getKnex === 'function';
+}
+
+/**
+ * Returns the backend name a driver connection reports, normalized to the
+ * names adk-python's SQLAlchemy dialects use.
+ *
+ * @param connection The driver connection to read the dialect from.
+ * @returns The backend name, or an empty string for a connection exposing no
+ *     knex handle and for one naming no dialect.
+ */
+export function dialectOf(connection: object): string {
+  if (!isKnexBackedConnection(connection)) {
+    return '';
+  }
+
+  const dialect = connection.getKnex().client?.dialect;
+  if (typeof dialect !== 'string') {
+    return '';
+  }
+  return dialect === SQLITE_KNEX_DIALECT ? SQLITE_BACKEND : dialect;
+}
+
+/**
+ * Returns the backend name the open database reports.
+ *
+ * @param orm The initialized MikroORM instance.
+ * @returns The backend name, as {@link dialectOf} normalizes it.
+ */
+export function getDatabaseBackend(orm: MikroORM): string {
+  return dialectOf(orm.em.getConnection());
+}
+
+/**
+ * Reports whether a backend implements `SELECT ... FOR UPDATE`.
+ *
+ * sqlite compiles the clause away and mssql turns it into a table hint, so
+ * neither is asked for a row-level lock.
+ *
+ * @param backend The backend name, as {@link getDatabaseBackend} returns it.
+ * @returns True when the backend takes a row-level write lock.
+ */
+export function supportsRowLevelLocking(backend: string): boolean {
+  return ROW_LEVEL_LOCKING_BACKENDS.has(backend);
+}
+
+/**
+ * Forks an entity manager for a read path.
+ *
+ * The fork is its own unit of work, and `FlushMode.COMMIT` stops it flushing
+ * outside a transaction, so a read cannot write through it. adk-python binds
+ * a `read_only=True` engine here; MikroORM offers no equivalent execution
+ * option, so this is a fork that cannot flush rather than a read-only
+ * connection.
+ *
+ * @param orm The initialized MikroORM instance.
+ * @returns An entity manager for the read path.
+ */
+export function forkForRead(orm: MikroORM): EntityManager {
+  return orm.em.fork({flushMode: FlushMode.COMMIT});
+}
+
+/**
+ * Forks an entity manager for a write path.
+ *
+ * @param orm The initialized MikroORM instance.
+ * @returns An entity manager for the write path.
+ */
+export function forkForWrite(orm: MikroORM): EntityManager {
+  return orm.em.fork();
+}
+
+/**
+ * Opens the database, reporting a failure against the URI with its password
+ * masked.
+ *
+ * @param options The MikroORM options to open.
+ * @param uri The connection URI the options came from, when there was one. An
+ *     options object built by the caller names no URL, so its failure is left
+ *     unchanged.
+ * @returns The initialized MikroORM instance.
+ */
+export async function openDatabaseOrm(
+  options: MikroORMOptions,
+  uri?: string,
+): Promise<MikroORM> {
+  try {
+    return await MikroORM.init(options);
+  } catch (error: unknown) {
+    if (uri === undefined) {
+      throw error;
+    }
+    throw new Error(
+      `Failed to create database engine for URL '${redactUriPassword(uri)}'`,
+      {cause: error},
+    );
+  }
+}
+
+/**
+ * Loads the driver package a backend needs, reporting a missing one against
+ * the URI that needs it.
+ */
+async function loadDriverForUri(
+  uri: string,
+  backend: string,
+): Promise<unknown> {
+  try {
+    return await DRIVER_LOADERS[backend]();
+  } catch (error: unknown) {
+    // `loadOptionalPeer` raises this type only for a package that is not
+    // installed, and rethrows every other load failure unchanged.
+    if (error instanceof MissingOptionalPeerError) {
+      throw new Error(
+        `Database related module not found for URL ` +
+          `'${redactUriPassword(uri)}'. ${error.message}`,
+        {cause: error},
+      );
+    }
+    throw error;
+  }
+}
+
 /**
  * Parses a database connection URI and returns MikroORM Options.
  *
@@ -280,7 +425,7 @@ async function deriveConnectionOptionsFromUri(
 ): Promise<MikroORMOptions> {
   assertSupportedDatabaseUri(uri);
   const {backend} = schemeOf(uri);
-  const driver = await DRIVER_LOADERS[backend]();
+  const driver = await loadDriverForUri(uri, backend);
 
   if (backend === SQLITE_BACKEND) {
     const {dbName, query} = parseSqliteUri(uri);
@@ -502,7 +647,7 @@ export async function detectDatabaseSchemaVersion(
  * @throws Error if the schema version is not compatible.
  */
 export async function validateDatabaseSchemaVersion(orm: MikroORM) {
-  const em = orm.em.fork();
+  const em = forkForWrite(orm);
   const existing = await em.findOne(StorageMetadata, {
     key: SCHEMA_VERSION_KEY,
   });

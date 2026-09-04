@@ -47,6 +47,15 @@ try {
 }
 ```
 
+`await using` releases the pool at the end of the block, so the `finally` is
+not needed:
+
+```ts
+await using service = new DatabaseSessionService('sqlite://./sessions.db');
+
+const session = await service.createSession({appName: 'my-app', userId: 'u1'});
+```
+
 Every method connects on first use, creates the tables if they are absent, and
 records the schema version. Call `init()` during startup to pay that cost
 upfront instead. It is safe to call twice and safe to call concurrently.
@@ -109,6 +118,19 @@ const service = new DatabaseSessionService('postgres://localhost/adk', {
   driverOptions: {pool: {}}, // no liveness check
 });
 ```
+
+Overrides apply to a URL only. An options object already carries its own
+settings, so combining the two is rejected.
+
+## Reads, writes and locking
+
+`getSession` and `listSessions` run on an entity manager that does not flush
+outside a transaction, so a read cannot write through it. `createSession`,
+`deleteSession` and `appendEvent` run on a separate one.
+
+`appendEvent` takes a row-level write lock on the session row, but only on
+MariaDB, MySQL and PostgreSQL. sqlite compiles `SELECT ... FOR UPDATE` away,
+and SQL Server turns it into a table hint, so neither is asked for the lock.
 
 ## Reading a session
 

@@ -198,8 +198,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Sessions
 
 - [DatabaseSessionService](sessions/database_session_service/index.md) -
-  Storing sessions in SQL, the connection URLs it accepts, rejecting stale
-  writes, reading user state, and opening a legacy database adk-python wrote.
+  Storing sessions in SQL, the connection URLs it accepts, the engine settings
+  each backend gets, rejecting stale writes, reading user state, releasing the
+  connection pool, and opening a legacy database adk-python wrote.
 - [Session resolution](sessions/session_resolution/index.md) - How a runner
   resolves the session id you give it, and when it creates a missing session.
 - [Session state and its scopes](sessions/state/index.md) - Session state and
