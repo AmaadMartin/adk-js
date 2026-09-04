@@ -181,8 +181,8 @@ A passing run resolves and returns nothing. A failing run throws
 threshold and the mean score. A run whose inference crashed produces no metric
 results at all, and is reported separately by eval case id.
 
-A metric that produced no score at all gets a different line, saying it *was
-not evaluated*. This is what an unreachable judge model looks like: the
+A metric that produced no score at all gets a different line, saying it _was
+not evaluated_. This is what an unreachable judge model looks like: the
 threshold was never checked, so the agent did not regress and the logs hold the
 reason the metric could not run. The run still fails.
 
@@ -198,6 +198,20 @@ with a single header row. Parent directories are created.
 Set `evalSetResultsManager` together with `appName` to persist the whole result
 of the run. The eval service saves the results before `AgentEvaluator` throws,
 so a failing run is still recorded.
+
+## Who plays the user
+
+An eval case records the turns a user took. Something has to replay those turns
+against the agent, and that something is a _user simulator_. `AgentEvaluator`
+hands the eval service a `UserSimulatorProvider`, which returns a fresh
+simulator for each eval case.
+
+The provider returns a `StaticUserSimulator`. It replays the case's recorded
+turns in order and stops when the script ends, so the agent's replies never
+change what the user says next. A case that carries no conversation is rejected
+with `InputValidationError`. adk-python also routes a case that describes a
+goal to a model-backed simulator; this SDK has no such simulator, so it rejects
+that case rather than guessing at it.
 
 ## Custom metrics
 
