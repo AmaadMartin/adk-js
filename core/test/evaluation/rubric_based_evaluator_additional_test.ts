@@ -26,6 +26,7 @@ import {
   RubricBasedEvaluatorOptions,
   RubricResponse,
   RubricsBasedCriterion,
+  getTextFromContent,
   parseRubricsBasedCriterion,
 } from '@google/adk';
 import {
@@ -205,5 +206,102 @@ describe('aggregating an invocation that was never scored', () => {
     expect(result.overallScore).toBeUndefined();
     expect(result.overallRubricScores).toEqual([]);
     expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
+  });
+});
+
+/** The metric shape the developer guide's "Get started" section builds. */
+class FinalAnswerRubricMetric extends RubricBasedEvaluator {
+  constructor(evalMetric: EvalMetric, judgeModel: FakeJudgeLlm) {
+    super({evalMetric, parseCriterion: parseRubricsBasedCriterion, judgeModel});
+  }
+
+  override formatAutoRaterPrompt(actual: Invocation): string {
+    const rubrics = this.getEffectiveRubricsList()
+      .map(
+        (rubric) =>
+          `ID: ${rubric.rubricId}\n` +
+          `Property: ${rubric.rubricContent.textProperty}`,
+      )
+      .join('\n\n');
+
+    return [
+      'Answer each property below with a Rationale and a Verdict.',
+      `Answer: ${getTextFromContent(actual.finalResponse)}`,
+      rubrics,
+    ].join('\n\n');
+  }
+}
+
+/** One judge reply, verdict per rubric in rubric order. */
+function critique(...verdicts: string[]): {critique: string} {
+  return {
+    critique: verdicts
+      .map(
+        (verdict, index) =>
+          `ID: ${index + 1}\nProperty: rubric ${index + 1}\n` +
+          `Rationale: because.\nVerdict: ${verdict}`,
+      )
+      .join('\n\n'),
+  };
+}
+
+describe('grading a whole eval case through LlmAsJudge', () => {
+  const graded: Invocation = {
+    userContent: {parts: [{text: 'What is the capital of France?'}]},
+    finalResponse: {parts: [{text: 'Paris, per the atlas.'}]},
+  };
+
+  const metric: EvalMetric = {
+    metricName: PrebuiltMetrics.RUBRIC_BASED_FINAL_RESPONSE_QUALITY_V1,
+    criterion: {
+      threshold: 0.5,
+      rubrics: [
+        {rubricId: '1', rubricContent: {textProperty: 'It cites a source.'}},
+        {rubricId: '2', rubricContent: {textProperty: 'It is concise.'}},
+      ],
+      judgeModelOptions: {numSamples: 3},
+    },
+  };
+
+  it('settles each rubric by majority vote over the three samples', async () => {
+    // Rubric "1" wins yes 2-1; rubric "2" ties 1-1-1 on yes/no/unreadable, so
+    // its single "no" outvotes its single "yes" and it fails.
+    const judgeModel = new FakeJudgeLlm([
+      critique('yes', 'yes'),
+      critique('yes', 'no'),
+      critique('no', 'maybe'),
+    ]);
+    const evaluator = new FinalAnswerRubricMetric(metric, judgeModel);
+    evaluator.createEffectiveRubricsList();
+
+    const result = await evaluator.evaluateInvocations([graded]);
+
+    expect(judgeModel.requests).toHaveLength(3);
+    expect(result.overallScore).toBe(0.5);
+    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
+    expect(
+      result.overallRubricScores?.map((score) => [score.rubricId, score.score]),
+    ).toEqual([
+      ['1', 1.0],
+      ['2', 0.0],
+    ]);
+    expect(result.perInvocationResults).toHaveLength(1);
+    expect(result.perInvocationResults[0].evalStatus).toBe(EvalStatus.PASSED);
+  });
+
+  it('reports the invocation as unevaluated when every judge call fails', async () => {
+    const evaluator = new FinalAnswerRubricMetric(
+      metric,
+      new FakeJudgeLlm([{failure: 'judge unavailable'}]),
+    );
+    evaluator.createEffectiveRubricsList();
+
+    const result = await evaluator.evaluateInvocations([graded]);
+
+    expect(result.overallScore).toBeUndefined();
+    expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
+    expect(result.perInvocationResults[0].evalStatus).toBe(
+      EvalStatus.NOT_EVALUATED,
+    );
   });
 });

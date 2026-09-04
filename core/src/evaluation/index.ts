@@ -37,21 +37,29 @@ export {
   DEFAULT_JUDGE_MODEL,
   DEFAULT_JUDGE_NUM_SAMPLES,
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
   PrebuiltMetrics,
+  ToolTrajectoryMatchType,
   getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
   parseLlmAsAJudgeCriterion,
   parseRubricsBasedCriterion,
+  resolveJudgeModelOptions,
 } from './eval_metrics.js';
 export type {
   BaseCriterion,
   CriterionParser,
   EvalMetric,
+  EvalMetricCriterion,
+  HallucinationsCriterion,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
   LlmAsAJudgeMetric,
+  LlmBackedUserSimulatorCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
+  ToolTrajectoryCriterion,
 } from './eval_metrics.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export {
