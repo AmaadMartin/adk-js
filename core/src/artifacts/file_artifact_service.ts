@@ -6,12 +6,12 @@
 
 import {Part} from '@google/genai';
 import {randomUUID} from 'node:crypto';
-import {Dirent} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
 import {InputValidationError} from '../errors/input_validation_error.js';
+import {isInsideDir} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -378,19 +378,6 @@ export class FileArtifactService implements BaseArtifactService {
   }
 }
 
-/**
- * Reports whether `target` is nested strictly inside `parent`.
- *
- * A plain `startsWith` check is separator-unaware and would accept a sibling
- * whose name merely shares the prefix, e.g. `/tmp/root-evil` under `/tmp/root`.
- */
-function isInsideDir(target: string, parent: string): boolean {
-  const relative = path.relative(parent, target);
-  return (
-    relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative)
-  );
-}
-
 export function assertSafeSegment(value: string, label: string): void {
   if (!value || !SAFE_SEGMENT_RE.test(value)) {
     throw new InputValidationError(
@@ -406,7 +393,7 @@ export function assertInsideRoot(
 ): void {
   const root = path.resolve(rootDir);
   const resolved = path.resolve(resolvedPath);
-  if (resolved !== root && !isInsideDir(resolved, root)) {
+  if (!isInsideDir(resolved, root)) {
     throw new InputValidationError(
       `[FileArtifactService] ${label} escapes storage root. Resolved: ${resolved}, Root: ${root}`,
     );
@@ -473,22 +460,19 @@ function getCanonicalUri(artifactDir: string, version: number): string {
 /**
  * Returns the directory that represents the artifact scope.
  *
- * Only a missing `sessionId` selects the user namespace. An empty one is a
- * caller mistake and is reported as such, because silently widening the scope
- * would publish a session artifact to every session of that user.
- *
- * `sessionId` is declared required on the request types, so it is only
- * `undefined` here when a JavaScript caller omits it.
+ * Only the `user:` prefix selects the user namespace. A missing or empty
+ * `sessionId` is a caller mistake and is reported as one, because silently
+ * widening the scope would publish a session artifact to every session of
+ * that user.
  */
 function getScopeRoot(
   baseRoot: string,
-  sessionId: string | undefined,
+  sessionId: string,
   filename: string,
 ): string {
-  if (sessionId === undefined || filename.startsWith(USER_NAMESPACE_PREFIX)) {
-    return getUserArtifactsDir(baseRoot);
-  }
-  return getSessionArtifactsDir(baseRoot, sessionId);
+  return filename.startsWith(USER_NAMESPACE_PREFIX)
+    ? getUserArtifactsDir(baseRoot)
+    : getSessionArtifactsDir(baseRoot, sessionId);
 }
 
 /**
@@ -557,13 +541,12 @@ function resolveScopedArtifactPath(
 
   const resolvedScopeRoot = path.resolve(scopeRoot);
   const artifactDir = path.resolve(resolvedScopeRoot, toPosixPath(stripped));
-  const relative = path.relative(resolvedScopeRoot, artifactDir);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new InputValidationError(
-      `[FileArtifactService] Artifact filename ${filename} escapes storage directory.`,
-    );
-  }
-  if (relative === '') {
+  // Defence in depth. The rejections above already exclude every filename that
+  // could resolve outside the scope, so this only fires if one of them is
+  // weakened. `assertInsideRoot` carries the same containment rule the storage
+  // helpers use, and its own tests pin the throw.
+  assertInsideRoot(artifactDir, resolvedScopeRoot, `filename ${filename}`);
+  if (artifactDir === resolvedScopeRoot) {
     return path.join(resolvedScopeRoot, 'artifact');
   }
   return artifactDir;
@@ -840,15 +823,6 @@ async function artifactKey(
   return `${prefix}${toPosixPath(path.relative(scopeRoot, artifactDir))}`;
 }
 
-/** Lists a directory's entries, treating an unreadable directory as empty. */
-async function readDirEntries(dir: string): Promise<Dirent[]> {
-  try {
-    return await fs.readdir(dir, {withFileTypes: true});
-  } catch {
-    return [];
-  }
-}
-
 /**
  * Yields every artifact directory beneath `dir`.
  *
@@ -857,7 +831,8 @@ async function readDirEntries(dir: string): Promise<Dirent[]> {
 export async function* iterateArtifactDirs(
   dir: string,
 ): AsyncGenerator<string> {
-  const entries = await readDirEntries(dir);
+  // An unreadable directory holds no artifacts anyone can list.
+  const entries = await fs.readdir(dir, {withFileTypes: true}).catch(() => []);
   if (
     entries.some(
       (entry) => entry.isDirectory() && entry.name === VERSIONS_DIRNAME,
@@ -888,7 +863,7 @@ export async function* iterateArtifactDirs(
  */
 async function pruneEmptyDirs(leaf: string, stopAt: string): Promise<void> {
   let current = leaf;
-  while (isInsideDir(current, stopAt)) {
+  while (current !== stopAt && isInsideDir(current, stopAt)) {
     try {
       // Only succeeds on an empty directory.
       await fs.rmdir(current);

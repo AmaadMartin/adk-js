@@ -192,6 +192,11 @@ describe('FileArtifactService', () => {
           assertInsideRoot('/tmp/root/users/alice', '/tmp/root', 'test'),
         ).not.toThrow();
       });
+      it('throws when a sibling merely shares the root prefix', () => {
+        expect(() =>
+          assertInsideRoot('/tmp/root-evil/secret', '/tmp/root', 'test'),
+        ).toThrow('escapes storage root');
+      });
     });
   });
 
@@ -323,6 +328,18 @@ describe('FileArtifactService', () => {
       await expect(
         service.listArtifactKeys({appName, userId, sessionId}),
       ).resolves.toEqual(['ghost']);
+    });
+
+    it('leaves the scope root in place after the last artifact goes', async () => {
+      const scope = {appName, userId, sessionId, filename: 'only.txt'};
+      await service.saveArtifact({...scope, artifact: {text: 'x'}});
+
+      await service.deleteArtifact(scope);
+
+      // Pruning walks up from the artifact directory and must stop below the
+      // scope root, which later saves and listings still need.
+      await expect(fs.stat(artifactDir())).resolves.toBeDefined();
+      await expect(fs.stat(artifactDir('only.txt'))).rejects.toThrow();
     });
 
     it('walks each artifact directory exactly once', async () => {
