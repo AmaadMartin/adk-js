@@ -15,34 +15,13 @@
  * live.
  */
 
-import {AgentCard} from '@a2a-js/sdk';
 import {
   AgentRegistry,
-  AuthCredential,
-  AuthCredentialTypes,
   AuthScheme,
   GcpAuthProviderScheme,
   ReadonlyContext,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {RemoteA2AAgentConfig} from '../../src/a2a/a2a_remote_agent.js';
-
-/** Configs handed to every `RemoteA2AAgent` built during a test. */
-const remoteAgentConfigs: RemoteA2AAgentConfig[] = [];
-
-vi.mock('../../src/a2a/a2a_remote_agent.js', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../src/a2a/a2a_remote_agent.js')>();
-  return {
-    ...actual,
-    RemoteA2AAgent: class extends actual.RemoteA2AAgent {
-      constructor(config: RemoteA2AAgentConfig) {
-        super(config);
-        remoteAgentConfigs.push(config);
-      }
-    },
-  };
-});
 
 let quotaProjectId: string | undefined;
 let getClientError: Error | undefined;
@@ -142,22 +121,20 @@ function headersOfCall(index: number): Record<string, string> {
   );
 }
 
-/** Registry metadata for an agent bound to an auth provider. */
-const AGENT_WITH_BINDING = {
-  'test-agent': {
-    agentId: 'agent-456',
-    displayName: 'TestAgent',
-    protocols: [
-      {
-        type: 'A2A_AGENT',
-        interfaces: [{url: 'https://agent.com', protocolBinding: 'HTTP_JSON'}],
-      },
-    ],
+/** Registry metadata for an MCP server bound to an auth provider. */
+const MCP_WITH_BINDING = {
+  'test-mcp': {
+    displayName: 'TestPrefix',
+    mcpServerId: 'server-456',
+    interfaces: [{url: 'https://mcp.com', protocolBinding: 'JSONRPC'}],
   },
   'bindings': {
     bindings: [
       {
-        target: {identifier: 'urn:agent:pub:ns:agent-456'},
+        target: {
+          identifier:
+            'urn:mcp:projects-123:projects:123:locations:l:mcpServers:server-456',
+        },
         authProviderBinding: {
           authProvider: 'projects/123/locations/l/authProviders/ap-789',
         },
@@ -183,7 +160,6 @@ describe('TestAgentRegistry', () => {
     quotaProjectId = undefined;
     getClientError = undefined;
     getRequestHeadersError = undefined;
-    remoteAgentConfigs.length = 0;
     fetchMock.mockReset();
     globalThis.fetch = fetchMock;
     registry = newRegistry();
@@ -222,6 +198,7 @@ describe('TestAgentRegistry', () => {
       'https://agentregistry.googleapis.com/v1alpha/projects/test-project/locations/global/agents:search',
     );
     expect(init?.method).toBe('POST');
+    expect(headersOfCall(0)['content-type']).toBe('application/json');
     expect(JSON.parse(String(init?.body))).toEqual({
       searchString: 'test-agent',
       searchType: 'KEYWORD',
@@ -250,6 +227,7 @@ describe('TestAgentRegistry', () => {
       'https://agentregistry.googleapis.com/v1alpha/projects/test-project/locations/global/mcpServers:search',
     );
     expect(init?.method).toBe('POST');
+    expect(headersOfCall(0)['content-type']).toBe('application/json');
     expect(JSON.parse(String(init?.body))).toEqual({
       searchString: 'test-mcp',
       searchType: 'KEYWORD',
@@ -380,26 +358,7 @@ describe('TestAgentRegistry', () => {
   });
 
   it('test_get_mcp_toolset_with_binding', async () => {
-    routeFetch({
-      'test-mcp': {
-        displayName: 'TestPrefix',
-        mcpServerId: 'server-456',
-        interfaces: [{url: 'https://mcp.com', protocolBinding: 'JSONRPC'}],
-      },
-      'bindings': {
-        bindings: [
-          {
-            target: {
-              identifier:
-                'urn:mcp:projects-123:projects:123:locations:l:mcpServers:server-456',
-            },
-            authProviderBinding: {
-              authProvider: 'projects/123/locations/l/authProviders/ap-789',
-            },
-          },
-        ],
-      },
-    });
+    routeFetch(MCP_WITH_BINDING);
 
     const toolset = await registry.getMcpToolset('test-mcp', {
       continueUri: 'https://override.com/continue',
@@ -410,83 +369,23 @@ describe('TestAgentRegistry', () => {
     expect(scheme.continueUri).toBe('https://override.com/continue');
   });
 
-  it('test_get_remote_a2a_agent_with_binding', async () => {
-    routeFetch(AGENT_WITH_BINDING);
+  it('getMcpToolset leaves the server unauthenticated when no binding matches', async () => {
+    routeFetch({...MCP_WITH_BINDING, bindings: {bindings: []}});
 
-    await registry.getRemoteA2AAgent('test-agent', {
-      continueUri: 'https://override.com/continue',
-    });
+    const toolset = await registry.getMcpToolset('test-mcp');
 
-    const scheme = gcpSchemeOf(remoteAgentConfigs[0].authScheme);
-    expect(scheme.name).toBe('projects/123/locations/l/authProviders/ap-789');
-    expect(scheme.continueUri).toBe('https://override.com/continue');
+    expect(toolset.authScheme).toBeUndefined();
   });
 
-  it('test_get_remote_a2a_agent_with_card_and_binding', async () => {
-    const content: AgentCard = {
-      name: 'CardName',
-      description: 'CardDesc',
-      version: '2.0',
-      url: 'https://card-agent.com',
-      protocolVersion: '0.3.0',
-      preferredTransport: 'HTTP+JSON',
-      capabilities: {},
-      defaultInputModes: ['text'],
-      defaultOutputModes: ['text'],
-      skills: [],
-    };
+  it('getMcpToolset tolerates a bindings failure', async () => {
     routeFetch({
-      ...AGENT_WITH_BINDING,
-      'test-agent': {
-        agentId: 'agent-456',
-        card: {type: 'A2A_AGENT_CARD', content},
-      },
-    });
-
-    await registry.getRemoteA2AAgent('test-agent');
-
-    expect(remoteAgentConfigs[0].agentCard).toEqual(content);
-    expect(gcpSchemeOf(remoteAgentConfigs[0].authScheme).name).toBe(
-      'projects/123/locations/l/authProviders/ap-789',
-    );
-  });
-
-  it('test_get_remote_a2a_agent_with_explicit_auth', async () => {
-    routeFetch(AGENT_WITH_BINDING);
-    const authScheme: AuthScheme = {type: 'apiKey', name: 'key', in: 'header'};
-    const authCredential: AuthCredential = {
-      authType: AuthCredentialTypes.API_KEY,
-      apiKey: 'key',
-    };
-
-    await registry.getRemoteA2AAgent('test-agent', {
-      authScheme,
-      authCredential,
-    });
-
-    expect(remoteAgentConfigs[0].authScheme).toBe(authScheme);
-    expect(remoteAgentConfigs[0].authCredential).toBe(authCredential);
-    const requested = fetchMock.mock.calls.map((c) => pathOf(String(c[0])));
-    expect(requested).not.toContain('bindings');
-  });
-
-  it('test_get_remote_a2a_agent_without_binding', async () => {
-    routeFetch({...AGENT_WITH_BINDING, bindings: {bindings: []}});
-
-    await registry.getRemoteA2AAgent('test-agent');
-
-    expect(remoteAgentConfigs[0].authScheme).toBeUndefined();
-  });
-
-  it('test_get_remote_a2a_agent_tolerates_bindings_failure', async () => {
-    routeFetch({
-      ...AGENT_WITH_BINDING,
+      ...MCP_WITH_BINDING,
       bindings: new Error('bindings unavailable'),
     });
 
-    await registry.getRemoteA2AAgent('test-agent');
+    const toolset = await registry.getMcpToolset('test-mcp');
 
-    expect(remoteAgentConfigs[0].authScheme).toBeUndefined();
+    expect(toolset.authScheme).toBeUndefined();
   });
 
   it('test_make_request_raises_http_status_error', async () => {
