@@ -7,6 +7,7 @@
 import type {
   Content,
   FunctionCall,
+  FunctionResponse,
   FunctionResponsePart,
   Part,
 } from '@google/genai';
@@ -177,6 +178,29 @@ async function callToolAsync(
   });
 }
 
+/**
+ * Builds the `FunctionResponse` that carries a tool result back to the model.
+ *
+ * A scheduling the tool asked for on this one call wins over its tool-wide
+ * default. `id` and `name` address the function call being answered, so ADK
+ * owns both whatever the tool returned.
+ */
+function buildToolFunctionResponse(
+  tool: BaseTool,
+  functionResult: unknown,
+  toolContext: Context,
+): FunctionResponse {
+  const scheduling = toolContext.responseScheduling ?? tool.responseScheduling;
+  return {
+    id: toolContext.functionCallId,
+    name: tool.name,
+    response: normalizeCallbackResponse(functionResult) ?? {
+      result: functionResult,
+    },
+    ...(scheduling !== undefined && {scheduling}),
+  };
+}
+
 function buildResponseEvent(
   tool: BaseTool,
   functionResult: unknown,
@@ -184,15 +208,10 @@ function buildResponseEvent(
   invocationContext: InvocationContext,
 ): Event {
   const {remainder, parts} = extractMediaParts(functionResult);
-  const responseResult = normalizeCallbackResponse(remainder) ?? {
-    result: remainder,
-  };
 
   const partFunctionResponse: Part = {
     functionResponse: {
-      name: tool.name,
-      response: responseResult,
-      id: toolContext.functionCallId,
+      ...buildToolFunctionResponse(tool, remainder, toolContext),
       ...(parts && {parts}),
     },
   };
@@ -634,12 +653,7 @@ export async function handleFunctionCallList({
       author: toolEventAuthor(invocationContext),
       content: createUserContent({
         functionResponse: {
-          id: toolContext.functionCallId,
-          name: tool.name,
-          response: functionResponse,
-          ...(tool.responseScheduling !== undefined && {
-            scheduling: tool.responseScheduling,
-          }),
+          ...buildToolFunctionResponse(tool, functionResponse, toolContext),
           ...(responseParts && {parts: responseParts}),
         },
       }),

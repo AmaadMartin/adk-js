@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Part} from '@google/genai';
+import type {FunctionResponseScheduling, Part} from '@google/genai';
 
 import type {AuthCredential} from '../auth/auth_credential.js';
 import {AuthHandler} from '../auth/auth_handler.js';
@@ -36,6 +36,16 @@ export class Context extends ReadonlyContext {
   toolConfirmation?: ToolConfirmation;
   readonly resumeInputs: ResumeInputs;
   readonly abortSignal?: AbortSignal;
+
+  /**
+   * Scheduling for this one call's `FunctionResponse`, overriding the tool-wide
+   * `responseScheduling` default when set.
+   *
+   * A tool assigns this while it runs to have the Live API treat one result
+   * differently from the rest, for example to interrupt on an alert from a tool
+   * that is otherwise silent.
+   */
+  responseScheduling?: FunctionResponseScheduling;
 
   /**
    * @param options The configuration options for the Context.

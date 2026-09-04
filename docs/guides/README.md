@@ -61,6 +61,8 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 - [MCP tool error handling](tools/mcp_tool/error_handling/index.md) - Turning a
   failed MCP tool call into a result the model can read, and the MCP-App
   metadata accessors.
+- [Tool response scheduling](tools/response_scheduling/index.md) - Controlling
+  when the model reacts to a tool result on a Live API session.
 
 ### Utils
 
