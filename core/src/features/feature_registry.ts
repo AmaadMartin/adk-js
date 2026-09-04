@@ -11,6 +11,7 @@ import {logger} from '../utils/logger.js';
  * Feature names.
  */
 export enum FeatureName {
+  ENVIRONMENT_SIMULATION = 'ENVIRONMENT_SIMULATION',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
 }
 
@@ -33,6 +34,12 @@ export interface FeatureConfig {
 
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
+  // On by default: it gates configuration value objects that carry no runtime,
+  // and adk-python's `@experimental` warns rather than blocking.
+  [FeatureName.ENVIRONMENT_SIMULATION]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
