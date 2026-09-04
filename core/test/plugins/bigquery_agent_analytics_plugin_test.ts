@@ -848,7 +848,7 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
     expect(attributes).toMatchObject({
       model: 'gemini-2.0-flash',
       llm_config: {temperature: 0.5, top_p: 0.9, max_output_tokens: 128},
-      tools: ['lookup_weather'],
+      tools: [{name: 'lookup_weather', description: 'Looks up the weather.'}],
     });
   });
 
