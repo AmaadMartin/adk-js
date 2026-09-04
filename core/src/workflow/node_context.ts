@@ -4,21 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {context} from '@opentelemetry/api';
+
+import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {Event} from '../events/event.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
 import {State} from '../sessions/state.js';
+import {
+  createTelemetryContext,
+  TelemetryContext,
+} from '../telemetry/node_tracing.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import type {SchemaLike} from '../utils/schema.js';
 import type {BaseNode} from './base_node.js';
-import {NodeInterruptedError} from './errors.js';
+import {DynamicNodeFailError, NodeInterruptedError} from './errors.js';
 import type {RouteValue, RunnableNode} from './graph.js';
 import {executeChildNode, RunNodeOptions} from './node_runner.js';
-import type {
-  ScheduleDynamicNode,
-  ScheduleDynamicNodeOptions,
-} from './schedule_dynamic_node.js';
+import type {ScheduleDynamicNode} from './schedule_dynamic_node.js';
+import {
+  agentNamesInTree,
+  MAX_PARENT_DEPTH,
+  resolveAndDeriveTransferContext,
+} from './utils/transfer_utils.js';
 import {buildNode} from './utils/workflow_graph_utils.js';
+import {isWorkflow} from './workflow.js';
 
 /**
  * The result of running a node: the fields a caller (and the engine's
@@ -63,6 +73,10 @@ export interface NodeContextOptions {
    * Resolved by the runner: the node's own schema, or the parent's.
    */
   stateSchema?: SchemaLike;
+  /** The context that ran this one; absent for a root context. */
+  parentCtx?: NodeContext;
+  /** The node this context belongs to; absent for a root context. */
+  node?: BaseNode;
 }
 
 /**
@@ -78,6 +92,12 @@ export class NodeContext {
   readonly channel: AsyncQueue<Event>;
   readonly nodePath: string;
   readonly runId: string;
+
+  /** The context that ran this one; `undefined` for a root context. */
+  readonly parentCtx?: NodeContext;
+
+  /** The node this context belongs to; `undefined` for a root context. */
+  readonly node?: BaseNode;
 
   /**
    * Node paths whose output this node's output also becomes: its parent's if
@@ -99,14 +119,35 @@ export class NodeContext {
   resumeInputs: Record<string, unknown>;
   isolationScope?: string;
 
-  /** The structured output produced by the node during its run. */
-  output: unknown = undefined;
-
   /** The route key(s) emitted by the node, if any (array = multi-route). */
   route?: RouteValue | RouteValue[];
 
   /** Interrupt ids the node is currently blocked on (HITL). */
   interruptIds: string[] = [];
+
+  /**
+   * The failure that ended this node's run, recorded by the engine before it
+   * re-throws. Cleared per attempt.
+   */
+  error?: Error;
+
+  /**
+   * The path of the node that actually failed, which is this node only when the
+   * failure started here: a failure raised by a `ctx.runNode` child keeps the
+   * child's path as it travels up. Empty while the node has not failed.
+   */
+  errorNodePath = '';
+
+  /**
+   * The author stamped on events this node emits, overriding the node's own
+   * name. A `Workflow` sets it to its own name so a reader grouping events by
+   * author sees one workflow rather than N anonymous nodes. Inherited from
+   * {@link parentCtx}; empty means "use the node's name".
+   */
+  eventAuthor: string;
+
+  /** Telemetry state tied to this node's span. */
+  readonly telemetryContext: TelemetryContext;
 
   /**
    * The failure a node reported by emitting an error event rather than by
@@ -155,11 +196,20 @@ export class NodeContext {
    */
   private readonly numericCustomRunIds = new Map<string, Set<string>>();
 
+  private outputValue: unknown;
+
   constructor(opts: NodeContextOptions) {
     this.invocationContext = opts.invocationContext;
     this.channel = opts.channel;
     this.nodePath = opts.nodePath;
     this.runId = opts.runId;
+    this.parentCtx = opts.parentCtx;
+    this.node = opts.node;
+    this.eventAuthor = opts.parentCtx?.eventAuthor ?? '';
+    // Captured here rather than when the node starts: `runChildNode` builds the
+    // child inside its `execute_node` span, so the active context is the node's
+    // own span.
+    this.telemetryContext = createTelemetryContext(context.active());
     this.resumeInputs = opts.resumeInputs ?? {};
     this.isolationScope = opts.isolationScope;
     this.actions = opts.actions ?? createEventActions();
@@ -173,6 +223,37 @@ export class NodeContext {
       this.actions.stateDelta,
       opts.stateSchema,
     );
+  }
+
+  /**
+   * The structured output produced by the node during its run.
+   *
+   * A node produces at most one output, so a second assignment throws instead
+   * of silently replacing the first. The engine writes the value through
+   * {@link setOutputInternal}, which is exempt.
+   */
+  get output(): unknown {
+    return this.outputValue;
+  }
+
+  set output(value: unknown) {
+    if (this.outputValue !== undefined) {
+      throw new Error(
+        'Output already set. A node can produce at most one output.',
+      );
+    }
+    this.outputValue = value;
+  }
+
+  /**
+   * Writes the output without the at-most-one check.
+   *
+   * @internal The engine writes the field more than once by design — clearing
+   * it before a retry, replacing it from an `afterNode` plugin, adopting a
+   * child's value under `useAsOutput`. Node bodies use the `output` setter.
+   */
+  setOutputInternal(value: unknown): void {
+    this.outputValue = value;
   }
 
   /** Delta-aware session state; writes accumulate in `actions.stateDelta`. */
@@ -248,65 +329,235 @@ export class NodeContext {
    * `ctx.runNode(myAgent, input)` works without `node(myAgent)`. Wrap it
    * yourself when you need the options `node()` carries, such as a schema or a
    * name that differs from the value's own.
+   *
+   * An agent that asks to transfer to another agent (by setting
+   * `actions.transferToAgent`) is followed here: the target is resolved against
+   * the agent tree and run in place, and its result is what this call returns.
+   *
+   * Called from a node body, a child that failed or that stopped to ask the
+   * user raises rather than returning, so the body cannot run on past it. A
+   * root context built by a driver reads the child's state instead, and sees no
+   * raise.
    */
-  runNode(
+  async runNode(
     nodeLike: RunnableNode,
     input?: unknown,
-    options?: RunNodeOptions,
+    options: RunNodeOptions = {},
   ): Promise<NodeContext | NodeResult> {
-    const node = buildNode(nodeLike);
-    if (this.scheduler) {
-      const nodeName = options?.nodeName ?? node.name;
-      let runId = options?.runId;
-      if (runId !== undefined) {
-        assertCustomRunId(runId, nodeName, mapSet(this.autoRunIds, nodeName));
-        if (isAutoNumberShaped(runId)) {
-          mapSet(this.numericCustomRunIds, nodeName).add(runId);
-        }
-      }
-      if (!runId) {
-        assertNoNumericCustomRunIds(
-          nodeName,
-          mapSet(this.numericCustomRunIds, nodeName),
+    // Output delegation is claimed before the child runs, not after: the
+    // child's output event is annotated as answering for this node too, so a
+    // second delegate would produce two events both claiming to be this node's
+    // result. A Workflow is exempt — it delegates to each of its nodes in turn.
+    if (options.useAsOutput && !isWorkflow(this.node)) {
+      if (this.outputDelegated) {
+        throw new Error(
+          `Node ${this.nodePath} already has a use_as_output delegate.`,
         );
-        // No need to skip ids a caller already claimed: the counter is
-        // monotonic, so the next value was never handed out automatically, and
-        // a custom id that could equal it is refused by the two asserts above.
-        const next = (this.dynamicRunCounters.get(nodeName) ?? 0) + 1;
-        this.dynamicRunCounters.set(nodeName, next);
-        runId = String(next);
-        mapSet(this.autoRunIds, nodeName).add(runId);
       }
-      return this.scheduleAndUnwind(node, input, {
-        ...options,
-        nodeName,
-        runId,
-      });
+      this.outputDelegated = true;
     }
-    return executeChildNode({parent: this, node, input, options});
+
+    return NodeContext.runFollowingTransfers(
+      this,
+      buildNode(nodeLike),
+      input,
+      options,
+    );
   }
 
   /**
-   * Runs a child through the scheduler, raising {@link NodeInterruptedError}
-   * when it comes back waiting on an unanswered interrupt.
+   * Runs `node` under `origin`, and keeps running whatever agent the result
+   * asks to transfer to until one finishes without asking.
    *
-   * The caller's body must not continue past a child that stopped to ask the
-   * user: everything after the call would run on a missing answer, and would
-   * run again when the turn resumes. The scheduler has already copied the
-   * child's interrupt ids onto this context by the time it returns, so the
-   * runner that catches the throw records this node as waiting.
+   * A transfer moves execution to another context, so the caller's context is
+   * a loop pointer rather than `this` — hence the explicit `origin` parameter.
    */
-  private async scheduleAndUnwind(
+  private static async runFollowingTransfers(
+    origin: NodeContext,
     node: BaseNode,
     input: unknown,
-    options: ScheduleDynamicNodeOptions,
+    options: RunNodeOptions,
   ): Promise<NodeContext | NodeResult> {
-    const child = await this.scheduler!.schedule(this, node, input, options);
+    let currParentCtx = origin;
+    let currNode = node;
+    let currRunId = options.runId;
+    let currInput = input;
+
+    for (let hop = 0; hop < MAX_PARENT_DEPTH; hop++) {
+      const child = await currParentCtx.runChild(currNode, currInput, {
+        ...options,
+        // Only the original caller's own output is delegated; once a transfer
+        // has moved execution under another context, that context is not
+        // standing in for the original one.
+        useAsOutput: options.useAsOutput && currParentCtx === origin,
+        runId: currRunId,
+      });
+
+      const childCtx = isNodeContext(child) ? child : undefined;
+      const transferTo = childCtx?.actions.transferToAgent;
+      currParentCtx.validateChildRun(child, currNode, options, transferTo);
+      if (childCtx === undefined || transferTo === undefined) {
+        return child;
+      }
+
+      const next = resolveTransfer(
+        transferTo,
+        currNode,
+        childCtx,
+        currParentCtx,
+      );
+      currParentCtx = next.parentCtx;
+      currNode = next.agent;
+      currRunId = undefined;
+      currInput = undefined;
+    }
+
+    throw new Error(
+      `Agent transfer from node ${origin.nodePath} exceeded ` +
+        `${MAX_PARENT_DEPTH} hops; the agents are transferring in a cycle.`,
+    );
+  }
+
+  /**
+   * Runs one child, through the dynamic-node scheduler when this subtree has
+   * one (for dedup and resume) and directly otherwise.
+   */
+  private runChild(
+    node: BaseNode,
+    input: unknown,
+    options: RunNodeOptions,
+  ): Promise<NodeContext | NodeResult> {
+    if (!this.scheduler) {
+      return executeChildNode({parent: this, node, input, options});
+    }
+    const nodeName = options.nodeName ?? node.name;
+    return this.scheduler.schedule(this, node, input, {
+      ...options,
+      nodeName,
+      runId: this.claimRunId(nodeName, options.runId),
+    });
+  }
+
+  /**
+   * Returns the run id this child run is keyed by: the caller's, once checked
+   * against the automatic numbering namespace, or the next automatic number.
+   */
+  private claimRunId(nodeName: string, runId: string | undefined): string {
+    if (runId !== undefined) {
+      assertCustomRunId(runId, nodeName, mapSet(this.autoRunIds, nodeName));
+      if (isAutoNumberShaped(runId)) {
+        mapSet(this.numericCustomRunIds, nodeName).add(runId);
+      }
+    }
+    if (runId) {
+      return runId;
+    }
+    assertNoNumericCustomRunIds(
+      nodeName,
+      mapSet(this.numericCustomRunIds, nodeName),
+    );
+    // No need to skip ids a caller already claimed: the counter is monotonic,
+    // so the next value was never handed out automatically, and a custom id
+    // that could equal it is refused by the two asserts above.
+    const next = (this.dynamicRunCounters.get(nodeName) ?? 0) + 1;
+    this.dynamicRunCounters.set(nodeName, next);
+    const claimed = String(next);
+    mapSet(this.autoRunIds, nodeName).add(claimed);
+    return claimed;
+  }
+
+  /**
+   * Raises whatever a finished child leaves this node unable to continue past:
+   * its failure, its unanswered interrupt, or — under `raiseOnWait` — its
+   * having produced nothing while it waits for output.
+   *
+   * A node body must not run on past a child that stopped to ask the user:
+   * everything after the call would run on a missing answer, and would run
+   * again when the turn resumes. Copying the child's interrupt ids here first
+   * is what lets the runner catching the throw record this node as waiting
+   * rather than failed.
+   *
+   * A root context has no {@link node} and is therefore not a node body but a
+   * driver — `runNodeAsInvocation`, `NodeTool`, a caller of its own — which
+   * awaits the child and reads its state directly. Raising at a driver would
+   * turn a paused run into a failed one, so it is skipped there. This is the
+   * split adk-python spells `return_ctx` on `Context._run_node_internal`.
+   */
+  private validateChildRun(
+    child: NodeContext | NodeResult,
+    node: BaseNode,
+    options: RunNodeOptions,
+    transferTo: string | undefined,
+  ): void {
+    if (!this.node) {
+      return;
+    }
+    if (isNodeContext(child) && child.error) {
+      throw new DynamicNodeFailError({
+        message: `Dynamic node ${node.name} failed`,
+        error: child.error,
+        errorNodePath: child.errorNodePath,
+      });
+    }
     if (child.interruptIds.length > 0) {
+      for (const id of child.interruptIds) {
+        if (!this.interruptIds.includes(id)) {
+          this.interruptIds.push(id);
+        }
+      }
       throw new NodeInterruptedError();
     }
-    return child;
+    if (
+      options.raiseOnWait &&
+      child.output === undefined &&
+      transferTo === undefined &&
+      (isWorkflow(node) || node.waitForOutput)
+    ) {
+      throw new NodeInterruptedError();
+    }
   }
+}
+
+/**
+ * Whether a finished child run is a live context rather than a bare result
+ * fast-forwarded from a checkpoint. Structural, not `instanceof`, so it stays
+ * correct when two copies of adk-js share a runtime.
+ */
+function isNodeContext(child: NodeContext | NodeResult): child is NodeContext {
+  return 'actions' in child;
+}
+
+/**
+ * Resolves an agent transfer requested by `node` into the agent to run next and
+ * the context to run it under.
+ */
+function resolveTransfer(
+  targetName: string,
+  node: BaseNode,
+  childCtx: NodeContext,
+  currParentCtx: NodeContext,
+): {agent: BaseAgent; parentCtx: NodeContext} {
+  if (!isBaseAgent(node)) {
+    throw new Error('Only agents can request an agent transfer.');
+  }
+  const {targetAgent, nextParentCtx} = resolveAndDeriveTransferContext({
+    targetName,
+    currentAgent: node,
+    rootAgent: node.rootAgent,
+    currCtx: childCtx,
+    currParentCtx,
+  });
+  if (!targetAgent) {
+    throw new Error(`Transfer target agent '${targetName}' not found.`);
+  }
+  if (!nextParentCtx) {
+    throw new Error(
+      `Cannot transfer from '${node.name}' to unrelated agent ` +
+        `'${targetName}'.\nAvailable agents: ` +
+        `${agentNamesInTree(node.rootAgent).join(', ')}`,
+    );
+  }
+  return {agent: targetAgent, parentCtx: nextParentCtx};
 }
 
 /** Returns the set stored under `key`, creating it on first use. */

@@ -179,6 +179,11 @@ export class Workflow extends BaseNode {
   ): AsyncGenerator<Event, void, void> {
     // Child events are streamed through ctx.channel by ctx.runNode(), so this
     // orchestration generator itself yields nothing.
+
+    // Attribute the child events to this workflow, so a reader grouping events
+    // by author sees one workflow rather than N separate nodes.
+    ctx.eventAuthor = this.name;
+
     const dynamicState = new DynamicNodeState();
 
     // Workflow-scoped cancellation: a controller chained to the invocation's
@@ -277,7 +282,7 @@ export class Workflow extends BaseNode {
       return;
     }
     if (output !== undefined) {
-      ctx.output = output;
+      ctx.setOutputInternal(output);
     }
   }
 
@@ -633,7 +638,7 @@ export class Workflow extends BaseNode {
       .map((name) => loop.nodeOutputs.get(name));
 
     if (terminalOutputs.length === 1) {
-      ctx.output = terminalOutputs[0];
+      ctx.setOutputInternal(terminalOutputs[0]);
     } else if (terminalOutputs.length > 1) {
       throw new Error(
         `Workflow ${this.name}: multiple terminal nodes produced output ` +

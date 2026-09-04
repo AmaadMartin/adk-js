@@ -177,7 +177,7 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     options: ScheduleDynamicNodeOptions,
   ): NodeResult {
     if (options.useAsOutput) {
-      ctx.output = result.output;
+      ctx.setOutputInternal(result.output);
       ctx.route = result.route;
     }
     return result;

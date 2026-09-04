@@ -390,6 +390,9 @@ export {
   createRestApiTool,
 } from './tools/openapi_tool/rest_api_tool.js';
 
+export {createTelemetryContext} from './telemetry/node_tracing.js';
+export type {TelemetryContext} from './telemetry/node_tracing.js';
+
 // Workflow (parity port of google/adk-python `google/adk/workflow`). Named
 // explicitly (not `export *`) so the top-level surface stays intentional and
 // collisions are compile errors; keep this in sync with `./workflow/index.js`.
@@ -429,6 +432,7 @@ export {
   node,
   normalizeRetryExceptions,
   prepareRetryConfig,
+  resolveAndDeriveTransferContext,
 } from './workflow/index.js';
 export type {
   BaseNodeConfig,
@@ -450,6 +454,7 @@ export type {
   ParallelWorkerConfig,
   PreparedRetryConfig,
   RequestInputParams,
+  ResolveTransferParams,
   RetryConfig,
   RouteValue,
   RoutingMap,
@@ -459,6 +464,7 @@ export type {
   ScheduleDynamicNode,
   ScheduleDynamicNodeOptions,
   ToolNodeConfig,
+  TransferResolution,
   WorkflowConfig,
 } from './workflow/index.js';
 
