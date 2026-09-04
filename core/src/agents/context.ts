@@ -128,7 +128,7 @@ export class Context extends ReadonlyContext {
    *
    * @param authConfig The auth config holding the credential to save.
    */
-  saveCredential(authConfig: AuthConfig): Promise<void> {
+  async saveCredential(authConfig: AuthConfig): Promise<void> {
     if (!this.invocationContext.credentialService) {
       throw new Error('Credential service is not initialized.');
     }
@@ -146,7 +146,9 @@ export class Context extends ReadonlyContext {
    * @return A promise that resolves to the credential, or `undefined` when the
    *     store holds none for this config.
    */
-  loadCredential(authConfig: AuthConfig): Promise<AuthCredential | undefined> {
+  async loadCredential(
+    authConfig: AuthConfig,
+  ): Promise<AuthCredential | undefined> {
     if (!this.invocationContext.credentialService) {
       throw new Error('Credential service is not initialized.');
     }
