@@ -181,8 +181,8 @@ A passing run resolves and returns nothing. A failing run throws
 threshold and the mean score. A run whose inference crashed produces no metric
 results at all, and is reported separately by eval case id.
 
-A metric that produced no score at all gets a different line, saying it *was
-not evaluated*. This is what an unreachable judge model looks like: the
+A metric that produced no score at all gets a different line, saying it _was
+not evaluated_. This is what an unreachable judge model looks like: the
 threshold was never checked, so the agent did not regress and the logs hold the
 reason the metric could not run. The run still fails.
 
@@ -214,6 +214,13 @@ JavaScript specifier cannot support, so this SDK marks the export explicitly.
   }
 }
 ```
+
+A relative or absolute path resolves against the working directory of the
+process running the eval, so `./metrics.js` names a file of your own project
+and a checked-in config stays portable. Run the eval from your project root, as
+you would a test. A bare specifier such as `my-metrics-package` is left to
+Node's package resolution instead. When an import fails, the error names both
+the path you wrote and the location it tried.
 
 The function receives the metric, the actual invocations, the expected ones and
 the conversation scenario, and returns an `EvaluationResult` or a promise of
