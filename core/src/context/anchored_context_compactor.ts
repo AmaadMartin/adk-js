@@ -115,7 +115,7 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
 
     const rawEventsToCompact = rawEvents.slice(0, retainStartIndex);
 
-    let scratchpadEvent: CompactedEvent;
+    let scratchpadEvent: CompactedEvent | null;
 
     if (hasScratchpad) {
       const existingScratchpad = activeEvents[0] as CompactedEvent;
@@ -125,6 +125,10 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
       ]);
     } else {
       scratchpadEvent = await this.summarizer.summarize(rawEventsToCompact);
+    }
+
+    if (!scratchpadEvent) {
+      return;
     }
 
     // Ensure the event is marked as scratchpad and has system author.
