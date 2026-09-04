@@ -18,13 +18,11 @@ import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {createEvent, Event} from '../../../src/events/event.js';
 import {createEventActions} from '../../../src/events/event_actions.js';
+import {StorageSession} from '../../../src/sessions/db/schema.js';
 import {
   DEFAULT_MAX_VARCHAR_LENGTH,
-  EVENTS_TIMESTAMP_INDEX_NAME,
-  StorageSession,
-} from '../../../src/sessions/db/schema.js';
-import {
   ENTITIES_V0,
+  EVENTS_TIMESTAMP_INDEX_NAME,
   pickleBlobColumnType,
   PickleBlobType,
   StorageEventV0,

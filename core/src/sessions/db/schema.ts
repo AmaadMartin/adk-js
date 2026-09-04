@@ -18,23 +18,6 @@ export const STORAGE_KEY_COLUMN_LENGTH = 191;
 export const EVENTS_TABLE_NAME = 'events';
 
 /**
- * The length adk-python gives every `VARCHAR` column that is not a key.
- *
- * adk-js declares those columns as text, so this is only the width a value has
- * to fit for a database that still carries the older declaration.
- */
-export const DEFAULT_MAX_VARCHAR_LENGTH = 256;
-
-/**
- * The index a session's events are read through.
- *
- * The name is the one adk-python declares. Both SDKs read the same database,
- * so sharing the name stops the two of them creating two indexes for one
- * access path.
- */
-export const EVENTS_TIMESTAMP_INDEX_NAME = 'idx_events_app_user_session_ts';
-
-/**
  * Custom type for serializing and deserializing ADK Event objects.
  *
  * This type handles the conversion between camelCase (TypeScript ADK) and
@@ -203,42 +186,12 @@ export const ENTITIES = [
   StorageEvent,
 ];
 
-/**
- * Returns the time a session row was last written, in milliseconds.
- *
- * adk-python's `StorageSession.get_update_timestamp` returns POSIX seconds and
- * has to read a naive column value as UTC by hand. A driver hands MikroORM a
- * `Date`, which already names an instant, so there is nothing to correct here.
- * adk-python's `update_timestamp_tz` returns the same value, so it has no
- * counterpart of its own.
- */
-export function getUpdateTimestamp(row: StorageSession): number {
-  return row.updateTime.getTime();
-}
-
-/**
- * Returns the revision marker for a session row.
- *
- * The marker is compared for exact equality against the marker rebuilt from a
- * later read of the same row, so it only has to be stable and normalized to
- * UTC. adk-python renders microseconds; a `Date` holds milliseconds, so this
- * renders what the column can round-trip.
- */
-export function getUpdateMarker(row: StorageSession): string {
-  return row.updateTime.toISOString();
-}
-
 /** The parts of a {@link Session} that do not live on the session row. */
 export interface ToSessionOptions {
   /** The state merged from the app, user and session rows. */
   state: Record<string, unknown>;
   /** The session's events, oldest first. */
   events?: Event[];
-  /**
-   * The exact storage revision the caller read the row at. It defaults to the
-   * marker of the row itself.
-   */
-  storageUpdateMarker?: string;
 }
 
 /**
@@ -258,7 +211,15 @@ export function toSession(
     userId: row.userId,
     state: options.state,
     events: options.events ?? [],
-    lastUpdateTime: getUpdateTimestamp(row),
-    storageUpdateMarker: options.storageUpdateMarker ?? getUpdateMarker(row),
+    // adk-python's `get_update_timestamp` returns POSIX seconds and reads a
+    // naive column value as UTC by hand. A driver hands MikroORM a `Date`,
+    // which already names an instant, so there is nothing to correct here. Its
+    // `update_timestamp_tz` returns the same value, so it has no counterpart.
+    lastUpdateTime: row.updateTime.getTime(),
+    // The marker is compared for exact equality against the marker rebuilt
+    // from a later read of the same row, so it only has to be stable and
+    // normalized to UTC. adk-python renders microseconds; a `Date` holds
+    // milliseconds, so this renders what the column can round-trip.
+    storageUpdateMarker: row.updateTime.toISOString(),
   });
 }

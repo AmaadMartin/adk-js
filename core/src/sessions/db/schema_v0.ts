@@ -28,9 +28,7 @@ import {
   encodeEventActionsPickle,
 } from './event_actions_pickle.js';
 import {
-  DEFAULT_MAX_VARCHAR_LENGTH,
   EVENTS_TABLE_NAME,
-  EVENTS_TIMESTAMP_INDEX_NAME,
   STORAGE_KEY_COLUMN_LENGTH,
   StorageAppState,
   StorageSession,
@@ -39,6 +37,22 @@ import {
 
 /** The marker a truncated value ends with, as adk-python writes it. */
 export const TRUNCATION_SUFFIX = '...[truncated]';
+
+/**
+ * The length adk-python gives every `VARCHAR` column that is not a key.
+ *
+ * adk-js declares those columns as text, so this is only the width a value has
+ * to fit for a database that still carries the older declaration.
+ */
+export const DEFAULT_MAX_VARCHAR_LENGTH = 256;
+
+/**
+ * The index a session's events are read through.
+ *
+ * The name is the one adk-python's schema declares, so adk-js creating the
+ * table gives the access path the index the other SDK already looks for.
+ */
+export const EVENTS_TIMESTAMP_INDEX_NAME = 'idx_events_app_user_session_ts';
 
 /**
  * The default character set of the platforms whose `blob` holds only 64 KiB.
@@ -100,13 +114,6 @@ function parseLongRunningToolIds(stored: string | undefined): string[] {
   return stored ? (JSON.parse(stored) as string[]) : [];
 }
 
-/** Renders an event's long-running tool call ids for storage. */
-function serializeLongRunningToolIds(
-  value: readonly string[] | undefined,
-): string | undefined {
-  return value === undefined ? undefined : JSON.stringify(value);
-}
-
 /**
  * Truncates a value to fit a column of `maxLength` characters.
  *
@@ -144,10 +151,10 @@ export function truncateStr(
  *
  * Mirrors `src/google/adk/sessions/schemas/v0.py` in adk-python.
  *
- * The index below carries the name the current schema's event index also
- * carries. The two entity sets both describe the `events` table and are never
- * registered with one `MikroORM` instance, so there is one index per database,
- * not two.
+ * The index below carries the name adk-python's v0 schema declares for it.
+ * {@link ENTITIES_V0} and the current `ENTITIES` both describe the `events`
+ * table and are never registered with one `MikroORM` instance, so a database
+ * only ever gets the one entity set's index.
  */
 @Index({
   name: EVENTS_TIMESTAMP_INDEX_NAME,
@@ -283,7 +290,8 @@ export class StorageEventV0 {
   }
 
   set longRunningToolIds(value: string[] | undefined) {
-    this.longRunningToolIdsJson = serializeLongRunningToolIds(value);
+    this.longRunningToolIdsJson =
+      value === undefined ? undefined : JSON.stringify(value);
   }
 
   [PrimaryKey.name]?: [string, string, string, string];
@@ -396,7 +404,7 @@ export function storageEventV0ToEvent(row: StorageEventV0): Event {
     error_message: row.errorMessage,
     interrupted: row.interrupted,
     long_running_tool_ids: row.longRunningToolIdsJson
-      ? parseLongRunningToolIds(row.longRunningToolIdsJson)
+      ? row.longRunningToolIds
       : undefined,
   });
 

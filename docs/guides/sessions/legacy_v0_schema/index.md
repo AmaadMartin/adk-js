@@ -112,9 +112,10 @@ can still carry a `VARCHAR(256)` column that was never altered after the schema
 definition moved to text, and truncating turns a failed write into a shortened
 value. Each truncation logs a warning naming both lengths.
 
-`ENTITIES_V0` and `ENTITIES` both describe the `events` table and both name the
-event index `idx_events_app_user_session_ts`. Only one of the two sets is ever
-registered with a `MikroORM` instance, so a database gets one index, not two.
+The event index is named `idx_events_app_user_session_ts`, which is the name
+adk-python's v0 schema declares. `ENTITIES_V0` and `ENTITIES` both describe the
+`events` table, and only one of the two sets is ever registered with a
+`MikroORM` instance.
 
 ## Differences from adk-python
 
@@ -124,5 +125,5 @@ registered with a `MikroORM` instance, so a database gets one index, not two.
 | `long_running_tool_ids` | a `set`                           | an array, so the stored JSON has a stable order |
 | Allowed model classes   | derived from pydantic annotations | declared                                        |
 | Spanner blob column     | `SpannerPickleType`               | no Spanner driver                               |
-| `update_timestamp_tz`   | a second accessor                 | folded into `getUpdateTimestamp`                |
+| `update_timestamp_tz`   | a second accessor                 | folded into `toSession`                         |
 | Key column width        | 128 characters                    | 191, the MySQL `utf8mb4` index limit            |

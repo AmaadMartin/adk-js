@@ -15,12 +15,7 @@
 
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {createEvent} from '../../../src/events/event.js';
-import {
-  getUpdateMarker,
-  getUpdateTimestamp,
-  StorageSession,
-  toSession,
-} from '../../../src/sessions/db/schema.js';
+import {StorageSession, toSession} from '../../../src/sessions/db/schema.js';
 
 /** The instant the reference stores, to the millisecond a `Date` can hold. */
 const UPDATE_TIME = new Date('2026-01-02T03:04:05.123Z');
@@ -82,25 +77,14 @@ describe('toSession', () => {
     expect(session.storageUpdateMarker).toBe('2026-01-01T22:04:05.123Z');
   });
 
-  it('keeps a marker the caller supplies', () => {
-    const session = toSession(storageSession(UPDATE_TIME), {
-      state: {},
-      storageUpdateMarker: 'read-at-this-revision',
-    });
-
-    expect(session.storageUpdateMarker).toBe('read-at-this-revision');
-  });
-});
-
-describe('getUpdateTimestamp', () => {
   it('returns the row timestamp in milliseconds', () => {
-    expect(getUpdateTimestamp(storageSession(UPDATE_TIME))).toBe(
-      UPDATE_TIME.getTime(),
-    );
+    const session = toSession(storageSession(UPDATE_TIME), {state: {}});
+
+    expect(session.lastUpdateTime).toBe(UPDATE_TIME.getTime());
   });
 });
 
-describe('getUpdateMarker', () => {
+describe('toSession update marker', () => {
   let previousTimezone: string | undefined;
 
   beforeEach(() => {
@@ -113,9 +97,13 @@ describe('getUpdateMarker', () => {
 
   it('renders the same marker whatever the local zone is', () => {
     process.env.TZ = 'America/Los_Angeles';
-    const inLosAngeles = getUpdateMarker(storageSession(UPDATE_TIME));
+    const inLosAngeles = toSession(storageSession(UPDATE_TIME), {
+      state: {},
+    }).storageUpdateMarker;
     process.env.TZ = 'Asia/Tokyo';
-    const inTokyo = getUpdateMarker(storageSession(UPDATE_TIME));
+    const inTokyo = toSession(storageSession(UPDATE_TIME), {
+      state: {},
+    }).storageUpdateMarker;
 
     expect(inLosAngeles).toBe(inTokyo);
     expect(inTokyo).toBe('2026-01-02T03:04:05.123Z');
