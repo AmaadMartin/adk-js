@@ -38,10 +38,12 @@ import {
   resolvePluginOptions,
 } from './bigquery_analytics_config.js';
 import {
+  AnalyticsOffload,
   formatContentSummary,
   parseAnalyticsContent,
   ParsedAnalyticsContent,
 } from './bigquery_analytics_content.js';
+import {GcsOffloader} from './bigquery_analytics_offloader.js';
 import {
   ADK_ENVELOPE_SCHEMA_VERSION,
   AnalyticsEventType,
@@ -77,6 +79,30 @@ const FORMATTER_FAILED = '[FORMATTER_FAILED]';
 
 /** Content written when the payload cannot be sanitized. */
 const CONTENT_PARSE_FAILED = '[CONTENT_PARSE_FAILED]';
+
+/**
+ * Stands in for the span id in an offloaded object's name when the event has
+ * none. A row can carry a null `span_id`; an object name cannot.
+ */
+const NO_SPAN_ID = 'no-span';
+
+/**
+ * Builds the content offloader, or returns undefined when nothing would read
+ * what it uploads.
+ *
+ * Denying `content_parts` drops the column that holds the object reference, so
+ * an upload would cost storage and leave no row pointing at it.
+ */
+function createOffloader(
+  projectId: string,
+  config: ResolvedConfig,
+): GcsOffloader | undefined {
+  const {gcsBucketName, deniedColumns} = config;
+  if (gcsBucketName === undefined || deniedColumns.has('content_parts')) {
+    return undefined;
+  }
+  return new GcsOffloader({projectId, bucketName: gcsBucketName});
+}
 
 /**
  * Generation-config fields captured into `attributes.llm_config`.
@@ -256,6 +282,7 @@ function buildLatency(data: AnalyticsEventData): Record<string, number> | null {
 export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   private readonly config: ResolvedConfig;
   private readonly writer: BigQueryRowWriter;
+  private readonly offloader?: GcsOffloader;
   private readonly spans = new SpanTracker();
   private shutDown = false;
   private shutdownPromise?: Promise<void>;
@@ -265,6 +292,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     const resolved = resolvePluginOptions(options);
     this.config = resolved.config;
     this.writer = new BigQueryRowWriter(resolved.writer);
+    this.offloader = createOffloader(options.projectId, resolved.config);
   }
 
   /**
@@ -306,14 +334,14 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     invocationContext: InvocationContext;
     userMessage: Content;
   }): Promise<undefined> {
-    return this.safe('onUserMessageCallback', () => {
+    return this.safe('onUserMessageCallback', async () => {
       this.spans.ensureInvocation(params.invocationContext.invocationId);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.USER_MESSAGE_RECEIVED,
         invocationContext: params.invocationContext,
         rawContent: params.userMessage,
       });
-      this.logUserMessageCompletions(
+      await this.logUserMessageCompletions(
         params.invocationContext,
         params.userMessage,
       );
@@ -323,9 +351,9 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   override async beforeRunCallback(params: {
     invocationContext: InvocationContext;
   }): Promise<undefined> {
-    return this.safe('beforeRunCallback', () => {
+    return this.safe('beforeRunCallback', async () => {
       this.spans.ensureInvocation(params.invocationContext.invocationId);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.INVOCATION_STARTING,
         invocationContext: params.invocationContext,
       });
@@ -344,7 +372,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       const popped = this.spans.pop(invocationId);
       const parentSpanIdOverride = this.spans.current(invocationId)?.spanId;
       this.spans.forget(invocationId);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.INVOCATION_COMPLETED,
         invocationContext,
         data: {
@@ -364,10 +392,10 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     agent: BaseAgent;
     callbackContext: Context;
   }): Promise<undefined> {
-    return this.safe('beforeAgentCallback', () => {
+    return this.safe('beforeAgentCallback', async () => {
       const invocationContext = params.callbackContext.invocationContext;
       this.spans.push(invocationContext.invocationId, SpanKind.AGENT);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.AGENT_STARTING,
         invocationContext,
         rawContent: agentInstruction(params.agent),
@@ -379,13 +407,13 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     agent: BaseAgent;
     callbackContext: Context;
   }): Promise<undefined> {
-    return this.safe('afterAgentCallback', () => {
+    return this.safe('afterAgentCallback', async () => {
       const invocationContext = params.callbackContext.invocationContext;
       const popped = this.spans.pop(
         invocationContext.invocationId,
         SpanKind.AGENT,
       );
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.AGENT_COMPLETED,
         invocationContext,
         data: this.afterPopData(invocationContext.invocationId, popped),
@@ -398,9 +426,9 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     nodeContext: NodeContext;
     output: unknown;
   }): Promise<undefined> {
-    return this.safe('afterNodeCallback', () => {
+    return this.safe('afterNodeCallback', async () => {
       const {node, nodeContext} = params;
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.NODE_OUTPUT,
         invocationContext: nodeContext.invocationContext,
         rawContent: {node: node.name, output: params.output},
@@ -423,14 +451,14 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     callbackContext: Context;
     llmRequest: LlmRequest;
   }): Promise<undefined> {
-    return this.safe('beforeModelCallback', () => {
+    return this.safe('beforeModelCallback', async () => {
       const invocationContext = params.callbackContext.invocationContext;
       const invocationId = invocationContext.invocationId;
       // A request short-circuited by another plugin never reaches
       // afterModelCallback, so its span would otherwise stay on the stack.
       this.spans.pop(invocationId, SpanKind.LLM_REQUEST);
       this.spans.push(invocationId, SpanKind.LLM_REQUEST);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.LLM_REQUEST,
         invocationContext,
         rawContent: params.llmRequest,
@@ -446,7 +474,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     callbackContext: Context;
     llmResponse: LlmResponse;
   }): Promise<undefined> {
-    return this.safe('afterModelCallback', () => {
+    return this.safe('afterModelCallback', async () => {
       const {llmResponse} = params;
       const invocationContext = params.callbackContext.invocationContext;
       const invocationId = invocationContext.invocationId;
@@ -469,7 +497,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       if (usage !== undefined) {
         content['usage'] = usage;
       }
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.LLM_RESPONSE,
         invocationContext,
         rawContent: Object.keys(content).length > 0 ? content : undefined,
@@ -497,11 +525,11 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     llmRequest: LlmRequest;
     error: Error;
   }): Promise<undefined> {
-    return this.safe('onModelErrorCallback', () => {
+    return this.safe('onModelErrorCallback', async () => {
       const invocationContext = params.callbackContext.invocationContext;
       const invocationId = invocationContext.invocationId;
       const popped = this.spans.pop(invocationId, SpanKind.LLM_REQUEST);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.LLM_ERROR,
         invocationContext,
         data: {
@@ -518,10 +546,10 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     toolArgs: Record<string, unknown>;
     toolContext: Context;
   }): Promise<undefined> {
-    return this.safe('beforeToolCallback', () => {
+    return this.safe('beforeToolCallback', async () => {
       const invocationContext = params.toolContext.invocationContext;
       this.spans.push(invocationContext.invocationId, SpanKind.TOOL);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.TOOL_STARTING,
         invocationContext,
         rawContent: toolContent(params, {args: params.toolArgs}),
@@ -535,11 +563,11 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     toolContext: Context;
     result: Record<string, unknown>;
   }): Promise<undefined> {
-    return this.safe('afterToolCallback', () => {
+    return this.safe('afterToolCallback', async () => {
       const invocationContext = params.toolContext.invocationContext;
       const invocationId = invocationContext.invocationId;
       const popped = this.spans.pop(invocationId, SpanKind.TOOL);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.TOOL_COMPLETED,
         invocationContext,
         rawContent: toolContent(params, {result: params.result}),
@@ -548,7 +576,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       // An agent that answers through a dedicated tool emits no plain-text
       // final event, so the onEventCallback path never sees the answer.
       if (this.config.finalResponseToolNames.includes(params.tool.name)) {
-        this.logEvent({
+        await this.logEvent({
           eventType: AnalyticsEventType.AGENT_RESPONSE,
           invocationContext,
           rawContent: {response: params.toolArgs},
@@ -564,11 +592,11 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     toolContext: Context;
     error: Error;
   }): Promise<undefined> {
-    return this.safe('onToolErrorCallback', () => {
+    return this.safe('onToolErrorCallback', async () => {
       const invocationContext = params.toolContext.invocationContext;
       const invocationId = invocationContext.invocationId;
       const popped = this.spans.pop(invocationId, SpanKind.TOOL);
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.TOOL_ERROR,
         invocationContext,
         rawContent: toolContent(params, {args: params.toolArgs}),
@@ -585,15 +613,15 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     invocationContext: InvocationContext;
     event: Event;
   }): Promise<undefined> {
-    return this.safe('onEventCallback', () => {
+    return this.safe('onEventCallback', async () => {
       const {invocationContext, event} = params;
-      this.logStateDelta(invocationContext, event);
-      this.logAgentStateCheckpoint(invocationContext, event);
-      this.logNodeError(invocationContext, event);
-      this.logAgentTransfer(invocationContext, event);
-      this.logPausedCalls(invocationContext, event);
-      this.logHitlCompletions(invocationContext, event);
-      this.logAgentResponse(invocationContext, event);
+      await this.logStateDelta(invocationContext, event);
+      await this.logAgentStateCheckpoint(invocationContext, event);
+      await this.logNodeError(invocationContext, event);
+      await this.logAgentTransfer(invocationContext, event);
+      await this.logPausedCalls(invocationContext, event);
+      await this.logHitlCompletions(invocationContext, event);
+      await this.logAgentResponse(invocationContext, event);
     });
   }
 
@@ -607,14 +635,14 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
    * code; adk-js routes those to `onModelErrorCallback`, so the event type
    * already excludes them.
    */
-  private logNodeError(
+  private async logNodeError(
     invocationContext: InvocationContext,
     event: Event,
-  ): void {
+  ): Promise<void> {
     if (!isNodeErrorEvent(event)) {
       return;
     }
-    this.logEvent({
+    await this.logEvent({
       eventType: AnalyticsEventType.NODE_ERROR,
       invocationContext,
       rawContent: {error_code: event.errorCode ?? null},
@@ -632,15 +660,15 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
    * `endOfAgent` alone is enough, so an agent that finishes without saving
    * state still marks where its run ended.
    */
-  private logAgentStateCheckpoint(
+  private async logAgentStateCheckpoint(
     invocationContext: InvocationContext,
     event: Event,
-  ): void {
+  ): Promise<void> {
     const {agentState, endOfAgent} = event.actions;
     if (agentState === undefined && endOfAgent !== true) {
       return;
     }
-    this.logEvent({
+    await this.logEvent({
       eventType: AnalyticsEventType.AGENT_STATE_CHECKPOINT,
       invocationContext,
       rawContent: {
@@ -652,15 +680,15 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   }
 
   /** Writes an `AGENT_TRANSFER` row when the event handed control to a peer. */
-  private logAgentTransfer(
+  private async logAgentTransfer(
     invocationContext: InvocationContext,
     event: Event,
-  ): void {
+  ): Promise<void> {
     const toAgent = event.actions.transferToAgent;
     if (toAgent === undefined) {
       return;
     }
-    this.logEvent({
+    await this.logEvent({
       eventType: AnalyticsEventType.AGENT_TRANSFER,
       invocationContext,
       rawContent: {from_agent: event.author, to_agent: toAgent},
@@ -676,17 +704,17 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
    * waiting for, which is why a query counting pauses sees framework requests
    * too.
    */
-  private logPausedCalls(
+  private async logPausedCalls(
     invocationContext: InvocationContext,
     event: Event,
-  ): void {
+  ): Promise<void> {
     const calls = getFunctionCalls(event);
     for (const call of calls) {
       const mapping = hitlMappingFor(call.name);
       if (mapping === undefined) {
         continue;
       }
-      this.logEvent({
+      await this.logEvent({
         eventType: mapping.request,
         invocationContext,
         rawContent: {tool: mapping.name, args: call.args ?? null},
@@ -705,7 +733,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
           'BigQuery analytics found a long-running tool id with no matching function call; writing the pause row without the call.',
         );
       }
-      this.logEvent({
+      await this.logEvent({
         eventType: AnalyticsEventType.TOOL_PAUSED,
         invocationContext,
         rawContent: {tool: call?.name ?? null, args: call?.args ?? null},
@@ -721,16 +749,16 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   }
 
   /** Writes a `HITL_*_REQUEST_COMPLETED` row per answered framework request. */
-  private logHitlCompletions(
+  private async logHitlCompletions(
     invocationContext: InvocationContext,
     event: Event,
-  ): void {
+  ): Promise<void> {
     for (const response of getFunctionResponses(event)) {
       const mapping = hitlMappingFor(response.name);
       if (mapping === undefined) {
         continue;
       }
-      this.logEvent({
+      await this.logEvent({
         eventType: mapping.completed,
         invocationContext,
         rawContent: {
@@ -750,17 +778,17 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
    * `HITL_*_REQUEST_COMPLETED` for a framework request, otherwise the
    * `TOOL_COMPLETED` of a long-running tool.
    */
-  private logUserMessageCompletions(
+  private async logUserMessageCompletions(
     invocationContext: InvocationContext,
     userMessage: Content,
-  ): void {
+  ): Promise<void> {
     for (const part of userMessage.parts ?? []) {
       const response = part.functionResponse;
       if (response === undefined) {
         continue;
       }
       const mapping = hitlMappingFor(response.name);
-      this.logEvent({
+      await this.logEvent({
         eventType: mapping?.completed ?? AnalyticsEventType.TOOL_COMPLETED,
         invocationContext,
         rawContent: {
@@ -775,15 +803,15 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   }
 
   /** Writes a `STATE_DELTA` row when the event changed session state. */
-  private logStateDelta(
+  private async logStateDelta(
     invocationContext: InvocationContext,
     event: Event,
-  ): void {
+  ): Promise<void> {
     const stateDelta = event.actions.stateDelta;
     if (Object.keys(stateDelta).length === 0) {
       return;
     }
-    this.logEvent({
+    await this.logEvent({
       eventType: AnalyticsEventType.STATE_DELTA,
       invocationContext,
       data: {sourceEvent: event, extraAttributes: {state_delta: stateDelta}},
@@ -797,10 +825,10 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
    * tool pause, and an event whose parts are all thoughts, all empty, or not
    * text at all — those are internal steps, not the answer a user saw.
    */
-  private logAgentResponse(
+  private async logAgentResponse(
     invocationContext: InvocationContext,
     event: Event,
-  ): void {
+  ): Promise<void> {
     const parts = event.content?.parts;
     if (
       parts === undefined ||
@@ -817,7 +845,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     if (visible.length === 0) {
       return;
     }
-    this.logEvent({
+    await this.logEvent({
       eventType: AnalyticsEventType.AGENT_RESPONSE,
       invocationContext,
       rawContent: {
@@ -850,7 +878,7 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
   }
 
   /** Builds one row and queues it. Never waits on the network. */
-  private logEvent(params: LogEventParams): void {
+  private async logEvent(params: LogEventParams): Promise<void> {
     const {eventType, invocationContext, rawContent, data = {}} = params;
     if (!this.config.enabled || !this.isLogged(eventType)) {
       return;
@@ -862,7 +890,13 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       return;
     }
     const invocationId = invocationContext.invocationId;
-    const parsed = this.parseContent(eventType, rawContent);
+    const traceId = data.traceIdOverride ?? this.spans.traceId(invocationId);
+    const spanId =
+      data.spanIdOverride ?? this.spans.current(invocationId)?.spanId ?? null;
+    const parsed = await this.parseContent(eventType, rawContent, {
+      traceId,
+      spanId,
+    });
     const attributes = recursiveSmartTruncate(
       this.buildAttributes(invocationContext, data),
       this.config.maxContentLength,
@@ -880,9 +914,8 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       session_id: invocationContext.session.id,
       invocation_id: invocationId,
       user_id: invocationContext.userId,
-      trace_id: data.traceIdOverride ?? this.spans.traceId(invocationId),
-      span_id:
-        data.spanIdOverride ?? this.spans.current(invocationId)?.spanId ?? null,
+      trace_id: traceId,
+      span_id: spanId,
       parent_span_id:
         data.parentSpanIdOverride ??
         this.spans.parentSpanId(invocationId) ??
@@ -899,6 +932,29 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
     this.writer.enqueue(row);
   }
 
+  /**
+   * The Cloud Storage destination for this event's oversized parts, or
+   * undefined when the plugin offloads nothing.
+   *
+   * The span identifies the event and names its objects, so it is passed per
+   * call: one parser instance serves concurrent events, and reading a mutable
+   * field would let one event resume under another event's identity.
+   */
+  private buildOffload(span: {
+    traceId: string;
+    spanId: string | null;
+  }): AnalyticsOffload | undefined {
+    if (this.offloader === undefined) {
+      return undefined;
+    }
+    return {
+      offloader: this.offloader,
+      traceId: span.traceId,
+      spanId: span.spanId ?? NO_SPAN_ID,
+      connectionId: this.config.connectionId,
+    };
+  }
+
   /** Whether `eventType` passes the denylist and the allowlist. */
   private isLogged(eventType: AnalyticsEventType): boolean {
     const {eventAllowlist, eventDenylist} = this.config;
@@ -913,10 +969,11 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
    * fail closed: the row is still written, carrying a sentinel instead of a
    * payload that could not be handled safely.
    */
-  private parseContent(
+  private async parseContent(
     eventType: AnalyticsEventType,
     rawContent: unknown,
-  ): ParsedAnalyticsContent {
+    span: {traceId: string; spanId: string | null},
+  ): Promise<ParsedAnalyticsContent> {
     let payload = rawContent;
     const formatter = this.config.contentFormatter;
     if (formatter !== undefined) {
@@ -934,7 +991,11 @@ export class BigQueryAgentAnalyticsPlugin extends BasePlugin {
       }
     }
     try {
-      return parseAnalyticsContent(payload, this.config.maxContentLength);
+      return await parseAnalyticsContent(
+        payload,
+        this.config.maxContentLength,
+        this.buildOffload(span),
+      );
     } catch {
       this.writer.countDrop(AnalyticsDropReason.CONTENT_PARSE_FAILED);
       // Constant message, for the same reason as the formatter failure above.
