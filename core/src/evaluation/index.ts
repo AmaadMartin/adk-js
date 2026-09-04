@@ -20,7 +20,6 @@ export type {
   ExtraKeysPolicy,
 } from './common.js';
 export type {ConversationScenario} from './conversation_scenarios.js';
-export {validateEvalCase} from './eval_case.js';
 export type {
   EvalCase,
   IntermediateData,
@@ -33,7 +32,6 @@ export type {
   StaticConversation,
 } from './eval_case.js';
 export {EvalStatus} from './eval_metrics.js';
-export type {BaseCriterion, Threshold} from './eval_metrics.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export type {
   EvaluationResult,

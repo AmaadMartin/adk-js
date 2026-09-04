@@ -125,14 +125,10 @@ describe('user_simulator_provider ported reference tests', () => {
   });
 
   it('test_init_rejects_non_config_argument', () => {
-    // A config read out of a JSON eval config document is unchecked at
-    // compile time; the provider is what rejects a value that is not a config.
-    const notAConfig: BaseUserSimulatorConfig = JSON.parse('"not a config"');
-
-    expect(() => new UserSimulatorProvider(notAConfig)).toThrow(
+    expect(() => new UserSimulatorProvider('not a config')).toThrow(
       InputValidationError,
     );
-    expect(() => new UserSimulatorProvider(notAConfig)).toThrow(
+    expect(() => new UserSimulatorProvider('not a config')).toThrow(
       'Expect config of type `BaseUserSimulatorConfig`.',
     );
   });

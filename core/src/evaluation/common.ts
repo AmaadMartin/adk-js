@@ -43,6 +43,9 @@ export interface EvalDumpOptions {
 
 /** An evaluation model: the shared validation configuration, applied. */
 export interface EvalModel<T extends object> {
+  /** The model name, reported by every error raised against this model. */
+  readonly name: string;
+
   /**
    * The underlying schema, so one model can be a field of another, and so a
    * caller can validate without throwing through `schema.safeParse`.
@@ -111,6 +114,7 @@ export function evalModel<Shape extends z.ZodRawShape>(
     .pipe(object);
 
   return {
+    name: options.name,
     schema,
     parse(raw) {
       const result = schema.safeParse(raw);

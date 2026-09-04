@@ -56,11 +56,13 @@ export class UserSimulatorProvider {
   private readonly config: BaseUserSimulatorConfig;
 
   /**
-   * @param config The config that selects the scenario simulator. Omitting it
-   *   stores a bare base config, which dispatches to nothing.
+   * @param config The config that selects the scenario simulator. It is
+   *   declared `unknown` and validated here because it usually arrives from a
+   *   JSON eval config document. Omitting it stores a bare base config, which
+   *   dispatches to nothing.
    * @throws {InputValidationError} If `config` is not a config object.
    */
-  constructor(config?: BaseUserSimulatorConfig) {
+  constructor(config?: unknown) {
     this.config =
       config === undefined ? {} : parseBaseUserSimulatorConfig(config);
   }

@@ -48,8 +48,8 @@ const baseUserSimulatorConfigModel: EvalModel<BaseUserSimulatorConfig> =
  * interface.
  *
  * @param config The config the caller supplied.
- * @param model The concrete simulator's own model.
- * @param name The concrete config's name, reported in the error.
+ * @param model The concrete simulator's own model. Its `name` is what the
+ *   error reports.
  * @returns The config, narrowed to the concrete shape.
  * @throws {InputValidationError} If the config does not match the model. The
  *   underlying schema error is kept as the `cause`.
@@ -57,11 +57,10 @@ const baseUserSimulatorConfigModel: EvalModel<BaseUserSimulatorConfig> =
 export function unpackUserSimulatorConfig<T extends BaseUserSimulatorConfig>(
   config: unknown,
   model: EvalModel<T>,
-  name: string,
 ): T {
   const result = model.schema.safeParse(config);
   if (!result.success) {
-    throw new InputValidationError(`Expect config of type \`${name}\`.`, {
+    throw new InputValidationError(`Expect config of type \`${model.name}\`.`, {
       cause: result.error,
     });
   }
@@ -78,11 +77,7 @@ export function unpackUserSimulatorConfig<T extends BaseUserSimulatorConfig>(
 export function parseBaseUserSimulatorConfig(
   raw: unknown,
 ): BaseUserSimulatorConfig {
-  return unpackUserSimulatorConfig(
-    raw,
-    baseUserSimulatorConfigModel,
-    BASE_USER_SIMULATOR_CONFIG_NAME,
-  );
+  return unpackUserSimulatorConfig(raw, baseUserSimulatorConfigModel);
 }
 
 /** The resulting status of {@link UserSimulator.getNextUserMessage}. */

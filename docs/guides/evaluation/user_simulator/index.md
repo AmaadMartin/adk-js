@@ -144,7 +144,6 @@ registerUserSimulator('opening', ({config, conversationScenario}) => {
   const {maxAllowedInvocations} = unpackUserSimulatorConfig(
     config,
     openingConfigModel,
-    'OpeningConfig',
   );
   return new OpeningSimulator(
     conversationScenario.startingPrompt,

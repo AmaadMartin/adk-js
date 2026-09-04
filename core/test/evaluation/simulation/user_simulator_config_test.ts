@@ -100,7 +100,6 @@ describe('unpackUserSimulatorConfig', () => {
     const unpacked = unpackUserSimulatorConfig(
       {type: 'fake_sim', model: 'gemini-2.5-pro'},
       fakeSimulatorConfigModel,
-      'FakeSimulatorConfig',
     );
 
     expect(unpacked.model).toBe('gemini-2.5-pro');
@@ -110,7 +109,6 @@ describe('unpackUserSimulatorConfig', () => {
     const unpacked = unpackUserSimulatorConfig(
       {type: 'fake_sim', model: 'gemini-2.5-pro', max_allowed_invocations: 4},
       fakeSimulatorConfigModel,
-      'FakeSimulatorConfig',
     );
 
     expect(unpacked.maxAllowedInvocations).toBe(4);
@@ -118,11 +116,7 @@ describe('unpackUserSimulatorConfig', () => {
 
   it('names the concrete model when a required field is missing', () => {
     expect(() =>
-      unpackUserSimulatorConfig(
-        {type: 'fake_sim'},
-        fakeSimulatorConfigModel,
-        'FakeSimulatorConfig',
-      ),
+      unpackUserSimulatorConfig({type: 'fake_sim'}, fakeSimulatorConfigModel),
     ).toThrow('Expect config of type `FakeSimulatorConfig`.');
   });
 
@@ -131,7 +125,6 @@ describe('unpackUserSimulatorConfig', () => {
       unpackUserSimulatorConfig(
         {type: 'other_sim', model: 'gemini-2.5-pro'},
         fakeSimulatorConfigModel,
-        'FakeSimulatorConfig',
       ),
     ).toThrow('Expect config of type `FakeSimulatorConfig`.');
   });
