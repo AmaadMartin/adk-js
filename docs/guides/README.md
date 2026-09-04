@@ -236,6 +236,9 @@ documentation, visit [adk.dev](https://adk.dev/).
   Toolbox for Databases server, with named toolsets, bound parameters and
   authentication.
 - [ToolConfig](tools/tool_config/index.md) - Declaring a tool in a configuration file, and validating that declaration at load time.
+- [ToolConfirmation](tools/tool_confirmation/index.md) - Reading a human
+  approval out of the function response a client sends back, and the two
+  shapes it may arrive in.
 - [Toolset tool-name prefixing](tools/base_toolset/index.md) - Giving a toolset a name prefix, what the invocation cache guarantees, and the `close`, `fromConfig` and `getAuthConfig` hooks.
 - [TransferToAgentTool](tools/transfer_to_agent_tool/index.md) - Handing off control to another agent, with the reachable agent names declared to the model.
 - [UrlContextTool](tools/url_context/index.md) - Letting a Gemini model fetch and read the URLs a user mentions.
