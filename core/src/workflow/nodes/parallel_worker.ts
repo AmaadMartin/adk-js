@@ -240,17 +240,15 @@ export class ParallelWorker extends BaseNode {
       }
     };
 
-    // Keeps claiming the next item until the list is exhausted, an item fails
-    // or interrupts, or the invocation is aborted. Never rejects — every item
-    // outcome is handled here, which is what lets the claimants run unawaited.
+    // Keeps claiming the next item until the list is exhausted or the fan-out
+    // winds down. Never rejects — every item outcome is handled here, which is
+    // what lets the claimants run unawaited.
     const claimant = async (): Promise<void> => {
       try {
         for (;;) {
+          // A cancelled invocation lands here too: the abort listener above
+          // winds the fan-out down before any claimant gets back to this point.
           if (windingDown) {
-            return;
-          }
-          if (isAborted(ctx)) {
-            stopFanOut();
             return;
           }
           const index = nextIndex++;
