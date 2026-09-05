@@ -76,25 +76,17 @@ export function createNodeErrorEvent(
 }
 
 /**
- * The code reported for a failure, most specific first: the API's own canonical
- * status (`PERMISSION_DENIED`), then a `code` the error carries, then the
- * error's class name.
+ * The code reported for a failure: a `code` the error carries, otherwise its
+ * class name. `UNKNOWN_ERROR` is left for a thrown value that is neither an
+ * `Error` nor carries a code.
  *
- * The status wins so a structured code from the service reaches the client
- * rather than the transport's class name, and it counts only as a string — an
- * HTTP client's numeric `.status` is a code, not a status. `UNKNOWN_ERROR` is
- * left for a thrown value that is neither an `Error` nor carries either field.
- *
- * The status rung and the class-name rung both mirror `NodeRunner` in
- * `google/adk-python` (`src/google/adk/workflow/_node_runner.py`, the
- * `error_code=` argument of the error event it builds). The `code` rung is
- * adk-js's own, kept between the two.
+ * The class-name rung is what `google/adk-python` reports
+ * (`workflow/_node_runner.py` builds its error event with
+ * `error_code=type(e).__name__`). The `code` rung is adk-js's own and stays in
+ * front of it, since an error that names its own failure says more than the
+ * class that carried it.
  */
 function errorCodeOf(error: unknown): string {
-  const status = (error as {status?: unknown} | null | undefined)?.status;
-  if (typeof status === 'string') {
-    return status;
-  }
   const code = (error as {code?: unknown} | null | undefined)?.code;
   if (typeof code === 'string' || typeof code === 'number') {
     return String(code);

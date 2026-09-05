@@ -300,7 +300,7 @@ describe('node runner — the error code of a failed attempt', () => {
     expect(failed[0].errorMessage).toBe('just a string');
   });
 
-  it('keeps a code the error carries when it has no status', async () => {
+  it('prefers a code the error carries over its class name', async () => {
     const coded = Object.assign(new TypeError('connection refused'), {
       code: 'ECONNREFUSED',
     });

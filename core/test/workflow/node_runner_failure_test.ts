@@ -7,14 +7,15 @@
 /**
  * Ported from `google/adk-python`
  * `tests/unittests/workflow/test_node_runner_failure.py`, for the error events
- * a failing node produces: one per failed attempt, coded by the error's own
- * canonical status where it has one.
+ * a failing node produces: one per failed attempt, coded by the error.
  *
  * The retry-policy tests in that file are covered here by
  * `node_execution_test.ts` and `node_error_event_test.ts`; this file ports the
- * error-event cases those two do not reach. Test names are kept verbatim, and
- * every one of them exists on adk-python's default branch — including the two
- * about the error code, which a checkout older than 2026-08-13 does not have.
+ * error-event cases those two do not reach.
+ *
+ * A `test_`-prefixed name is a verbatim port and names a test in the reference
+ * file. The class-name test is adk-js's own: it pins the rung this change added
+ * to `errorCodeOf`, which the reference covers only inside its other tests.
  */
 
 import {describe, expect, it} from 'vitest';
@@ -22,15 +23,6 @@ import {Event} from '../../src/events/event.js';
 import {node} from '../../src/workflow/node.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {driveWorkflow, FnNode, runFailingChildNode} from './test_helpers.js';
-
-/** A failure carrying the canonical status a genai/Gatekeeper error reports. */
-class ClientError extends Error {
-  readonly status = 'PERMISSION_DENIED';
-  readonly code = 403;
-  constructor() {
-    super('403 PERMISSION_DENIED. Egress request is not authorized');
-  }
-}
 
 function errorEvents(events: Event[]): Event[] {
   return events.filter((e) => e.errorCode !== undefined);
@@ -99,25 +91,7 @@ describe('node_runner — error events on failure', () => {
     expect(output).toBe('Success');
   });
 
-  it('test_node_runner_prefers_api_status_for_error_code', async () => {
-    const errNode = new FnNode('ErrNode', () => {
-      throw new ClientError();
-    });
-
-    const {error, events} = await runFailingChildNode(errNode);
-
-    // Divergence from adk-python, kept deliberately: adk-python records the
-    // failure on the returned context, adk-js rethrows it.
-    expect(error).toBeInstanceOf(ClientError);
-    const failed = errorEvents(events);
-    expect(failed).toHaveLength(1);
-    expect(failed[0].errorCode).toBe('PERMISSION_DENIED');
-    expect(failed[0].errorMessage).toContain(
-      'Egress request is not authorized',
-    );
-  });
-
-  it('test_node_runner_falls_back_to_class_name_without_status', async () => {
+  it('codes a failure by its error class name when it carries no code', async () => {
     const errNode = new FnNode('ErrNode', () => {
       throw new RangeError('boom');
     });
