@@ -8,12 +8,14 @@
  * Validates workflow graphs and computes terminal nodes.
  *
  * Ported from `google/adk-python` `workflow/utils/_graph_validation.py`.
- * The Phase 3 static-schema check and the Phase 7 chat-agent wiring check are
- * intentionally deferred to their respective phases.
+ * The Phase 7 chat-agent wiring check is intentionally deferred to that phase.
  */
 
+import {isLlmAgent} from '../../agents/llm_agent.js';
+import {StateSchemaError} from '../../sessions/state.js';
+import {objectSchemaFields, SchemaLike} from '../../utils/schema.js';
 import {BaseNode, START} from '../base_node.js';
-import {DEFAULT_ROUTE, Edge} from '../graph.js';
+import {DEFAULT_ROUTE, Edge, Graph} from '../graph.js';
 
 function validateDuplicateNodeNames(nodes: BaseNode[]): Set<string> {
   const counts = new Map<string, number>();
@@ -230,4 +232,46 @@ export function validateGraph(nodes: BaseNode[], edges: Edge[]): Set<string> {
   validateDefaultRoutes(edges);
   detectUnconditionalCycles(edges, nodeNames);
   return computeTerminalNodes(nodes, edges);
+}
+
+/**
+ * Rejects a workflow whose graph writes a state key its `stateSchema` does not
+ * declare, at construction rather than on the first run.
+ *
+ * Only keys a node declares statically are checkable, which today means an
+ * agent node's `outputKey`. A node carrying its own `stateSchema` answers to
+ * that instead, and a prefixed key (`app:`, `user:`, `temp:`) belongs to a
+ * wider scope — both are exempt here exactly as they are at run time. A schema
+ * that is not an object schema is left unenforced rather than rejected.
+ *
+ * adk-python checks a `FunctionNode`'s state parameters instead. adk-js's
+ * `FunctionNodeHandler` signature is fixed at `(ctx, input)` and binds no state
+ * parameters, so there is nothing there to check.
+ */
+export function validateStateSchema(
+  workflowName: string,
+  graph: Graph | undefined,
+  stateSchema: SchemaLike | undefined,
+): void {
+  if (!stateSchema || !graph) {
+    return;
+  }
+  const fields = objectSchemaFields(stateSchema);
+  if (!fields) {
+    return;
+  }
+  for (const graphNode of graph.nodes) {
+    if (graphNode.stateSchema) {
+      continue;
+    }
+    const key = isLlmAgent(graphNode) ? graphNode.outputKey : undefined;
+    if (!key || key.includes(':') || fields.has(key)) {
+      continue;
+    }
+    throw new StateSchemaError(
+      `Workflow ${workflowName} node '${graphNode.name}' writes state key ` +
+        `'${key}', which is not declared in the state schema. Declared ` +
+        `fields: ${JSON.stringify([...fields.keys()].sort())}`,
+    );
+  }
 }
