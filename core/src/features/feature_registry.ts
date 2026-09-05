@@ -12,6 +12,8 @@ import {logger} from '../utils/logger.js';
  */
 export enum FeatureName {
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
+  GCS_ADMIN_TOOLSET = 'GCS_ADMIN_TOOLSET',
+  GCS_TOOL_SETTINGS = 'GCS_TOOL_SETTINGS',
 }
 
 /**
@@ -36,6 +38,14 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
+  },
+  [FeatureName.GCS_ADMIN_TOOLSET]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
+  [FeatureName.GCS_TOOL_SETTINGS]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
   },
 };
 
