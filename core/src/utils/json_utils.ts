@@ -7,9 +7,6 @@
 /** The stand-in written in place of a value that refers back to itself. */
 const CIRCULAR_STAND_IN = '[Circular]';
 
-/** Notified once for each value that was replaced. */
-export type ReplaceListener = () => void;
-
 /**
  * Converts a value into a form `JSON.stringify` can represent.
  *
@@ -25,7 +22,7 @@ export type ReplaceListener = () => void;
  */
 export function toJsonSerializable(
   value: unknown,
-  onReplace?: ReplaceListener,
+  onReplace?: () => void,
 ): unknown {
   return convert(value, new Set<object>(), onReplace);
 }
@@ -33,7 +30,7 @@ export function toJsonSerializable(
 function convert(
   value: unknown,
   visiting: Set<object>,
-  onReplace?: ReplaceListener,
+  onReplace?: () => void,
 ): unknown {
   const standIn = jsonStandIn(value);
   if (standIn !== undefined) {
@@ -57,7 +54,7 @@ function convert(
 function convertObject(
   value: object,
   visiting: Set<object>,
-  onReplace?: ReplaceListener,
+  onReplace?: () => void,
 ): unknown {
   if (hasToJson(value)) {
     return convert(value.toJSON(), visiting, onReplace);
