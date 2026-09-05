@@ -568,12 +568,7 @@ export class Workflow extends BaseNode {
         runId,
         useSubBranch: trigger.useSubBranch,
         overrideBranch: trigger.branch,
-        overrideIsolationScope: computeIsolationScopeForNode(
-          node,
-          trigger,
-          ctx.nodePath,
-          runId,
-        ),
+        overrideIsolationScope: trigger.isolationScope,
         useAsOutput: this.graph!.terminalNodeNames.has(nodeName),
       },
     }).then(
@@ -919,32 +914,6 @@ export function hasWaitingTaskAgent(
 /** Whether `node` is an agent that runs as a multi-turn task. */
 function isTaskModeNode(node: BaseNode): boolean {
   return isLlmAgent(node) && node.mode === 'task';
-}
-
-/**
- * Decides the isolation scope for a node about to run.
- *
- * An explicit `trigger.isolationScope` wins, so a resumed run continues in its
- * original scope. A task-mode agent otherwise gets its own full node path, so
- * its multi-turn conversation is hidden from peer nodes; the full path (not
- * just `<name>@<runId>`) keeps the scope unique across nested workflows and
- * across two graph positions holding the same node name. Every other node is
- * unscoped and shares the workflow's conversation view.
- */
-export function computeIsolationScopeForNode(
-  node: BaseNode,
-  trigger: Trigger,
-  parentPath: string,
-  runId: string,
-): string | undefined {
-  if (trigger.isolationScope !== undefined) {
-    return trigger.isolationScope;
-  }
-  if (!isTaskModeNode(node)) {
-    return undefined;
-  }
-  const segment = `${node.name}@${runId}`;
-  return parentPath ? `${parentPath}/${segment}` : segment;
 }
 
 /**
