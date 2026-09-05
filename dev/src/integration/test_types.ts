@@ -45,6 +45,9 @@ export interface TestSpec {
 export interface LlmRecording {
   llmRequest?: LlmRequest;
   llmResponse?: LlmResponse;
+  // adk-python records a list of responses per call. Recordings shared with it
+  // carry this instead of the singular llmResponse above.
+  llmResponses?: LlmResponse[];
 }
 
 export interface ToolRecording {

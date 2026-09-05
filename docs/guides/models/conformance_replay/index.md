@@ -119,11 +119,12 @@ userMessageIndex 0. Expected 1, but got request at index 1
 
 ## Recording shape
 
-`ConformanceReplayModelConfig.recordings` accepts the `Recordings` type the
-conformance harness already produces. A recording may carry `llmResponses` (a
-list, as adk-python records it) or `llmResponse` (a single response, as adk-js
-records it); the list is preferred when both are present. A recording with no
-request is served without verification, because there is nothing to compare.
+`ConformanceReplayModelConfig.recordings` is the `Recordings` type from
+`dev/src/integration/test_types.ts`, which the conformance harness already
+produces. A recording may carry `llmResponses` (a list, as adk-python records
+it) or `llmResponse` (a single response, as adk-js records it); the list is
+preferred when both are present. A recording with no request is served without
+verification, because there is nothing to compare.
 
 ## Live calls
 

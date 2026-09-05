@@ -98,21 +98,19 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, (match) => `\\${match}`);
-}
-
 /**
  * The fenced payload of a relayed part, anchored at the end of the string.
+ *
+ * The markers are interpolated unescaped, which holds because they contain no
+ * regular-expression metacharacter. adk-python passes them through `re.escape`;
+ * that is a one-line call there and a hand-rolled helper here.
  *
  * The `s` flag makes `.` match a newline, so a multi-line payload reduces
  * whole. There is deliberately no `m` flag: with it, `$` would match at every
  * line break and the anchor would stop meaning end-of-string.
  */
 const QUOTED_CONTENT_PATTERN = new RegExp(
-  `:\\n${escapeRegExp(QUOTED_CONTENT_BEGIN)}\\n(.*)\\n${escapeRegExp(
-    QUOTED_CONTENT_END,
-  )}$`,
+  `:\\n${QUOTED_CONTENT_BEGIN}\\n(.*)\\n${QUOTED_CONTENT_END}$`,
   's',
 );
 
