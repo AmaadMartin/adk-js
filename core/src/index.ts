@@ -121,6 +121,10 @@ export type {
 // The Application Integration clients reach 'google-auth-library' through
 // ApiTransport, which is Node only, so they are exported here and not from the
 // browser barrel 'common.ts'.
+export {
+  SqliteSpanExporter,
+  type SqliteSpanExporterOptions,
+} from './telemetry/sqlite_span_exporter.js';
 export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
 export type {
   ActionSchema,
