@@ -23,7 +23,7 @@ export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
 /**
  * The size of a screen, in pixels.
  *
- * {@link ComputerUseTool} takes the screen size in this named form.
+ * `ComputerUseTool` takes the screen size in this named form.
  * {@link BaseComputer.screenSize} reports the same pair as a
  * `[width, height]` tuple, which is the shape adk-python returns.
  */
