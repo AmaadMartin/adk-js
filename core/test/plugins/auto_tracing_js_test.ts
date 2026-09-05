@@ -11,11 +11,15 @@
  */
 
 import {trace} from '@opentelemetry/api';
+import {BasicTracerProvider} from '@opentelemetry/sdk-trace-base';
 import {afterAll, beforeEach, describe, expect, it} from 'vitest';
 
 import {AutoTracingPlugin} from '@google/adk';
 
-import {safeRepr} from '../../src/plugins/auto_tracing_helpers.js';
+import {
+  buildTracingWrapper,
+  safeRepr,
+} from '../../src/plugins/auto_tracing_helpers.js';
 
 import {
   CAPS,
@@ -280,6 +284,31 @@ describe('AutoTracingPlugin on JavaScript shapes', () => {
     // Each outer call is traced exactly once; no re-entrant call adds a span.
     expect(spanNames().filter((name) => name === 'hot')).toEqual(['hot']);
     expect(spanNames().filter((name) => name === 'hotGen')).toEqual(['hotGen']);
+  });
+
+  it('probes a tracer once however many functions it wraps', async () => {
+    // A probe opens a real span, so it runs the caller's sampler and every
+    // registered processor's onStart. That has to cost one span per tracer,
+    // not one per wrapped function.
+    const probeProvider = new BasicTracerProvider();
+    const probeTracer = probeProvider.getTracer('probe-count');
+    const realStartSpan = probeTracer.startSpan.bind(probeTracer);
+    const probes: string[] = [];
+    probeTracer.startSpan = (...args: Parameters<typeof realStartSpan>) => {
+      probes.push(args[0]);
+      return realStartSpan(...args);
+    };
+
+    for (let index = 0; index < 20; index++) {
+      buildTracingWrapper({
+        fn: () => index,
+        tracer: probeTracer,
+        caps: CAPS,
+      });
+    }
+    await probeProvider.shutdown();
+
+    expect(probes).toEqual(['adk.auto_tracing.probe']);
   });
 
   it('keeps a nested call under the span of the function that made it', async () => {
