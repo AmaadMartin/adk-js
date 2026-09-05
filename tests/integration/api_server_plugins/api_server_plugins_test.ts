@@ -4,7 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BasePlugin, InvocationContext} from '@google/adk';
+/**
+ * Drives `plugins.yaml` with no mocks at all: a real agent directory, a real
+ * `plugins.yaml`, the real `AgentLoader`, a real listener and real HTTP.
+ *
+ * `@google/adk` does not export `BigQueryAgentAnalyticsPlugin` on this branch,
+ * so the honest end-to-end outcome is the documented degradation — the server
+ * reads the file, reaches the import, names the export it wanted, and serves
+ * the app anyway. Construction of the plugin itself is covered by
+ * `dev/test/server/plugins_config_bigquery_export_test.ts`.
+ */
+
+import {Logger, LogLevel} from '@google/adk';
 import {AdkApiServer} from '@google/adk-devtools';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -16,35 +27,21 @@ const APP_NAME = 'bq_app';
 const USER_ID = 'integration_user';
 const SESSION_ID = 'integration_session';
 
-interface AnalyticsPluginOptions {
-  projectId: string;
-  datasetId: string;
-  tableId?: string;
-  location: string;
-}
+class CapturingLogger implements Logger {
+  readonly warnMessages: string[] = [];
 
-/**
- * Stands in for `BigQueryAgentAnalyticsPlugin`, which `@google/adk` does not
- * export on this branch. Everything else here is real: a real agent directory,
- * a real `plugins.yaml`, a real listener and real HTTP requests.
- */
-class AnalyticsProbePlugin extends BasePlugin {
-  readonly invocationIds: string[] = [];
-
-  constructor(readonly options: AnalyticsPluginOptions) {
-    super('bigquery_agent_analytics');
+  log(_level: LogLevel, ..._args: unknown[]): void {}
+  debug(..._args: unknown[]): void {}
+  info(..._args: unknown[]): void {}
+  warn(...args: unknown[]): void {
+    this.warnMessages.push(args.join(' '));
   }
-
-  override async beforeRunCallback(params: {
-    invocationContext: InvocationContext;
-  }): Promise<undefined> {
-    this.invocationIds.push(params.invocationContext.invocationId);
-    return undefined;
-  }
+  error(..._args: unknown[]): void {}
+  setLogLevel(_level: LogLevel): void {}
 }
 
 describe('API server plugins.yaml', () => {
-  const built: AnalyticsProbePlugin[] = [];
+  const logger = new CapturingLogger();
   let server: AdkApiServer;
   let url: string;
 
@@ -52,11 +49,7 @@ describe('API server plugins.yaml', () => {
     server = new AdkApiServer({
       agentsDir: path.resolve(__dirname),
       port: 0,
-      bigQueryAnalyticsPluginFactory: async (options) => {
-        const plugin = new AnalyticsProbePlugin(options);
-        built.push(plugin);
-        return plugin;
-      },
+      logger,
     });
     await server.start();
     url = server.url;
@@ -66,7 +59,7 @@ describe('API server plugins.yaml', () => {
     await server.stop();
   });
 
-  it('attaches the plugin an app declares on disk to its runner', async () => {
+  it('reads the plugins.yaml an app declares on disk and still serves it', async () => {
     const created = await fetch(
       `${url}/apps/${APP_NAME}/users/${USER_ID}/sessions/${SESSION_ID}`,
       {method: 'POST', headers: {'Content-Type': 'application/json'}},
@@ -85,13 +78,11 @@ describe('API server plugins.yaml', () => {
     });
 
     expect(run.status).toBe(200);
-    expect(built).toHaveLength(1);
-    expect(built[0].options).toEqual({
-      projectId: 'fixture-project',
-      datasetId: 'fixture_dataset',
-      tableId: 'fixture_events',
-      location: 'US',
-    });
-    expect(built[0].invocationIds).toHaveLength(1);
+    // The block on disk is complete, so the loader got past both guards and
+    // reached the import. An absent or incomplete file logs nothing here.
+    expect(logger.warnMessages).toEqual([
+      'Not attaching the BigQuery agent analytics plugin: the installed ' +
+        '@google/adk does not export BigQueryAgentAnalyticsPlugin.',
+    ]);
   });
 });

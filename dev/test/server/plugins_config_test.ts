@@ -4,20 +4,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BasePlugin} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {
-  BigQueryAnalyticsPluginOptions,
-  createBigQueryAnalyticsPlugin,
   loadBigQueryAnalyticsPlugin,
-  readPluginsYaml,
+  readBigQueryAnalyticsYaml,
   toBigQueryAnalyticsOptions,
 } from '../../src/server/plugins_config.js';
 import {CapturingLogger} from './capturing_logger.js';
+
+/**
+ * Budget (ms) for a test whose first `await import('@google/adk')` evaluates
+ * the whole package. Well above the ~5s it costs on a developer machine,
+ * because CI adds v8 coverage instrumentation on slower runners.
+ */
+const PACKAGE_IMPORT_TIMEOUT_MS = 120_000;
 
 const APP_NAME = 'bq_app';
 
@@ -27,12 +31,6 @@ const COMPLETE_PLUGINS_YAML = `bigquery_agent_analytics:
   table_id: test-table
   dataset_location: US
 `;
-
-class RecordingPlugin extends BasePlugin {
-  constructor(readonly options: BigQueryAnalyticsPluginOptions) {
-    super('recording_plugin');
-  }
-}
 
 describe('plugins.yaml configuration', () => {
   let agentsDir: string;
@@ -55,10 +53,10 @@ describe('plugins.yaml configuration', () => {
     );
   }
 
-  describe('readPluginsYaml', () => {
+  describe('readBigQueryAnalyticsYaml', () => {
     it('returns undefined when the app has no plugins.yaml', async () => {
       expect(
-        await readPluginsYaml(agentsDir, APP_NAME, logger),
+        await readBigQueryAnalyticsYaml(agentsDir, APP_NAME, logger),
       ).toBeUndefined();
       expect(logger.warnMessages).toEqual([]);
     });
@@ -66,13 +64,13 @@ describe('plugins.yaml configuration', () => {
     it('reads every key of the bigquery_agent_analytics block', async () => {
       await writePluginsYaml(COMPLETE_PLUGINS_YAML);
 
-      expect(await readPluginsYaml(agentsDir, APP_NAME, logger)).toEqual({
-        bigquery_agent_analytics: {
-          project_id: 'test-project',
-          dataset_id: 'test-dataset',
-          table_id: 'test-table',
-          dataset_location: 'US',
-        },
+      expect(
+        await readBigQueryAnalyticsYaml(agentsDir, APP_NAME, logger),
+      ).toEqual({
+        project_id: 'test-project',
+        dataset_id: 'test-dataset',
+        table_id: 'test-table',
+        dataset_location: 'US',
       });
     });
 
@@ -81,39 +79,45 @@ describe('plugins.yaml configuration', () => {
         'bigquery_agent_analytics:\n  project_id: 42\n  dataset_id: ""\n',
       );
 
-      expect(await readPluginsYaml(agentsDir, APP_NAME, logger)).toEqual({
-        bigquery_agent_analytics: {
-          project_id: undefined,
-          dataset_id: undefined,
-          table_id: undefined,
-          dataset_location: undefined,
-        },
+      expect(
+        await readBigQueryAnalyticsYaml(agentsDir, APP_NAME, logger),
+      ).toEqual({
+        project_id: undefined,
+        dataset_id: undefined,
+        table_id: undefined,
+        dataset_location: undefined,
       });
     });
 
     it('ignores keys other than bigquery_agent_analytics', async () => {
       await writePluginsYaml('some_other_plugin:\n  enabled: true\n');
 
-      expect(await readPluginsYaml(agentsDir, APP_NAME, logger)).toEqual({});
+      expect(
+        await readBigQueryAnalyticsYaml(agentsDir, APP_NAME, logger),
+      ).toBeUndefined();
     });
 
     it('treats a block that is not a mapping as absent', async () => {
       await writePluginsYaml('bigquery_agent_analytics: [1, 2]\n');
 
-      expect(await readPluginsYaml(agentsDir, APP_NAME, logger)).toEqual({});
+      expect(
+        await readBigQueryAnalyticsYaml(agentsDir, APP_NAME, logger),
+      ).toBeUndefined();
     });
 
     it('treats a file that is not a mapping as absent', async () => {
       await writePluginsYaml('- just\n- a\n- list\n');
 
-      expect(await readPluginsYaml(agentsDir, APP_NAME, logger)).toEqual({});
+      expect(
+        await readBigQueryAnalyticsYaml(agentsDir, APP_NAME, logger),
+      ).toBeUndefined();
     });
 
     it('warns and returns undefined when the YAML does not parse', async () => {
       await writePluginsYaml('bigquery_agent_analytics: [unterminated\n');
 
       expect(
-        await readPluginsYaml(agentsDir, APP_NAME, logger),
+        await readBigQueryAnalyticsYaml(agentsDir, APP_NAME, logger),
       ).toBeUndefined();
       expect(logger.warnMessages).toHaveLength(1);
       expect(logger.warnMessages[0]).toContain('plugins.yaml');
@@ -188,95 +192,43 @@ describe('plugins.yaml configuration', () => {
   });
 
   describe('loadBigQueryAnalyticsPlugin', () => {
-    it('builds the plugin from a complete plugins.yaml', async () => {
-      await writePluginsYaml(COMPLETE_PLUGINS_YAML);
-      const seen: BigQueryAnalyticsPluginOptions[] = [];
+    it(
+      'warns and builds nothing when @google/adk omits the export',
+      async () => {
+        await writePluginsYaml(COMPLETE_PLUGINS_YAML);
 
-      const plugin = await loadBigQueryAnalyticsPlugin(
-        agentsDir,
-        APP_NAME,
-        async (options) => {
-          seen.push(options);
-          return new RecordingPlugin(options);
-        },
-        logger,
-      );
+        const plugin = await loadBigQueryAnalyticsPlugin(
+          agentsDir,
+          APP_NAME,
+          logger,
+        );
 
-      expect(plugin).toBeInstanceOf(RecordingPlugin);
-      expect(seen).toEqual([
-        {
-          projectId: 'test-project',
-          datasetId: 'test-dataset',
-          tableId: 'test-table',
-          location: 'US',
-        },
-      ]);
+        expect(plugin).toBeUndefined();
+        expect(logger.warnMessages).toHaveLength(1);
+        expect(logger.warnMessages[0]).toContain(
+          'BigQueryAgentAnalyticsPlugin',
+        );
+      },
+      PACKAGE_IMPORT_TIMEOUT_MS,
+    );
+
+    it('does not reach the import when plugins.yaml is absent', async () => {
+      expect(
+        await loadBigQueryAnalyticsPlugin(agentsDir, APP_NAME, logger),
+      ).toBeUndefined();
+      expect(logger.warnMessages).toEqual([]);
     });
 
-    it('does not call the factory when plugins.yaml is absent', async () => {
-      let called = false;
-
-      const plugin = await loadBigQueryAnalyticsPlugin(
-        agentsDir,
-        APP_NAME,
-        async () => {
-          called = true;
-          return undefined;
-        },
-        logger,
-      );
-
-      expect(plugin).toBeUndefined();
-      expect(called).toBe(false);
-    });
-
-    it('does not call the factory when the block is incomplete', async () => {
+    it('does not reach the import when the block is incomplete', async () => {
       await writePluginsYaml(
         'bigquery_agent_analytics:\n  project_id: test-project\n',
       );
-      let called = false;
 
-      const plugin = await loadBigQueryAnalyticsPlugin(
-        agentsDir,
-        APP_NAME,
-        async () => {
-          called = true;
-          return undefined;
-        },
-        logger,
-      );
-
-      expect(plugin).toBeUndefined();
-      expect(called).toBe(false);
-    });
-
-    it('returns undefined when the factory declines to build a plugin', async () => {
-      await writePluginsYaml(COMPLETE_PLUGINS_YAML);
-
-      const plugin = await loadBigQueryAnalyticsPlugin(
-        agentsDir,
-        APP_NAME,
-        async () => undefined,
-        logger,
-      );
-
-      expect(plugin).toBeUndefined();
-    });
-  });
-
-  describe('createBigQueryAnalyticsPlugin', () => {
-    it('warns and builds nothing when @google/adk omits the export', async () => {
-      const factory = createBigQueryAnalyticsPlugin(logger);
-
-      const plugin = await factory({
-        projectId: 'test-project',
-        datasetId: 'test-dataset',
-        location: 'US',
-      });
-
-      expect(plugin).toBeUndefined();
-      expect(logger.warnMessages).toHaveLength(1);
-      expect(logger.warnMessages[0]).toContain('BigQueryAgentAnalyticsPlugin');
+      expect(
+        await loadBigQueryAnalyticsPlugin(agentsDir, APP_NAME, logger),
+      ).toBeUndefined();
+      expect(logger.warnMessages).toEqual([]);
+      expect(logger.debugMessages[0]).toContain('dataset_id');
     });
   });
 });
