@@ -45,6 +45,8 @@ interface RecordingToolOptions {
   artifacts?: Record<string, number>;
   /** The tool's return value; omitted means the tool returns nothing. */
   returns?: unknown;
+  /** When set, the tool throws with this message instead of returning. */
+  throws?: string;
 }
 
 /** A tool that records what it is told to and returns `options.returns`. */
@@ -70,6 +72,9 @@ class RecordingTool extends BaseTool {
       toolContext.actions.artifactDelta,
       this.options.artifacts ?? {},
     );
+    if (this.options.throws !== undefined) {
+      throw new Error(this.options.throws);
+    }
     return this.options.returns;
   }
 }
@@ -186,6 +191,17 @@ describe('ToolNode tools that return nothing', () => {
 
     expect(output).toEqual({result: 'x'});
   });
+
+  it('treats a thrown error as a response, not as an empty result', async () => {
+    const tool = new RecordingTool({name: 'boom', throws: 'tool exploded'});
+    const {events, output} = await driveNode(new ToolNode(tool));
+
+    expect(events).toHaveLength(1);
+    expect(getFunctionResponses(events[0])[0]?.response).toEqual({
+      error: 'tool exploded',
+    });
+    expect(output).toEqual({error: 'tool exploded'});
+  });
 });
 
 describe('ToolNode rerunOnResume', () => {
@@ -193,13 +209,26 @@ describe('ToolNode rerunOnResume', () => {
     expect(new ToolNode(new EchoTool()).rerunOnResume).toBe(false);
   });
 
-  it('stays false when a caller asks for a rerun', () => {
-    // `rerunOnResume` is not a ToolNodeConfig field, so this is the only way to
-    // ask for it. A tool call is not idempotent, so the request is ignored —
-    // adk-python `_tool_node.py` pins the same value.
+  // `rerunOnResume` is in OVERRIDABLE_KEYS, so all three routes below are
+  // supported calls and must agree. `cloneWithOverrides` applies the key after
+  // construction, so a constructor that pinned it last would leave the
+  // pre-wrapped form as the only one that worked.
+  it('honours an explicit override on the constructor', () => {
+    expect(
+      new ToolNode(new EchoTool(), {rerunOnResume: true}).rerunOnResume,
+    ).toBe(true);
+  });
+
+  it('honours an explicit override through node()', () => {
     expect(node(new EchoTool(), {rerunOnResume: true}).rerunOnResume).toBe(
-      false,
+      true,
     );
+  });
+
+  it('honours an explicit override on an already-built ToolNode', () => {
+    expect(
+      node(new ToolNode(new EchoTool()), {rerunOnResume: true}).rerunOnResume,
+    ).toBe(true);
   });
 });
 

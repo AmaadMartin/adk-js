@@ -6,16 +6,14 @@
 
 import type {FunctionCall} from '@google/genai';
 import {handleFunctionCallList} from '../../agents/functions.js';
-import {createEvent, Event, getFunctionResponses} from '../../events/event.js';
+import {Event, getFunctionResponses} from '../../events/event.js';
 import {isDefaultEventActions} from '../../events/event_actions.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 
 /** Options for a {@link ToolNode}. */
-export interface ToolNodeConfig extends Partial<
-  Omit<BaseNodeConfig, 'name' | 'rerunOnResume'>
-> {
+export interface ToolNodeConfig extends Partial<Omit<BaseNodeConfig, 'name'>> {
   /** Optional name override; defaults to the tool's name. */
   name?: string;
 }
@@ -45,11 +43,17 @@ export class ToolNode extends BaseNode {
   readonly tool: BaseTool;
 
   constructor(tool: BaseTool, config: ToolNodeConfig = {}) {
-    // Spread first so an explicit `undefined` name in `config` can't clobber
-    // the fallback (which BaseNode requires to be non-empty). `rerunOnResume`
-    // is pinned after it: a tool call is not idempotent, so a resumed workflow
-    // must not re-fire it (adk-python `_tool_node.py` pins it the same way).
-    super({...config, name: config.name ?? tool.name, rerunOnResume: false});
+    super({
+      // adk-python's `_ToolNode` pins `rerun_on_resume=False`: a tool call is a
+      // side effect, so resuming a workflow must not run it a second time. It
+      // precedes the spread because `rerunOnResume` is in `OVERRIDABLE_KEYS`,
+      // so a caller that asks for a rerun still gets one.
+      rerunOnResume: false,
+      // Spread before `name` so an explicit `undefined` name in `config` can't
+      // clobber the fallback (which BaseNode requires to be non-empty).
+      ...config,
+      name: config.name ?? tool.name,
+    });
     this.tool = tool;
   }
 
@@ -102,12 +106,10 @@ export class ToolNode extends BaseNode {
     // No response: match adk-python `_tool_node`, which yields a state-only
     // event or nothing rather than an output the successor node would read.
     if (!isDefaultEventActions(responseEvent.actions)) {
-      yield createEvent({
-        author: this.name,
-        invocationId: ctx.invocationId,
-        branch: ctx.branch,
-        actions: responseEvent.actions,
-      });
+      // Drop the `{result: <nullish>}` part so the event carries only what the
+      // tool recorded. A deferred long-running response has no content already.
+      responseEvent.content = undefined;
+      yield responseEvent;
     }
   }
 }
@@ -121,7 +123,7 @@ export class ToolNode extends BaseNode {
  */
 function toolResponse(event: Event): Record<string, unknown> | undefined {
   const response = getFunctionResponses(event)[0]?.response;
-  if (!response) {
+  if (response == null) {
     return undefined;
   }
   const keys = Object.keys(response);
