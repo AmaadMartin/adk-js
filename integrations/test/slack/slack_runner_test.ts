@@ -285,6 +285,19 @@ describe('SlackRunner', () => {
       });
     });
 
+    it('propagates the failure when the placeholder post fails', async () => {
+      slack.failures.set('chat.postMessage', 'channel_not_found');
+
+      await expect(slack.deliver(appMention())).rejects.toThrow(
+        'channel_not_found',
+      );
+
+      // The placeholder post and the error report both went out and both
+      // failed, so Bolt's listener error path sees the second rejection.
+      expect(slack.argsFor('chat.postMessage')).toHaveLength(2);
+      expect(slack.argsFor('chat.update')).toEqual([]);
+    });
+
     it('stringifies a thrown value that is not an Error', async () => {
       runner.failure = 'plain failure';
 
