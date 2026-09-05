@@ -16,7 +16,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
   connectionMap,
-  createToolContext,
   declaredTool,
   stubRegistryWithText,
   undeclaredTool,
@@ -36,7 +35,6 @@ function mock(
   return strategy.mock({
     tool,
     args: {},
-    toolContext: createToolContext(),
     toolConnectionMap,
     stateStore,
   });

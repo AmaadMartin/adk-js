@@ -144,11 +144,11 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
       };
     }
 
-    const responseText = await generateJsonText({
-      llm: (this.llm ??= LLMRegistry.newLlm(this.llmName)),
-      config: this.llmConfig,
-      prompt: buildToolSpecMockPrompt(request, declaration),
-    });
+    const responseText = await generateJsonText(
+      (this.llm ??= LLMRegistry.newLlm(this.llmName)),
+      this.llmConfig,
+      buildToolSpecMockPrompt(request, declaration),
+    );
 
     const parsed = parseFencedJson(responseText);
     if (parsed === undefined) {

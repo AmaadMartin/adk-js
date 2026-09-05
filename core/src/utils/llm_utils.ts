@@ -15,16 +15,6 @@ import {GenerateContentConfig} from '@google/genai';
 import {BaseLlm} from '../models/base_llm.js';
 import {LlmRequest} from '../models/llm_request.js';
 
-/** Parameters for {@link generateJsonText}. */
-export interface GenerateJsonTextParams {
-  /** The model to send the prompt to. */
-  llm: BaseLlm;
-  /** The generation config to send, merged with a JSON response mime type. */
-  config: GenerateContentConfig;
-  /** The single user prompt to send. */
-  prompt: string;
-}
-
 /** Matches an opening markdown code fence, with an optional language tag. */
 const LEADING_CODE_FENCE = /^```[a-zA-Z]*\n/;
 
@@ -35,14 +25,16 @@ const TRAILING_CODE_FENCE = /\n```\n?$/;
  * Sends `prompt` as a single user turn asking for JSON, and concatenates the
  * text of every part of every streamed response.
  *
- * @param params The model, generation config and prompt.
+ * @param llm The model to send the prompt to.
+ * @param config The generation config, merged with a JSON response mime type.
+ * @param prompt The single user prompt to send.
  * @returns The concatenated response text.
  */
-export async function generateJsonText({
-  llm,
-  config,
-  prompt,
-}: GenerateJsonTextParams): Promise<string> {
+export async function generateJsonText(
+  llm: BaseLlm,
+  config: GenerateContentConfig,
+  prompt: string,
+): Promise<string> {
   const request: LlmRequest = {
     model: llm.model,
     contents: [{role: 'user', parts: [{text: prompt}]}],

@@ -10,13 +10,9 @@ import {
   BaseLlm,
   BaseLlmConnection,
   BaseTool,
-  Context,
-  createSession,
-  InvocationContext,
   LLMRegistry,
   LlmRequest,
   LlmResponse,
-  PluginManager,
   RunAsyncToolRequest,
   StatefulParameter,
   ToolConnectionMap,
@@ -100,17 +96,6 @@ export function declaredTool(name: string): BaseTool {
 /** A tool with no declaration to simulate against. */
 export function undeclaredTool(name: string): BaseTool {
   return new StubTool(name);
-}
-
-/** Builds the tool-call context of an invocation. */
-export function createToolContext(): Context {
-  return new Context({
-    invocationContext: new InvocationContext({
-      invocationId: 'test-invocation',
-      session: createSession({id: 'test-session', appName: 'test-app'}),
-      pluginManager: new PluginManager(),
-    }),
-  });
 }
 
 /** A connection map holding a single stateful parameter. */

@@ -21,7 +21,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
   connectionMap,
-  createToolContext,
   declaredTool,
   promptOf,
   RecordingLlm,
@@ -46,7 +45,6 @@ function mock(
   return strategy.mock({
     tool: options.tool ?? declaredTool('create_ticket'),
     args: options.args ?? {},
-    toolContext: createToolContext(),
     stateStore: options.stateStore ?? {},
     toolConnectionMap: options.toolConnectionMap,
     environmentData: options.environmentData,

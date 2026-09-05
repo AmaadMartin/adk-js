@@ -291,10 +291,7 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
-export {
-  BaseMockStrategy,
-  TracingMockStrategy,
-} from './tools/environment_simulation/strategies/base.js';
+export {BaseMockStrategy} from './tools/environment_simulation/strategies/base.js';
 export type {MockRequest} from './tools/environment_simulation/strategies/base.js';
 export {ToolSpecMockStrategy} from './tools/environment_simulation/strategies/tool_spec_mock_strategy.js';
 export type {

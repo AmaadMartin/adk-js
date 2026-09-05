@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../../../agents/context.js';
 import {BaseTool} from '../../base_tool.js';
 import {ToolConnectionMap} from '../tool_connection_map.js';
 
@@ -14,8 +13,6 @@ export interface MockRequest {
   tool: BaseTool;
   /** The arguments the model called the tool with. */
   args: Record<string, unknown>;
-  /** The context of the tool call. */
-  toolContext: Context;
   /** The stateful connections between the agent's tools, when analyzed. */
   toolConnectionMap?: ToolConnectionMap;
   /**
@@ -40,11 +37,4 @@ export abstract class BaseMockStrategy {
    * @returns The simulated tool response, handed back to the model as-is.
    */
   abstract mock(request: MockRequest): Promise<Record<string, unknown>>;
-}
-
-/** A placeholder strategy for tracing-based mocking, which is not built yet. */
-export class TracingMockStrategy extends BaseMockStrategy {
-  async mock(_request: MockRequest): Promise<Record<string, unknown>> {
-    return {status: 'error', error_message: 'Not implemented'};
-  }
 }

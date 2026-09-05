@@ -40,11 +40,7 @@ describe('generateJsonText', () => {
       {content: {role: 'model', parts: [{text: ' "b": 2}'}]}},
     ]);
 
-    const text = await generateJsonText({
-      llm,
-      config: {},
-      prompt: 'give me json',
-    });
+    const text = await generateJsonText(llm, {}, 'give me json');
 
     expect(text).toBe('{"a": 1, "b": 2}');
   });
@@ -55,11 +51,7 @@ describe('generateJsonText', () => {
       {content: {role: 'model', parts: [{text: '{}'}]}},
     ]);
 
-    const text = await generateJsonText({
-      llm,
-      config: {},
-      prompt: 'give me json',
-    });
+    const text = await generateJsonText(llm, {}, 'give me json');
 
     expect(text).toBe('{}');
   });
@@ -77,11 +69,7 @@ describe('generateJsonText', () => {
       },
     ]);
 
-    const text = await generateJsonText({
-      llm,
-      config: {},
-      prompt: 'give me json',
-    });
+    const text = await generateJsonText(llm, {}, 'give me json');
 
     expect(text).toBe('{}');
   });
@@ -89,11 +77,7 @@ describe('generateJsonText', () => {
   it("sends one user turn, the model's own name and a JSON response type", async () => {
     const llm = new ReplayLlm([]);
 
-    await generateJsonText({
-      llm,
-      config: {temperature: 0.2},
-      prompt: 'give me json',
-    });
+    await generateJsonText(llm, {temperature: 0.2}, 'give me json');
 
     expect(llm.request?.model).toBe('replay-llm');
     expect(llm.request?.contents).toEqual([
