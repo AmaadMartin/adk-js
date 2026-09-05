@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Tool} from '@google/genai';
+import {
+  FunctionDeclaration,
+  FunctionResponseScheduling,
+  Tool,
+} from '@google/genai';
 
 import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
@@ -34,6 +38,13 @@ export interface BaseToolParams {
   name: string;
   description: string;
   isLongRunning?: boolean;
+  /**
+   * When the Live API should apply this tool's response. Set it for a tool
+   * whose response arrives asynchronously; the live flow then declares the
+   * tool `NON_BLOCKING`, which is the only behavior the Live API accepts for
+   * an asynchronous response.
+   */
+  responseScheduling?: FunctionResponseScheduling;
 }
 
 /**
@@ -87,6 +98,12 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * When the Live API should apply this tool's response, or `undefined` when
+   * the tool answers synchronously. See {@link BaseToolParams.responseScheduling}.
+   */
+  readonly responseScheduling?: FunctionResponseScheduling;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
@@ -95,6 +112,16 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
+    this.responseScheduling = params.responseScheduling;
+  }
+
+  /**
+   * Whether this tool streams its results instead of returning a single
+   * response. A streaming tool answers the Live API asynchronously, so the
+   * live flow declares it `NON_BLOCKING`.
+   */
+  get isStreaming(): boolean {
+    return false;
   }
 
   /**

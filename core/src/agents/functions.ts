@@ -8,6 +8,7 @@ import {Content, createUserContent, FunctionCall, Part} from '@google/genai';
 import {isEmpty} from 'lodash-es';
 
 import {InvocationContext} from '../agents/invocation_context.js';
+import {AuthConfig} from '../auth/auth_tool.js';
 import {
   createEvent,
   Event,
@@ -111,11 +112,55 @@ export function generateAuthEvent(
   ) {
     return undefined;
   }
+
+  return buildAuthRequestEvent(
+    invocationContext,
+    functionResponseEvent.actions.requestedAuthConfigs,
+    {role: functionResponseEvent.content?.role ?? 'user'},
+  );
+}
+
+/**
+ * Options for {@link buildAuthRequestEvent}.
+ */
+export interface BuildAuthRequestEventOptions {
+  /** The event author. Defaults to the agent driving the invocation. */
+  author?: string;
+  /** The content role. Left unset by default. */
+  role?: string;
+}
+
+/**
+ * Builds one event carrying an `adk_request_credential` function call per
+ * distinct auth request.
+ *
+ * Shared by tool-level auth, where a tool asks for a credential while it runs,
+ * and by toolset-level auth, which asks before tool listing. Requests that
+ * share a credential key collapse to a single call, because answering one
+ * answers them all; requests with no key are all kept.
+ *
+ * @param invocationContext The current invocation context.
+ * @param authRequests The auth configs to request, by function call id.
+ * @param options Overrides for the event author and the content role.
+ * @return The event to yield to the client.
+ */
+export function buildAuthRequestEvent(
+  invocationContext: InvocationContext,
+  authRequests: Record<string, AuthConfig>,
+  options: BuildAuthRequestEventOptions = {},
+): Event {
   const parts: Part[] = [];
   const longRunningToolIds = new Set<string>();
-  for (const [functionCallId, authConfig] of Object.entries(
-    functionResponseEvent.actions.requestedAuthConfigs,
-  )) {
+  const seenKeys = new Set<string>();
+
+  for (const [functionCallId, authConfig] of Object.entries(authRequests)) {
+    const key = authConfig.credentialKey;
+    if (key) {
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+    }
     const requestCredentialFunctionCall: FunctionCall = {
       name: REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
       args: {
@@ -130,11 +175,11 @@ export function generateAuthEvent(
 
   return createEvent({
     invocationId: invocationContext.invocationId,
-    author: toolEventAuthor(invocationContext),
+    author: options.author ?? toolEventAuthor(invocationContext),
     branch: invocationContext.branch,
     content: {
-      parts: parts,
-      role: functionResponseEvent.content?.role ?? 'user',
+      parts,
+      role: options.role,
     },
     longRunningToolIds: Array.from(longRunningToolIds),
   });

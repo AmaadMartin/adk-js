@@ -531,9 +531,11 @@ describe('Runner.runLive', () => {
     expect(
       llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption?.handle,
     ).toBe('handle-1');
+    // `transparent` is Vertex AI only, and this fake model is not a Gemini.
+    // llm_agent_live_connect_config_test.ts pins the flag per backend.
     expect(
       llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption?.transparent,
-    ).toBe(true);
+    ).toBeUndefined();
     // First connect had no resumption handle set.
     expect(
       llm.llmRequestsSeen[0].liveConnectConfig?.sessionResumption?.handle,
