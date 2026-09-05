@@ -1240,11 +1240,9 @@ function hookKinds(config: AntigravityAgentConfig): string[] {
 /** The ACTIVE step the harness fabricates when it asks us to run a tool. */
 function clientToolActiveStep(): AntigravityStep {
   return {
-    id: 'call_3',
     stepIndex: 1,
     type: 'TOOL_CALL',
     source: 'MODEL',
-    target: 'TARGET_ENVIRONMENT',
     status: 'ACTIVE',
     toolCalls: [{name: 'reviewer', args: {request: 'go'}, id: 'call_3'}],
   };
@@ -1256,7 +1254,6 @@ function clientToolDoneStep(): AntigravityStep {
     stepIndex: 1,
     type: 'TOOL_CALL',
     source: 'MODEL',
-    target: 'TARGET_ENVIRONMENT',
     status: 'DONE',
     content: 'Calling custom tool "reviewer"',
     toolCalls: [],

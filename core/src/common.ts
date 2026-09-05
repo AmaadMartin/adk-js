@@ -215,7 +215,6 @@ export type {
   AntigravityStep,
   AntigravityStepSource,
   AntigravityStepStatus,
-  AntigravityStepTarget,
   AntigravityStepType,
   AntigravityTool,
   AntigravityToolCall,
