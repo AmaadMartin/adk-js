@@ -1062,6 +1062,9 @@ export type {
   ToolSimulationConfig,
   ToolSimulationConfigParams,
 } from './tools/environment_simulation/environment_simulation_config.js';
+export {EnvironmentSimulationEngine} from './tools/environment_simulation/environment_simulation_engine.js';
+export {EnvironmentSimulationFactory} from './tools/environment_simulation/environment_simulation_factory.js';
+export {EnvironmentSimulationPlugin} from './tools/environment_simulation/environment_simulation_plugin.js';
 export {
   createStatefulParameter,
   createToolConnectionMap,
