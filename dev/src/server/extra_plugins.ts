@@ -7,17 +7,7 @@
 import {BasePlugin, Logger} from '@google/adk';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
-
-/**
- * Callbacks every plugin carries. They stand in for an `instanceof
- * BasePlugin` check, which an operator's plugin module can fail when it
- * resolves its own copy of `@google/adk`.
- */
-const PLUGIN_CALLBACKS = [
-  'beforeRunCallback',
-  'afterRunCallback',
-  'onEventCallback',
-] as const;
+import {isRecord} from '../utils/object_utils.js';
 
 /** A plugin class, constructed with the qualified name it was named by. */
 type PluginConstructor = new (name: string) => BasePlugin;
@@ -100,11 +90,14 @@ function readExport(module: unknown, exportName: string): unknown {
   return module[exportName];
 }
 
+/**
+ * Stands in for an `instanceof BasePlugin` check, which an operator's plugin
+ * module can fail when it resolves its own copy of `@google/adk`. Every
+ * plugin inherits `beforeRunCallback` from `BasePlugin`, alongside the rest of
+ * the callbacks it declares.
+ */
 function hasPluginCallbacks(value: unknown): value is Record<string, unknown> {
-  return (
-    isRecord(value) &&
-    PLUGIN_CALLBACKS.every((callback) => typeof value[callback] === 'function')
-  );
+  return isRecord(value) && typeof value['beforeRunCallback'] === 'function';
 }
 
 function isPlugin(value: unknown): value is BasePlugin {
@@ -113,8 +106,4 @@ function isPlugin(value: unknown): value is BasePlugin {
 
 function isPluginConstructor(value: unknown): value is PluginConstructor {
   return typeof value === 'function' && hasPluginCallbacks(value.prototype);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }

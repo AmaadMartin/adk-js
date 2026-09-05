@@ -7,6 +7,7 @@
 import {Logger} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import {isRecord} from '../utils/object_utils.js';
 import {readTelemetryConsent} from '../utils/telemetry_config.js';
 
 /**
@@ -134,8 +135,4 @@ function parseJson(contents: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

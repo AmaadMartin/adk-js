@@ -11,7 +11,7 @@ import {
   LlmAgent,
   RunnableRoot,
 } from '@google/adk';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {ServerAgentLoader} from '../../src/server/adk_api_server.js';
 
 /** An agent that answers without reaching a model. */
 export class StubAgent extends LlmAgent {
@@ -28,13 +28,13 @@ export class StubAgent extends LlmAgent {
 }
 
 /**
- * Builds an {@link AgentLoader} that serves one agent under one app name, so a
- * test can start a real server without an agents directory on disk.
+ * Builds a loader that serves one agent under one app name, so a test can
+ * start a real server without an agents directory on disk.
  */
 export function createStubAgentLoader(
   appName: string,
   agent: RunnableRoot = new StubAgent({name: 'stubAgent'}),
-): AgentLoader {
+): ServerAgentLoader {
   return {
     listAgents: () => Promise.resolve([appName]),
     getAgentFile: () =>
@@ -42,10 +42,7 @@ export function createStubAgentLoader(
         load: () => Promise.resolve(agent),
         async [Symbol.asyncDispose](): Promise<void> {},
       }),
-    // AgentLoader is a concrete class and AgentFile holds private state that
-    // only a real file on disk can fill, so the double is shaped by hand. Same
-    // cast as the harness in adk_api_server_test.ts.
-  } as unknown as AgentLoader;
+  };
 }
 
 /** The status and parsed JSON body of one request. */
