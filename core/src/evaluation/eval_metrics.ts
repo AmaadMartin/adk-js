@@ -542,9 +542,9 @@ const toolTrajectoryCriterionModel: EvalModel<ParsedToolTrajectoryCriterion> =
  * A function that validates a criterion read from a config file, and applies
  * its defaults.
  *
- * {@link LlmAsJudge} takes one of these so that it can name the criterion type
- * its metric expects when the criterion does not fit. It is the callable form
- * of {@link CriterionType}, which an evaluator class declares instead.
+ * `LlmAsJudge` takes one of these so that it can name the criterion type its
+ * metric expects when the criterion does not fit. It is the callable form of
+ * `CriterionType`, which an evaluator class declares instead.
  */
 export interface CriterionParser<CriterionT extends BaseCriterion> {
   (raw: unknown): CriterionT;

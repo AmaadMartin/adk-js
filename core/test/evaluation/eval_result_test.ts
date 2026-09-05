@@ -10,7 +10,14 @@
  * so the tests pin the on-disk field names and the eval status integers.
  */
 
-import {Session} from '@google/adk';
+import {
+  InputValidationError,
+  Session,
+  createEvent,
+  createSession,
+  parseEvalCaseResult,
+  parseEvalSetResult,
+} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, expectTypeOf, it} from 'vitest';
 import {
@@ -217,9 +224,9 @@ describe('EvalCaseResult', () => {
   });
 
   // A compile-time claim: tsc fails this case, the runner cannot.
-  it('requires the overall metric results on every case result', () => {
+  it('leaves the overall metric results optional on a case result', () => {
     expectTypeOf<EvalCaseResult['overallEvalMetricResults']>().toEqualTypeOf<
-      EvalMetricResult[]
+      EvalMetricResult[] | undefined
     >();
   });
 });
@@ -256,5 +263,247 @@ describe('EvalSetResult', () => {
     expectTypeOf<EvalSetResult['evalSetResultName']>().toEqualTypeOf<
       string | undefined
     >();
+  });
+});
+
+/** A payload carrying only the fields adk-python declares without a default. */
+const REQUIRED_CASE_RESULT_FIELDS = {
+  final_eval_status: EvalStatus.PASSED,
+  eval_metric_result_per_invocation: [],
+  session_id: 'session_1',
+};
+
+const RECORDED_SESSION = createSession({
+  id: 'inference_session',
+  appName: 'home_automation',
+  userId: 'test_user',
+  events: [
+    createEvent({
+      invocationId: 'invocation-1',
+      author: 'user',
+      content: USER_CONTENT,
+      timestamp: 1700000000,
+    }),
+  ],
+  lastUpdateTime: 1700000000,
+});
+
+describe('parseEvalCaseResult', () => {
+  it('applies the defaults adk-python declares on eval_result.py', () => {
+    const result = parseEvalCaseResult(REQUIRED_CASE_RESULT_FIELDS);
+
+    expect(result.evalSetId).toBe('');
+    expect(result.evalId).toBe('');
+    expect(result.overallEvalMetricResults).toEqual([]);
+  });
+
+  it('reads the field names adk-python writes', () => {
+    const result = parseEvalCaseResult(SNAKE_CASE_CASE_RESULT);
+
+    expect(result.evalSetId).toBe('smoke');
+    expect(result.evalId).toBe('lights_on');
+    expect(result.finalEvalStatus).toBe(EvalStatus.PASSED);
+    expect(result.sessionId).toBe('inference_session');
+    expect(result.userId).toBe('test_user');
+    expect(result.evalMetricResultPerInvocation).toHaveLength(1);
+  });
+
+  it('reads the camelCase field names unchanged', () => {
+    const result = parseEvalCaseResult(CASE_RESULT);
+
+    expect(result).toEqual(CASE_RESULT);
+  });
+
+  it('keeps the deprecated fields beside their replacements', () => {
+    const fromAlias = parseEvalCaseResult(SNAKE_CASE_CASE_RESULT);
+    const fromProperty = parseEvalCaseResult(CASE_RESULT);
+
+    expect(fromAlias.evalSetFile).toBe('smoke.evalset.json');
+    expect(fromAlias.evalMetricResults).toHaveLength(1);
+    expect(fromProperty.evalSetFile).toBe('smoke.evalset.json');
+    expect(fromProperty.evalMetricResults).toEqual(
+      CASE_RESULT.evalMetricResults,
+    );
+  });
+
+  it('reads the null adk-python writes for an absent optional as undefined', () => {
+    const result = parseEvalCaseResult({
+      ...REQUIRED_CASE_RESULT_FIELDS,
+      eval_set_file: null,
+      session_details: null,
+      user_id: null,
+    });
+
+    expect(result.evalSetFile).toBeUndefined();
+    expect(result.sessionDetails).toBeUndefined();
+    expect(result.userId).toBeUndefined();
+  });
+
+  it('passes a recorded session through by reference', () => {
+    const result = parseEvalCaseResult({
+      ...REQUIRED_CASE_RESULT_FIELDS,
+      session_details: RECORDED_SESSION,
+    });
+
+    expect(result.sessionDetails).toBe(RECORDED_SESSION);
+  });
+
+  it('passes a metric result through by reference, in the spelling it arrived in', () => {
+    const result = parseEvalCaseResult({
+      ...REQUIRED_CASE_RESULT_FIELDS,
+      overall_eval_metric_results: [SNAKE_CASE_METRIC_RESULT],
+    });
+
+    const metricResult = asRecord(firstOf(result.overallEvalMetricResults));
+    expect(metricResult).toBe(SNAKE_CASE_METRIC_RESULT);
+    expect(metricResult['metric_name']).toBe('response_match_score');
+  });
+
+  it('accepts every eval status both SDKs write', () => {
+    const statuses = [
+      EvalStatus.PASSED,
+      EvalStatus.FAILED,
+      EvalStatus.NOT_EVALUATED,
+    ];
+
+    const parsed = statuses.map((status) =>
+      parseEvalCaseResult({
+        ...REQUIRED_CASE_RESULT_FIELDS,
+        final_eval_status: status,
+      }),
+    );
+
+    expect(parsed.map((result) => result.finalEvalStatus)).toEqual([1, 2, 3]);
+  });
+
+  it('rejects an eval status outside the enum', () => {
+    expect(() =>
+      parseEvalCaseResult({
+        ...REQUIRED_CASE_RESULT_FIELDS,
+        final_eval_status: 99,
+      }),
+    ).toThrow(InputValidationError);
+  });
+
+  it.each([
+    'final_eval_status',
+    'eval_metric_result_per_invocation',
+    'session_id',
+  ])('rejects a payload that omits %s', (field) => {
+    const payload: Record<string, unknown> = {
+      ...REQUIRED_CASE_RESULT_FIELDS,
+    };
+    delete payload[field];
+
+    expect(() => parseEvalCaseResult(payload)).toThrow(InputValidationError);
+  });
+
+  it.each([['response_match_score'], [['response_match_score']], [null]])(
+    'rejects a metric result that is not an object',
+    (metricResult) => {
+      expect(() =>
+        parseEvalCaseResult({
+          ...REQUIRED_CASE_RESULT_FIELDS,
+          overall_eval_metric_results: [metricResult],
+        }),
+      ).toThrow(InputValidationError);
+    },
+  );
+
+  it('keeps the alias when a payload supplies both spellings of a field', () => {
+    const result = parseEvalCaseResult({
+      ...REQUIRED_CASE_RESULT_FIELDS,
+      eval_set_id: 'from_the_alias',
+      evalSetId: 'from_the_property',
+    });
+
+    expect(result.evalSetId).toBe('from_the_property');
+    expect(asRecord(result)['eval_set_id']).toBe('from_the_alias');
+  });
+
+  it('keeps a key the model does not name', () => {
+    const result = parseEvalCaseResult({
+      ...REQUIRED_CASE_RESULT_FIELDS,
+      inference_config: {model: 'gemini-2.5-flash'},
+    });
+
+    expect(asRecord(result)['inference_config']).toEqual({
+      model: 'gemini-2.5-flash',
+    });
+  });
+});
+
+describe('parseEvalSetResult', () => {
+  it('applies the defaults adk-python declares on eval_result.py', () => {
+    const result = parseEvalSetResult({
+      eval_set_result_id: 'my_app_my_eval_set_123.0',
+      eval_set_id: 'my_eval_set',
+    });
+
+    expect(result.evalCaseResults).toEqual([]);
+    expect(result.creationTimestamp).toBe(0);
+  });
+
+  it('reads the field names adk-python writes', () => {
+    const result = parseEvalSetResult(SNAKE_CASE_SET_RESULT);
+
+    expect(result.evalSetResultId).toBe('home_automation_smoke_1700000000');
+    expect(result.evalSetResultName).toBe('home_automation_smoke_1700000000');
+    expect(result.evalSetId).toBe('smoke');
+    expect(result.creationTimestamp).toBe(1700000000);
+    expect(result.evalCaseResults).toHaveLength(1);
+    expect(result.evalCaseResults[0].evalId).toBe('lights_on');
+    expect(result.evalCaseResults[0].sessionId).toBe('inference_session');
+  });
+
+  it('reads the camelCase field names unchanged', () => {
+    const result = parseEvalSetResult(SET_RESULT);
+
+    expect(result).toEqual(SET_RESULT);
+  });
+
+  it('applies the case result defaults to every nested case result', () => {
+    const result = parseEvalSetResult({
+      eval_set_result_id: 'my_app_my_eval_set_123.0',
+      eval_set_id: 'my_eval_set',
+      eval_case_results: [REQUIRED_CASE_RESULT_FIELDS],
+    });
+
+    expect(result.evalCaseResults[0].evalSetId).toBe('');
+    expect(result.evalCaseResults[0].evalId).toBe('');
+    expect(result.evalCaseResults[0].overallEvalMetricResults).toEqual([]);
+  });
+
+  it('rejects a nested case result that does not validate', () => {
+    expect(() =>
+      parseEvalSetResult({
+        eval_set_result_id: 'my_app_my_eval_set_123.0',
+        eval_set_id: 'my_eval_set',
+        eval_case_results: [{session_id: 'session_1'}],
+      }),
+    ).toThrow(InputValidationError);
+  });
+
+  it.each(['eval_set_result_id', 'eval_set_id'])(
+    'rejects a payload that omits %s',
+    (field) => {
+      const payload: Record<string, unknown> = {
+        eval_set_result_id: 'my_app_my_eval_set_123.0',
+        eval_set_id: 'my_eval_set',
+      };
+      delete payload[field];
+
+      expect(() => parseEvalSetResult(payload)).toThrow(InputValidationError);
+    },
+  );
+
+  it('reads the null adk-python writes for an absent name as undefined', () => {
+    const result = parseEvalSetResult({
+      eval_set_result_id: 'my_app_my_eval_set_123.0',
+      eval_set_id: 'my_eval_set',
+      eval_set_result_name: null,
+    });
+
+    expect(result.evalSetResultName).toBeUndefined();
   });
 });

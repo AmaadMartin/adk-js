@@ -76,6 +76,22 @@ export function optionalField<T extends NonNullable<unknown>>(
 }
 
 /**
+ * Wraps a field whose value another module owns, so that it passes through by
+ * reference.
+ *
+ * adk-python allows the same through `arbitrary_types_allowed`: the module
+ * that declares the payload validates it, not the model holding it. The guard
+ * rejects a scalar, a `null` and an array, so a field the interface declares
+ * as an object cannot hold one.
+ */
+export function payloadField<T>(): z.ZodType<T> {
+  return z.custom<T>(
+    (value) =>
+      typeof value === 'object' && value !== null && !Array.isArray(value),
+  );
+}
+
+/**
  * Builds an evaluation model from a field shape.
  *
  * Every evaluation model shares one validation configuration, the counterpart
