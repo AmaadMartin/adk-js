@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
@@ -14,33 +12,22 @@ import {
   readTelemetryConsent,
 } from '../../src/utils/telemetry_config.js';
 import {CapturingLogger} from '../capturing_logger.js';
+import {TempHome} from '../temp_home.js';
 
-/**
- * `os.homedir()` reads `$HOME` on POSIX, so pointing it at a temp directory
- * gives each test its own config file without mocking the module.
- */
 describe('telemetry config', () => {
+  const tempHome = new TempHome();
   let home: string;
-  let originalHome: string | undefined;
 
   beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-telemetry-config-'));
-    originalHome = process.env['HOME'];
-    process.env['HOME'] = home;
+    home = tempHome.create();
   });
 
   afterEach(() => {
-    if (originalHome === undefined) {
-      delete process.env['HOME'];
-    } else {
-      process.env['HOME'] = originalHome;
-    }
-    fs.rmSync(home, {recursive: true, force: true});
+    tempHome.remove();
   });
 
   function writeConfig(contents: string): void {
-    fs.mkdirSync(path.dirname(getUserConfigPath()), {recursive: true});
-    fs.writeFileSync(getUserConfigPath(), contents, 'utf-8');
+    tempHome.writeAdkConfig(contents);
   }
 
   it('places the config file under .adk in the home directory', () => {

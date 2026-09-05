@@ -14,6 +14,7 @@ import {
   setupRuntimeConfig,
 } from '../../src/server/runtime_config.js';
 import {CapturingLogger} from '../capturing_logger.js';
+import {TempHome} from '../temp_home.js';
 
 const CONFIG_RELATIVE_PATH = path.join(
   'assets',
@@ -22,29 +23,21 @@ const CONFIG_RELATIVE_PATH = path.join(
 );
 
 describe('setupRuntimeConfig', () => {
+  // The consent value comes from the ADK global config file, so each test gets
+  // an empty home rather than the developer's real one.
+  const tempHome = new TempHome();
   let webAssetsDir: string;
-  let home: string;
-  let originalHome: string | undefined;
   let logger: CapturingLogger;
 
   beforeEach(() => {
     webAssetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-web-assets-'));
-    // The consent value comes from `$HOME/.adk/config.json`, so each test gets
-    // an empty home rather than the developer's real one.
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-runtime-home-'));
-    originalHome = process.env['HOME'];
-    process.env['HOME'] = home;
+    tempHome.create();
     logger = new CapturingLogger();
   });
 
   afterEach(() => {
-    if (originalHome === undefined) {
-      delete process.env['HOME'];
-    } else {
-      process.env['HOME'] = originalHome;
-    }
+    tempHome.remove();
     fs.rmSync(webAssetsDir, {recursive: true, force: true});
-    fs.rmSync(home, {recursive: true, force: true});
   });
 
   function configPath(): string {
@@ -61,12 +54,7 @@ describe('setupRuntimeConfig', () => {
   }
 
   function writeConsent(value: string): void {
-    fs.mkdirSync(path.join(home, '.adk'), {recursive: true});
-    fs.writeFileSync(
-      path.join(home, '.adk', 'config.json'),
-      `{"telemetry": ${value}}`,
-      'utf-8',
-    );
+    tempHome.writeAdkConfig(`{"telemetry": ${value}}`);
   }
 
   it('creates the file with an empty backend URL and no recorded consent', () => {
