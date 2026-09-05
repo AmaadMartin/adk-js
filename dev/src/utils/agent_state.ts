@@ -24,19 +24,11 @@ const STATE_PLACEHOLDER_PATTERN = /{(\w+)}/g;
  * no instruction of its own and yields no keys.
  *
  * @param root The agent whose tree to walk.
- * @param initializedStates Keys the caller already has values for, which are
- *   left out of the result.
  */
-export function createEmptyState(
-  root: RunnableRoot,
-  initializedStates: Record<string, unknown> = {},
-): Record<string, string> {
+export function createEmptyState(root: RunnableRoot): Record<string, string> {
   const state: Record<string, string> = {};
   if (isBaseAgent(root)) {
     collectStateKeys(root, state, new Set<BaseAgent>());
-  }
-  for (const key of Object.keys(initializedStates)) {
-    delete state[key];
   }
   return state;
 }
