@@ -1,15 +1,18 @@
 # BigQuery tool config
 
-Sets what the BigQuery tools may write, how much a query may cost, where it
-runs, and the labels its jobs carry. Reach for it when you want a guardrail on
-the BigQuery work an agent does.
+Declares what the BigQuery tools may write, how much a query may cost, where it
+runs, and the labels its jobs will carry.
 
 ## Introduction
 
 `BigQueryToolConfig` is the configuration surface for the BigQuery tools. It
 holds data only. It opens no connection, reads no credentials and starts no
-network call. Each tool takes the config as a parameter and reads the fields it
-needs.
+network call.
+
+Nothing in adk-js reads the config yet. It is the first piece of the BigQuery
+integration, and the tools that will take it as a parameter arrive in later
+changes. So do not go looking for a `BigQueryToolset` export: the part that
+works today is the type, its defaults and its validation.
 
 You build the config with `createBigQueryToolConfig` rather than an object
 literal. The factory validates its input, applies the defaults and returns a
@@ -17,7 +20,7 @@ fresh object, so a later change to the object you passed in cannot reach a
 config you already built.
 
 The most important field is `writeMode`. It defaults to `WriteMode.BLOCKED`, so
-a config you build without thinking about it permits only read queries.
+a config you build without thinking about it will permit only read queries.
 
 ## Get started
 
@@ -42,7 +45,8 @@ const sessionScoped = createBigQueryToolConfig({
 
 ## Write mode
 
-`WriteMode` has three members, and the config defaults to `BLOCKED`.
+`WriteMode` has three members, and the config defaults to `BLOCKED`. The
+meanings below are what the tools will enforce once they land.
 
 | Member                | Meaning                                                                                                                                                                                                                                      |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -52,9 +56,10 @@ const sessionScoped = createBigQueryToolConfig({
 
 ## Cost and result size
 
-`maximumBytesBilled` caps what one query may be billed for. BigQuery on-demand
-pricing rounds a charge up to the nearest MB and bills at least 10 MB per query,
-so a cap below `10485760` can never be met. The factory rejects one:
+`maximumBytesBilled` will cap what one query may be billed for. BigQuery
+on-demand pricing rounds a charge up to the nearest MB and bills at least 10 MB
+per query, so a cap below `10485760` can never be met. The factory rejects one
+today:
 
 ```ts
 import {createBigQueryToolConfig} from '@google/adk';
@@ -64,27 +69,29 @@ createBigQueryToolConfig({maximumBytesBilled: 10_485_759});
 // to the nearest MB, ... So maximumBytesBilled must be set >=10485760.
 ```
 
-`maxQueryResultRows` caps how many rows a query returns. It defaults to `50`.
+`maxQueryResultRows` will cap how many rows a query returns. It defaults to
+`50`.
 
 ## Project and location
 
-`computeProjectId` pins the project that runs the compute, such as a query. Set
-it when the tools must not bill work to the project your credentials resolve to.
+`computeProjectId` names the project that will run the compute, such as a query.
+Set it when the tools must not bill work to the project your credentials resolve
+to.
 
-`location` pins the BigQuery location of the data and the compute. When you
+`location` names the BigQuery location of the data and the compute. When you
 leave it out, BigQuery derives the location from the data the query references.
 For the supported values, see
 [BigQuery locations](https://cloud.google.com/bigquery/docs/locations).
 
 ## Application name and job labels
 
-`applicationName` names the application that uses the tools. The tools add it to
-the user agent of a BigQuery API call, and to the job label
+`applicationName` names the application that uses the tools. The tools will add
+it to the user agent of a BigQuery API call, and to the job label
 `adk-bigquery-application-name`. It must not contain a space.
 
-`jobLabels` are the labels the tools apply to every BigQuery job they run. Use
-them for billing, monitoring and resource organization. For the label rules, see
-[Introduction to labels](https://cloud.google.com/bigquery/docs/labels-intro).
+`jobLabels` are the labels the tools will apply to every BigQuery job they run.
+Use them for billing, monitoring and resource organization. For the label rules,
+see [Introduction to labels](https://cloud.google.com/bigquery/docs/labels-intro).
 
 Both fields serve usage discovery and tracking only. Never base a
 security-sensitive decision on either one.

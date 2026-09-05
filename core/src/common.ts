@@ -200,10 +200,8 @@ export type {Example} from './examples/example.js';
 export {
   WriteMode,
   createBigQueryToolConfig,
-} from './integrations/bigquery/config.js';
-export type {
-  BigQueryToolConfig,
-  ResolvedBigQueryToolConfig,
+  type BigQueryToolConfig,
+  type ResolvedBigQueryToolConfig,
 } from './integrations/bigquery/config.js';
 export type {
   BaseMemoryService,

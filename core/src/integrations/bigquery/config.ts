@@ -199,13 +199,9 @@ export function createBigQueryToolConfig(
   validateApplicationName(config.applicationName);
   validateJobLabels(config.jobLabels);
   return {
+    ...config,
     writeMode: config.writeMode ?? WriteMode.BLOCKED,
-    maximumBytesBilled: config.maximumBytesBilled,
     maxQueryResultRows:
       config.maxQueryResultRows ?? DEFAULT_MAX_QUERY_RESULT_ROWS,
-    applicationName: config.applicationName,
-    computeProjectId: config.computeProjectId,
-    location: config.location,
-    jobLabels: config.jobLabels,
   };
 }

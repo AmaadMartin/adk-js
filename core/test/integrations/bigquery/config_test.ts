@@ -264,11 +264,12 @@ describe('BigQuery tool config', () => {
     });
 
     it('does not follow a later change to the caller object', () => {
-      const params: BigQueryToolConfig = {jobLabels: {team: 'data'}};
+      const jobLabels = {team: 'data'};
+      const params: BigQueryToolConfig = {jobLabels};
 
       const config = createBigQueryToolConfig(params);
       params.location = 'eu';
-      params.jobLabels!['team'] = 'other';
+      jobLabels['team'] = 'other';
 
       expect(config.location).toBeUndefined();
       expect(config.jobLabels).toEqual({team: 'data'});
