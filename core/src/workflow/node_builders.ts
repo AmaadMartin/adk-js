@@ -5,6 +5,8 @@
  */
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
+import type {BaseNode} from './base_node.js';
+import {isWorkflowNode} from './node.js';
 import {FunctionNode, FunctionNodeHandler} from './nodes/function_node.js';
 import {ParallelWorker} from './nodes/parallel_worker.js';
 import {ToolNode} from './nodes/tool_node.js';
@@ -60,3 +62,18 @@ export const PARALLEL_WORKER_FACTORY: ParallelWorkerFactory | undefined = (
   inner,
   options,
 ) => new ParallelWorker(inner, options);
+
+/**
+ * Reapplies the fix-ups a shallow node copy needs, after `buildNode` copies a
+ * node to override its properties.
+ *
+ * Today that is only rebuilding a `WorkflowNode`'s parallel-worker wrapper, so
+ * the copy fans out over itself rather than over the node it was copied from.
+ * Wired here, like {@link PARALLEL_WORKER_FACTORY}, so
+ * `workflow_graph_utils` does not import the node modules that import it.
+ */
+export const AFTER_NODE_COPY: (copy: BaseNode) => void = (copy) => {
+  if (isWorkflowNode(copy)) {
+    copy.rebuildParallelWorker();
+  }
+};
