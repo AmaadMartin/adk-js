@@ -21,6 +21,10 @@ export type {
   RunNodeAsInvocationOptions,
   RunnableRoot,
 } from './run_node_as_invocation.js';
+export type {
+  WorkflowAgentState,
+  WorkflowNodeCheckpoint,
+} from './utils/checkpoint_utils.js';
 export {Workflow, isWorkflow} from './workflow.js';
 export type {DynamicEntry, WorkflowConfig} from './workflow.js';
 

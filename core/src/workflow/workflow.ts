@@ -5,10 +5,13 @@
  */
 
 import {context, trace} from '@opentelemetry/api';
+import {isLlmAgent} from '../agents/llm_agent.js';
 import {Event} from '../events/event.js';
+import {StateSchemaError} from '../sessions/state.js';
 import {tracer, traceWorkflowInvocation} from '../telemetry/tracing.js';
 import {experimental} from '../utils/experimental.js';
-import {BaseNode, BaseNodeConfig} from './base_node.js';
+import {objectSchemaFields, SchemaLike} from '../utils/schema.js';
+import {BaseNode, BaseNodeConfig, START} from './base_node.js';
 import {commonPrefixOf} from './branch_path.js';
 import {DynamicNodeScheduler} from './dynamic_node_scheduler.js';
 import {isInvocationAbortedError} from './errors.js';
@@ -28,6 +31,12 @@ import {createNodeState, NodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
 import {DynamicNodeState} from './schedule_dynamic_node.js';
 import {Trigger} from './trigger.js';
+import {
+  createEndOfAgentEvent,
+  createNodeCheckpointEvent,
+  createReplayedOutputEvent,
+  WorkflowEventOrigin,
+} from './utils/checkpoint_utils.js';
 import {
   eventsForCurrentRun,
   isFastForwardable,
@@ -90,8 +99,7 @@ export type WorkflowConfig = BaseNodeConfig & {
 
 /**
  * Mutable, in-memory state for a single {@link Workflow} run. Not persisted;
- * discarded when `runImpl` returns. (Replay/checkpoint fields are added in
- * Phase 5.)
+ * discarded when `runImpl` returns.
  */
 class LoopState {
   readonly nodes = new Map<string, NodeState>();
@@ -105,6 +113,11 @@ class LoopState {
 
   /** Nodes already activated in this turn, so a repeat activation is visible. */
   activated: Set<string> = new Set();
+  /**
+   * Nodes fast-forwarded from recovered history in this turn. Their completion
+   * re-surfaces the recovered output instead of recording a fresh checkpoint.
+   */
+  readonly replayedNodes = new Set<string>();
   errorShutDown = false;
   /**
    * Workflow-scoped abort signal handed to each scheduled node so a failure can
@@ -129,9 +142,9 @@ interface CompletedTask {
  * SETUP (seed START triggers) → LOOP (schedule ready nodes, handle
  * completions) → FINALIZE (collect the terminal output).
  *
- * Ported (Phase 2 subset) from `google/adk-python` `workflow/_workflow.py`.
- * Replay/checkpointing, dynamic scheduling, and task/chat isolation scopes are
- * added in later phases; hook points are marked with TODO(phase-N).
+ * Ported from `google/adk-python` `workflow/_workflow.py`. On a resumable app
+ * the loop also records node checkpoints and an end-of-agent marker, so a later
+ * run can read how far the graph got.
  */
 @experimental
 export class Workflow extends BaseNode {
@@ -170,6 +183,7 @@ export class Workflow extends BaseNode {
       // createGraphFromEdgeItems validates as part of construction.
       this.graph = createGraphFromEdgeItems(config.edges);
     }
+    validateStateSchema(this.name, this.graph, this.stateSchema);
   }
 
   // eslint-disable-next-line require-yield -- child events stream out via ctx.channel/ctx.runNode; this orchestration generator itself yields nothing
@@ -245,9 +259,11 @@ export class Workflow extends BaseNode {
     loop.rehydrated = rehydrated;
     loop.abortSignal = abortController.signal;
 
-    this.seedStartTriggers(loop, nodeInput);
+    this.seedStartTriggers(loop, ctx, nodeInput);
 
     await this.runLoop(loop, ctx, abortController);
+
+    await surfaceDetachedDynamicOutcome(dynamicState);
 
     if (loop.errorShutDown) {
       return;
@@ -260,6 +276,10 @@ export class Workflow extends BaseNode {
     }
 
     this.finalize(loop, ctx);
+
+    if (loop.interruptIds.size === 0) {
+      this.emitEndOfAgent(ctx);
+    }
   }
 
   /**
@@ -301,12 +321,24 @@ export class Workflow extends BaseNode {
 
   // --- SETUP ---
 
-  private seedStartTriggers(loop: LoopState, nodeInput: unknown): void {
+  private seedStartTriggers(
+    loop: LoopState,
+    ctx: NodeContext,
+    nodeInput: unknown,
+  ): void {
     const startEdges = this.graph!.edges.filter(
-      (e) => e.fromNode.name === '__START__',
+      (e) => e.fromNode.name === START.name,
     );
     const useSubBranch = startEdges.length > 1;
     for (const edge of startEdges) {
+      if (edge.toNode.requiresAllPredecessors) {
+        // A wait-for-all node must still wait for its other predecessors, so
+        // record START's contribution and let the barrier decide when it fires.
+        loop.nodeOutputs.set(START.name, nodeInput);
+        loop.nodeBranches.set(START.name, ctx.branch ?? '');
+        this.bufferBarrierTrigger(loop, edge.toNode.name);
+        continue;
+      }
       this.pushTrigger(loop, edge.toNode.name, {
         input: nodeInput,
         useSubBranch,
@@ -342,7 +374,7 @@ export class Workflow extends BaseNode {
         throw result.error;
       }
 
-      await this.handleCompletion(loop, result.name, result.childCtx!);
+      await this.handleCompletion(loop, ctx, result.name, result.childCtx!);
     }
   }
 
@@ -364,9 +396,7 @@ export class Workflow extends BaseNode {
         attemptCount: loop.nodes.get(nodeName)?.attemptCount ?? 1,
         author: nodeName,
         invocationId: ctx.invocationId,
-        nodeInfo: {
-          path: ctx.nodePath ? `${ctx.nodePath}.${nodeName}` : nodeName,
-        },
+        nodeInfo: {path: childNodePath(ctx, nodeName)},
         branch: ctx.branch,
         isolationScope: ctx.isolationScope,
       }),
@@ -376,6 +406,12 @@ export class Workflow extends BaseNode {
   // --- Scheduling ---
 
   private scheduleReadyNodes(loop: LoopState, ctx: NodeContext): void {
+    // A task-mode agent owns the conversation until its task finishes, so no
+    // peer node starts while one is mid-task.
+    if (hasWaitingTaskAgent(this.graph!, loop.nodes)) {
+      return;
+    }
+
     for (const nodeName of [...loop.triggerBuffer.keys()]) {
       if (loop.pending.has(nodeName)) {
         continue;
@@ -401,7 +437,11 @@ export class Workflow extends BaseNode {
         continue;
       }
       this.prepareNodeStateForStarting(loop, nodeName, trigger);
-      this.startNodeTask(loop, ctx, nodeName, trigger);
+      // Only a node that genuinely runs marks a new step; one fast-forwarded
+      // from history must not re-announce itself.
+      if (this.startNodeTask(loop, ctx, nodeName, trigger)) {
+        this.emitNodeCheckpoint(loop, ctx);
+      }
     }
   }
 
@@ -427,12 +467,16 @@ export class Workflow extends BaseNode {
     loop.nodes.set(nodeName, state);
   }
 
+  /**
+   * Starts a node, returning whether it genuinely runs. `false` means the node
+   * was fast-forwarded from recovered history and executes nothing.
+   */
   private startNodeTask(
     loop: LoopState,
     ctx: NodeContext,
     nodeName: string,
     trigger: Trigger,
-  ): void {
+  ): boolean {
     const node = this.getStaticNode(nodeName);
     const nodeState = loop.nodes.get(nodeName)!;
     const repeatActivation = loop.activated.has(nodeName);
@@ -445,6 +489,7 @@ export class Workflow extends BaseNode {
     // is not consulted here. Python reaches its cached-result case first too.
     const prior = loop.rehydrated.get(nodeName)?.shift();
     if (prior && isFastForwardable(prior)) {
+      loop.replayedNodes.add(nodeName);
       loop.pending.set(
         nodeName,
         Promise.resolve({
@@ -452,7 +497,7 @@ export class Workflow extends BaseNode {
           childCtx: makeFastForwardResult(ctx, prior),
         }),
       );
-      return;
+      return false;
     }
 
     // Resume with rerun_on_resume=false: a node that interrupted last turn
@@ -475,11 +520,12 @@ export class Workflow extends BaseNode {
           branch: prior.branch ?? ctx.branch,
           interruptIds: [],
         };
+        loop.replayedNodes.add(nodeName);
         loop.pending.set(
           nodeName,
           Promise.resolve({name: nodeName, childCtx: resumeResult}),
         );
-        return;
+        return false;
       }
     }
 
@@ -513,28 +559,33 @@ export class Workflow extends BaseNode {
         useSubBranch: trigger.useSubBranch,
         overrideBranch: trigger.branch,
         overrideIsolationScope: trigger.isolationScope,
+        useAsOutput: this.graph!.terminalNodeNames.has(nodeName),
       },
     }).then(
       (childCtx) => ({name: nodeName, childCtx}),
       (error) => ({name: nodeName, error}),
     );
     loop.pending.set(nodeName, task);
+    return true;
   }
 
   // --- Completion handling ---
 
   private async handleCompletion(
     loop: LoopState,
+    ctx: NodeContext,
     nodeName: string,
     childCtx: NodeContext | NodeResult,
   ): Promise<void> {
     const nodeState = loop.nodes.get(nodeName)!;
     const node = this.getStaticNode(nodeName);
+    const replayed = loop.replayedNodes.delete(nodeName);
 
     if (childCtx.interruptIds.length > 0) {
       nodeState.status = NodeStatus.WAITING;
       nodeState.interrupts = [...childCtx.interruptIds];
       childCtx.interruptIds.forEach((id) => loop.interruptIds.add(id));
+      this.emitNodeCheckpoint(loop, ctx);
       return;
     }
 
@@ -544,6 +595,7 @@ export class Workflow extends BaseNode {
       childCtx.route === undefined
     ) {
       nodeState.status = NodeStatus.WAITING;
+      this.emitNodeCheckpoint(loop, ctx);
       return;
     }
 
@@ -552,6 +604,15 @@ export class Workflow extends BaseNode {
       loop.nodeOutputs.set(nodeName, childCtx.output);
     }
     loop.nodeBranches.set(nodeName, childCtx.branch ?? '');
+
+    // A node that genuinely ran records a checkpoint. A fast-forwarded one
+    // instead re-surfaces its recovered output, so a resumable stream stays
+    // complete without a redundant checkpoint.
+    if (replayed) {
+      this.reemitReplayedOutput(ctx, nodeName, childCtx.output);
+    } else {
+      this.emitNodeCheckpoint(loop, ctx);
+    }
 
     this.bufferDownstreamTriggers(
       loop,
@@ -576,29 +637,7 @@ export class Workflow extends BaseNode {
       const targetNode = this.getStaticNode(targetName);
 
       if (targetNode.requiresAllPredecessors) {
-        const predecessors = new Set(
-          this.graph!.edges.filter((e) => e.toNode.name === targetName).map(
-            (e) => e.fromNode.name,
-          ),
-        );
-        const allCompleted = [...predecessors].every(
-          (p) => loop.nodes.get(p)?.status === NodeStatus.COMPLETED,
-        );
-        if (allCompleted) {
-          const outputs: Record<string, unknown> = {};
-          for (const p of predecessors) {
-            outputs[p] = loop.nodeOutputs.get(p);
-          }
-          const branches = [...predecessors].map(
-            (p) => loop.nodeBranches.get(p) ?? '',
-          );
-          const commonBranch = commonPrefixOf(branches);
-          this.pushTrigger(loop, targetName, {
-            input: outputs,
-            useSubBranch: false,
-            branch: commonBranch || undefined,
-          });
-        }
+        this.bufferBarrierTrigger(loop, targetName);
       } else {
         this.pushTrigger(loop, targetName, {
           input: output,
@@ -607,6 +646,90 @@ export class Workflow extends BaseNode {
         });
       }
     }
+  }
+
+  /**
+   * Buffers a trigger for `targetName` once every predecessor has completed,
+   * and does nothing while any is still outstanding.
+   */
+  private bufferBarrierTrigger(loop: LoopState, targetName: string): void {
+    const predecessors = new Set(
+      this.graph!.edges.filter((e) => e.toNode.name === targetName).map(
+        (e) => e.fromNode.name,
+      ),
+    );
+    // START never executes, so it is satisfied as soon as the workflow begins.
+    const allCompleted = [...predecessors].every(
+      (p) =>
+        p === START.name || loop.nodes.get(p)?.status === NodeStatus.COMPLETED,
+    );
+    if (!allCompleted) {
+      return;
+    }
+
+    const outputs: Record<string, unknown> = {};
+    for (const p of predecessors) {
+      outputs[p] = loop.nodeOutputs.get(p);
+    }
+    const branches = [...predecessors].map(
+      (p) => loop.nodeBranches.get(p) ?? '',
+    );
+    const commonBranch = commonPrefixOf(branches);
+    this.pushTrigger(loop, targetName, {
+      input: outputs,
+      useSubBranch: false,
+      branch: commonBranch || undefined,
+    });
+  }
+
+  // --- Resumability checkpoints ---
+
+  /**
+   * Records a snapshot of node statuses on the resumable event stream, so a
+   * later run can see how far the workflow progressed.
+   *
+   * A non-resumable session reconstructs the same state by replaying prior
+   * events, so the snapshot is skipped for it.
+   */
+  private emitNodeCheckpoint(loop: LoopState, ctx: NodeContext): void {
+    if (!ctx.invocationContext.isResumable) {
+      return;
+    }
+    ctx.emit(createNodeCheckpointEvent(this.eventOrigin(ctx), loop.nodes));
+  }
+
+  /** Records an end-of-agent marker for resumable sessions. */
+  private emitEndOfAgent(ctx: NodeContext): void {
+    if (!ctx.invocationContext.isResumable) {
+      return;
+    }
+    ctx.emit(createEndOfAgentEvent(this.eventOrigin(ctx)));
+  }
+
+  /** Re-surfaces a fast-forwarded node's output on a resumable stream. */
+  private reemitReplayedOutput(
+    ctx: NodeContext,
+    nodeName: string,
+    output: unknown,
+  ): void {
+    if (!ctx.invocationContext.isResumable || output === undefined) {
+      return;
+    }
+    ctx.emit(
+      createReplayedOutputEvent(
+        this.eventOrigin(ctx),
+        childNodePath(ctx, nodeName),
+        output,
+      ),
+    );
+  }
+
+  private eventOrigin(ctx: NodeContext): WorkflowEventOrigin {
+    return {
+      author: this.name,
+      invocationId: ctx.invocationId,
+      branch: ctx.branch,
+    };
   }
 
   private collectRemainingInterrupts(loop: LoopState): void {
@@ -708,6 +831,110 @@ export function isWorkflow(value: unknown): value is Workflow {
     WORKFLOW_SIGNATURE_SYMBOL in value &&
     value[WORKFLOW_SIGNATURE_SYMBOL] === true
   );
+}
+
+/**
+ * Rejects a workflow whose graph writes a state key its `stateSchema` does not
+ * declare, at construction rather than on the first run.
+ *
+ * Only keys a node declares statically are checkable, which today means an
+ * agent node's `outputKey`. A node carrying its own `stateSchema` answers to
+ * that instead, and a prefixed key (`app:`, `user:`, `temp:`) belongs to a
+ * wider scope — both are exempt here exactly as they are at run time. A schema
+ * that is not an object schema is left unenforced rather than rejected.
+ *
+ * adk-python checks a `FunctionNode`'s state parameters instead. adk-js's
+ * `FunctionNodeHandler` signature is fixed at `(ctx, input)` and binds no state
+ * parameters, so there is nothing there to check.
+ */
+function validateStateSchema(
+  workflowName: string,
+  graph: Graph | undefined,
+  stateSchema: SchemaLike | undefined,
+): void {
+  if (!stateSchema || !graph) {
+    return;
+  }
+  const fields = objectSchemaFields(stateSchema);
+  if (!fields) {
+    return;
+  }
+  for (const graphNode of graph.nodes) {
+    if (graphNode.stateSchema) {
+      continue;
+    }
+    const key = isLlmAgent(graphNode) ? graphNode.outputKey : undefined;
+    if (!key || key.includes(':') || fields.has(key)) {
+      continue;
+    }
+    throw new StateSchemaError(
+      `Workflow ${workflowName} node '${graphNode.name}' writes state key ` +
+        `'${key}', which is not declared in the state schema. Declared ` +
+        `fields: ${JSON.stringify([...fields.keys()].sort())}`,
+    );
+  }
+}
+
+/**
+ * Whether any task-mode agent node in the graph is currently `WAITING`.
+ *
+ * A task-mode agent may need several user turns to finish. While one is
+ * mid-task the graph holds, so a peer node does not join a conversation that
+ * is still in progress.
+ */
+function hasWaitingTaskAgent(
+  graph: Graph,
+  nodes: ReadonlyMap<string, NodeState>,
+): boolean {
+  return graph.nodes.some(
+    (node) =>
+      isTaskModeNode(node) &&
+      nodes.get(node.name)?.status === NodeStatus.WAITING,
+  );
+}
+
+/** The path a direct child of `ctx` runs under. */
+function childNodePath(ctx: NodeContext, nodeName: string): string {
+  return ctx.nodePath ? `${ctx.nodePath}.${nodeName}` : nodeName;
+}
+
+/** Whether `node` is an agent that runs as a multi-turn task. */
+function isTaskModeNode(node: BaseNode): boolean {
+  return isLlmAgent(node) && node.mode === 'task';
+}
+
+/**
+ * Fails the workflow when a detached dynamic node errored or interrupted.
+ *
+ * A node started without awaiting `ctx.runNode()` bypasses the normal
+ * completion path, so its failure would otherwise be dropped and the workflow
+ * would report success. A detached node cannot be resumed, so an interrupt is
+ * surfaced as an error too. The first bad outcome wins, mirroring the static
+ * completion path, and the error is thrown because throwing is how adk-js
+ * reports a failed node.
+ *
+ * Only runs still in flight when the graph finished are inspected: a settled
+ * run cannot be told apart from an awaited, handled one.
+ */
+async function surfaceDetachedDynamicOutcome(
+  dynamicState: DynamicNodeState,
+): Promise<void> {
+  const tasks = dynamicState.getDynamicTasks();
+  if (tasks.length === 0) {
+    return;
+  }
+  for (const settled of await Promise.allSettled(tasks)) {
+    if (settled.status === 'rejected') {
+      throw settled.reason;
+    }
+    if (settled.value.interruptIds.length > 0) {
+      throw new Error(
+        'A dynamic node started without awaiting ctx.runNode() requested ' +
+          'human input, but a detached node cannot be resumed. Await ' +
+          'ctx.runNode() directly.',
+      );
+    }
+  }
 }
 
 /**

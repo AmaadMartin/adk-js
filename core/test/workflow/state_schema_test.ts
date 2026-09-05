@@ -312,16 +312,18 @@ describe('Node-level state schema and inheritance', () => {
     );
   });
 
-  it('rejects an undeclared outputKey written by an agent node', async () => {
+  it('rejects an undeclared outputKey written by an agent node', () => {
     const agent = replyAgent('writer', 'hi', {outputKey: 'undeclaredKey'});
-    const wf = new Workflow({
-      name: 'agent_output_key',
-      stateSchema: schema,
-      edges: [['START', agent]],
-    });
-    await expect(driveWorkflow(wf, 'x')).rejects.toThrow(
-      /not declared in the state schema/,
-    );
+    // The workflow refuses this at construction now, rather than on the first
+    // write. The error is the same one the run used to raise.
+    expect(
+      () =>
+        new Workflow({
+          name: 'agent_output_key',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).toThrow(/not declared in the state schema/);
   });
 
   it('accepts a declared outputKey written by an agent node', async () => {
@@ -351,5 +353,99 @@ describe('Node-level state schema and inheritance', () => {
     await expect(driveWorkflow(outer, 'x')).rejects.toThrow(
       /not declared in the state schema/,
     );
+  });
+});
+
+/**
+ * adk-python validates a `FunctionNode`'s state parameters at construction
+ * (`tests/unittests/workflow/test_state_schema.py` at `25f5214c`). adk-js's
+ * `FunctionNodeHandler` is fixed at `(ctx, input)` and binds no state
+ * parameters, so the equivalent check covers the state key an agent node
+ * declares statically: its `outputKey`.
+ */
+describe('state schema validated at construction', () => {
+  it('test_startup_no_validation_when_schema_none', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'anything'});
+    expect(
+      () => new Workflow({name: 'wf', edges: [['START', agent]]}),
+    ).not.toThrow();
+  });
+
+  it('accepts an outputKey the schema declares', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'label'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('names the workflow, the node and the declared fields', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'nope'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'pipeline',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).toThrow(
+      "Workflow pipeline node 'writer' writes state key 'nope', which is not " +
+        'declared in the state schema. Declared fields: ' +
+        '["counter","label","note"]',
+    );
+  });
+
+  it('skips a node that declares its own schema', () => {
+    const agent = replyAgent('writer', 'hi', {
+      outputKey: 'nodeKey',
+      stateSchema: z4.object({nodeKey: z4.string()}),
+    });
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('skips a prefixed key, which belongs to a wider scope', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'temp:scratch'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('leaves a non-object schema unenforced rather than rejecting', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'nope'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: z4.string(),
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('leaves a dynamicEntry workflow, which has no graph, unchecked', () => {
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          dynamicEntry: async () => 'done',
+        }),
+    ).not.toThrow();
   });
 });

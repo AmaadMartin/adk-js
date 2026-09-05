@@ -459,7 +459,9 @@ export type {
   ScheduleDynamicNode,
   ScheduleDynamicNodeOptions,
   ToolNodeConfig,
+  WorkflowAgentState,
   WorkflowConfig,
+  WorkflowNodeCheckpoint,
 } from './workflow/index.js';
 
 export * from './apps/app.js';
