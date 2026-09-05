@@ -120,10 +120,17 @@ response carries content.
 
 Call the response setter once per response. A turn that arrives as several
 streamed chunks accumulates into `gen_ai.output.messages`, one message per
-chunk, in arrival order. Only the chunk that ends the turn reports a finish
-reason: the proto3 zero value `FINISH_REASON_UNSPECIFIED` means unreported, so
-it leaves `gen_ai.response.finish_reasons` out rather than publishing a healthy
-turn as a failed one.
+chunk, in arrival order.
+
+Only the chunk that ends the turn reports a finish reason. `@google/genai`
+types `FinishReason` as a string enum, so its proto3 zero value
+`FINISH_REASON_UNSPECIFIED` is truthy and cannot be told from a real reason by
+a truthiness check. It means the model set nothing, so this module treats it as
+unreported: `gen_ai.response.finish_reasons` is left out entirely, and the
+output message carries `finish_reason: ''`. A healthy turn is therefore never
+published as a failed one. adk-python behaves the same way, and the ported test
+`test_response_attributes_treat_unspecified_finish_reason_as_unreported` pins
+both halves.
 
 ## Content capture
 
