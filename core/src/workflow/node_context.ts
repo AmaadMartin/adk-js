@@ -283,7 +283,13 @@ export class NodeContext {
         runId,
       });
     }
-    return executeChildNode({parent: this, node, input, options});
+    return executeChildNode({
+      parent: this,
+      node,
+      input,
+      options,
+      abortSignal: options?.abortSignal,
+    });
   }
 
   /**
