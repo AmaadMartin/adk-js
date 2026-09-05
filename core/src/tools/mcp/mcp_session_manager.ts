@@ -30,6 +30,44 @@ function logTransportError(err: unknown): void {
 }
 
 /**
+ * Builds the transport options for one session, without writing anything back
+ * into the connection parameters every session shares.
+ *
+ * Per-session headers win over the connection's static ones. `Headers.set`
+ * does the merging, so `authorization` replaces `Authorization` rather than
+ * arriving beside it as a second value.
+ */
+function buildTransportOptions(
+  params: StreamableHTTPConnectionParams,
+  sessionHeaders: Record<string, string> | undefined,
+): StreamableHTTPClientTransportOptions {
+  const options: StreamableHTTPClientTransportOptions = {
+    ...params.transportOptions,
+  };
+
+  if (!options.requestInit && params.header !== undefined) {
+    options.requestInit = {
+      headers: params.header as Record<string, string>,
+    };
+  }
+
+  if (!sessionHeaders || Object.keys(sessionHeaders).length === 0) {
+    return options;
+  }
+
+  const merged = new Headers(options.requestInit?.headers);
+  for (const [name, value] of Object.entries(sessionHeaders)) {
+    merged.set(name, value);
+  }
+  const headers: Record<string, string> = {};
+  merged.forEach((value, name) => {
+    headers[name] = value;
+  });
+  options.requestInit = {...options.requestInit, headers};
+  return options;
+}
+
+/**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
  * as local child processes.
@@ -93,7 +131,17 @@ export class MCPSessionManager {
     this.connectionParams = connectionParams;
   }
 
-  async createSession(): Promise<Client> {
+  /**
+   * Opens a new MCP client session.
+   *
+   * @param options.headers Headers merged over the connection's static headers
+   *     for this session only, so one invocation's credentials never reach the
+   *     next. On a key conflict these win, whatever the letter case. Stdio
+   *     connections carry no headers and ignore them.
+   */
+  async createSession(options?: {
+    headers?: Record<string, string>;
+  }): Promise<Client> {
     const {Client} = await loadOptionalPeer(
       MCP_SDK,
       () => import('@modelcontextprotocol/sdk/client/index.js'),
@@ -115,16 +163,10 @@ export class MCPSessionManager {
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
-
-          if (
-            !options.requestInit &&
-            this.connectionParams.header !== undefined
-          ) {
-            options.requestInit = {
-              headers: this.connectionParams.header as Record<string, string>,
-            };
-          }
+          const transportOptions = buildTransportOptions(
+            this.connectionParams,
+            options?.headers,
+          );
 
           const {StreamableHTTPClientTransport} = await loadOptionalPeer(
             MCP_SDK,
@@ -132,7 +174,7 @@ export class MCPSessionManager {
           );
           const transport = new StreamableHTTPClientTransport(
             new URL(this.connectionParams.url),
-            options,
+            transportOptions,
           );
           transport.onerror = logTransportError;
           await client.connect(transport);
