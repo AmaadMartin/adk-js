@@ -26,6 +26,35 @@ Cloud API Registry.
 The listing is read once per instance and kept in memory. A failed listing is
 not cached, so a later call retries.
 
+## Credentials
+
+`ApiRegistry` resolves an access token before each MCP connection, not once
+when it builds the toolset. A toolset that an agent builds at startup keeps
+working after the first token expires.
+
+Credentials go only to a Google API host reached over TLS. A server registered
+with an `http://` URL, or on a host outside `googleapis.com`, gets no
+`Authorization` header. A cloud-platform token must not travel in cleartext or
+to a third party. Give such a server its own credentials through
+`headerProvider`.
+
+## Extra headers
+
+`headerProvider` supplies headers for the MCP server calls. It runs before each
+connection, so it may return a value that expires. The registry listing request
+does not use it.
+
+```ts
+const registry = new ApiRegistry({
+  projectId: 'my-project',
+  headerProvider: () => ({'x-tenant': process.env['TENANT_ID'] ?? 'default'}),
+});
+```
+
+What it returns is merged over the credentials `ApiRegistry` resolved, so
+returning `Authorization` replaces the token from Application Default
+Credentials.
+
 ## Get started
 
 ```ts
