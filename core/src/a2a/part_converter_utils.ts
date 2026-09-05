@@ -35,14 +35,14 @@ enum DataPartType {
 }
 
 /**
- * Converts a GenAI part to an A2A part, or to nothing when the part has no A2A
- * representation. A deployment supplies one of these to override the default
- * conversion, {@link toA2APart}.
+ * Converts a GenAI part to one A2A part, several, or none when the part has no
+ * A2A representation. A deployment supplies one of these to override the
+ * default conversion, {@link toA2APart}.
  */
 export type GenAIPartToA2APartConverter = (
   part: GenAIPart,
   longRunningToolIDs?: string[],
-) => A2APart | undefined;
+) => A2APart | A2APart[] | undefined;
 
 /**
  * Converts an array of GenAI Parts to A2A Parts.
@@ -58,9 +58,7 @@ export function toA2AParts(
   longRunningToolIDs: string[] = [],
   converter: GenAIPartToA2APartConverter = toA2APart,
 ): A2APart[] {
-  return parts
-    .map((part) => converter(part, longRunningToolIDs))
-    .filter((part): part is A2APart => part !== undefined);
+  return parts.flatMap((part) => converter(part, longRunningToolIDs) ?? []);
 }
 
 /**

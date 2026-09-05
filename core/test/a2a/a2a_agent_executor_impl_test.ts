@@ -281,6 +281,31 @@ describe('A2AAgentExecutor parity with adk-python', () => {
     expect((artifact.artifact.parts[0] as TextPart).text).toBe('converted');
   });
 
+  it('publishes every part when the converter expands one into several', async () => {
+    willYield([
+      createEvent({
+        author: 'test_agent',
+        content: {role: 'model', parts: [{text: 'original'}]},
+      }),
+    ]);
+
+    await new A2AAgentExecutor({
+      runner,
+      genAiPartConverter: () => [
+        {kind: 'text', text: 'first'},
+        {kind: 'text', text: 'second'},
+      ],
+    }).execute(requestContext(), eventBus);
+
+    const artifact = published[2];
+    if (artifact?.kind !== 'artifact-update') {
+      return expect.fail(`third published event is ${artifact?.kind}`);
+    }
+    expect(
+      artifact.artifact.parts.map((part) => (part as TextPart).text),
+    ).toEqual(['first', 'second']);
+  });
+
   it('drops an artifact whose parts the configured converter discards', async () => {
     willYield([
       createEvent({
