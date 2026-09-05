@@ -41,7 +41,7 @@ Tool output also carries `role: 'user'`, and it must not begin an invocation. If
 
 `removeAmount` does not say how many invocations to remove. Truncation always keeps exactly `numInvocationsToKeep` invocations and drops everything before them.
 
-What `removeAmount` decides is _when_ truncation runs. The plugin truncates only once the history holds `numInvocationsToKeep + removeAmount` invocations. A larger value therefore truncates less often, in bigger steps.
+What `removeAmount` decides is _when_ truncation runs. The plugin truncates only once the history holds `numInvocationsToKeep + removeAmount` invocations. A larger value therefore truncates less often, in bigger steps. That suits a cached prompt prefix, because every cut invalidates the cache.
 
 ```typescript
 // Keep 3 invocations, but only re-truncate once 5 have accumulated.

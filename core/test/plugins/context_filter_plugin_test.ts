@@ -18,10 +18,29 @@ import {
   LlmAgent,
   LlmRequest,
   LlmResponse,
+  LogLevel,
+  Logger,
   PluginManager,
+  getLogger,
+  setLogger,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
+
+/** Collects the `error` calls the plugin makes, and drops everything else. */
+class RecordingLogger implements Logger {
+  readonly errorCalls: unknown[][] = [];
+
+  log(_level: LogLevel, ..._args: unknown[]): void {}
+  debug(..._args: unknown[]): void {}
+  info(..._args: unknown[]): void {}
+  warn(..._args: unknown[]): void {}
+  setLogLevel(_level: LogLevel): void {}
+
+  error(...args: unknown[]): void {
+    this.errorCalls.push(args);
+  }
+}
 
 /** Records the contents of every request the runner sends. */
 class RecordingLlm extends BaseLlm {
@@ -120,6 +139,12 @@ function collectPairIds(contents: Content[]): {
 }
 
 describe('ContextFilterPlugin', () => {
+  const previousLogger = getLogger();
+
+  afterEach(() => {
+    setLogger(previousLogger);
+  });
+
   it('test_filter_last_n_invocations', async () => {
     const plugin = new ContextFilterPlugin({numInvocationsToKeep: 1});
     const llmRequest = createLlmRequest([
@@ -221,6 +246,8 @@ describe('ContextFilterPlugin', () => {
   });
 
   it('test_filter_function_raises_exception', async () => {
+    const recordingLogger = new RecordingLogger();
+    setLogger(recordingLogger);
     const plugin = new ContextFilterPlugin({
       customFilter: () => {
         throw new Error('Filter error');
@@ -235,6 +262,11 @@ describe('ContextFilterPlugin', () => {
     await plugin.beforeModelCallback({callbackContext, llmRequest});
 
     expect(llmRequest.contents).toEqual(originalContents);
+    expect(recordingLogger.errorCalls).toHaveLength(1);
+    expect(recordingLogger.errorCalls[0][0]).toBe(
+      'Failed to reduce context for request',
+    );
+    expect(recordingLogger.errorCalls[0][1]).toBeInstanceOf(Error);
   });
 
   it('test_filter_preserves_function_call_response_pairs', async () => {
