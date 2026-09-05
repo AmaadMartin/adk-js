@@ -258,6 +258,43 @@ const executor = new A2AAgentExecutor({
 
 Returning an empty array publishes nothing for that ADK event.
 
+### Converting an event from the executor context
+
+`eventConverter` is the second ADK-event slot. It receives the
+`ExecutorContext` of the run, which carries the session, the user, the events
+so far and the `RequestContext` the A2A server built:
+
+```ts
+import {A2AAgentExecutor} from '@google/adk';
+
+const executor = new A2AAgentExecutor({
+  runner: myRunner,
+  eventConverter: (adkEvent, ctx, genAiPartConverter) => [
+    {
+      kind: 'status-update',
+      taskId: ctx.requestContext.taskId,
+      contextId: ctx.requestContext.contextId,
+      final: false,
+      status: {
+        state: 'working',
+        message: {
+          kind: 'message',
+          messageId: adkEvent.id,
+          role: 'agent',
+          parts: (adkEvent.content?.parts ?? []).flatMap(
+            (part) => genAiPartConverter(part) ?? [],
+          ),
+        },
+      },
+    },
+  ],
+});
+```
+
+It has no default, and the executor prefers it over `adkEventConverter` when
+you set both. adk-python splits these two slots across two executor classes;
+adk-js has one executor, so the precedence rule stands in for that split.
+
 ### The artifact map
 
 `adkEventConverter` receives a `Map` from an event author to the artifact id

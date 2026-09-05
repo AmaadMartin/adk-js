@@ -55,7 +55,6 @@ import {
   getA2AEventMetadata,
   getInvocationMetadata,
 } from './metadata_converter_utils.js';
-import {GenAIPartToA2APartConverter} from './part_converter_utils.js';
 import {
   A2ARequestToAgentRunRequestConverter,
   AgentRunRequest,
@@ -100,17 +99,6 @@ export type AfterExecuteCallback = (
 ) => Promise<void>;
 
 /**
- * Converts one ADK event into the A2A events that represent it.
- *
- * Returning an empty array publishes nothing for that ADK event.
- */
-export type AdkEventToA2AEventsConverter = (
-  adkEvent: AdkEvent,
-  ctx: ExecutorContext,
-  genAiPartConverter: GenAIPartToA2APartConverter,
-) => A2AEvent[];
-
-/**
  * Configuration for the Executor.
  */
 export interface AgentExecutorConfig extends A2aAgentExecutorConverterConfig {
@@ -129,12 +117,10 @@ export interface AgentExecutorConfig extends A2aAgentExecutorConverterConfig {
    */
   requestConverter?: A2ARequestToAgentRunRequestConverter;
 
-  /**
-   * Converts each ADK event into A2A events, with the whole executor context
-   * in hand. Takes precedence over the inherited `adkEventConverter`, which
-   * receives the task and context ids instead.
-   */
-  eventConverter?: AdkEventToA2AEventsConverter;
+  // `eventConverter` also comes from A2aAgentExecutorConverterConfig: it
+  // converts one ADK event with the whole executor context in hand, and takes
+  // precedence over `adkEventConverter`, which receives the task and context
+  // ids instead.
 
   /** Hooks that can rewrite the request, the events and the terminal event. */
   executeInterceptors?: ExecuteInterceptor[];
@@ -486,19 +472,22 @@ export class A2AAgentExecutor implements AgentExecutor {
     });
   }
 
+  /**
+   * Converts one ADK event with whichever event converter the config selects.
+   *
+   * `eventConverter` wins over `adkEventConverter`, so a config that sets both
+   * gets the one that reads the executor context.
+   */
   private convertAdkEvent(
     adkEvent: AdkEvent,
     executorContext: ExecutorContext,
     partialArtifactIds: Map<string, string>,
   ): A2AEvent[] {
     const {taskId, contextId} = executorContext.requestContext;
-    const {adkEventConverter, genAiPartConverter} = this.converters;
-    const a2aEvents = this.config.eventConverter
-      ? this.config.eventConverter(
-          adkEvent,
-          executorContext,
-          genAiPartConverter,
-        )
+    const {adkEventConverter, eventConverter, genAiPartConverter} =
+      this.converters;
+    const a2aEvents = eventConverter
+      ? eventConverter(adkEvent, executorContext, genAiPartConverter)
       : adkEventConverter(
           adkEvent,
           partialArtifactIds,

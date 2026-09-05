@@ -69,7 +69,7 @@ export type GenAIPartToA2APartConverter = (
  * @param partConverter - Converts a single part. Defaults to
  *   {@link toA2APart}. A converter may drop a part by returning `undefined`,
  *   or expand it by returning an array.
- * @returns An array of A2A parts.
+ * @returns An array of A2A parts, without the parts the converter dropped.
  */
 export function toA2AParts(
   parts: GenAIPart[] = [],

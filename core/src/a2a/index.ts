@@ -42,7 +42,6 @@ export {
 export type {ResolveAgentCardOptions} from './agent_card.js';
 export {A2AAgentExecutor} from './agent_executor.js';
 export type {
-  AdkEventToA2AEventsConverter,
   AfterEventCallback,
   AfterExecuteCallback,
   AgentExecutorConfig,
@@ -70,6 +69,7 @@ export {
 } from './executor_config.js';
 export type {
   A2aAgentExecutorConverterConfig,
+  AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   ResolvedA2aAgentExecutorConfig,
 } from './executor_config.js';
