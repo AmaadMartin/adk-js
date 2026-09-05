@@ -10,6 +10,9 @@ import AdmZip from 'adm-zip';
 import {AuthClient, OAuth2Client} from 'google-auth-library';
 import {expect, vi} from 'vitest';
 
+/** The init argument of `globalThis.fetch`. */
+export type FetchInit = Parameters<typeof fetch>[1];
+
 export const TEST_PROJECT = 'test-project';
 export const TEST_LOCATION = 'us-central1';
 
@@ -51,7 +54,9 @@ export function jsonResponse(body: unknown, status = 200): Response {
 
 /** Builds a response carrying `body` as raw bytes. */
 export function bytesResponse(body: Buffer, status = 200): Response {
-  return new Response(body, {status});
+  // A `Buffer` may be backed by a `SharedArrayBuffer`, which `BodyInit` does
+  // not accept, so the bytes are copied into a plain view first.
+  return new Response(new Uint8Array(body), {status});
 }
 
 /**

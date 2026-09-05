@@ -15,6 +15,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 import {
   DEFAULT_BASE_URL,
+  FetchInit,
   RESOURCE_PARENT,
   TEST_LOCATION,
   TEST_PROJECT,
@@ -44,8 +45,7 @@ vi.mock('../../src/utils/mtls_utils.js', async (importOriginal) => ({
 
 const REVISION = `${RESOURCE_PARENT}/skills/my-skill/revisions/rev-123`;
 
-const fetchMock =
-  vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+const fetchMock = vi.fn<(url: string, init?: FetchInit) => Promise<Response>>();
 
 /** Returns the headers the registry sent on its `nth` request. */
 function sentHeaders(nth: number): Record<string, string> {

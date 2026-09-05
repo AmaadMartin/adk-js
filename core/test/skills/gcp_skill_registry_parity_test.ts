@@ -19,6 +19,7 @@ import {logger} from '../../src/utils/logger.js';
 import type {MtlsClientCerts} from '../../src/utils/mtls_utils.js';
 import {
   DEFAULT_BASE_URL,
+  FetchInit,
   RESOURCE_PARENT,
   TEST_LOCATION,
   TEST_PROJECT,
@@ -56,8 +57,7 @@ const SKILL_URL = `${DEFAULT_BASE_URL}/${RESOURCE_PARENT}/skills/my-skill`;
 const REVISION_URL = `${DEFAULT_BASE_URL}/${REVISION}`;
 const SEARCH_URL = `${DEFAULT_BASE_URL}/${RESOURCE_PARENT}/skills:search`;
 
-const fetchMock =
-  vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+const fetchMock = vi.fn<(url: string, init?: FetchInit) => Promise<Response>>();
 
 /** The headers the registry is expected to put on the wire. */
 function expectedHeaders(
