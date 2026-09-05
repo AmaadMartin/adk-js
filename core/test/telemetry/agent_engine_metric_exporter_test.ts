@@ -16,6 +16,7 @@ import {
   RequestDrivenMetricReader,
 } from '@google/adk';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
+import {emptyResource} from '@opentelemetry/resources';
 import {
   AggregationTemporality,
   AggregationType,
@@ -24,7 +25,6 @@ import {
   PushMetricExporter,
   ResourceMetrics,
 } from '@opentelemetry/sdk-metrics';
-import {emptyResource} from '@opentelemetry/resources';
 import {BasicTracerProvider} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
