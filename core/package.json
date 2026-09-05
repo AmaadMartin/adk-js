@@ -105,6 +105,8 @@
     "dockerode": "^5.0.1"
   },
   "devDependencies": {
+    "@google-cloud/bigquery": "^9.0.3",
+    "@google-cloud/dataplex": "^6.0.0",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/storage": "^7.17.1",
@@ -118,6 +120,8 @@
     "openapi-types": "^12.1.3"
   },
   "peerDependencies": {
+    "@google-cloud/bigquery": "^9.0.3",
+    "@google-cloud/dataplex": "^6.0.0",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/storage": "^7.17.1",
@@ -130,6 +134,12 @@
     "express": "^4.22.1 || ^5.1.0"
   },
   "peerDependenciesMeta": {
+    "@google-cloud/bigquery": {
+      "optional": true
+    },
+    "@google-cloud/dataplex": {
+      "optional": true
+    },
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": {
       "optional": true
     },
