@@ -33,3 +33,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Evaluation
+
+- [Multi-turn task success evaluator](evaluation/multi_turn_task_success_evaluator/index.md) - Scoring whether an agent achieved the goal of a whole conversation.
