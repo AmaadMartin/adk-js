@@ -164,6 +164,7 @@ export type {
   EvalDumpOptions,
   EvalModel,
   EvalModelOptions,
+  ExtraKeysPolicy,
 } from './evaluation/common.js';
 export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
 export type {
@@ -175,6 +176,8 @@ export type {
   InvocationEvent,
   InvocationEvents,
   SessionInput,
+  SessionState,
+  StaticConversation,
 } from './evaluation/eval_case.js';
 export {
   DEFAULT_JUDGE_MODEL,
@@ -218,6 +221,7 @@ export type {
   MetricInfoProvider,
   MetricValueInfo,
   ParsedLlmBackedUserSimulatorCriterion,
+  ParsedRubricsBasedCriterion,
   ParsedToolTrajectoryCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
