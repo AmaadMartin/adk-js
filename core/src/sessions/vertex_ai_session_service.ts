@@ -22,7 +22,7 @@ import {
 } from '@google/genai';
 import {ApiClient} from '@google/genai/vertex_internal';
 import {isCompactedEvent} from '../events/compacted_event.js';
-import {isNotFoundError} from '../utils/error_utils.js';
+import {formatError, isNotFoundError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 
 import {AuthConfig} from '../auth/auth_tool.js';
@@ -410,8 +410,9 @@ export class VertexAiSessionService extends BaseSessionService {
       if (isNotFoundError(error)) {
         return undefined;
       }
-      const {message} = error as {message?: string};
-      logger.error(`Error getting session from Vertex AI: ${message}`);
+      logger.error(
+        `Error getting session from Vertex AI: ${formatError(error)}`,
+      );
       throw error;
     }
   }

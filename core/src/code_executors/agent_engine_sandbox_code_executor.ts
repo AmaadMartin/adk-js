@@ -254,7 +254,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
     }
 
     if (!this.agentEngineCreationPromise) {
-      this.agentEngineCreationPromise = (async () => {
+      const creation = (async () => {
         logger.debug(
           'No Agent Engine resource name provided. Creating a new one...',
         );
@@ -284,6 +284,14 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
         logger.debug(`Created Agent Engine: ${this.agentEngineResourceName}`);
         return this.agentEngineResourceName!;
       })();
+
+      // The reference leaves its resource name unset when creation fails and
+      // retries on the next execution. Dropping the memo keeps that behaviour;
+      // a cached rejection would fail every later call on this executor.
+      this.agentEngineCreationPromise = creation.catch((error: unknown) => {
+        this.agentEngineCreationPromise = undefined;
+        throw error;
+      });
     }
 
     return this.agentEngineCreationPromise;
@@ -308,13 +316,13 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
             name: sandboxName,
           });
         // adk-js binds a sandbox to one language, so a cached sandbox that
-        // declares a different one cannot serve this request.
+        // does not declare the requested one cannot serve this request.
         const cachedLanguage =
           sandbox?.spec?.codeExecutionEnvironment?.codeLanguage;
         if (
           !sandbox ||
           sandbox.state !== 'STATE_RUNNING' ||
-          (cachedLanguage !== undefined && cachedLanguage !== language)
+          cachedLanguage !== language
         ) {
           createNewSandbox = true;
         }
