@@ -40,6 +40,7 @@ import {State} from '../../sessions/state.js';
 import {randomUUID} from '../../utils/env_aware_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
+import {runSerialized} from '../../utils/serial_queue.js';
 
 /** Default root collection, overridable per service or by environment. */
 const DEFAULT_ROOT_COLLECTION = 'adk-session';
@@ -64,11 +65,6 @@ const MAX_BATCH_SIZE = 500;
 const STALE_SESSION_ERROR_MESSAGE =
   'The session has been modified in storage since it was loaded. ' +
   'Please reload the session before appending more events.';
-
-const NON_SERIALIZABLE_STATE_MESSAGE =
-  'Failed to serialize session state; some values are not JSON-serializable ' +
-  '(e.g. functions) and were replaced with a string representation in the ' +
-  'persisted state.';
 
 /** The `@google-cloud/firestore` module namespace. */
 type FirestoreModule = typeof import('@google-cloud/firestore');
@@ -157,16 +153,20 @@ function extractStateDelta(state: Record<string, unknown>): ScopedState {
 }
 
 /**
- * Coerces a state map into a form that survives `JSON.stringify`.
+ * Coerces a map into a form that survives `JSON.stringify`.
  *
  * A bare `JSON.stringify` drops a function-valued or symbol-valued key without
- * a word, so the key disappears from storage. Replacing the value with its
- * string form keeps the key and makes the lossy write visible in the log. A
- * value carrying `toJSON` goes through it, so a `Date` persists as its ISO
- * string.
+ * a word, and throws outright on a circular reference. Replacing the value
+ * with its string form keeps the key, keeps the write, and makes the loss
+ * visible in the log. A value carrying `toJSON` goes through it, so a `Date`
+ * persists as its ISO string.
+ *
+ * @param map The map to coerce.
+ * @param subject Names the map in the warning, e.g. `session state`.
  */
-function makeJsonSafeState(
-  state: Record<string, unknown>,
+function makeJsonSafe(
+  map: Record<string, unknown>,
+  subject: string,
 ): Record<string, unknown> {
   let replaced = false;
   const replace = (_key: string, value: unknown): unknown => {
@@ -180,22 +180,24 @@ function makeJsonSafeState(
 
   let safe: Record<string, unknown>;
   try {
-    safe = JSON.parse(JSON.stringify(state, replace)) as Record<
-      string,
-      unknown
-    >;
+    safe = JSON.parse(JSON.stringify(map, replace)) as Record<string, unknown>;
   } catch {
     // A circular reference defeats the whole-map pass. Isolate it to the key
     // that holds it rather than losing every other key with it.
     replaced = true;
     safe = {};
-    for (const [key, value] of Object.entries(state)) {
+    for (const [key, value] of Object.entries(map)) {
       safe[key] = toJsonSafeValue(value, replace);
     }
   }
 
   if (replaced) {
-    logger.warn(NON_SERIALIZABLE_STATE_MESSAGE);
+    // The values themselves are never logged: state can hold user data.
+    logger.warn(
+      `Some ${subject} values are not JSON-serializable (e.g. functions) and ` +
+        'were replaced with a string representation before writing to ' +
+        'Firestore.',
+    );
   }
   return safe;
 }
@@ -265,11 +267,7 @@ function parseStoredState(
  * The keys are trimmed from the event before it is persisted.
  */
 function applyTempState(session: Session, event: Event): void {
-  const stateDelta = event.actions?.stateDelta;
-  if (!stateDelta) {
-    return;
-  }
-  for (const [key, value] of Object.entries(stateDelta)) {
+  for (const [key, value] of Object.entries(event.actions.stateDelta)) {
     if (!key.startsWith(State.TEMP_PREFIX)) {
       continue;
     }
@@ -286,21 +284,20 @@ function applyTempState(session: Session, event: Event): void {
 
 /** The event as the plain JSON stored in its document's `event_data` field. */
 function toEventData(event: Event): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(event)) as Record<string, unknown>;
+  // The event carries the same state delta the session state does, so it hits
+  // the same unserializable values and needs the same coercion.
+  return makeJsonSafe({...event}, 'event');
 }
 
 /** Orders sessions by last update time, then user, then id — all ascending. */
 function compareSessions(a: Session, b: Session): number {
-  return (
-    a.lastUpdateTime - b.lastUpdateTime ||
-    compareStrings(a.userId, b.userId) ||
-    compareStrings(a.id, b.id)
-  );
-}
-
-function compareStrings(a: string, b: string): number {
-  if (a < b) return -1;
-  return a > b ? 1 : 0;
+  if (a.lastUpdateTime !== b.lastUpdateTime) {
+    return a.lastUpdateTime - b.lastUpdateTime;
+  }
+  if (a.userId !== b.userId) {
+    return a.userId < b.userId ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : 1;
 }
 
 /**
@@ -365,8 +362,6 @@ function toSessionLockKey({
 }: CompositeSessionKey): string {
   return `${appName}\u0000${userId}\u0000${sessionId}`;
 }
-
-function ignore(): void {}
 
 /**
  * Session service backed by Google Cloud Firestore.
@@ -454,7 +449,7 @@ export class FirestoreSessionService extends BaseSessionService {
     // App and user state are written natively, so a Date stays a Date. Only
     // the session bucket is JSON-encoded, so only it is coerced.
     const scoped = extractStateDelta(state ?? {});
-    const sessionState = makeJsonSafeState(scoped.session);
+    const sessionState = makeJsonSafe(scoped.session, 'session state');
 
     const sessionData = {
       id,
@@ -510,10 +505,8 @@ export class FirestoreSessionService extends BaseSessionService {
     const db = await this.getClient();
     const sessionRef = this.getSessionsRef(db, appName, userId).doc(sessionId);
     const snap = await sessionRef.get();
-    if (!snap.exists) {
-      return undefined;
-    }
-
+    // An absent document reads back as no data at all, and an empty body
+    // carries no session either.
     const data = snap.data() as StoredSessionDocument | undefined;
     if (!data || Object.keys(data).length === 0) {
       return undefined;
@@ -580,7 +573,7 @@ export class FirestoreSessionService extends BaseSessionService {
     const sessions = stored.map((data) =>
       createSession({
         id: data.id ?? '',
-        appName: data.appName ?? appName,
+        appName,
         userId: data.userId ?? '',
         state: mergeStates(
           appState,
@@ -655,7 +648,7 @@ export class FirestoreSessionService extends BaseSessionService {
     event = trimTempDeltaState(event);
 
     const db = await this.getClient();
-    const scoped = extractStateDelta(event.actions?.stateDelta ?? {});
+    const scoped = extractStateDelta(event.actions.stateDelta);
     const sessionRef = this.getSessionsRef(
       db,
       session.appName,
@@ -665,20 +658,24 @@ export class FirestoreSessionService extends BaseSessionService {
     const userRef = this.getUserStateRef(db, session.appName, session.userId);
     const now = await this.serverTimestamp();
 
-    const revision = await this.withSessionLock(
-      {
+    // Two appends racing on one session would both read the same revision and
+    // one would lose its write. Firestore's transaction retry cannot help: the
+    // loser is stale by then and must be rejected, not retried.
+    const revision = await runSerialized(
+      this.sessionLocks,
+      toSessionLockKey({
         appName: session.appName,
         userId: session.userId,
         sessionId: session.id,
-      },
+      }),
       () =>
         db.runTransaction(async (t) => {
           // 1. Reads
           const snap = await t.get(sessionRef);
-          if (!snap.exists) {
+          const data = snap.data() as StoredSessionDocument | undefined;
+          if (!data) {
             throw new SessionNotFoundError(`Session ${session.id} not found.`);
           }
-          const data = (snap.data() ?? {}) as StoredSessionDocument;
           if (data.status === DELETING_STATUS) {
             throw new Error(
               `Session ${session.id} is currently being deleted.`,
@@ -721,7 +718,7 @@ export class FirestoreSessionService extends BaseSessionService {
           );
           const newRevision = currentRevision + 1;
           t.update(sessionRef, {
-            state: JSON.stringify(makeJsonSafeState(merged)),
+            state: JSON.stringify(makeJsonSafe(merged, 'session state')),
             updateTime: now,
             revision: newRevision,
           });
@@ -849,35 +846,6 @@ export class FirestoreSessionService extends BaseSessionService {
     }
     return states;
   }
-
-  /**
-   * Runs `work` after every append already queued for the same session.
-   *
-   * Two appends racing on one session would both read the same revision and
-   * one would lose its write. Firestore's own transaction retry cannot help:
-   * the second append is stale by then and must be rejected, not retried.
-   */
-  private withSessionLock<T>(
-    key: CompositeSessionKey,
-    work: () => Promise<T>,
-  ): Promise<T> {
-    const lockKey = toSessionLockKey(key);
-    const queued = this.sessionLocks.get(lockKey);
-    const result = queued ? queued.then(work) : work();
-
-    // The queued promise must never reject, or a failed append would fail
-    // every append waiting behind it.
-    const settled = result.then(ignore, ignore);
-    this.sessionLocks.set(lockKey, settled);
-    void settled.then(() => {
-      // Drop the entry only when nothing queued behind this call, so the map
-      // does not keep one entry per session for the life of the process.
-      if (this.sessionLocks.get(lockKey) === settled) {
-        this.sessionLocks.delete(lockKey);
-      }
-    });
-    return result;
-  }
 }
 
 /** Reads a state document inside a transaction, defaulting to an empty map. */
@@ -886,5 +854,5 @@ async function readStateDocument(
   ref: DocumentReference,
 ): Promise<Record<string, unknown>> {
   const snap = await t.get(ref);
-  return snap.exists ? (snap.data() ?? {}) : {};
+  return snap.data() ?? {};
 }
