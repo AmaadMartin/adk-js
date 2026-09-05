@@ -11,12 +11,22 @@
  * adk-python ships no test module for that file, so these cases are derived
  * from the pydantic model definitions rather than translated from reference
  * tests.
+ *
+ * The default output schema cases were added later, against the same reference
+ * file.
  */
 
-import {InputValidationError, Logger, setLogger} from '@google/adk';
+import {
+  FinishTaskTool,
+  InputValidationError,
+  Logger,
+  setLogger,
+} from '@google/adk';
+import {Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   asTaskRequest,
+  DEFAULT_TASK_OUTPUT_SCHEMA,
   parseTaskRequest,
   parseTaskResult,
 } from '../../src/tools/task_models.js';
@@ -174,5 +184,27 @@ describe('asTaskRequest', () => {
 
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain(typeName);
+  });
+});
+
+describe('DEFAULT_TASK_OUTPUT_SCHEMA', () => {
+  it('exposes result as a required string', () => {
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.type).toBe(Type.OBJECT);
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.properties?.['result']?.type).toBe(
+      Type.STRING,
+    );
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.required).toEqual(['result']);
+  });
+
+  it('carries the reference description of result', () => {
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.properties?.['result']?.description).toBe(
+      'A brief summary of what the agent accomplished.',
+    );
+  });
+
+  it('is the very schema FinishTaskTool declares when given none', () => {
+    expect(new FinishTaskTool()._getDeclaration().parameters).toBe(
+      DEFAULT_TASK_OUTPUT_SCHEMA,
+    );
   });
 });

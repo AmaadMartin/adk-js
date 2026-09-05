@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Schema, Type} from '@google/genai';
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
@@ -52,6 +53,21 @@ export interface TaskResult {
   /** The validated output data from the task. */
   readonly output: unknown;
 }
+
+/**
+ * The function declaration parameters `FinishTaskTool` falls back to when the
+ * task agent declares no output schema.
+ */
+export const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    result: {
+      type: Type.STRING,
+      description: 'A brief summary of what the agent accomplished.',
+    },
+  },
+  required: ['result'],
+};
 
 const taskRequestSchema = z.preprocess(
   normalizeAgentNameKey,
