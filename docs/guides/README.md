@@ -86,3 +86,9 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 
 - [content_utils](utils/content_utils/index.md) - Reading and reshaping a genai
   `Content`: its text, its audio parts, and coercing a value into a user turn.
+
+### Workflow
+
+- [Workflow nodes](workflow/node/index.md) - Building a node from a function,
+  tool, agent or node, subclassing `WorkflowNode`, and running a node once per
+  item of a list input.

@@ -9,7 +9,11 @@ import type {SchemaLike} from '../../utils/schema.js';
 import type {BaseNode} from '../base_node.js';
 import {isBaseNode, START} from '../base_node.js';
 import type {NodeLike} from '../graph.js';
-import {NODE_BUILDERS, PARALLEL_WORKER_FACTORY} from '../node_builders.js';
+import {
+  AFTER_NODE_COPY,
+  NODE_BUILDERS,
+  PARALLEL_WORKER_FACTORY,
+} from '../node_builders.js';
 import type {RetryConfig} from '../retry_config.js';
 import {prepareRetryConfig} from '../retry_config.js';
 
@@ -76,6 +80,44 @@ export function isPlainObject(value: unknown): boolean {
 }
 
 /**
+ * The complete key set of {@link BuildNodeOptions}.
+ *
+ * `satisfies Record<keyof BuildNodeOptions, true>` rejects both a missing key
+ * and an unknown one, so the set cannot drift from the interface.
+ */
+const BUILD_NODE_OPTION_KEYS: ReadonlySet<string> = new Set(
+  Object.keys({
+    name: true,
+    description: true,
+    rerunOnResume: true,
+    retryConfig: true,
+    timeout: true,
+    inputSchema: true,
+    outputSchema: true,
+    stateSchema: true,
+    authConfig: true,
+    isolationScope: true,
+    parallelWorker: true,
+    maxParallelWorkers: true,
+  } satisfies Record<keyof BuildNodeOptions, true>),
+);
+
+/**
+ * Returns whether a value is a {@link BuildNodeOptions} literal.
+ *
+ * `node()` tells its two call forms apart by this, and "plain object" alone is
+ * not enough to decide: `{name: 'a', runAsync: fn}` is a plain object too, and
+ * has to reach {@link buildNode} so it is rejected as an unsupported node-like
+ * value rather than read as options.
+ */
+export function isBuildNodeOptions(value: unknown): value is BuildNodeOptions {
+  return (
+    isPlainObject(value) &&
+    Object.keys(value as object).every((key) => BUILD_NODE_OPTION_KEYS.has(key))
+  );
+}
+
+/**
  * Returns whether a value can be converted into a workflow node via
  * {@link buildNode}: the `'START'` sentinel, an existing {@link BaseNode}, or a
  * value matched by a registered {@link NodeBuilder}.
@@ -86,6 +128,27 @@ export function isNodeLike(value: unknown): value is NodeLike {
     isBaseNode(value) ||
     NODE_BUILDERS.some((builder) => builder.match(value))
   );
+}
+
+/**
+ * Rejects a parallel-worker option pair that cannot produce a worker, with the
+ * same verdict adk-python's `node()` and `Node` give.
+ */
+export function assertParallelWorkerOptions(options: {
+  parallelWorker?: boolean;
+  maxParallelWorkers?: number;
+}): void {
+  if (options.maxParallelWorkers === undefined) {
+    return;
+  }
+  if (!options.parallelWorker) {
+    throw new Error(
+      'maxParallelWorkers can only be set when parallelWorker is true.',
+    );
+  }
+  if (options.maxParallelWorkers < 1) {
+    throw new Error('maxParallelWorkers must be greater than or equal to 1.');
+  }
 }
 
 /**
@@ -100,11 +163,7 @@ export function buildNode(
   nodeLike: NodeLike,
   options: BuildNodeOptions = {},
 ): BaseNode {
-  if (options.maxParallelWorkers !== undefined && !options.parallelWorker) {
-    throw new Error(
-      'maxParallelWorkers can only be set when parallelWorker is true.',
-    );
-  }
+  assertParallelWorkerOptions(options);
 
   const built = buildInnerNode(nodeLike, options);
 
@@ -244,10 +303,7 @@ function cloneWithOverrides(
     overrides['name'] = name;
   }
 
-  const clone = Object.create(
-    Object.getPrototypeOf(node) as object,
-  ) as BaseNode;
-  Object.assign(clone, node, overrides);
+  const clone = copyNodeWithPrototype(node, overrides);
   if ('retryConfig' in overrides) {
     Object.assign(clone, {
       preparedRetryConfig: options.retryConfig
@@ -255,5 +311,24 @@ function cloneWithOverrides(
         : undefined,
     });
   }
+  AFTER_NODE_COPY(clone);
   return clone;
+}
+
+/**
+ * Returns a shallow copy of `source` with the same prototype and some of its
+ * own properties replaced.
+ *
+ * Keeping the prototype keeps the node's class and behaviour, and copying own
+ * properties carries the `BaseNode` brand over. The caller is responsible for
+ * anything derived from a replaced property — see {@link cloneWithOverrides}
+ * for `preparedRetryConfig` and {@link AFTER_NODE_COPY} for a parallel-worker
+ * wrapper.
+ */
+export function copyNodeWithPrototype<T extends BaseNode>(
+  source: T,
+  overrides: object,
+): T {
+  const copy = Object.create(Object.getPrototypeOf(source) as object) as T;
+  return Object.assign(copy, source, overrides);
 }
