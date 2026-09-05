@@ -76,6 +76,7 @@ describe('MultiTurnToolUseQualityV1Evaluator', () => {
 
     expect(result.overallScore).toBeUndefined();
     expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
+    expect(result.perInvocationResults).toEqual([]);
   });
 
   it('prefers the criterion threshold over the deprecated one', async () => {
@@ -214,5 +215,27 @@ describe('MultiTurnToolUseQualityV1Evaluator', () => {
     expect(result.perInvocationResults.map((r) => r.actualInvocation)).toEqual(
       actual,
     );
+  });
+
+  it('scores the same conversation with and without a scenario', async () => {
+    const withScenario = new FakeEvalClient(scored(0.9));
+    const withoutScenario = new FakeEvalClient(scored(0.9));
+    const evalMetric = {
+      metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+      threshold: 0.8,
+    };
+    const invocations = [invocation('inv1'), invocation('inv2')];
+
+    const scenarioResult = await new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric,
+      evalClient: withScenario,
+    }).evaluateInvocations(invocations, undefined, SCENARIO);
+    const plainResult = await new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric,
+      evalClient: withoutScenario,
+    }).evaluateInvocations(invocations);
+
+    expect(withScenario.requests).toEqual(withoutScenario.requests);
+    expect(scenarioResult).toEqual(plainResult);
   });
 });
