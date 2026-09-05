@@ -493,6 +493,74 @@ describe('FirestoreSessionService appendEvent', () => {
   });
 });
 
+describe('FirestoreSessionService cross-SDK event format', () => {
+  // Captured verbatim from adk-python:
+  //   Event(invocation_id='py_inv', author='py_user',
+  //         actions=EventActions(state_delta={'session_key': 'session_val'}))
+  //     .model_dump(exclude_none=True, mode='json')
+  // Its `Event` sets alias_generator=to_camel without serialize_by_alias, so
+  // `model_dump` writes the field names, which are snake_case.
+  const PYTHON_EVENT_DOCUMENT = {
+    invocation_id: 'py_inv',
+    author: 'py_user',
+    actions: {
+      state_delta: {session_key: 'session_val'},
+      artifact_delta: {},
+      requested_auth_configs: {},
+      requested_tool_confirmations: {},
+    },
+    node_info: {path: ''},
+    id: '71d9e6a0-cf33-42d4-b1e4-5cc474e572a8',
+    timestamp: 1788614765.9920907,
+  };
+
+  it('reads an event adk-python wrote', async () => {
+    fake.seed(SESSION_PATH, {id: SESSION_ID, appName: APP_NAME});
+    fake.seed(`${EVENTS_PATH}/py`, {
+      event_data: PYTHON_EVENT_DOCUMENT,
+      timestamp: new FakeTimestamp(1),
+    });
+
+    const session = await service.getSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    const event = session?.events[0];
+    expect(event?.invocationId).toBe('py_inv');
+    expect(event?.author).toBe('py_user');
+    // The delta's own keys are caller data and survive verbatim.
+    expect(event?.actions.stateDelta).toEqual({session_key: 'session_val'});
+  });
+
+  it('writes an event adk-python can read', async () => {
+    fake.seed(SESSION_PATH, {id: SESSION_ID, revision: 0});
+    const session = createSession({
+      id: SESSION_ID,
+      appName: APP_NAME,
+      userId: USER_ID,
+    });
+    const event = createEvent({
+      invocationId: 'js_inv',
+      author: 'js_user',
+      actions: createEventActions({stateDelta: {session_key: 'session_val'}}),
+    });
+
+    await service.appendEvent({session, event});
+
+    const stored = fake.writes.find(
+      (w) => w.kind === 'set' && w.path === `${EVENTS_PATH}/${event.id}`,
+    )?.data['event_data'] as Record<string, Record<string, unknown>>;
+    expect(Object.keys(stored)).toContain('invocation_id');
+    expect(Object.keys(stored)).not.toContain('invocationId');
+    expect(stored['invocation_id']).toBe('js_inv');
+    expect(stored['actions']['state_delta']).toEqual({
+      session_key: 'session_val',
+    });
+  });
+});
+
 describe('FirestoreSessionService getSession', () => {
   it('parses a state field stored as JSON text', async () => {
     fake.seed(SESSION_PATH, {
