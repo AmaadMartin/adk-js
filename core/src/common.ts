@@ -148,13 +148,20 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  getDeveloperInstructions,
+  getToolsByAgentName,
+} from './evaluation/app_details.js';
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export {
   DEFAULT_EVAL_PARALLELISM,
@@ -168,7 +175,17 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
-export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
+export {evalModel, optionalField} from './evaluation/common.js';
+export type {
+  EvalDumpOptions,
+  EvalModel,
+  EvalModelOptions,
+  ExtraKeysPolicy,
+} from './evaluation/common.js';
+export {
+  DEFAULT_LIVE_TIMEOUT_SECONDS,
+  MISSING_EVAL_DEPENDENCIES_MESSAGE,
+} from './evaluation/constants.js';
 export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
 export {
   getAllToolCalls,
@@ -211,8 +228,23 @@ export {
   EvalStatus,
   PrebuiltMetrics,
   ToolTrajectoryMatchType,
+  getConfigCustomFunctionPath,
   getMetricThreshold,
   normalizeToolTrajectoryMatchType,
+  parseBaseCriterion,
+  parseEvalMetric,
+  parseEvalMetricResult,
+  parseHallucinationsCriterion,
+  parseInterval,
+  parseJudgeModelOptions,
+  parseLlmAsAJudgeCriterion,
+  parseLlmBackedUserSimulatorCriterion,
+  parseMetricInfo,
+  parseMetricValueInfo,
+  parseRubricsBasedCriterion,
+  parseToolTrajectoryCriterion,
+  resolveJudgeModelOptions,
+  setConfigCustomFunctionPath,
 } from './evaluation/eval_metrics.js';
 export type {
   BaseCriterion,
@@ -222,10 +254,17 @@ export type {
   EvalMetricResultDetails,
   EvalMetricResultPerInvocation,
   HallucinationsCriterion,
+  Interval,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
   LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+  ParsedLlmBackedUserSimulatorCriterion,
+  ParsedRubricsBasedCriterion,
   ParsedToolTrajectoryCriterion,
+  ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
   ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
@@ -234,12 +273,19 @@ export {
   addRubricsToInvocation,
   copyEvalCaseRubricsToActualInvocations,
   copyInvocationRubricsToActualInvocations,
+  parseRubric,
+  parseRubricScore,
 } from './evaluation/eval_rubrics.js';
 export type {
   Rubric,
   RubricContent,
   RubricScore,
 } from './evaluation/eval_rubrics.js';
+export {getEvalRuntime, setEvalRuntime} from './evaluation/eval_runtime.js';
+export type {
+  EvalRuntime,
+  EvalServiceParams,
+} from './evaluation/eval_runtime.js';
 export type {EvalSet} from './evaluation/eval_set.js';
 export type {
   EvalSetResult,
@@ -248,9 +294,6 @@ export type {
 export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
 export {
   convertEventsToEvalInvocations,
-  generateInferencesFromAgentModule,
-  generateInferencesFromRootAgent,
-  generateInferencesFromRootAgentLive,
   generateResponses,
   generateResponsesFromSession,
   normalizeLiveTranscriptions,
@@ -258,7 +301,6 @@ export {
 export type {
   EvalCaseResponses,
   EvalRow,
-  EvalRunParams,
 } from './evaluation/evaluation_generator.js';
 export {
   BASE_CRITERION_TYPE,
@@ -297,7 +339,10 @@ export type {RougeScore} from './evaluation/rouge_scorer.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   UserSimulatorStatus,
+  getRegisteredUserSimulator,
+  parseBaseUserSimulatorConfig,
   registerUserSimulator,
+  registeredUserSimulatorTypes,
   unregisterUserSimulator,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
