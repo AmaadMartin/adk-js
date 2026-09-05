@@ -93,20 +93,20 @@ function getBoolean(option?: string | boolean): boolean {
 }
 
 /**
- * Splits the comma-separated --allowed_hosts value into a list, dropping
- * empty/whitespace-only entries. An unset or empty option yields undefined
- * rather than [], so it composes with ServerOptions.allowedHosts?: string[]
- * without callers needing to special-case "no value provided".
+ * Splits a comma-separated option value into a list, dropping empty and
+ * whitespace-only entries. An unset or empty option yields undefined rather
+ * than [], so it composes with an optional `string[]` server option without
+ * callers needing to special-case "no value provided".
  */
-function getAllowedHosts(option?: string): string[] | undefined {
+function splitCommaSeparated(option?: string): string[] | undefined {
   if (!option) {
     return undefined;
   }
-  const hosts = option
+  const values = option
     .split(',')
-    .map((host) => host.trim())
+    .map((value) => value.trim())
     .filter(Boolean);
-  return hosts.length > 0 ? hosts : undefined;
+  return values.length > 0 ? values : undefined;
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -177,6 +177,24 @@ const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
 ).default(false);
+const EXTRA_PLUGINS_OPTION = new Option(
+  '--extra_plugins <string>',
+  'Optional. Comma-separated list of plugins to attach to every runner. ' +
+    'Name each one as <module>#<export>, or as a bare module specifier for ' +
+    'its default export. The export may be a plugin class or a plugin ' +
+    'instance. A relative module path is resolved against the agents ' +
+    'directory.',
+).default('');
+// Spelled with dashes, unlike the underscored flags around them, because
+// adk-python spells them that way and the rejection message names them.
+const LOGO_TEXT_OPTION = new Option(
+  '--logo-text <string>',
+  'Optional. The text to display in the logo of the web UI. Requires --logo-image-url.',
+);
+const LOGO_IMAGE_URL_OPTION = new Option(
+  '--logo-image-url <string>',
+  'Optional. The URL of the image to display in the logo of the web UI. Requires --logo-text.',
+);
 const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
 AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 
@@ -251,6 +269,9 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(EXTRA_PLUGINS_OPTION)
+    .addOption(LOGO_TEXT_OPTION)
+    .addOption(LOGO_IMAGE_URL_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
@@ -263,7 +284,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
+          allowedHosts: splitCommaSeparated(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
@@ -271,6 +292,9 @@ export function createProgram(): Command {
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
           reloadAgents: getBoolean(options['reload_agents']),
+          extraPlugins: splitCommaSeparated(options['extra_plugins']),
+          logoText: options['logoText'],
+          logoImageUrl: options['logoImageUrl'],
         });
 
         await server.start();
@@ -299,6 +323,7 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(EXTRA_PLUGINS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
@@ -311,7 +336,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
+          allowedHosts: splitCommaSeparated(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
@@ -319,6 +344,7 @@ export function createProgram(): Command {
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
           reloadAgents: getBoolean(options['reload_agents']),
+          extraPlugins: splitCommaSeparated(options['extra_plugins']),
         });
         await server.start();
       } catch (error) {

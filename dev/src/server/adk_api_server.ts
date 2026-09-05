@@ -8,6 +8,7 @@ import {
   App,
   BaseArtifactService,
   BaseMemoryService,
+  BasePlugin,
   BaseSessionService,
   bearerTokenUserBuilder,
   Event,
@@ -51,9 +52,15 @@ import {
   serializeAppInfo,
 } from './app_info.js';
 import {
+  DEFAULT_APP_NAME_ENV_VAR,
+  defaultAppRewriteMiddleware,
+} from './default_app_rewrite.js';
+import {
   getAllowedRequestHosts,
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
+import {loadExtraPlugins} from './extra_plugins.js';
+import {setupRuntimeConfig} from './runtime_config.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -62,6 +69,14 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  * command line.
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
+
+/**
+ * Rejection message when `/run` or `/run_sse` receives no app name and no
+ * default app is configured. The text matches adk-python; the envelope key
+ * does not, because this server reports every error as `{error}`.
+ */
+export const MISSING_APP_NAME_ERROR =
+  'app_name is required when ADK_DEFAULT_APP_NAME is not set';
 
 interface ServerOptions {
   agentsDir?: string;
@@ -95,6 +110,23 @@ interface ServerOptions {
   a2aAuthToken?: string;
   reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
+  /**
+   * Plugins attached to every runner, each named as `<module>#<export>` (or a
+   * bare module specifier for its default export). A relative specifier is
+   * resolved against `agentsDir`. A specifier that fails to load is logged and
+   * skipped.
+   */
+  extraPlugins?: string[];
+  /** Text shown in the dev UI logo. Requires `logoImageUrl`. */
+  logoText?: string;
+  /** Image shown in the dev UI logo. Requires `logoText`. */
+  logoImageUrl?: string;
+  /**
+   * Directory the dev UI is served from, and where `runtime-config.json` is
+   * written. Defaults to the bundled `browser` directory. adk-python takes the
+   * same directory as `get_fast_api_app(web_assets_dir=...)`.
+   */
+  webAssetsDir?: string;
 }
 
 export class AdkApiServer {
@@ -141,6 +173,23 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  private readonly agentsDir?: string;
+  private readonly extraPlugins: string[];
+  private readonly logoText?: string;
+  private readonly logoImageUrl?: string;
+  private readonly webAssetsDir: string;
+  /**
+   * App that serves requests which omit the app name, read once at
+   * construction so a later `process.env` change cannot alter routing
+   * mid-process. adk-python reads it in `__init__` for the same reason.
+   */
+  private readonly defaultAppName?: string;
+  /**
+   * Memoised plugin instances. adk-python re-instantiates the extra plugins
+   * for every app; loading them once means N apps share one instance instead
+   * of re-importing the same module N times.
+   */
+  private extraPluginsPromise?: Promise<BasePlugin[]>;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -179,6 +228,13 @@ export class AdkApiServer {
     // to the authenticator, which rejects a token that is not usable.
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
+    this.agentsDir = options.agentsDir;
+    this.extraPlugins = options.extraPlugins ?? [];
+    this.logoText = options.logoText;
+    this.logoImageUrl = options.logoImageUrl;
+    this.webAssetsDir =
+      options.webAssetsDir ?? path.join(__dirname, '../../browser');
+    this.defaultAppName = process.env[DEFAULT_APP_NAME_ENV_VAR];
     this.app = express();
   }
 
@@ -262,13 +318,34 @@ export class AdkApiServer {
       next();
     });
 
+    // adk-python installs this rewrite outermost. Here the DNS-rebinding guard
+    // keeps that place and the rewrite comes second: the rewrite only edits the
+    // path and the guard only reads the Host header, so neither sees the other.
+    app.use(defaultAppRewriteMiddleware(this.defaultAppName));
+
     if (this.serveDebugUI) {
+      setupRuntimeConfig(
+        this.webAssetsDir,
+        {logoText: this.logoText, logoImageUrl: this.logoImageUrl},
+        this.logger,
+      );
+
       app.get('/', (req: Request, res: Response) => {
         res.redirect('/dev-ui');
       });
+      // Registered before the static mount so the static handler cannot shadow
+      // it with an asset that happens to be named `config`.
+      app.get('/dev-ui/config', (req: Request, res: Response) => {
+        res.json({
+          // snake_case, unlike the rest of this server: the dev UI bundle is
+          // shared with adk-python and reads these key names.
+          logo_text: this.logoText ?? null,
+          logo_image_url: this.logoImageUrl ?? null,
+        });
+      });
       app.use(
         '/dev-ui',
-        express.static(path.join(__dirname, '../../browser'), {
+        express.static(this.webAssetsDir, {
           setHeaders: (res: Response, path: string) => {
             if (path.endsWith('.js')) {
               res.setHeader('Content-Type', 'text/javascript');
@@ -925,7 +1002,14 @@ export class AdkApiServer {
 
     // -------------------------- Run related endpoints ------------------------
     app.post('/run', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, stateDelta} = req.body;
+      const {userId, sessionId, newMessage, stateDelta} = req.body;
+      const appName = req.body['appName'] ?? this.defaultAppName;
+
+      if (!appName) {
+        res.status(400).json({error: MISSING_APP_NAME_ERROR});
+        return;
+      }
+
       const session = await this.sessionService.getSession({
         appName,
         userId,
@@ -1049,8 +1133,13 @@ export class AdkApiServer {
     });
 
     app.post('/run_sse', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, streaming, stateDelta} =
-        req.body;
+      const {userId, sessionId, newMessage, streaming, stateDelta} = req.body;
+      const appName = req.body['appName'] ?? this.defaultAppName;
+
+      if (!appName) {
+        res.status(400).json({error: MISSING_APP_NAME_ERROR});
+        return;
+      }
 
       const session = await this.sessionService.getSession({
         appName,
@@ -1200,6 +1289,20 @@ export class AdkApiServer {
     return isApp(loaded) ? loaded.rootAgent : loaded;
   }
 
+  /**
+   * Loads the configured extra plugins, at most once per server. The promise
+   * itself is cached, so concurrent first requests share one load.
+   */
+  private loadExtraPluginsOnce(): Promise<BasePlugin[]> {
+    this.extraPluginsPromise ??= loadExtraPlugins(
+      this.extraPlugins,
+      this.agentsDir,
+      this.logger,
+    );
+
+    return this.extraPluginsPromise;
+  }
+
   private async getRunner(
     agentOrApp: RunnableRoot | App,
     appName: string,
@@ -1214,6 +1317,9 @@ export class AdkApiServer {
         memoryService: this.memoryService,
         sessionService: this.sessionService,
         artifactService: this.artifactService,
+        // The Runner merges these with the app's own plugins, so attaching
+        // them here leaves the App untouched.
+        plugins: await this.loadExtraPluginsOnce(),
       });
     }
 
