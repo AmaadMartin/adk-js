@@ -83,3 +83,43 @@ export function getClientLabels(): string[] {
   }
   return labels;
 }
+
+/**
+ * Returns the headers that identify this client to Google APIs, built from
+ * {@link getClientLabels}.
+ */
+export function getTrackingHeaders(): Record<string, string> {
+  const headerValue = getClientLabels().join(' ');
+  return {
+    'x-goog-api-client': headerValue,
+    'user-agent': headerValue,
+  };
+}
+
+/**
+ * Returns a copy of `headers` with the tracking headers merged in.
+ *
+ * A caller's own value for a tracking header is kept: its labels are appended
+ * after the ADK ones, and a label the caller already carries is not repeated.
+ * The argument is never modified.
+ */
+export function mergeTrackingHeaders(
+  headers?: Record<string, string>,
+): Record<string, string> {
+  const merged: Record<string, string> = {...headers};
+  for (const [key, trackingValue] of Object.entries(getTrackingHeaders())) {
+    const customValue = merged[key];
+    if (!customValue) {
+      merged[key] = trackingValue;
+      continue;
+    }
+    const valueParts = trackingValue.split(' ');
+    for (const customPart of customValue.split(' ')) {
+      if (!valueParts.includes(customPart)) {
+        valueParts.push(customPart);
+      }
+    }
+    merged[key] = valueParts.join(' ');
+  }
+  return merged;
+}
