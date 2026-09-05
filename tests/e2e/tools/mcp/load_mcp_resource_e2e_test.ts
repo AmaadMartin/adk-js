@@ -13,6 +13,8 @@ import {
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
 
+import {finalizeDynamicInstructions} from '../../../../core/src/models/llm_request.js';
+
 /**
  * End-to-end test with NO mocks: a real `MCPToolset` talks to a real MCP server
  * (spawned as a stdio child process, see `mcp_resource_server.mjs`) that exposes
@@ -94,6 +96,7 @@ describe('LoadMcpResourceTool (e2e, real MCP server over stdio)', () => {
     const llmRequest = functionResponseRequest(['readme', 'logo']);
 
     await tool.processLlmRequest({toolContext, llmRequest});
+    finalizeDynamicInstructions(llmRequest);
 
     // The server advertises the resources, so the guidance is injected.
     expect(llmRequest.config?.systemInstruction).toContain('readme');

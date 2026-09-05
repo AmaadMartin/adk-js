@@ -10,7 +10,10 @@ import type {
   TextResourceContents,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
+import {
+  appendDynamicInstructions,
+  LlmRequest,
+} from '../../models/llm_request.js';
 import {logger} from '../../utils/logger.js';
 import {
   BaseTool,
@@ -81,7 +84,7 @@ export class LoadMcpResourceTool extends BaseTool {
     try {
       const availableResourceNames = await this.mcpToolset.listResources();
       if (availableResourceNames.length > 0) {
-        appendInstructions(llmRequest, [
+        appendDynamicInstructions(llmRequest, [
           `You have a list of MCP resources:\n${JSON.stringify(
             availableResourceNames,
           )}\n\nWhen the user asks questions about any of the resources, you should call the\n\`load_mcp_resource\` function to load the resource. Always call load_mcp_resource\nbefore answering questions related to the resources.`,

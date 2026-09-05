@@ -43,6 +43,7 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {appendDynamicInstructions} from '../../src/models/llm_request.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -1427,5 +1428,77 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent dynamic instructions', () => {
+  class DynamicInstructionCapturingLlm extends BaseLlm {
+    capturedRequest?: LlmRequest;
+
+    async *generateContentAsync(
+      request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.capturedRequest = request;
+      yield {content: {role: 'model', parts: [{text: 'done'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  class DynamicInstructionTool extends BaseTool {
+    constructor(private readonly instruction: string) {
+      super({
+        name: 'dynamic_instruction_tool',
+        description: 'contributes an instruction',
+      });
+    }
+
+    async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+      return {};
+    }
+
+    override async processLlmRequest({
+      llmRequest,
+    }: ToolProcessLlmRequest): Promise<void> {
+      appendDynamicInstructions(llmRequest, [this.instruction]);
+    }
+  }
+
+  it('resolves a tool instruction into the system instruction before the model runs', async () => {
+    const llm = new DynamicInstructionCapturingLlm({model: 'gemini-2.5-flash'});
+    const agent = new LlmAgent({
+      name: 'dynamic_instruction_agent',
+      model: llm,
+      instruction: 'Base instruction',
+      tools: [
+        new DynamicInstructionTool('Prefer the artifact named report.pdf.'),
+      ],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_dynamic_1',
+      session: createSession({
+        id: 'sess_dynamic_1',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    const request = llm.capturedRequest;
+    if (!request) {
+      expect.fail('the agent never called the model');
+    }
+    expect(request.config?.systemInstruction).toContain(
+      'Prefer the artifact named report.pdf.',
+    );
+    expect(request.dynamicInstructions).toEqual([]);
   });
 });
