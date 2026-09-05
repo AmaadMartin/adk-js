@@ -72,6 +72,20 @@ const handler = new DefaultRequestHandler(
 `toA2a` does this for you and mounts the Express routes. Build the executor
 yourself when you need the configuration below, which `toA2a` does not expose.
 
+## What the runner option accepts
+
+`runner` takes a `Runner`, a `RunnerConfig`, or a function returning either.
+The function may be async, and it is called once per `execute()`.
+
+A value that is none of those raises a `TypeError` naming what it received, so
+a misconfigured deployment fails at the boundary rather than deep inside the
+`Runner` constructor:
+
+- When a factory returns the wrong thing:
+  `Runner factory must return a Runner or a runner config, got <type>`.
+- When the option itself is wrong:
+  `Runner must be a Runner instance or a callable that returns a Runner, got <type>`.
+
 ## The event stream
 
 For a task the client does not yet hold, `execute` publishes, in order:
@@ -88,8 +102,33 @@ reads only artifacts still receives the answer, and the task then closes as
 `completed`. When something did settle the task, no artifact update is
 published and the terminal event carries the settled state and its message.
 
-The terminal event's metadata carries the app, user and session ids, plus the
-last ADK event's invocation id, author and event id.
+## Event metadata
+
+Every event the executor publishes carries the ADK session keys and a flag
+identifying the executor generation:
+
+```json
+{
+  "adk_app_name": "weather_agent",
+  "adk_user_id": "A2A_USER_ctx-1",
+  "adk_session_id": "ctx-1",
+  "https://google.github.io/adk-docs/a2a/a2a-extension/": {
+    "adk_agent_executor_v2": true
+  }
+}
+```
+
+The extension URL is `https://google.github.io/adk-docs/a2a/a2a-extension/`. A
+Python peer publishes the same key with the same value. The leading `submitted`
+task is the one exception: a run that fails while it resolves the runner or the
+session has no session to name, so the task carries the keys only once the
+session is resolved.
+
+Artifact updates carry more: the invocation id, the author, the branch, and any
+citation, grounding or usage metadata the ADK event had. The terminal event
+carries the last ADK event's invocation id, author and event id. The session
+keys are merged on top of those, never in place of them, so a client can read
+both.
 
 ## Attribute runs to an authenticated principal
 
@@ -269,3 +308,8 @@ creation, the run, event conversion, an interceptor — is logged and published 
 a terminal `failed` status update whose text reads
 `Agent run failed: <message>`. A throwing `afterExecuteCallback` is logged and
 swallowed, and the terminal event is still published.
+
+An ADK event that carries `errorCode` or `errorMessage` is a failure the run
+reported rather than threw. It makes the terminal event `failed`, whatever else
+the run produced, and the last such event wins. The events published before it,
+artifact updates included, still reach the caller.

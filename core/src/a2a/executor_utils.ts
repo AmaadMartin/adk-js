@@ -75,10 +75,14 @@ export function requireRequestContext(ctx: RequestContext): {
  * for any status update that arrives before the task exists. adk-python emits
  * a status update here on the a2a 0.3.x wire; this is the shape that SDK
  * accepts.
+ *
+ * @param metadata The invocation metadata the task carries, when the caller
+ *   already knows which session serves the request.
  */
 export function enqueueSubmittedSignal(
   ctx: RequestContext,
   eventBus: ExecutionEventBus,
+  metadata?: Record<string, unknown>,
 ): void {
   if (ctx.task) {
     return;
@@ -89,6 +93,7 @@ export function enqueueSubmittedSignal(
       taskId: ctx.taskId,
       contextId: ctx.contextId,
       message: ctx.userMessage,
+      metadata,
     }),
   );
 }

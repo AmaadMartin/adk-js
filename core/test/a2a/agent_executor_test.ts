@@ -37,6 +37,8 @@ import {
   toGenAIPart,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, MockInstance, vi} from 'vitest';
+import {getAdkRunner} from '../../src/a2a/agent_executor.js';
+import {NEW_A2A_ADK_INTEGRATION_EXTENSION} from '../../src/a2a/metadata_converter_utils.js';
 
 const DEFAULT_USER_MESSAGE: Message = {
   kind: 'message',
@@ -838,7 +840,9 @@ describe('A2AAgentExecutor', () => {
       });
       await executor.execute(createRequestContext(), mockEventBus);
 
-      expect(publishedEvents().at(-1)).toBe(rewritten);
+      // Published as a copy of it: the executor stamps the invocation
+      // metadata onto the terminal event.
+      expect(publishedEvents().at(-1)).toMatchObject(rewritten);
     });
   });
 
@@ -959,6 +963,7 @@ describe('A2AAgentExecutor', () => {
         adk_app_name: 'test-app',
         adk_user_id: 'test-user',
         adk_session_id: 'session-id',
+        [NEW_A2A_ADK_INTEGRATION_EXTENSION]: {adk_agent_executor_v2: true},
       });
       expect(terminal.metadata).not.toHaveProperty('adk_event_id');
     });
@@ -984,6 +989,7 @@ describe('A2AAgentExecutor', () => {
         adk_app_name: 'test-app',
         adk_user_id: 'test-user',
         adk_session_id: 'session-id',
+        [NEW_A2A_ADK_INTEGRATION_EXTENSION]: {adk_agent_executor_v2: true},
       });
 
       const terminal = publishedEvents().at(-1) as TaskStatusUpdateEvent;
@@ -994,6 +1000,7 @@ describe('A2AAgentExecutor', () => {
         adk_invocation_id: lastEvent.invocationId,
         adk_author: 'model',
         adk_event_id: lastEvent.id,
+        [NEW_A2A_ADK_INTEGRATION_EXTENSION]: {adk_agent_executor_v2: true},
       });
       expect(lastEvent.id).not.toBe(firstEvent.id);
     });
@@ -1289,6 +1296,251 @@ describe('A2AAgentExecutor', () => {
         executor.execute(createRequestContext(), mockEventBus),
       ).rejects.toThrow('A2A request must have a task ID');
       expect(publishSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('parity gap closures', () => {
+    const EXTENSION_FLAG = {adk_agent_executor_v2: true};
+
+    /** A config the executor accepts, wired to the mocked session service. */
+    function runnerConfig(): RunnerConfig {
+      return {appName: 'test-app', sessionService: mockSessionService};
+    }
+
+    function publishedEvent(index: number): TaskStatusUpdateEvent {
+      return publishSpy.mock.calls[index][0] as TaskStatusUpdateEvent;
+    }
+
+    beforeEach(() => {
+      mockSessionService.getSession.mockResolvedValue(testSession());
+    });
+
+    it('publishes the last error of the run, not the first', async () => {
+      mockRunner(async function* () {
+        yield createEvent({author: 'model', errorMessage: 'first failure'});
+        yield createEvent({author: 'model', errorMessage: 'second failure'});
+      });
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      const finalEvent = publishedEvent(publishSpy.mock.calls.length - 1);
+      expect(finalEvent.status.state).toBe('failed');
+      expect((finalEvent.status.message!.parts[0] as TextPart).text).toContain(
+        'second failure',
+      );
+    });
+
+    it('falls back to the error code when the event carries no message', async () => {
+      mockRunner(async function* () {
+        yield createEvent({author: 'model', errorCode: 'SAFETY_BLOCK'});
+      });
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      const finalEvent = publishedEvent(publishSpy.mock.calls.length - 1);
+      expect(finalEvent.status.state).toBe('failed');
+      expect((finalEvent.status.message!.parts[0] as TextPart).text).toContain(
+        'SAFETY_BLOCK',
+      );
+    });
+
+    it('publishes the artifact of an errored event before the terminal failure', async () => {
+      mockRunner(async function* () {
+        yield createEvent({
+          author: 'model',
+          content: {role: 'model', parts: [{text: 'partial answer'}]},
+          errorMessage: 'stopped early',
+        });
+      });
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      // Task + working + artifact update + terminal failure.
+      expect(publishSpy).toHaveBeenCalledTimes(4);
+      expect(publishSpy.mock.calls[2][0].kind).toBe('artifact-update');
+      expect(publishedEvent(3).status.state).toBe('failed');
+    });
+
+    it('stamps the integration extension on every published event', async () => {
+      mockRunner(async function* () {
+        yield createEvent({
+          author: 'model',
+          content: {role: 'model', parts: [{text: 'hello back'}]},
+        });
+      });
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      expect(publishSpy).toHaveBeenCalledTimes(4);
+      for (const [event] of publishSpy.mock.calls) {
+        expect(event.metadata).toMatchObject({
+          [NEW_A2A_ADK_INTEGRATION_EXTENSION]: EXTENSION_FLAG,
+          'adk_app_name': 'test-app',
+          'adk_session_id': 'session-id',
+        });
+      }
+    });
+
+    it('keeps the per-event metadata on an artifact update', async () => {
+      mockRunner(async function* () {
+        yield createEvent({
+          author: 'model',
+          branch: 'main',
+          content: {role: 'model', parts: [{text: 'hello back'}]},
+        });
+      });
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      expect(publishSpy.mock.calls[2][0].metadata).toMatchObject({
+        [NEW_A2A_ADK_INTEGRATION_EXTENSION]: EXTENSION_FLAG,
+        'adk_author': 'model',
+        'adk_branch': 'main',
+      });
+    });
+
+    it('stamps the integration extension on the unanswered-request event', async () => {
+      const executor = new A2AAgentExecutor({runner: runnerConfig()});
+
+      await executor.execute(
+        createRequestContext({
+          task: {
+            kind: 'task',
+            id: 'test-task',
+            contextId: 'test-context',
+            status: {
+              state: 'input-required',
+              message: {
+                kind: 'message',
+                messageId: 'gate-message',
+                role: 'agent',
+                parts: [
+                  {
+                    kind: 'data',
+                    metadata: {'adk_type': 'function_call'},
+                    data: {id: 'fc-123', name: 'mockFunction'},
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        mockEventBus,
+      );
+
+      expect(publishSpy).toHaveBeenCalledTimes(1);
+      expect(publishedEvent(0).metadata).toMatchObject({
+        [NEW_A2A_ADK_INTEGRATION_EXTENSION]: EXTENSION_FLAG,
+      });
+    });
+
+    it('looks the session up once, with its event history', async () => {
+      mockRunner(async function* () {});
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(1);
+      expect(mockSessionService.getSession).toHaveBeenCalledWith({
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        sessionId: 'test-context',
+      });
+      expect(mockSessionService.createSession).not.toHaveBeenCalled();
+    });
+
+    it('creates the session only when the lookup misses', async () => {
+      mockSessionService.getSession.mockReset();
+      mockSessionService.getSession.mockResolvedValue(undefined);
+      mockSessionService.createSession.mockResolvedValue(testSession());
+      mockRunner(async function* () {});
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(1);
+      expect(mockSessionService.createSession).toHaveBeenCalledWith({
+        appName: 'test-app',
+        userId: 'A2A_USER_test-context',
+        sessionId: 'test-context',
+      });
+    });
+
+    it('keeps a pause recorded only in the session history open', async () => {
+      // The gate is not on the incoming A2A task, so the executor has to read
+      // it out of the session the lookup returns.
+      const pendingCall = createEvent({
+        author: 'agent',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'gate-1',
+                name: 'adk_request_confirmation',
+                args: {},
+              },
+            },
+          ],
+        },
+        longRunningToolIds: ['gate-1'],
+      });
+      mockSessionService.getSession.mockResolvedValue(
+        createSession({
+          id: 'session-id',
+          userId: 'test-user',
+          appName: 'test-app',
+          events: [pendingCall],
+        }),
+      );
+
+      await new A2AAgentExecutor({runner: runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      // The leading submitted task precedes the gate's status update.
+      expect(publishSpy).toHaveBeenCalledTimes(2);
+      expect(publishedEvent(1).status.state).toBe('input-required');
+    });
+
+    it('names null and a prototype-less object in the runner error', async () => {
+      await expect(getAdkRunner(null)).rejects.toThrow(
+        'Runner must be a Runner instance or a callable that returns a Runner, got null',
+      );
+      await expect(getAdkRunner(Object.create(null))).rejects.toThrow(
+        'Runner must be a Runner instance or a callable that returns a Runner, got object',
+      );
+    });
+
+    it('resolves a runner config returned by a factory', async () => {
+      mockRunner(async function* () {});
+
+      await new A2AAgentExecutor({runner: () => runnerConfig()}).execute(
+        createRequestContext(),
+        mockEventBus,
+      );
+
+      expect(publishSpy).toHaveBeenCalledTimes(3);
     });
   });
 });

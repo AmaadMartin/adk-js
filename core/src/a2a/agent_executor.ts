@@ -12,7 +12,12 @@ import {
 } from '@a2a-js/sdk/server';
 import {RunConfig} from '../agents/run_config.js';
 import {Event as AdkEvent} from '../events/event.js';
-import {isRunner, Runner, RunnerConfig} from '../runner/runner.js';
+import {
+  isRunner,
+  isRunnerConfig,
+  Runner,
+  RunnerConfig,
+} from '../runner/runner.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {logger} from '../utils/logger.js';
@@ -47,7 +52,7 @@ import {
 import {
   A2AMetadataKeys,
   getA2AEventMetadata,
-  getA2ASessionMetadata,
+  getInvocationMetadata,
 } from './metadata_converter_utils.js';
 import {GenAIPartToA2APartConverter} from './part_converter_utils.js';
 import {
@@ -174,13 +179,27 @@ export class A2AAgentExecutor implements AgentExecutor {
     const abortController = new AbortController();
     this.inFlightExecutions.set(taskId, {contextId, abortController});
 
+    let executorContext: ExecutorContext | undefined;
+    let submitted = false;
+
     // The submitted signal precedes every event this execution publishes,
     // including the terminal event of a run that failed while resolving the
     // runner or the session. The SDK's result manager drops a status update
     // for a task it has not seen, so the caller would receive no task at all.
-    enqueueSubmittedSignal(reqCtx, eventBus);
+    // It carries the invocation metadata once the session is resolved; a run
+    // that failed before that point has no session to name.
+    const publishSubmittedSignal = (): void => {
+      if (submitted) {
+        return;
+      }
+      submitted = true;
+      enqueueSubmittedSignal(
+        reqCtx,
+        eventBus,
+        executorContext ? getInvocationMetadata(executorContext) : undefined,
+      );
+    };
 
-    let executorContext: ExecutorContext | undefined;
     try {
       const runner = await getAdkRunner(this.config.runner);
       let runRequest = (
@@ -204,6 +223,7 @@ export class A2AAgentExecutor implements AgentExecutor {
         requestContext: reqCtx,
         a2aMetadata: getA2aRequestMetadata(reqCtx),
       });
+      publishSubmittedSignal();
 
       await this.runLegacy(
         runner,
@@ -223,6 +243,7 @@ export class A2AAgentExecutor implements AgentExecutor {
         return;
       }
       logger.error('Error handling A2A request:', error);
+      publishSubmittedSignal();
 
       await this.publishFinalTaskStatus({
         executorContext,
@@ -232,9 +253,6 @@ export class A2AAgentExecutor implements AgentExecutor {
           taskId,
           contextId,
           error: new Error(`Agent run failed: ${error.message}`),
-          metadata: executorContext
-            ? getA2ASessionMetadata(executorContext)
-            : undefined,
         }),
       });
     } finally {
@@ -309,7 +327,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       createTaskWorkingEvent({
         taskId,
         contextId,
-        metadata: getA2ASessionMetadata(executorContext),
+        metadata: getInvocationMetadata(executorContext),
       }),
     );
 
@@ -319,6 +337,7 @@ export class A2AAgentExecutor implements AgentExecutor {
     // append their streamed parts to each other's artifact.
     const partialArtifactIds = new Map<string, string>();
     let lastAdkEvent: AdkEvent | undefined;
+    let errorStatusEvent: TaskStatusUpdateEvent | undefined;
 
     for await (const adkEvent of runner.runAsync({
       abortSignal,
@@ -338,6 +357,16 @@ export class A2AAgentExecutor implements AgentExecutor {
     })) {
       adkEvents.push(adkEvent);
       lastAdkEvent = adkEvent;
+
+      // Reassigned rather than broken out of, so the last error wins.
+      if (adkEvent.errorCode || adkEvent.errorMessage) {
+        errorStatusEvent = createTaskFailedEvent({
+          taskId,
+          contextId,
+          error: new Error(adkEvent.errorMessage || adkEvent.errorCode),
+          metadata: getA2AEventMetadata(adkEvent, executorContext),
+        });
+      }
 
       for (const converted of this.convertAdkEvent(
         adkEvent,
@@ -371,22 +400,28 @@ export class A2AAgentExecutor implements AgentExecutor {
     }
 
     const finalMetadata = {
-      ...getA2ASessionMetadata(executorContext),
+      ...getInvocationMetadata(executorContext),
       ...(lastAdkEvent ? getLastEventMetadata(lastAdkEvent) : {}),
     };
+
+    // Built even when an ADK event already reported an error, because it also
+    // publishes the aggregated artifact update that carries the run's content.
+    const aggregatedEvent = this.buildFinalEvent({
+      aggregator,
+      adkEvents,
+      executorContext,
+      eventBus,
+      finalMetadata,
+    });
 
     return this.publishFinalTaskStatus({
       executorContext,
       eventBus,
+      // An ADK event that reported an error settles the task as failed,
+      // whatever else the run produced.
       event: await executeAfterAgentInterceptors(
         executorContext,
-        this.buildFinalEvent({
-          aggregator,
-          adkEvents,
-          executorContext,
-          eventBus,
-          finalMetadata,
-        }),
+        errorStatusEvent ?? aggregatedEvent,
         this.config.executeInterceptors,
       ),
     });
@@ -470,6 +505,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       a2aEvent.metadata = {
         ...a2aEvent.metadata,
         ...getA2AEventMetadata(adkEvent, executorContext),
+        ...getInvocationMetadata(executorContext),
       };
     }
 
@@ -490,15 +526,24 @@ export class A2AAgentExecutor implements AgentExecutor {
     event: TaskStatusUpdateEvent;
     error?: Error;
   }): Promise<void> {
+    // A run that failed before it resolved its session names no invocation,
+    // so its terminal event carries no metadata at all.
+    const finalEvent = executorContext
+      ? withInvocationMetadata(event, executorContext)
+      : event;
     try {
       if (executorContext) {
-        await this.config.afterExecuteCallback?.(executorContext, event, error);
+        await this.config.afterExecuteCallback?.(
+          executorContext,
+          finalEvent,
+          error,
+        );
       }
     } catch (e: unknown) {
       logger.error('Error in afterExecuteCallback:', e);
     }
 
-    eventBus.publish(event);
+    eventBus.publish(finalEvent);
   }
 }
 
@@ -522,6 +567,22 @@ function getLastEventMetadata(adkEvent: AdkEvent): Record<string, unknown> {
  */
 function toError(e: unknown): Error {
   return e instanceof Error ? e : new Error(String(e));
+}
+
+/**
+ * Merges the invocation metadata into an already-built A2A event.
+ *
+ * Spreads on top of the event's own metadata rather than replacing it, so the
+ * per-event keys survive.
+ */
+function withInvocationMetadata<T extends {metadata?: Record<string, unknown>}>(
+  event: T,
+  context: ExecutorContext,
+): T {
+  return {
+    ...event,
+    metadata: {...event.metadata, ...getInvocationMetadata(context)},
+  };
 }
 
 /**
@@ -557,19 +618,49 @@ async function getAdkSession(
 
 /**
  * Resolves the runner from the provided runner or runner config.
+ *
+ * Takes `unknown` because the value arrives unvalidated: a JavaScript caller,
+ * or a factory whose declared return type does not match what it returns, can
+ * hand over anything.
+ *
+ * @param runnerOrConfig The runner, runner config, or factory for either.
+ * @param fromFactory Whether this value came out of a factory, which decides
+ *   which of the two error messages a bad value gets.
+ * @throws {TypeError} If the value is neither a Runner nor a runner config.
  */
-async function getAdkRunner(
-  runnerOrConfig: RunnerOrRunnerConfig,
+export async function getAdkRunner(
+  runnerOrConfig: unknown,
+  fromFactory = false,
 ): Promise<Runner> {
   if (typeof runnerOrConfig === 'function') {
-    const result = await runnerOrConfig();
-
-    return getAdkRunner(result);
+    return getAdkRunner(await runnerOrConfig(), true);
   }
 
   if (isRunner(runnerOrConfig)) {
     return runnerOrConfig;
   }
 
+  if (!isRunnerConfig(runnerOrConfig)) {
+    throw new TypeError(
+      fromFactory
+        ? `Runner factory must return a Runner or a runner config, got ${describeType(runnerOrConfig)}`
+        : `Runner must be a Runner instance or a callable that returns a Runner, got ${describeType(runnerOrConfig)}`,
+    );
+  }
+
   return new Runner(runnerOrConfig);
+}
+
+/**
+ * Names the type of a value for an error message.
+ */
+function describeType(value: unknown): string {
+  if (value === null) {
+    return 'null';
+  }
+  if (typeof value !== 'object') {
+    return typeof value;
+  }
+
+  return value.constructor?.name ?? 'object';
 }
