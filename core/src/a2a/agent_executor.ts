@@ -305,6 +305,15 @@ export class A2AAgentExecutor implements AgentExecutor {
 
 /**
  * Gets or creates new ADK session.
+ *
+ * Reads an existing session twice. The first read only asks whether the
+ * session exists, so it skips the event history, matching `_resolve_session`
+ * in adk-python. The second read fetches that history, which
+ * `getUnansweredRequestEvent` needs to decide whether a pending
+ * human-in-the-loop request is still open. adk-python needs one read because
+ * its `Runner` reloads the session itself and its executor never reads events.
+ *
+ * @returns A session carrying its event history, never the probe result.
  */
 async function getAdkSession(
   userId: string,
@@ -312,26 +321,29 @@ async function getAdkSession(
   sessionService: BaseSessionService,
   appName: string,
 ): Promise<Session> {
-  // Fetched with its full event history, unlike adk-python's
-  // `_resolve_session`, which passes `num_recent_events=0` because it only
-  // probes for existence. These events feed `getUnansweredRequestEvent`, which
-  // decides whether a pending human-in-the-loop request is still open. Asking
-  // for no events would blind that gate: VertexAiSessionService returns an
-  // event-less session for `numRecentEvents: 0`.
-  const session = await sessionService.getSession({
+  const exists = await sessionService.getSession({
     appName,
     userId,
     sessionId,
+    // Checking existence does not require event history.
+    config: {numRecentEvents: 0},
   });
-  if (session) {
-    return session;
-  }
 
-  return sessionService.createSession({
-    appName,
-    userId,
-    sessionId,
-  });
+  const sessionWithEvents = exists
+    ? await sessionService.getSession({appName, userId, sessionId})
+    : undefined;
+
+  // A session deleted between the two reads is created fresh. Returning the
+  // probe result instead would hand the pending-request scan the empty history
+  // that `numRecentEvents: 0` asked for.
+  return (
+    sessionWithEvents ??
+    sessionService.createSession({
+      appName,
+      userId,
+      sessionId,
+    })
+  );
 }
 
 /**
