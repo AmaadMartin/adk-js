@@ -210,7 +210,12 @@ describe('node_runner — the branch an event inherits and redirects', () => {
 
     const events = await driveWithBranch(node, icWithBranch('parent_branch'));
 
-    expect(events.map((e) => e.branch)).toEqual(['attempt1', 'parent_branch']);
+    // The failed attempt's event, its error event, then the retry's event.
+    expect(events.map((e) => e.branch)).toEqual([
+      'attempt1',
+      'attempt1',
+      'parent_branch',
+    ]);
   });
 
   it('discards a cleared branch when the attempt that cleared it failed', async () => {
@@ -218,7 +223,11 @@ describe('node_runner — the branch an event inherits and redirects', () => {
 
     const events = await driveWithBranch(node, icWithBranch('parent_branch'));
 
-    expect(events.map((e) => e.branch)).toEqual([undefined, 'parent_branch']);
+    expect(events.map((e) => e.branch)).toEqual([
+      undefined,
+      undefined,
+      'parent_branch',
+    ]);
   });
 
   it('re-stamps the node branch when the node yields a plain value', async () => {

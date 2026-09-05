@@ -16,6 +16,7 @@
  * sample's own draws are interleaved with it.
  */
 
+import {isNodeErrorEvent} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {mulberry32} from '../_harness/rng.js';
 import {allEvents, finalOutput, runSample} from '../_harness/sample_harness.js';
@@ -52,6 +53,10 @@ describe('workflow sample: retry', () => {
     expect(finalOutput(events)).toBe('sunny');
     expect(texts).toContain('The weather is sunny');
 
-    expect(events.filter((e) => e.errorCode !== undefined)).toHaveLength(0);
+    // The runner reports every failed attempt, so the two failures before the
+    // node succeeded each leave an error event. The run still succeeds.
+    const errorEvents = events.filter(isNodeErrorEvent);
+    expect(errorEvents).toHaveLength(2);
+    expect(errorEvents.map((e) => e.attemptCount)).toEqual([1, 2]);
   }, 30000);
 });

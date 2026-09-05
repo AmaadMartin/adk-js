@@ -19,6 +19,21 @@ import {NodeContext} from '../../src/workflow/node_context.js';
 import {executeChildNode} from '../../src/workflow/node_runner.js';
 import {createIc, driveNode, FnNode} from './test_helpers.js';
 
+/** Closes `channel` and returns everything buffered on it. */
+async function collect(channel: AsyncQueue<Event>): Promise<Event[]> {
+  channel.close();
+  const events: Event[] = [];
+  for await (const event of channel) {
+    events.push(event);
+  }
+  return events;
+}
+
+/** Whether `event` carries a state delta holding `key`. */
+function hasStateDelta(event: Event, key: string): boolean {
+  return event.actions?.stateDelta?.[key] !== undefined;
+}
+
 // --- Tests ----------------------------------------------------------------
 
 describe('Phase 1 — node execution & the push/pull bridge', () => {
@@ -116,7 +131,13 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
       options: {useAsOutput: true},
     });
     expect(child.state.get('counter')).toBe(7);
-    expect(child.actions.stateDelta['counter']).toBe(7);
+    // The runner moves the pending write onto the node's own event, which is
+    // how it reaches the session; the context's delta is drained doing so.
+    const withDelta = (await collect(channel)).filter((e) =>
+      hasStateDelta(e, 'counter'),
+    );
+    expect(withDelta).toHaveLength(1);
+    expect(withDelta[0].actions.stateDelta['counter']).toBe(7);
   });
 
   it('retries a flaky node per retryConfig and then succeeds', async () => {
@@ -192,8 +213,11 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
 
     expect(child.output).toBe('ok');
     // The failed first attempt's write must not survive into the committed
-    // delta — only the successful attempt's write remains.
-    expect(child.actions.stateDelta).toEqual({'attempt-2': 2});
+    // delta — only the successful attempt's write reaches an event.
+    const committed = (await collect(channel))
+      .map((e) => e.actions?.stateDelta)
+      .filter((delta) => delta && Object.keys(delta).length > 0);
+    expect(committed).toEqual([{'attempt-2': 2}]);
   });
 
   it('enforces a per-node timeout with NodeTimeoutError', async () => {

@@ -179,6 +179,9 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     if (options.useAsOutput) {
       ctx.output = result.output;
       ctx.route = result.route;
+      // A fast-forwarded run never reaches runChildNode, so nothing else marks
+      // the caller as standing in for the child that already emitted this.
+      ctx.outputDelegated = true;
     }
     return result;
   }
