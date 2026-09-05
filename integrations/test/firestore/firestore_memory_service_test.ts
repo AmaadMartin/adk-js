@@ -274,6 +274,22 @@ describe('FirestoreMemoryService', () => {
       expect(response.memories[0].timestamp).toBe('1970-01-01T00:00:00.000Z');
     });
 
+    it('reads a timestamp no Date can hold as the epoch', async () => {
+      const {service, store} = createService();
+      store.seed('memories', {
+        appName: APP_NAME,
+        userId: USER_ID,
+        keywords: ['quick'],
+        author: 'user',
+        content: createUserContent('quick brown fox'),
+        timestamp: Number.NaN,
+      });
+
+      const response = await search(service, 'quick');
+
+      expect(response.memories[0].timestamp).toBe('1970-01-01T00:00:00.000Z');
+    });
+
     it('skips a document that stores no content, without warning', async () => {
       const {service, store} = createService();
       store.seed('memories', {
