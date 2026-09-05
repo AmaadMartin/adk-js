@@ -81,6 +81,9 @@ describe('FirestoreSessionService lastUpdateTime', () => {
     ['a Date', new Date('2024-06-15T10:30:00.000Z'), 1718447400000],
     ['a raw number of milliseconds', 1718447400000, 1718447400000],
     ['an absent field', undefined, 0],
+    ['a NaN written by hand', Number.NaN, 0],
+    ['an infinite number written by hand', Number.POSITIVE_INFINITY, 0],
+    ['a string written by hand', '2024-06-15', 0],
   ])('reads %s as milliseconds', async (_label, updateTime, expected) => {
     fake.seed(SESSION_PATH, {
       id: SESSION_ID,
@@ -422,6 +425,28 @@ describe('FirestoreSessionService appendEvent', () => {
     });
 
     expect(sessionUpdates().map((w) => w.data['revision'])).toEqual([1]);
+  });
+
+  it('writes an event whose actions carry no state delta', async () => {
+    const session = createSession({
+      id: SESSION_ID,
+      appName: APP_NAME,
+      userId: USER_ID,
+      state: {kept: 'yes'},
+    });
+
+    await service.appendEvent({
+      session,
+      event: createEvent({
+        invocationId: 'a',
+        author: 'user',
+        actions: {stateDelta: undefined},
+      }),
+    });
+
+    const update = sessionUpdates()[0];
+    expect(update.data['revision']).toBe(1);
+    expect(JSON.parse(String(update.data['state']))).toEqual({kept: 'yes'});
   });
 
   it('rejects an append to a session that is being deleted', async () => {
