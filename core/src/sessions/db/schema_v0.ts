@@ -262,31 +262,23 @@ export function storageEventV0FromEvent(
   session: Session,
   event: Event,
 ): StorageEventV0 {
-  return fillStorageEventV0(new StorageEventV0(), session, event);
+  return updateStorageEventV0(new StorageEventV0(), session, event);
 }
 
 /**
- * Rewrites a stored legacy row from an {@link Event}.
+ * Rewrites a legacy row from an {@link Event}.
  *
  * A v0 row spreads an event across typed columns, so re-appending an event
  * that is already stored has to rebuild every one of them. The v1 layout
  * replaces a single JSON column instead.
  *
- * @param row The stored row to rewrite.
+ * @param row The row to write the event onto.
  * @param session The session the event belongs to.
  * @param event The event to store.
+ * @return The row, ready to persist.
  * @throws If the event's actions hold a value with no Python counterpart.
  */
 export function updateStorageEventV0(
-  row: StorageEventV0,
-  session: Session,
-  event: Event,
-): void {
-  fillStorageEventV0(row, session, event);
-}
-
-/** Writes the columns of `event` onto `row`, and returns it. */
-function fillStorageEventV0(
   row: StorageEventV0,
   session: Session,
   event: Event,
