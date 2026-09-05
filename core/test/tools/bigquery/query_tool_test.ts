@@ -93,14 +93,13 @@ describe('executeSql', () => {
     expect(result).toEqual({rows: []});
   });
 
-  it('reports a failing query as an error payload', async () => {
+  it('propagates a failing query to its BigQueryTool', async () => {
+    // The tool wrapper turns the throw into the model-facing error payload;
+    // see core/test/tools/bigquery/bigquery_tool_test.ts.
     fake.failure = new Error('Syntax error: Unexpected end of script');
 
     await expect(
       executeSql({project_id: 'p', query: 'SELECT'}),
-    ).resolves.toEqual({
-      status: 'ERROR',
-      error_details: 'Syntax error: Unexpected end of script',
-    });
+    ).rejects.toThrow('Syntax error: Unexpected end of script');
   });
 });

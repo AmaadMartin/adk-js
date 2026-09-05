@@ -10,25 +10,8 @@ import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
 import {BigQueryCredentialsConfig} from './bigquery_credentials.js';
-import {BigQueryTool} from './bigquery_tool.js';
-import {
-  DATASET_PARAMETERS,
-  GET_DATASET_INFO_DESCRIPTION,
-  GET_TABLE_INFO_DESCRIPTION,
-  GET_TABLE_INFO_PARAMETERS,
-  LIST_DATASET_IDS_DESCRIPTION,
-  LIST_DATASET_IDS_PARAMETERS,
-  LIST_TABLE_IDS_DESCRIPTION,
-  getDatasetInfo,
-  getTableInfo,
-  listDatasetIds,
-  listTableIds,
-} from './metadata_tool.js';
-import {
-  EXECUTE_SQL_DESCRIPTION,
-  EXECUTE_SQL_PARAMETERS,
-  executeSql,
-} from './query_tool.js';
+import {createMetadataTools} from './metadata_tool.js';
+import {createQueryTools} from './query_tool.js';
 
 /** The configuration for a {@link BigQueryToolset}. */
 export interface BigQueryToolsetOptions {
@@ -42,49 +25,6 @@ export interface BigQueryToolsetOptions {
    * and the BigQuery client falls back to application default credentials.
    */
   credentialsConfig?: BigQueryCredentialsConfig;
-}
-
-/** Builds the five BigQuery tools, all sharing one credential configuration. */
-function createBigQueryTools(
-  credentialsConfig?: BigQueryCredentialsConfig,
-): BaseTool[] {
-  return [
-    new BigQueryTool({
-      name: 'list_dataset_ids',
-      description: LIST_DATASET_IDS_DESCRIPTION,
-      parameters: LIST_DATASET_IDS_PARAMETERS,
-      execute: listDatasetIds,
-      credentialsConfig,
-    }),
-    new BigQueryTool({
-      name: 'get_dataset_info',
-      description: GET_DATASET_INFO_DESCRIPTION,
-      parameters: DATASET_PARAMETERS,
-      execute: getDatasetInfo,
-      credentialsConfig,
-    }),
-    new BigQueryTool({
-      name: 'list_table_ids',
-      description: LIST_TABLE_IDS_DESCRIPTION,
-      parameters: DATASET_PARAMETERS,
-      execute: listTableIds,
-      credentialsConfig,
-    }),
-    new BigQueryTool({
-      name: 'get_table_info',
-      description: GET_TABLE_INFO_DESCRIPTION,
-      parameters: GET_TABLE_INFO_PARAMETERS,
-      execute: getTableInfo,
-      credentialsConfig,
-    }),
-    new BigQueryTool({
-      name: 'execute_sql',
-      description: EXECUTE_SQL_DESCRIPTION,
-      parameters: EXECUTE_SQL_PARAMETERS,
-      execute: executeSql,
-      credentialsConfig,
-    }),
-  ];
 }
 
 /**
@@ -101,7 +41,10 @@ export class BigQueryToolset extends BaseToolset {
 
   constructor(options: BigQueryToolsetOptions = {}) {
     super(options.toolFilter ?? []);
-    this.tools = createBigQueryTools(options.credentialsConfig);
+    this.tools = [
+      ...createMetadataTools(options.credentialsConfig),
+      ...createQueryTools(options.credentialsConfig),
+    ];
   }
 
   /**
