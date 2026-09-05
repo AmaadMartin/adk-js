@@ -117,8 +117,11 @@ describe('FunctionNode auth gate', () => {
 
 describe('FunctionNode RequestInput handling', () => {
   it('emits an interrupt event for a returned RequestInput', async () => {
-    // `FunctionNodeResult` carries `RequestInput`, so no cast is needed here.
-    const node = new FunctionNode(
+    // `FunctionNodeResult` carries `RequestInput`, so a handler declaring a
+    // concrete output type can still return one without a cast. The type
+    // parameters matter: with the default `unknown` output, every value is
+    // assignable and the union member proves nothing.
+    const node = new FunctionNode<string, string>(
       'ask',
       () => new RequestInput({interruptId: 'ask-1', message: 'Approve?'}),
     );
@@ -134,7 +137,7 @@ describe('FunctionNode RequestInput handling', () => {
   it('keeps a pending state delta on the event after the interrupt', async () => {
     // `BaseNode.run` converts the RequestInput without reaching `toEvent`, so
     // the delta is not drained by it and still reaches the next event.
-    const node = new FunctionNode('ask', function* (ctx) {
+    const node = new FunctionNode<string, string>('ask', function* (ctx) {
       ctx.state.set('k', 1);
       yield new RequestInput({interruptId: 'ask-2'});
       yield 'after';
