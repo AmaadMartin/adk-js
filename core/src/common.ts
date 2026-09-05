@@ -450,6 +450,21 @@ export type {
   SamplingResult,
   UnstructuredSamplingResult,
 } from './optimization/data_types.js';
+export {
+  LocalEvalSampler,
+  extractSingleInvocationInfo,
+  extractToolCallData,
+} from './optimization/local_eval_sampler.js';
+export type {
+  CapturedEvalData,
+  CapturedInvocation,
+  CapturedMetricResult,
+  InvocationInfo,
+  LocalEvalSamplerConfig,
+  LocalEvalSamplerOptions,
+  LocalEvalSamplingResult,
+  ToolCallData,
+} from './optimization/local_eval_sampler.js';
 export {Sampler, isSampler} from './optimization/sampler.js';
 export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {
