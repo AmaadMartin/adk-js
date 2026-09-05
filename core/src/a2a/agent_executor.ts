@@ -32,6 +32,7 @@ import {
   TaskState,
 } from './a2a_event.js';
 import {
+  DEFAULT_ERROR_MESSAGE,
   getFinalTaskStatusUpdate,
   getUnansweredRequestEvent,
 } from './event_processor_utils.js';
@@ -113,6 +114,9 @@ export type AdkEventToA2AEventsConverter = (
  * Configuration for the Executor.
  */
 export interface AgentExecutorConfig extends A2aAgentExecutorConverterConfig {
+  // `genAiPartConverter` comes from A2aAgentExecutorConverterConfig: it
+  // converts one GenAI part to an A2A part, and a part it converts to nothing
+  // is dropped from the published event.
   runner: RunnerOrRunnerConfig;
   runConfig?: RunConfig;
   beforeExecuteCallback?: BeforeExecuteCallback;
@@ -363,7 +367,7 @@ export class A2AAgentExecutor implements AgentExecutor {
         errorStatusEvent = createTaskFailedEvent({
           taskId,
           contextId,
-          error: new Error(adkEvent.errorMessage || adkEvent.errorCode),
+          error: new Error(adkEvent.errorMessage || DEFAULT_ERROR_MESSAGE),
           metadata: getA2AEventMetadata(adkEvent, executorContext),
         });
       }
@@ -458,7 +462,11 @@ export class A2AAgentExecutor implements AgentExecutor {
 
     const statusParts = aggregator.taskStatusMessage?.parts;
     if (!statusParts?.length) {
-      return getFinalTaskStatusUpdate(adkEvents, executorContext);
+      return getFinalTaskStatusUpdate(
+        adkEvents,
+        executorContext,
+        this.converters.genAiPartConverter,
+      );
     }
 
     eventBus.publish(
@@ -597,6 +605,12 @@ async function getAdkSession(
   sessionService: BaseSessionService,
   appName: string,
 ): Promise<{session: Session; created: boolean}> {
+  // Fetched with its full event history, unlike adk-python's
+  // `_resolve_session`, which passes `num_recent_events=0` because it only
+  // probes for existence. These events feed `getUnansweredRequestEvent`, which
+  // decides whether a pending human-in-the-loop request is still open. Asking
+  // for no events would blind that gate: VertexAiSessionService returns an
+  // event-less session for `numRecentEvents: 0`.
   const session = await sessionService.getSession({
     appName,
     userId,
@@ -626,6 +640,7 @@ async function getAdkSession(
  * @param runnerOrConfig The runner, runner config, or factory for either.
  * @param fromFactory Whether this value came out of a factory, which decides
  *   which of the two error messages a bad value gets.
+ * @returns The resolved runner.
  * @throws {TypeError} If the value is neither a Runner nor a runner config.
  */
 export async function getAdkRunner(
@@ -641,6 +656,7 @@ export async function getAdkRunner(
   }
 
   if (!isRunnerConfig(runnerOrConfig)) {
+    // The type only: the value itself may carry credentials.
     throw new TypeError(
       fromFactory
         ? `Runner factory must return a Runner or a runner config, got ${describeType(runnerOrConfig)}`

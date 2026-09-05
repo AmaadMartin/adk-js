@@ -86,6 +86,22 @@ a misconfigured deployment fails at the boundary rather than deep inside the
 - When the option itself is wrong:
   `Runner must be a Runner instance or a callable that returns a Runner, got <type>`.
 
+The message names the type only, never the value, because a rejected value can
+carry a credential.
+
+## Sessions
+
+The executor derives both identifiers from the A2A context id: the session id
+is the context id, and the user id is `A2A_USER_` followed by it. A request
+converter can return different ones. The executor looks the session up on the
+runner's session service and creates it when it is missing.
+
+The lookup asks for the session's full event history. Those events decide
+whether a human-in-the-loop request from an earlier turn is still unanswered.
+When one is, the executor publishes an `input-required` status update and does
+not run the agent. A client therefore cannot talk past an open gate by starting
+a new task in the same context.
+
 ## The event stream
 
 For a task the client does not yet hold, `execute` publishes, in order:
@@ -193,6 +209,24 @@ The executor stamps ADK metadata — the app, user and session ids, the
 invocation id, the author, the branch — onto every event a converter returns. A
 converter does not have to reproduce it.
 
+A part converter that returns `undefined` drops the part, and one that returns
+an array expands it into several. An artifact update left with no parts is not
+published at all:
+
+```ts
+import {A2AAgentExecutor, toA2APart} from '@google/adk';
+
+const executor = new A2AAgentExecutor({
+  runner: myRunner,
+  genAiPartConverter: (part, longRunningToolIds) =>
+    part.thought ? undefined : toA2APart(part, longRunningToolIds),
+});
+```
+
+A long-running function call whose parts all convert to nothing is an error.
+The client would otherwise be told the task completed while the agent waits for
+an answer, so the executor throws and the run is reported as `failed`.
+
 ```ts
 import {
   A2AAgentExecutor,
@@ -250,6 +284,18 @@ new A2AAgentExecutor({runner, genAiPartConverter: 'nope'});
 `undefined` selects the default. `null` is a supplied value of the wrong type
 and is rejected. The message names the field, and with several wrong fields it
 names the first one in the order listed above.
+
+## Callbacks
+
+Three optional callbacks observe one execution:
+
+- `beforeExecuteCallback` runs before the executor publishes anything.
+- `afterEventCallback` runs for each artifact update, before it reaches the bus.
+- `afterExecuteCallback` runs once with the terminal event, exactly as it will
+  be published, and with the error when the run failed.
+
+A callback observes; an interceptor rewrites. Reach for an interceptor when you
+need to change what the server publishes.
 
 ## Rewrite what the server publishes
 

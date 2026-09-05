@@ -14,7 +14,9 @@ const A2A_METADATA_KEY_PREFIX = 'a2a:';
 /**
  * The A2A extension that identifies the ADK integration. A client declares it
  * in the extension header, and every event the ADK agent executor publishes
- * echoes it back.
+ * echoes it back. It is a bare URL rather than an `adk_`-prefixed key because
+ * a peer matches it against the extension it declares. Same value as
+ * adk-python's `_NEW_A2A_ADK_INTEGRATION_EXTENSION`.
  */
 export const NEW_A2A_ADK_INTEGRATION_EXTENSION =
   'https://google.github.io/adk-docs/a2a/a2a-extension/';
@@ -146,6 +148,10 @@ export function getA2ASessionMetadata({
 /**
  * Creates the metadata every event of one invocation carries: which app, user
  * and session produced it, and which executor generation served it.
+ *
+ * Kept apart from {@link getA2ASessionMetadata}, which the client side calls
+ * too: the flag describes the server that published the event, so it must not
+ * travel on an outbound request.
  *
  * @param context - The app name, user ID and session ID of the invocation.
  * @returns The session metadata plus the ADK integration extension flag.

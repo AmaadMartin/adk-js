@@ -12,6 +12,7 @@ import {
   A2AMetadataKeys,
   AdkMetadataKeys,
   getA2AEventMetadata,
+  getA2ASessionMetadata,
   getAdkEventMetadata,
   getInvocationMetadata,
   NEW_A2A_ADK_INTEGRATION_EXTENSION,
@@ -213,6 +214,18 @@ describe('metadata_converter_utils', () => {
       expect(NEW_A2A_ADK_INTEGRATION_EXTENSION).toBe(
         'https://google.github.io/adk-docs/a2a/a2a-extension/',
       );
+    });
+
+    it('leaves the flag off getA2ASessionMetadata, which the client side calls', () => {
+      // `a2a_remote_agent.ts` stamps outbound requests with the session
+      // metadata. The flag describes the server, so it must not travel there.
+      expect(
+        getA2ASessionMetadata({
+          appName: 'my-app',
+          userId: 'user-id',
+          sessionId: 'session-id',
+        }),
+      ).not.toHaveProperty(NEW_A2A_ADK_INTEGRATION_EXTENSION);
     });
   });
 });

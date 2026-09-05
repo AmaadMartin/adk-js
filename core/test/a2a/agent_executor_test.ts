@@ -1333,7 +1333,7 @@ describe('A2AAgentExecutor', () => {
       );
     });
 
-    it('falls back to the error code when the event carries no message', async () => {
+    it('reports the default text and keeps the error code when the event carries no message', async () => {
       mockRunner(async function* () {
         yield createEvent({author: 'model', errorCode: 'SAFETY_BLOCK'});
       });
@@ -1345,8 +1345,13 @@ describe('A2AAgentExecutor', () => {
 
       const finalEvent = publishedEvent(publishSpy.mock.calls.length - 1);
       expect(finalEvent.status.state).toBe('failed');
+      // The text matches adk-python's `DEFAULT_ERROR_MESSAGE`, and the code
+      // reaches the client on the metadata rather than in the text.
       expect((finalEvent.status.message!.parts[0] as TextPart).text).toContain(
-        'SAFETY_BLOCK',
+        'An error occurred during processing',
+      );
+      expect(finalEvent.metadata).toEqual(
+        expect.objectContaining({adk_error_code: 'SAFETY_BLOCK'}),
       );
     });
 

@@ -75,7 +75,11 @@ export type {
 } from './executor_config.js';
 export type {ExecutorContext} from './executor_context.js';
 export type {ExecuteInterceptor} from './executor_utils.js';
-export {toGenAIContent, toGenAIPart} from './part_converter_utils.js';
+export {
+  toA2APart,
+  toGenAIContent,
+  toGenAIPart,
+} from './part_converter_utils.js';
 export type {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
