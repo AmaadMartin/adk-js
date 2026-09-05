@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {getSessionServiceFromUri, LogLevel, setLogLevel} from '@google/adk';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -12,6 +13,11 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {loadDotenvForAgent} from '../../src/utils/envs.js';
+
+vi.mock('../../src/utils/envs.js', () => ({
+  loadDotenvForAgent: vi.fn(),
+}));
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -46,6 +52,7 @@ vi.mock('@google/adk', async (importOriginal) => {
   return {
     ...(actual as object),
     setLogLevel: vi.fn(),
+    getSessionServiceFromUri: vi.fn(),
   };
 });
 
@@ -297,6 +304,40 @@ describe('CLI Entrypoint', () => {
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+
+    it("loads the agent's .env before building the session service", async () => {
+      // The `.env` may hold the DATABASE_URL the session service is built
+      // from, so a load after the service is a load too late.
+      const order: string[] = [];
+      (loadDotenvForAgent as Mock).mockImplementation(() => {
+        order.push('dotenv');
+      });
+      (getSessionServiceFromUri as Mock).mockImplementation(() => {
+        order.push('session-service');
+        return undefined;
+      });
+
+      await parse(['run', 'agent.ts']);
+
+      expect(order).toEqual(['dotenv', 'session-service']);
+    });
+
+    it("loads the .env of the agent's own directory", async () => {
+      const agentPath = path.resolve(
+        path.sep,
+        'tmp',
+        'agents',
+        'weather',
+        'agent.ts',
+      );
+
+      await parse(['run', agentPath]);
+
+      expect(loadDotenvForAgent).toHaveBeenCalledWith(
+        'weather',
+        path.resolve(path.sep, 'tmp', 'agents'),
       );
     });
   });

@@ -15,6 +15,7 @@ import {pathToFileURL} from 'node:url';
 
 import {
   createTempDir,
+  getAbsolutePath,
   isFile,
   isFileExists,
   isFolderExists,
@@ -30,6 +31,40 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
  * Supported file extensions for JavaScript and TypeScript.
  */
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
+
+/**
+ * Entry file names that make the containing *directory* the agent's name, in
+ * the order {@link AgentLoader} prefers them.
+ */
+const DIRECTORY_ENTRY_NAMES = ['app', 'agent'];
+
+/** Where an agent file sits, in the terms {@link AgentLoader} names agents by. */
+export interface AgentLocation {
+  /** The name {@link AgentLoader} would serve this agent under. */
+  name: string;
+  /** Absolute path of the directory that contains the agent. */
+  parentDir: string;
+}
+
+/**
+ * Reads an agent file path the way {@link AgentLoader} reads a directory.
+ *
+ * `agents/weather/agent.ts` and `agents/weather.ts` both name the agent
+ * `weather`, so running either file agrees with the server over the same
+ * directory about what the agent is called.
+ *
+ * @param agentPath Path of the agent file, absolute or relative to the working
+ *     directory.
+ */
+export function resolveAgentLocation(agentPath: string): AgentLocation {
+  const absolutePath = getAbsolutePath(agentPath);
+  const dir = path.dirname(absolutePath);
+  const baseName = path.basename(absolutePath, path.extname(absolutePath));
+
+  return DIRECTORY_ENTRY_NAMES.includes(baseName)
+    ? {name: path.basename(dir), parentDir: path.dirname(dir)}
+    : {name: baseName, parentDir: dir};
+}
 
 /**
  * Supported JS/TS file module types.
@@ -580,9 +615,9 @@ export class AgentLoader {
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
-    const possibleEntryFile =
-      subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
+    const possibleEntryFile = DIRECTORY_ENTRY_NAMES.map((entryName) =>
+      subFiles.find((f) => f.isFile && f.name === entryName && isJsFile(f.ext)),
+    ).find((file) => file !== undefined);
 
     if (!possibleEntryFile) {
       return;
