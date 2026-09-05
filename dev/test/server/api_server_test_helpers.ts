@@ -42,6 +42,9 @@ export function createStubAgentLoader(
         load: () => Promise.resolve(agent),
         async [Symbol.asyncDispose](): Promise<void> {},
       }),
+    // AgentLoader is a concrete class and AgentFile holds private state that
+    // only a real file on disk can fill, so the double is shaped by hand. Same
+    // cast as the harness in adk_api_server_test.ts.
   } as unknown as AgentLoader;
 }
 

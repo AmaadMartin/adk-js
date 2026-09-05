@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {AdkApiServer, ServerOptions} from '../../src/server/adk_api_server.js';
 
@@ -31,7 +31,7 @@ describe('CLI configuration surface', () => {
   /** Parses `args` and returns the options the server was constructed with. */
   async function serverOptionsFor(args: string[]): Promise<ServerOptions> {
     await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
-    return (AdkApiServer as unknown as Mock).mock.calls[0][0] as ServerOptions;
+    return vi.mocked(AdkApiServer).mock.calls[0][0];
   }
 
   for (const command of ['web', 'api_server']) {
