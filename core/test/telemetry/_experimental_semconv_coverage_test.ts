@@ -6,8 +6,10 @@
 
 /**
  * Tests for the paths adk-python's `test_experimental_semconv.py` does not
- * cover: the two config-dependent setters, redaction, value normalization and
- * tool resolution. The ported reference tests live beside this file in
+ * cover: the two config-dependent setters, redaction, value normalization, tool
+ * resolution, and one emission through the real OpenTelemetry providers.
+ *
+ * The verbatim port of that reference file lives beside this one in
  * `_experimental_semconv_test.ts`.
  */
 

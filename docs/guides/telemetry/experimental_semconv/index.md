@@ -127,8 +127,8 @@ turn as a failed one.
 ## Content capture
 
 `maybeLogCompletionDetails` reads three booleans off the config you pass it. Any
-object with these three properties satisfies it, so `TelemetryConfig` works
-without an import.
+object with these three properties satisfies `ExperimentalSemconvConfig`, so the
+`TelemetryConfig` on the `parity` branch will supply them without an import.
 
 | Property                              | Effect                                      |
 | ------------------------------------- | ------------------------------------------- |

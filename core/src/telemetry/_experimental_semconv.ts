@@ -40,8 +40,9 @@ import type {
 
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
+import {NOT_SERIALIZABLE, safeJsonSerialize} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
-import {toSnakeCase} from '../utils/object_notation_utils.js';
+import {toSnakeCaseKey} from '../utils/object_notation_utils.js';
 
 // ---------------------------------------------------------------------------
 // Section A — Constants & emitted shapes
@@ -68,9 +69,6 @@ const FUNCTION_TOOL_DEFINITION_TYPE = 'function';
 /** Event name of the emitted completion-details log record. */
 export const COMPLETION_DETAILS_EVENT_NAME =
   'gen_ai.client.inference.operation.details';
-
-/** Stand-in written wherever a value cannot be represented. */
-const NOT_SERIALIZABLE = '<not serializable>';
 
 /** Key of the `Tool` field that carries declared functions. */
 const FUNCTION_DECLARATIONS_KEY = 'functionDeclarations';
@@ -178,8 +176,11 @@ export interface ExtendedUsageMetadata extends GenerateContentResponseUsageMetad
 }
 
 /**
- * The telemetry decisions this module reads. adk-js's `TelemetryConfig`
- * satisfies it structurally, so this module does not import it.
+ * The telemetry decisions this module reads.
+ *
+ * Declared here rather than imported: the `TelemetryConfig` that will supply
+ * these is on the `parity` branch, not on `main`. It satisfies this interface
+ * structurally, so wiring the two together needs no change to either.
  */
 export interface ExperimentalSemconvConfig {
   readonly shouldUseExperimentalGenaiSemconv: boolean;
@@ -309,22 +310,6 @@ function toOptionalMap(value: unknown): AnyValueMap | null {
   }
   const normalized = toAnyValue(value);
   return isAnyValueMap(normalized) ? normalized : {'value': normalized};
-}
-
-/**
- * Serializes `value` to JSON with no whitespace, matching adk-python's
- * `separators=(',',':'), ensure_ascii=False`.
- *
- * `core/src/telemetry/tracing.ts` holds a private helper of the same name.
- * Sharing one would mean editing that module, which this additive change does
- * not do.
- */
-function safeJsonSerialize(value: AnyValue): string {
-  try {
-    return JSON.stringify(value) ?? NOT_SERIALIZABLE;
-  } catch {
-    return NOT_SERIALIZABLE;
-  }
 }
 
 function toRole(role: string | undefined): string {
@@ -535,27 +520,17 @@ function functionToolDefinitions(tool: Tool): FunctionToolDefinition[] {
  * adk-python.
  */
 function genericToolDefinitions(tool: Tool): GenericToolDefinition[] {
-  const presentKeys = Object.entries(tool)
+  return Object.entries(tool)
     .filter(
       ([key, value]) =>
         key !== FUNCTION_DECLARATIONS_KEY &&
         value !== null &&
         value !== undefined,
     )
-    .map(([key]) => [key, true] as const);
-  return snakeCaseKeys(Object.fromEntries(presentKeys)).map((name) => ({
-    name,
-    type: name,
-  }));
-}
-
-/**
- * The own keys of `value`, converted to `snake_case`. `toSnakeCase` converts
- * an object's keys and is typed to return `unknown`; `Object.assign` recovers
- * an object type from it without a cast.
- */
-function snakeCaseKeys(value: object): string[] {
-  return Object.keys(Object.assign({}, toSnakeCase(value)));
+    .map(([key]) => {
+      const name = toSnakeCaseKey(key);
+      return {name, type: name};
+    });
 }
 
 /** Whether `value` carries at least one field of a `@google/genai` `Tool`. */
@@ -763,6 +738,10 @@ function completionLogAttributes(
 /**
  * Copies `attributes` into `common`, and `logOnlyAttributes` as well when the
  * config routes content onto the log record.
+ *
+ * `logOnlyAttributes` carries what may reach a log record but not a span, such
+ * as the end user's id. adk-python's sole caller is `tracing.py`, which passes
+ * it on every call; the port of that module is this function's caller here too.
  */
 export function setOperationDetailsCommonAttributes(
   common: AnyValueMap,
@@ -771,11 +750,7 @@ export function setOperationDetailsCommonAttributes(
   logOnlyAttributes?: AnyValueMap,
 ): void {
   Object.assign(common, attributes);
-  if (
-    logOnlyAttributes &&
-    Object.keys(logOnlyAttributes).length > 0 &&
-    telemetryConfig.shouldAddContentToLogs
-  ) {
+  if (logOnlyAttributes && telemetryConfig.shouldAddContentToLogs) {
     Object.assign(common, logOnlyAttributes);
   }
 }
