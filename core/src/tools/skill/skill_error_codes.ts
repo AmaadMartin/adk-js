@@ -10,7 +10,8 @@
  * The string values are part of the model-facing contract: the system
  * instruction names `SCRIPT_NOT_FOUND` directly, and a model is expected to
  * branch on them. They are kept byte-identical to the codes adk-python's
- * `skill_toolset.py` returns.
+ * `skill_toolset.py` returns, except for `CONFIRMATION_REJECTED`, which
+ * belongs to a confirmation gate adk-python does not have.
  */
 export enum SkillErrorCode {
   INVALID_ARGUMENTS = 'INVALID_ARGUMENTS',
@@ -29,4 +30,5 @@ export enum SkillErrorCode {
   EXECUTION_ERROR = 'EXECUTION_ERROR',
   SKILL_SCRIPT_EXECUTION_ERROR = 'SKILL_SCRIPT_EXECUTION_ERROR',
   TOOL_ERROR = 'TOOL_ERROR',
+  CONFIRMATION_REJECTED = 'CONFIRMATION_REJECTED',
 }

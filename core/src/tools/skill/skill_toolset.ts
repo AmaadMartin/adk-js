@@ -11,6 +11,7 @@ import {Context} from '../../agents/context.js';
 import {isLlmAgent} from '../../agents/llm_agent.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {BaseCodeExecutor} from '../../code_executors/base_code_executor.js';
+import {BaseEnvironment} from '../../environment/base_environment.js';
 import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {formatSkillsAsXml} from '../../skills/prompt.js';
 import {Skill} from '../../skills/skill.js';
@@ -32,6 +33,9 @@ import {
   RUN_SKILL_SCRIPT_TOOL_NAME,
   SEARCH_SKILLS_TOOL_NAME,
 } from './skill_tool_names.js';
+
+/** Default seconds a skill script may run in an environment. */
+export const DEFAULT_SCRIPT_TIMEOUT_SECONDS = 300;
 
 /** Options for {@link SkillToolset}. */
 export interface SkillToolsetOptions {
@@ -61,6 +65,24 @@ export interface SkillToolsetOptions {
    * Set this to own the location and the lifetime of the output.
    */
   scriptOutputDir?: string;
+  /**
+   * Environment that `run_skill_script` runs its command in. Mutually
+   * exclusive with `codeExecutor`: the environment runs a shell command the
+   * model supplies, the code executor runs a generated wrapper script.
+   */
+  environment?: BaseEnvironment;
+  /**
+   * Absolute path inside the environment that skill resources are
+   * materialized under. Defaults to `skills` beneath the environment's
+   * working directory. Requires `environment`.
+   */
+  skillsFolder?: string;
+  /**
+   * Seconds a command may run in the environment before it is killed.
+   * Defaults to {@link DEFAULT_SCRIPT_TIMEOUT_SECONDS}. Does not apply to the
+   * code-executor path, which owns its own timeout.
+   */
+  scriptTimeoutSeconds?: number;
   /** Selects which of the toolset's tools are exposed to the model. */
   toolFilter?: ToolPredicate | string[];
   /** Prefix prepended to every tool name, e.g. `myAgent_load_skill`. */
@@ -74,11 +96,15 @@ export class SkillToolset extends BaseToolset {
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
+  public readonly environment?: BaseEnvironment;
+  public readonly scriptTimeoutSeconds: number;
+  private readonly configuredSkillsFolder?: string;
   private readonly scriptOutputDir?: string;
   private readonly allowInlineScripts: boolean;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
   private tempOutputDir?: Promise<string>;
+  private readonly preparedRequests = new WeakSet<LlmRequest>();
 
   constructor(
     skills: Record<string, Skill> | Skill[],
@@ -94,6 +120,27 @@ export class SkillToolset extends BaseToolset {
     this.registry = options.registry;
     this.scriptOutputDir = options.scriptOutputDir;
     this.allowInlineScripts = options.allowInlineScripts ?? false;
+    this.environment = options.environment;
+    this.scriptTimeoutSeconds =
+      options.scriptTimeoutSeconds ?? DEFAULT_SCRIPT_TIMEOUT_SECONDS;
+
+    if (options.codeExecutor && options.environment) {
+      throw new Error('Cannot have both codeExecutor and environment');
+    }
+    if (options.skillsFolder !== undefined) {
+      if (!options.environment) {
+        throw new Error('Cannot specify skillsFolder without an environment');
+      }
+      if (
+        !path.posix.isAbsolute(options.skillsFolder) &&
+        !path.win32.isAbsolute(options.skillsFolder)
+      ) {
+        throw new Error(
+          `\`skillsFolder\` must be an absolute path: '${options.skillsFolder}'`,
+        );
+      }
+    }
+    this.configuredSkillsFolder = options.skillsFolder;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -113,6 +160,27 @@ export class SkillToolset extends BaseToolset {
     }
   }
 
+  /**
+   * POSIX path the skill resources are materialized under in the environment,
+   * or `undefined` when no environment is configured.
+   *
+   * Reading this before the environment is initialized throws, because
+   * `LocalEnvironment.workingDir` is only known after `initialize()`.
+   */
+  get skillsFolder(): string | undefined {
+    return this.environment ? this.skillsFolderIn(this.environment) : undefined;
+  }
+
+  /**
+   * The folder `env` holds this toolset's skills in: the configured
+   * `skillsFolder`, or `skills` beneath the environment's working directory.
+   */
+  skillsFolderIn(env: BaseEnvironment): string {
+    return this.configuredSkillsFolder !== undefined
+      ? toPosixPath(this.configuredSkillsFolder)
+      : `${toPosixPath(env.workingDir)}/skills`;
+  }
+
   /** Renders a base tool name with the toolset's configured prefix. */
   toolName(baseName: string): string {
     return prefixedToolName(this.prefix, baseName);
@@ -124,7 +192,7 @@ export class SkillToolset extends BaseToolset {
    * backend is certain.
    */
   private hasScriptExecution(context?: ReadonlyContext): boolean {
-    if (this.codeExecutor) {
+    if (this.environment || this.codeExecutor) {
       return true;
     }
     const agent = context?.invocationContext?.agent;
@@ -155,7 +223,23 @@ export class SkillToolset extends BaseToolset {
       : allTools;
   }
 
+  /**
+   * Brings the environment up if it is not up yet.
+   *
+   * `LocalEnvironment` only knows its working directory after this, so both
+   * the skills folder and any command depend on it. `initialize()` is
+   * idempotent, and the flag keeps a second call from paying for the check.
+   */
+  async ensureEnvironmentInitialized(): Promise<void> {
+    if (this.environment && !this.environment.isInitialized) {
+      await this.environment.initialize();
+    }
+  }
+
   override async close(): Promise<void> {
+    if (this.environment?.isInitialized) {
+      await this.environment.close();
+    }
     this.fetchedSkillCache.clear();
     this.toolCache.clear();
   }
@@ -225,6 +309,28 @@ export class SkillToolset extends BaseToolset {
     llmRequest: LlmRequest,
   ): Promise<void> {
     await super.processLlmRequest(toolContext, llmRequest);
+    await this.prepareLlmRequest(toolContext, llmRequest);
+  }
+
+  /**
+   * Initializes the environment and appends the skill guidance to `llmRequest`.
+   *
+   * `LlmAgent` flattens a toolset into its tools and then calls
+   * `BaseTool.processLlmRequest` on each one, so a toolset's own hook never
+   * runs. Every skill tool calls this instead, and the first one through does
+   * the work; the rest find the request already prepared. The set is weak, so
+   * a finished request is collected rather than retained.
+   */
+  async prepareLlmRequest(
+    toolContext: Context,
+    llmRequest: LlmRequest,
+  ): Promise<void> {
+    if (this.preparedRequests.has(llmRequest)) {
+      return;
+    }
+    this.preparedRequests.add(llmRequest);
+
+    await this.ensureEnvironmentInitialized();
 
     const allowedTools = new Set(
       this.tools
@@ -236,6 +342,7 @@ export class SkillToolset extends BaseToolset {
       buildSkillSystemInstruction({
         prefix: this.prefix,
         allowedTools,
+        skillsFolder: this.skillsFolder,
         scriptExecutionEnabled: this.hasScriptExecution(toolContext),
       }),
     ];
@@ -333,6 +440,11 @@ export class SkillToolset extends BaseToolset {
     this.toolCache.set(cacheKey, resolvedTools);
     return resolvedTools;
   }
+}
+
+/** Rewrites a host path with forward slashes, as the environment reports it. */
+function toPosixPath(hostPath: string): string {
+  return hostPath.split(path.win32.sep).join(path.posix.sep);
 }
 
 /**

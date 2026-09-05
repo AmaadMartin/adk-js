@@ -1256,7 +1256,10 @@ export {
   buildSkillSystemInstruction,
 } from './tools/skill/skill_system_instruction.js';
 export type {SkillSystemInstructionOptions} from './tools/skill/skill_system_instruction.js';
-export {SkillToolset} from './tools/skill/skill_toolset.js';
+export {
+  DEFAULT_SCRIPT_TIMEOUT_SECONDS,
+  SkillToolset,
+} from './tools/skill/skill_toolset.js';
 export type {SkillToolsetOptions} from './tools/skill/skill_toolset.js';
 export {
   SPANNER_DEFAULT_SCOPE,

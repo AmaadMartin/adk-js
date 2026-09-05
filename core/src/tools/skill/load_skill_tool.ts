@@ -5,19 +5,21 @@
  */
 
 import {FunctionDeclaration, Type} from '@google/genai';
+import {injectSessionState} from '../../agents/instructions.js';
 import {requireAgent} from '../../agents/invocation_context.js';
 import {experimental} from '../../utils/experimental.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
+import {SkillTool} from './skill_tool.js';
 import {LOAD_SKILL_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
-export class LoadSkillTool extends BaseTool {
+export class LoadSkillTool extends SkillTool {
   static readonly TOOL_NAME = LOAD_SKILL_TOOL_NAME;
 
-  constructor(private toolset: SkillToolset) {
-    super({
+  constructor(toolset: SkillToolset) {
+    super(toolset, {
       name: toolset.toolName(LoadSkillTool.TOOL_NAME),
       description: 'Loads the SKILL.md instructions for a given skill.',
     });
@@ -81,9 +83,15 @@ export class LoadSkillTool extends BaseTool {
       toolContext.state.set(stateKey, [...currentActivated, skillName]);
     }
 
+    // A skill opts in to templating so an instruction that legitimately
+    // contains braces is not rewritten behind its author's back.
+    const instructions = skill.frontmatter.metadata?.['adk_inject_state']
+      ? await injectSessionState(skill.instructions, toolContext)
+      : skill.instructions;
+
     return {
       skill_name: skillName,
-      instructions: skill.instructions,
+      instructions,
       frontmatter: skill.frontmatter,
       resources: skill.resources,
     };

@@ -104,6 +104,20 @@ describe('getScriptLanguageByExtension', () => {
     });
   });
 
+  describe('bash extension', () => {
+    it('maps .bash to SHELL, as adk-python does', () => {
+      expect(getScriptLanguageByExtension('.bash')).toBe(
+        CodeExecutionLanguage.SHELL,
+      );
+    });
+
+    it('maps .BASH to SHELL, matching the case-insensitive lookup', () => {
+      expect(getScriptLanguageByExtension('.BASH')).toBe(
+        CodeExecutionLanguage.SHELL,
+      );
+    });
+  });
+
   describe('unknown extension', () => {
     it('returns UNSPECIFIED for unknown extension', () => {
       expect(getScriptLanguageByExtension('.rb')).toBe(

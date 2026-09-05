@@ -13,10 +13,12 @@ import {
   BaseTool,
   BaseToolset,
   buildSkillSystemInstruction,
+  CodeExecutionInput,
   CodeExecutionResult,
   Context,
   createSession,
   DEFAULT_SKILL_SYSTEM_INSTRUCTION,
+  ExecuteCodeParams,
   Frontmatter,
   InMemorySessionService,
   InvocationContext,
@@ -32,12 +34,36 @@ import {
   Skill,
   SkillRegistry,
   SkillToolset,
+  ToolConfirmation,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {FakeEnvironment} from './fake_environment.js';
 
 class StubCodeExecutor extends BaseCodeExecutor {
   override async executeCode(): Promise<CodeExecutionResult> {
     return {stdout: '', stderr: '', outputFiles: []};
+  }
+}
+
+class RecordingCodeExecutor extends BaseCodeExecutor {
+  lastInput?: CodeExecutionInput;
+  calls = 0;
+
+  constructor(private readonly result: Partial<CodeExecutionResult> = {}) {
+    super();
+  }
+
+  override async executeCode(
+    params: ExecuteCodeParams,
+  ): Promise<CodeExecutionResult> {
+    this.calls++;
+    this.lastInput = params.codeExecutionInput;
+    return {
+      stdout: '',
+      stderr: '',
+      outputFiles: [],
+      ...this.result,
+    };
   }
 }
 
@@ -96,6 +122,17 @@ function createContext(
   } = {},
 ): Context {
   return new Context({invocationContext: createInvocationContext(options)});
+}
+
+/**
+ * A context that has already approved the command, so the environment path
+ * runs it instead of pausing on the confirmation gate.
+ */
+function createConfirmedContext(): Context {
+  return new Context({
+    invocationContext: createInvocationContext({}),
+    toolConfirmation: new ToolConfirmation({confirmed: true}),
+  });
 }
 
 /** A context whose agent owns a code executor, so scripts can run. */
@@ -191,6 +228,18 @@ describe('skill_toolset parity: system instruction', () => {
     expect(LoadSkillTool.TOOL_NAME).toBe('load_skill');
     expect(LoadSkillResourceTool.TOOL_NAME).toBe('load_skill_resource');
     expect(RunSkillScriptTool.TOOL_NAME).toBe('run_skill_script');
+
+    // adk-python reads these off the classes. Here they are also asserted on
+    // the built tools, which is the name the model actually sees.
+    const toolset = new SkillToolset([createSkill('skill1')], {
+      registry: new StubRegistry(),
+    });
+
+    expect(new ListSkillsTool(toolset).name).toBe('list_skills');
+    expect(new SearchSkillsTool(toolset).name).toBe('search_skills');
+    expect(new LoadSkillTool(toolset).name).toBe('load_skill');
+    expect(new LoadSkillResourceTool(toolset).name).toBe('load_skill_resource');
+    expect(new RunSkillScriptTool(toolset).name).toBe('run_skill_script');
   });
 
   it('drops the script steps but keeps the numbering contiguous', () => {
@@ -550,5 +599,654 @@ describe('skill_toolset parity: toolset shape', () => {
 
     expect(resolutions).toBe(2);
     expect(names).toContain('counted_tool');
+  });
+});
+
+describe('skill_toolset parity: environment', () => {
+  const envSkill: Skill = {
+    frontmatter: {name: 'skill1', description: 'A test skill'},
+    instructions: 'Test instructions',
+    resources: {scripts: {'run.py': {src: "print('hi')"}}},
+  };
+
+  it('test_init_accepts_environment', () => {
+    const env = new FakeEnvironment();
+
+    expect(new SkillToolset([envSkill], {environment: env}).environment).toBe(
+      env,
+    );
+  });
+
+  it('test_init_accepts_skills_folder', () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+      skillsFolder: '/custom/skills',
+    });
+
+    expect(toolset.skillsFolder).toBe('/custom/skills');
+  });
+
+  it('test_init_raises_when_skills_folder_provided_without_environment', () => {
+    expect(
+      () => new SkillToolset([envSkill], {skillsFolder: '/custom/skills'}),
+    ).toThrow('Cannot specify skillsFolder without an environment');
+  });
+
+  it('test_skills_folder_defaults_to_environment', () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment({workingDir: '/workspace'}),
+    });
+
+    expect(toolset.skillsFolder).toBe('/workspace/skills');
+  });
+
+  it('test_init_raises_when_both_executor_and_environment_provided', () => {
+    expect(
+      () =>
+        new SkillToolset([envSkill], {
+          codeExecutor: new StubCodeExecutor(),
+          environment: new FakeEnvironment(),
+        }),
+    ).toThrow('Cannot have both codeExecutor and environment');
+  });
+
+  it('test_run_skill_script_declaration_with_environment', () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+    });
+
+    const declaration = new RunSkillScriptTool(toolset)._getDeclaration();
+    const properties = declaration?.parameters?.properties ?? {};
+
+    expect(Object.keys(properties)).toEqual([
+      'skill_name',
+      'script_path',
+      'command',
+    ]);
+    expect(declaration?.parameters?.required).toContain('command');
+  });
+
+  it('test_run_skill_script_execute_with_environment_missing_command', async () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+    });
+
+    const result = (await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py'},
+      toolContext: createContext(),
+    })) as {error: string; error_code: string};
+
+    expect(result.error_code).toBe('INVALID_ARGUMENTS');
+    expect(result.error).toContain("Argument 'command' is required");
+  });
+
+  it('test_run_skill_script_execute_with_environment', async () => {
+    const env = new FakeEnvironment({
+      workingDir: '/workspace',
+      result: {exitCode: 0, stdout: 'env out', stderr: '', timedOut: false},
+    });
+    const toolset = new SkillToolset([envSkill], {environment: env});
+
+    const result = await new RunSkillScriptTool(toolset).runAsync({
+      args: {
+        skill_name: 'skill1',
+        script_path: 'run.py',
+        command: 'python3 skills/skill1/scripts/run.py --flag 1',
+      },
+      toolContext: createConfirmedContext(),
+    });
+
+    expect(result).toEqual({
+      stdout: 'env out',
+      stderr: '',
+      exit_code: 0,
+      timed_out: false,
+    });
+    expect(env.writeCalls.map((w) => w.filePath)).toEqual([
+      '/workspace/skills/skill1/scripts/run.py',
+    ]);
+    expect(env.executeCalls).toHaveLength(1);
+    expect(env.executeCalls[0].command).toBe(
+      'python3 skills/skill1/scripts/run.py --flag 1',
+    );
+  });
+
+  it('test_run_skill_script_environment_execute_exception', async () => {
+    const env = new FakeEnvironment({workingDir: '/workspace'});
+    env.files.set('/workspace/skills/skill1/scripts/run.py', "print('hi')");
+    const toolset = new SkillToolset([envSkill], {environment: env});
+    const tool = new RunSkillScriptTool(toolset);
+    const failure = new Error('Sandbox connection lost');
+    failure.name = 'RuntimeError';
+    env.executeError = failure;
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
+      toolContext: createConfirmedContext(),
+    })) as {error: string; error_code: string};
+
+    expect(result.error_code).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain('Failed to execute script');
+    expect(result.error).toContain('RuntimeError: Sandbox connection lost');
+  });
+
+  it('test_run_skill_script_environment_materialize_ls_exception', async () => {
+    const failure = new Error('Failed to check file existence');
+    failure.name = 'RuntimeError';
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment({
+        workingDir: '/workspace',
+        readFileError: failure,
+      }),
+    });
+
+    const result = (await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
+      toolContext: createConfirmedContext(),
+    })) as {error: string; error_code: string};
+
+    expect(result.error_code).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain(
+      'RuntimeError: Failed to check file existence',
+    );
+  });
+
+  it('test_run_skill_script_environment_materialize_write_exception', async () => {
+    const failure = new Error('Disk full');
+    failure.name = 'RuntimeError';
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment({
+        workingDir: '/workspace',
+        writeFileError: failure,
+      }),
+    });
+
+    const result = (await new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
+      toolContext: createConfirmedContext(),
+    })) as {error: string; error_code: string};
+
+    expect(result.error_code).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain('RuntimeError: Disk full');
+  });
+
+  it('test_run_skill_script_materialize_writes_concurrently', async () => {
+    let activeWrites = 0;
+    let maxActiveWrites = 0;
+    const env = new FakeEnvironment({
+      workingDir: '/workspace',
+      onWrite: async () => {
+        activeWrites++;
+        maxActiveWrites = Math.max(maxActiveWrites, activeWrites);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        activeWrites--;
+      },
+    });
+    const multiResourceSkill: Skill = {
+      frontmatter: {name: 'multi-res', description: 'desc'},
+      instructions: 'desc',
+      resources: {
+        references: {'ref1.md': 'c1', 'ref2.md': 'c2'},
+        assets: {'asset1.json': 'c3'},
+        scripts: {'run.py': {src: "print('hi')"}},
+      },
+    };
+    const toolset = new SkillToolset([multiResourceSkill], {environment: env});
+
+    await new RunSkillScriptTool(toolset).runAsync({
+      args: {
+        skill_name: 'multi-res',
+        script_path: 'run.py',
+        command: 'python3 run.py',
+      },
+      toolContext: createConfirmedContext(),
+    });
+
+    expect(env.writeCalls).toHaveLength(4);
+    expect(maxActiveWrites).toBe(4);
+  });
+
+  it('test_get_tools_keeps_run_skill_script_with_environment', async () => {
+    const toolset = new SkillToolset([envSkill], {
+      environment: new FakeEnvironment(),
+    });
+
+    const names = (await toolset.getTools(createContext())).map((t) => t.name);
+
+    expect(names).toContain('run_skill_script');
+  });
+
+  it('test_close_cancels_futures_and_clears_cache', async () => {
+    const env = new FakeEnvironment();
+    await env.initialize();
+    const toolset = new SkillToolset([envSkill], {environment: env});
+
+    await toolset.close();
+
+    expect(env.closeCount).toBe(1);
+  });
+});
+
+describe('skill_toolset parity: script arguments and status', () => {
+  const scriptSkill: Skill = {
+    frontmatter: {name: 'skill1', description: 'A test skill'},
+    instructions: 'Test instructions',
+    resources: {
+      scripts: {
+        'run.py': {src: "print('hi')"},
+        'run.sh': {src: 'echo hi'},
+        'build.rb': {src: 'puts 1'},
+        noext: {src: 'echo hi'},
+      },
+    },
+  };
+
+  function runScript(
+    executor: RecordingCodeExecutor,
+    args: Record<string, unknown>,
+  ) {
+    const toolset = new SkillToolset([scriptSkill], {codeExecutor: executor});
+    return new RunSkillScriptTool(toolset).runAsync({
+      args: {skill_name: 'skill1', ...args},
+      toolContext: createContext(),
+    });
+  }
+
+  it('test_execute_script_with_input_args_python', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'done\n'});
+
+    const result = (await runScript(executor, {
+      script_path: 'run.py',
+      args: {verbose: true, count: '3'},
+    })) as {status: string};
+
+    expect(result.status).toBe('success');
+    expect(executor.lastInput?.args).toEqual([
+      '--verbose',
+      'true',
+      '--count',
+      '3',
+    ]);
+  });
+
+  it('test_execute_script_with_input_args_shell', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'done\n'});
+
+    await runScript(executor, {
+      script_path: 'run.sh',
+      args: {verbose: true},
+      short_options: {n: 5},
+      positional_args: ['input.csv'],
+    });
+
+    expect(executor.lastInput?.args).toEqual([
+      '--verbose',
+      'true',
+      '-n',
+      '5',
+      '--',
+      'input.csv',
+    ]);
+  });
+
+  it('test_execute_script_with_list_args_python', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'done\n'});
+
+    const result = (await runScript(executor, {
+      script_path: 'run.py',
+      args: ['--verbose', 'True', '-n', '5', 'input.txt'],
+    })) as {status: string};
+
+    expect(result.status).toBe('success');
+    expect(executor.lastInput?.args).toEqual([
+      '--verbose',
+      'True',
+      '-n',
+      '5',
+      'input.txt',
+    ]);
+  });
+
+  it('test_execute_script_with_list_args_rejects_others_python', async () => {
+    const executor = new RecordingCodeExecutor();
+
+    const result = (await runScript(executor, {
+      script_path: 'run.py',
+      args: ['arg1', 'arg2'],
+      short_options: {v: true},
+      positional_args: ['pos1'],
+    })) as {error: string; error_code: string};
+
+    expect(result.error_code).toBe('INVALID_ARGUMENTS');
+    expect(result.error).toContain(
+      "Cannot specify 'short_options' or 'positional_args'",
+    );
+    expect(executor.calls).toBe(0);
+  });
+
+  it('test_execute_script_invalid_args_type', async () => {
+    for (const badArgs of ['not a dict', 42, true]) {
+      const executor = new RecordingCodeExecutor();
+
+      const result = (await runScript(executor, {
+        script_path: 'run.py',
+        args: badArgs,
+      })) as {error_code: string};
+
+      expect(result.error_code).toBe('INVALID_ARGUMENTS');
+      expect(executor.calls).toBe(0);
+    }
+  });
+
+  it('test_execute_script_invalid_short_options_type', async () => {
+    for (const badShortOptions of ['not a dict', 42, true, ['list']]) {
+      const executor = new RecordingCodeExecutor();
+
+      const result = (await runScript(executor, {
+        script_path: 'run.py',
+        short_options: badShortOptions,
+      })) as {error_code: string};
+
+      expect(result.error_code).toBe('INVALID_ARGUMENTS');
+      expect(executor.calls).toBe(0);
+    }
+  });
+
+  it('test_execute_script_invalid_positional_args_type', async () => {
+    for (const badPositionalArgs of ['not a list', 42, true, {dict: 1}]) {
+      const executor = new RecordingCodeExecutor();
+
+      const result = (await runScript(executor, {
+        script_path: 'run.py',
+        positional_args: badPositionalArgs,
+      })) as {error_code: string};
+
+      expect(result.error_code).toBe('INVALID_ARGUMENTS');
+      expect(executor.calls).toBe(0);
+    }
+  });
+
+  it('test_execute_script_stderr_only_sets_error_status', async () => {
+    const executor = new RecordingCodeExecutor({stderr: 'fatal error\n'});
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+      stderr: string;
+    };
+
+    expect(result.status).toBe('error');
+    expect(result.stderr).toBe('fatal error\n');
+  });
+
+  it('test_execute_script_stderr_with_stdout_sets_warning', async () => {
+    const executor = new RecordingCodeExecutor({
+      stdout: 'output\n',
+      stderr: 'deprecation\n',
+    });
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+    };
+
+    expect(result.status).toBe('warning');
+  });
+
+  it('test_missing_executor_exit_code_falls_back_to_stderr', async () => {
+    const executor = new RecordingCodeExecutor({stderr: 'fatal error\n'});
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+    };
+
+    expect(result.status).toBe('error');
+  });
+
+  it('test_execute_script_unsupported_type', async () => {
+    const executor = new RecordingCodeExecutor();
+
+    const result = (await runScript(executor, {
+      script_path: 'build.rb',
+    })) as {error: string; error_code: string};
+
+    expect(result.error_code).toBe('UNSUPPORTED_SCRIPT_TYPE');
+    expect(result.error).toContain("Unsupported script type '.rb'");
+    expect(executor.calls).toBe(0);
+  });
+
+  it('test_execute_script_extensionless_unsupported', async () => {
+    const executor = new RecordingCodeExecutor();
+
+    const result = (await runScript(executor, {script_path: 'noext'})) as {
+      error: string;
+      error_code: string;
+    };
+
+    expect(result.error_code).toBe('UNSUPPORTED_SCRIPT_TYPE');
+    expect(result.error).toContain('Unsupported script type (no extension)');
+  });
+
+  it('names the skill and the script in the response', async () => {
+    const executor = new RecordingCodeExecutor({stdout: 'ok'});
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      skill_name: string;
+      script_path: string;
+    };
+
+    expect(result.skill_name).toBe('skill1');
+    expect(result.script_path).toBe('run.py');
+  });
+});
+
+describe('skill_toolset parity: invocation-scoped retry guards', () => {
+  const guardSkill: Skill = {
+    frontmatter: {name: 'skill1', description: 'A test skill'},
+    instructions: 'Test instructions',
+    resources: {
+      references: {'doc.md': 'body'},
+      scripts: {'run.py': {src: 'x'}},
+    },
+  };
+
+  it('test_load_resource_first_missing_returns_soft_error', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/nope.md'},
+      toolContext: createContext(),
+    })) as {error_code: string};
+
+    expect(result.error_code).toBe('RESOURCE_NOT_FOUND');
+  });
+
+  it('test_load_resource_repeated_failure_escalates_to_fatal', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const context = createContext();
+    const args = {skill_name: 'skill1', path: 'references/nope.md'};
+
+    const first = (await tool.runAsync({args, toolContext: context})) as {
+      error_code: string;
+    };
+    const second = (await tool.runAsync({args, toolContext: context})) as {
+      error: string;
+      error_code: string;
+    };
+
+    expect(first.error_code).toBe('RESOURCE_NOT_FOUND');
+    expect(second.error_code).toBe('RESOURCE_NOT_FOUND_FATAL');
+    expect(second.error).toContain('Do not retry');
+    expect(second.error).toContain('failure #2');
+    expect(second.error).toContain('stop');
+  });
+
+  it('test_load_resource_different_path_also_escalates_to_fatal', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/one.md'},
+      toolContext: context,
+    });
+    const second = (await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/two.md'},
+      toolContext: context,
+    })) as {error_code: string};
+
+    expect(second.error_code).toBe('RESOURCE_NOT_FOUND_FATAL');
+  });
+
+  it('test_load_resource_failures_isolated_per_invocation', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const args = {skill_name: 'skill1', path: 'references/nope.md'};
+
+    const first = (await tool.runAsync({
+      args,
+      toolContext: createContext(),
+    })) as {error_code: string};
+    const second = (await tool.runAsync({
+      args,
+      toolContext: createContext({invocationId: 'other_invocation'}),
+    })) as {error_code: string};
+
+    expect(first.error_code).toBe('RESOURCE_NOT_FOUND');
+    expect(second.error_code).toBe('RESOURCE_NOT_FOUND');
+  });
+
+  it('test_load_resource_counter_uses_temp_prefix', async () => {
+    const tool = new LoadSkillResourceTool(new SkillToolset([guardSkill]));
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', path: 'references/nope.md'},
+      toolContext: context,
+    });
+
+    const guardKeys = Object.keys(context.eventActions.stateDelta).filter((k) =>
+      k.includes('skill_resource_not_found_count'),
+    );
+    expect(guardKeys).toHaveLength(1);
+    expect(guardKeys[0].startsWith('temp:')).toBe(true);
+  });
+
+  it('test_execute_script_repeated_failure_escalates_to_fatal', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const context = createContext();
+    const args = {skill_name: 'skill1', script_path: 'scripts/nope.py'};
+
+    const first = (await tool.runAsync({args, toolContext: context})) as {
+      error_code: string;
+    };
+    const second = (await tool.runAsync({args, toolContext: context})) as {
+      error: string;
+      error_code: string;
+    };
+
+    expect(first.error_code).toBe('SCRIPT_NOT_FOUND');
+    expect(second.error_code).toBe('SCRIPT_NOT_FOUND_FATAL');
+    expect(second.error).toContain('Do not retry any script path');
+    expect(second.error).toContain('failure #2');
+  });
+
+  it('test_execute_script_different_path_also_escalates_to_fatal', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'one.py'},
+      toolContext: context,
+    });
+    const second = (await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'two.py'},
+      toolContext: context,
+    })) as {error_code: string};
+
+    expect(second.error_code).toBe('SCRIPT_NOT_FOUND_FATAL');
+  });
+
+  it('test_execute_script_failures_isolated_per_invocation', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const args = {skill_name: 'skill1', script_path: 'nope.py'};
+
+    const first = (await tool.runAsync({
+      args,
+      toolContext: createContext(),
+    })) as {error_code: string};
+    const second = (await tool.runAsync({
+      args,
+      toolContext: createContext({invocationId: 'other_invocation'}),
+    })) as {error_code: string};
+
+    expect(first.error_code).toBe('SCRIPT_NOT_FOUND');
+    expect(second.error_code).toBe('SCRIPT_NOT_FOUND');
+  });
+
+  it('test_execute_script_counter_uses_temp_prefix', async () => {
+    const tool = new RunSkillScriptTool(
+      new SkillToolset([guardSkill], {codeExecutor: new StubCodeExecutor()}),
+    );
+    const context = createContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'skill1', script_path: 'nope.py'},
+      toolContext: context,
+    });
+
+    const guardKeys = Object.keys(context.eventActions.stateDelta).filter((k) =>
+      k.includes('skill_script_not_found_count'),
+    );
+    expect(guardKeys).toHaveLength(1);
+    expect(guardKeys[0].startsWith('temp:')).toBe(true);
+  });
+});
+
+describe('skill_toolset parity: session-state injection', () => {
+  function stateSkill(metadata?: Record<string, unknown>): Skill {
+    return {
+      frontmatter: {name: 'skill1', description: 'desc', metadata},
+      instructions: 'Hello {user_name}!',
+    };
+  }
+
+  it('test_load_skill_run_async_injects_state_when_opt_in', async () => {
+    const tool = new LoadSkillTool(
+      new SkillToolset([stateSkill({adk_inject_state: true})]),
+    );
+
+    const result = (await tool.runAsync({
+      args: {name: 'skill1'},
+      toolContext: createContext({state: {user_name: 'Alice'}}),
+    })) as {instructions: string};
+
+    expect(result.instructions).toBe('Hello Alice!');
+  });
+
+  it('test_load_skill_run_async_skips_injection_when_opt_out', async () => {
+    const tool = new LoadSkillTool(
+      new SkillToolset([stateSkill({adk_inject_state: false})]),
+    );
+
+    const result = (await tool.runAsync({
+      args: {name: 'skill1'},
+      toolContext: createContext({state: {user_name: 'Alice'}}),
+    })) as {instructions: string};
+
+    expect(result.instructions).toBe('Hello {user_name}!');
+  });
+
+  it('test_load_skill_run_async_skips_injection_when_metadata_absent', async () => {
+    const tool = new LoadSkillTool(new SkillToolset([stateSkill()]));
+
+    const result = (await tool.runAsync({
+      args: {name: 'skill1'},
+      toolContext: createContext({state: {user_name: 'Alice'}}),
+    })) as {instructions: string};
+
+    expect(result.instructions).toBe('Hello {user_name}!');
   });
 });
