@@ -56,6 +56,12 @@ export interface RunNodeOptions {
    * resume). Defaults to `${parent.nodePath}.${nodeName}`.
    */
   overrideNodePath?: string;
+  /**
+   * Cancellation signal for this child run, overriding the one it would
+   * inherit. `ParallelWorker` passes a signal it owns so it can stop the items
+   * still in flight when one of them fails.
+   */
+  abortSignal?: AbortSignal;
 }
 
 /** Parameters for {@link executeChildNode}. */
@@ -166,10 +172,12 @@ async function runChildNode({
   const isolationScope =
     options.overrideIsolationScope ?? declaredScope ?? parent.isolationScope;
 
-  // The child observes the engine-supplied abort signal when given (a Workflow
-  // uses it to cancel siblings on failure), otherwise the parent invocation's.
+  // A caller-supplied signal wins over the engine-supplied one (a Workflow uses
+  // that to cancel siblings on failure), which in turn wins over the parent
+  // invocation's. The caller chains its signal to the ones it displaces, so
+  // preferring it does not detach the child from them.
   const effectiveAbortSignal =
-    abortSignal ?? parent.invocationContext.abortSignal;
+    options.abortSignal ?? abortSignal ?? parent.invocationContext.abortSignal;
 
   const childIc =
     branch === parent.invocationContext.branch &&

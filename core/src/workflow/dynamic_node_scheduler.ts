@@ -245,6 +245,7 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
         useSubBranch: options.useSubBranch,
         overrideBranch: options.overrideBranch,
         overrideIsolationScope: options.overrideIsolationScope,
+        abortSignal: options.abortSignal,
       },
     });
 
