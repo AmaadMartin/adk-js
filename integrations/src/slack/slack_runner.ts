@@ -73,7 +73,9 @@ export async function handleSlackMessage(
   const text = event.text;
   const userId = event.user;
   const channel = event.channel;
-  const threadTs = event.thread_ts ?? event.ts;
+  // `||`, not `??`: the reference uses `or`, so an empty thread_ts falls
+  // back to ts rather than keying a session on the empty string.
+  const threadTs = event.thread_ts || event.ts;
 
   if (!text || !userId || !channel) return;
 

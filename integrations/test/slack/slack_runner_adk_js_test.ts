@@ -120,6 +120,28 @@ describe('handleSlackMessage', () => {
     );
   });
 
+  it('falls back to the message timestamp when thread_ts is empty', async () => {
+    const {runner, client, say, runAsync} = fixture;
+    runAsync.mockImplementation(streamOf([modelEvent('ok')]));
+
+    await handleSlackMessage({
+      runner,
+      client,
+      event: {
+        text: 'hi',
+        user: USER,
+        channel: CHANNEL,
+        ts: EVENT_TS,
+        thread_ts: '',
+      },
+      say,
+    });
+
+    expect(runAsync).toHaveBeenCalledWith(
+      expect.objectContaining({sessionId: `${CHANNEL}-${EVENT_TS}`}),
+    );
+  });
+
   it('keys the session on the channel alone when no timestamp is present', async () => {
     const {runner, client, say, runAsync} = fixture;
     runAsync.mockImplementation(streamOf([modelEvent('ok')]));
