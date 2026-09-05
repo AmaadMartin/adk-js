@@ -327,8 +327,9 @@ describe('MCPSessionManager', () => {
    *   timeout ...' below.
    * - `terminate_on_close is True` (test_init_with_streamable_http_*_factory)
    *   -> 'terminates the server session before closing the client'.
-   * - `test_create_session_bounds_hung_connect` -> 'wraps a connect that
-   *   exceeds the configured timeout'.
+   * - `test_create_session_bounds_hung_connect` -> covered against the real SDK
+   *   by `tests/e2e/tools/mcp/mcp_streamable_http_e2e_test.ts`, because the
+   *   mocked `Client` here has no timer to exceed.
    *
    * `test_init_with_streamable_http_custom_httpx_factory` and
    * `test_init_with_streamable_http_default_httpx_factory` are not portable:
@@ -373,33 +374,6 @@ describe('MCPSessionManager', () => {
       const client = await manager.createSession();
 
       expect(client.connect).toHaveBeenCalledWith(expect.anything(), undefined);
-    });
-
-    it('wraps a connect that exceeds the configured timeout', async () => {
-      vi.mocked(Client).mockImplementationOnce(
-        () =>
-          ({
-            connect: vi
-              .fn()
-              .mockRejectedValue(
-                new Error('MCP error -32001: Request timed out'),
-              ),
-            close: vi.fn().mockResolvedValue(undefined),
-          }) as unknown as Client,
-      );
-
-      const manager = new MCPSessionManager({
-        type: 'StreamableHTTPConnectionParams',
-        url: 'http://test-url',
-        timeout: 1,
-      });
-
-      const error = await manager.createSession().catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain(
-        'Failed to create MCP session',
-      );
-      expect((error as Error).message).toContain('Request timed out');
     });
   });
 
