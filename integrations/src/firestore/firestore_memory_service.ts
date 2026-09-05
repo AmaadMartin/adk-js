@@ -21,7 +21,12 @@ import {DEFAULT_STOP_WORDS} from './stop_words.js';
 /** The collection that holds memory documents when the caller names none. */
 export const DEFAULT_MEMORIES_COLLECTION = 'memories';
 
-/** Firestore commits at most this many writes in one batch. */
+/**
+ * Writes per batch, matching adk-python.
+ *
+ * It bounds one commit, so a long session cannot build a request Firestore
+ * rejects for its size.
+ */
 const MAX_BATCH_WRITES = 500;
 
 /** The timestamp a memory entry carries when its stored value is unusable. */
