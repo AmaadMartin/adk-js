@@ -25,6 +25,9 @@ import {
   LlmRequest,
   LlmResponse,
   LongRunningFunctionTool,
+  NL_PLANNING_REQUEST_PROCESSOR,
+  NL_PLANNING_RESPONSE_PROCESSOR,
+  PlanReActPlanner,
   PluginManager,
   RunAsyncToolRequest,
   Runner,
@@ -43,6 +46,7 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {CODE_EXECUTION_REQUEST_PROCESSOR} from '../../src/agents/processors/code_execution_request_processor.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -1026,6 +1030,52 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+
+  it('runs NL_PLANNING_REQUEST_PROCESSOR after contents and before code execution', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    const planningIndex = agent.requestProcessors.indexOf(
+      NL_PLANNING_REQUEST_PROCESSOR,
+    );
+    const codeExecutionIndex = agent.requestProcessors.indexOf(
+      CODE_EXECUTION_REQUEST_PROCESSOR,
+    );
+    expect(planningIndex).toBeGreaterThan(contentIndex);
+    expect(planningIndex).toBeLessThan(codeExecutionIndex);
+  });
+});
+
+describe('LlmAgent Default Response Processors', () => {
+  it('defaults responseProcessors to NL_PLANNING_RESPONSE_PROCESSOR', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.responseProcessors).toEqual([NL_PLANNING_RESPONSE_PROCESSOR]);
+  });
+
+  it('lets an explicit responseProcessors config override the default', () => {
+    const agent = new LlmAgent({name: 'test_agent', responseProcessors: []});
+
+    expect(agent.responseProcessors).toEqual([]);
+  });
+});
+
+describe('LlmAgent planner', () => {
+  it('round-trips the planner from the config', () => {
+    const planner = new PlanReActPlanner();
+
+    const agent = new LlmAgent({name: 'test_agent', planner});
+
+    expect(agent.planner).toBe(planner);
+  });
+
+  it('leaves planner undefined when the config omits it', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.planner).toBeUndefined();
   });
 });
 
