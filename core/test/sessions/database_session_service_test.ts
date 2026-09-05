@@ -2989,15 +2989,16 @@ describe('DatabaseSessionService v0 schema', () => {
     expect(reloaded?.events.map((e) => e.id)).toContain(appended.id);
   });
 
-  it('warns that the database uses the deprecated v0 schema', async () => {
+  it('warns once that the database uses the deprecated v0 schema', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
 
+    await service.getSession({appName, userId, sessionId});
     await service.getSession({appName, userId, sessionId});
 
     const schemaWarnings = warn.mock.calls.filter(([message]) =>
       String(message).includes('legacy v0 session schema'),
     );
-    expect(schemaWarnings).not.toHaveLength(0);
+    expect(schemaWarnings).toHaveLength(1);
     warn.mockRestore();
   });
 
