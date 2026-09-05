@@ -10,6 +10,8 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ### Tools
 
+- [GcsAdminToolset](tools/gcs_admin_toolset/index.md) - Cloud Storage bucket administration tools, behind a read/read-write capability gate and the end user's Google credential.
+
 #### Retrieval
 
 Client-side retrieval tools. The agent calls a one-argument search function, your code answers it, and you choose the store, the chunking and the ranking. Start with `BaseRetrievalTool` if you are deciding between these and server-side retrieval.
