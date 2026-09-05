@@ -196,8 +196,7 @@ function joinPartText(content: Content): string {
  * writes the same document through `model_dump(exclude_none=True)`.
  */
 function toStorableContent(content: Content): Content {
-  const storable: Content = JSON.parse(JSON.stringify(content));
-  return storable;
+  return JSON.parse(JSON.stringify(content));
 }
 
 /** Reads a memory entry per document, skipping the ones that do not parse. */
