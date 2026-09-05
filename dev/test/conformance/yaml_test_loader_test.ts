@@ -33,6 +33,12 @@ user_messages:
   - text: hello
 `;
 
+// The smallest spec the loader accepts: description and agent are required.
+const MINIMAL_SPEC_YAML = `
+description: Test description
+agent: test-agent
+`;
+
 const SESSION_YAML = `
 app_name: test-app
 user_id: user-1
@@ -162,7 +168,9 @@ describe('batchLoadYamlTestDefs', () => {
     const mockFiles = ['/root/tests/t1/spec.yaml', '/root/tests/t2/spec.yaml'];
 
     (fg.stream as unknown as Mock).mockReturnValue(mockFiles);
-    (fs.readFile as Mock).mockResolvedValue('{}');
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) =>
+      filePath.endsWith('spec.yaml') ? MINIMAL_SPEC_YAML : '{}',
+    );
 
     const tests = await batchLoadYamlTestDefs(rootDir);
     expect(tests.size).toBe(2);
@@ -238,6 +246,22 @@ describe('batchLoadYamlTestDefs', () => {
     expect(recording?.toolRecording?.toolCall?.args).toEqual({
       user_name: 'ada',
     });
+  });
+
+  it('should reject a spec whose key is misspelled', async () => {
+    const rootDir = '/root/tests';
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml']),
+    );
+    // The typo is snake_case in the file, so this also pins the order: the
+    // loader camelCases the spec first, then validates it.
+    (fs.readFile as Mock).mockResolvedValue(
+      'description: d\nagent: a\nuser_mesages:\n  - text: typo\n',
+    );
+
+    await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
+      /Unrecognized key: "userMesages"/,
+    );
   });
 
   it('should throw an error if a required file is missing', async () => {

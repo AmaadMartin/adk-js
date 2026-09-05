@@ -9,9 +9,10 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {TestCaseSpec, TestInfo, TestSpec} from '../integration/test_types.js';
+import {TestCaseSpec, TestInfo} from '../integration/test_types.js';
 import {generatedFilePaths} from './generated_file_utils.js';
 import {loadRecordings} from './recordings_loader.js';
+import {parseTestSpec} from './test_spec_schema.js';
 import {toCamelKeys} from './yaml_writer.js';
 
 /**
@@ -35,7 +36,12 @@ export async function batchLoadTestSpecs(
     // and when handling Windows paths.
     const normalizedFile = (file as string).replaceAll('\\', '/');
     const baseDir = path.posix.dirname(normalizedFile);
-    const spec = await loadYamlMapping<TestSpec>(normalizedFile, 'Spec');
+    // The spec is validated, not cast: a misspelled key is a broken fixture.
+    // Validation runs after loadYamlMapping camelCases the keys, because a
+    // spec.yaml is legitimately written in snake_case.
+    const spec = parseTestSpec(
+      await loadYamlMapping<unknown>(normalizedFile, 'Spec'),
+    );
 
     // Make test names unique by including relative file path from given root dir
     const normalizedDir = directory.replaceAll('\\', '/');
