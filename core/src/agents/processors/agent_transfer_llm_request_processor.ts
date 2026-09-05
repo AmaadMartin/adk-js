@@ -10,6 +10,7 @@ import {appendInstructions, LlmRequest} from '../../models/llm_request.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
+import {TRANSFER_TO_AGENT_FUNCTION_CALL_NAME} from '../framework_function_calls.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
@@ -22,7 +23,7 @@ import {BaseLlmRequestProcessor} from './base_llm_processor.js';
  * hand off control.
  */
 export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
-  private readonly toolName = 'transfer_to_agent' as const;
+  private readonly toolName = TRANSFER_TO_AGENT_FUNCTION_CALL_NAME;
   private readonly tool = new FunctionTool({
     name: this.toolName,
     description:

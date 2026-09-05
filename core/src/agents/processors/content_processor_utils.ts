@@ -19,10 +19,12 @@ import {
 import {isSegmentPrefix} from '../../utils/branch_trie.js';
 
 import {
+  ADK_FRAMEWORK_FUNCTION_CALL_NAME,
   AF_FUNCTION_CALL_ID_PREFIX,
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
 } from '../functions.js';
 
 /**
@@ -59,11 +61,11 @@ export function getContents(
   currentBranch?: string,
   currentIsolationScope?: string,
 ): Content[] {
-  const filteredEvents: Event[] = [];
+  const includedEvents: Event[] = [];
 
   for (const event of events) {
     if (isCompactedEvent(event)) {
-      filteredEvents.push(convertCompactedEvent(event));
+      includedEvents.push(convertCompactedEvent(event));
       continue;
     }
 
@@ -73,12 +75,16 @@ export function getContents(
       continue;
     }
 
-    filteredEvents.push(
-      isEventFromAnotherAgent(agentName, event)
-        ? convertForeignEvent(event)
-        : event,
-    );
+    includedEvents.push(event);
   }
+
+  const callAuthorById = functionCallAuthorsById(includedEvents);
+  const filteredEvents = includedEvents.map((event) =>
+    isEventFromAnotherAgent(agentName, event) ||
+    repliesToAnotherAgentCall(event, agentName, callAuthorById)
+      ? convertForeignEvent(event)
+      : event,
+  );
 
   let resultEvents = rearrangeEventsForLatestFunctionResponse(filteredEvents);
   resultEvents =
@@ -123,8 +129,25 @@ function shouldIncludeEventInContext(
   return (
     !isAuthEvent(event) &&
     !isToolConfirmationEvent(event) &&
-    !isRequestInputEvent(event)
+    !isRequestInputEvent(event) &&
+    !isAdkFrameworkEvent(event)
   );
+}
+
+/**
+ * Whether the event carries a function call or a function response named
+ * `functionName`.
+ */
+function hasFunctionCallNamed(event: Event, functionName: string): boolean {
+  for (const part of event.content?.parts ?? []) {
+    if (
+      part.functionCall?.name === functionName ||
+      part.functionResponse?.name === functionName
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -137,18 +160,17 @@ function shouldIncludeEventInContext(
  * rearrange step rejects outright.
  */
 function isRequestInputEvent(event: Event): boolean {
-  if (!event.content?.parts) {
-    return false;
-  }
-  for (const part of event.content.parts) {
-    if (
-      part.functionCall?.name === REQUEST_INPUT_FUNCTION_CALL_NAME ||
-      part.functionResponse?.name === REQUEST_INPUT_FUNCTION_CALL_NAME
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return hasFunctionCallNamed(event, REQUEST_INPUT_FUNCTION_CALL_NAME);
+}
+
+/**
+ * Whether the event is one the framework emitted for its own bookkeeping.
+ *
+ * It records what the framework did, not what the conversation said, so the
+ * model never sees it.
+ */
+function isAdkFrameworkEvent(event: Event): boolean {
+  return hasFunctionCallNamed(event, ADK_FRAMEWORK_FUNCTION_CALL_NAME);
 }
 
 /**
@@ -176,14 +198,37 @@ export function getCurrentTurnContents(
   currentIsolationScope?: string,
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
+  // A posted-back tool result is not a turn start, and the window must reach
+  // back far enough to include the call it answers: the conversation can carry
+  // on while a long-running tool is pending, so an ordinary user turn can sit
+  // between the two, and anchoring there would leave the result orphaned.
+  const unmatchedResponseIds = new Set<string>();
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (
-      !shouldIncludeEventInContext(event, currentBranch, currentIsolationScope)
-    ) {
-      continue;
+    for (const functionCall of getFunctionCalls(event)) {
+      if (functionCall.id) {
+        unmatchedResponseIds.delete(functionCall.id);
+      }
     }
-    if (event.author === 'user' || isEventFromAnotherAgent(agentName, event)) {
+    const isSubmittedResult = isSubmittedToolResult(event);
+    if (isSubmittedResult) {
+      for (const functionResponse of getFunctionResponses(event)) {
+        if (functionResponse.id) {
+          unmatchedResponseIds.add(functionResponse.id);
+        }
+      }
+    }
+    if (
+      unmatchedResponseIds.size === 0 &&
+      shouldIncludeEventInContext(
+        event,
+        currentBranch,
+        currentIsolationScope,
+      ) &&
+      (event.author === 'user' || isEventFromAnotherAgent(agentName, event)) &&
+      !isDirectTransfer(event) &&
+      !isSubmittedResult
+    ) {
       return getContents(
         events.slice(turnStart(events, i)),
         agentName,
@@ -199,10 +244,13 @@ export function getCurrentTurnContents(
 /**
  * Widens the turn window back over a function call the turn answers.
  *
- * A tool that paused for confirmation is called in one turn and answered in the
- * next, so the response falls inside the turn while the call that earned it
- * sits before it. Left split, the model is shown a result for a call it cannot
- * see — it re-issues the call, and the confirmation never resolves.
+ * The anchor scan above walks back past a result the caller posted itself. A
+ * result the agent produced is different: it is authored by the agent, so the
+ * scan can settle on a later event from another agent and leave the result
+ * without its call. adk-python drops such a response as an orphan; adk-js
+ * rejects it, so the window is widened to keep the pair together. A tool that
+ * paused for confirmation is the case that reaches this: it is called in one
+ * turn and answered in the next.
  */
 function turnStart(events: Event[], anchor: number): number {
   const answered = new Set<string>();
@@ -226,6 +274,40 @@ function turnStart(events: Event[], anchor: number): number {
     }
   }
   return start;
+}
+
+/**
+ * Whether the event is a tool result the caller posted back.
+ *
+ * A long-running tool is finished by calling the runner again with the result
+ * as the new message, which lands as a user-authored function response. It
+ * answers a call the model made earlier, so it continues the turn rather than
+ * starting one. Anchoring on it would cut the history above the matching
+ * function call, and the response left with nothing to pair with is then
+ * rejected as an orphan.
+ */
+function isSubmittedToolResult(event: Event): boolean {
+  return event.author === 'user' && getFunctionResponses(event).length > 0;
+}
+
+/**
+ * Whether the event hands control to another agent.
+ *
+ * When `includeContents` is `'none'` and a parent transfers to a sub-agent, the
+ * trailing transfer events must not start the sub-agent's turn: the turn would
+ * anchor on the transfer and drop the user input that caused it. The transfer
+ * events still reach the model as relayed context.
+ *
+ * `actions` is declared required, but an event rehydrated from storage can
+ * arrive without it, hence the optional chaining.
+ */
+function isDirectTransfer(event: Event): boolean {
+  if (event.actions?.transferToAgent) {
+    return true;
+  }
+  return (event.content?.parts ?? []).some(
+    (part) => part.functionCall?.name === TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
+  );
 }
 
 /**
@@ -254,18 +336,7 @@ function isOutsideIsolationScope(
  * skipped when constructing the content for the LLM request.
  */
 function isAuthEvent(event: Event): boolean {
-  if (!event.content?.parts) {
-    return false;
-  }
-  for (const part of event.content.parts) {
-    if (
-      part.functionCall?.name === REQUEST_CREDENTIAL_FUNCTION_CALL_NAME ||
-      part.functionResponse?.name === REQUEST_CREDENTIAL_FUNCTION_CALL_NAME
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return hasFunctionCallNamed(event, REQUEST_CREDENTIAL_FUNCTION_CALL_NAME);
 }
 
 /**
@@ -276,18 +347,7 @@ function isAuthEvent(event: Event): boolean {
  * are skipped when constructing the content for the LLM request.
  */
 function isToolConfirmationEvent(event: Event): boolean {
-  if (!event.content?.parts) {
-    return false;
-  }
-  for (const part of event.content.parts) {
-    if (
-      part.functionCall?.name === REQUEST_CONFIRMATION_FUNCTION_CALL_NAME ||
-      part.functionResponse?.name === REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return hasFunctionCallNamed(event, REQUEST_CONFIRMATION_FUNCTION_CALL_NAME);
 }
 
 /**
@@ -295,6 +355,51 @@ function isToolConfirmationEvent(event: Event): boolean {
  */
 function isEventFromAnotherAgent(agentName: string, event: Event): boolean {
   return !!agentName && event.author !== agentName && event.author !== 'user';
+}
+
+/**
+ * Maps every function call id in `events` to the author of the event that
+ * issued the call. An absent author reads the same way as an id the map does
+ * not hold: a call nobody else made.
+ */
+function functionCallAuthorsById(
+  events: Event[],
+): Map<string, string | undefined> {
+  const authorById = new Map<string, string | undefined>();
+  for (const event of events) {
+    for (const part of event.content?.parts ?? []) {
+      if (part.functionCall?.id) {
+        authorById.set(part.functionCall.id, event.author);
+      }
+    }
+  }
+  return authorById;
+}
+
+/**
+ * Whether the event answers a function call another agent made.
+ *
+ * A delegation reply is commonly written under `user` or under the current
+ * agent, so the author alone does not identify it. The call it answers does: an
+ * agent that never made the call must be shown the reply as context, because a
+ * response with no matching call in view is what the rearrange step rejects.
+ *
+ * A call the current agent made, and a call `user` made, both leave the event
+ * alone — as does a response whose id matches no call in the window.
+ */
+function repliesToAnotherAgentCall(
+  event: Event,
+  agentName: string,
+  callAuthorById: Map<string, string | undefined>,
+): boolean {
+  for (const part of event.content?.parts ?? []) {
+    const responseId = part.functionResponse?.id;
+    const callAuthor = responseId ? callAuthorById.get(responseId) : undefined;
+    if (callAuthor && callAuthor !== agentName && callAuthor !== 'user') {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

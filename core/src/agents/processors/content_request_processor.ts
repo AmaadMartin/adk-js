@@ -6,7 +6,10 @@
 
 import {getActiveEvents} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
-import {LlmRequest} from '../../models/llm_request.js';
+import {
+  insertTransientUserContent,
+  LlmRequest,
+} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
@@ -44,6 +47,10 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
 
     const events = getActiveEvents(invocationContext.session.events);
 
+    // Contents an earlier processor put on the request — a dynamic
+    // instruction, recalled memory — would be lost by the reassignment below.
+    const instructionContents = llmRequest.contents;
+
     if (agent.includeContents === 'default') {
       // Include full conversation history
       llmRequest.contents = getContents(
@@ -61,6 +68,8 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         invocationContext.isolationScope,
       );
     }
+
+    insertTransientUserContent(llmRequest, instructionContents);
 
     return;
   }
