@@ -22,8 +22,6 @@ import {join} from 'node:path';
 import {promisify} from 'node:util';
 import {logger} from '../../utils/logger.js';
 
-const execFileAsync = promisify(execFile);
-
 const SECURE_CONNECT_DIR = '.secureConnect';
 const METADATA_FILE = 'context_aware_metadata.json';
 
@@ -136,10 +134,14 @@ async function readCertProviderCommand(): Promise<string[] | undefined> {
  *
  * The failure is reported without the command's output or the thrown error,
  * because both can carry the private key.
+ *
+ * `execFile` is promisified here rather than at module scope: this module is
+ * reachable from the package entry point, and a test that partially mocks
+ * `node:child_process` would otherwise fail to import the whole package.
  */
 async function runCertProvider(command: string[]): Promise<string | undefined> {
   try {
-    const {stdout} = await execFileAsync(command[0], command.slice(1), {
+    const {stdout} = await promisify(execFile)(command[0], command.slice(1), {
       timeout: CERT_PROVIDER_TIMEOUT_MS,
     });
     return stdout;
