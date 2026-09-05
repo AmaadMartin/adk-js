@@ -211,7 +211,12 @@ describe('JoinNode — ported from google/adk-python test_join_node.py', () => {
 
     const {events} = await driveWorkflow(wf, 'start');
 
-    expect(events.some((e) => e.author === 'NodeA' && e.branch === 'NodeA@1'));
+    expect(
+      events.some((e) => e.author === 'NodeA' && e.branch === 'NodeA@1'),
+    ).toBe(true);
+    expect(
+      events.some((e) => e.author === 'NodeB' && e.branch === 'NodeB@1'),
+    ).toBe(true);
     const joinEvents = joinOutputEvents(events, 'NodeJoin');
     expect(joinEvents).toHaveLength(1);
     // 'NodeA@1' and 'NodeB@1' share no prefix, so the join emits on the root
