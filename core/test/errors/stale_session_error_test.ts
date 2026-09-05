@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {StaleSessionError} from '@google/adk';
+import {isStaleSessionError, StaleSessionError} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('StaleSessionError', () => {
@@ -26,5 +26,14 @@ describe('StaleSessionError', () => {
 
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe('StaleSessionError');
+  });
+
+  it('is recognised by its type guard', () => {
+    expect(isStaleSessionError(new StaleSessionError())).toBe(true);
+  });
+
+  it('does not recognise another error as a stale session', () => {
+    expect(isStaleSessionError(new Error('other'))).toBe(false);
+    expect(isStaleSessionError('not an error')).toBe(false);
   });
 });
