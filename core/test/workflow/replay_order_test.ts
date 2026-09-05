@@ -20,6 +20,7 @@ import {describe, expect, it} from 'vitest';
 import {createEvent, Event} from '../../src/events/event.js';
 import {
   eventsForCurrentRun,
+  reconstructNodeRuns,
   replaySequence,
 } from '../../src/workflow/utils/rehydration_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';
@@ -41,7 +42,7 @@ describe('replaySequence', () => {
       nodeEvent('wf.A', {output: 'a'}),
     ];
 
-    expect(replaySequence(events, 'wf')).toEqual(['B@1', 'A@1']);
+    expect(replaySequence(events, 'wf')).toEqual(['B', 'A']);
   });
 
   it('skips a node that produced no terminal event', () => {
@@ -50,7 +51,7 @@ describe('replaySequence', () => {
       nodeEvent('wf.A', {output: 'a'}),
     ];
 
-    expect(replaySequence(events, 'wf')).toEqual(['A@1']);
+    expect(replaySequence(events, 'wf')).toEqual(['A']);
   });
 
   it('counts a route and a raised interrupt as completions', () => {
@@ -59,17 +60,49 @@ describe('replaySequence', () => {
       nodeEvent('wf.gate', {longRunningToolIds: ['i1']}),
     ];
 
-    expect(replaySequence(events, 'wf')).toEqual(['router@1', 'gate@1']);
+    expect(replaySequence(events, 'wf')).toEqual(['router', 'gate']);
   });
 
-  it('numbers a repeated node by its run', () => {
+  it('keeps the first position of a node that completed twice', () => {
     const events = [
       nodeEvent('wf.A', {output: 'a1'}),
       nodeEvent('wf.B', {output: 'b'}),
       nodeEvent('wf.A', {output: 'a2'}),
     ];
 
-    expect(replaySequence(events, 'wf')).toEqual(['A@1', 'B@1', 'A@2']);
+    // A loop-back node completes again after the nodes it feeds. Keeping the
+    // later position would order it behind them, and its first replayed
+    // activation would wait for a node that cannot run until it finishes.
+    expect(replaySequence(events, 'wf')).toEqual(['A', 'B']);
+  });
+
+  it('skips a workflow echo of an already recovered output', () => {
+    const events = [
+      nodeEvent('wf.A', {output: 'a'}),
+      createEvent({
+        author: 'wf',
+        invocationId: 'inv-1',
+        output: 'a',
+        nodeInfo: {path: 'wf.A', replayed: true},
+      }),
+      nodeEvent('wf.B', {output: 'b'}),
+    ];
+
+    expect(replaySequence(events, 'wf')).toEqual(['A', 'B']);
+  });
+
+  it('does not let a workflow echo open another run of the node', () => {
+    const events = [
+      nodeEvent('wf.A', {output: 'a'}),
+      createEvent({
+        author: 'wf',
+        invocationId: 'inv-1',
+        output: 'a',
+        nodeInfo: {path: 'wf.A', replayed: true},
+      }),
+    ];
+
+    expect(reconstructNodeRuns(events, 'wf').get('A')).toHaveLength(1);
   });
 
   it('ignores events outside this workflow and below its own children', () => {
@@ -79,13 +112,13 @@ describe('replaySequence', () => {
       nodeEvent('wf.A', {output: 'a'}),
     ];
 
-    expect(replaySequence(events, 'wf')).toEqual(['A@1']);
+    expect(replaySequence(events, 'wf')).toEqual(['A']);
   });
 
   it('keys by the path leaf when no parent path is given', () => {
     const events = [nodeEvent('wf.A', {output: 'a'})];
 
-    expect(replaySequence(events)).toEqual(['A@1']);
+    expect(replaySequence(events)).toEqual(['A']);
   });
 
   it('leaves out a completed earlier run, so its keys cannot block the resume', () => {
@@ -101,7 +134,7 @@ describe('replaySequence', () => {
       'inv-1',
     );
 
-    expect(replaySequence(scoped, 'wf')).toEqual(['A@1']);
+    expect(replaySequence(scoped, 'wf')).toEqual(['A']);
   });
 });
 
@@ -166,39 +199,5 @@ describe('Workflow replay ordering', () => {
     await runWithHistory([], seen);
 
     expect(seen).toEqual(['a', 'b']);
-  });
-});
-
-describe('Workflow run ids', () => {
-  it('gives a replayed activation its own run number', async () => {
-    const scopes: Array<string | undefined> = [];
-    const worker = new FnNode(
-      'worker',
-      (ctx) => {
-        scopes.push(ctx.isolationScope);
-        return 'done';
-      },
-      {isolationScope: true},
-    );
-    const router = new FnNode('router', () =>
-      createEvent({route: scopes.length === 0 ? 'again' : 'out'}),
-    );
-    const sink = new FnNode('sink', (_ctx, input) => input);
-    const wf = new Workflow({
-      name: 'wf',
-      edges: [
-        ['START', worker, router],
-        [router, {again: worker, out: sink}],
-      ],
-    });
-
-    const ic = createIc();
-    ic.session.events.push(nodeEvent('wf.worker', {output: 'replayed'}));
-    await driveWorkflow(wf, 'go', {ic});
-
-    // The first activation replayed, so it consumed run 1 without running.
-    // The real second activation is therefore run 2, and its isolation scope
-    // says so.
-    expect(scopes).toEqual(['wf.worker@2']);
   });
 });

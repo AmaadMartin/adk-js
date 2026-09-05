@@ -46,10 +46,7 @@ import {
   replaySequence,
   resolvedInterruptResponses,
 } from './utils/rehydration_utils.js';
-import {
-  ReplaySequenceBarrier,
-  sequenceKey,
-} from './utils/replay_sequence_barrier.js';
+import {ReplaySequenceBarrier} from './utils/replay_sequence_barrier.js';
 
 /**
  * A unique symbol branding {@link Workflow} instances.
@@ -139,8 +136,6 @@ class LoopState {
 
 interface CompletedTask {
   name: string;
-  /** This run's replay sequence key, `<nodeName>@<runId>`. */
-  key: string;
   /**
    * The finished node's result: a live {@link NodeContext} for a node that ran,
    * or a bare {@link NodeResult} for one fast-forwarded from cached output on
@@ -374,11 +369,20 @@ export class Workflow extends BaseNode {
         break;
       }
 
-      const result = await Promise.race(loop.pending.values());
+      let result: CompletedTask;
+      try {
+        result = await Promise.race(loop.pending.values());
+      } catch (error) {
+        // A replay divergence rejects the race itself rather than resolving
+        // with an error result, so it never reaches the branch below.
+        loop.errorShutDown = true;
+        await this.cleanupPending(loop, abortController);
+        throw error;
+      }
       loop.pending.delete(result.name);
       // Release whichever replayed completion the recording puts next. A fresh
-      // run advances nothing, because its keys are not in the sequence.
-      loop.sequenceBarrier.checkAndAdvance(result.key);
+      // node advances nothing, because it is not in the sequence.
+      loop.sequenceBarrier.checkAndAdvance(result.name);
 
       if (result.error) {
         const nodeState = loop.nodes.get(result.name);
@@ -499,19 +503,6 @@ export class Workflow extends BaseNode {
     const repeatActivation = loop.activated.has(nodeName);
     loop.activated.add(nodeName);
 
-    // Reuse the run id on resume; number a fresh run sequentially. Resolved
-    // before the fast-forward branches below, so every activation consumes a
-    // run number whether it executes or replays. That keeps the Nth activation
-    // aligned with the Nth recorded run, which is what both the replay
-    // sequence barrier and a task agent's isolation scope key on.
-    let runId = nodeState.runId;
-    if (!runId) {
-      nodeState.runCounter += 1;
-      runId = String(nodeState.runCounter);
-      nodeState.runId = runId;
-    }
-    const key = sequenceKey(nodeName, runId);
-
     // Resume: fast-forward a node that already completed in a prior run
     // (cached output, all interrupts resolved). `rerunOnResume` governs an
     // interrupt the node is still waiting on, not a run that already produced
@@ -522,7 +513,6 @@ export class Workflow extends BaseNode {
       queueReplayedCompletion(
         loop,
         nodeName,
-        key,
         makeFastForwardResult(ctx, prior),
       );
       return false;
@@ -548,9 +538,16 @@ export class Workflow extends BaseNode {
           branch: prior.branch ?? ctx.branch,
           interruptIds: [],
         };
-        queueReplayedCompletion(loop, nodeName, key, resumeResult);
+        queueReplayedCompletion(loop, nodeName, resumeResult);
         return false;
       }
+    }
+
+    let runId = nodeState.runId;
+    if (!runId) {
+      nodeState.runCounter += 1;
+      runId = String(nodeState.runCounter);
+      nodeState.runId = runId;
     }
 
     // On resume, a waiting node (it interrupted last turn) re-runs with its
@@ -579,8 +576,8 @@ export class Workflow extends BaseNode {
         useAsOutput: this.graph!.terminalNodeNames.has(nodeName),
       },
     }).then(
-      (childCtx) => ({name: nodeName, key, childCtx}),
-      (error) => ({name: nodeName, key, error}),
+      (childCtx) => ({name: nodeName, childCtx}),
+      (error) => ({name: nodeName, error}),
     );
     loop.pending.set(nodeName, task);
     return true;
@@ -827,6 +824,9 @@ export class Workflow extends BaseNode {
     // their cleanup runs and events flush; failures are swallowed because the
     // workflow is already shutting down on error.
     abortController.abort();
+    // Replayed completions park on the barrier rather than on the signal, so
+    // release them too or awaiting them below never returns.
+    loop.sequenceBarrier.dispose();
     const outstanding = [...loop.pending.values()];
     loop.pending.clear();
     await Promise.allSettled(outstanding);
@@ -927,15 +927,14 @@ function isTaskModeNode(node: BaseNode): boolean {
 function queueReplayedCompletion(
   loop: LoopState,
   nodeName: string,
-  key: string,
   childCtx: NodeResult,
 ): void {
   loop.replayedNodes.add(nodeName);
   loop.pending.set(
     nodeName,
     loop.sequenceBarrier
-      .wait(key)
-      .then(() => ({name: nodeName, key, childCtx})),
+      .wait(nodeName)
+      .then(() => ({name: nodeName, childCtx})),
   );
 }
 
