@@ -150,6 +150,7 @@ export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
+export {NotImplementedError} from './errors/not_implemented_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
@@ -291,6 +292,15 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {
+  BaseMockStrategy,
+  TracingMockStrategy,
+} from './tools/environment_simulation/strategies/base.js';
+export type {MockRequest} from './tools/environment_simulation/strategies/base.js';
+export type {
+  StatefulParameter,
+  ToolConnectionMap,
+} from './tools/environment_simulation/tool_connection_map.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
