@@ -6,7 +6,7 @@
 
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {SchemaLike} from '../../utils/schema.js';
-import {BaseNode, isBaseNode, START} from '../base_node.js';
+import {BaseNode, isBaseNode, START, validateNodeName} from '../base_node.js';
 import {NodeLike} from '../graph.js';
 import {NODE_BUILDERS, PARALLEL_WORKER_FACTORY} from '../node_builders.js';
 import {prepareRetryConfig, RetryConfig} from '../retry_config.js';
@@ -234,12 +234,10 @@ function cloneWithOverrides(
     return node;
   }
 
-  if (typeof overrides['name'] === 'string') {
-    const name = overrides['name'].trim();
-    if (!name) {
-      throw new Error('Node name must be a non-empty string.');
-    }
-    overrides['name'] = name;
+  if (overrides['name'] !== undefined) {
+    // The clone never runs the constructor, so the name check has to happen
+    // here too.
+    overrides['name'] = validateNodeName(overrides['name']);
   }
 
   const clone = Object.create(
