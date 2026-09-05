@@ -18,6 +18,7 @@ import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   buildTracingWrapper,
+  CALLABLE_SHAPE_SAMPLES,
   Caps,
   DEFAULT_MAX_RECORDED_YIELDS,
   DEFAULT_MAX_REPR_LEN,
@@ -104,14 +105,8 @@ function collectIntrinsicObjects(): ReadonlySet<object> {
     addPrototypeChain(found, (value as {prototype?: unknown}).prototype);
   }
   // Generator and async generator prototypes have no global binding, so they
-  // are reached through sample functions instead.
-  const samples = [
-    function* (): Generator<never> {},
-    async function* (): AsyncGenerator<never> {},
-    async function (): Promise<void> {},
-    function (): void {},
-  ];
-  for (const sample of samples) {
+  // are reached through the shape samples instead.
+  for (const sample of CALLABLE_SHAPE_SAMPLES) {
     addPrototypeChain(found, sample);
     addPrototypeChain(found, sample.prototype);
   }

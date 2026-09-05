@@ -134,6 +134,13 @@ describe('auto tracing helpers — introspection', () => {
       'Holder.method',
     );
   });
+
+  it('names an unnamed function "anonymous"', () => {
+    const unnamed = Object.defineProperty(() => 1, 'name', {value: ''});
+
+    expect(displayNameFor(unnamed)).toBe('anonymous');
+    expect(displayNameFor(unnamed, 'Owner')).toBe('Owner.anonymous');
+  });
 });
 
 describe('auto tracing helpers — argument capture', () => {
@@ -167,6 +174,28 @@ describe('auto tracing helpers — span attributes', () => {
       'adk.fn.arg.x': '1',
       'adk.fn.return': '"ok"',
     });
+  });
+
+  it('drops a credential-named pair a caller did not filter', () => {
+    // nameValuePairs already drops these, but recordIoOnSpan is public and
+    // may be handed pairs that never went through it.
+    const span = tracer.startSpan('record_io_unfiltered');
+
+    recordIoOnSpan(
+      span,
+      [
+        ['apiKey', '"leaked"'],
+        ['x', '1'],
+      ],
+      'ok',
+      undefined,
+      CAPS,
+    );
+    span.end();
+
+    const attributes = attributesOf('record_io_unfiltered');
+    expect(attributes).not.toHaveProperty('adk.fn.arg.apiKey');
+    expect(attributes['adk.fn.arg.x']).toBe('1');
   });
 
   it('test_record_io_on_span_records_exception_instead_of_return', () => {

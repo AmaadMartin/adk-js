@@ -112,6 +112,18 @@ class FixtureAgent extends BaseAgent {
   }
 }
 
+describe('AutoTracingPlugin — construction', () => {
+  it('defaults its name and its tracer', () => {
+    const plugin = new AutoTracingPlugin();
+
+    expect(plugin.name).toBe('AutoTracingPlugin');
+  });
+
+  it('takes a caller-supplied name', () => {
+    expect(new AutoTracingPlugin({name: 'tracing'}).name).toBe('tracing');
+  });
+});
+
 describe('AutoTracingPlugin — runtime safety', () => {
   it('never wraps an intrinsic prototype', async () => {
     const originals = {
@@ -182,6 +194,51 @@ describe('AutoTracingPlugin — runtime safety', () => {
     await instrument([target]);
 
     expect(target.fn).toBe(original);
+  });
+
+  it('skips an intrinsic reached by value and visits a shared object once', async () => {
+    const shared = {
+      fn(): number {
+        return 1;
+      },
+    };
+    const mathMax = Math.max;
+
+    await instrument([{math: Math, first: shared, second: shared}]);
+
+    expect(Math.max).toBe(mathMax);
+    expect(isTracingWrapper(shared.fn)).toBe(true);
+  });
+
+  it('leaves an underscored own function alone', async () => {
+    const bag = {
+      _hidden(): number {
+        return 1;
+      },
+      visible(): number {
+        return 2;
+      },
+    };
+
+    await instrument([bag]);
+
+    expect(isTracingWrapper(bag._hidden)).toBe(false);
+    expect(isTracingWrapper(bag.visible)).toBe(true);
+  });
+
+  it('names a span by the function alone when the owner has no class', async () => {
+    // Assigning an arrow to a property leaves it unnamed, so the function is
+    // named explicitly; the owner is what this test drops.
+    const prototype: {detached?: () => number} = Object.create(null);
+    prototype.detached = function detached(): number {
+      return 5;
+    };
+    const instance: {detached(): number} = Object.create(prototype);
+
+    await instrument([instance]);
+    instance.detached();
+
+    expect(attributesOf('detached')['adk.fn.return']).toBe('5');
   });
 
   it('skips a hostile object and keeps instrumenting the rest', async () => {
@@ -272,6 +329,21 @@ describe('AutoTracingPlugin — walk bounds and reach', () => {
 
     expect(isTracingWrapper(atLimit.fn)).toBe(true);
     expect(isTracingWrapper(deepest.fn)).toBe(false);
+  });
+
+  it('stops a prototype chain that never repeats', async () => {
+    // A proxy can hand back a fresh prototype every time, so the visited set
+    // never matches it. Only the node budget ends this walk.
+    const link = (): object => new Proxy({}, {getPrototypeOf: link});
+    const survivor = {
+      fn(): number {
+        return 1;
+      },
+    };
+
+    await instrument([survivor, link()]);
+
+    expect(isTracingWrapper(survivor.fn)).toBe(true);
   });
 
   it('stops when the node budget runs out on a very wide graph', async () => {
@@ -440,14 +512,17 @@ describe('AutoTracingPlugin — wrapper shapes', () => {
 
 describe('AutoTracingPlugin — parameter names', () => {
   it('reads names from every function form', () => {
-    // prettier-ignore
-    const bareArrow: TracedFunction = x => x;
+    // esbuild re-prints a TypeScript arrow with parentheses, so an
+    // unparenthesised one has to be built at runtime. Minified user code,
+    // which this plugin also wraps, is full of them.
+    const bareArrow: unknown = new Function('return x => x').call(null);
     const cases: ReadonlyArray<[unknown, readonly string[]]> = [
       [(a: unknown, b: unknown) => [a, b], ['a', 'b']],
       [(a: unknown = 1) => a, ['a']],
       [(a: unknown, ...rest: unknown[]) => [a, rest], ['a']],
       [bareArrow, ['x']],
       [Math.max, []],
+      [{}, []],
     ];
 
     for (const [fn, expected] of cases) {
@@ -596,6 +671,51 @@ describe('AutoTracingPlugin — rendering edge cases', () => {
     for (const [value, expected] of cases) {
       expect(safeRepr(value, CAPS)).toBe(expected);
     }
+  });
+
+  it('masks a secret-named member whatever it holds', () => {
+    const rendered = safeRepr(
+      {
+        apiKey: null,
+        authConfig: undefined,
+        privateKey: Object.create(null),
+        keep: 1,
+      },
+      CAPS,
+    );
+
+    expect(rendered).toBe(
+      '{apiKey: <null>, authConfig: <undefined>, privateKey: <object>, keep: 1}',
+    );
+  });
+
+  it('skips an accessor property rather than firing it', () => {
+    let fired = 0;
+    const value = {
+      get lazy(): number {
+        fired++;
+        return 1;
+      },
+      plain: 2,
+    };
+
+    expect(safeRepr(value, CAPS)).toBe('{plain: 2}');
+    expect(fired).toBe(0);
+  });
+
+  it('stops walking a prototype chain that never ends', () => {
+    // A proxy can report itself as its own prototype. Without the chain
+    // bound, the credential-type check would spin here forever.
+    const cyclic: object = new Proxy(
+      {},
+      {
+        getPrototypeOf(): object {
+          return cyclic;
+        },
+      },
+    );
+
+    expect(safeRepr(cyclic, CAPS)).toBe('<Object>');
   });
 
   it('renders an anonymous function without a name', () => {

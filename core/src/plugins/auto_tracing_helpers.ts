@@ -241,10 +241,7 @@ export function typeNameOf(value: unknown): string {
 }
 
 /** True when `value` or one of its prototypes is a credential-bearing type. */
-function isCredentialType(value: unknown): boolean {
-  if (value === null || typeof value !== 'object') {
-    return false;
-  }
+function isCredentialType(value: object): boolean {
   let prototype = Object.getPrototypeOf(value) as object | null;
   for (let depth = 0; prototype !== null; depth++) {
     if (depth >= MAX_PROTOTYPE_CHAIN_DEPTH) {
@@ -539,18 +536,18 @@ function splitParameters(list: string): string[] {
   return parts;
 }
 
-/** Returns the text between a function's outermost parentheses. */
-function parameterListOf(source: string): string | undefined {
+/**
+ * Returns the text between a function's outermost parentheses, or `''` when
+ * the source declares no parameter list.
+ */
+function parameterListOf(source: string): string {
   const bareArrow = BARE_ARROW_PARAM_RE.exec(source);
   if (bareArrow) {
     return bareArrow[1];
   }
   const open = source.indexOf('(');
-  if (open < 0) {
-    return undefined;
-  }
   let depth = 0;
-  for (let i = open; i < source.length; i++) {
+  for (let i = open; i >= 0 && i < source.length; i++) {
     const character = source[i];
     if (character === '(' || character === '[' || character === '{') {
       depth++;
@@ -561,7 +558,7 @@ function parameterListOf(source: string): string | undefined {
       }
     }
   }
-  return undefined;
+  return '';
 }
 
 /**
@@ -581,9 +578,6 @@ export function positionalParamNames(fn: unknown): readonly string[] {
     return [];
   }
   const list = parameterListOf(Function.prototype.toString.call(fn));
-  if (list === undefined) {
-    return [];
-  }
   const names: string[] = [];
   for (const part of splitParameters(list)) {
     const declaration = part.trim();
@@ -681,20 +675,36 @@ export function tracerWillRecord(tracer: Tracer): boolean {
   return span.isRecording() || isSpanContextValid(span.spanContext());
 }
 
+/**
+ * One function of each callable shape.
+ *
+ * They are never called. The module reads the prototypes they expose, which
+ * are this realm's callable intrinsics, and comparing against those is safe
+ * across two copies of the package in a way that a constructor-name check is
+ * not.
+ */
+export const CALLABLE_SHAPE_SAMPLES: readonly TracedFunction[] = [
+  function* (): Generator<never> {},
+  async function* (): AsyncGenerator<never> {},
+  async function (): Promise<void> {},
+  function (): void {},
+];
+
+const [GENERATOR_SAMPLE, ASYNC_GENERATOR_SAMPLE, ASYNC_SAMPLE] =
+  CALLABLE_SHAPE_SAMPLES;
+
 /** Prototype shared by every generator function in this realm. */
 const GENERATOR_FUNCTION_PROTOTYPE = Object.getPrototypeOf(
-  function* (): Generator<never> {},
+  GENERATOR_SAMPLE,
 ) as object;
 
 /** Prototype shared by every async generator function in this realm. */
 const ASYNC_GENERATOR_FUNCTION_PROTOTYPE = Object.getPrototypeOf(
-  async function* (): AsyncGenerator<never> {},
+  ASYNC_GENERATOR_SAMPLE,
 ) as object;
 
 /** Prototype shared by every async function in this realm. */
-const ASYNC_FUNCTION_PROTOTYPE = Object.getPrototypeOf(
-  async function (): Promise<void> {},
-) as object;
+const ASYNC_FUNCTION_PROTOTYPE = Object.getPrototypeOf(ASYNC_SAMPLE) as object;
 
 /** What a wrapper needs to turn one call's arguments into span attributes. */
 interface CallRecorder {
