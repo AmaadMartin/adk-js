@@ -8,8 +8,11 @@
 
 import AdmZip from 'adm-zip';
 import {AuthClient, OAuth2Client} from 'google-auth-library';
+import * as fs from 'node:fs/promises';
 import type {IncomingHttpHeaders} from 'node:http';
 import {createServer} from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {expect, vi} from 'vitest';
 
 export const TEST_PROJECT = 'test-project';
@@ -58,6 +61,29 @@ export function createSkillZip(
 /** Serializes `body` as the JSON bytes of one response. */
 export function jsonBody(body: unknown): Buffer {
   return Buffer.from(JSON.stringify(body), 'utf-8');
+}
+
+/**
+ * Makes an empty home directory, so this machine has no SecureConnect
+ * certificate to present.
+ *
+ * The endpoint choice reads `~/.secureConnect/context_aware_metadata.json`. A
+ * test that read the real home directory would pass on a workstation that has
+ * that file and fail on a runner that does not, so each test owns its own.
+ */
+export async function createTempHome(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'adk-registry-home-'));
+}
+
+/** Gives `homeDir` the SecureConnect metadata that names a certificate. */
+export async function writeCertSource(homeDir: string): Promise<void> {
+  const dir = path.join(homeDir, '.secureConnect');
+  await fs.mkdir(dir, {recursive: true});
+  await fs.writeFile(
+    path.join(dir, 'context_aware_metadata.json'),
+    JSON.stringify({cert_provider_command: ['/opt/cert_provider']}),
+    'utf-8',
+  );
 }
 
 /**

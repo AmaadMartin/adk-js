@@ -19,6 +19,8 @@
  */
 
 import {GCPSkillRegistry} from '@google/adk';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {getTrackingHeaders} from '../../src/utils/client_labels.js';
 import {logger} from '../../src/utils/logger.js';
@@ -31,18 +33,32 @@ import {
   TEST_LOCATION,
   TEST_PROJECT,
   createSkillZip,
+  createTempHome,
   credentialsFor,
   jsonBody,
   stubTransport,
+  writeCertSource,
 } from './gcp_skill_registry_test_utils.js';
 
-const {googleAuthMock, getClientMock, clientCertsToPresentMock} = vi.hoisted(
-  () => ({
+const {googleAuthMock, getClientMock, clientCertsToPresentMock, homedirMock} =
+  vi.hoisted(() => ({
     googleAuthMock: vi.fn(),
     getClientMock: vi.fn(),
     clientCertsToPresentMock: vi.fn(),
-  }),
-);
+    homedirMock: vi.fn(),
+  }));
+
+// The endpoint choice asks whether this machine has a SecureConnect
+// certificate, so the tests own the home directory it looks in. Reading the
+// real one would pass on a workstation that has one and fail on a CI runner.
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof os>();
+  return {
+    ...actual,
+    default: {...actual, homedir: homedirMock},
+    homedir: homedirMock,
+  };
+});
 
 vi.mock('google-auth-library', async (importOriginal) => ({
   ...(await importOriginal<typeof import('google-auth-library')>()),
@@ -87,7 +103,12 @@ function expectedHeaders(quotaProject: string): Record<string, string> {
 }
 
 describe('GCPSkillRegistry parity', () => {
-  beforeEach(() => {
+  let homeDir: string;
+
+  beforeEach(async () => {
+    homeDir = await createTempHome();
+    homedirMock.mockReturnValue(homeDir);
+
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', TEST_PROJECT);
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', TEST_LOCATION);
     vi.stubEnv('AGENT_REGISTRY_ENDPOINT', undefined);
@@ -102,9 +123,10 @@ describe('GCPSkillRegistry parity', () => {
     clientCertsToPresentMock.mockResolvedValue(undefined);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    await fs.rm(homeDir, {recursive: true, force: true});
   });
 
   it('test_get_skill_success', async () => {
@@ -303,7 +325,8 @@ describe('GCPSkillRegistry parity', () => {
     expect(clientCertsToPresentMock).not.toHaveBeenCalled();
   });
 
-  it('test_constructor_configures_mtls_base_url', () => {
+  it('test_constructor_configures_mtls_base_url', async () => {
+    await writeCertSource(homeDir);
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
 
     expect(new GCPSkillRegistry().baseUrl).toBe(
@@ -314,6 +337,7 @@ describe('GCPSkillRegistry parity', () => {
   it('test_get_skill_with_mtls', async () => {
     const certs: MtlsClientCerts = {cert: 'fake-cert', key: 'fake-key'};
     const mtlsBase = 'https://agentregistry.mtls.googleapis.com/v1alpha';
+    await writeCertSource(homeDir);
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
     clientCertsToPresentMock.mockResolvedValue(certs);
     const transport = serveSkill({

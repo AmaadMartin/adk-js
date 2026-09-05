@@ -12,6 +12,7 @@ import {logger} from '../../src/utils/logger.js';
 import {
   clientCertsToPresent,
   getApiEndpoint,
+  hasDefaultClientCertSource,
   loadDefaultClientCerts,
   useClientCertEffective,
 } from '../../src/utils/mtls_utils.js';
@@ -40,9 +41,28 @@ function endpoint(): string {
 }
 
 describe('getApiEndpoint', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
+  let homeDir: string;
+
+  beforeEach(async () => {
+    homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-mtls-home-'));
+    homedirMock.mockReturnValue(homeDir);
   });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(homeDir, {recursive: true, force: true});
+  });
+
+  /** Gives the machine a certificate source the loader can read. */
+  async function writeDefaultMetadata(): Promise<void> {
+    const dir = path.join(homeDir, '.secureConnect');
+    await fs.mkdir(dir, {recursive: true});
+    await fs.writeFile(
+      path.join(dir, 'context_aware_metadata.json'),
+      JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
+      'utf-8',
+    );
+  }
 
   it('returns the default host when neither variable is set', () => {
     vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
@@ -71,7 +91,8 @@ describe('getApiEndpoint', () => {
     expect(endpoint()).toBe(DEFAULT_ENDPOINT);
   });
 
-  it('returns the mTLS host for auto with a client certificate', () => {
+  it('returns the mTLS host for auto with a client certificate', async () => {
+    await writeDefaultMetadata();
     vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'TRUE');
 
@@ -85,7 +106,22 @@ describe('getApiEndpoint', () => {
     expect(endpoint()).toBe(DEFAULT_ENDPOINT);
   });
 
-  it('warns and treats an unrecognised setting as auto', () => {
+  it('returns the default host for auto when the machine has no certificate to present', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    expect(endpoint()).toBe(DEFAULT_ENDPOINT);
+  });
+
+  it('returns the mTLS host for always even with no certificate to present', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'false');
+
+    expect(endpoint()).toBe(MTLS_ENDPOINT);
+  });
+
+  it('warns and treats an unrecognised setting as auto', async () => {
+    await writeDefaultMetadata();
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'sometimes');
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
@@ -95,6 +131,35 @@ describe('getApiEndpoint', () => {
       expect.stringContaining('GOOGLE_API_USE_MTLS_ENDPOINT'),
     );
     warn.mockRestore();
+  });
+});
+
+describe('hasDefaultClientCertSource', () => {
+  let homeDir: string;
+
+  beforeEach(async () => {
+    homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-mtls-home-'));
+    homedirMock.mockReturnValue(homeDir);
+  });
+
+  afterEach(async () => {
+    await fs.rm(homeDir, {recursive: true, force: true});
+  });
+
+  it('is false when the machine has no context-aware metadata', () => {
+    expect(hasDefaultClientCertSource()).toBe(false);
+  });
+
+  it('is true once the context-aware metadata exists', async () => {
+    const dir = path.join(homeDir, '.secureConnect');
+    await fs.mkdir(dir, {recursive: true});
+    await fs.writeFile(
+      path.join(dir, 'context_aware_metadata.json'),
+      JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
+      'utf-8',
+    );
+
+    expect(hasDefaultClientCertSource()).toBe(true);
   });
 });
 

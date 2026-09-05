@@ -95,15 +95,17 @@ Two variables select the mutual-TLS host
 
 - `GOOGLE_API_USE_MTLS_ENDPOINT` is `auto`, `always` or `never`. It defaults to
   `auto`, and an unrecognised value warns and reads as `auto`.
-- `GOOGLE_API_USE_CLIENT_CERTIFICATE` is `true` or `false`. Under `auto`, it
-  decides.
+- `GOOGLE_API_USE_CLIENT_CERTIFICATE` is `true` or `false`. Under `auto` the
+  registry picks the mutual-TLS host only when this is `true` and the machine
+  has a certificate to present. Asking for a certificate you do not have would
+  otherwise send every request to a host that rejects a connection presenting
+  nothing. `always` skips that availability check.
 
 With `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` the registry also loads the
 SecureConnect context-aware certificate from
 `~/.secureConnect/context_aware_metadata.json` and presents it on the
 connection. The certificate, the key and the passphrase stay in memory. A
-machine with no metadata file, and a certificate that fails to load, both warn
-and connect without one.
+certificate that fails to load warns, and the registry connects without one.
 
 `AGENT_REGISTRY_ENDPOINT` is read first, so it overrides the mutual-TLS host
 too.

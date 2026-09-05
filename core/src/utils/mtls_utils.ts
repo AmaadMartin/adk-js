@@ -5,6 +5,7 @@
  */
 
 import * as childProcess from 'node:child_process';
+import {existsSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -18,10 +19,12 @@ import {logger} from './logger.js';
  *
  * `GOOGLE_API_USE_MTLS_ENDPOINT` selects the host: `always` picks the
  * mutual-TLS one, `never` picks the default one, and `auto` picks the
- * mutual-TLS one only when `GOOGLE_API_USE_CLIENT_CERTIFICATE` is `true`. An
- * unset or unrecognised setting means `auto`. Both variables are read case
- * insensitively, and on every call, so a process that changes one between
- * calls is honoured.
+ * mutual-TLS one only when `GOOGLE_API_USE_CLIENT_CERTIFICATE` is `true` and
+ * this machine has a certificate to present. Asking for a client certificate
+ * is not enough on its own: the transport would present nothing, and the
+ * mutual-TLS host rejects such a connection. An unset or unrecognised setting
+ * means `auto`. Both variables are read case insensitively, and on every call,
+ * so a process that changes one between calls is honoured.
  *
  * @param defaultEndpoint The host to call without mutual TLS.
  * @param mtlsEndpoint The mutual-TLS host.
@@ -34,7 +37,8 @@ export function getApiEndpoint(
   const useMtls =
     setting === MtlsEndpointSetting.ALWAYS ||
     (setting !== MtlsEndpointSetting.NEVER &&
-      (process.env[USE_CLIENT_CERTIFICATE_ENV] ?? '').toLowerCase() === 'true');
+      useClientCertEffective() &&
+      hasDefaultClientCertSource());
   return useMtls ? mtlsEndpoint : defaultEndpoint;
 }
 
@@ -122,6 +126,18 @@ export function useClientCertEffective(): boolean {
     );
   }
   return value === 'true';
+}
+
+/**
+ * Reports whether this machine has a client certificate to present.
+ *
+ * The answer is the existence of the context-aware metadata file that
+ * {@link loadDefaultClientCerts} reads, so the two agree: a mutual-TLS host
+ * chosen on the strength of this answer is one the loader can serve a
+ * certificate for.
+ */
+export function hasDefaultClientCertSource(): boolean {
+  return existsSync(defaultMetadataPath());
 }
 
 /** Returns the default SecureConnect context-aware metadata path. */
