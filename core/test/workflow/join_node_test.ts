@@ -12,6 +12,7 @@ import {
   Event,
   isNodeSchemaValidationError,
   JoinNode,
+  NodeSchemaValidationError,
   Workflow,
 } from '@google/adk';
 import {Content} from '@google/genai';
@@ -46,6 +47,20 @@ function buildJoinNodeWorkflow(): {wf: Workflow; received: unknown[]} {
 
 function joinOutputEvents(events: Event[], joinName: string): Event[] {
   return events.filter((e) => e.author === joinName && e.output !== undefined);
+}
+
+/** Awaits a run expected to reject, and returns the schema error it raised. */
+async function schemaErrorFrom(
+  run: Promise<unknown>,
+): Promise<NodeSchemaValidationError> {
+  const error = await run.then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  if (!isNodeSchemaValidationError(error)) {
+    expect.fail(`expected a NodeSchemaValidationError, got ${String(error)}`);
+  }
+  return error;
 }
 
 describe('JoinNode — ported from google/adk-python test_join_node.py', () => {
@@ -167,14 +182,8 @@ describe('JoinNode — ported from google/adk-python test_join_node.py', () => {
       edges: [['START', [nodeA, nodeB], join, capture.node]],
     });
 
-    const error = await driveWorkflow(wf, 'start').then(
-      () => undefined,
-      (e: unknown) => e,
-    );
+    const error = await schemaErrorFrom(driveWorkflow(wf, 'start'));
 
-    if (!isNodeSchemaValidationError(error)) {
-      expect.fail(`expected a NodeSchemaValidationError, got ${String(error)}`);
-    }
     expect(error.nodeName).toBe('join');
     expect(error.direction).toBe('input');
     expect(capture.received).toEqual([]);
@@ -227,6 +236,18 @@ describe('JoinNode — per-trigger validation, adk-js specific', () => {
     });
 
     expect(output).toEqual({p1: content, p2: {key: 'b', value: 2}});
+  });
+
+  it('rejects a trigger value even when the record itself matches the schema', async () => {
+    const join = new JoinNode({name: 'join', inputSchema: triggerSchema});
+
+    // {key: 'a', value: 1} satisfies triggerSchema, so validating the record
+    // as a whole would accept it. Per-trigger validation rejects it, because
+    // neither 'a' nor 1 is a {key, value} payload.
+    const error = await schemaErrorFrom(driveNode(join, {key: 'a', value: 1}));
+
+    expect(error.nodeName).toBe('join');
+    expect(error.direction).toBe('input');
   });
 
   it('skips a null trigger value', async () => {
