@@ -8,6 +8,7 @@ import {ReadonlyContext} from '../agents/readonly_context.js';
 import {LlmRequest} from '../models/llm_request.js';
 
 import {Context} from '../agents/context.js';
+import type {AuthConfig} from '../auth/auth_tool.js';
 import {BaseTool} from './base_tool.js';
 
 /**
@@ -19,6 +20,12 @@ export type ToolPredicate = (
   tool: BaseTool,
   readonlyContext: ReadonlyContext,
 ) => boolean;
+
+/**
+ * Free-form key/value arguments that configure a toolset declared in a config
+ * file. Mirrors adk-python's `ToolArgsConfig`.
+ */
+export type ToolArgsConfig = Record<string, unknown>;
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -36,6 +43,24 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
 }
 
 /**
+ * Returns a copy of `tool` that answers to `prefixedName`.
+ *
+ * The copy keeps the prototype of the original, so subclass methods and the
+ * `isBaseTool()` type guard still work. It shadows `_getDeclaration()` so the
+ * declaration name agrees with the tool name. Neither the original tool nor
+ * its declaration is mutated.
+ */
+function withPrefixedName(tool: BaseTool, prefixedName: string): BaseTool {
+  const copy = Object.create(Object.getPrototypeOf(tool)) as BaseTool;
+  Object.assign(copy, tool, {name: prefixedName});
+  copy._getDeclaration = () => {
+    const declaration = tool._getDeclaration();
+    return declaration ? {...declaration, name: prefixedName} : undefined;
+  };
+  return copy;
+}
+
+/**
  * Base class for toolset.
  *
  * A toolset is a collection of tools that can be used by an agent.
@@ -43,6 +68,22 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
 export abstract class BaseToolset {
   readonly [BASE_TOOLSET_SIGNATURE_SYMBOL] = true;
 
+  /**
+   * Whether `getToolsWithPrefix()` may serve tools from its per-invocation
+   * cache. A subclass whose tool list changes within a single invocation must
+   * set this to `false`.
+   */
+  protected useInvocationCache = true;
+
+  private cachedInvocationId?: string;
+  private cachedTools?: BaseTool[];
+
+  /**
+   * @param toolFilter Filter deciding which tools the toolset exposes.
+   * @param prefix Prepended to the name of every tool `getToolsWithPrefix()`
+   *     returns, separated by an underscore. Corresponds to
+   *     `tool_name_prefix` in adk-python.
+   */
   constructor(
     readonly toolFilter: ToolPredicate | string[],
     readonly prefix?: string,
@@ -51,11 +92,85 @@ export abstract class BaseToolset {
   /**
    * Returns the tools that should be exposed to LLM.
    *
+   * Names are unprefixed. Use `getToolsWithPrefix()` to get the names the
+   * model sees.
+   *
    * @param context Context used to filter tools available to the agent. If
    *     not defined, all tools in the toolset are returned.
    * @return A Promise that resolves to the list of tools.
    */
   abstract getTools(context?: ReadonlyContext): Promise<BaseTool[]>;
+
+  /**
+   * Returns the tools of this toolset with `prefix` applied to their names.
+   *
+   * The framework calls this method to build the tool list shown to the model.
+   * A subclass implements `getTools()` and must not override this method; it
+   * stands in for the `@final` decorator adk-python puts on
+   * `get_tools_with_prefix()`.
+   *
+   * The result is cached per invocation, so a toolset is listed once per
+   * invocation rather than once per LLM request.
+   *
+   * @param context Context used to filter tools available to the agent. If
+   *     not defined, all tools in the toolset are returned.
+   * @return A Promise that resolves to the list of tools. Without a prefix
+   *     these are the tools `getTools()` returned. With one they are copies
+   *     whose name and function declaration carry the prefix.
+   */
+  async getToolsWithPrefix(context?: ReadonlyContext): Promise<BaseTool[]> {
+    const invocationId = context?.invocationId;
+    if (
+      this.useInvocationCache &&
+      this.cachedTools !== undefined &&
+      this.cachedInvocationId === invocationId
+    ) {
+      return this.cachedTools;
+    }
+
+    const tools = await this.getTools(context);
+    const prefix = this.prefix;
+    this.cachedTools = prefix
+      ? tools.map((tool) => withPrefixedName(tool, `${prefix}_${tool.name}`))
+      : tools;
+    this.cachedInvocationId = invocationId;
+    return this.cachedTools;
+  }
+
+  /**
+   * Creates a toolset instance from a config.
+   *
+   * A subclass that can be declared in a config file overrides this method.
+   * The base implementation always throws.
+   *
+   * @param _config The config for the toolset.
+   * @param _configAbsPath The absolute path to the config file that contains
+   *     the toolset config.
+   * @return The toolset instance.
+   */
+  static fromConfig(
+    _config: ToolArgsConfig,
+    _configAbsPath: string,
+  ): BaseToolset {
+    throw new Error(`fromConfig() not implemented for toolset: ${this.name}`);
+  }
+
+  /**
+   * Returns the auth config for this toolset, or `undefined` when it needs no
+   * authentication.
+   *
+   * A toolset that supports authentication overrides this method and returns
+   * an `AuthConfig` built from its own auth scheme and credential.
+   *
+   * NOTE: nothing in adk-js reads this value yet, so the toolset must obtain
+   * its own credential. Do not rely on the framework to fill
+   * `exchangedAuthCredential`. In adk-python the LLM flow exchanges the
+   * credential and fills that field before it lists or runs the tools; the
+   * port of that flow is separate work.
+   */
+  getAuthConfig(): AuthConfig | undefined {
+    return undefined;
+  }
 
   /**
    * Closes the toolset.
@@ -67,7 +182,7 @@ export abstract class BaseToolset {
    *
    * @return A Promise that resolves when the toolset is closed.
    */
-  abstract close(): Promise<void>;
+  async close(): Promise<void> {}
 
   /**
    * Returns whether the tool should be exposed to LLM.
