@@ -157,6 +157,19 @@ export class FakeStorage {
  * hoisted to the top of the file that calls it. This holds the shared state
  * that mock reads.
  */
+/**
+ * Builds the class a `vi.mock` factory installs as `Storage`, recording each
+ * client it constructs in `registry`.
+ */
+function fakeStorageClass(registry: FakeStorageRegistry) {
+  return class extends FakeStorage {
+    constructor(options: Record<string, unknown>) {
+      super(options, registry.behaviour);
+      registry.built.push(this);
+    }
+  };
+}
+
 export class FakeStorageRegistry {
   /** Every client built since the last {@link reset}, oldest first. */
   readonly built: FakeStorage[] = [];
@@ -164,17 +177,7 @@ export class FakeStorageRegistry {
   behaviour: FakeStorageBehaviour = {};
 
   /** The constructor to install as `Storage` from a `vi.mock` factory. */
-  readonly Storage: new (options: Record<string, unknown>) => FakeStorage;
-
-  constructor() {
-    const registry = this;
-    this.Storage = class extends FakeStorage {
-      constructor(options: Record<string, unknown>) {
-        super(options, registry.behaviour);
-        registry.built.push(this);
-      }
-    };
-  }
+  readonly Storage = fakeStorageClass(this);
 
   reset(behaviour: FakeStorageBehaviour = {}): void {
     this.built.length = 0;
