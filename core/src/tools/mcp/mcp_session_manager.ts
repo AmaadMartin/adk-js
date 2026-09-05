@@ -61,7 +61,8 @@ export interface StdioConnectionParams {
   serverParams: StdioServerParameters;
   /**
    * Seconds to wait for the MCP server to complete the `initialize` handshake.
-   * When unset, the MCP SDK's own 60s request timeout applies.
+   * When unset, the MCP SDK's own 60s request timeout applies. `0` is a
+   * zero-length budget, not "no limit".
    */
   timeout?: number;
 }
@@ -87,7 +88,8 @@ export interface StreamableHTTPConnectionParams {
   header?: Record<string, unknown>;
   /**
    * Seconds to wait for the MCP server to complete the `initialize` handshake.
-   * When unset, the MCP SDK's own 60s request timeout applies.
+   * When unset, the MCP SDK's own 60s request timeout applies. `0` is a
+   * zero-length budget, not "no limit".
    */
   timeout?: number;
   /**
@@ -196,7 +198,15 @@ export class MCPSessionManager {
             this.connectionParams.terminateOnClose ??
             DEFAULT_TERMINATE_ON_CLOSE
           ) {
-            terminate = () => transport.terminateSession();
+            terminate = async () => {
+              // `terminateSession()` reports through `onerror` as well as
+              // rejecting. `closeSession` awaits and logs the rejection, so
+              // leaving the handler in place reports one failure twice, the
+              // first time at error level for a teardown we deliberately
+              // swallow.
+              transport.onerror = undefined;
+              await transport.terminateSession();
+            };
           }
           break;
         }

@@ -449,6 +449,32 @@ describe('MCPSessionManager', () => {
       warnSpy.mockRestore();
     });
 
+    it('reports a failed termination once, not also through onerror', async () => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const manager = new MCPSessionManager({
+        type: 'StreamableHTTPConnectionParams',
+        url: 'http://test-url',
+      });
+
+      const client = await manager.createSession();
+      const transport = lastHttpTransport();
+      // The real transport calls `onerror` and then rejects.
+      vi.mocked(transport.terminateSession).mockImplementation(async () => {
+        const err = new Error('server refused the delete');
+        transport.onerror?.(err);
+        throw err;
+      });
+
+      await manager.closeSession(client);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(errorSpy).not.toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
     it('drops the session from getActiveSessions even when termination fails', async () => {
       const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
       const manager = new MCPSessionManager({
