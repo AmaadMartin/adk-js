@@ -279,8 +279,13 @@ export class Workflow extends BaseNode {
     if (output !== undefined) {
       ctx.output = output;
       // A value the entry passed straight back from a child was already
-      // emitted by that child. One the entry computed itself still needs an
-      // event, so only suppress the flush for the former.
+      // emitted by that child; one the entry computed itself still needs an
+      // event. Runs record their output by value, so this compares values
+      // rather than tracking where the entry got it: for a primitive, an entry
+      // that independently computed a value some child also produced reads as
+      // passing that child's value back, and its event is suppressed. That
+      // value still reaches the stream on the child's event, and `ctx.output`
+      // is set either way, so what is lost is a duplicate, not the result.
       if (
         [...dynamicState.runs.values()].some((run) =>
           Object.is(run.output, output),
