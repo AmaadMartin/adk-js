@@ -57,6 +57,11 @@ function splitLinesKeepingTerminators(text: string): string[] {
   return lines;
 }
 
+/** A range error. It reports the file length so the model can retry. */
+function rangeError(error: string, totalLines: number): ReadFileFailure {
+  return {status: 'error', error, total_lines: totalLines};
+}
+
 /**
  * Whether a model-supplied line number is absent or a whole number.
  *
@@ -177,20 +182,16 @@ export class ReadFileTool extends BaseTool {
       const start = Math.max(1, rawStartLine || 1);
       const end = Math.min(total, rawEndLine || total);
       if (start > total) {
-        const failure: ReadFileFailure = {
-          status: 'error',
-          error: `\`start_line\` ${start} exceeds file length (${total} lines).`,
-          total_lines: total,
-        };
-        return failure;
+        return rangeError(
+          `\`start_line\` ${start} exceeds file length (${total} lines).`,
+          total,
+        );
       }
       if (start > end) {
-        const failure: ReadFileFailure = {
-          status: 'error',
-          error: `\`start_line\` (${start}) is after \`end_line\` (${end}).`,
-          total_lines: total,
-        };
-        return failure;
+        return rangeError(
+          `\`start_line\` (${start}) is after \`end_line\` (${end}).`,
+          total,
+        );
       }
       const numbered = lines
         .slice(start - 1, end)
