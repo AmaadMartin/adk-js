@@ -54,7 +54,6 @@ export function mtlsEndpointSetting(): MtlsEndpoint {
  * The three locations are the ones google-auth reads: the context-aware
  * metadata the Endpoint Verification agent writes, the gcloud certificate
  * configuration, and a configuration named by `GOOGLE_API_CERTIFICATE_CONFIG`.
- * A filesystem error reads as no source.
  */
 export function hasDefaultClientCertSource(): boolean {
   const candidates = [
@@ -62,7 +61,7 @@ export function hasDefaultClientCertSource(): boolean {
     join(homedir(), '.config', 'gcloud', 'certificate_config.json'),
     process.env[CERTIFICATE_CONFIG_ENV],
   ];
-  return candidates.some((path) => !!path && fileExists(path));
+  return candidates.some((path) => !!path && existsSync(path));
 }
 
 /**
@@ -126,18 +125,15 @@ export function isNonMtlsGoogleapisEndpoint(url: string): boolean {
 /**
  * Rewrites a `*.googleapis.com` URL to its `.mtls.googleapis.com` variant.
  *
- * `GOOGLE_API_USE_MTLS_ENDPOINT=never` opts out. A host that is not a
- * googleapis.com host, and a host that is already a mutual-TLS host, are
- * returned unchanged, so a non-Google provider is never affected.
+ * A host that is not a googleapis.com host, and a host that is already a
+ * mutual-TLS host, are returned unchanged, so a non-Google provider is never
+ * affected. Whether to rewrite at all is {@link shouldUseMtlsEndpoint}.
  *
  * @param url The absolute URL the caller is about to request.
  * @return The URL to request instead.
  */
 export function effectiveGoogleapisEndpoint(url: string): string {
-  if (
-    !isNonMtlsGoogleapisEndpoint(url) ||
-    mtlsEndpointSetting() === MtlsEndpoint.NEVER
-  ) {
+  if (!isNonMtlsGoogleapisEndpoint(url)) {
     return url;
   }
   const parsed = new URL(url);
@@ -157,15 +153,6 @@ function hostnameOf(url: string): string {
     return new URL(url).hostname;
   } catch {
     return '';
-  }
-}
-
-/** Reports whether a path names an existing file, swallowing access errors. */
-function fileExists(path: string): boolean {
-  try {
-    return existsSync(path);
-  } catch {
-    return false;
   }
 }
 
