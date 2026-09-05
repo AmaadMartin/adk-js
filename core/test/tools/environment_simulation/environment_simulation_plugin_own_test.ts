@@ -15,14 +15,20 @@ import {
   Context,
   EnvironmentSimulationPlugin,
   FeatureName,
+  functionsExportedForTestingOnly,
   FunctionTool,
+  InvocationContext,
   isFeatureEnabled,
+  LlmAgent,
   overrideFeatureEnabled,
   PluginManager,
+  Session,
   ToolCallSimulator,
 } from '@google/adk';
 import {afterEach, describe, expect, it} from 'vitest';
 import {z} from 'zod';
+
+const {handleFunctionCallList} = functionsExportedForTestingOnly;
 
 class FixedSimulator implements ToolCallSimulator {
   constructor(private readonly result: Record<string, unknown> | undefined) {}
@@ -121,5 +127,42 @@ describe('EnvironmentSimulationPlugin own', () => {
 
     expect(await answering.runBeforeToolCallback(params)).toBe(simulated);
     expect(await declining.runBeforeToolCallback(params)).toBe(fallback);
+  });
+
+  it('answers a function call without running the real tool', async () => {
+    let realToolRuns = 0;
+    const realTool = new FunctionTool({
+      name: 'get_weather',
+      description: 'Returns the weather of a city.',
+      parameters: z.object({city: z.string()}),
+      execute: async ({city}) => {
+        realToolRuns++;
+        return {city, conditions: 'real'};
+      },
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_environment_simulation',
+      session: {} as Session,
+      agent: new LlmAgent({name: 'weather_agent', model: 'test_model'}),
+      pluginManager: new PluginManager([
+        new EnvironmentSimulationPlugin(
+          new FixedSimulator({city: 'Paris', conditions: 'simulated'}),
+        ),
+      ]),
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'fc-1', name: 'get_weather', args: {city: 'Paris'}}],
+      toolsDict: {'get_weather': realTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      city: 'Paris',
+      conditions: 'simulated',
+    });
+    expect(realToolRuns).toBe(0);
   });
 });
