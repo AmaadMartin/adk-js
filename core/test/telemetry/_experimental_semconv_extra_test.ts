@@ -30,6 +30,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   COMPLETION_DETAILS_EVENT_NAME,
   ExperimentalSemconvConfig,
+  ExtendedUsageMetadata,
   maybeLogCompletionDetails,
   resolveToolDefinitions,
   setOperationDetailsAttributesFromRequest,
@@ -550,35 +551,6 @@ describe('tool resolution', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
-  it('describes a raw Model Context Protocol tool', () => {
-    // The fixture is the plain object the Model Context Protocol JS SDK
-    // produces at runtime, since it has no runtime class.
-    expect(
-      resolveToolDefinitions([
-        {
-          name: 'read_file',
-          description: 'Reads a file.',
-          inputSchema: {
-            type: 'object',
-            properties: {path: {type: 'string'}},
-            required: ['path'],
-          },
-        },
-      ]),
-    ).toEqual([
-      {
-        name: 'read_file',
-        description: 'Reads a file.',
-        parameters: {
-          type: 'object',
-          properties: {path: {type: 'string'}},
-          required: ['path'],
-        },
-        type: 'function',
-      },
-    ]);
-  });
-
   it('reports a tool entry it cannot recognize', () => {
     expect(
       resolveToolDefinitions([{unrelated: 1}, 7, null, Object.create(null)]),
@@ -592,38 +564,6 @@ describe('tool resolution', () => {
 });
 
 describe('toolDefinitionFromDumpedTool', () => {
-  it.each([
-    {spelling: 'parameters', tool: {name: 'f', parameters: {type: 'object'}}},
-    {spelling: 'inputSchema', tool: {name: 'f', inputSchema: {type: 'object'}}},
-    {
-      spelling: 'input_schema',
-      tool: {name: 'f', input_schema: {type: 'object'}},
-    },
-  ])('reads the parameters under $spelling', ({tool}) => {
-    expect(toolDefinitionFromDumpedTool(tool)).toEqual({
-      name: 'f',
-      description: null,
-      parameters: {type: 'object'},
-      type: 'function',
-    });
-  });
-
-  it('still reports a tool whose schema spelling is unknown', () => {
-    expect(
-      toolDefinitionFromDumpedTool({
-        name: 'f',
-        description: 'A tool.',
-        // A spelling no Model Context Protocol SDK version produces.
-        ['schema' as string]: {type: 'object'},
-      }),
-    ).toEqual({
-      name: 'f',
-      description: 'A tool.',
-      parameters: null,
-      type: 'function',
-    });
-  });
-
   it('labels a descriptor whose name is not a usable string', () => {
     expect(toolDefinitionFromDumpedTool({name: ''})).toEqual({
       name: 'Object',
@@ -714,6 +654,25 @@ describe('token usage', () => {
     );
 
     expect(common).toEqual({'gen_ai.usage.output_tokens': 4});
+  });
+
+  it('reports the two counts genai does not declare', () => {
+    const common: AnyValueMap = {};
+    // `ExtendedUsageMetadata` is assignable to the field's declared type, so a
+    // response can carry the counts adk-python reads defensively.
+    const usageMetadata: ExtendedUsageMetadata = {
+      promptTokenCount: 1,
+      cacheCreationInputTokens: 8,
+      systemInstructionTokens: 3,
+    };
+
+    setOperationDetailsAttributesFromResponse({usageMetadata}, {}, common);
+
+    expect(common).toEqual({
+      'gen_ai.usage.input_tokens': 1,
+      'gen_ai.usage.cache_creation.input_tokens': 8,
+      'gen_ai.usage.experimental.system_instruction_tokens': 3,
+    });
   });
 
   it('reports tool-use tokens on their own as input tokens', () => {

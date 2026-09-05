@@ -117,6 +117,13 @@ reason appears only when the model reported one, the counters only when the
 response carries usage metadata, and `gen_ai.output.messages` only when the
 response carries content.
 
+Call the response setter once per response. A turn that arrives as several
+streamed chunks accumulates into `gen_ai.output.messages`, one message per
+chunk, in arrival order. Only the chunk that ends the turn reports a finish
+reason: the proto3 zero value `FINISH_REASON_UNSPECIFIED` means unreported, so
+it leaves `gen_ai.response.finish_reasons` out rather than publishing a healthy
+turn as a failed one.
+
 ## Content capture
 
 `maybeLogCompletionDetails` reads three booleans off the config you pass it. Any

@@ -58,6 +58,10 @@ const GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS =
   'gen_ai.usage.cache_read.input_tokens';
 const GEN_AI_USAGE_REASONING_OUTPUT_TOKENS =
   'gen_ai.usage.reasoning.output_tokens';
+const GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS =
+  'gen_ai.usage.cache_creation.input_tokens';
+const GEN_AI_USAGE_SYSTEM_INSTRUCTION_TOKENS =
+  'gen_ai.usage.experimental.system_instruction_tokens';
 
 const FUNCTION_TOOL_DEFINITION_TYPE = 'function';
 
@@ -161,6 +165,16 @@ export interface DumpedTool {
   parameters?: unknown;
   inputSchema?: unknown;
   input_schema?: unknown;
+}
+
+/**
+ * The two token counts `@google/genai` 2.9.0 does not declare on
+ * `GenerateContentResponseUsageMetadata`. adk-python reads them defensively,
+ * because the Anthropic paths set them by hand.
+ */
+export interface ExtendedUsageMetadata extends GenerateContentResponseUsageMetadata {
+  cacheCreationInputTokens?: number;
+  systemInstructionTokens?: number;
 }
 
 /**
@@ -323,13 +337,30 @@ function toRole(role: string | undefined): string {
   return '';
 }
 
+/**
+ * Whether the model reported why generation stopped.
+ *
+ * Ported from adk-python `src/google/adk/telemetry/_finish_reason.py`, which is
+ * a separate parity task. The proto3 zero value is truthy, so an unset field
+ * otherwise reads as a reason of its own, and a turn that ended normally is
+ * published as a failed one.
+ */
+function isReportedFinishReason(
+  finishReason: FinishReason | undefined,
+): finishReason is FinishReason {
+  return (
+    finishReason !== undefined &&
+    finishReason !== FinishReason.FINISH_REASON_UNSPECIFIED
+  );
+}
+
 /** Maps a genai finish reason onto the vocabulary the semconv JSON allows. */
 function toFinishReason(finishReason: FinishReason | undefined): string {
+  if (!isReportedFinishReason(finishReason)) {
+    return '';
+  }
   switch (finishReason) {
-    case undefined:
-      return '';
-    // Unspecified and other become `error`, which the schema does allow.
-    case FinishReason.FINISH_REASON_UNSPECIFIED:
+    // Mapped to error, as the JSON schema for finish_reason does not support it.
     case FinishReason.OTHER:
       return 'error';
     case FinishReason.STOP:
@@ -675,7 +706,7 @@ function sumTokens(
  * task, and its port replaces this helper's call site.
  */
 function tokenUsageAttributes(
-  usageMetadata: GenerateContentResponseUsageMetadata,
+  usageMetadata: ExtendedUsageMetadata,
 ): AnyValueMap {
   const attributes: AnyValueMap = {};
 
@@ -698,9 +729,17 @@ function tokenUsageAttributes(
     attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS] =
       usageMetadata.cachedContentTokenCount;
   }
+  if (isPresent(usageMetadata.cacheCreationInputTokens)) {
+    attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS] =
+      usageMetadata.cacheCreationInputTokens;
+  }
   if (isPresent(usageMetadata.thoughtsTokenCount)) {
     attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS] =
       usageMetadata.thoughtsTokenCount;
+  }
+  if (isPresent(usageMetadata.systemInstructionTokens)) {
+    attributes[GEN_AI_USAGE_SYSTEM_INSTRUCTION_TOKENS] =
+      usageMetadata.systemInstructionTokens;
   }
   return attributes;
 }
@@ -763,16 +802,20 @@ export function setOperationDetailsAttributesFromRequest(
 /**
  * Writes the response keys: the output message into `details`, the finish
  * reason and the token counters into `common`.
+ *
+ * Call it once per response. A turn that arrives as several streamed responses
+ * is reported as all of them, one message each.
  */
 export function setOperationDetailsAttributesFromResponse(
   llmResponse: LlmResponse,
   details: AnyValueMap,
   common: AnyValueMap,
 ): void {
-  if (llmResponse.finishReason) {
-    common[GEN_AI_RESPONSE_FINISH_REASONS] = [
-      toFinishReason(llmResponse.finishReason),
-    ];
+  // An unreported finish reason maps to '': omit the attribute rather than
+  // publish that.
+  const finishReason = toFinishReason(llmResponse.finishReason);
+  if (finishReason) {
+    common[GEN_AI_RESPONSE_FINISH_REASONS] = [finishReason];
   }
   if (llmResponse.usageMetadata) {
     Object.assign(common, tokenUsageAttributes(llmResponse.usageMetadata));
@@ -780,7 +823,11 @@ export function setOperationDetailsAttributesFromResponse(
 
   const outputMessage = toOutputMessage(llmResponse);
   if (outputMessage) {
-    details[GEN_AI_OUTPUT_MESSAGES] = toAnyValue([outputMessage]);
+    const recorded = details[GEN_AI_OUTPUT_MESSAGES];
+    const arrived = toAnyValue(outputMessage);
+    details[GEN_AI_OUTPUT_MESSAGES] = Array.isArray(recorded)
+      ? [...recorded, arrived]
+      : [arrived];
   }
 }
 

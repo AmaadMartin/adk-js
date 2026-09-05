@@ -22,8 +22,10 @@ import type {AnyValueMap} from '@opentelemetry/api-logs';
 import {describe, expect, it} from 'vitest';
 
 import {
+  resolveToolDefinitions,
   setOperationDetailsAttributesFromRequest,
   setOperationDetailsAttributesFromResponse,
+  toolDefinitionFromDumpedTool,
 } from '../../src/telemetry/_experimental_semconv.js';
 
 const GEN_AI_INPUT_MESSAGES = 'gen_ai.input.messages';
@@ -244,6 +246,38 @@ describe('setOperationDetailsAttributesFromRequest', () => {
       },
     ]);
   });
+
+  it('test_request_attributes_describe_a_raw_mcp_tool', () => {
+    // A caller bypassing ADK's tool pipeline can hand genai a raw MCP tool.
+    // The reference reaches it through `config.tools`; here that field is typed
+    // as `ToolUnion[]`, so the descriptor goes through the resolver directly.
+    // The fixture is the plain object the MCP JS SDK produces at runtime, since
+    // it has no runtime class.
+    const definitions = resolveToolDefinitions([
+      {
+        name: 'get_weather',
+        description: 'Gets the weather.',
+        inputSchema: {
+          type: 'object',
+          properties: {city: {type: 'string'}},
+          required: ['city'],
+        },
+      },
+    ]);
+
+    expect(definitions).toEqual([
+      {
+        name: 'get_weather',
+        description: 'Gets the weather.',
+        parameters: {
+          type: 'object',
+          properties: {city: {type: 'string'}},
+          required: ['city'],
+        },
+        type: 'function',
+      },
+    ]);
+  });
 });
 
 describe('setOperationDetailsAttributesFromResponse', () => {
@@ -276,6 +310,69 @@ describe('setOperationDetailsAttributesFromResponse', () => {
       'gen_ai.usage.output_tokens': 20,
       'gen_ai.usage.cache_read.input_tokens': 4,
     });
+  });
+
+  it('test_response_attributes_accumulate_output_messages_across_a_stream', () => {
+    // Keeping only the last chunk truncated the log to it.
+    const details: AnyValueMap = {};
+    const common: AnyValueMap = {};
+
+    for (const text of ['text ', 'response']) {
+      setOperationDetailsAttributesFromResponse(
+        {
+          content: {role: 'model', parts: [{text}]},
+          finishReason: FinishReason.STOP,
+        },
+        details,
+        common,
+      );
+    }
+
+    expect(details).toEqual({
+      'gen_ai.output.messages': [
+        {
+          role: 'assistant',
+          parts: [{content: 'text ', type: 'text'}],
+          finish_reason: 'stop',
+        },
+        {
+          role: 'assistant',
+          parts: [{content: 'response', type: 'text'}],
+          finish_reason: 'stop',
+        },
+      ],
+    });
+  });
+
+  it('test_streamed_chunks_are_reported_one_message_each', () => {
+    // Each chunk is its own message, as the OTel instrumentor reports a stream.
+    const details: AnyValueMap = {};
+    const common: AnyValueMap = {};
+
+    // Only the chunk that ends the turn reports why generation stopped.
+    const chunks: Array<[string, FinishReason]> = [
+      ['text ', FinishReason.FINISH_REASON_UNSPECIFIED],
+      ['response', FinishReason.STOP],
+    ];
+    for (const [text, finishReason] of chunks) {
+      setOperationDetailsAttributesFromResponse(
+        {content: {role: 'model', parts: [{text}]}, finishReason},
+        details,
+        common,
+      );
+    }
+
+    const messages = details[GEN_AI_OUTPUT_MESSAGES];
+    if (!Array.isArray(messages)) {
+      expect.fail('expected gen_ai.output.messages to be an array');
+    }
+    expect(
+      messages.map(
+        (message) =>
+          ((message as AnyValueMap)['parts'] as AnyValueMap[])[0]['content'],
+      ),
+    ).toEqual(['text ', 'response']);
+    expect(common).toEqual({'gen_ai.response.finish_reasons': ['stop']});
   });
 
   it('test_response_attributes_omit_output_messages_without_content', () => {
@@ -311,10 +408,6 @@ describe('setOperationDetailsAttributesFromResponse', () => {
     {finishReason: FinishReason.STOP, expected: 'stop'},
     {finishReason: FinishReason.MAX_TOKENS, expected: 'length'},
     {finishReason: FinishReason.OTHER, expected: 'error'},
-    {
-      finishReason: FinishReason.FINISH_REASON_UNSPECIFIED,
-      expected: 'error',
-    },
     {finishReason: FinishReason.SAFETY, expected: 'safety'},
   ])(
     'test_response_attributes_normalize_finish_reason ($finishReason)',
@@ -332,6 +425,19 @@ describe('setOperationDetailsAttributesFromResponse', () => {
     },
   );
 
+  it('test_response_attributes_treat_unspecified_finish_reason_as_unreported', () => {
+    // The proto3 zero value means unreported, not failed.
+    const llmResponse: LlmResponse = {
+      content: {role: 'model', parts: [{text: 'Response'}]},
+      finishReason: FinishReason.FINISH_REASON_UNSPECIFIED,
+    };
+
+    const [details, common] = responseAttributes(llmResponse);
+
+    expect(GEN_AI_RESPONSE_FINISH_REASONS in common).toBe(false);
+    expect(firstOutputMessage(details)['finish_reason']).toBe('');
+  });
+
   it('test_response_attributes_omit_token_usage_without_metadata', () => {
     const llmResponse: LlmResponse = {
       content: {role: 'model', parts: [{text: 'Response'}]},
@@ -343,5 +449,42 @@ describe('setOperationDetailsAttributesFromResponse', () => {
     expect(common).toEqual({[GEN_AI_RESPONSE_FINISH_REASONS]: ['stop']});
     expect(GEN_AI_USAGE_INPUT_TOKENS in common).toBe(false);
     expect(GEN_AI_USAGE_OUTPUT_TOKENS in common).toBe(false);
+  });
+});
+
+describe('TestModelDumpToolDefinitionSchemaKey', () => {
+  // The schema key an MCP tool dumps under changes with the SDK version.
+  // Reading the wrong key is not an error: the tool is still reported, and
+  // reported with no parameters, so the loss shows up only as an emptier span.
+  /** A dumped tool whose schema sits under the given key. */
+  function dumpingTool(schemaKey: string): Record<string, unknown> {
+    return {
+      name: 'mcp_tool',
+      description: 'A standalone mcp tool',
+      [schemaKey]: {type: 'object', properties: {id: {type: 'integer'}}},
+    };
+  }
+
+  it.each(['parameters', 'inputSchema', 'input_schema'])(
+    'test_parameters_are_read_under_every_spelling (%s)',
+    (schemaKey) => {
+      const definition = toolDefinitionFromDumpedTool(dumpingTool(schemaKey));
+
+      expect(definition.parameters).toEqual({
+        type: 'object',
+        properties: {id: {type: 'integer'}},
+      });
+    },
+  );
+
+  it('test_an_unknown_spelling_is_still_reported_without_parameters', () => {
+    // The fallback must stay lossy-but-alive, not raise. Telemetry is not worth
+    // failing a tool call over.
+    const definition = toolDefinitionFromDumpedTool(
+      dumpingTool('schemaOfInput'),
+    );
+
+    expect(definition.name).toBe('mcp_tool');
+    expect(definition.parameters).toBeNull();
   });
 });
