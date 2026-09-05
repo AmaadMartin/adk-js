@@ -173,6 +173,24 @@ describe('SkillToolset with an environment', () => {
   });
 });
 
+/**
+ * A skill whose script is JavaScript, so the same command runs on Linux,
+ * macOS and Windows. `LocalEnvironment` spawns through the platform shell,
+ * and `cmd.exe` has no `sh`.
+ */
+const NODE_SKILL: Skill = {
+  frontmatter: {name: 'skill1', description: 'A test skill'},
+  instructions: 'Test instructions',
+  resources: {
+    references: {'ref1.md': 'reference one'},
+    assets: {'asset1.json': '{"a": 1}'},
+    scripts: {'run.js': {src: "console.log('hello');"}},
+  },
+};
+
+/** Runs the materialized script through the Node binary running the test. */
+const RUN_SCRIPT_COMMAND = `"${process.execPath}" skills/skill1/scripts/run.js`;
+
 describe('SkillToolset against a real LocalEnvironment', () => {
   let workspace: string;
 
@@ -187,14 +205,14 @@ describe('SkillToolset against a real LocalEnvironment', () => {
   it('brings an environment nobody initialized up before it runs', async () => {
     const environment = new LocalEnvironment({workingDir: workspace});
     const tool = new RunSkillScriptTool(
-      new SkillToolset([SKILL], {environment}),
+      new SkillToolset([NODE_SKILL], {environment}),
     );
 
     const result = (await tool.runAsync({
       args: {
         skill_name: 'skill1',
-        script_path: 'run.sh',
-        command: 'sh skills/skill1/scripts/run.sh',
+        script_path: 'run.js',
+        command: RUN_SCRIPT_COMMAND,
       },
       toolContext: createConfirmedContext(),
     })) as {stdout: string; exit_code: number};
@@ -206,15 +224,15 @@ describe('SkillToolset against a real LocalEnvironment', () => {
 
   it('materializes the skill and runs its script', async () => {
     const environment = new LocalEnvironment({workingDir: workspace});
-    const toolset = new SkillToolset([SKILL], {environment});
+    const toolset = new SkillToolset([NODE_SKILL], {environment});
     const tool = new RunSkillScriptTool(toolset);
     await environment.initialize();
 
     const result = (await tool.runAsync({
       args: {
         skill_name: 'skill1',
-        script_path: 'run.sh',
-        command: 'sh skills/skill1/scripts/run.sh',
+        script_path: 'run.js',
+        command: RUN_SCRIPT_COMMAND,
       },
       toolContext: createConfirmedContext(),
     })) as {
@@ -245,15 +263,15 @@ describe('SkillToolset against a real LocalEnvironment', () => {
 
   it('reports a non-zero exit code and does not throw', async () => {
     const environment = new LocalEnvironment({workingDir: workspace});
-    const toolset = new SkillToolset([SKILL], {environment});
+    const toolset = new SkillToolset([NODE_SKILL], {environment});
     const tool = new RunSkillScriptTool(toolset);
     await environment.initialize();
 
     const result = (await tool.runAsync({
       args: {
         skill_name: 'skill1',
-        script_path: 'run.sh',
-        command: 'exit 3',
+        script_path: 'run.js',
+        command: `"${process.execPath}" -e "process.exit(3)"`,
       },
       toolContext: createConfirmedContext(),
     })) as {exit_code: number; timed_out: boolean};
@@ -266,7 +284,7 @@ describe('SkillToolset against a real LocalEnvironment', () => {
 
   it('reports a timed-out command', async () => {
     const environment = new LocalEnvironment({workingDir: workspace});
-    const toolset = new SkillToolset([SKILL], {
+    const toolset = new SkillToolset([NODE_SKILL], {
       environment,
       scriptTimeoutSeconds: 0.2,
     });
@@ -274,7 +292,11 @@ describe('SkillToolset against a real LocalEnvironment', () => {
     await environment.initialize();
 
     const result = (await tool.runAsync({
-      args: {skill_name: 'skill1', script_path: 'run.sh', command: 'sleep 5'},
+      args: {
+        skill_name: 'skill1',
+        script_path: 'run.js',
+        command: `"${process.execPath}" -e "setTimeout(() => {}, 5000)"`,
+      },
       toolContext: createConfirmedContext(),
     })) as {timed_out: boolean};
 
