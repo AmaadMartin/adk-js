@@ -44,36 +44,36 @@ function requestedScopes(scheme: AuthScheme): string[] {
   return Object.keys(flows.authorizationCode?.scopes ?? {});
 }
 
+/**
+ * Constructs the manager the way an untyped JavaScript caller can.
+ *
+ * `BigQueryCredentialsConfig` is a union that rejects each configuration below
+ * at compile time, which is why reaching the runtime guards needs one cast.
+ */
+function constructFromUntypedConfig(config: Record<string, unknown>): void {
+  new BigQueryCredentialsManager(config as BigQueryCredentialsConfig);
+}
+
 describe('BigQueryCredentialsManager construction', () => {
   it('rejects a configuration with neither a credential nor a client pair', () => {
-    expect(
-      () => new BigQueryCredentialsManager({} as BigQueryCredentialsConfig),
-    ).toThrow(
+    expect(() => constructFromUntypedConfig({})).toThrow(
       /must provide either credentials, or a clientId and clientSecret/,
     );
   });
 
   it('rejects a client id without a client secret', () => {
-    expect(
-      () =>
-        new BigQueryCredentialsManager({
-          clientId: 'client-id',
-        } as BigQueryCredentialsConfig),
-    ).toThrow(/must provide either credentials/);
+    expect(() => constructFromUntypedConfig({clientId: 'client-id'})).toThrow(
+      /must provide either credentials/,
+    );
   });
 
   it('rejects a configuration carrying both a credential and a client pair', () => {
-    expect(
-      () =>
-        new BigQueryCredentialsManager({
-          credentials: {
-            clientId: 'a',
-            clientSecret: 'b',
-            refreshToken: 'c',
-          },
-          clientId: 'client-id',
-          clientSecret: 'client-secret',
-        } as unknown as BigQueryCredentialsConfig),
+    expect(() =>
+      constructFromUntypedConfig({
+        credentials: {clientId: 'a', clientSecret: 'b', refreshToken: 'c'},
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+      }),
     ).toThrow(/cannot provide both existing credentials/);
   });
 

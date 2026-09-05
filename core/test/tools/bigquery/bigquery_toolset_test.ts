@@ -8,6 +8,7 @@ import {
   BaseTool,
   BigQueryCredentialsConfig,
   BigQueryToolset,
+  LlmAgent,
   isBigQueryTool,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -126,6 +127,31 @@ describe('BigQueryToolset', () => {
     const toolset = new BigQueryToolset();
 
     expect(names(await toolset.getTools())).toEqual(ALL_TOOL_NAMES);
+  });
+
+  it('accepts an existing credential instead of a client pair', async () => {
+    const toolset = new BigQueryToolset({
+      credentialsConfig: {
+        credentials: {
+          clientId: 'client-id',
+          clientSecret: 'client-secret',
+          refreshToken: 'refresh-token',
+        },
+      },
+    });
+
+    expect(names(await toolset.getTools())).toEqual(ALL_TOOL_NAMES);
+  });
+
+  it('serves an LlmAgent as a tool source', async () => {
+    const agent = new LlmAgent({
+      name: 'bigquery_agent',
+      model: 'gemini-2.5-flash',
+      instruction: 'You answer questions about BigQuery data and metadata.',
+      tools: [new BigQueryToolset({credentialsConfig: CREDENTIALS_CONFIG})],
+    });
+
+    expect(names(await agent.canonicalTools())).toEqual(ALL_TOOL_NAMES);
   });
 
   it('closes without error', async () => {
