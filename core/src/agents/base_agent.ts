@@ -14,6 +14,7 @@ import {
   traceAgentInvocation,
   tracer,
 } from '../telemetry/tracing.js';
+import {isIdentifier} from '../utils/identifier_utils.js';
 import {BaseNode, BaseNodeConfig} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
 import {Context} from './context.js';
@@ -569,16 +570,6 @@ function validateAgentName(name: string): string {
   }
 
   return name;
-}
-
-/**
- * Checks if the given string is a valid identifier.
- *
- * @param str The string to check.
- * @return True if the string is a valid identifier, false otherwise.
- */
-function isIdentifier(str: string): boolean {
-  return /^[\p{ID_Start}$_][\p{ID_Continue}$_-]*$/u.test(str);
 }
 
 /**
