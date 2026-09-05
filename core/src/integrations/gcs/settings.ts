@@ -58,33 +58,3 @@ export function createGcsToolSettings(
   // only an absent field takes the default.
   return {capabilities: params.capabilities ?? [...DEFAULT_GCS_CAPABILITIES]};
 }
-
-/**
- * Whether `settings` permits the read tools — `get_object_data`,
- * `get_object_metadata`, `list_objects`, `get_bucket` and `list_buckets`.
- *
- * Either capability grants read, matching the guard adk-python's `GCSToolset`
- * and `GCSAdminToolset` run in `get_tools`.
- *
- * @param settings The resolved settings to read.
- * @returns True when the read tools are permitted.
- */
-export function allowsGcsRead(settings: GcsToolSettings): boolean {
-  return (
-    settings.capabilities.includes(Capabilities.READ_ONLY) ||
-    settings.capabilities.includes(Capabilities.READ_WRITE)
-  );
-}
-
-/**
- * Whether `settings` permits the write tools — `create_object`,
- * `delete_objects`, `create_bucket`, `update_bucket` and `delete_bucket`.
- *
- * Only {@link Capabilities.READ_WRITE} grants write.
- *
- * @param settings The resolved settings to read.
- * @returns True when the write tools are permitted.
- */
-export function allowsGcsWrite(settings: GcsToolSettings): boolean {
-  return settings.capabilities.includes(Capabilities.READ_WRITE);
-}

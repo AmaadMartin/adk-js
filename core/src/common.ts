@@ -466,10 +466,7 @@ export type {
 // flat: Cloud Storage cannot claim an identifier that another settings port
 // will also want.
 export {
-  DEFAULT_GCS_CAPABILITIES,
   Capabilities as GcsCapabilities,
-  allowsGcsRead,
-  allowsGcsWrite,
   createGcsToolSettings,
 } from './integrations/gcs/settings.js';
 export type {GcsToolSettings} from './integrations/gcs/settings.js';
