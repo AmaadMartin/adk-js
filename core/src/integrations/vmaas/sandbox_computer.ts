@@ -611,7 +611,7 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   ): Promise<string> {
     const state = this.requireSessionState();
     const sharedToken = state.get<string>(STATE_KEY_ACCESS_TOKEN);
-    const expiry = state.get<number>(STATE_KEY_TOKEN_EXPIRY, 0) ?? 0;
+    const expiry = state.get<number>(STATE_KEY_TOKEN_EXPIRY) ?? 0;
     if (sharedToken && nowSeconds() < expiry - TOKEN_REFRESH_BUFFER_SECONDS) {
       return sharedToken;
     }

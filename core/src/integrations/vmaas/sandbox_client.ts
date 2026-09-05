@@ -214,11 +214,11 @@ async function retryWhileNavigating<T>(
   read: () => Promise<T>,
   maxAttempts: number,
 ): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
+  for (let attempt = 1; attempt < maxAttempts; attempt++) {
     try {
       return await read();
     } catch (e: unknown) {
-      if (attempt >= maxAttempts || !isNavigationError(formatError(e))) {
+      if (!isNavigationError(formatError(e))) {
         throw e;
       }
       logger.debug(
@@ -227,6 +227,8 @@ async function retryWhileNavigating<T>(
       await sleep(RETRY_DELAY_MS);
     }
   }
+  // The last attempt is not retried, so it reports its own failure.
+  return read();
 }
 
 /** A CDP command that dispatches a key event. */
@@ -407,7 +409,9 @@ export class SandboxClient {
           `${CDP_PAGE_CAPTURE_SCREENSHOT} returned no image data.`,
         );
       }
-      return Buffer.from(data, 'base64');
+      // Copied out of the Buffer so the caller receives a plain Uint8Array,
+      // which is what ComputerState declares.
+      return Uint8Array.from(Buffer.from(data, 'base64'));
     }, maxAttempts);
   }
 
