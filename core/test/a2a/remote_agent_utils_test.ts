@@ -398,9 +398,9 @@ describe('remote_agent_utils', () => {
     });
 
     it('matches a differently-named credential call in snake_case', () => {
-      // generateAuthEvent, the primary in-tree producer, emits args in
-      // snake_case (function_call_id/auth_config). The structural fallback
-      // must still catch a credential envelope under a name other than
+      // A foreign client can emit args in snake_case
+      // (function_call_id/auth_config). The structural fallback must still
+      // catch a credential envelope under a name other than
       // adk_request_credential once normalised.
       const credentialRequest = createEvent({
         author: 'root_agent',

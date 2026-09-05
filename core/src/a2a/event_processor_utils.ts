@@ -266,7 +266,7 @@ function pendingRequestParts(
  *
  * Defers to {@link getUserInputRequests} rather than reading `functionCall.id`:
  * the three request kinds do not agree on where the answering id lives (the
- * agent auth flow puts it in `args.function_call_id`), and that helper is where
+ * credential kind puts it in `args.functionCallId`), and that helper is where
  * the framework settles it.
  */
 function interruptIdOfPart(
