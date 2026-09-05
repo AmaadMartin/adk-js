@@ -176,9 +176,9 @@ function getAgentData(invocations: Invocation[]): VertexAgentData {
  * given, and the caller owns how that client is built and authenticated.
  */
 export class MultiTurnVertexAiEvalFacade implements Evaluator {
-  protected readonly threshold: number;
-  protected readonly metricName: string;
-  protected readonly client: VertexAiEvalClient;
+  private readonly threshold: number;
+  private readonly metricName: string;
+  private readonly client: VertexAiEvalClient;
 
   constructor(options: VertexAiEvalFacadeOptions) {
     this.threshold = options.threshold;
@@ -202,38 +202,32 @@ export class MultiTurnVertexAiEvalFacade implements Evaluator {
       return emptyEvaluationResult();
     }
 
-    const perInvocationResults: PerInvocationResult[] = actualInvocations
-      .slice(0, -1)
-      .map((actual, index) => ({
-        actualInvocation: actual,
-        expectedInvocation: expectedInvocations?.[index],
-        score: undefined,
-        evalStatus: EvalStatus.NOT_EVALUATED,
-      }));
-
     const result = await this.client.evaluate({
       dataset: {evalCases: [{agentData: getAgentData(actualInvocations)}]},
       metrics: [{name: this.metricName}],
     });
 
-    const lastTurn = actualInvocations.length - 1;
     const score = getScore(result);
-    perInvocationResults.push({
-      actualInvocation: actualInvocations[lastTurn],
-      expectedInvocation: expectedInvocations?.[lastTurn],
-      score,
-      evalStatus: getEvalStatus(score, this.threshold),
-    });
-
     if (score === undefined) {
       // Parity with adk-python: an unscored conversation reports nothing at
-      // all, and the per-invocation results accumulated above are discarded.
+      // all, rather than a list of unevaluated turns.
       return emptyEvaluationResult();
     }
 
+    const evalStatus = getEvalStatus(score, this.threshold);
+    const lastTurn = actualInvocations.length - 1;
+    const perInvocationResults: PerInvocationResult[] = actualInvocations.map(
+      (actual, index) => ({
+        actualInvocation: actual,
+        expectedInvocation: expectedInvocations?.[index],
+        score: index === lastTurn ? score : undefined,
+        evalStatus: index === lastTurn ? evalStatus : EvalStatus.NOT_EVALUATED,
+      }),
+    );
+
     return {
       overallScore: score,
-      overallEvalStatus: getEvalStatus(score, this.threshold),
+      overallEvalStatus: evalStatus,
       perInvocationResults,
     };
   }
