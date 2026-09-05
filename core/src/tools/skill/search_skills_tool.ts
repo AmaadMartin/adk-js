@@ -7,17 +7,20 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {RunAsyncToolRequest} from '../base_tool.js';
+import {SkillErrorCode} from './skill_error_codes.js';
+import {SkillTool} from './skill_tool.js';
+import {SEARCH_SKILLS_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
-export class SearchSkillsTool extends BaseTool {
-  constructor(private toolset: SkillToolset) {
+export class SearchSkillsTool extends SkillTool {
+  constructor(toolset: SkillToolset) {
     if (!toolset.registry) {
       throw new Error('SearchSkillsTool requires a configured skill registry.');
     }
-    super({
-      name: 'search_skills',
+    super(toolset, {
+      name: toolset.toolName(SEARCH_SKILLS_TOOL_NAME),
       description:
         toolset.registry.searchToolDescription?.() ||
         'Searches for relevant skills in the registry based on a semantic or keyword query.',
@@ -46,7 +49,7 @@ export class SearchSkillsTool extends BaseTool {
     if (!query) {
       return {
         error: "Argument 'query' is required.",
-        error_code: 'INVALID_ARGUMENTS',
+        error_code: SkillErrorCode.INVALID_ARGUMENTS,
       };
     }
 
@@ -64,7 +67,7 @@ export class SearchSkillsTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to search skills from registry: ${(e as Error).message || e}`,
-        error_code: 'REGISTRY_ERROR',
+        error_code: SkillErrorCode.REGISTRY_ERROR,
       };
     }
   }
