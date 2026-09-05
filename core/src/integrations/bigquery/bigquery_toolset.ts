@@ -14,7 +14,6 @@ import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
 import {ToolInputParameters} from '../../tools/function_tool.js';
 import {
   GoogleTool,
-  GoogleToolExecuteContext,
   GoogleToolExecuteFunction,
 } from '../../tools/google_tool.js';
 import {experimental} from '../../utils/experimental.js';
@@ -311,37 +310,33 @@ export class BigQueryToolset extends BaseToolset {
     name: string,
     description: string,
     parameters: TParameters,
-    execute: GoogleToolExecuteFunction<TParameters, BigQueryToolSettings>,
+    execute: GoogleToolExecuteFunction<TParameters, never>,
   ): BaseTool {
+    // `GoogleTool` can carry the settings and inject them as a third
+    // argument, as adk-python's does. Here every tool body is a closure over
+    // `this.toolSettings`, so the injection would only restate what the
+    // closure already holds.
     return new GoogleTool({
       name,
       description,
       parameters,
       execute,
       credentialsConfig: this.credentialsConfig,
-      toolSettings: this.toolSettings,
     });
   }
 
   /** Opens a BigQuery client identifying itself as `toolName`. */
   private client(
     project: string,
-    google: GoogleToolExecuteContext<BigQueryToolSettings> | undefined,
+    credentials: AuthClient | undefined,
     toolName: string,
   ): Promise<BigQuery> {
     return getBigQueryClient({
       project,
-      credentials: google?.credentials,
-      location: google?.settings?.location,
-      userAgent: [google?.settings?.applicationName, toolName],
+      credentials,
+      location: this.toolSettings.location,
+      userAgent: [this.toolSettings.applicationName, toolName],
     });
-  }
-
-  /** The settings a tool runs with, falling back to the toolset's own. */
-  private settingsOf(
-    google: GoogleToolExecuteContext<BigQueryToolSettings> | undefined,
-  ): BigQueryToolSettings {
-    return google?.settings ?? this.toolSettings;
   }
 
   /** Builds one tool per BigQuery operation, in the reference's order. */
@@ -353,7 +348,11 @@ export class BigQueryToolset extends BaseToolset {
         DatasetSchema,
         async (input, _toolContext, google) =>
           getDatasetInfo(
-            await this.client(input.projectId, google, 'get_dataset_info'),
+            await this.client(
+              input.projectId,
+              google?.credentials,
+              'get_dataset_info',
+            ),
             input.projectId,
             input.datasetId,
           ),
@@ -364,7 +363,11 @@ export class BigQueryToolset extends BaseToolset {
         TableSchema,
         async (input, _toolContext, google) =>
           getTableInfo(
-            await this.client(input.projectId, google, 'get_table_info'),
+            await this.client(
+              input.projectId,
+              google?.credentials,
+              'get_table_info',
+            ),
             input.projectId,
             input.datasetId,
             input.tableId,
@@ -376,7 +379,11 @@ export class BigQueryToolset extends BaseToolset {
         ProjectSchema,
         async (input, _toolContext, google) =>
           listDatasetIds(
-            await this.client(input.projectId, google, 'list_dataset_ids'),
+            await this.client(
+              input.projectId,
+              google?.credentials,
+              'list_dataset_ids',
+            ),
             input.projectId,
           ),
       ),
@@ -386,7 +393,11 @@ export class BigQueryToolset extends BaseToolset {
         DatasetSchema,
         async (input, _toolContext, google) =>
           listTableIds(
-            await this.client(input.projectId, google, 'list_table_ids'),
+            await this.client(
+              input.projectId,
+              google?.credentials,
+              'list_table_ids',
+            ),
             input.projectId,
             input.datasetId,
           ),
@@ -398,7 +409,11 @@ export class BigQueryToolset extends BaseToolset {
         JobSchema,
         async (input, _toolContext, google) =>
           getJobInfo(
-            await this.client(input.projectId, google, 'get_job_info'),
+            await this.client(
+              input.projectId,
+              google?.credentials,
+              'get_job_info',
+            ),
             input.jobId,
           ),
       ),
@@ -408,10 +423,14 @@ export class BigQueryToolset extends BaseToolset {
         ExecuteSqlSchema,
         async (input, toolContext, google) =>
           executeSqlQuery({
-            client: await this.client(input.projectId, google, 'execute_sql'),
+            client: await this.client(
+              input.projectId,
+              google?.credentials,
+              'execute_sql',
+            ),
             projectId: input.projectId,
             query: input.query,
-            settings: this.settingsOf(google),
+            settings: this.toolSettings,
             toolContext,
             dryRun: input.dryRun,
             callerId: 'execute_sql',
@@ -423,9 +442,9 @@ export class BigQueryToolset extends BaseToolset {
         ForecastSchema,
         async (input, toolContext, google) =>
           forecast(
-            await this.client(input.projectId, google, 'forecast'),
+            await this.client(input.projectId, google?.credentials, 'forecast'),
             input,
-            this.settingsOf(google),
+            this.toolSettings,
             toolContext,
           ),
       ),
@@ -437,9 +456,13 @@ export class BigQueryToolset extends BaseToolset {
         AnalyzeContributionSchema,
         async (input, toolContext, google) =>
           analyzeContribution(
-            await this.client(input.projectId, google, 'analyze_contribution'),
+            await this.client(
+              input.projectId,
+              google?.credentials,
+              'analyze_contribution',
+            ),
             input,
-            this.settingsOf(google),
+            this.toolSettings,
             toolContext,
           ),
       ),
@@ -450,9 +473,13 @@ export class BigQueryToolset extends BaseToolset {
         DetectAnomaliesSchema,
         async (input, toolContext, google) =>
           detectAnomalies(
-            await this.client(input.projectId, google, 'detect_anomalies'),
+            await this.client(
+              input.projectId,
+              google?.credentials,
+              'detect_anomalies',
+            ),
             input,
-            this.settingsOf(google),
+            this.toolSettings,
             toolContext,
           ),
       ),
@@ -463,7 +490,7 @@ export class BigQueryToolset extends BaseToolset {
           ' rows they read, and the answer.',
         AskDataInsightsSchema,
         (input, _toolContext, google) =>
-          askDataInsights(input, this.settingsOf(google), google?.credentials),
+          askDataInsights(input, this.toolSettings, google?.credentials),
       ),
       this.buildTool(
         'search_catalog',
@@ -472,7 +499,7 @@ export class BigQueryToolset extends BaseToolset {
         SearchCatalogSchema,
         async (input, _toolContext, google) =>
           this.withCatalogClient(google?.credentials, (client) =>
-            searchCatalog(client, input, this.settingsOf(google)),
+            searchCatalog(client, input, this.toolSettings),
           ),
       ),
     ];
