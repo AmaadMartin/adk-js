@@ -12,7 +12,10 @@ import {
   A2AMetadataKeys,
   AdkMetadataKeys,
   getA2AEventMetadata,
+  getA2AInvocationMetadata,
+  getA2ASessionMetadata,
   getAdkEventMetadata,
+  NEW_A2A_ADK_INTEGRATION_EXTENSION,
 } from '../../src/a2a/metadata_converter_utils.js';
 
 describe('metadata_converter_utils', () => {
@@ -188,6 +191,36 @@ describe('metadata_converter_utils', () => {
         [A2AMetadataKeys.TRANSFER_TO_AGENT]: undefined,
         [A2AMetadataKeys.IS_LONG_RUNNING]: false,
       });
+    });
+  });
+  describe('getA2AInvocationMetadata', () => {
+    const invocation = {
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 'test-session',
+    };
+
+    it('adds the integration extension flag to the session metadata', () => {
+      expect(getA2AInvocationMetadata(invocation)).toEqual({
+        [A2AMetadataKeys.APP_NAME]: 'test-app',
+        [A2AMetadataKeys.USER_ID]: 'test-user',
+        [A2AMetadataKeys.SESSION_ID]: 'test-session',
+        [NEW_A2A_ADK_INTEGRATION_EXTENSION]: {adk_agent_executor_v2: true},
+      });
+    });
+
+    it('spells the extension as the bare URL the peer matches on', () => {
+      expect(NEW_A2A_ADK_INTEGRATION_EXTENSION).toBe(
+        'https://google.github.io/adk-docs/a2a/a2a-extension/',
+      );
+    });
+
+    it('leaves the flag off getA2ASessionMetadata, which the client side calls', () => {
+      // `a2a_remote_agent.ts` stamps outbound requests with the session
+      // metadata. The flag describes the server, so it must not travel there.
+      expect(getA2ASessionMetadata(invocation)).not.toHaveProperty(
+        NEW_A2A_ADK_INTEGRATION_EXTENSION,
+      );
     });
   });
 });
