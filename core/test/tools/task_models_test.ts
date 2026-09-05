@@ -17,7 +17,6 @@ import {InputValidationError, Logger, setLogger} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   asTaskRequest,
-  parseDefaultTaskInput,
   parseTaskRequest,
   parseTaskResult,
 } from '../../src/tools/task_models.js';
@@ -131,57 +130,6 @@ describe('parseTaskResult', () => {
 
     expect(Object.isFrozen(result)).toBe(true);
     expect(() => Object.assign(result, {output: 6})).toThrow(TypeError);
-  });
-});
-
-describe('parseDefaultTaskInput', () => {
-  it('accepts an empty payload', () => {
-    expect(parseDefaultTaskInput({})).toEqual({});
-  });
-
-  it('leaves an absent field absent rather than setting it to undefined', () => {
-    const parsed = parseDefaultTaskInput({goal: 'g'});
-
-    expect('background' in parsed).toBe(false);
-  });
-
-  it('accepts both fields', () => {
-    expect(parseDefaultTaskInput({goal: 'g', background: 'b'})).toEqual({
-      goal: 'g',
-      background: 'b',
-    });
-  });
-
-  it('normalizes a null field to undefined', () => {
-    const parsed = parseDefaultTaskInput({goal: null, background: 'b'});
-
-    expect(parsed.goal).toBeUndefined();
-    expect(parsed.background).toBe('b');
-  });
-
-  it('rejects an unknown key', () => {
-    expect(() => parseDefaultTaskInput({nope: 1})).toThrow(
-      InputValidationError,
-    );
-  });
-
-  it('rejects a goal that is not a string', () => {
-    expect(() => parseDefaultTaskInput({goal: 1})).toThrow(
-      'goal must be a string.',
-    );
-  });
-
-  it('rejects a background that is not a string', () => {
-    expect(() => parseDefaultTaskInput({background: 1})).toThrow(
-      'background must be a string.',
-    );
-  });
-
-  it('returns a frozen input', () => {
-    const parsed = parseDefaultTaskInput({goal: 'g'});
-
-    expect(Object.isFrozen(parsed)).toBe(true);
-    expect(() => Object.assign(parsed, {goal: 'other'})).toThrow(TypeError);
   });
 });
 

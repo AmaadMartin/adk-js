@@ -19,25 +19,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Names the received type for a diagnostic message.
- *
- * `typeof` reports `'object'` for both `null` and an array, which is the case a
- * caller most needs to tell apart.
- *
- * @param value The value to name.
- * @returns The type name, mirroring Python's `type(value).__name__`.
- */
-function typeNameOf(value: unknown): string {
-  if (value === null) {
-    return 'null';
-  }
-  if (Array.isArray(value)) {
-    return 'Array';
-  }
-  return typeof value;
-}
-
-/**
  * Renames the top-level `agent_name` key to `agentName`, so the spelling
  * adk-python's `model_dump()` writes validates here.
  *
@@ -72,22 +53,6 @@ export interface TaskResult {
   readonly output: unknown;
 }
 
-/**
- * Default input shape for a task agent that declares no input schema.
- *
- * This is the `goal`/`background` pair from adk-python's `_task_models.py`. It
- * is not the single-`request`-string `_DefaultTaskInput` that
- * `tools/agent_tool.py` declares; those are two distinct models in the
- * reference, and adk-js mirrors the other one as `DEFAULT_TASK_INPUT_SCHEMA` in
- * `agent_tool.ts`.
- */
-export interface DefaultTaskInput {
-  /** The goal or objective for the task agent. */
-  readonly goal?: string;
-  /** Additional background context for the task agent. */
-  readonly background?: string;
-}
-
 const taskRequestSchema = z.preprocess(
   normalizeAgentNameKey,
   z.strictObject({
@@ -102,17 +67,24 @@ const taskResultSchema = z.strictObject({
   output: z.unknown().nonoptional('output is required.'),
 });
 
-/** `Optional[str] = None` in the reference: absent, null and a string all pass. */
-const optionalText = (field: string) =>
-  z
-    .string({error: `${field} must be a string.`})
-    .nullish()
-    .transform((value) => value ?? undefined);
-
-const defaultTaskInputSchema = z.strictObject({
-  goal: optionalText('goal'),
-  background: optionalText('background'),
-});
+/**
+ * Validates a value against a schema and freezes the result.
+ *
+ * @param schema The schema to validate against.
+ * @param value The value to validate.
+ * @returns A frozen payload. A later write to it throws a `TypeError`.
+ * @throws InputValidationError Carrying the first issue the schema reports.
+ */
+function parseOrThrow<T extends object>(
+  schema: z.ZodType<T>,
+  value: unknown,
+): Readonly<T> {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new InputValidationError(parsed.error.issues[0].message);
+  }
+  return Object.freeze(parsed.data);
+}
 
 /**
  * Validates a task delegation payload that arrives as `unknown`.
@@ -121,15 +93,11 @@ const defaultTaskInputSchema = z.strictObject({
  * alongside `agentName`. The keys inside `input` are never rewritten.
  *
  * @param value The value to validate.
- * @returns A frozen request. A later write to it throws a `TypeError`.
+ * @returns A frozen request.
  * @throws InputValidationError If the value is not a valid task request.
  */
 export function parseTaskRequest(value: unknown): TaskRequest {
-  const parsed = taskRequestSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new InputValidationError(parsed.error.issues[0].message);
-  }
-  return Object.freeze(parsed.data);
+  return parseOrThrow(taskRequestSchema, value);
 }
 
 /**
@@ -139,30 +107,11 @@ export function parseTaskRequest(value: unknown): TaskRequest {
  * must be present, and its value may be anything including `null`.
  *
  * @param value The value to validate.
- * @returns A frozen result. A later write to it throws a `TypeError`.
+ * @returns A frozen result.
  * @throws InputValidationError If the value is not a valid task result.
  */
 export function parseTaskResult(value: unknown): TaskResult {
-  const parsed = taskResultSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new InputValidationError(parsed.error.issues[0].message);
-  }
-  return Object.freeze(parsed.data);
-}
-
-/**
- * Validates a default task input payload that arrives as `unknown`.
- *
- * @param value The value to validate.
- * @returns A frozen input. A later write to it throws a `TypeError`.
- * @throws InputValidationError If the value is not a valid default task input.
- */
-export function parseDefaultTaskInput(value: unknown): DefaultTaskInput {
-  const parsed = defaultTaskInputSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new InputValidationError(parsed.error.issues[0].message);
-  }
-  return Object.freeze(parsed.data);
+  return parseOrThrow(taskResultSchema, value);
 }
 
 /**
@@ -180,8 +129,10 @@ export function parseDefaultTaskInput(value: unknown): DefaultTaskInput {
  */
 export function asTaskRequest(value: unknown): TaskRequest {
   if (!isRecord(value)) {
+    const typeName =
+      value === null ? 'null' : Array.isArray(value) ? 'Array' : typeof value;
     logger.error(
-      `Unexpected type for TaskRequest: ${typeNameOf(value)}. Expected an object.`,
+      `Unexpected type for TaskRequest: ${typeName}. Expected an object.`,
     );
   }
   return parseTaskRequest(value);
