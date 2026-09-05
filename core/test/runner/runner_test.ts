@@ -17,6 +17,7 @@ import {
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
+  RunConfig,
   Runner,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
@@ -1513,5 +1514,246 @@ describe('Runner reserved function call rejection', () => {
     });
 
     expect(error).toBeUndefined();
+  });
+});
+
+/** Emits one model event that already carries its own custom metadata. */
+class StampingAgent extends LlmAgent {
+  constructor(
+    name: string,
+    private readonly eventMetadata: Record<string, unknown>,
+  ) {
+    super({name, model: 'gemini-2.5-flash'});
+  }
+
+  protected override async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'Test LLM response'}]},
+      customMetadata: this.eventMetadata,
+    });
+  }
+}
+
+/** Records the metadata each event carries when the on-event callback runs. */
+class MetadataObservingPlugin extends BasePlugin {
+  constructor(
+    private readonly seen: Array<Record<string, unknown> | undefined>,
+  ) {
+    super('metadata_observing_plugin');
+  }
+
+  override async onEventCallback({
+    event,
+  }: {
+    invocationContext: InvocationContext;
+    event: Event;
+  }): Promise<undefined> {
+    this.seen.push(event.customMetadata);
+    return undefined;
+  }
+}
+
+describe('Runner runConfig.customMetadata', () => {
+  let sessionService: InMemorySessionService;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+  });
+
+  function createRunnerFor(agent: BaseAgent): Runner {
+    return new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+    });
+  }
+
+  async function run(
+    runner: Runner,
+    runConfig: Partial<RunConfig>,
+  ): Promise<Event[]> {
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      runConfig,
+    })) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  it('stamps the metadata on every event the run yields', async () => {
+    const runner = createRunnerFor(new MockLlmAgent('test_agent'));
+
+    const events = await run(runner, {customMetadata: {tenant: 'acme'}});
+
+    expect(events).not.toHaveLength(0);
+    for (const event of events) {
+      expect(event.customMetadata).toEqual({tenant: 'acme'});
+    }
+  });
+
+  it('stamps the metadata on the persisted user event', async () => {
+    const runner = createRunnerFor(new MockLlmAgent('test_agent'));
+
+    await run(runner, {customMetadata: {tenant: 'acme'}});
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    const userEvent = session!.events[0];
+    expect(userEvent.author).toBe('user');
+    expect(userEvent.customMetadata).toEqual({tenant: 'acme'});
+  });
+
+  it("keeps the event's own value for a key the run also sets", async () => {
+    const runner = createRunnerFor(
+      new StampingAgent('test_agent', {tenant: 'from-event'}),
+    );
+
+    const events = await run(runner, {
+      customMetadata: {tenant: 'from-run-config', region: 'eu'},
+    });
+
+    const modelEvent = events.find((event) => event.author === 'test_agent');
+    expect(modelEvent?.customMetadata).toEqual({
+      tenant: 'from-event',
+      region: 'eu',
+    });
+  });
+
+  it('leaves the events untouched when the metadata is empty', async () => {
+    const runner = createRunnerFor(new MockLlmAgent('test_agent'));
+
+    const events = await run(runner, {customMetadata: {}});
+
+    for (const event of events) {
+      expect(event.customMetadata).toBeUndefined();
+    }
+  });
+
+  it('shows the merged metadata to an on-event plugin callback', async () => {
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    const plugin = new MetadataObservingPlugin(seen);
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+      plugins: [plugin],
+    });
+
+    await run(runner, {customMetadata: {tenant: 'acme'}});
+
+    expect(seen).not.toHaveLength(0);
+    for (const customMetadata of seen) {
+      expect(customMetadata).toEqual({tenant: 'acme'});
+    }
+  });
+
+  it('stamps the metadata on a before-run plugin early exit', async () => {
+    const plugin = new MockPlugin();
+    plugin.enableBeforeRunCallback = true;
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+      plugins: [plugin],
+    });
+
+    const events = await run(runner, {customMetadata: {tenant: 'acme'}});
+
+    const earlyExit = events.find((event) => event.author === 'model');
+    expect(earlyExit?.content?.parts?.[0]?.text).toBe(
+      MockPlugin.BEFORE_RUN_CALLBACK_MSG,
+    );
+    expect(earlyExit?.customMetadata).toEqual({tenant: 'acme'});
+  });
+
+  it('lets the runAsync customMetadata param win on the user event', async () => {
+    const runner = createRunnerFor(new MockLlmAgent('test_agent'));
+
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      runConfig: {customMetadata: {tenant: 'from-run-config'}},
+      customMetadata: {tenant: 'from-param'},
+    })) {
+      // drain
+    }
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    expect(session!.events[0].customMetadata).toEqual({tenant: 'from-param'});
+  });
+});
+
+describe('Runner runConfig.getSessionConfig', () => {
+  let sessionService: InMemorySessionService;
+  let runner: Runner;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new MockLlmAgent('test_agent'),
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+    });
+  });
+
+  it('forwards the config to the session lookup', async () => {
+    const getSessionSpy = vi.spyOn(sessionService, 'getSession');
+
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+      runConfig: {getSessionConfig: {numRecentEvents: 50}},
+    })) {
+      // drain
+    }
+
+    expect(getSessionSpy.mock.calls[0][0].config).toEqual({
+      numRecentEvents: 50,
+    });
+  });
+
+  it('leaves the config unset when the run does not ask for one', async () => {
+    const getSessionSpy = vi.spyOn(sessionService, 'getSession');
+
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: 'Hello'}]},
+    })) {
+      // drain
+    }
+
+    expect(getSessionSpy.mock.calls[0][0].config).toBeUndefined();
   });
 });

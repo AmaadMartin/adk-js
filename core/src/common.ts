@@ -66,7 +66,7 @@ export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
-export type {RunConfig} from './agents/run_config.js';
+export type {RunConfig, ToolThreadPoolConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {
@@ -266,6 +266,7 @@ export type {
   AppendEventRequest,
   CreateSessionRequest,
   DeleteSessionRequest,
+  GetOrCreateSessionRequest,
   GetSessionConfig,
   GetSessionRequest,
   ListSessionsRequest,
@@ -275,6 +276,12 @@ export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
+export {
+  ContentCapturingMode,
+  TelemetryConfig,
+  createTelemetryConfig,
+} from './telemetry/context.js';
+export type {TelemetryConfigParams} from './telemetry/context.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
