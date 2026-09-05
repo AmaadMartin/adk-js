@@ -41,6 +41,15 @@ export interface NodeState {
   runId?: string;
 
   /**
+   * The isolation scope every run of this node shares.
+   *
+   * Held across activations rather than derived per run: an event carries the
+   * scope it was written under, so a node that re-derived its scope would read
+   * none of its own earlier turns.
+   */
+  isolationScope?: string;
+
+  /**
    * The run ID of the parent node which dynamically scheduled this node run.
    */
   parentRunId?: string;

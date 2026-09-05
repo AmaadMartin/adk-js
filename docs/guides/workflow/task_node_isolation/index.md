@@ -19,10 +19,12 @@ reads. A scoped agent sees the unscoped history plus its own turns, and nothing
 a sibling wrote. Unscoped nodes are unaffected: they keep seeing the shared
 history, which still holds the user's messages and the output of every node.
 
-The scope is the node's full path and run, `<path>@<runId>` — for example
+The scope is the node's full path and first run, `<path>@<runId>` — for example
 `intake_flow.intake@1`. The path is included so two nested workflows that reuse
-a node name do not share a scope. The run id is included so a re-triggered node
-gets a new scope, which is what makes a retry a fresh conversation.
+a node name do not share a scope. The node then keeps that scope for every later
+activation, because an event is readable only inside the scope it was written
+under: a node that took a new scope on re-trigger would read none of its own
+turns.
 
 Only `task`-mode agent nodes get a scope automatically. A node that declares its
 own `isolationScope` keeps the one it declared.
@@ -79,9 +81,9 @@ const intake = new LlmAgent({
 
 ## Retries
 
-A graph that routes back to a task node runs it again under a new run id, so the
-second attempt does not read the first. The node still sees the unscoped
-history, which includes whatever the routing node said about the failure.
+A graph that routes back to a task node runs it again under the scope it already
+has, so the second attempt reads the first. It also sees the unscoped history,
+which includes whatever the routing node said about the failure.
 
 ```ts
 import {createEvent, DEFAULT_ROUTE, node, Workflow} from '@google/adk';
@@ -109,6 +111,12 @@ export const rootAgent = new Workflow({
 });
 ```
 
-The second run of `intake` is scoped `intake_flow.intake@2`. It reads the
-`No records for ...` message, because `check` is unscoped, but not its own
-earlier questions.
+The second run of `intake` stays in `intake_flow.intake@1`. It reads the
+`No records for ...` message, because `check` is unscoped, and its own earlier
+questions, so it can ask for something it has not asked for yet.
+
+adk-python differs here: it re-derives the scope per activation and compensates
+in its content filter, which drops untagged events and rebuilds the agent's
+opening turn. adk-js keeps untagged events shared and has no such rebuild, so it
+carries the scope forward instead. Both give the agent a whole conversation;
+adk-python restarts it on a retry and adk-js continues it.
