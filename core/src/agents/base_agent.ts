@@ -14,6 +14,7 @@ import {
   traceAgentInvocation,
   tracer,
 } from '../telemetry/tracing.js';
+import {validateIdentifierName} from '../utils/identifier_utils.js';
 import {BaseNode, BaseNodeConfig} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
 import {Context} from './context.js';
@@ -554,13 +555,7 @@ export abstract class BaseAgent<
  * @return The validated agent name.
  */
 function validateAgentName(name: string): string {
-  if (!isIdentifier(name)) {
-    throw new Error(
-      `Found invalid agent name: "${
-        name
-      }". Agent name must be a valid identifier. It should start with a letter (a-z, A-Z) or an underscore (_), and can only contain letters, digits (0-9), underscores, and hyphens.`,
-    );
-  }
+  validateIdentifierName('Agent', name);
 
   if (name === 'user') {
     throw new Error(
@@ -569,16 +564,6 @@ function validateAgentName(name: string): string {
   }
 
   return name;
-}
-
-/**
- * Checks if the given string is a valid identifier.
- *
- * @param str The string to check.
- * @return True if the string is a valid identifier, false otherwise.
- */
-function isIdentifier(str: string): boolean {
-  return /^[\p{ID_Start}$_][\p{ID_Continue}$_-]*$/u.test(str);
 }
 
 /**
