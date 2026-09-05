@@ -68,6 +68,8 @@ export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
+export {parseSequentialAgentYamlConfig} from './agents/sequential_agent_config.js';
+export type {SequentialAgentYamlConfig} from './agents/sequential_agent_config.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {
   getPendingUserInputRequests,
