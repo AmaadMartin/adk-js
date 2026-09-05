@@ -10,6 +10,11 @@ import {
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
 } from '../../events/event.js';
+import {
+  DEFAULT_MAX_VARCHAR_LENGTH,
+  DynamicJsonType,
+  PreciseTimestampType,
+} from './shared.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
 export const SCHEMA_VERSION_1_JSON = '1';
@@ -41,7 +46,7 @@ export class StorageMetadata {
   @PrimaryKey({type: 'string'})
   key!: string;
 
-  @Property({type: 'string'})
+  @Property({type: 'string', length: DEFAULT_MAX_VARCHAR_LENGTH})
   value!: string;
 }
 
@@ -54,11 +59,11 @@ export class StorageAppState {
   })
   appName!: string;
 
-  @Property({type: 'json'})
+  @Property({type: DynamicJsonType})
   state!: Record<string, unknown>;
 
   @Property({
-    type: 'datetime',
+    type: PreciseTimestampType,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -82,11 +87,11 @@ export class StorageUserState {
   })
   userId!: string;
 
-  @Property({type: 'json'})
+  @Property({type: DynamicJsonType})
   state!: Record<string, unknown>;
 
   @Property({
-    type: 'datetime',
+    type: PreciseTimestampType,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -115,18 +120,18 @@ export class StorageSession {
   })
   userId!: string;
 
-  @Property({type: 'json'})
+  @Property({type: DynamicJsonType})
   state!: Record<string, unknown>;
 
   @Property({
-    type: 'datetime',
+    type: PreciseTimestampType,
     fieldName: 'create_time',
     onCreate: () => new Date(),
   })
   createTime: Date = new Date();
 
   @Property({
-    type: 'datetime',
+    type: PreciseTimestampType,
     fieldName: 'update_time',
     onCreate: () => new Date(),
   })
@@ -164,7 +169,7 @@ export class StorageEvent {
   @Property({type: 'string', fieldName: 'invocation_id'})
   invocationId!: string;
 
-  @Property({type: 'datetime'})
+  @Property({type: PreciseTimestampType})
   timestamp!: Date;
 
   @Property({type: CamelCaseToSnakeCaseJsonType, fieldName: 'event_data'})
