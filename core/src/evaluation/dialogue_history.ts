@@ -9,8 +9,9 @@
  * prompt carries.
  */
 
-import {Content, Part} from '@google/genai';
+import {Part} from '@google/genai';
 import {Invocation, isInvocationEvents} from './eval_case.js';
+import {getTextFromContent} from './evaluator.js';
 
 /** The conversation context the multi-turn judge prompt carries. */
 export interface DialogueHistory {
@@ -37,13 +38,6 @@ function toPythonJson(value: unknown): string {
   return JSON.stringify(value, null, 2)
     .replace(/,\n\s*/g, ', ')
     .replace(/\n\s*/g, '');
-}
-
-/** Returns the text of every part that carries some, in order. */
-function textsOf(content?: Content): string[] {
-  return (content?.parts ?? []).flatMap((part) =>
-    part.text ? [part.text] : [],
-  );
 }
 
 /** Returns the transcript lines one part contributes, if any. */
@@ -80,9 +74,9 @@ function eventLines(invocation: Invocation, turn: number): string[] {
       event.author?.toLowerCase() === 'user'
         ? 'USER'
         : `AGENT (${event.author})`;
-    const texts = textsOf(event.content);
-    if (texts.length > 0) {
-      lines.push(`${role} TURN ${turn}: ${texts.join(' ')}`);
+    const text = getTextFromContent(event.content, ' ');
+    if (text) {
+      lines.push(`${role} TURN ${turn}: ${text}`);
     }
     for (const part of event.content?.parts ?? []) {
       lines.push(...toolLinesOf(part, role, turn));
@@ -109,17 +103,17 @@ function invocationLines(invocation: Invocation, turn: number): string[] {
 
   // A single space, not a newline: the transcript is one line per turn, and
   // the two runtimes have to build byte-identical judge prompts.
-  const userTexts = textsOf(invocation.userContent);
-  if (userTexts.length > 0) {
-    lines.push(`USER TURN ${turn}: ${userTexts.join(' ')}`);
+  const userText = getTextFromContent(invocation.userContent, ' ');
+  if (userText) {
+    lines.push(`USER TURN ${turn}: ${userText}`);
   }
 
   lines.push(...eventLines(invocation, turn));
 
-  const finalTexts = textsOf(invocation.finalResponse);
-  if (finalTexts.length > 0) {
+  const finalText = getTextFromContent(invocation.finalResponse, ' ');
+  if (finalText) {
     const author = finalResponseAuthor(invocation);
-    lines.push(`AGENT (${author}) TURN ${turn}: ${finalTexts.join(' ')}`);
+    lines.push(`AGENT (${author}) TURN ${turn}: ${finalText}`);
   }
 
   return lines;

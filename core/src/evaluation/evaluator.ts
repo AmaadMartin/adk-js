@@ -197,9 +197,12 @@ export function getEvalStatus(
   return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
 }
 
-/** Joins the text parts of a content with newlines. */
-export function getTextFromContent(content?: Content): string {
+/** Joins the text parts of a content, with newlines unless told otherwise. */
+export function getTextFromContent(
+  content?: Content,
+  separator = '\n',
+): string {
   return (content?.parts ?? [])
     .flatMap((part) => (part.text ? [part.text] : []))
-    .join('\n');
+    .join(separator);
 }
