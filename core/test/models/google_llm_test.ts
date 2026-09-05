@@ -6,20 +6,28 @@
 
 import {
   Gemini,
+  geminiInitParams,
   GeminiParams,
+  isResourceExhaustedError,
   LlmRequest,
   LlmResponse,
-  geminiInitParams,
   version,
 } from '@google/adk';
 import {
+  Environment,
   GenerateContentResponse,
   GoogleGenAI,
+  HarmBlockThreshold,
+  HarmCategory,
   HttpOptions,
+  LiveConnectConfig,
   Modality,
   Part,
+  SafetySetting,
 } from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {RESOURCE_EXHAUSTED_MITIGATION_MESSAGE} from '../../src/errors/resource_exhausted_error.js';
+import {httpOptionsOf} from './http_options_test_utils.js';
 
 vi.mock('@google/genai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/genai')>();
@@ -34,6 +42,9 @@ vi.mock('@google/genai', async (importOriginal) => {
       models: {
         generateContentStream: vi.fn(),
         generateContent: vi.fn(),
+      },
+      interactions: {
+        create: vi.fn().mockResolvedValue({}),
       },
       live: {
         connect: vi.fn().mockResolvedValue({
@@ -57,6 +68,63 @@ class TestGemini extends Gemini {
   }
 }
 
+const BLOCK_NONE: SafetySetting[] = [
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+];
+const BLOCK_ONLY_HIGH: SafetySetting[] = [
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH,
+  },
+];
+
+/** Reads the live connect config of the most recent connect call. */
+function connectConfig(llm: Gemini): LiveConnectConfig {
+  const connect = vi.mocked(llm.liveApiClient.live.connect);
+  return connect.mock.lastCall![0].config as LiveConnectConfig;
+}
+
+function makeRequest(overrides: Partial<LlmRequest> = {}): LlmRequest {
+  return {
+    model: 'gemini-2.5-flash',
+    contents: [{role: 'user', parts: [{text: 'hello'}]}],
+    liveConnectConfig: {},
+    toolsDict: {},
+    ...overrides,
+  };
+}
+
+/** Drains a response stream and returns whatever it threw, or `undefined`. */
+async function captureError(
+  generator: AsyncGenerator<LlmResponse, void>,
+): Promise<unknown> {
+  try {
+    for await (const response of generator) {
+      expect(response).toBeDefined();
+    }
+  } catch (e: unknown) {
+    return e;
+  }
+  return undefined;
+}
+
+/**
+ * Runs a request to completion against a stub that answers successfully, so a
+ * test can assert on the request the model built.
+ */
+async function runRequest(llm: Gemini, request: LlmRequest): Promise<void> {
+  llm.apiClient.models.generateContent = vi
+    .fn()
+    .mockResolvedValue(new GenerateContentResponse());
+
+  expect(await captureError(llm.generateContentAsync(request, false))).toBe(
+    undefined,
+  );
+}
+
 describe('GoogleLlm', () => {
   const clearEnv = () => {
     delete process.env['GOOGLE_CLOUD_PROJECT'];
@@ -67,6 +135,7 @@ describe('GoogleLlm', () => {
     delete process.env['GOOGLE_GENAI_USE_VERTEXAI'];
     delete process.env['GOOGLE_GENAI_USE_ENTERPRISE'];
     delete process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'];
+    delete process.env['GOOGLE_GENAI_API_VERSION'];
   };
 
   beforeEach(clearEnv);
@@ -755,6 +824,597 @@ describe('GoogleLlm', () => {
         model: 'gemini-3.1-flash-live-preview',
       });
       expect(llm.liveApiVersion).toBe('v1alpha');
+    });
+  });
+
+  describe('supportedModels', () => {
+    function matches(model: string): boolean {
+      return Gemini.supportedModels.some((pattern) =>
+        typeof pattern === 'string'
+          ? pattern === model
+          : new RegExp(`^${pattern.source}$`).test(model),
+      );
+    }
+
+    it('matches a Gemma 4 model', () => {
+      expect(matches('gemma-4-27b-it')).toBe(true);
+    });
+
+    it('matches a model optimizer model', () => {
+      expect(matches('model-optimizer-exp-04-09')).toBe(true);
+    });
+
+    it('does not match a Gemma 3 model', () => {
+      expect(matches('gemma-3-27b-it')).toBe(false);
+    });
+  });
+
+  describe('api version and base URL', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('takes the API version from a Google base URL', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
+      });
+
+      const options = httpOptionsOf(llm.apiClient);
+
+      expect(options.baseUrl).toBe(
+        'https://generativelanguage.googleapis.com/',
+      );
+      expect(options.apiVersion).toBe('v1alpha');
+    });
+
+    it('leaves the API version unset when nothing is configured', () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      expect(httpOptionsOf(llm.apiClient).apiVersion).toBeUndefined();
+    });
+
+    it('takes the API version from the apiVersion field', () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+
+      expect(httpOptionsOf(llm.apiClient).apiVersion).toBe('v1');
+    });
+
+    it('takes the API version from the environment variable', () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1';
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      expect(httpOptionsOf(llm.apiClient).apiVersion).toBe('v1');
+    });
+
+    it('prefers the apiVersion field over the environment variable', () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1beta';
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+
+      expect(httpOptionsOf(llm.apiClient).apiVersion).toBe('v1');
+    });
+
+    it('does not read the environment variable in a browser', () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1';
+      vi.stubGlobal('window', {navigator: {userAgent: 'Mozilla/5.0'}});
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      expect(httpOptionsOf(llm.apiClient).apiVersion).toBeUndefined();
+    });
+
+    it('prefers the base URL version over the apiVersion field', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        apiVersion: 'v1',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
+      });
+
+      expect(httpOptionsOf(llm.apiClient).apiVersion).toBe('v1alpha');
+    });
+
+    it('keeps a custom base URL path and leaves the version unset', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://proxy.example.com/gemini/v1alpha',
+      });
+
+      const options = httpOptionsOf(llm.apiClient);
+
+      expect(options.baseUrl).toBe('https://proxy.example.com/gemini/v1alpha');
+      expect(options.apiVersion).toBeUndefined();
+    });
+
+    it('ignores the apiVersion field for the live endpoint', () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+
+      expect(llm.liveApiVersion).toBe('v1alpha');
+    });
+
+    it('ignores the environment variable for the live endpoint', () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1';
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      expect(llm.liveApiVersion).toBe('v1alpha');
+    });
+
+    it('takes the live API version from a Google base URL', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      });
+
+      expect(llm.liveApiVersion).toBe('v1beta');
+      expect(httpOptionsOf(llm.liveApiClient).baseUrl).toBe(
+        'https://generativelanguage.googleapis.com/',
+      );
+    });
+  });
+
+  describe('client injection and clientKwargs', () => {
+    it('uses the injected client for both endpoints', () => {
+      const injected = new GoogleGenAI({apiKey: 'injected'});
+      const constructorSpy = vi.mocked(GoogleGenAI);
+      constructorSpy.mockClear();
+
+      const llm = new TestGemini({apiKey: 'test-key', client: injected});
+
+      expect(llm.apiClient).toBe(injected);
+      expect(llm.liveApiClient).toBe(injected);
+      expect(constructorSpy).not.toHaveBeenCalled();
+    });
+
+    it('ignores clientKwargs when a client is injected', () => {
+      const injected = new GoogleGenAI({apiKey: 'injected'});
+
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        client: injected,
+        clientKwargs: {location: 'global'},
+      });
+
+      expect(llm.apiClient).toBe(injected);
+    });
+
+    it('lets clientKwargs override the computed options on both clients', () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const withKwargs = new TestGemini({
+        apiKey: 'test-key',
+        clientKwargs: {apiKey: 'override', location: 'global'},
+      });
+      const constructorSpy = vi.mocked(GoogleGenAI);
+      constructorSpy.mockClear();
+
+      expect(llm.apiClient).toBeDefined();
+      expect(constructorSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({apiKey: 'test-key'}),
+      );
+
+      expect(withKwargs.apiClient).toBeDefined();
+      expect(constructorSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({apiKey: 'override', location: 'global'}),
+      );
+
+      expect(withKwargs.liveApiClient).toBeDefined();
+      expect(constructorSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({apiKey: 'override', location: 'global'}),
+      );
+    });
+
+    it('sets enterprise for a fine-tuned endpoint model on both clients', () => {
+      const llm = new TestGemini({
+        model: 'projects/p/locations/l/endpoints/e',
+        vertexai: true,
+        project: 'p',
+        location: 'l',
+      });
+      const constructorSpy = vi.mocked(GoogleGenAI);
+      constructorSpy.mockClear();
+
+      expect(llm.apiClient).toBeDefined();
+      expect(constructorSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({enterprise: true}),
+      );
+
+      expect(llm.liveApiClient).toBeDefined();
+      expect(constructorSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({enterprise: true}),
+      );
+    });
+
+    it('does not set enterprise for a plain model name', () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const constructorSpy = vi.mocked(GoogleGenAI);
+      constructorSpy.mockClear();
+
+      expect(llm.apiClient).toBeDefined();
+      expect(constructorSpy).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({enterprise: true}),
+      );
+    });
+  });
+
+  describe('retryOptions', () => {
+    it('applies to the non-live client only', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        retryOptions: {attempts: 3},
+      });
+
+      expect(httpOptionsOf(llm.apiClient).retryOptions).toEqual({attempts: 3});
+      expect(httpOptionsOf(llm.liveApiClient).retryOptions).toBeUndefined();
+    });
+  });
+
+  describe('resource exhausted errors', () => {
+    function quotaError(): Error {
+      return Object.assign(new Error('Quota exceeded for requests'), {
+        status: 429,
+      });
+    }
+
+    it.each([false, true])(
+      'wraps a 429 rejection with the mitigation guide (stream: %s)',
+      async (stream) => {
+        const llm = new TestGemini({apiKey: 'test-key'});
+        const rejection = quotaError();
+        llm.apiClient.models.generateContent = vi
+          .fn()
+          .mockRejectedValue(rejection);
+        llm.apiClient.models.generateContentStream = vi
+          .fn()
+          .mockRejectedValue(rejection);
+
+        const error = await captureError(
+          llm.generateContentAsync(makeRequest(), stream),
+        );
+
+        if (!isResourceExhaustedError(error)) {
+          expect.fail('expected a ResourceExhaustedError');
+        }
+        expect(error.message).toContain(RESOURCE_EXHAUSTED_MITIGATION_MESSAGE);
+        expect(error.message).toContain('Quota exceeded for requests');
+        expect(error.status).toBe(429);
+        expect(error.cause).toBe(rejection);
+      },
+    );
+
+    it.each([false, true])(
+      'rethrows a non-429 rejection unchanged (stream: %s)',
+      async (stream) => {
+        const llm = new TestGemini({apiKey: 'test-key'});
+        const rejection = Object.assign(new Error('Server error'), {
+          status: 500,
+        });
+        llm.apiClient.models.generateContent = vi
+          .fn()
+          .mockRejectedValue(rejection);
+        llm.apiClient.models.generateContentStream = vi
+          .fn()
+          .mockRejectedValue(rejection);
+
+        const error = await captureError(
+          llm.generateContentAsync(makeRequest(), stream),
+        );
+
+        expect(error).toBe(rejection);
+        expect(isResourceExhaustedError(error)).toBe(false);
+      },
+    );
+
+    it('wraps a 429 raised part way through a stream', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const rejection = quotaError();
+      llm.apiClient.models.generateContentStream = vi
+        .fn()
+        .mockImplementation(async function* () {
+          yield {candidates: [{content: {parts: [{text: 'partial'}]}}]};
+          throw rejection;
+        });
+
+      const error = await captureError(
+        llm.generateContentAsync(makeRequest(), true),
+      );
+
+      expect(isResourceExhaustedError(error)).toBe(true);
+    });
+  });
+
+  describe('connect speech config', () => {
+    it('uses the model speech config when the request has none', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        speechConfig: {languageCode: 'en-US'},
+      });
+
+      await llm.connect(makeRequest({config: {}}));
+
+      expect(connectConfig(llm).speechConfig).toEqual({languageCode: 'en-US'});
+    });
+
+    it('keeps the request speech config when the model has none', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(
+        makeRequest({
+          config: {},
+          liveConnectConfig: {speechConfig: {languageCode: 'fr-FR'}},
+        }),
+      );
+
+      expect(connectConfig(llm).speechConfig).toEqual({languageCode: 'fr-FR'});
+    });
+
+    it('lets the model speech config override the request', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        speechConfig: {languageCode: 'en-US'},
+      });
+
+      await llm.connect(
+        makeRequest({
+          config: {},
+          liveConnectConfig: {speechConfig: {languageCode: 'fr-FR'}},
+        }),
+      );
+
+      expect(connectConfig(llm).speechConfig).toEqual({languageCode: 'en-US'});
+    });
+
+    it('leaves the speech config unset when neither side has one', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(makeRequest({config: {}}));
+
+      expect(connectConfig(llm).speechConfig).toBeUndefined();
+    });
+  });
+
+  describe('connect config forwarding', () => {
+    it('merges the tracking headers and live API version into the request http options', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      });
+      const request = makeRequest({
+        config: {},
+        liveConnectConfig: {httpOptions: {}},
+      });
+
+      await llm.connect(request);
+
+      const httpOptions = request.liveConnectConfig.httpOptions;
+      expect(httpOptions?.headers).toMatchObject(llm.getTrackingHeaders());
+      expect(httpOptions?.apiVersion).toBe('v1beta');
+    });
+
+    it('sends an empty system instruction part when none is set', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(makeRequest({config: {}}));
+
+      expect(connectConfig(llm).systemInstruction).toEqual({
+        role: 'system',
+        parts: [{text: undefined}],
+      });
+    });
+
+    it('forwards the thinking config', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(
+        makeRequest({config: {thinkingConfig: {includeThoughts: true}}}),
+      );
+
+      expect(connectConfig(llm).thinkingConfig).toEqual({
+        includeThoughts: true,
+      });
+    });
+
+    it('leaves the thinking config unset when the request has none', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(makeRequest({config: {}}));
+
+      expect(connectConfig(llm).thinkingConfig).toBeUndefined();
+    });
+
+    it('forwards the safety settings', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(makeRequest({config: {safetySettings: BLOCK_NONE}}));
+
+      expect(connectConfig(llm).safetySettings).toEqual(BLOCK_NONE);
+    });
+
+    it('keeps safety settings already on the live config', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(
+        makeRequest({
+          config: {safetySettings: BLOCK_NONE},
+          liveConnectConfig: {safetySettings: BLOCK_ONLY_HIGH},
+        }),
+      );
+
+      expect(connectConfig(llm).safetySettings).toEqual(BLOCK_ONLY_HIGH);
+    });
+
+    it('keeps an explicitly empty live safety settings list', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(
+        makeRequest({
+          config: {safetySettings: BLOCK_NONE},
+          liveConnectConfig: {safetySettings: []},
+        }),
+      );
+
+      expect(connectConfig(llm).safetySettings).toEqual([]);
+    });
+
+    it('leaves the safety settings unset when neither side has any', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      await llm.connect(makeRequest({config: {}}));
+
+      expect(connectConfig(llm).safetySettings).toBeUndefined();
+    });
+  });
+
+  describe('preprocessRequest', () => {
+    function docxRequest(): LlmRequest {
+      return makeRequest({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {text: 'look at this'},
+              {
+                inlineData: {
+                  mimeType:
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  data: Buffer.from('binary').toString('base64'),
+                },
+              },
+            ],
+          },
+        ],
+        config: {},
+      });
+    }
+
+    it('converts unsupported inline data into a text part', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = docxRequest();
+
+      await runRequest(llm, request);
+
+      const parts = request.contents[0].parts;
+      expect(parts?.[0]).toEqual({text: 'look at this'});
+      expect(parts?.[1].inlineData).toBeUndefined();
+      expect(parts?.[1].text).toContain('inline-file');
+    });
+
+    it('leaves a supported inline part alone', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const inlineData = {
+        mimeType: 'image/png',
+        data: Buffer.from('png').toString('base64'),
+      };
+      const request = makeRequest({
+        contents: [{role: 'user', parts: [{inlineData}]}],
+        config: {},
+      });
+
+      await runRequest(llm, request);
+
+      expect(request.contents[0].parts?.[0].inlineData).toEqual(inlineData);
+    });
+
+    it('leaves a content that has no parts alone', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = makeRequest({
+        contents: [{role: 'user'}],
+        config: {},
+      });
+
+      await runRequest(llm, request);
+
+      expect(request.contents[0].parts).toBeUndefined();
+    });
+
+    it('sanitizes the request before the interactions API call', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        useInteractionsApi: true,
+      });
+      const request = docxRequest();
+
+      await runRequest(llm, request);
+
+      expect(request.contents[0].parts?.[1].inlineData).toBeUndefined();
+      expect(llm.apiClient.interactions.create).toHaveBeenCalled();
+    });
+
+    it('clears the system instruction when a computer use tool is present', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = makeRequest({
+        config: {
+          systemInstruction: 'be careful',
+          tools: [
+            {computerUse: {environment: Environment.ENVIRONMENT_BROWSER}},
+          ],
+        },
+      });
+
+      await runRequest(llm, request);
+
+      expect(request.config?.systemInstruction).toBeUndefined();
+    });
+
+    it('keeps the system instruction when no tool uses computer use', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = makeRequest({
+        config: {systemInstruction: 'be careful', tools: [{googleSearch: {}}]},
+      });
+
+      await runRequest(llm, request);
+
+      expect(request.config?.systemInstruction).toBe('be careful');
+    });
+
+    it('keeps the system instruction when the request has no tools', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = makeRequest({config: {systemInstruction: 'be careful'}});
+
+      await runRequest(llm, request);
+
+      expect(request.config?.systemInstruction).toBe('be careful');
+    });
+
+    it('survives a request with no config', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = makeRequest();
+      expect(request.config).toBeUndefined();
+
+      await runRequest(llm, request);
+
+      expect(request.config?.systemInstruction).toBeUndefined();
+    });
+  });
+
+  describe('per-request http options', () => {
+    it('creates the http options and merges the tracking headers', async () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+      const request = makeRequest({config: {}});
+
+      await runRequest(llm, request);
+
+      expect(request.config?.httpOptions?.headers).toMatchObject(
+        llm.getTrackingHeaders(),
+      );
+      expect(request.config?.httpOptions?.apiVersion).toBe('v1');
+    });
+
+    it('keeps an API version the request already set', async () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+      const request = makeRequest({
+        config: {httpOptions: {apiVersion: 'v1beta'}},
+      });
+
+      await runRequest(llm, request);
+
+      expect(request.config?.httpOptions?.apiVersion).toBe('v1beta');
+    });
+
+    it('does not read the environment variable on the request path', async () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1';
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = makeRequest({config: {}});
+
+      await runRequest(llm, request);
+
+      expect(request.config?.httpOptions?.apiVersion).toBeUndefined();
     });
   });
 });
