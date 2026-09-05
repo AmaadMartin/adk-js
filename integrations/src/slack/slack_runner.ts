@@ -61,8 +61,8 @@ export interface HandleSlackMessageParams {
  * new message in the same thread. A run that produces no text at all deletes
  * the placeholder instead of leaving it behind.
  *
- * Exported so it can be driven from a listener the caller registers
- * themselves, and so it is testable without reaching into {@link SlackRunner}.
+ * Module-level rather than a method, because it needs no instance state:
+ * {@link SlackRunner} hands it everything it reads.
  *
  * @param params The runner, Slack client, event and `say` for this message.
  */

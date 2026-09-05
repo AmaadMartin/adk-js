@@ -25,46 +25,12 @@ between a Slack conversation and an ADK session, and the shape of the reply.
 
 ## Get started
 
-Install the optional peer dependency:
+The [module README](../../../../integrations/src/slack/README.md) owns the install command, the
+Slack app setup and a runnable example. Start there and come back here for how
+the runner behaves once it is connected.
 
-```bash
-npm install @google/adk-integrations @slack/bolt
-```
-
-Build the runner, create a session for the conversation, and open the connection:
-
-```typescript
-import {InMemorySessionService, LlmAgent, Runner} from '@google/adk';
-import {SlackRunner} from '@google/adk-integrations';
-import {App} from '@slack/bolt';
-
-const agent = new LlmAgent({name: 'slack_agent', model: 'gemini-2.5-flash'});
-const sessionService = new InMemorySessionService();
-const runner = new Runner({appName: 'slack_agent', agent, sessionService});
-
-// Bolt builds its default HTTP receiver during construction and rejects a
-// missing signing secret, even though Socket Mode never uses one.
-const slackApp = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-});
-
-// SlackRunner does not create sessions, so create one for each conversation
-// you want answered, keyed the way the runner keys it.
-await sessionService.getOrCreateSession({
-  appName: 'slack_agent',
-  userId: 'U01234567',
-  sessionId: 'C01234567-1700000000.123456',
-});
-
-const slackRunner = new SlackRunner({runner, slackApp});
-await slackRunner.start(process.env.SLACK_APP_TOKEN!);
-```
-
-`start()` opens a Socket Mode connection, so your process needs no public URL.
-The app-level token starts with `xapp-` and needs the `connections:write`
-scope. For the Slack app setup — scopes, event subscriptions, tokens — see the
-[module README](../../../../integrations/src/slack/README.md).
+One thing that README does not say: `start()` dials out to Slack over Socket
+Mode, so the process needs no public URL and no inbound webhook route.
 
 ## Which messages the agent answers
 
@@ -82,21 +48,9 @@ threads are not supported.
 
 ## Sessions
 
-One Slack thread maps onto one ADK session. The session id is the channel id
-and the thread timestamp, joined with a hyphen:
-
-```
-C0123456789-1700000000.123456
-```
-
-The thread timestamp is `thread_ts` when the message is a threaded reply, and
-the message's own `ts` otherwise. When the event carries neither, the session
-id is the bare channel id.
-
-**You create the session.** `SlackRunner` does not, because `Runner.runAsync`
-does not: it throws `Session not found: <id>` for an unknown id, and the
-runner reports that error in the thread. Create the session before the
-conversation's first message, keyed the same way.
+One Slack thread maps onto one ADK session, and the caller creates it. The
+README's Session Management section gives the keying rules and what happens
+when the session is missing.
 
 ## What the user sees
 

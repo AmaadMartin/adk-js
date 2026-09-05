@@ -8,9 +8,10 @@
 // key, the empty-run path and the lifecycle methods.
 
 import {Event, InMemorySessionService, LlmAgent, Runner} from '@google/adk';
-import {handleSlackMessage, SlackRunner} from '@google/adk-integrations';
+import {SlackRunner} from '@google/adk-integrations';
 import {App} from '@slack/bolt';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {handleSlackMessage} from '../../src/slack/slack_runner.js';
 import {
   AGENT_NAME,
   APP_NAME,

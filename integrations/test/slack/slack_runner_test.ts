@@ -7,8 +7,8 @@
 // Ported from adk-python
 // tests/unittests/integrations/slack/test_slack_runner.py @ main.
 
-import {handleSlackMessage} from '@google/adk-integrations';
 import {beforeEach, describe, expect, it} from 'vitest';
+import {handleSlackMessage} from '../../src/slack/slack_runner.js';
 import {
   CHANNEL,
   createSlackFixture,
