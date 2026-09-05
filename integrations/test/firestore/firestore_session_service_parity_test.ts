@@ -118,7 +118,7 @@ describe('FirestoreSessionService (ported from adk-python)', () => {
       updateTime: 1234567890,
     });
     fake.seed(`${EVENTS_PATH}/e1`, {
-      event_data: {invocationId: 'test_inv', author: 'user'},
+      event_data: {invocation_id: 'test_inv', author: 'user'},
       timestamp: new FakeTimestamp(1),
     });
 
@@ -233,6 +233,14 @@ describe('FirestoreSessionService (ported from adk-python)', () => {
     const update = writeTo('update', SESSION_PATH);
     expect(persistedState(update)).toEqual(session.state);
     expect(update.data['updateTime']).toBe(SERVER_TIMESTAMP);
+
+    // The stored event is snake_cased, as adk-python's `model_dump` writes it,
+    // but the state delta's own keys are caller data and stay verbatim.
+    const stored = writeTo('set', `${EVENTS_PATH}/${event.id}`).data[
+      'event_data'
+    ] as Record<string, Record<string, Record<string, unknown>>>;
+    expect(stored['invocation_id']).toBe('test_inv');
+    expect(stored['actions']['state_delta']['session_key']).toBe('session_val');
   });
 
   it('test_append_event_repeated_non_serializable_state_delta', async () => {
@@ -341,11 +349,12 @@ describe('FirestoreSessionService (ported from adk-python)', () => {
     expect(session.state['session_key']).toBe('session_val');
 
     const eventWrite = writeTo('set', `${EVENTS_PATH}/${event.id}`);
+    // The stored event is snake_cased, matching what adk-python writes.
     const stored = eventWrite.data['event_data'] as {
-      actions: {stateDelta: Record<string, unknown>};
+      actions: {state_delta: Record<string, unknown>};
     };
-    expect(stored.actions.stateDelta).not.toHaveProperty('temp:k1');
-    expect(stored.actions.stateDelta['session_key']).toBe('session_val');
+    expect(stored.actions.state_delta).not.toHaveProperty('temp:k1');
+    expect(stored.actions.state_delta['session_key']).toBe('session_val');
 
     const update = writeTo('update', SESSION_PATH);
     expect(String(update.data['state'])).not.toContain('temp:k1');
@@ -495,7 +504,7 @@ describe('FirestoreSessionService (ported from adk-python)', () => {
       userId: USER_ID,
     });
     fake.seed(`${EVENTS_PATH}/e1`, {
-      event_data: {invocationId: 'inv', author: 'user'},
+      event_data: {invocation_id: 'inv', author: 'user'},
       timestamp: new FakeTimestamp(1),
     });
 

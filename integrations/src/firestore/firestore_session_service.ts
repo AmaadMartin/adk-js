@@ -38,6 +38,8 @@ import {
   StaleSessionError,
   State,
   toJsonSerializable,
+  transformToCamelCaseEvent,
+  transformToSnakeCaseEvent,
   trimTempDeltaState,
 } from '@google/adk';
 
@@ -85,7 +87,8 @@ interface StoredSessionDocument {
 
 /** An event document as this service writes it. */
 interface StoredEventDocument {
-  event_data?: Event;
+  /** The event, snake_cased. See {@link toEventData}. */
+  event_data?: Record<string, unknown>;
 }
 
 /** Pagination metadata carried by {@link ListSessionsResponse}. */
@@ -152,11 +155,19 @@ function parseSessionState(raw: unknown): Record<string, unknown> {
     : {};
 }
 
-/** The event as the plain JSON stored in its document's `event_data` field. */
+/**
+ * The event as the plain JSON stored in its document's `event_data` field.
+ *
+ * adk-python persists `event.model_dump(mode='json')`, and its `Event` model
+ * sets `alias_generator=to_camel` without `serialize_by_alias`, so the stored
+ * keys are snake_case. This is the cross-language wire contract, so adk-js
+ * writes snake_case too. `DatabaseSessionService` stores event bodies through
+ * the same pair of transforms.
+ */
 function toEventData(event: Event): unknown {
   // The event carries the same state delta the session state does, so it hits
   // the same unserializable values and needs the same coercion.
-  return toJsonSerializable({...event});
+  return toJsonSerializable(transformToSnakeCaseEvent(event));
 }
 
 /** Orders sessions by last update time, then user, then id — all ascending. */
@@ -452,7 +463,7 @@ export class FirestoreSessionService extends BaseSessionService {
     for (const doc of eventDocs) {
       const stored = doc.data() as StoredEventDocument | undefined;
       if (stored?.event_data) {
-        events.push(stored.event_data);
+        events.push(transformToCamelCaseEvent(stored.event_data));
       }
     }
 
