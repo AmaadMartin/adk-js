@@ -71,6 +71,14 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * The structured output the model submitted through the `set_model_response`
+   * tool, already checked against the agent's output schema. Its shape is the
+   * schema's, so it stays untyped here, as in Python
+   * `EventActions.set_model_response`.
+   */
+  setModelResponse?: unknown;
 }
 
 /**
@@ -80,8 +88,8 @@ export interface EventActions {
  * @param state - Optional partial {@link EventActions} whose properties
  *   override the defaults. Dictionary fields (`stateDelta`, `artifactDelta`,
  *   `requestedAuthConfigs`, `requestedToolConfirmations`) default to `{}`;
- *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`) default
- *   to `undefined`.
+ *   scalar fields (`skipSummarization`, `transferToAgent`, `escalate`,
+ *   `setModelResponse`) default to `undefined`.
  * @returns A fully populated {@link EventActions} object.
  */
 export function createEventActions(
@@ -116,7 +124,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.requestedToolConfirmations) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
-    actions.escalate === undefined
+    actions.escalate === undefined &&
+    actions.setModelResponse === undefined
   );
 }
 
@@ -129,9 +138,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    `requestedAuthConfigs`, `requestedToolConfirmations`) — all entries from
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
- * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
- *    last-writer-wins: the value from the last source that sets the field is
- *    kept.
+ * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
+ *    `setModelResponse`) — last-writer-wins: the value from the last source
+ *    that sets the field is kept.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -179,6 +188,9 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.setModelResponse !== undefined) {
+      result.setModelResponse = source.setModelResponse;
     }
   }
   return result;

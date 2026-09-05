@@ -327,6 +327,11 @@ export {
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
+  SET_MODEL_RESPONSE_TOOL_NAME,
+  createSetModelResponseTool,
+  getStructuredModelResponse,
+} from './tools/set_model_response_tool.js';
+export {
   IntentMismatchError,
   ToolConfirmation,
   isIntentMismatchError,

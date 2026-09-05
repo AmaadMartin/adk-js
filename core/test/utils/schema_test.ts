@@ -11,6 +11,7 @@ import {z as z4} from 'zod/v4';
 import {
   objectSchemaFields,
   parseWithSchema,
+  schemaShape,
   toJsonSchema,
 } from '../../src/utils/schema.js';
 import {zodObjectToSchema} from '../../src/utils/simple_zod_to_json.js';
@@ -156,6 +157,69 @@ describe('toJsonSchema', () => {
       },
       required: ['count'],
     });
+  });
+});
+
+describe('schemaShape', () => {
+  it('classifies a Zod object as an object', () => {
+    expect(schemaShape(z4.object({count: z4.number()}))).toBe('object');
+    expect(schemaShape(z3.object({count: z3.number()}))).toBe('object');
+  });
+
+  it('classifies an array of objects as an object array', () => {
+    expect(schemaShape(z4.array(z4.object({id: z4.number()})))).toBe(
+      'objectArray',
+    );
+  });
+
+  it('classifies an array of primitives as a value', () => {
+    expect(schemaShape(z4.array(z4.string()))).toBe('value');
+  });
+
+  it('classifies a primitive as a value', () => {
+    expect(schemaShape(z4.string())).toBe('value');
+  });
+
+  it('classifies a record as a value', () => {
+    expect(schemaShape(z4.record(z4.string(), z4.number()))).toBe('value');
+    expect(schemaShape(z3.record(z3.number()))).toBe('value');
+  });
+
+  it('classifies a genai object Schema as an object', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {count: {type: Type.NUMBER}},
+    };
+    expect(schemaShape(schema)).toBe('object');
+  });
+
+  it('classifies a genai object Schema with no properties as an object', () => {
+    expect(schemaShape({type: Type.OBJECT})).toBe('object');
+  });
+
+  it('classifies a genai array Schema of objects as an object array', () => {
+    const schema: Schema = {
+      type: Type.ARRAY,
+      items: {type: Type.OBJECT, properties: {id: {type: Type.NUMBER}}},
+    };
+    expect(schemaShape(schema)).toBe('objectArray');
+  });
+
+  it('classifies a genai array Schema of primitives as a value', () => {
+    const schema: Schema = {type: Type.ARRAY, items: {type: Type.STRING}};
+    expect(schemaShape(schema)).toBe('value');
+  });
+
+  it('classifies a genai array Schema with no items as a value', () => {
+    expect(schemaShape({type: Type.ARRAY})).toBe('value');
+  });
+
+  it('classifies a genai primitive Schema as a value', () => {
+    expect(schemaShape({type: Type.STRING})).toBe('value');
+  });
+
+  it('classifies a schema it cannot render as a value', () => {
+    expect(schemaShape(z4.date())).toBe('value');
   });
 });
 
