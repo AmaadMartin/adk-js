@@ -434,10 +434,10 @@ describe('toAnyValue', () => {
     expect(toAnyValue({a: undefined, b: null, c: 1})).toEqual({b: null, c: 1});
   });
 
-  it('normalizes a Map by stringifying its keys', () => {
-    expect(toAnyValue(new Map<unknown, unknown>([[1, 'one']]))).toEqual({
-      '1': 'one',
-    });
+  it('reports a Map as not serializable, like any other class instance', () => {
+    expect(toAnyValue(new Map<unknown, unknown>([[1, 'one']]))).toBe(
+      '<not serializable>',
+    );
   });
 
   it('reports a cycle rather than throwing', () => {

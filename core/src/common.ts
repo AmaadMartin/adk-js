@@ -281,18 +281,7 @@ export {
   setOperationDetailsAttributesFromRequest,
   setOperationDetailsAttributesFromResponse,
   setOperationDetailsCommonAttributes,
-  type BlobPart,
   type ExperimentalSemconvConfig,
-  type FileDataPart,
-  type FunctionToolDefinition,
-  type GenericToolDefinition,
-  type InputMessage,
-  type OutputMessage,
-  type SemconvPart,
-  type TextPart,
-  type ToolCallPart,
-  type ToolCallResponsePart,
-  type ToolDefinition,
 } from './telemetry/_experimental_semconv.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';

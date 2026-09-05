@@ -36,6 +36,7 @@ import {
   maybeSetOtelProviders,
   setOperationDetailsAttributesFromRequest,
   setOperationDetailsAttributesFromResponse,
+  setOperationDetailsCommonAttributes,
 } from '@google/adk';
 import {trace} from '@opentelemetry/api';
 import type {AnyValueMap} from '@opentelemetry/api-logs';
@@ -76,6 +77,17 @@ class ExperimentalSemconvPlugin extends BasePlugin {
     this.details = {};
     this.common = {};
     setOperationDetailsAttributesFromRequest(this.details, params.llmRequest);
+    // The end user's id identifies a person, so it goes in the log-only map and
+    // reaches the record only while `shouldAddContentToLogs` is on.
+    setOperationDetailsCommonAttributes(
+      this.common,
+      telemetryConfig,
+      {
+        'gen_ai.agent.name': params.callbackContext.agentName,
+        'gen_ai.conversation.id': params.callbackContext.sessionId,
+      },
+      {'user.id': params.callbackContext.userId},
+    );
     return;
   }
 
