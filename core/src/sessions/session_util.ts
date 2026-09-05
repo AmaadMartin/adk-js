@@ -6,7 +6,6 @@
 
 import {toJsonSerializable} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
-import {extractStateDelta, ScopedStateDelta} from './base_session_service.js';
 import {carryDeltaStamps} from './state_write_order.js';
 
 /** Logged once per call that had to replace at least one state value. */
@@ -46,18 +45,4 @@ export function makeJsonSafeState(
   // write order recorded against the original has to come with it.
   carryDeltaStamps(state, safe);
   return safe;
-}
-
-/**
- * Splits a state delta by scope, with every value coerced into a
- * JSON-serializable form.
- *
- * The counterpart of adk-python's `extract_json_safe_state_delta`. Coercion
- * runs before the split, so the three buckets keep the null prototype
- * {@link extractStateDelta} gives them.
- */
-export function extractJsonSafeStateDelta(
-  state: Record<string, unknown>,
-): ScopedStateDelta {
-  return extractStateDelta(makeJsonSafeState(state));
 }
