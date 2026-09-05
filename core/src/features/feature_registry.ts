@@ -11,6 +11,8 @@ import {logger} from '../utils/logger.js';
  * Feature names.
  */
 export enum FeatureName {
+  /** Configuration surface for the Cloud Storage tools. */
+  GCS_TOOL_SETTINGS = 'GCS_TOOL_SETTINGS',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
 }
 
@@ -33,6 +35,10 @@ export interface FeatureConfig {
 
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
+  [FeatureName.GCS_TOOL_SETTINGS]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
