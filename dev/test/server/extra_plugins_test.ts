@@ -106,6 +106,22 @@ describe('loadExtraPlugins', () => {
     );
   });
 
+  it('hands a bare package specifier to the module resolver', async () => {
+    const logger = new CapturingLogger();
+
+    const plugins = await loadExtraPlugins(
+      ['@acme/not-installed-adk-plugin#AuditPlugin'],
+      TESTDATA_DIR,
+      logger,
+    );
+
+    // The specifier is passed through rather than resolved against the agents
+    // directory, so the resolver reports it by its bare name.
+    expect(plugins).toEqual([]);
+    expect(logger.errorMessages[0]).toContain('@acme/not-installed-adk-plugin');
+    expect(logger.errorMessages[0]).not.toContain(TESTDATA_DIR);
+  });
+
   it('reports a module that has no such export', async () => {
     const logger = new CapturingLogger();
 
