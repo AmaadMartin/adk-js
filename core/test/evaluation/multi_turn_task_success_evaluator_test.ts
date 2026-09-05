@@ -15,12 +15,13 @@ import {
   IntermediateDataType,
   Invocation,
   MultiTurnTaskSuccessV1Evaluator,
+  MultiTurnVertexAiEvalFacade,
   PrebuiltMetrics,
   VertexAiEvalClient,
   VertexAiEvalRequest,
   VertexEvaluationResult,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 /** One turn of a conversation, with the fields a multi-turn request maps. */
 function turn(options: {
@@ -100,6 +101,10 @@ function evaluatorWith(
 }
 
 describe('MultiTurnTaskSuccessV1Evaluator', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   // Ports TestMultiTurnTaskSuccessV1Evaluator
   // ::test_evaluate_invocations_metric_passed
   it('scores a two-turn conversation and requests the MULTI_TURN_TASK_SUCCESS metric', async () => {
@@ -125,6 +130,17 @@ describe('MultiTurnTaskSuccessV1Evaluator', () => {
     expect(result.overallScore).toBe(0.5);
     expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
     expect(result.perInvocationResults[1].evalStatus).toBe(EvalStatus.FAILED);
+  });
+
+  it('passes the conversation when the score exactly meets the threshold', async () => {
+    const client = new FakeEvalClient([scored(0.8)]);
+
+    const result =
+      await evaluatorWith(client).evaluateInvocations(conversation());
+
+    expect(result.overallScore).toBe(0.8);
+    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
+    expect(result.perInvocationResults[1].evalStatus).toBe(EvalStatus.PASSED);
   });
 
   it('reports nothing at all when the service returns no score', async () => {
@@ -281,7 +297,24 @@ describe('MultiTurnTaskSuccessV1Evaluator', () => {
     ).toEqual([undefined, undefined]);
   });
 
-  it('forwards the conversation scenario to the facade without changing the outcome', async () => {
+  it('forwards the conversation scenario to the facade', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+    const forwarded = vi.spyOn(
+      MultiTurnVertexAiEvalFacade.prototype,
+      'evaluateInvocations',
+    );
+    const invocations = conversation();
+
+    await evaluatorWith(client).evaluateInvocations(
+      invocations,
+      undefined,
+      SCENARIO,
+    );
+
+    expect(forwarded).toHaveBeenCalledWith(invocations, undefined, SCENARIO);
+  });
+
+  it('scores the same conversation with and without a scenario', async () => {
     const withScenario = new FakeEvalClient([scored(0.9)]);
     const withoutScenario = new FakeEvalClient([scored(0.9)]);
 
