@@ -1,0 +1,218 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  ConversationScenario,
+  EvalStatus,
+  Invocation,
+  MultiTurnToolUseQualityV1Evaluator,
+  PrebuiltMetrics,
+  VertexAiEvalClient,
+  VertexAiEvalRequest,
+  VertexEvaluationResult,
+} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+
+/** A client that records its requests and replays one fixed result. */
+class FakeEvalClient implements VertexAiEvalClient {
+  readonly requests: VertexAiEvalRequest[] = [];
+
+  constructor(private readonly result: VertexEvaluationResult = {}) {}
+
+  async evaluate(
+    request: VertexAiEvalRequest,
+  ): Promise<VertexEvaluationResult> {
+    this.requests.push(request);
+    return this.result;
+  }
+}
+
+function scored(meanScore: number): VertexEvaluationResult {
+  return {summaryMetrics: [{meanScore}]};
+}
+
+function invocation(id: string): Invocation {
+  return {
+    invocationId: id,
+    userContent: {parts: [{text: `q-${id}`}]},
+    finalResponse: {parts: [{text: `r-${id}`}]},
+  };
+}
+
+const SCENARIO: ConversationScenario = {
+  startingPrompt: 'I need to book a flight.',
+  conversationPlan: 'Book a one-way flight from SFO to LAX for next Tuesday.',
+};
+
+describe('MultiTurnToolUseQualityV1Evaluator', () => {
+  it('fails a conversation scored below the threshold', async () => {
+    const evaluator = new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+        threshold: 0.8,
+      },
+      evalClient: new FakeEvalClient(scored(0.5)),
+    });
+
+    const result = await evaluator.evaluateInvocations([invocation('inv1')]);
+
+    expect(result.overallScore).toBe(0.5);
+    expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
+  });
+
+  it('reports not evaluated when the service returns no score', async () => {
+    const evaluator = new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+        threshold: 0.8,
+      },
+      evalClient: new FakeEvalClient({summaryMetrics: []}),
+    });
+
+    const result = await evaluator.evaluateInvocations([invocation('inv1')]);
+
+    expect(result.overallScore).toBeUndefined();
+    expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
+  });
+
+  it('prefers the criterion threshold over the deprecated one', async () => {
+    const evaluator = new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+        threshold: 0.8,
+        criterion: {threshold: 0.95},
+      },
+      evalClient: new FakeEvalClient(scored(0.9)),
+    });
+
+    const result = await evaluator.evaluateInvocations([invocation('inv1')]);
+
+    expect(result.overallScore).toBe(0.9);
+    expect(result.overallEvalStatus).toBe(EvalStatus.FAILED);
+  });
+
+  it('rejects a metric that carries no threshold', () => {
+    const evalClient = new FakeEvalClient(scored(0.9));
+
+    expect(
+      () =>
+        new MultiTurnToolUseQualityV1Evaluator({
+          evalMetric: {
+            metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+          },
+          evalClient,
+        }),
+    ).toThrow(
+      "Evaluation metric 'multi_turn_tool_use_quality_v1' requires a" +
+        ' threshold.',
+    );
+    expect(evalClient.requests).toHaveLength(0);
+  });
+
+  it('rejects invocation lists of different lengths', async () => {
+    const evalClient = new FakeEvalClient(scored(0.9));
+    const evaluator = new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+        threshold: 0.8,
+      },
+      evalClient,
+    });
+
+    await expect(
+      evaluator.evaluateInvocations(
+        [invocation('inv1'), invocation('inv2')],
+        [invocation('golden1')],
+      ),
+    ).rejects.toThrow(
+      'actualInvocations and expectedInvocations must have the same length;' +
+        ' got 2 and 1.',
+    );
+    expect(evalClient.requests).toHaveLength(0);
+  });
+
+  it('evaluates nothing when there are no invocations', async () => {
+    const evalClient = new FakeEvalClient(scored(0.9));
+    const evaluator = new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+        threshold: 0.8,
+      },
+      evalClient,
+    });
+
+    const result = await evaluator.evaluateInvocations([]);
+
+    expect(result.overallScore).toBeUndefined();
+    expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
+    expect(result.perInvocationResults).toEqual([]);
+    expect(evalClient.requests).toHaveLength(0);
+  });
+
+  it('sends one request for the whole conversation', async () => {
+    const evalClient = new FakeEvalClient(scored(0.9));
+    const evaluator = new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+        threshold: 0.8,
+      },
+      evalClient,
+    });
+
+    const result = await evaluator.evaluateInvocations([
+      invocation('inv1'),
+      invocation('inv2'),
+      invocation('inv3'),
+    ]);
+
+    expect(evalClient.requests).toHaveLength(1);
+    expect(evalClient.requests[0].dataset.evalDataset).toBeUndefined();
+    expect(result.perInvocationResults.map((r) => r.evalStatus)).toEqual([
+      EvalStatus.NOT_EVALUATED,
+      EvalStatus.NOT_EVALUATED,
+      EvalStatus.PASSED,
+    ]);
+    expect(result.perInvocationResults.map((r) => r.score)).toEqual([
+      undefined,
+      undefined,
+      0.9,
+    ]);
+  });
+
+  it('forwards the expected invocations and the conversation scenario', async () => {
+    const evalClient = new FakeEvalClient(scored(0.9));
+    const evaluator = new MultiTurnToolUseQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TOOL_USE_QUALITY_V1,
+        threshold: 0.8,
+      },
+      evalClient,
+    });
+    const actual = [invocation('inv1'), invocation('inv2')];
+    const expected = [invocation('golden1'), invocation('golden2')];
+
+    const result = await evaluator.evaluateInvocations(
+      actual,
+      expected,
+      SCENARIO,
+    );
+
+    const evalCases = evalClient.requests[0].dataset.evalCases;
+    if (evalCases === undefined) {
+      expect.fail('the request carried no eval cases');
+    }
+    expect(evalCases[0].agentData.turns.map((turn) => turn.turnId)).toEqual([
+      'inv1',
+      'inv2',
+    ]);
+    expect(
+      result.perInvocationResults.map((r) => r.expectedInvocation),
+    ).toEqual(expected);
+    expect(result.perInvocationResults.map((r) => r.actualInvocation)).toEqual(
+      actual,
+    );
+  });
+});
