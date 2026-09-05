@@ -24,7 +24,19 @@ import {
   ProtocolType,
   ReadonlyContext,
 } from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 let quotaProjectId: string | undefined;
 let getClientError: Error | undefined;
@@ -59,6 +71,17 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     listTools: vi.fn().mockResolvedValue({tools: []}),
   })),
 }));
+
+/**
+ * The home directory the registry searches for a client certificate. A real
+ * one on the developer's machine would otherwise decide these tests.
+ */
+const fakeHome = vi.hoisted(() => ({dir: ''}));
+
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return {...actual, homedir: () => fakeHome.dir || actual.homedir()};
+});
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -189,16 +212,32 @@ function newRegistry(
   });
 }
 
+/** Environment variables that decide which host the registry calls. */
+const MTLS_ENV = [
+  'GOOGLE_API_USE_CLIENT_CERTIFICATE',
+  'GOOGLE_API_USE_MTLS_ENDPOINT',
+  'GOOGLE_API_CERTIFICATE_CONFIG',
+];
+
 describe('TestAgentRegistry', () => {
+  const originalEnv = {...process.env};
   let registry: AgentRegistry;
 
   beforeEach(() => {
+    // A registry built with mTLS asked for elsewhere would call another host.
+    for (const name of MTLS_ENV) {
+      delete process.env[name];
+    }
     quotaProjectId = undefined;
     getClientError = undefined;
     getRequestHeadersError = undefined;
     fetchMock.mockReset();
     globalThis.fetch = fetchMock;
     registry = newRegistry();
+  });
+
+  afterEach(() => {
+    process.env = {...originalEnv};
   });
 
   it('test_init_raises_value_error_if_params_missing', () => {
@@ -532,9 +571,36 @@ describe('TestAgentRegistry', () => {
 });
 
 describe('TestAgentRegistryMtls', () => {
-  const originalClientCert = process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
+  const originalEnv = {...process.env};
+  let certConfigDir: string;
+  let certConfigPath: string;
+
+  /** Asks for a client certificate, and puts a real one where it is found. */
+  function withClientCertificate(): void {
+    process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = 'true';
+    process.env['GOOGLE_API_CERTIFICATE_CONFIG'] = certConfigPath;
+  }
+
+  beforeAll(() => {
+    certConfigDir = mkdtempSync(join(tmpdir(), 'adk-cert-'));
+    certConfigPath = join(certConfigDir, 'certificate_config.json');
+    writeFileSync(
+      certConfigPath,
+      JSON.stringify({cert_configs: {workload: {}}}),
+    );
+    fakeHome.dir = mkdtempSync(join(tmpdir(), 'adk-home-'));
+  });
+
+  afterAll(() => {
+    rmSync(certConfigDir, {recursive: true, force: true});
+    rmSync(fakeHome.dir, {recursive: true, force: true});
+    fakeHome.dir = '';
+  });
 
   beforeEach(() => {
+    for (const name of MTLS_ENV) {
+      delete process.env[name];
+    }
     quotaProjectId = undefined;
     getClientError = undefined;
     getRequestHeadersError = undefined;
@@ -543,15 +609,10 @@ describe('TestAgentRegistryMtls', () => {
   });
 
   afterEach(() => {
-    if (originalClientCert === undefined) {
-      delete process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
-    } else {
-      process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = originalClientCert;
-    }
+    process.env = {...originalEnv};
   });
 
   it('test_make_request_uses_authorized_session_no_mtls', async () => {
-    delete process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
     const registry = newRegistry();
     routeFetch({'test-path': {key: 'value'}});
 
@@ -563,7 +624,7 @@ describe('TestAgentRegistryMtls', () => {
   });
 
   it('test_make_request_configures_mtls', async () => {
-    process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = 'true';
+    withClientCertificate();
     const registry = newRegistry();
     routeFetch({'test-path': {key: 'value'}});
 
@@ -572,8 +633,40 @@ describe('TestAgentRegistryMtls', () => {
     expect(onlyCall().url).toContain('agentregistry.mtls.googleapis.com');
   });
 
-  it('getConnectionUri rewrites a resolved endpoint to its mTLS host', async () => {
+  it('keeps the default host when a certificate is asked for but absent', async () => {
     process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = 'true';
+    const registry = newRegistry();
+    routeFetch({'test-path': {key: 'value'}});
+
+    await registry.makeRequest('test-path');
+
+    expect(onlyCall().url).toContain('agentregistry.googleapis.com');
+    expect(onlyCall().url).not.toContain('mtls');
+  });
+
+  it('uses the mTLS host for always, with no certificate at all', async () => {
+    process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
+    const registry = newRegistry();
+    routeFetch({'test-path': {key: 'value'}});
+
+    await registry.makeRequest('test-path');
+
+    expect(onlyCall().url).toContain('agentregistry.mtls.googleapis.com');
+  });
+
+  it('keeps the default host for never, with a certificate present', async () => {
+    withClientCertificate();
+    process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'never';
+    const registry = newRegistry();
+    routeFetch({'test-path': {key: 'value'}});
+
+    await registry.makeRequest('test-path');
+
+    expect(onlyCall().url).not.toContain('mtls');
+  });
+
+  it('getConnectionUri rewrites a resolved endpoint to its mTLS host', async () => {
+    withClientCertificate();
     const registry = newRegistry();
 
     const {url} = registry.getConnectionUri({
@@ -584,7 +677,6 @@ describe('TestAgentRegistryMtls', () => {
   });
 
   it('getConnectionUri leaves a resolved endpoint alone without mTLS', () => {
-    delete process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
     const registry = newRegistry();
 
     const {url} = registry.getConnectionUri({

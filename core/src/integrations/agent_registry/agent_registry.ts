@@ -21,7 +21,9 @@ import {mergeTrackingHeaders} from '../../utils/client_labels.js';
 import {logger} from '../../utils/logger.js';
 import {
   effectiveGoogleapisEndpoint,
+  hasDefaultClientCertSource,
   shouldUseMtlsEndpoint,
+  useClientCertEffective,
 } from '../../utils/mtls_utils.js';
 import {AgentRegistrySingleMCPToolset} from './agent_registry_mcp_toolset.js';
 import {cleanName, isGoogleApi} from './helpers.js';
@@ -96,7 +98,9 @@ export class AgentRegistry {
     this.location = options.location;
     this.basePath = `projects/${this.projectId}/locations/${this.location}`;
     this.headerProvider = options.headerProvider;
-    this.useMtls = shouldUseMtlsEndpoint();
+    this.useMtls = shouldUseMtlsEndpoint(
+      useClientCertEffective() && hasDefaultClientCertSource(),
+    );
     this.baseUrl = this.useMtls
       ? AGENT_REGISTRY_MTLS_BASE_URL
       : AGENT_REGISTRY_BASE_URL;
@@ -299,18 +303,20 @@ export class AgentRegistry {
    * Resolves the auth scheme a registered resource is bound to.
    *
    * @param resourceId Stable identifier of the resource, for example an
-   *     `agentId` or an `mcpServerId`, matched against the binding targets.
+   *     `agentId` or an `mcpServerId`, matched against the binding targets. It
+   *     arrives from the wire, so a value that is not a string names no
+   *     resource and resolves no scheme.
    * @param resourceName Resource name, only used for logging.
    * @param continueUri Continue URI that overrides the auth provider's own.
    * @return The scheme for the bound auth provider, or `undefined` when the
    *     resource is bound to none or the bindings could not be read.
    */
   private async resolveAuthProviderScheme(
-    resourceId: string | undefined,
+    resourceId: unknown,
     resourceName: string,
     continueUri?: string,
   ): Promise<GcpAuthProviderScheme | undefined> {
-    if (!resourceId) {
+    if (typeof resourceId !== 'string' || !resourceId) {
       return undefined;
     }
     try {
