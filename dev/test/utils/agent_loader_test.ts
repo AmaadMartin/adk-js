@@ -33,6 +33,7 @@ vi.mock('../../src/utils/file_utils.js', () => ({
   isFile: vi.fn(),
   isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
+  loadFileData: vi.fn(),
   removeFolder: vi.fn(),
   tryToFindFileRecursively: vi.fn(),
 }));
@@ -157,6 +158,28 @@ class FakeNamedAgent extends BaseAgent {
 }
 exports.rootAgent = new FakeNamedAgent('${agentName}');`;
 
+/** The shape `export * as agent from './impl.js'` compiles down to. */
+const nestedAgentJsContent = (agentName: string) => `
+const {BaseAgent} = require('@google/adk');
+
+class FakeNestedAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.agent = { rootAgent: new FakeNestedAgent('${agentName}') };`;
+
+const nestedAndTopLevelAgentJsContent = `
+const {BaseAgent} = require('@google/adk');
+
+class FakeBothAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.rootAgent = new FakeBothAgent('top_level_agent');
+exports.agent = { rootAgent: new FakeBothAgent('nested_agent') };`;
+
 const indexAppJsContent = `
 const {App, BaseAgent} = require('@google/adk');
 
@@ -204,6 +227,9 @@ describe('AgentLoader', () => {
       }
     });
     (fileUtils.isFileExists as Mock).mockImplementation(() => true);
+    (fileUtils.loadFileData as Mock).mockImplementation(async (filePath) =>
+      JSON.parse(await fs.readFile(filePath as string, {encoding: 'utf-8'})),
+    );
     (fileUtils.isFolderExists as Mock).mockImplementation(
       async (folderPath) => {
         try {
@@ -273,6 +299,41 @@ describe('AgentLoader', () => {
   }
 
   describe('AgentFile', () => {
+    it('loads the root agent republished under a nested agent export', async () => {
+      const agentPath = path.join(tempAgentsDir, 'nested_export.js');
+      const content = nestedAgentJsContent('nested_agent');
+      await fs.writeFile(agentPath, content);
+
+      const compiledAgentPath = compiledPath('nested_export.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, content);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('nested_agent');
+      await agentFile.dispose();
+    });
+
+    it('prefers a top-level rootAgent over a nested agent export', async () => {
+      const agentPath = path.join(tempAgentsDir, 'nested_and_top.js');
+      await fs.writeFile(agentPath, nestedAndTopLevelAgentJsContent);
+
+      const compiledAgentPath = compiledPath('nested_and_top.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, nestedAndTopLevelAgentJsContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('top_level_agent');
+      await agentFile.dispose();
+    });
+
     it('loads an agent file whose root is a bare Workflow', async () => {
       // A graph is a node, not an agent. The loader adapts it, so a sample can
       // export a Workflow directly rather than wrapping it in a Workflow.
@@ -1205,6 +1266,165 @@ describe('AgentLoader', () => {
         expect(await loader.listAgents()).not.toContain('all_helpers');
         expect(await loader.listLoadFailures()).toEqual([]);
 
+        await loader.disposeAll();
+      });
+    });
+
+    /**
+     * A directory can name its entrypoint in `package.json`, the way Node
+     * resolves a package. adk-python accepts the same layout as case (b) of
+     * its AgentLoader.
+     */
+    describe('directory entrypoint from package.json main', () => {
+      const writeManifest = (dirName: string, manifest: unknown) =>
+        writeDirFile(dirName, 'package.json', JSON.stringify(manifest));
+
+      /**
+       * Every fall-through case pairs its manifest with an `index.js`, so the
+       * assertion distinguishes "ignored the manifest" from "found nothing".
+       */
+      const writeFallthroughFixture = async (
+        dirName: string,
+        manifest: unknown,
+      ) => {
+        await writeManifest(dirName, manifest);
+        await writeDirFile(
+          dirName,
+          'index.js',
+          namedAgentJsContent(`${dirName}_from_index`),
+        );
+      };
+
+      const loadAgentNamed = async (dirName: string) => {
+        const loader = new AgentLoader(tempAgentsDir);
+        const agentFile = await loader.getAgentFile(dirName);
+        const agent = await agentFile.load();
+        await loader.disposeAll();
+
+        return agent.name;
+      };
+
+      it('loads the file main names', async () => {
+        await writeManifest('pkg_main', {main: 'custom_entry.js'});
+        await writeDirFile(
+          'pkg_main',
+          'custom_entry.js',
+          namedAgentJsContent('from_custom_entry'),
+        );
+
+        expect(await loadAgentNamed('pkg_main')).toBe('from_custom_entry');
+      });
+
+      it('probes the supported extensions when main carries none', async () => {
+        await writeManifest('pkg_main_noext', {main: 'custom_entry'});
+        await writeDirFile(
+          'pkg_main_noext',
+          'custom_entry.ts',
+          namedAgentJsContent('from_extensionless_main'),
+        );
+
+        expect(await loadAgentNamed('pkg_main_noext')).toBe(
+          'from_extensionless_main',
+        );
+      });
+
+      it('prefers main over index', async () => {
+        await writeFallthroughFixture('pkg_main_wins', {
+          main: 'custom_entry.js',
+        });
+        await writeDirFile(
+          'pkg_main_wins',
+          'custom_entry.js',
+          namedAgentJsContent('from_custom_entry'),
+        );
+
+        expect(await loadAgentNamed('pkg_main_wins')).toBe('from_custom_entry');
+      });
+
+      it('prefers agent over main', async () => {
+        await writeManifest('pkg_agent_wins', {main: 'custom_entry.js'});
+        await writeDirFile(
+          'pkg_agent_wins',
+          'custom_entry.js',
+          namedAgentJsContent('from_custom_entry'),
+        );
+        await writeDirFile(
+          'pkg_agent_wins',
+          'agent.js',
+          namedAgentJsContent('from_agent'),
+        );
+
+        expect(await loadAgentNamed('pkg_agent_wins')).toBe('from_agent');
+      });
+
+      it('ignores a main that escapes the directory', async () => {
+        await writeFallthroughFixture('pkg_main_escape', {
+          main: '../agent1.js',
+        });
+
+        expect(await loadAgentNamed('pkg_main_escape')).toBe(
+          'pkg_main_escape_from_index',
+        );
+      });
+
+      it('ignores an absolute main', async () => {
+        await writeFallthroughFixture('pkg_main_absolute', {
+          main: path.join(tempAgentsDir, 'agent1.js'),
+        });
+
+        expect(await loadAgentNamed('pkg_main_absolute')).toBe(
+          'pkg_main_absolute_from_index',
+        );
+      });
+
+      it('ignores a main that names the directory itself', async () => {
+        await writeFallthroughFixture('pkg_main_self', {main: '.'});
+
+        expect(await loadAgentNamed('pkg_main_self')).toBe(
+          'pkg_main_self_from_index',
+        );
+      });
+
+      it('ignores a main whose file is missing', async () => {
+        await writeFallthroughFixture('pkg_main_missing', {main: 'nope.js'});
+
+        expect(await loadAgentNamed('pkg_main_missing')).toBe(
+          'pkg_main_missing_from_index',
+        );
+      });
+
+      it('ignores an extensionless main that matches no file', async () => {
+        await writeFallthroughFixture('pkg_main_noext_missing', {
+          main: 'nope',
+        });
+
+        expect(await loadAgentNamed('pkg_main_noext_missing')).toBe(
+          'pkg_main_noext_missing_from_index',
+        );
+      });
+
+      it('ignores a non-string main', async () => {
+        await writeFallthroughFixture('pkg_main_nonstring', {main: 42});
+
+        expect(await loadAgentNamed('pkg_main_nonstring')).toBe(
+          'pkg_main_nonstring_from_index',
+        );
+      });
+
+      it('ignores a package.json that is not valid JSON', async () => {
+        await writeDirFile('pkg_bad_json', 'package.json', '{ not json');
+        await writeDirFile(
+          'pkg_bad_json',
+          'index.js',
+          namedAgentJsContent('pkg_bad_json_from_index'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const agentFile = await loader.getAgentFile('pkg_bad_json');
+        const agent = await agentFile.load();
+
+        expect(agent.name).toBe('pkg_bad_json_from_index');
+        expect(await loader.listLoadFailures()).toEqual([]);
         await loader.disposeAll();
       });
     });
