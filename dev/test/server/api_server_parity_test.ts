@@ -29,7 +29,7 @@ import {
   MISSING_APP_NAME_ERROR,
 } from '../../src/server/adk_api_server.js';
 import {DEFAULT_APP_NAME_ENV_VAR} from '../../src/server/default_app_rewrite.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {StubAgentLoader} from './stub_agent_loader.js';
 
 const APP_NAME = 'test_app';
 const USER_ID = 'test_user';
@@ -48,19 +48,6 @@ class EchoAgent extends LlmAgent {
   }
 }
 
-function agentLoaderFor(agent: LlmAgent, appName: string): AgentLoader {
-  return {
-    listAgents: () => Promise.resolve([appName]),
-    getAgentFile: () =>
-      Promise.resolve({
-        load: () => Promise.resolve(agent),
-        async [Symbol.asyncDispose](): Promise<void> {
-          return;
-        },
-      }),
-  } as unknown as AgentLoader;
-}
-
 const RUN_PAYLOAD_WITHOUT_APP_NAME = {
   userId: USER_ID,
   sessionId: SESSION_ID,
@@ -68,6 +55,9 @@ const RUN_PAYLOAD_WITHOUT_APP_NAME = {
 };
 
 describe('ADK_DEFAULT_APP_NAME parity with adk-python', () => {
+  // One stub per file: the real loader's constructor adds process exit
+  // handlers that it never removes.
+  const agentLoader = new StubAgentLoader();
   let sessionService: BaseSessionService;
   let server: AdkApiServer | undefined;
   let originalDefaultApp: string | undefined;
@@ -92,10 +82,8 @@ describe('ADK_DEFAULT_APP_NAME parity with adk-python', () => {
    * test sets it before starting the server.
    */
   async function startServer(appName: string): Promise<AdkApiServer> {
-    server = new AdkApiServer({
-      agentLoader: agentLoaderFor(new EchoAgent({name: 'echo'}), appName),
-      sessionService,
-    });
+    agentLoader.serve(new EchoAgent({name: 'echo'}), appName);
+    server = new AdkApiServer({agentLoader, sessionService});
     await server.start();
 
     return server;
