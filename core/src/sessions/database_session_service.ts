@@ -37,7 +37,7 @@ import {
   StorageUserState,
 } from './db/schema.js';
 import {createSession, Session} from './session.js';
-import {State} from './state.js';
+import {extractJsonSafeStateDelta} from './session_util.js';
 
 /**
  * Checks if a URI is a database connection URI.
@@ -100,6 +100,20 @@ export class DatabaseSessionService extends BaseSessionService {
     this.initialized = true;
   }
 
+  /**
+   * Releases the database connections this service opened.
+   *
+   * The sqlite driver keeps its file open until the pool closes, so a caller
+   * that has finished with a database has no other way to let go of it.
+   * Calling this twice, or before `init`, does nothing.
+   */
+  async close(): Promise<void> {
+    this.initialized = false;
+    const orm = this.orm;
+    this.orm = undefined;
+    await orm?.close();
+  }
+
   async createSession({
     appName,
     userId,
@@ -109,7 +123,7 @@ export class DatabaseSessionService extends BaseSessionService {
     await this.init();
     const em = this.orm!.em.fork();
 
-    const id = sessionId || randomUUID();
+    const id = sessionId?.trim() || randomUUID();
     const now = new Date();
     const existing = await em.findOne(StorageSession, {
       id,
@@ -140,21 +154,11 @@ export class DatabaseSessionService extends BaseSessionService {
       em.persist(userStateModel);
     }
 
-    const appStateDelta: Record<string, unknown> = {};
-    const userStateDelta: Record<string, unknown> = {};
-    const sessionState: Record<string, unknown> = {};
-
-    if (state) {
-      for (const [key, value] of Object.entries(state)) {
-        if (key.startsWith(State.APP_PREFIX)) {
-          appStateDelta[key.replace(State.APP_PREFIX, '')] = value;
-        } else if (key.startsWith(State.USER_PREFIX)) {
-          userStateDelta[key.replace(State.USER_PREFIX, '')] = value;
-        } else if (!key.startsWith(State.TEMP_PREFIX)) {
-          sessionState[key] = value;
-        }
-      }
-    }
+    const {
+      app: appStateDelta,
+      user: userStateDelta,
+      session: sessionState,
+    } = extractJsonSafeStateDelta(state ?? {});
 
     if (Object.keys(appStateDelta).length > 0) {
       appStateModel.state = {...appStateModel.state, ...appStateDelta};
@@ -442,19 +446,11 @@ export class DatabaseSessionService extends BaseSessionService {
       }
 
       if (event.actions && event.actions.stateDelta) {
-        const appDelta: Record<string, unknown> = {};
-        const userDelta: Record<string, unknown> = {};
-        const sessionDelta: Record<string, unknown> = {};
-
-        for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-          if (key.startsWith(State.APP_PREFIX)) {
-            appDelta[key.replace(State.APP_PREFIX, '')] = value;
-          } else if (key.startsWith(State.USER_PREFIX)) {
-            userDelta[key.replace(State.USER_PREFIX, '')] = value;
-          } else if (!key.startsWith(State.TEMP_PREFIX)) {
-            sessionDelta[key] = value;
-          }
-        }
+        const {
+          app: appDelta,
+          user: userDelta,
+          session: sessionDelta,
+        } = extractJsonSafeStateDelta(event.actions.stateDelta);
 
         if (Object.keys(appDelta).length > 0) {
           appStateModel.state = {...appStateModel.state, ...appDelta};
