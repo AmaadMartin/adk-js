@@ -89,11 +89,11 @@ const MAX_RENDER_DEPTH = 10;
  */
 const MAX_RENDER_NODES = 1024;
 
-/** Matches a parameter list that holds nothing but plain identifiers. */
-const IDENTIFIER_LIST = /^[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)*$/;
+/** Matches a parameter that binds a plain name. */
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
-/** Matches the first parenthesised group in a function's source. */
-const PARAMETER_LIST = /\(([^)]*)\)/;
+/** Marks a rest parameter in a function's source. */
+const REST_PREFIX = '...';
 
 /** Matches an arrow function that declares its one parameter without parens. */
 const BARE_ARROW_PARAM = /^(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>/;
@@ -477,14 +477,13 @@ export function safeRepr(value: unknown, caps: Caps): string {
 }
 
 /**
- * Reads `fn`'s positional parameter names out of its source.
+ * The top-level parameter tokens of `fn`'s source, trimmed and in order.
  *
- * Deliberately conservative: a plain identifier list only. A signature with a
- * default, a rest parameter or a destructured parameter yields no names at
- * all, and those arguments are recorded as `arg0`, `arg1` and so on. A
- * minifier renames parameters, so names are best-effort in a bundled build.
+ * The scan tracks bracket depth and string literals, so a default value that
+ * itself holds a comma or a bracket does not split a token. Source it cannot
+ * read at all yields no tokens.
  */
-export function positionalParamNames(fn: unknown): readonly string[] {
+function parameterTokens(fn: unknown): string[] {
   if (typeof fn !== 'function') {
     return [];
   }
@@ -496,11 +495,86 @@ export function positionalParamNames(fn: unknown): readonly string[] {
   if (bare !== null) {
     return [bare[1]];
   }
-  const list = (PARAMETER_LIST.exec(source)?.[1] ?? '').trim();
-  if (list === '' || !IDENTIFIER_LIST.test(list)) {
+  const open = source.indexOf('(');
+  if (open < 0) {
     return [];
   }
-  return list.split(',').map((name) => name.trim());
+  const tokens: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let start = open + 1;
+  for (let index = open; index < source.length; index++) {
+    const char = source[index];
+    if (quote !== '') {
+      if (char === '\\') {
+        index += 1;
+      } else if (char === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char;
+    } else if (char === '(' || char === '[' || char === '{') {
+      depth += 1;
+    } else if (char === ')' || char === ']' || char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        tokens.push(source.slice(start, index).trim());
+        return tokens.length === 1 && tokens[0] === '' ? [] : tokens;
+      }
+    } else if (char === ',' && depth === 1) {
+      tokens.push(source.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  return [];
+}
+
+/** The binding a parameter token declares, without its default value. */
+function bindingOf(token: string): string {
+  // A binding identifier holds no `=`, so everything before the first one is
+  // the binding however complex the default is.
+  return token.split('=', 1)[0].trim();
+}
+
+/**
+ * Reads `fn`'s positional parameter names out of its source.
+ *
+ * Each parameter is resolved on its own, so a default value on one of them
+ * does not cost the others their names — losing a name loses the credential
+ * check that keys off it. A parameter with no readable name, such as a
+ * destructured one, is reported as `arg<i>`, and a rest parameter names
+ * nothing here: {@link restParamName} names the arguments it collects.
+ *
+ * A minifier renames parameters, so names are best-effort in a bundled build.
+ */
+export function positionalParamNames(fn: unknown): readonly string[] {
+  const names: string[] = [];
+  parameterTokens(fn).forEach((token, index) => {
+    if (token.startsWith(REST_PREFIX)) {
+      return;
+    }
+    const binding = bindingOf(token);
+    names.push(IDENTIFIER.test(binding) ? binding : `arg${index}`);
+  });
+  return names;
+}
+
+/**
+ * The name of `fn`'s rest parameter, which names every argument it collects.
+ *
+ * Without it a secret passed into `...credentials` would be recorded under
+ * `arg<i>`, where no name marks it as one.
+ */
+export function restParamName(fn: unknown): string | undefined {
+  const tokens = parameterTokens(fn);
+  const last = tokens[tokens.length - 1];
+  if (last === undefined || !last.startsWith(REST_PREFIX)) {
+    return undefined;
+  }
+  const binding = bindingOf(last.slice(REST_PREFIX.length));
+  return IDENTIFIER.test(binding) ? binding : undefined;
 }
 
 /**
@@ -510,16 +584,21 @@ export function positionalParamNames(fn: unknown): readonly string[] {
  * masked: at the top level the name alone already says the call took a token.
  * A secret nested inside a recorded argument is masked in place instead, so
  * that the shape of the traced value is still reported.
+ *
+ * @param params.restName Names every argument past `paramNames`, for a
+ *     signature that ends in a rest parameter. Arguments beyond a signature
+ *     that does not are recorded as `arg<i>`.
  */
 export function nameValuePairs(params: {
   paramNames: readonly string[];
   args: readonly unknown[];
   caps: Caps;
+  restName?: string;
 }): NamedArg[] {
-  const {paramNames, args, caps} = params;
+  const {paramNames, args, caps, restName} = params;
   const pairs: NamedArg[] = [];
   args.forEach((value, index) => {
-    const name = paramNames[index] ?? `arg${index}`;
+    const name = paramNames[index] ?? restName ?? `arg${index}`;
     if (SELF_OR_CLS.has(name) || isCredentialArgName(name)) {
       return;
     }
@@ -630,6 +709,13 @@ function markWrapper<F extends TracedFunction>(
   fn: F,
 ): F {
   Object.defineProperty(wrapper, 'name', {value: fn.name, configurable: true});
+  Object.defineProperty(wrapper, 'length', {
+    value: fn.length,
+    configurable: true,
+  });
+  // The analogue of the reference's functools.wraps copying __dict__: a
+  // property a caller attached to the function is part of its interface.
+  Object.assign(wrapper, fn);
   Object.defineProperty(wrapper, AUTO_TRACING_WRAPPED, {value: true});
   return wrapper as F;
 }
@@ -662,6 +748,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
   const displayName = displayNameFor(fn, ownerName);
   // Signature introspection is expensive; resolve it once, here, not per call.
   const paramNames = positionalParamNames(fn);
+  const restName = restParamName(fn);
   const yieldCap = caps.maxRecordedYields;
 
   function finish(
@@ -673,7 +760,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
     if (!span.isRecording()) {
       return;
     }
-    const pairs = nameValuePairs({paramNames, args, caps});
+    const pairs = nameValuePairs({paramNames, args, caps, restName});
     recordIoOnSpan({span, pairs, result, error, caps});
   }
 

@@ -77,6 +77,15 @@ A returned `{accessToken, rows}` keeps its shape and loses only the token: `{acc
 
 The renderer is bounded three ways: nesting depth, a node budget, and a cycle set. A value that hits a bound is elided to `<Name ...>` rather than rendered, and a rendering that throws elides the whole value the same way. A bound can therefore never uncover a secret. A class instance is summarized from its **public** fields only; its own `toString` is never consulted, because it may print private state.
 
+### The one case the name rule cannot cover
+
+The name rule needs a name. Each parameter is read on its own, so a default value, a rest parameter or a destructuring pattern on one of them costs only that one its name — and a rest parameter names every argument it collects, so `...credentials` masks all of them. But two things still erase a name, and where a name is gone only shape masking is left:
+
+- a **destructured** parameter, which declares no name at all;
+- a **minified** build, which renames parameters to single letters.
+
+An argument with no name is recorded as `arg0`, `arg1` and so on, and no `arg<i>` matches the secret table. A bare scalar secret in such a position is written to the span in full. Its fields are still masked if it is an object, and it is still masked wholesale if it is credential-shaped — but a lone token string in a destructured or minified position is not. Name the parameter, or keep the secret inside an object, if the trace leaves your process.
+
 ## What gets instrumented
 
 The walk starts at `invocationContext.agent`, plus any object in `extraTargets`. From each root it descends through arrays, `Map` values, `Set` members and public data properties, and it wraps:
@@ -87,15 +96,15 @@ The walk starts at `invocationContext.agent`, plus any object in `extraTargets`.
 It deliberately does not touch:
 
 - **accessor properties.** The walk reads property _descriptors_, so a getter never fires during discovery.
-- **methods of built-in prototypes.** `Error.prototype`, `Promise.prototype`, `Object.prototype` and their siblings stop the prototype chain. Wrapping one would change every value in the runtime.
+- **methods the runtime owns.** Every prototype reachable from a global, plus the iterator and generator prototypes, stops the prototype chain. The set is derived from the runtime rather than listed, because a list would miss `URL.prototype` or the async generator prototype, and wrapping one of those changes every value in the process.
 - **class constructors**, symbol-keyed methods, and names starting with `_`.
 - **anything already wrapped.** The marker is `Symbol.for('adk.auto_tracing.wrapped')`, taken from the global symbol registry so that two copies of `@google/adk` in one runtime agree. A second pass, or a second plugin, re-wraps nothing.
 
-A wrapped function is observationally identical to the original: same return value, same thrown error, same yields in the same order, and the same `name`. A generator's yields all pass through; only the sample recorded on the span is capped. Failing to wrap one property is logged at debug level and never aborts the pass.
+A wrapped function is observationally identical to the original: same return value, same thrown error, same yields in the same order, the same `name`, the same arity, and any property attached to it. A generator's yields all pass through; only the sample recorded on the span is capped. Failing to wrap one property is logged at debug level and never aborts the pass.
 
 Two limits are worth knowing before you read a trace:
 
-- **A bundler renames parameters.** `esbuild` keeps function names, so span names survive a build, but parameter names do not. An argument whose name is lost is recorded as `arg0`, `arg1` and so on. The same happens for a destructured parameter, which has no name to read.
+- **A bundler renames parameters.** `esbuild` keeps function names, so span names survive a build, but parameter names do not. An argument whose name is lost is recorded as `arg0`, `arg1` and so on, which also costs it the name-based redaction described above.
 - **The reach is the object graph, not the module.** adk-python rebinds module attributes through `sys.modules`. ES module bindings are immutable and there is no writable registry of loaded modules, so a function that no reachable object holds is not instrumented. Pass it in `extraTargets` if you need it.
 
 ## Configuration options
@@ -115,6 +124,7 @@ The walk also stops after 10,000 objects. That bound is not an option: an agent'
 
 Recorded here because they are visible in a trace:
 
+- **A generator's span does not parent the work inside it.** The sync and async wrappers open their span with `startActiveSpan`, so anything they call nests under it. A generator suspends at every `yield`, and a span cannot stay context-active across that suspension without leaking the context into the consumer's frame, so the generator wrappers open a plain span instead. Spans created inside a generator body therefore land beside it, not under it — and if the generator is the outermost call, in a different trace.
 - Rendered values follow JavaScript, not Python: `true` rather than `True`, `{a: 1}` rather than `{'a': 1}`, `<Array ...>` rather than `<list ...>` for an elided value.
 - There are no keyword arguments. A trailing options object is recorded as one argument, with its secret-named fields masked in place.
 - `__slots__` has no analogue, so the helpers that read it are not ported.

@@ -238,6 +238,7 @@ export {
   nameValuePairs,
   positionalParamNames,
   recordIoOnSpan,
+  restParamName,
   safeRepr,
   tracerWillRecord,
   type Caps,

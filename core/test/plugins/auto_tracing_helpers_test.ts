@@ -32,6 +32,7 @@ import {
   nameValuePairs,
   positionalParamNames,
   recordIoOnSpan,
+  restParamName,
   safeRepr,
 } from '@google/adk';
 
@@ -112,10 +113,12 @@ describe('auto tracing helpers', () => {
       void second;
     }
 
-    // A rest parameter stands in for Python's `*args`/`**kwargs`: the whole
-    // list is refused rather than partially named.
-    expect(positionalParamNames(fn)).toEqual([]);
+    // A rest parameter stands in for Python's `*args`, which the reference
+    // excludes as VAR_POSITIONAL while keeping the named positionals.
+    expect(positionalParamNames(fn)).toEqual(['first', 'second']);
     expect(positionalParamNames(plain)).toEqual(['first', 'second']);
+    expect(restParamName(fn)).toBe('rest');
+    expect(restParamName(plain)).toBeUndefined();
   });
 
   it('test_positional_param_names_empty_when_not_introspectable', () => {
@@ -499,9 +502,120 @@ describe('positionalParamNames source parsing', () => {
     }
 
     expect(positionalParamNames(Widget)).toEqual([]);
-    expect(positionalParamNames((a = 1) => a)).toEqual([]);
-    expect(positionalParamNames(({a}: {a: number}) => a)).toEqual([]);
     expect(positionalParamNames(Widget.prototype.render)).toEqual(['a']);
+  });
+
+  it('names a parameter that carries a default, so the secret rule still fires', () => {
+    function login(user: string, password = 'x'): string {
+      void password;
+      return user;
+    }
+    // A default holding a comma and a call must not split the token list.
+    function connect(
+      host: string,
+      token: Record<string, number> = {a: 1, b: 2},
+      port = Number(1),
+    ): string {
+      void token;
+      void port;
+      return host;
+    }
+
+    expect(positionalParamNames(login)).toEqual(['user', 'password']);
+    expect(positionalParamNames(connect)).toEqual(['host', 'token', 'port']);
+    expect(positionalParamNames((a = 1) => a)).toEqual(['a']);
+  });
+
+  it('reports a parameter with no readable name under its index', () => {
+    function connect({host}: {host: string}, secret: string): string {
+      void secret;
+      return host;
+    }
+
+    // The destructured parameter loses only its own name, not its neighbour's.
+    expect(positionalParamNames(connect)).toEqual(['arg0', 'secret']);
+    expect(positionalParamNames(({a}: {a: number}) => a)).toEqual(['arg0']);
+  });
+
+  it('drops a secret an unnamed parameter would otherwise have recorded', () => {
+    function login(user: string, password = 'x'): string {
+      void password;
+      return user;
+    }
+    function push(channel: string, ...credentials: string[]): string {
+      void credentials;
+      return channel;
+    }
+
+    buildTracingWrapper({fn: login, tracer, caps: CAPS})(
+      'alice',
+      SENTINEL_TOKEN,
+    );
+    buildTracingWrapper({fn: push, tracer, caps: CAPS})(
+      'general',
+      SENTINEL_TOKEN,
+      SENTINEL_TOKEN,
+    );
+
+    expect(attributesOf('login')).toEqual({
+      'adk.fn.arg.user': "'alice'",
+      'adk.fn.return': "'alice'",
+    });
+    expect(attributesOf('push')).toEqual({
+      'adk.fn.arg.channel': "'general'",
+      'adk.fn.return': "'general'",
+    });
+  });
+
+  it('names every argument a rest parameter collects', () => {
+    function send(channel: string, ...parts: string[]): string {
+      void parts;
+      return channel;
+    }
+
+    buildTracingWrapper({fn: send, tracer, caps: CAPS})(
+      'general',
+      'first',
+      'second',
+    );
+
+    expect(restParamName(send)).toBe('parts');
+    // Every collected argument takes the rest parameter's name, which is what
+    // lets a `...credentials` rest parameter mask all of them.
+    expect(attributesOf('send')['adk.fn.arg.parts']).toBe("'second'");
+  });
+
+  it('names nothing for a rest parameter that is itself destructured', () => {
+    function collect(...[first, second]: number[]): number {
+      return first + second;
+    }
+
+    expect(restParamName(collect)).toBeUndefined();
+    expect(positionalParamNames(collect)).toEqual([]);
+  });
+
+  it('preserves a property and the arity of the wrapped function', () => {
+    function annotated(a: number, b: number): number {
+      return a + b;
+    }
+    Object.assign(annotated, {schema: 'sum'});
+
+    const wrapped = buildTracingWrapper({fn: annotated, tracer, caps: CAPS});
+
+    expect(wrapped.length).toBe(2);
+    expect(Object.assign({}, wrapped)).toMatchObject({schema: 'sum'});
+  });
+
+  it('keeps its place through a default holding an escaped quote', () => {
+    // If the scanner loses the string it is inside, the token list splits in
+    // the wrong place and the parameter after it loses its name — which is
+    // the name the credential rule keys off.
+    function greet(greeting = "it\\'s", token: string): string {
+      void token;
+      return greeting;
+    }
+
+    expect(positionalParamNames(greet)).toEqual(['greeting', 'token']);
   });
 
   it('reads an arrow that declares its one parameter without parentheses', () => {
@@ -515,6 +629,11 @@ describe('positionalParamNames source parsing', () => {
 
       spy.mockReturnValue('something the parser cannot read');
       expect(positionalParamNames(syncShape)).toEqual([]);
+
+      // A parameter list that never closes names nothing at all.
+      spy.mockReturnValue('function truncated(a, b');
+      expect(positionalParamNames(syncShape)).toEqual([]);
+      expect(restParamName(syncShape)).toBeUndefined();
     } finally {
       spy.mockRestore();
     }

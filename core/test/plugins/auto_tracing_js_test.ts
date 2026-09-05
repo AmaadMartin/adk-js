@@ -162,19 +162,40 @@ describe('AutoTracingPlugin on JavaScript shapes', () => {
         return 'try again';
       }
     }
+    async function* stream(): AsyncGenerator<number> {
+      yield 1;
+    }
+    const live = stream();
+    const asyncGeneratorPrototype: object = Object.getPrototypeOf(
+      Object.getPrototypeOf(live),
+    );
     const graph = {
       failure: new AppError('held'),
       pending: Promise.resolve(1),
       when: new Date(0),
+      // Host types the walk reaches through an ordinary field. None of them is
+      // named in the plugin's source, which is the point: the stop set is
+      // derived from the runtime rather than listed by hand.
+      url: new URL('https://example.com'),
+      signal: new AbortController().signal,
+      live,
     };
 
     await instrument({graph});
 
-    expect(isWrapped(Error.prototype.toString)).toBe(false);
-    expect(isWrapped(Promise.prototype.then)).toBe(false);
-    expect(isWrapped(Date.prototype.getTime)).toBe(false);
-    expect(isWrapped(Object.prototype.hasOwnProperty)).toBe(false);
-    // The stop set blocks the built-ins only, not the subclass above them.
+    for (const method of [
+      Error.prototype.toString,
+      Promise.prototype.then,
+      Date.prototype.getTime,
+      Object.prototype.hasOwnProperty,
+      URL.prototype.toJSON,
+      EventTarget.prototype.addEventListener,
+      Object.getOwnPropertyDescriptor(asyncGeneratorPrototype, 'next')?.value,
+    ]) {
+      expect(isWrapped(method)).toBe(false);
+    }
+    // The stop set blocks the runtime's own prototypes, not the subclass above
+    // them.
     expect(isWrapped(AppError.prototype.hint)).toBe(true);
   });
 

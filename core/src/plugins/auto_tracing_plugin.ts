@@ -46,22 +46,43 @@ export const DEFAULT_MAX_WALK_DEPTH = 30;
 const MAX_WALK_NODES = 10_000;
 
 /**
- * Prototypes the walk stops at. Wrapping a method of a built-in would change
- * the behaviour of every value in the runtime, not just the agent's own.
+ * Every prototype the runtime itself owns, which the walk stops at.
+ *
+ * Derived rather than listed, because a hand-written list is silently
+ * incomplete and an omission is not a missing feature: it is a wrapped
+ * `Promise.prototype.then` or `URL.prototype.toJSON`, which changes the
+ * behaviour of every value in the process. The globals are read through their
+ * property descriptors, so building the set fires no deprecation getter.
  */
-const INTRINSIC_PROTOTYPES: ReadonlySet<object> = new Set<object>([
-  Object.prototype,
-  Function.prototype,
-  Array.prototype,
-  Error.prototype,
-  Promise.prototype,
-  Map.prototype,
-  Set.prototype,
-  WeakMap.prototype,
-  WeakSet.prototype,
-  Date.prototype,
-  RegExp.prototype,
-]);
+function intrinsicPrototypes(): ReadonlySet<object> {
+  const found = new Set<object>();
+  const addChain = (start: unknown): void => {
+    let current: unknown = start;
+    while (typeof current === 'object' && current !== null) {
+      found.add(current);
+      current = Object.getPrototypeOf(current);
+    }
+  };
+  for (const key of Object.getOwnPropertyNames(globalThis)) {
+    const global: unknown = Object.getOwnPropertyDescriptor(
+      globalThis,
+      key,
+    )?.value;
+    if (typeof global !== 'function') {
+      continue;
+    }
+    addChain(Object.getOwnPropertyDescriptor(global, 'prototype')?.value);
+  }
+  // No global names the iterator and generator prototypes, so they are
+  // reached through an instance instead.
+  function* generator(): Generator<never> {}
+  async function* asyncGenerator(): AsyncGenerator<never> {}
+  addChain(Object.getPrototypeOf(Object.getPrototypeOf(generator())));
+  addChain(Object.getPrototypeOf(Object.getPrototypeOf(asyncGenerator())));
+  return found;
+}
+
+const INTRINSIC_PROTOTYPES: ReadonlySet<object> = intrinsicPrototypes();
 
 /** Options for {@link AutoTracingPlugin}. */
 export interface AutoTracingPluginOptions {
