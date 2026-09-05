@@ -49,6 +49,12 @@
       "require": "./dist/cjs/sessions/database_session_service.js",
       "default": "./dist/esm/sessions/database_session_service.js"
     },
+    "./sessions/firestore": {
+      "types": "./dist/types/integrations/firestore/firestore_session_service.d.ts",
+      "import": "./dist/esm/integrations/firestore/firestore_session_service.js",
+      "require": "./dist/cjs/integrations/firestore/firestore_session_service.js",
+      "default": "./dist/esm/integrations/firestore/firestore_session_service.js"
+    },
     "./telemetry/gcp": {
       "types": "./dist/types/telemetry/google_cloud.d.ts",
       "import": "./dist/esm/telemetry/google_cloud.js",
@@ -104,6 +110,7 @@
   "devDependencies": {
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
+    "@google-cloud/firestore": "^9.0.1",
     "@google-cloud/storage": "^7.17.1",
     "@mikro-orm/sqlite": "^6.6.6",
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -117,6 +124,7 @@
   "peerDependencies": {
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
+    "@google-cloud/firestore": "^9.0.1",
     "@google-cloud/storage": "^7.17.1",
     "@mikro-orm/mariadb": "^6.6.6",
     "@mikro-orm/mssql": "^6.6.6",
@@ -131,6 +139,9 @@
       "optional": true
     },
     "@google-cloud/opentelemetry-cloud-trace-exporter": {
+      "optional": true
+    },
+    "@google-cloud/firestore": {
       "optional": true
     },
     "@google-cloud/storage": {
