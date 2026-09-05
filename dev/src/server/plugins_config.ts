@@ -116,8 +116,7 @@ export async function readPluginsYaml(
       },
     };
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    logger.warn(`Ignoring ${yamlPath}: ${message}`);
+    logger.warn(`Ignoring ${yamlPath}:`, e);
     return undefined;
   }
 }
