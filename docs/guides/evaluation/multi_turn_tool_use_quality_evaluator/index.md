@@ -16,11 +16,11 @@ The Vertex AI Gen AI evaluation service does the scoring, through its prebuilt
 score closer to 1 is better. The metric is reference-free, so golden
 invocations are optional.
 
-The class implements the `Evaluator` interface, so an eval harness holds it
-behind the same call as any other metric. It holds no scoring logic of its own:
-it resolves the threshold, then delegates to `MultiTurnVertexAiEvalFacade`. The
-`V1` suffix marks that a later version of the metric could use a different
-strategy.
+The class extends `MultiTurnVertexAiEvalFacade`, the facade that speaks to the
+service, and preconfigures it with this one metric name. It implements the
+`Evaluator` interface, so an eval harness holds it behind the same call as
+every other metric. The `V1` suffix marks that a later version of the metric
+could use a different strategy.
 
 ## Get started
 
