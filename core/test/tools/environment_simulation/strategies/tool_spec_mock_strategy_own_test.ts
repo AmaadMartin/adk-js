@@ -75,8 +75,8 @@ describe('ToolSpecMockStrategy own behaviour', () => {
 
         expect(result).toEqual({
           status: 'error',
-          error_message: 'Generated mock response was not a JSON object.',
-          llm_output: responseText,
+          errorMessage: 'Generated mock response was not a JSON object.',
+          llmOutput: responseText,
         });
       },
     );

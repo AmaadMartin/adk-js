@@ -140,7 +140,7 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
     if (!declaration) {
       return {
         status: 'error',
-        error_message: 'Could not get tool declaration.',
+        errorMessage: 'Could not get tool declaration.',
       };
     }
 
@@ -154,15 +154,15 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
     if (parsed === undefined) {
       return {
         status: 'error',
-        error_message: 'Failed to generate valid JSON mock response.',
-        llm_output: responseText,
+        errorMessage: 'Failed to generate valid JSON mock response.',
+        llmOutput: responseText,
       };
     }
     if (!isJsonObject(parsed)) {
       return {
         status: 'error',
-        error_message: 'Generated mock response was not a JSON object.',
-        llm_output: responseText,
+        errorMessage: 'Generated mock response was not a JSON object.',
+        llmOutput: responseText,
       };
     }
 

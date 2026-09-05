@@ -52,7 +52,7 @@ describe('ToolSpecMockStrategy', () => {
 
     expect(result).toEqual({
       status: 'error',
-      error_message: 'Could not get tool declaration.',
+      errorMessage: 'Could not get tool declaration.',
     });
   });
 
@@ -79,8 +79,8 @@ describe('ToolSpecMockStrategy', () => {
 
     expect(result).toEqual({
       status: 'error',
-      error_message: 'Failed to generate valid JSON mock response.',
-      llm_output: 'sorry, I cannot do that',
+      errorMessage: 'Failed to generate valid JSON mock response.',
+      llmOutput: 'sorry, I cannot do that',
     });
   });
 
