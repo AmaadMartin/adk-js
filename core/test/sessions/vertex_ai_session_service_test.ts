@@ -1727,6 +1727,23 @@ describe('VertexAiSessionService', () => {
     });
   });
 
+  /**
+   * The mock as the `Sessions` client a service takes. It implements only the
+   * methods this file drives, which is why the constructor's own injection
+   * point above casts it the same way.
+   */
+  const mockSessions = () => mockClient as unknown as Sessions;
+
+  /** A session for the append tests, matching the mock's app name. */
+  const appendSession = () =>
+    createSession({
+      id: 'append-session',
+      appName: '12345',
+      userId: 'testUser',
+      events: [],
+      lastUpdateTime: Date.now(),
+    });
+
   // Ported from adk-python
   // tests/unittests/sessions/test_vertex_ai_session_service.py @ 25f5214c.
   // Names are kept verbatim so a reviewer can grep the original. They are
@@ -1736,15 +1753,6 @@ describe('VertexAiSessionService', () => {
     afterEach(() => {
       vi.useRealTimers();
     });
-
-    const appendSession = () =>
-      ({
-        id: 'append-session',
-        appName: '12345',
-        userId: 'testUser',
-        events: [],
-        lastUpdateTime: Date.now(),
-      }) as unknown as Session;
 
     it('test_append_event_retries_once_on_429', async () => {
       mockClient.events.append.mockRejectedValueOnce(
@@ -1923,9 +1931,7 @@ describe('VertexAiSessionService', () => {
     });
 
     it('test_api_client_http_options_override_default', () => {
-      const probe = new HttpOptionsProbeService({
-        sessions: mockClient as unknown as Sessions,
-      });
+      const probe = new HttpOptionsProbeService({sessions: mockSessions()});
 
       expect(probe.readApiClientHttpOptionsOverride()).toBeUndefined();
     });
@@ -1934,23 +1940,12 @@ describe('VertexAiSessionService', () => {
   describe('apiClientHttpOptionsOverride', () => {
     let overriding: VertexAiSessionService;
 
-    const appendSession = () =>
-      ({
-        id: 'append-session',
-        appName: '12345',
-        userId: 'testUser',
-        events: [],
-        lastUpdateTime: Date.now(),
-      }) as unknown as Session;
-
     /** The config object the mock recorded for its first call. */
     const firstConfig = (mock: ReturnType<typeof vi.fn>) =>
       mock.mock.calls[0][0].config;
 
     beforeEach(() => {
-      overriding = new OverridingSessionService({
-        sessions: mockClient as unknown as Sessions,
-      });
+      overriding = new OverridingSessionService({sessions: mockSessions()});
     });
 
     afterEach(() => {
@@ -2164,13 +2159,7 @@ describe('VertexAiSessionService', () => {
       vi.useFakeTimers();
 
       const appendPromise = service.appendEvent({
-        session: {
-          id: 'append-session',
-          appName: '12345',
-          userId: 'testUser',
-          events: [],
-          lastUpdateTime: Date.now(),
-        } as unknown as Session,
+        session: appendSession(),
         event,
       });
       await Promise.all([appendPromise, vi.runAllTimersAsync()]);
