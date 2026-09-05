@@ -133,6 +133,52 @@ describe('node runner — resume state survives a retry', () => {
   });
 });
 
+describe('node runner — per-attempt state is cleared before a retry', () => {
+  it('drops the artifact delta a failed attempt left behind', async () => {
+    let attempts = 0;
+    const node = new FnNode(
+      'writer',
+      (ctx) => {
+        attempts += 1;
+        ctx.actions.artifactDelta[`attempt-${attempts}.txt`] = attempts;
+        if (attempts < 2) {
+          throw new Error('transient');
+        }
+        return 'ok';
+      },
+      {retryConfig: {maxAttempts: 2, initialDelay: 0, jitter: 0}},
+    );
+
+    const {events} = await driveNodeRunner(node);
+
+    const merged: Record<string, number> = {};
+    for (const event of events) {
+      Object.assign(merged, event.actions.artifactDelta);
+    }
+    expect(merged).toEqual({'attempt-2.txt': 2});
+  });
+});
+
+describe('node runner — a node that emits its own delta object', () => {
+  it('leaves the entries on the event instead of draining them away', async () => {
+    // `createEventActions` keeps the delta object it is handed, so a node that
+    // passes `ctx.actions.stateDelta` straight through emits the very object
+    // the runner drains. Draining it would empty the event it is filling.
+    const node = new FnNode('sharer', (ctx) => {
+      ctx.state.set('shared', 'value');
+      return createEvent({
+        output: 'done',
+        actions: {stateDelta: ctx.actions.stateDelta},
+      });
+    });
+
+    const {events} = await driveNodeRunner(node);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].actions.stateDelta).toEqual({shared: 'value'});
+  });
+});
+
 describe('node runner — an output already on the stream is not repeated', () => {
   it('emits one event for a node that returned its output', async () => {
     const node = new FnNode('emitter', () => 'answer');

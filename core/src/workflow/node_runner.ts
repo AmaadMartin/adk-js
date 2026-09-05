@@ -7,7 +7,6 @@
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event} from '../events/event.js';
-import {createEventActions} from '../events/event_actions.js';
 import {carryDeltaStamp} from '../sessions/state_write_order.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
@@ -525,32 +524,33 @@ function applyPriorState({
  * `workflow/_node_runner.py`.
  */
 function hasNonOutputContent(event: Event): boolean {
-  const actions = event.actions;
-  if (!actions) {
-    return false;
-  }
   return (
-    Object.keys(actions.stateDelta).length > 0 ||
-    Object.keys(actions.artifactDelta).length > 0
+    Object.keys(event.actions.stateDelta).length > 0 ||
+    Object.keys(event.actions.artifactDelta).length > 0
   );
 }
 
 /**
- * Moves every entry of `from` onto `to`, carrying the state write-order stamps
- * so a late commit can still tell it has been superseded.
+ * Empties `from` onto `to` and returns the delta the event should carry,
+ * bringing the state write-order stamps with each entry so a late commit can
+ * still tell it has been superseded.
  *
- * A node that emitted the context's own delta object gets a no-op: that object
- * already holds every entry, and draining it would empty the event too.
+ * A node can emit the context's own delta object — `createEventActions` keeps
+ * whatever object it is handed — so the two can be the same. Then the entries
+ * are copied out first, because emptying the context would otherwise empty the
+ * event with it.
  */
-function drainDelta<T>(from: Record<string, T>, to: Record<string, T>): void {
-  if (from === to) {
-    return;
-  }
+function drainDelta<T>(
+  from: Record<string, T>,
+  to: Record<string, T>,
+): Record<string, T> {
+  const target = from === to ? {...from} : to;
   for (const key of Object.keys(from)) {
-    to[key] = from[key];
-    carryDeltaStamp(from, to, key);
+    target[key] = from[key];
+    carryDeltaStamp(from, target, key);
     delete from[key];
   }
+  return target;
 }
 
 /**
@@ -570,11 +570,11 @@ function flushDeltas(event: Event, child: NodeContext): void {
   ) {
     return;
   }
-  if (!event.actions) {
-    event.actions = createEventActions();
-  }
-  drainDelta(stateDelta, event.actions.stateDelta);
-  drainDelta(artifactDelta, event.actions.artifactDelta);
+  event.actions.stateDelta = drainDelta(stateDelta, event.actions.stateDelta);
+  event.actions.artifactDelta = drainDelta(
+    artifactDelta,
+    event.actions.artifactDelta,
+  );
 }
 
 interface FlushOutputAndDeltasParams {
