@@ -65,7 +65,6 @@ export class BaseMockStrategy {
    * @return The simulated tool response.
    */
   async mock(_request: MockRequest): Promise<Record<string, unknown>> {
-    // A dedicated NotImplementedError type is not on this base branch.
     throw new Error(
       'BaseMockStrategy.mock() is not implemented. Subclass BaseMockStrategy and override mock().',
     );
