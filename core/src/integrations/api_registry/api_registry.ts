@@ -8,14 +8,33 @@ import {GoogleAuth} from 'google-auth-library';
 import {ToolPredicate} from '../../tools/base_toolset.js';
 import {MCPToolset} from '../../tools/mcp/mcp_toolset.js';
 import {logger} from '../../utils/logger.js';
+import {
+  clientCertsToPresent,
+  getWithClientCert,
+  MtlsClientCerts,
+} from '../../utils/mtls_utils.js';
 
 const API_REGISTRY_URL = 'https://cloudapiregistry.googleapis.com';
+const API_REGISTRY_MTLS_URL = 'https://cloudapiregistry.mtls.googleapis.com';
 const API_REGISTRY_API_VERSION = 'v1beta';
 /** API Registry no longer supports enabling APIs, so disabled ones are listed too. */
 const LIST_MCP_SERVERS_FILTER = 'enabled=false';
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 const DEPRECATION_MESSAGE =
   'ApiRegistry is deprecated. Use AgentRegistry from @google/adk instead.';
+
+/** How long a listing request that presents a client certificate may take. */
+const CLIENT_CERT_REQUEST_TIMEOUT_MS = 60_000;
+
+/** The environment variable that selects the registry host. */
+const USE_MTLS_ENDPOINT_ENV = 'GOOGLE_API_USE_MTLS_ENDPOINT';
+
+/** The values {@link USE_MTLS_ENDPOINT_ENV} accepts. */
+enum MtlsEndpoint {
+  AUTO = 'auto',
+  ALWAYS = 'always',
+  NEVER = 'never',
+}
 
 interface ApiRegistryMcpServer {
   name?: string;
@@ -51,6 +70,65 @@ function toAbsoluteUrl(url: string): string {
 }
 
 /**
+ * Chooses the registry host.
+ *
+ * `always` picks the mutual-TLS host and `never` picks the default one. Every
+ * other setting, including an unset or unrecognised one, means `auto`: the
+ * mutual-TLS host is used only when a client certificate is available to
+ * present on that connection.
+ *
+ * @param hasClientCert Whether a client certificate was loaded.
+ */
+function apiRegistryUrl(hasClientCert: boolean): string {
+  const setting = (process.env[USE_MTLS_ENDPOINT_ENV] ?? '').toLowerCase();
+  if (setting === MtlsEndpoint.ALWAYS) {
+    return API_REGISTRY_MTLS_URL;
+  }
+  if (setting === MtlsEndpoint.NEVER) {
+    return API_REGISTRY_URL;
+  }
+  return hasClientCert ? API_REGISTRY_MTLS_URL : API_REGISTRY_URL;
+}
+
+/**
+ * Reads one page of the listing.
+ *
+ * `globalThis.fetch` cannot present a client certificate in Node, so a request
+ * that has to present one goes through {@link getWithClientCert} instead.
+ *
+ * @param url The absolute URL to request.
+ * @param headers The request headers.
+ * @param certs The certificate to present, when the environment asks for one.
+ * @return The response body, as text.
+ * @throws If the response status is outside the 2xx range.
+ */
+async function readListingPage(
+  url: string,
+  headers: Record<string, string>,
+  certs?: MtlsClientCerts,
+): Promise<string> {
+  if (certs) {
+    const {status, body} = await getWithClientCert(
+      url,
+      headers,
+      certs,
+      CLIENT_CERT_REQUEST_TIMEOUT_MS,
+    );
+    if (status < 200 || status > 299) {
+      throw new Error(`request failed with status ${status}: ${body}`);
+    }
+    return body;
+  }
+  const res = await fetch(url, {method: 'GET', headers});
+  if (!res.ok) {
+    throw new Error(
+      `request failed with status ${res.status}: ${await res.text()}`,
+    );
+  }
+  return res.text();
+}
+
+/**
  * Registry that provides {@link MCPToolset}s for MCP servers registered in the
  * Google Cloud API Registry.
  *
@@ -59,7 +137,6 @@ function toAbsoluteUrl(url: string): string {
 export class ApiRegistry {
   readonly projectId: string;
   readonly location: string;
-  private readonly listUrl: string;
   private readonly auth: GoogleAuth;
   private serversPromise?: Promise<Map<string, ApiRegistryMcpServer>>;
 
@@ -70,9 +147,6 @@ export class ApiRegistry {
     logger.warn(DEPRECATION_MESSAGE);
     this.projectId = options.projectId;
     this.location = options.location ?? 'global';
-    this.listUrl =
-      `${API_REGISTRY_URL}/${API_REGISTRY_API_VERSION}` +
-      `/projects/${this.projectId}/locations/${this.location}/mcpServers`;
     this.auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
   }
 
@@ -131,6 +205,8 @@ export class ApiRegistry {
   private async fetchMcpServers(): Promise<Map<string, ApiRegistryMcpServer>> {
     const servers = new Map<string, ApiRegistryMcpServer>();
     try {
+      const certs = await clientCertsToPresent();
+      const listUrl = this.listUrl(apiRegistryUrl(certs !== undefined));
       const headers = {
         ...(await this.getAuthHeaders()),
         'Content-Type': 'application/json',
@@ -141,16 +217,12 @@ export class ApiRegistry {
         if (pageToken) {
           params.set('pageToken', pageToken);
         }
-        const res = await fetch(`${this.listUrl}?${params.toString()}`, {
-          method: 'GET',
+        const body = await readListingPage(
+          `${listUrl}?${params.toString()}`,
           headers,
-        });
-        if (!res.ok) {
-          throw new Error(
-            `request failed with status ${res.status}: ${await res.text()}`,
-          );
-        }
-        const data = (await res.json()) as ListApiRegistryMcpServersResponse;
+          certs,
+        );
+        const data = JSON.parse(body) as ListApiRegistryMcpServersResponse;
         for (const server of data.mcpServers ?? []) {
           if (server.name) {
             servers.set(server.name, server);
@@ -163,6 +235,14 @@ export class ApiRegistry {
       throw new Error(`Error fetching MCP servers from API Registry: ${msg}`);
     }
     return servers;
+  }
+
+  /** Builds the `mcpServers.list` URL against `baseUrl`. */
+  private listUrl(baseUrl: string): string {
+    return (
+      `${baseUrl}/${API_REGISTRY_API_VERSION}` +
+      `/projects/${this.projectId}/locations/${this.location}/mcpServers`
+    );
   }
 
   /**

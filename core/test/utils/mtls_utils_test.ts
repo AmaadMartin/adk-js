@@ -46,7 +46,6 @@ vi.mock('node:os', async (importOriginal) => {
   };
 });
 
-
 const CERT_PEM =
   '-----BEGIN CERTIFICATE-----\nMIIByGVsbG8=\n-----END CERTIFICATE-----';
 const KEY_PEM =
@@ -303,7 +302,6 @@ describe('loadDefaultClientCerts', () => {
     );
   });
 });
-
 
 describe('clientCertsToPresent', () => {
   let tempDir: string;
