@@ -52,6 +52,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@mikro-orm/sqlite',
   '@modelcontextprotocol/sdk',
   'express',
+  'openai',
 ];
 
 describe('core/package.json install weight', () => {
@@ -78,6 +79,7 @@ describe('core/package.json install weight', () => {
     '@mikro-orm/sqlite',
     '@modelcontextprotocol/sdk',
     'express',
+    'openai',
   ])(
     '%s is still a devDependency so the repo can build and test against it',
     (name) => {
