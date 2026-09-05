@@ -78,7 +78,7 @@ export interface ParameterDescriptor {
 }
 
 /** A request to bind the declared parameters for one node run. */
-export interface BindParametersRequest {
+interface BindParametersRequest {
   /** The parameters the handler declares, from {@link describeParameters}. */
   descriptors: readonly ParameterDescriptor[];
   /** Where to read the parameters from. */
