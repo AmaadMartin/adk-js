@@ -224,3 +224,22 @@ export function safeJsonLoads(text: string, context?: string): unknown {
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+/** Written wherever a value cannot be represented. */
+export const NOT_SERIALIZABLE = '<not serializable>';
+
+/**
+ * Serializes a value to compact JSON, or to {@link NOT_SERIALIZABLE}.
+ *
+ * `JSON.stringify` produces no whitespace and does not escape non-ASCII, which
+ * matches the compact form the OpenTelemetry attribute values use. It throws on
+ * a cycle or a `BigInt`, and returns `undefined` for a value it drops, such as
+ * `undefined` itself or a function.
+ */
+export function safeJsonSerialize(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? NOT_SERIALIZABLE;
+  } catch {
+    return NOT_SERIALIZABLE;
+  }
+}
