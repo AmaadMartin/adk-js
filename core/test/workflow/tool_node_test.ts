@@ -209,10 +209,9 @@ describe('ToolNode rerunOnResume', () => {
     expect(new ToolNode(new EchoTool()).rerunOnResume).toBe(false);
   });
 
-  // `rerunOnResume` is in OVERRIDABLE_KEYS, so all three routes below are
-  // supported calls and must agree. `cloneWithOverrides` applies the key after
-  // construction, so a constructor that pinned it last would leave the
-  // pre-wrapped form as the only one that worked.
+  // adk-python's `_ToolNode` passes `rerun_on_resume=False`, which `BaseNode`
+  // already gives us. `rerunOnResume` is in OVERRIDABLE_KEYS, so the three
+  // routes below are supported calls and must agree.
   it('honours an explicit override on the constructor', () => {
     expect(
       new ToolNode(new EchoTool(), {rerunOnResume: true}).rerunOnResume,

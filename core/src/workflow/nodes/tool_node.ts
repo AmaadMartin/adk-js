@@ -43,17 +43,9 @@ export class ToolNode extends BaseNode {
   readonly tool: BaseTool;
 
   constructor(tool: BaseTool, config: ToolNodeConfig = {}) {
-    super({
-      // adk-python's `_ToolNode` pins `rerun_on_resume=False`: a tool call is a
-      // side effect, so resuming a workflow must not run it a second time. It
-      // precedes the spread because `rerunOnResume` is in `OVERRIDABLE_KEYS`,
-      // so a caller that asks for a rerun still gets one.
-      rerunOnResume: false,
-      // Spread before `name` so an explicit `undefined` name in `config` can't
-      // clobber the fallback (which BaseNode requires to be non-empty).
-      ...config,
-      name: config.name ?? tool.name,
-    });
+    // Spread first so an explicit `undefined` name in `config` can't clobber
+    // the fallback (which BaseNode requires to be non-empty).
+    super({...config, name: config.name ?? tool.name});
     this.tool = tool;
   }
 
