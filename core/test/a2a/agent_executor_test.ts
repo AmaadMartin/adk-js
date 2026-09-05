@@ -19,6 +19,7 @@ import {
   Session,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {getAdkRunner} from '../../src/a2a/agent_executor.js';
 import {getFinalTaskStatusUpdate} from '../../src/a2a/event_processor_utils.js';
 
 // Mock the Runner to control its async generator
@@ -626,6 +627,15 @@ describe('A2AAgentExecutor', () => {
       expect(finalEvent.status.state).toBe('failed');
       expect((finalEvent.status.message!.parts[0] as TextPart).text).toContain(
         'Agent run failed: Long-running function calls produced no A2A response parts',
+      );
+    });
+
+    it('names null and a prototype-less object in the runner error', async () => {
+      await expect(getAdkRunner(null)).rejects.toThrow(
+        'Runner must be a Runner instance or a callable that returns a Runner, got null',
+      );
+      await expect(getAdkRunner(Object.create(null))).rejects.toThrow(
+        'Runner must be a Runner instance or a callable that returns a Runner, got object',
       );
     });
 
