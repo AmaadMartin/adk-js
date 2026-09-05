@@ -375,6 +375,20 @@ export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
 export * from './tools/base_tool.js';
+export {
+  openidDictToSchemeCredential,
+  openidUrlToSchemeCredential,
+  serviceAccountDictToSchemeCredential,
+  serviceAccountSchemeCredential,
+  tokenToSchemeCredential,
+} from './tools/openapi_tool/auth/auth_helpers.js';
+export type {
+  ApiKeyLocation,
+  OpenIdSchemeCredential,
+  SchemeCredential,
+  ServiceAccountSchemeCredential,
+  TokenType,
+} from './tools/openapi_tool/auth/auth_helpers.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,
