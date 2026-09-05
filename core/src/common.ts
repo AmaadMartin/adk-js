@@ -227,6 +227,28 @@ export {
   type PerItemFailuresCounter,
   type ToolFailureResponse,
 } from './plugins/_reflect_retry_utils.js';
+export {
+  AUTO_TRACING_WRAPPED,
+  DEFAULT_MAX_RECORDED_YIELDS,
+  DEFAULT_MAX_REPR_LEN,
+  StreamResult,
+  buildTracingWrapper,
+  createCaps,
+  displayNameFor,
+  nameValuePairs,
+  positionalParamNames,
+  recordIoOnSpan,
+  safeRepr,
+  tracerWillRecord,
+  type Caps,
+  type NamedArg,
+  type TracedFunction,
+} from './plugins/auto_tracing_helpers.js';
+export {
+  AutoTracingPlugin,
+  DEFAULT_MAX_WALK_DEPTH,
+  type AutoTracingPluginOptions,
+} from './plugins/auto_tracing_plugin.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
