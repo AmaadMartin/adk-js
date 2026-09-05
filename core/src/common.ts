@@ -359,6 +359,36 @@ export {
   type BigQueryToolConfig,
   type ResolvedBigQueryToolConfig,
 } from './integrations/bigquery/config.js';
+export {
+  AntigravityAgent,
+  PARENT_REQUIRES_SINGLE_TURN_MESSAGE,
+} from './labs/antigravity/antigravity_agent.js';
+export type {
+  AntigravityAgentMode,
+  AntigravityAgentOptions,
+} from './labs/antigravity/antigravity_agent.js';
+export {
+  isAntigravityToolExecutionError,
+  isLocalAntigravityConfig,
+} from './labs/antigravity/sdk_types.js';
+export type {
+  AntigravityAgentConfig,
+  AntigravityHook,
+  AntigravityStep,
+  AntigravityStepSource,
+  AntigravityStepStatus,
+  AntigravityStepType,
+  AntigravityTool,
+  AntigravityToolCall,
+  AntigravityToolExecutionError,
+  AntigravityToolResult,
+  LocalAntigravityAgentConfig,
+  OnToolErrorHook,
+  PostToolCallHook,
+  SdkAgent,
+  SdkConversation,
+  SessionContinuationMode,
+} from './labs/antigravity/sdk_types.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,

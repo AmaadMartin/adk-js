@@ -5,6 +5,8 @@ TypeScript implementation. One guide per feature, mirroring adk-python's
 `docs/guides/` layout, so the two SDKs document a feature in the same place. For
 the official ADK documentation, visit [adk.dev](https://adk.dev/).
 
+Maintainers may prefer these on adk.dev instead. Moving them is a file move.
+
 ## Index
 
 ### A2A
@@ -43,6 +45,11 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 
 - [Event and NodeInfo](events/event/index.md) - The event fields, the
   convenience construction options, and reading the emitting workflow node.
+
+### Labs
+
+- [AntigravityAgent](labs/antigravity/index.md) - Running a Google Antigravity
+  agent as an ADK agent node.
 
 ### Models
 
