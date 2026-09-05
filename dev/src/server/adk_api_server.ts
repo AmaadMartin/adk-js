@@ -112,7 +112,13 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  /**
+   * The configured agents directory, kept so a subclass can resolve paths
+   * under it. Undefined when the caller supplied its own `agentLoader` and no
+   * directory.
+   */
+  protected readonly agentsDir?: string;
+  protected readonly agentLoader: AgentLoader;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
@@ -138,7 +144,7 @@ export class AdkApiServer {
   private readonly sessionTraceDict: Record<string, string[]> =
     Object.create(null);
   private memoryExporter: InMemoryExporter;
-  private readonly logger: Logger;
+  protected readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
 
@@ -150,6 +156,7 @@ export class AdkApiServer {
     this.memoryService = options.memoryService ?? new InMemoryMemoryService();
     this.artifactService =
       options.artifactService ?? new InMemoryArtifactService();
+    this.agentsDir = options.agentsDir;
     this.agentLoader =
       options.agentLoader ??
       new AgentLoader(
@@ -1119,7 +1126,16 @@ export class AdkApiServer {
         }
       }
     });
+
+    this.registerDevEndpoints(app);
   }
+
+  /**
+   * Hook for a subclass to register development-only endpoints, called once
+   * every production route is registered. `AdkApiServer` itself serves none,
+   * so a production deployment never exposes them.
+   */
+  protected registerDevEndpoints(_app: express.Application): void {}
 
   async start(): Promise<void> {
     await this.init();
