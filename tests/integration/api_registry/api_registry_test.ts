@@ -53,8 +53,23 @@ interface SeenRequest {
   pageToken: string | null;
   authorization: string | undefined;
   contentType: string | undefined;
+  userAgent: string | undefined;
+  apiClient: string | string[] | undefined;
   /** A repeated header arrives as an array, so the raw shape is kept. */
   quotaProject: string | string[] | undefined;
+}
+
+/** Resolves the headers a toolset presents to its MCP server. */
+async function headersFor(toolset: {
+  headerProvider?: () =>
+    | Promise<Record<string, string>>
+    | Record<string, string>;
+}): Promise<Record<string, string>> {
+  const provider = toolset.headerProvider;
+  if (!provider) {
+    expect.fail('the toolset carries no header provider');
+  }
+  return provider();
 }
 
 describe('ApiRegistry against a local HTTP server', () => {
@@ -72,6 +87,8 @@ describe('ApiRegistry against a local HTTP server', () => {
         pageToken: url.searchParams.get('pageToken'),
         authorization: request.headers['authorization'],
         contentType: request.headers['content-type'],
+        userAgent: request.headers['user-agent'],
+        apiClient: request.headers['x-goog-api-client'],
         quotaProject: request.headers['x-goog-user-project'],
       });
       response.statusCode = status;
@@ -149,6 +166,28 @@ describe('ApiRegistry against a local HTTP server', () => {
     expect(analytics.connectionParams.url).toBe(
       'https://analytics-mcp.example.com',
     );
+  });
+
+  it('gives the access token to the Google host and not to the other one', async () => {
+    const registry = new ApiRegistry({projectId: 'p1'});
+
+    const billing = await registry.getToolset('billing');
+    const analytics = await registry.getToolset('analytics');
+
+    expect(await headersFor(billing)).toEqual({
+      'Authorization': 'Bearer integration-token',
+      'x-goog-user-project': 'quota-project',
+    });
+    expect(await headersFor(analytics)).toEqual({});
+  });
+
+  it('identifies the listing request as ADK traffic', async () => {
+    const registry = new ApiRegistry({projectId: 'p1'});
+
+    await registry.getToolset('billing');
+
+    expect(seen[0].apiClient).toContain('google-adk/');
+    expect(seen[0].userAgent).toContain('google-adk/');
   });
 
   it('reports a server-side failure through getToolset', async () => {
