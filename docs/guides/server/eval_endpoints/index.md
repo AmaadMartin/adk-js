@@ -75,6 +75,18 @@ const server = new AdkApiServer({
 A manager you supply wins over `evalStorageUri`, as `sessionService` wins over
 `sessionServiceUri`.
 
+## Request body spellings
+
+Every payload is camelCase, as the rest of adk-js is, with two exceptions the
+dev UI forces.
+
+`POST .../eval-sets` accepts either `{"evalSet":{"evalSetId":"..."}}` or the
+`{"eval_set":{"eval_set_id":"..."}}` the served UI bundle posts. adk-python
+accepts both here too, through pydantic aliases.
+
+`POST .../run` reads the cases to score from `evalCaseIds`, and from `evalIds`
+when that is absent. adk-python reads the same pair in the same order.
+
 ## Running a set
 
 `POST /dev/apps/:appName/eval-sets/:evalSetId/run` scores the set and saves
