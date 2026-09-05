@@ -277,11 +277,14 @@ export class Workflow extends BaseNode {
       return;
     }
     if (output !== undefined) {
-      // An entry that hands back a child's result is reporting the value that
-      // child already emitted, so the workflow must not announce it a second
-      // time. One it computed itself was never emitted, and does need an
-      // event of its own.
-      if (childEmitted(dynamicState, output)) {
+      // An entry that hands its last child's result straight back is reporting
+      // a value that child already announced, so the workflow must not announce
+      // it a second time. One the entry computed itself has never been on an
+      // event, and does need one. There is no provenance to test here — the
+      // entry returns a plain value, and the reference has no `dynamicEntry` to
+      // borrow a rule from — so identity against that child's output is the
+      // signal, and `useAsOutput` remains the explicit way to say it.
+      if (Object.is(dynamicState.lastChildOutput, output)) {
         ctx.outputDelegated = true;
       }
       ctx.output = output;
@@ -745,20 +748,4 @@ function createWorkflowAbort(parentSignal?: AbortSignal): {
     controller,
     dispose: () => parentSignal.removeEventListener('abort', onParentAbort),
   };
-}
-
-/**
- * Whether a `ctx.runNode` child produced this exact value as its own output,
- * and so has already announced it on an event of its own.
- */
-function childEmitted(
-  dynamicState: DynamicNodeState,
-  output: unknown,
-): boolean {
-  for (const run of dynamicState.runs.values()) {
-    if (Object.is(run.output, output)) {
-      return true;
-    }
-  }
-  return false;
 }

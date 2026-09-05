@@ -219,43 +219,6 @@ describe('node_runner — output delegation', () => {
   });
 });
 
-describe('node_runner — resume state carried forward', () => {
-  it('test_prior_output_carried_forward', async () => {
-    const n = new FnNode('n', () => undefined);
-
-    const {child, events} = await runChildNode(n, {
-      priorOutput: 'cached_result',
-    });
-
-    expect(child.output).toBe('cached_result');
-    // The prior run already emitted it, so it is not announced again.
-    expect(outputEvents(events)).toHaveLength(0);
-  });
-
-  it('test_prior_interrupt_ids_carried_forward', async () => {
-    const n = new FnNode('n', () => undefined);
-
-    const {child} = await runChildNode(n, {priorInterruptIds: ['fc-old']});
-
-    expect(child.interruptIds).toContain('fc-old');
-  });
-
-  it('test_prior_and_new_interrupt_ids_merged', async () => {
-    const n = new GenNode('n', async function* () {
-      yield createEvent({
-        content: {
-          parts: [{functionCall: {name: 'tool', args: {}, id: 'fc-new'}}],
-        },
-        longRunningToolIds: ['fc-new'],
-      });
-    });
-
-    const {child} = await runChildNode(n, {priorInterruptIds: ['fc-old']});
-
-    expect([...child.interruptIds].sort()).toEqual(['fc-new', 'fc-old']);
-  });
-});
-
 describe('node_runner — event enrichment', () => {
   it('test_event_author_defaults_to_node_name', async () => {
     const n = new GenNode('my_node', async function* () {

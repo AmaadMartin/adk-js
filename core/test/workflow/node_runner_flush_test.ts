@@ -286,47 +286,6 @@ describe('node runner — the flush stays silent when nothing is pending', () =>
   });
 });
 
-describe('node runner — resume state across a retry', () => {
-  it('re-seeds the prior output and interrupt ids on the second attempt', async () => {
-    let attempts = 0;
-    const seen: Array<{output: unknown; ids: string[]}> = [];
-    const flaky = new FnNode(
-      'flaky',
-      (ctx) => {
-        attempts++;
-        seen.push({output: ctx.output, ids: [...ctx.interruptIds]});
-        if (attempts === 1) {
-          throw new Error('transient');
-        }
-        return undefined;
-      },
-      {retryConfig: {maxAttempts: 2, initialDelay: 0, jitter: 0}},
-    );
-
-    const {child} = await runChildNode(flaky, {
-      priorOutput: 'carried',
-      priorInterruptIds: ['fc-old'],
-    });
-
-    expect(seen).toEqual([
-      {output: 'carried', ids: ['fc-old']},
-      {output: 'carried', ids: ['fc-old']},
-    ]);
-    expect(child.output).toBe('carried');
-    expect(child.interruptIds).toEqual(['fc-old']);
-  });
-
-  it('does not duplicate an interrupt id the node raises again', async () => {
-    const n = new GenNode('n', async function* () {
-      yield createEvent({longRunningToolIds: ['fc-old']});
-    });
-
-    const {child} = await runChildNode(n, {priorInterruptIds: ['fc-old']});
-
-    expect(child.interruptIds).toEqual(['fc-old']);
-  });
-});
-
 describe('node runner — the error code of a failed attempt', () => {
   it('falls back to UNKNOWN_ERROR for a thrown value that is not an Error', async () => {
     const n = new FnNode('n', () => {

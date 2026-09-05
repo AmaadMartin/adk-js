@@ -76,6 +76,7 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
         ctx.interruptIds.push(id);
       }
     }
+    this.state.lastChildOutput = result.output;
     return result;
   }
 

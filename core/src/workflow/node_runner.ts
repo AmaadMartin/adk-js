@@ -88,17 +88,6 @@ export interface ExecuteChildNodeParams {
    * starts clean instead of re-reading a response it already answered.
    */
   resumeInputs?: Record<string, unknown>;
-  /**
-   * Output from a previous run, carried forward on resume. It counts as
-   * already emitted — the earlier turn's event carries it — so it is not
-   * announced a second time.
-   */
-  priorOutput?: unknown;
-  /**
-   * Unresolved interrupt ids from a previous run, carried forward on resume.
-   * Ids the node raises in this run join them rather than replacing them.
-   */
-  priorInterruptIds?: Iterable<string>;
 }
 
 /**
@@ -161,8 +150,6 @@ async function runChildNode({
     abortSignal,
     nodeState: callerNodeState,
     resumeInputs,
-    priorOutput,
-    priorInterruptIds,
   },
   nodeName,
   nodePath,
@@ -264,7 +251,6 @@ async function runChildNode({
     let inputRecorded = false;
     while (!succeeded) {
       resetState(child);
-      applyPriorState({child, priorOutput, priorInterruptIds});
       child.attemptCount = nodeState.attemptCount;
       try {
         inputRecorded = await runAttempt({
@@ -477,37 +463,6 @@ function resetState(childNodeContext: NodeContext): void {
   childNodeContext.outputDelegated = false;
   clearInPlace(childNodeContext.actions.stateDelta);
   clearInPlace(childNodeContext.actions.artifactDelta);
-}
-
-interface ApplyPriorStateParams {
-  child: NodeContext;
-  priorOutput?: unknown;
-  priorInterruptIds?: Iterable<string>;
-}
-
-/**
- * Seeds a previous run's output and unresolved interrupt ids onto the child.
- *
- * Applied per attempt rather than once at construction: adk-python builds a
- * fresh context for every attempt and re-applies the priors to each, while
- * adk-js reuses one context and clears exactly these fields in
- * {@link resetState}. The prior output counts as already emitted — the earlier
- * turn's event carries it — so the end-of-node flush leaves it alone.
- */
-function applyPriorState({
-  child,
-  priorOutput,
-  priorInterruptIds,
-}: ApplyPriorStateParams): void {
-  if (priorOutput !== undefined) {
-    child.output = priorOutput;
-    child.outputEmitted = true;
-  }
-  for (const id of priorInterruptIds ?? []) {
-    if (!child.interruptIds.includes(id)) {
-      child.interruptIds.push(id);
-    }
-  }
 }
 
 interface RunOnceParams {
