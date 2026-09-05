@@ -52,6 +52,16 @@ export interface Session {
    * The last update time of the session.
    */
   lastUpdateTime: number;
+
+  /**
+   * The exact storage revision this session was loaded at, set by persistent
+   * session services.
+   *
+   * This is internal bookkeeping: callers should not set it. A session built
+   * by hand leaves it undefined, which selects the timestamp-based staleness
+   * fallback in `DatabaseSessionService`.
+   */
+  storageUpdateMarker?: string;
 }
 
 /**
@@ -73,5 +83,6 @@ export function createSession(
     state: params.state || {},
     events: params.events || [],
     lastUpdateTime: params.lastUpdateTime || 0,
+    storageUpdateMarker: params.storageUpdateMarker,
   };
 }

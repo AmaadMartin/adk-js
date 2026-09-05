@@ -12,8 +12,24 @@ import {
 } from '../../events/event.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
+/**
+ * The legacy schema written by adk-python before event data moved to JSON.
+ * It stores event actions as a Python pickle, which this SDK cannot read.
+ */
+export const SCHEMA_VERSION_0_PICKLE = '0';
 export const SCHEMA_VERSION_1_JSON = '1';
+export const METADATA_TABLE_NAME = 'adk_internal_metadata';
+export const EVENTS_TABLE_NAME = 'events';
 export const STORAGE_KEY_COLUMN_LENGTH = 191;
+/**
+ * Fractional-second digits every stored timestamp column keeps.
+ *
+ * MySQL and MariaDB default a `DATETIME` column to whole seconds, which would
+ * round away the millisecond an `Event.timestamp` carries. The stale-session
+ * marker and the event ordering both compare those values, so the column has
+ * to hold what the caller wrote.
+ */
+export const DATETIME_FRACTIONAL_DIGITS = 3;
 
 /**
  * Custom type for serializing and deserializing ADK Event objects.
@@ -36,7 +52,7 @@ class CamelCaseToSnakeCaseJsonType extends JsonType {
   }
 }
 
-@Entity({tableName: 'adk_internal_metadata'})
+@Entity({tableName: METADATA_TABLE_NAME})
 export class StorageMetadata {
   @PrimaryKey({type: 'string'})
   key!: string;
@@ -59,6 +75,7 @@ export class StorageAppState {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -87,6 +104,7 @@ export class StorageUserState {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'update_time',
     onCreate: () => new Date(),
     onUpdate: () => new Date(),
@@ -120,6 +138,7 @@ export class StorageSession {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'create_time',
     onCreate: () => new Date(),
   })
@@ -127,6 +146,7 @@ export class StorageSession {
 
   @Property({
     type: 'datetime',
+    length: DATETIME_FRACTIONAL_DIGITS,
     fieldName: 'update_time',
     onCreate: () => new Date(),
   })
@@ -135,7 +155,7 @@ export class StorageSession {
   [PrimaryKey.name]?: [string, string, string];
 }
 
-@Entity({tableName: 'events'})
+@Entity({tableName: EVENTS_TABLE_NAME})
 export class StorageEvent {
   @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
   id!: string;
@@ -164,7 +184,7 @@ export class StorageEvent {
   @Property({type: 'string', fieldName: 'invocation_id'})
   invocationId!: string;
 
-  @Property({type: 'datetime'})
+  @Property({type: 'datetime', length: DATETIME_FRACTIONAL_DIGITS})
   timestamp!: Date;
 
   @Property({type: CamelCaseToSnakeCaseJsonType, fieldName: 'event_data'})
