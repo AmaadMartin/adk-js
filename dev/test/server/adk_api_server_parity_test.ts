@@ -245,6 +245,17 @@ describe('api_server parity', () => {
     });
   });
 
+  it('reports both logo fields as null when no logo is configured', async () => {
+    const server = await startServer({
+      serveDebugUI: true,
+      webAssetsDir: path.join(agentsDir, 'browser'),
+    });
+
+    const response = await get(server.url, '/dev-ui/config');
+
+    expect(response.body).toEqual({logo_text: null, logo_image_url: null});
+  });
+
   it('does not serve the dev UI logo config from the API server', async () => {
     const server = await startServer({serveDebugUI: false});
 

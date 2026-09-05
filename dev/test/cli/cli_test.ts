@@ -266,6 +266,19 @@ describe('CLI Entrypoint', () => {
       expect(args.extraPlugins).toEqual(['./a.js#One', './b.js#Two']);
     });
 
+    it('should append a repeated --extra_plugins', async () => {
+      await parse([
+        'web',
+        '--extra_plugins',
+        './a.js#One',
+        '--extra_plugins',
+        './b.js#Two',
+      ]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.extraPlugins).toEqual(['./a.js#One', './b.js#Two']);
+    });
+
     it('should leave extraPlugins unset without the flag', async () => {
       await parse(['web']);
 

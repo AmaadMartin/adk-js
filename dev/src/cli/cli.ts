@@ -249,9 +249,15 @@ const DEFAULT_LLM_MODEL_OPTION = new Option(
 );
 const EXTRA_PLUGINS_OPTION = new Option(
   '--extra_plugins <string>',
-  'Optional. Comma-separated fully qualified names of plugins to attach to ' +
-    'every served agent, each written as <module specifier>#<export>. A ' +
-    'name may resolve to a plugin instance or to a plugin class.',
+  'Optional. Fully qualified name of a plugin to attach to every served ' +
+    'agent, written as <module specifier>#<export>. A name may resolve to a ' +
+    'plugin instance or to a plugin class. Repeat the option, or separate ' +
+    'the names with commas, to attach more than one.',
+  // Repeating the option appends, matching adk-python's `multiple=True`. The
+  // names are joined rather than collected into an array so the value stays
+  // the string the option declares, and one splitter handles both spellings.
+).argParser((value: string, previous?: string) =>
+  previous ? `${previous},${value}` : value,
 );
 const LOGO_TEXT_OPTION = new Option(
   '--logo_text <string>',

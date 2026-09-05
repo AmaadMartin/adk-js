@@ -414,11 +414,13 @@ export class AdkApiServer {
       });
 
       // The response keys stay snake_case: the dev UI bundle is the same
-      // Angular build both SDKs serve, and it reads these exact names.
+      // Angular build both SDKs serve, and it reads these exact names. Both
+      // are explicitly null when no logo is configured, as adk-python
+      // answers, rather than dropped from the body by `res.json`.
       app.get('/dev-ui/config', (req: Request, res: Response) => {
         res.json({
-          logo_text: this.logo?.text,
-          logo_image_url: this.logo?.imageUrl,
+          logo_text: this.logo?.text ?? null,
+          logo_image_url: this.logo?.imageUrl ?? null,
         });
       });
 
