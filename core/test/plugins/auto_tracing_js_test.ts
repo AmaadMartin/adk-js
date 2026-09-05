@@ -13,9 +13,12 @@
 import {trace} from '@opentelemetry/api';
 import {afterAll, beforeEach, describe, expect, it} from 'vitest';
 
-import {AutoTracingPlugin, createCaps, safeRepr} from '@google/adk';
+import {AutoTracingPlugin} from '@google/adk';
+
+import {safeRepr} from '../../src/plugins/auto_tracing_helpers.js';
 
 import {
+  CAPS,
   FixtureAgent,
   SENTINEL_TOKEN,
   attributesOf,
@@ -28,8 +31,6 @@ import {
   spanNames,
   tracer,
 } from './auto_tracing_test_helpers.js';
-
-const CAPS = createCaps();
 
 beforeEach(() => {
   exporter.reset();

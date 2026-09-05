@@ -16,7 +16,6 @@ import {
 import {expect} from 'vitest';
 
 import {
-  AUTO_TRACING_WRAPPED,
   AuthCredentialTypes,
   AutoTracingPlugin,
   BaseAgent,
@@ -25,6 +24,19 @@ import {
   InvocationContext,
   PluginManager,
 } from '@google/adk';
+
+import {
+  AUTO_TRACING_WRAPPED,
+  DEFAULT_MAX_RECORDED_YIELDS,
+  DEFAULT_MAX_REPR_LEN,
+  type Caps,
+} from '../../src/plugins/auto_tracing_helpers.js';
+
+/** The default bounds, which most tests use unchanged. */
+export const CAPS: Caps = {
+  maxReprLen: DEFAULT_MAX_REPR_LEN,
+  maxRecordedYields: DEFAULT_MAX_RECORDED_YIELDS,
+};
 
 /** A value that must never reach a span attribute. */
 export const SENTINEL_TOKEN = 'sentinel-token-do-not-trace';

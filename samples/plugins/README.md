@@ -25,5 +25,6 @@ npm run ts:check:samples
 
 [`auto_tracing/agent.ts`](auto_tracing/agent.ts) - `AutoTracingPlugin` wrapping
 the helpers an agent reaches, with a console span exporter so a run prints the
-`adk.fn.*` spans. Runs offline, with no model and no credentials. The guide is
-[docs/guides/plugins/auto_tracing](../../docs/guides/plugins/auto_tracing/index.md).
+`adk.fn.*` spans. Runs offline, with no model and no credentials. What the
+plugin records, and the two cases where a secret argument is not masked, are
+documented on the class itself in `core/src/plugins/auto_tracing_plugin.ts`.

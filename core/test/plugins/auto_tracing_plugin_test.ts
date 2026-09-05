@@ -18,15 +18,16 @@
 
 import {afterAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
-import {
-  AUTO_TRACING_WRAPPED,
-  AuthCredentialTypes,
-  AutoTracingPlugin,
-  createCaps,
-  safeRepr,
-} from '@google/adk';
+import {AuthCredentialTypes, AutoTracingPlugin} from '@google/adk';
 
 import {
+  AUTO_TRACING_WRAPPED,
+  safeRepr,
+  type Caps,
+} from '../../src/plugins/auto_tracing_helpers.js';
+
+import {
+  CAPS,
   SENTINEL_TOKEN,
   attributesOf,
   buildGraph,
@@ -39,8 +40,6 @@ import {
   spanNames,
   tracer,
 } from './auto_tracing_test_helpers.js';
-
-const CAPS = createCaps();
 
 beforeEach(() => {
   exporter.reset();
@@ -520,7 +519,7 @@ describe('AutoTracingPlugin credential redaction', () => {
       payload: sentinelCredential(),
     }));
     // A length cap wide enough that it cannot hide the elision.
-    const roomy = createCaps({maxReprLen: 1_000_000});
+    const roomy: Caps = {...CAPS, maxReprLen: 1_000_000};
 
     const rendered = safeRepr(wide, roomy);
 

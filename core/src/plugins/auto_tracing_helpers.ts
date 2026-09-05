@@ -5,7 +5,7 @@
  */
 
 /**
- * Helpers for {@link AutoTracingPlugin}: argument capture, credential
+ * Helpers for `AutoTracingPlugin`: argument capture, credential
  * redaction, span attributes and the tracing wrapper itself.
  *
  * Ported from adk-python `src/google/adk/plugins/auto_tracing_helpers.py`.
@@ -85,11 +85,11 @@ const CREDENTIAL_ARG_SUFFIXES = [
  */
 const CAMEL_BOUNDARY = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/g;
 
-/** How deep {@link safeRepr} renders before it elides a subtree. */
+/** How deep `safeRepr` renders before it elides a subtree. */
 const MAX_RENDER_DEPTH = 10;
 
 /**
- * How many containers and objects {@link safeRepr} renders before it elides
+ * How many containers and objects `safeRepr` renders before it elides
  * the rest. Generous on purpose: only containers and objects spend budget, so
  * an array of a million numbers costs one node.
  */
@@ -168,15 +168,7 @@ export interface NamedArg {
   readonly value: string;
 }
 
-/** Builds a {@link Caps} from partial bounds, filling in the defaults. */
-export function createCaps(bounds: Partial<Caps> = {}): Caps {
-  return {
-    maxReprLen: bounds.maxReprLen ?? DEFAULT_MAX_REPR_LEN,
-    maxRecordedYields: bounds.maxRecordedYields ?? DEFAULT_MAX_RECORDED_YIELDS,
-  };
-}
-
-/** The tag {@link safeRepr} recognizes a {@link StreamResult} by. */
+/** The tag `safeRepr` recognizes a `StreamResult` by. */
 const STREAM_RESULT_TAG = 'StreamResult';
 
 /** Capped sample plus true yield count for a wrapped generator. */
@@ -351,7 +343,7 @@ function isCredentialLike(value: object): boolean {
   );
 }
 
-/** Bounds carried through one {@link safeRepr} rendering. */
+/** Bounds carried through one `safeRepr` rendering. */
 interface RenderState {
   readonly active: Set<object>;
   nodes: number;
@@ -563,7 +555,7 @@ function bindingOf(token: string): string {
  * does not cost the others their names — losing a name loses the credential
  * check that keys off it. A parameter with no readable name, such as a
  * destructured one, is reported as `arg<i>`, and a rest parameter names
- * nothing here: {@link restParamName} names the arguments it collects.
+ * nothing here: `restParamName` names the arguments it collects.
  *
  * A minifier renames parameters, so names are best-effort in a bundled build.
  */
@@ -640,8 +632,9 @@ export function recordIoOnSpan(params: {
 }): void {
   const {span, pairs, result, error, caps} = params;
   for (const {name, value} of pairs) {
-    // Repeats the filter in nameValuePairs on purpose: both functions are
-    // public, so pairs may come from a caller that never ran it.
+    // Repeats the filter in nameValuePairs on purpose. This function is
+    // exported and takes the pairs its caller built, so it cannot assume they
+    // went through that filter; a span attribute is the boundary that matters.
     if (isCredentialArgName(name)) {
       continue;
     }
@@ -661,18 +654,29 @@ export function displayNameFor(fn: TracedFunction, ownerName?: string): string {
   return ownerName === undefined ? name : `${ownerName}.${name}`;
 }
 
+/** One probe per tracer: the answer cannot change for a given tracer. */
+const tracerRecords = new WeakMap<Tracer, boolean>();
+
 /**
  * Whether `tracer` will record, so that instrumenting anything is worthwhile.
  *
  * `@opentelemetry/api` 1.9.0 exports no noop-tracer type to compare against,
  * and `instanceof` is unreliable across two copies of a package, so this
- * probes instead. The probe span is deliberately never ended: no span
- * processor is handed a span that did not end, so the probe cannot reach the
- * caller's trace backend.
+ * probes instead. The probe is not free: the SDK's `Span` constructor runs the
+ * sampler and calls `onStart` on every registered span processor. It is never
+ * ended, so no processor sees it again and it is never exported, and the
+ * result is cached so that one tracer costs one probe however many functions
+ * are wrapped with it.
  */
 export function tracerWillRecord(tracer: Tracer): boolean {
+  const cached = tracerRecords.get(tracer);
+  if (cached !== undefined) {
+    return cached;
+  }
   const span = tracer.startSpan('adk.auto_tracing.probe');
-  return span.isRecording() || isSpanContextValid(span.spanContext());
+  const records = span.isRecording() || isSpanContextValid(span.spanContext());
+  tracerRecords.set(tracer, records);
+  return records;
 }
 
 /** Whether `value` is callable, and so a candidate for wrapping. */
@@ -729,15 +733,6 @@ function whileRecording<T>(action: () => T): T {
   } finally {
     recordingSpan = false;
   }
-}
-
-/** Calls `fn` with the wrapper's own receiver and arguments, untouched. */
-function invoke<R>(
-  fn: (...args: never[]) => R,
-  thisArg: unknown,
-  args: never[],
-): R {
-  return fn.apply(thisArg, args);
 }
 
 /**
@@ -813,7 +808,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       ...args: never[]
     ): AsyncGenerator<unknown, void, unknown> {
       if (recordingSpan) {
-        yield* invoke(target, this, args);
+        yield* target.apply(this, args);
         return;
       }
       // A generator suspends at every yield, so its span cannot stay
@@ -825,7 +820,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       let total = 0;
       let failure: unknown;
       try {
-        for await (const item of invoke(target, this, args)) {
+        for await (const item of target.apply(this, args)) {
           total += 1;
           if (items.length < yieldCap) {
             items.push(item);
@@ -851,7 +846,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       ...args: never[]
     ): Generator<unknown, void, unknown> {
       if (recordingSpan) {
-        yield* invoke(target, this, args);
+        yield* target.apply(this, args);
         return;
       }
       const span = whileRecording(() => tracer.startSpan(displayName));
@@ -859,7 +854,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       let total = 0;
       let failure: unknown;
       try {
-        for (const item of invoke(target, this, args)) {
+        for (const item of target.apply(this, args)) {
           total += 1;
           if (items.length < yieldCap) {
             items.push(item);
@@ -885,7 +880,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       ...args: never[]
     ): Promise<unknown> {
       if (recordingSpan) {
-        return invoke(target, this, args);
+        return target.apply(this, args);
       }
       // startSpan plus context.with rather than startActiveSpan, so that the
       // span's creation is guarded without the call it wraps being guarded too.
@@ -893,7 +888,7 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       const active = trace.setSpan(context.active(), span);
       try {
         const result = await context.with(active, () =>
-          invoke(target, this, args),
+          target.apply(this, args),
         );
         whileRecording(() => finish(span, args, result, undefined));
         return result;
@@ -909,12 +904,12 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
   const target = fn;
   return markWrapper(function (this: unknown, ...args: never[]): unknown {
     if (recordingSpan) {
-      return invoke(target, this, args);
+      return target.apply(this, args);
     }
     const span = whileRecording(() => tracer.startSpan(displayName));
     const active = trace.setSpan(context.active(), span);
     try {
-      const result = context.with(active, () => invoke(target, this, args));
+      const result = context.with(active, () => target.apply(this, args));
       whileRecording(() => finish(span, args, result, undefined));
       return result;
     } catch (error: unknown) {

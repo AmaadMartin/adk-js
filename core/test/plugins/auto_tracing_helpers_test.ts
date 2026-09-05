@@ -25,18 +25,19 @@ import {afterAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   AUTO_TRACING_WRAPPED,
+  DEFAULT_MAX_RECORDED_YIELDS,
   StreamResult,
   buildTracingWrapper,
-  createCaps,
   displayNameFor,
   nameValuePairs,
   positionalParamNames,
   recordIoOnSpan,
   restParamName,
   safeRepr,
-} from '@google/adk';
+  type Caps,
+} from '../../src/plugins/auto_tracing_helpers.js';
 
-const CAPS = createCaps();
+const CAPS: Caps = {maxReprLen: 4096, maxRecordedYields: 16};
 const SENTINEL_TOKEN = 'sentinel-token-do-not-trace';
 
 const exporter = new InMemorySpanExporter();
@@ -182,7 +183,10 @@ describe('auto tracing helpers', () => {
   });
 
   it('test_name_value_pairs_caps_long_reprs', () => {
-    const caps = createCaps({maxReprLen: 5});
+    const caps: Caps = {
+      maxReprLen: 5,
+      maxRecordedYields: DEFAULT_MAX_RECORDED_YIELDS,
+    };
 
     const pairs = nameValuePairs({
       paramNames: ['x'],

@@ -19,8 +19,9 @@ import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {version} from '../version.js';
 import {
+  DEFAULT_MAX_RECORDED_YIELDS,
+  DEFAULT_MAX_REPR_LEN,
   buildTracingWrapper,
-  createCaps,
   isClassConstructor,
   isMap,
   isPlainTagged,
@@ -35,7 +36,7 @@ import {
 import {BasePlugin} from './base_plugin.js';
 
 /** Default bound on how deep the plugin walks from the agent. */
-export const DEFAULT_MAX_WALK_DEPTH = 30;
+const DEFAULT_MAX_WALK_DEPTH = 30;
 
 /**
  * Bound on how many objects one pass visits.
@@ -146,7 +147,23 @@ function prototypeOwnerName(prototype: object): string | undefined {
  * reaches stays wrapped for every other user of that class too.
  *
  * The pass runs on `beforeRunCallback` and is idempotent: a function already
- * carrying the wrapped marker is left alone.
+ * carrying the wrapped marker is left alone. It never throws; a unit it cannot
+ * instrument is logged at debug level and the pass continues.
+ *
+ * Each wrapped call records `adk.fn.arg.<name>` per argument and then either
+ * `adk.fn.return`, or `adk.fn.exc_type` and `adk.fn.exc_repr`. Credentials are
+ * kept off the span two ways: by field name, and by matching the shape of an
+ * ADK credential wherever it sits. **The name rule needs a name**, so an
+ * argument whose name cannot be read -- a destructured parameter, or any
+ * parameter in a minified build -- is recorded as `arg<i>`, and a bare scalar
+ * secret in that position is written out in full. Name the parameter, or keep
+ * the secret inside an object, if the trace leaves your process.
+ *
+ * Two behaviours differ from adk-python and are visible in a trace. A
+ * generator's span does not parent the work inside it, because a span cannot
+ * stay context-active across a `yield` without leaking into the consumer's
+ * frame. And rendered values follow JavaScript: `true` rather than `True`,
+ * `{a: 1}` rather than `{'a': 1}`.
  *
  * Example:
  * ```typescript
@@ -156,6 +173,8 @@ function prototypeOwnerName(prototype: object): string | undefined {
  *   plugins: [new AutoTracingPlugin()],
  * });
  * ```
+ *
+ * A runnable version is in `samples/plugins/auto_tracing/agent.ts`.
  */
 export class AutoTracingPlugin extends BasePlugin {
   private readonly tracer: Tracer;
@@ -169,10 +188,11 @@ export class AutoTracingPlugin extends BasePlugin {
     super(options.name ?? 'AutoTracingPlugin');
     this.tracer =
       options.tracer ?? trace.getTracer('gcp.vertex.agent', version);
-    this.caps = createCaps({
-      maxReprLen: options.maxReprLen,
-      maxRecordedYields: options.maxRecordedYields,
-    });
+    this.caps = {
+      maxReprLen: options.maxReprLen ?? DEFAULT_MAX_REPR_LEN,
+      maxRecordedYields:
+        options.maxRecordedYields ?? DEFAULT_MAX_RECORDED_YIELDS,
+    };
     this.maxWalkDepth = options.maxWalkDepth ?? DEFAULT_MAX_WALK_DEPTH;
     this.extraTargets = options.extraTargets ?? [];
     this.tracerEligible = tracerWillRecord(this.tracer);
