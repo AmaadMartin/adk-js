@@ -33,7 +33,6 @@ export {
 export {
   GCS_PEER,
   GCS_USER_AGENT,
-  asStorageAuthClient,
   getGcsClient,
   type GcsClientOptions,
 } from './client.js';
