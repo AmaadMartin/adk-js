@@ -206,6 +206,10 @@ export type {
   LiveModelConfig,
 } from './evaluation/eval_config.js';
 export {
+  DEFAULT_JUDGE_MODEL,
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
   PrebuiltMetrics,
   ToolTrajectoryMatchType,
@@ -215,9 +219,16 @@ export {
 export type {
   BaseCriterion,
   EvalMetric,
+  EvalMetricCriterion,
   EvalMetricResult,
   EvalMetricResultDetails,
   EvalMetricResultPerInvocation,
+  HallucinationsCriterion,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  ParsedToolTrajectoryCriterion,
+  RubricsBasedCriterion,
   ToolTrajectoryCriterion,
 } from './evaluation/eval_metrics.js';
 export type {EvalCaseResult} from './evaluation/eval_result.js';
@@ -249,6 +260,7 @@ export {
 export type {
   EvalCaseResponses,
   EvalRow,
+  EvalRunParams,
 } from './evaluation/evaluation_generator.js';
 export {
   BASE_CRITERION_TYPE,
@@ -287,11 +299,15 @@ export type {RougeScore} from './evaluation/rouge_scorer.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   UserSimulatorStatus,
+  registerUserSimulator,
+  unregisterUserSimulator,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
 export type {
+  BaseUserSimulatorConfig,
   NextUserMessage,
   UserSimulator,
+  UserSimulatorFactory,
 } from './evaluation/simulation/user_simulator.js';
 export type {
   UserBehavior,
@@ -300,12 +316,23 @@ export type {
 export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
-export {SingleTurnVertexAiEvalFacade} from './evaluation/vertex_ai_eval_facade.js';
+export {
+  MultiTurnVertexAiEvalFacade,
+  SingleTurnVertexAiEvalFacade,
+  VertexAiEvalFacade,
+  resolveVertexAiEvalClientConfig,
+} from './evaluation/vertex_ai_eval_facade.js';
 export type {
+  VertexAgentConfig,
+  VertexAgentData,
+  VertexAgentEvent,
   VertexAggregatedMetricResult,
   VertexAiEvalClient,
+  VertexAiEvalClientConfig,
   VertexAiEvalFacadeOptions,
   VertexAiEvalRequest,
+  VertexConversationTurn,
+  VertexEvalCase,
   VertexEvalCaseRow,
   VertexEvalMetricSpec,
   VertexEvaluationDataset,
