@@ -35,11 +35,11 @@ export interface EvalCaseResult {
 
   /**
    * Each metric aggregated over the whole eval case, which is what
-   * {@link finalEvalStatus} summarizes. adk-python declares the field required
-   * and the two SDKs read each other's result files, so an eval service that
-   * evaluated nothing writes an empty array rather than omitting the key.
+   * {@link finalEvalStatus} summarizes. An eval service that reports only
+   * per-invocation results leaves it absent; a result file written by
+   * adk-python carries it, and `adk eval --print_detailed_results` prints it.
    */
-  overallEvalMetricResults: EvalMetricResult[];
+  overallEvalMetricResults?: EvalMetricResult[];
 
   evalMetricResultPerInvocation: EvalMetricResultPerInvocation[];
 
@@ -77,12 +77,16 @@ export interface EvalSetResult {
  *
  * `Session`, `Invocation` and the metric results have no schema in this
  * package, so the value passes through by reference. That is what
- * adk-python's `arbitrary_types_allowed` does. The guard still keeps a scalar
- * out of a field the interface declares as an object. A caller that needs the
- * payload itself validated has `parseEvalMetricResult` in `eval_metrics.ts`.
+ * adk-python's `arbitrary_types_allowed` does. Every payload this module holds
+ * is an object, so the guard rejects a scalar, a `null` and an array without
+ * looking at what is inside. A caller that needs the payload itself validated
+ * has `parseEvalMetricResult` in `eval_metrics.ts`.
  */
 function payloadField<T>(): z.ZodType<T> {
-  return z.custom<T>((value) => typeof value === 'object' && value !== null);
+  return z.custom<T>(
+    (value) =>
+      typeof value === 'object' && value !== null && !Array.isArray(value),
+  );
 }
 
 const EVAL_RESULT_OPTIONS = {extraKeys: 'allow'} as const;

@@ -8,12 +8,13 @@ when you read a result file, or when you write a service that produces one.
 
 Both SDKs write their results to the same place, one JSON document per run,
 under `<agentsDir>/<appName>/.adk/eval_history/`. adk-python writes snake_case
-keys and omits any field whose value is the pydantic default. So a document is
-not enough on its own: a reader has to translate the key spelling and put the
-missing defaults back.
+keys, so a reader here has to translate the spelling. A hand-written document,
+or one an older tool produced, can also leave out a field that adk-python
+declares with a default, and a TypeScript interface carries no default to put
+back.
 
-`parseEvalCaseResult` and `parseEvalSetResult` do both. They accept either key
-spelling, so a document written by adk-js reads as well as one written by
+`parseEvalCaseResult` and `parseEvalSetResult` handle both. They accept either
+key spelling, so a document written by adk-js reads as well as one written by
 adk-python, and they apply the same defaults adk-python declares. Use them at
 the point a result enters your code. A result you build yourself in memory does
 not need them — the interfaces alone type it.

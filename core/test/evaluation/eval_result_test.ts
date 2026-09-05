@@ -224,9 +224,9 @@ describe('EvalCaseResult', () => {
   });
 
   // A compile-time claim: tsc fails this case, the runner cannot.
-  it('requires the overall metric results on every case result', () => {
+  it('leaves the overall metric results optional on a case result', () => {
     expectTypeOf<EvalCaseResult['overallEvalMetricResults']>().toEqualTypeOf<
-      EvalMetricResult[]
+      EvalMetricResult[] | undefined
     >();
   });
 });
@@ -354,7 +354,7 @@ describe('parseEvalCaseResult', () => {
       overall_eval_metric_results: [SNAKE_CASE_METRIC_RESULT],
     });
 
-    const metricResult = asRecord(result.overallEvalMetricResults[0]);
+    const metricResult = asRecord(firstOf(result.overallEvalMetricResults));
     expect(metricResult).toBe(SNAKE_CASE_METRIC_RESULT);
     expect(metricResult['metric_name']).toBe('response_match_score');
   });
@@ -398,13 +398,27 @@ describe('parseEvalCaseResult', () => {
     expect(() => parseEvalCaseResult(payload)).toThrow(InputValidationError);
   });
 
-  it('rejects a metric result that is not an object', () => {
-    expect(() =>
-      parseEvalCaseResult({
-        ...REQUIRED_CASE_RESULT_FIELDS,
-        overall_eval_metric_results: ['response_match_score'],
-      }),
-    ).toThrow(InputValidationError);
+  it.each([['response_match_score'], [['response_match_score']], [null]])(
+    'rejects a metric result that is not an object',
+    (metricResult) => {
+      expect(() =>
+        parseEvalCaseResult({
+          ...REQUIRED_CASE_RESULT_FIELDS,
+          overall_eval_metric_results: [metricResult],
+        }),
+      ).toThrow(InputValidationError);
+    },
+  );
+
+  it('keeps the alias when a payload supplies both spellings of a field', () => {
+    const result = parseEvalCaseResult({
+      ...REQUIRED_CASE_RESULT_FIELDS,
+      eval_set_id: 'from_the_alias',
+      evalSetId: 'from_the_property',
+    });
+
+    expect(result.evalSetId).toBe('from_the_property');
+    expect(asRecord(result)['eval_set_id']).toBe('from_the_alias');
   });
 
   it('keeps a key the model does not name', () => {
