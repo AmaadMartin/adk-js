@@ -19,7 +19,10 @@ import {
 } from '@google/adk-integrations';
 import {afterEach, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 import type {FirestoreClient} from '../../src/firestore/firestore_client.js';
-import {FIRESTORE_PEER} from '../../src/firestore/firestore_session_service.js';
+import {
+  FIRESTORE_PEER,
+  resolveClient,
+} from '../../src/firestore/firestore_session_service.js';
 import {
   appStatePath,
   eventPath,
@@ -126,6 +129,17 @@ describe('FirestoreSessionService options', () => {
     expect(
       client.read(sessionPath(APP_NAME, USER_ID, session.id, 'explicit')),
     ).toBeDefined();
+  });
+
+  it('builds a default client when the caller injects none', () => {
+    const built = resolveClient(undefined, {Firestore});
+
+    expect(built).not.toBe(client);
+    expect(typeof built.collection).toBe('function');
+  });
+
+  it('keeps the injected client', () => {
+    expect(resolveClient(client, {Firestore})).toBe(client);
   });
 
   it('accepts a real Firestore client', () => {
@@ -281,6 +295,32 @@ describe('FirestoreSessionService.getSession', () => {
     });
 
     expect(session?.lastUpdateTime).toBe(1717000000000);
+  });
+
+  it('reads an unwritten revision as zero', async () => {
+    seedSession({revision: 'not a number'});
+    const service = new FirestoreSessionService({client});
+
+    const session = await service.getSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    expect(session?.storageUpdateMarker).toBe('0');
+  });
+
+  it('reads a state that is not a record as empty', async () => {
+    seedSession({state: '"just a string"'});
+    const service = new FirestoreSessionService({client});
+
+    const session = await service.getSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    expect(session?.state).toEqual({});
   });
 
   it('reads an unusable update time as zero', async () => {
@@ -529,6 +569,42 @@ describe('FirestoreSessionService.listSessions', () => {
       totalItems: 0,
       totalPages: 0,
     });
+  });
+
+  it('breaks a tie on user id, then on session id', async () => {
+    for (const [userId, id] of [
+      ['u2', 'z'],
+      ['u1', 'b'],
+      ['u1', 'a'],
+    ] as const) {
+      client.put(sessionPath(APP_NAME, userId, id), {
+        id,
+        appName: APP_NAME,
+        userId,
+        state: {},
+        updateTime: 99,
+      });
+    }
+    const service = new FirestoreSessionService({client});
+
+    const response = await service.listSessions({appName: APP_NAME});
+
+    expect(
+      response.sessions
+        .filter((session) => session.lastUpdateTime === 99)
+        .map((session) => `${session.userId}/${session.id}`),
+    ).toEqual(['u1/a', 'u1/b', 'u2/z']);
+  });
+
+  it('reads no user state when the app has no sessions at all', async () => {
+    const service = new FirestoreSessionService({client});
+
+    const response = await service.listSessions({appName: 'empty_app'});
+
+    expect(response.sessions).toEqual([]);
+    expect(client.calls.filter((call) => call.startsWith('getAll'))).toEqual(
+      [],
+    );
   });
 
   it('skips a collection-group document that is not a session', async () => {
