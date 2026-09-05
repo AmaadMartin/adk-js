@@ -32,7 +32,7 @@ export class ReplayPlugin extends BasePlugin {
       (r) =>
         r.userMessageIndex === this.context.userMessageIndex &&
         r.agentName === agentName &&
-        r.llmRecording?.llmResponse &&
+        r.llmRecording?.llmResponses?.length &&
         // replay internal flag to mark event as consumed
         !(r as unknown as {_consumed: boolean})._consumed,
     );
@@ -46,7 +46,10 @@ export class ReplayPlugin extends BasePlugin {
     const rec = this.recordings[index];
     (rec as unknown as {_consumed: boolean})._consumed = true;
 
-    return rec.llmRecording!.llmResponse!;
+    // A streamed turn is recorded as its run of partial responses followed by
+    // the complete one, so the last entry is the turn's result.
+    const responses = rec.llmRecording!.llmResponses!;
+    return responses[responses.length - 1];
   }
 
   override async beforeToolCallback(params: {
