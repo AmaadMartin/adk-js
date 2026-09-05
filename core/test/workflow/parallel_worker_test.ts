@@ -454,6 +454,55 @@ describe('ParallelWorker cancellation', () => {
     expect(output).toBeUndefined();
   });
 
+  // adk-js regression guard: the worker's own deadline must reach the items.
+  // The invocation signal never fires here, so only `ctx.abortSignal` can
+  // carry the cancellation.
+  it('cancels the items in flight when the worker timeout fires', async () => {
+    const items = [0, 1];
+    const cancelled = new Set<number>();
+    let itemsSettled!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      itemsSettled = resolve;
+    });
+    let running = items.length;
+
+    const inner = new FunctionNode(
+      'hang',
+      async (ctx: NodeContext, i: number) => {
+        await new Promise<void>((resolve) => {
+          ctx.abortSignal?.addEventListener(
+            'abort',
+            () => {
+              cancelled.add(i);
+              resolve();
+            },
+            {once: true},
+          );
+          // Bounded, so an item left running fails the assertion below rather
+          // than hanging the runner.
+          setTimeout(resolve, 1000);
+        });
+        running -= 1;
+        if (running === 0) {
+          itemsSettled();
+        }
+        return `item-${i}_processed`;
+      },
+    );
+
+    const err = await driveNode(
+      new ParallelWorker(inner, {timeout: 0.05}),
+      items,
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await settled;
+
+    expect(isNodeTimeoutError(err)).toBe(true);
+    expect([...cancelled].sort()).toEqual(items);
+  });
+
   // test_parallel_worker_gives_up_on_item_that_ignores_cancellation
   it('gives up on an item that ignores its cancellation, and says so', async () => {
     vi.useFakeTimers({shouldAdvanceTime: true});
