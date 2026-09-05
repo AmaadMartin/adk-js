@@ -161,6 +161,142 @@ export async function withSpannerDatabase<T>(
   }
 }
 
+/** The instance administration endpoint, as `Spanner` hands it out. */
+export type SpannerInstanceAdminClient = ReturnType<
+  Spanner['getInstanceAdminClient']
+>;
+
+/** The database administration endpoint, as `Spanner` hands it out. */
+export type SpannerDatabaseAdminClient = ReturnType<
+  Spanner['getDatabaseAdminClient']
+>;
+
+/** Which project one admin call is made against, and as whom. */
+export interface SpannerAdminTarget {
+  projectId: string;
+  authClient: SpannerAuthClient;
+}
+
+/**
+ * A long-running operation an admin create call returns.
+ *
+ * Declared structurally rather than imported from `google-gax`, which reaches
+ * this module only as a transitive dependency of the optional peer.
+ */
+export interface SpannerLongRunningOperation {
+  promise(): Promise<unknown>;
+}
+
+/**
+ * How long {@link waitForOperation} waits, matching adk-python's
+ * `operation.result(timeout=300)` in `admin_tool.py`.
+ */
+export const OPERATION_TIMEOUT_MS = 300_000;
+
+/**
+ * Opens a Spanner client for one admin call, hands `use` the administration
+ * endpoint `select` picks off it, and closes the client again.
+ *
+ * The endpoint is owned by the client — `Spanner.close()` closes every
+ * endpoint it handed out — so only the client is closed here.
+ */
+async function withAdminClient<TAdmin, T>(
+  target: SpannerAdminTarget,
+  select: (client: Spanner) => TAdmin,
+  use: (admin: TAdmin) => Promise<T>,
+): Promise<T> {
+  const {Spanner: SpannerClient} = await loadOptionalPeer(
+    {packageName: '@google-cloud/spanner', feature: FEATURE_NAME},
+    () => import('@google-cloud/spanner'),
+  );
+  const options: SpannerClientOptions = {
+    projectId: target.projectId,
+    authClient: target.authClient,
+    libName: CLIENT_LIB_NAME,
+    libVersion: version,
+  };
+  const client = new SpannerClient(options);
+  try {
+    return await use(select(client));
+  } finally {
+    await closeQuietly('client', () => client.close());
+  }
+}
+
+/**
+ * Runs `use` against the instance administration endpoint of one project.
+ *
+ * The client is not shared between calls because `authClient` belongs to one
+ * end user, and it is closed on every exit path.
+ *
+ * @param target The project to administer and the identity to act as.
+ * @param use What to do with the endpoint.
+ * @return Whatever `use` returns.
+ */
+export function withInstanceAdminClient<T>(
+  target: SpannerAdminTarget,
+  use: (admin: SpannerInstanceAdminClient) => Promise<T>,
+): Promise<T> {
+  return withAdminClient(
+    target,
+    (client) => client.getInstanceAdminClient(),
+    use,
+  );
+}
+
+/**
+ * Runs `use` against the database administration endpoint of one project.
+ *
+ * @param target The project to administer and the identity to act as.
+ * @param use What to do with the endpoint.
+ * @return Whatever `use` returns.
+ */
+export function withDatabaseAdminClient<T>(
+  target: SpannerAdminTarget,
+  use: (admin: SpannerDatabaseAdminClient) => Promise<T>,
+): Promise<T> {
+  return withAdminClient(
+    target,
+    (client) => client.getDatabaseAdminClient(),
+    use,
+  );
+}
+
+/**
+ * Waits for one long-running operation, giving up after `timeoutMs`.
+ *
+ * The bound matters because a tool call blocks the agent turn: an instance
+ * that never finishes provisioning would otherwise hold it open forever.
+ *
+ * @param operation The operation the create call returned.
+ * @param timeoutMs How long to wait.
+ * @throws Error if the operation fails, or does not finish in time.
+ */
+export async function waitForOperation(
+  operation: SpannerLongRunningOperation,
+  timeoutMs: number = OPERATION_TIMEOUT_MS,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      operation.promise(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `The Spanner operation did not complete within ${timeoutMs} ms.`,
+              ),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Opens a read-only snapshot on `database`, runs `use` against it, and ends
  * the snapshot again so its session returns to the pool.
