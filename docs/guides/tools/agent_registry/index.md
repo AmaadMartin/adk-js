@@ -106,20 +106,28 @@ never receives that token.
 
 ## Mutual TLS
 
-Two environment variables choose the host. `GOOGLE_API_USE_MTLS_ENDPOINT` is
-`always`, `never` or `auto`; `auto` is the default and defers to
-`GOOGLE_API_USE_CLIENT_CERTIFICATE`. When the mutual-TLS host is selected, the
-registry calls `agentregistry.mtls.googleapis.com` and rewrites every resolved
+`GOOGLE_API_USE_MTLS_ENDPOINT` chooses the host: `always`, `never` or `auto`.
+`auto` is the default, and it picks the mutual-TLS host only when a client
+certificate is available. When that host is picked, the registry calls
+`agentregistry.mtls.googleapis.com` and rewrites every resolved
 `*.googleapis.com` connection URI to its `.mtls.googleapis.com` variant.
 
-```sh
-GOOGLE_API_USE_CLIENT_CERTIFICATE=true node my-app.js
-```
+A certificate is available when `GOOGLE_API_USE_CLIENT_CERTIFICATE` is `true`
+and one of these files exists:
+
+- `~/.secureConnect/context_aware_metadata.json`
+- `~/.config/gcloud/certificate_config.json`
+- the file `GOOGLE_API_CERTIFICATE_CONFIG` names
+
+Setting `GOOGLE_API_USE_CLIENT_CERTIFICATE=true` on a machine that has no
+certificate keeps the registry on the default host. Other Google client
+libraries read that variable too, so moving to a host the client cannot reach
+would break callers who never asked for mutual TLS.
 
 adk-js does not yet present a client certificate on the connection. Node's
-`fetch` has no per-request certificate option, so selecting the mutual-TLS host
-routes the traffic there without a certificate, and the host rejects it. Set
-these variables only once adk-js can present a certificate.
+`fetch` has no per-request certificate option, so the mutual-TLS host rejects
+the call even when a certificate exists on the machine. Use
+`GOOGLE_API_USE_MTLS_ENDPOINT=never` to opt out completely.
 
 ## Errors
 

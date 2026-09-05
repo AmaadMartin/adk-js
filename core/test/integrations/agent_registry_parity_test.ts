@@ -7,7 +7,7 @@
 /**
  * Reference tests ported from adk-python
  * `tests/unittests/integrations/agent_registry/test_agent_registry.py` at
- * `main` `44e0b2a8b1215aa98f057c4a781ddc24bae220da`.
+ * `main` `0b75a66d17a8b8a251c5f2bd903d47a4bdf05dc1`.
  *
  * Every `it()` keeps its Python function name so a reviewer can grep for the
  * original. `test_use_client_cert_effective` and `test_should_use_mtls_endpoint`
