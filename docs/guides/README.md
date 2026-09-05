@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Server
+
+- [API server configuration](server/api_server_configuration/index.md) - Default app name, dev UI logo, runtime config and extra plugins on AdkApiServer.
+
 ### Tools
 
 #### Retrieval
