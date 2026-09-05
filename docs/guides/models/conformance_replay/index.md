@@ -127,5 +127,11 @@ request is served without verification, because there is nothing to compare.
 
 ## Live calls
 
-`connect` throws. A replay model never reaches the network, so it is constructed
-with a placeholder API key and has no live path.
+`connect` throws. A replay model never reaches the network, so it has no live
+path.
+
+It also ignores the ambient credential environment. `Gemini` demands an API key
+normally, and a project and a location once `GOOGLE_GENAI_USE_VERTEXAI` or
+`GOOGLE_GENAI_USE_ENTERPRISE` is set, so the replay model supplies placeholders
+for all three. A conformance run therefore behaves the same on a machine that
+has credentials configured and on one that does not.
