@@ -167,16 +167,31 @@ export class ParallelWorker extends BaseNode {
     let windingDown = false;
     let interrupted = false;
     let inFlight = 0;
+    let claimantsRunning = poolSize;
     let failure: ItemFailure | undefined;
-    let signalWindDown!: () => void;
-    const windDown = new Promise<void>((resolve) => {
-      signalWindDown = resolve;
+    let settleFanOut!: () => void;
+    // Resolved by the last claimant to finish, or early by the drain when an
+    // item ignores its cancellation. Resolving it directly, rather than racing
+    // the claimants against a deadline, keeps the normal path free of the extra
+    // scheduling turns a race costs — the fan-out's timing is observable, since
+    // a downstream node reads the session this one is still writing to.
+    const fanOutSettled = new Promise<void>((resolve) => {
+      settleFanOut = resolve;
     });
 
     const stopFanOut = (): void => {
+      if (windingDown) {
+        return;
+      }
       windingDown = true;
       itemAbort.abort();
-      signalWindDown();
+      void abandonStalledItems({
+        fanOutSettled,
+        settleFanOut,
+        parentSignal,
+        nodeName: this.name,
+        countRemaining: () => inFlight,
+      });
     };
 
     const recordFailure = (index: number, error: unknown): void => {
@@ -193,7 +208,7 @@ export class ParallelWorker extends BaseNode {
 
     // Records before rethrowing, one microtask ahead of the claimant that stops
     // the fan-out. Items that failed in the same wake-up are therefore all
-    // considered, and the lowest index wins whichever settled first.
+    // considered, and the lowest index wins whichever of them settled first.
     const runItem = async (
       index: number,
     ): Promise<NodeContext | NodeResult> => {
@@ -216,65 +231,61 @@ export class ParallelWorker extends BaseNode {
     };
 
     // Keeps claiming the next item until the list is exhausted, an item fails
-    // or interrupts, or the invocation is aborted.
+    // or interrupts, or the invocation is aborted. Never rejects — every item
+    // outcome is handled here, which is what lets the claimants run unawaited.
     const claimant = async (): Promise<void> => {
-      for (;;) {
-        if (windingDown) {
-          return;
-        }
-        if (isAborted(ctx)) {
-          stopFanOut();
-          return;
-        }
-        const index = nextIndex++;
-        if (index >= items.length) {
-          return;
-        }
-        inFlight++;
-        try {
-          const child = await runItem(index);
-          if (child.interruptIds.length > 0) {
-            interrupted = true;
-            for (const id of child.interruptIds) {
-              if (!interruptIds.includes(id)) {
-                interruptIds.push(id);
-              }
-            }
+      try {
+        for (;;) {
+          if (windingDown) {
+            return;
+          }
+          if (isAborted(ctx)) {
             stopFanOut();
             return;
           }
-          results[index] = child.output;
-        } catch (err) {
-          // Inside a workflow the engine unwinds an interrupted caller by
-          // throwing rather than returning; that is a pause, not a failure.
-          // The ids are already on `ctx`, put there before the throw.
-          if (isNodeInterruptedError(err)) {
-            interrupted = true;
+          const index = nextIndex++;
+          if (index >= items.length) {
+            return;
           }
-          stopFanOut();
-          return;
-        } finally {
-          inFlight--;
+          inFlight++;
+          try {
+            const child = await runItem(index);
+            if (child.interruptIds.length > 0) {
+              interrupted = true;
+              for (const id of child.interruptIds) {
+                if (!interruptIds.includes(id)) {
+                  interruptIds.push(id);
+                }
+              }
+              stopFanOut();
+              return;
+            }
+            results[index] = child.output;
+          } catch (err) {
+            // Inside a workflow the engine unwinds an interrupted caller by
+            // throwing rather than returning; that is a pause, not a failure.
+            // The ids are already on `ctx`, put there before the throw.
+            if (isNodeInterruptedError(err)) {
+              interrupted = true;
+            }
+            stopFanOut();
+            return;
+          } finally {
+            inFlight--;
+          }
+        }
+      } finally {
+        if (--claimantsRunning === 0) {
+          settleFanOut();
         }
       }
     };
 
-    let poolSettled = false;
-    const settled = Promise.all(
-      Array.from({length: poolSize}, () => claimant()),
-    ).then(() => {
-      poolSettled = true;
-    });
+    for (let lane = 0; lane < poolSize; lane++) {
+      void claimant();
+    }
     try {
-      await Promise.race([settled, windDown]);
-      if (!poolSettled) {
-        await drainCancelledItems({
-          pending: settled,
-          parentSignal,
-          nodeName: this.name,
-          countRemaining: () => inFlight,
-        });
-      }
+      await fanOutSettled;
     } finally {
       dispose();
     }
@@ -291,10 +302,12 @@ function isAborted(ctx: NodeContext): boolean {
   );
 }
 
-/** Parameters for {@link drainCancelledItems}. */
+/** Parameters for {@link abandonStalledItems}. */
 interface DrainParams {
-  /** Settles once every claimant has let go of its item. */
-  pending: Promise<unknown>;
+  /** Resolves once every claimant has let go of its item. */
+  fanOutSettled: Promise<void>;
+  /** Releases the worker when the items are abandoned instead. */
+  settleFanOut: () => void;
   /** The signal the worker itself observes, if any. */
   parentSignal?: AbortSignal;
   /** The worker's name, for the warning. */
@@ -304,14 +317,16 @@ interface DrainParams {
 }
 
 /**
- * Waits for the cancelled items to stop, and says so when they do not.
+ * Waits for the cancelled items to stop, and releases the worker without them
+ * when they do not.
  *
  * The wait is bounded because an item that swallows cancellation would
  * otherwise hold the worker here forever. Giving up is never an error: the
  * worker is already unwinding on another one.
  */
-async function drainCancelledItems({
-  pending,
+async function abandonStalledItems({
+  fanOutSettled,
+  settleFanOut,
   parentSignal,
   nodeName,
   countRemaining,
@@ -319,11 +334,7 @@ async function drainCancelledItems({
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   const outcomes: Array<Promise<DrainOutcome>> = [
-    // How an item stopped does not matter here, only that it did.
-    pending.then(
-      () => 'drained' as const,
-      () => 'drained' as const,
-    ),
+    fanOutSettled.then(() => 'drained' as const),
     new Promise<DrainOutcome>((resolve) => {
       timer = setTimeout(
         () => resolve('timedOut'),
@@ -362,11 +373,12 @@ async function drainCancelledItems({
         `${CANCELLED_ITEM_DRAIN_TIMEOUT_MS / 1000}s of being cancelled; ` +
         'abandoning them.',
     );
-    return;
+  } else {
+    logger.warn(
+      `Node ${nodeName}: cancelled again while stopping ${remaining} item(s).`,
+    );
   }
-  logger.warn(
-    `Node ${nodeName}: cancelled again while stopping ${remaining} item(s).`,
-  );
+  settleFanOut();
 }
 
 // The factory the engine uses to wrap a built node in a ParallelWorker (for
