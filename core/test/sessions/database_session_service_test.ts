@@ -34,6 +34,7 @@ import {
 } from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {
+  ensureDatabaseCreated,
   forkForRead,
   forkForWrite,
   getConnectionOptionsFromUri,
@@ -129,11 +130,7 @@ describe('DatabaseSessionService', () => {
   });
 
   afterEach(async () => {
-    // MikroORM closing
-    const orm = (service as unknown as {orm: MikroORM}).orm;
-    if (orm) {
-      await orm.close();
-    }
+    await service.close();
   });
 
   it('should create a session', async () => {
@@ -538,13 +535,13 @@ describe('DatabaseSessionService', () => {
   });
 
   it('should fail with incompatible schema version', async () => {
-    const internalService = new DatabaseSessionService({
+    const orm = await MikroORM.init({
       dbName: ':memory:',
       driver: SqliteDriver,
+      entities: ENTITIES,
       allowGlobalContext: true,
     });
-    await internalService.init();
-    const orm = (internalService as unknown as {orm: MikroORM}).orm as MikroORM;
+    await ensureDatabaseCreated(orm);
 
     // Manually insert bad version
     const em = orm.em.fork();
@@ -1139,11 +1136,12 @@ describe('DatabaseSessionService', () => {
 
       await service.appendEvent({session, event});
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
-      const storedEvents = (await em.find('StorageEvent', {
+      const stored = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
         sessionId: 's-temp',
-      })) as {sessionId: string; eventData: Event}[];
-      const eventData = storedEvents[0].eventData;
+      });
+      const eventData = stored!.events[0];
 
       expect(eventData.actions?.stateDelta?.['keep']).toBe('me');
       expect(
@@ -1192,12 +1190,13 @@ describe('DatabaseSessionService', () => {
 
       expect(session.lastUpdateTime).toBe(timestamp);
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
-      const storedSession = (await em.findOne('StorageSession', {
-        id: 's-time',
-      })) as {id: string; updateTime: Date};
+      const stored = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-time',
+      });
 
-      expect(storedSession.updateTime.getTime()).toBe(timestamp);
+      expect(stored?.lastUpdateTime).toBe(timestamp);
     });
   });
 

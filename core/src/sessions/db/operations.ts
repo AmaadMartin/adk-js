@@ -405,6 +405,12 @@ async function loadDriverForUri(
 /**
  * Parses a database connection URI and returns MikroORM Options.
  *
+ * Every backend adk-js supports stores a timestamp in a column that drops the
+ * zone, so `forceUtcTimezone` keeps the stored wall clock on UTC instead of
+ * the Node process's local zone, and makes MikroORM read a zone-less string
+ * back as UTC. adk-python reaches the same result by stripping `tzinfo` before
+ * it stores.
+ *
  * @param uri The database connection URI (e.g., "postgres://user:password@host:port/database")
  * @param overrides Options merged over the ones derived from the URI, so a
  *     caller can configure the pool, the driver or anything else MikroORM
@@ -456,6 +462,7 @@ async function deriveConnectionOptionsFromUri(
       // and the rows written through its siblings. This is adk-python's
       // `poolclass=StaticPool`.
       ...(isMemory ? {pool: {min: 1, max: 1}} : {}),
+      forceUtcTimezone: true,
     } as MikroORMOptions;
   }
 
@@ -466,6 +473,7 @@ async function deriveConnectionOptionsFromUri(
     // Every backend but sqlite reaches this service over a socket that can be
     // closed while the connection sits idle in the pool.
     driverOptions: {pool: {validate: connectionIsAlive}},
+    forceUtcTimezone: true,
   } as MikroORMOptions;
 }
 

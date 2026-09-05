@@ -328,7 +328,13 @@ export class DatabaseSessionService extends BaseSessionService {
     if (!source.driver) {
       throw new Error('Driver is required when passing options object.');
     }
-    this.options = {...source, entities: ENTITIES};
+    // Every backend adk-js supports drops the zone, so UTC is the default
+    // here as it is for a URL. A caller's own value wins.
+    this.options = {
+      ...source,
+      entities: ENTITIES,
+      forceUtcTimezone: source.forceUtcTimezone ?? true,
+    };
     this.ownsOrm = true;
   }
 
@@ -396,6 +402,16 @@ export class DatabaseSessionService extends BaseSessionService {
   }
 
   /**
+   * Initializes the service on demand, and returns the open database.
+   *
+   * @returns The initialized MikroORM instance.
+   */
+  private async ready(): Promise<MikroORM> {
+    await this.init();
+    return this.orm!;
+  }
+
+  /**
    * Releases the database connections this service opened.
    *
    * The sqlite driver keeps its file open until the pool closes, so a
@@ -459,8 +475,7 @@ export class DatabaseSessionService extends BaseSessionService {
     state,
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
-    await this.init();
-    const em = forkForWrite(this.orm!);
+    const em = forkForWrite(await this.ready());
 
     const id = sessionId?.trim() || randomUUID();
     const now = new Date();
@@ -541,8 +556,7 @@ export class DatabaseSessionService extends BaseSessionService {
   }: GetSessionRequest): Promise<Session | undefined> {
     validateGetSessionConfig(config);
 
-    await this.init();
-    const em = forkForRead(this.orm!);
+    const em = forkForRead(await this.ready());
 
     const storageSession = await em.findOne(StorageSession, {
       appName,
@@ -583,8 +597,7 @@ export class DatabaseSessionService extends BaseSessionService {
     appName,
     userId,
   }: GetUserStateRequest): Promise<Record<string, unknown>> {
-    await this.init();
-    const em = forkForRead(this.orm!);
+    const em = forkForRead(await this.ready());
 
     const userStateModel = await em.findOne(StorageUserState, {
       appName,
@@ -639,8 +652,7 @@ export class DatabaseSessionService extends BaseSessionService {
     page,
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
-    await this.init();
-    const em = forkForRead(this.orm!);
+    const em = forkForRead(await this.ready());
 
     const where: FilterQuery<StorageSession> = {appName};
     // An empty user id is a user id. Falsiness here returned every user's
@@ -733,8 +745,7 @@ export class DatabaseSessionService extends BaseSessionService {
     userId,
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
-    await this.init();
-    const em = forkForWrite(this.orm!);
+    const em = forkForWrite(await this.ready());
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
     if (this.legacySchema) {
