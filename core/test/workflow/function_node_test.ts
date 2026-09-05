@@ -5,6 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 import {AuthCredentialTypes} from '../../src/auth/auth_credential.js';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {createEvent, Event} from '../../src/events/event.js';
@@ -173,6 +174,40 @@ describe('FunctionNode RequestInput handling', () => {
 });
 
 describe('FunctionNode construction', () => {
+  it('builds with a parameter JSON Schema cannot express', async () => {
+    // Rendering the whole schema as JSON Schema throws for `z.date()`, which
+    // used to abort construction with a raw Zod error naming neither the node
+    // nor the parameter.
+    const parameters = z.object({name: z.string(), when: z.date()});
+    const record = (
+      _ctx: NodeContext,
+      {name, when}: z.infer<typeof parameters>,
+    ) => `${name}@${when.toISOString()}`;
+    const node = new FunctionNode(record, {
+      parameters,
+      parameterBinding: 'nodeInput',
+    });
+
+    const {output} = await driveNode(node, {
+      name: 'ada',
+      when: new Date('2026-01-01T00:00:00Z'),
+    });
+
+    expect(output).toBe('ada@2026-01-01T00:00:00.000Z');
+  });
+
+  it('coerces a declared parameter with the field its schema declares', async () => {
+    const parameters = z.object({count: z.coerce.number()});
+    const twice = (_ctx: NodeContext, {count}: z.infer<typeof parameters>) =>
+      count * 2;
+    const node = new FunctionNode(twice, {
+      parameters,
+      parameterBinding: 'nodeInput',
+    });
+
+    expect((await driveNode(node, {count: '21'})).output).toBe(42);
+  });
+
   it('takes its name from the wrapped function when none is given', () => {
     const greet = () => 'hi';
 

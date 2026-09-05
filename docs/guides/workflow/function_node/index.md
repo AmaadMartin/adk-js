@@ -17,8 +17,9 @@ object. That buys three things:
 - **Defaults.** A parameter the source does not hold falls to the `default` its
   schema declares. A required parameter with no default raises a named error
   instead of arriving as `undefined`.
-- **Checked values.** Each bound value is validated against its own field
-  schema, so a handler does not re-check what it was handed.
+- **Checked values.** Each bound value is parsed by the Zod field that declares
+  it, so a handler does not re-check what it was handed. The field itself does
+  the work, so `z.coerce`, `.transform` and `.refine` all run.
 - **One declaration.** In `'nodeInput'` mode the schema also becomes the node's
   `inputSchema`, so `NodeTool` can expose the node to a model without restating
   it.
@@ -85,9 +86,14 @@ const addNode = node(add, {
 ```
 
 The node's `inputSchema` becomes `addParameters`, so `new NodeTool(addNode)`
-declares `x` and `y` to the model with no second declaration. A node input that
-is not a plain object reads as an empty source, so every parameter then falls to
-its default or raises.
+declares `x` and `y` to the model with no second declaration.
+
+That schema is also enforced. `BaseNode.validateInput` checks the whole node
+input against it before binding runs, so a node input that is not an object, or
+one missing a required key, is rejected as a node input-schema failure rather
+than reaching the per-parameter error below. ADK Python does not check it there:
+its `input_schema` in this mode is a plain dictionary, which its validator
+skips.
 
 ## The nodeInput parameter
 
@@ -125,22 +131,37 @@ are dropped and the framework logs one warning.
 An optional parameter with no default is left unbound, so the handler sees
 `undefined`.
 
+## Coercion
+
+Zod does not coerce the way Pydantic does. Pydantic turns the string `'42'` into
+the number `42`; a bare `z.number()` rejects it. Declare the coercion you want
+and it runs, because the field you declared is the validator:
+
+```ts
+const parameters = z.object({count: z.coerce.number()});
+// state {count: '42'} binds count as the number 42
+```
+
 ## What is not checked
 
-A field whose schema has no Zod equivalent passes its value through unchecked.
-That is the same degradation `parseWithSchema` makes across ADK: refusing data
-because the validator could not be built would reject values that are perfectly
-valid. Binding is therefore a convenience with a check attached, not a
-guarantee that every value matched.
+A parameter declared in a genai `Schema` rather than in Zod is checked only as
+far as that schema compiles to a Zod type. A property Zod cannot express — a
+pattern it cannot compile, say — passes its value through unchecked. That is
+the same degradation `parseWithSchema` makes across ADK: refusing data because
+the validator could not be built would reject values that are perfectly valid.
 
-Coercion is also weaker than ADK Python's. Pydantic turns the string `'42'` into
-the number `42`; Zod rejects it. Declare the coercion you want
-(`z.coerce.number()`) if you need it.
+A Zod parameter is always checked by its own field, so this applies to the genai
+dialect only.
+
+A default is resolved once, when the node is built. A handler that mutates a
+defaulted object therefore reaches the same object on the next run. ADK Python's
+parameter defaults behave the same way.
 
 ## Configuring the node
 
 `parameters` and `parameterBinding` are read when the node is built from its
-function. They are not overridable through `node(existingNode, {...})`, because
+function. `parameterBinding` does nothing on its own: without `parameters` there
+is nothing to bind, and the handler keeps receiving the raw node input. They are not overridable through `node(existingNode, {...})`, because
 the node compiles the parameters into descriptors and derives its `inputSchema`
 from both keys at construction — grafting one onto a built node would leave it
 binding one way and validating the other.
