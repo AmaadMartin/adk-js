@@ -251,9 +251,7 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     let childCtx: NodeContext;
     try {
       childCtx = await run.task;
-      run.taskSettled = true;
     } catch (err) {
-      run.taskSettled = true;
       if (isNodeInterruptedError(err) || isDynamicNodeFailError(err)) {
         throw err;
       }
@@ -264,6 +262,8 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
         error,
         errorNodePath: nodePath,
       });
+    } finally {
+      run.taskSettled = true;
     }
     this.recordResult(run, childCtx, node);
     return childCtx;
