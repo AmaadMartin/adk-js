@@ -325,6 +325,21 @@ describe('AgentEngineSandboxComputer', () => {
       expect(error.message).toContain('agent engine');
     });
 
+    it('reports a finished operation whose sandbox name is empty', async () => {
+      const {computer, vertexApi} = await createPreparedComputer();
+      vertexApi.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        {
+          name: 'operations/create-sandbox',
+          done: true,
+          response: {name: ''},
+        },
+      );
+
+      const error = await captureError(computer.currentState());
+
+      expect(error.code).toBe(SandboxErrorCode.CREATED_RESOURCE_UNNAMED);
+    });
+
     it('reports an unfinished operation that cannot be polled', async () => {
       const {computer, vertexApi} = await createPreparedComputer();
       vertexApi.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(

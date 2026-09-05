@@ -178,7 +178,8 @@ type Named<T> = T & {name: string};
 function isNamed<T extends {name?: string}>(
   resource: T | undefined,
 ): resource is Named<T> {
-  return resource?.name !== undefined;
+  // An empty name is as unusable as an absent one: it names no resource.
+  return !!resource?.name;
 }
 
 /** The name a create operation is polled by. */
@@ -210,9 +211,12 @@ async function awaitCreatedResource<T extends {name?: string}>(
   resource: string,
 ): Promise<Named<T>> {
   let current = operation;
-  for (let polls = 0; !current.done && polls < OPERATION_MAX_POLLS; polls++) {
-    await sleep(OPERATION_POLL_INTERVAL_MS);
-    current = await poll(requireOperationName(operation, resource));
+  if (!current.done) {
+    const operationName = requireOperationName(operation, resource);
+    for (let polls = 0; !current.done && polls < OPERATION_MAX_POLLS; polls++) {
+      await sleep(OPERATION_POLL_INTERVAL_MS);
+      current = await poll(operationName);
+    }
   }
   if (!current.done) {
     throw new SandboxError(
