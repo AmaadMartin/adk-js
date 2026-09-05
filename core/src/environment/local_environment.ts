@@ -125,6 +125,10 @@ async function killCommand(
   // Whatever the command wrote before this point has already been buffered.
   child.stdout.destroy();
   child.stderr.destroy();
+
+  // With the pipes released, 'close' reports the exit status the result needs.
+  // The wait is bounded, so teardown still cannot block forever.
+  await settledWithin(closed, TERMINATE_GRACE_MS);
 }
 
 /**
