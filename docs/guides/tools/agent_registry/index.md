@@ -84,9 +84,20 @@ Passing an `authScheme` yourself skips the bindings request entirely. A
 bindings lookup that fails, returns nothing, or matches no target leaves the
 server unauthenticated and logs a warning; it does not throw.
 
-`getRemoteA2AAgent` does not resolve a binding. `RemoteA2AAgent` has no way to
-apply a credential to its outgoing calls yet, so a scheme resolved for it would
-have no effect. Pass an already-authenticated `client` instead.
+A registered A2A agent can carry a binding too, and `getRemoteA2AAgent` reads
+it the same way. The resolved scheme and the credential you passed are readable
+on the agent:
+
+```ts
+const agent = await registry.getRemoteA2AAgent('my-agent', {
+  continueUri: 'https://my-app.example/continue',
+});
+
+agent.authScheme; // the provider the agent's binding names
+```
+
+`RemoteA2AAgent` does not apply the scheme to its outgoing calls yet. Read the
+scheme, obtain the credential, and pass an already-authenticated `client`.
 
 For an MCP server on a `*.googleapis.com` host reached over https, and only
 when no auth scheme and no credential apply, the registry attaches its own
