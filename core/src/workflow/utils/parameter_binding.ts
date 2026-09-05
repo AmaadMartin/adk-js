@@ -17,6 +17,10 @@
 
 import {Content, Schema} from '@google/genai';
 import {State} from '../../sessions/state.js';
+import {
+  contentHasNonTextParts,
+  contentToText,
+} from '../../utils/content_utils.js';
 import {logger} from '../../utils/logger.js';
 import {
   objectSchemaFields,
@@ -153,7 +157,8 @@ export function bindParameters(
 }
 
 /**
- * Joins the text parts of a `Content`, warning when it drops non-text parts.
+ * Reads a `Content` bound to a string parameter as text, naming the parameter
+ * in the warning when the conversion drops a non-text part.
  *
  * Never throws: a part carrying nothing this recognises is skipped, matching
  * Python's `_content_to_str`.
@@ -163,16 +168,7 @@ export function contentToString(
   nodeName: string,
   parameterName: string,
 ): string {
-  const texts: string[] = [];
-  let dropped = false;
-  for (const part of content.parts ?? []) {
-    if (part.text !== undefined && part.text !== null) {
-      texts.push(part.text);
-    } else if (part.inlineData || part.fileData || part.executableCode) {
-      dropped = true;
-    }
-  }
-  if (dropped) {
+  if (contentHasNonTextParts(content)) {
     logger.warn(
       `Parameter "${parameterName}" of function "${nodeName}" expects a ` +
         'string but received Content with non-text parts (inlineData, ' +
@@ -180,7 +176,7 @@ export function contentToString(
         'auto-conversion.',
     );
   }
-  return texts.join('');
+  return contentToText(content);
 }
 
 /**
