@@ -10,7 +10,8 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
+import {loadRecordings} from '../integration/recordings_loader.js';
+import {TestInfo, TestSpec} from '../integration/test_types.js';
 
 /**
  * batchLoadYamlTestDefs will recursively search the directory given
@@ -63,19 +64,12 @@ export async function batchLoadYamlTestDefs(
       deep: true,
     }) as Session;
 
-    // Recordings file
-    const recordingsFile = path.posix.join(
-      baseDir,
-      'generated-recordings.yaml',
+    // Recordings file. Loaded through the shared loader so that the recordings
+    // this runner replays follow the same rules as a session-state replay: the
+    // schema keys are camelCased and the recorded payloads are not.
+    const recordings = await loadRecordings(
+      path.posix.join(baseDir, 'generated-recordings.yaml'),
     );
-    const recordingsContent = await fs.readFile(recordingsFile, 'utf-8');
-    const parsedRecordings = yaml.load(recordingsContent);
-    if (typeof parsedRecordings !== 'object' || parsedRecordings === null) {
-      throw new Error('Recording file must be a YAML mapping');
-    }
-    const recordings = camelcaseKeys(parsedRecordings, {
-      deep: true,
-    }) as Recordings;
 
     // Make test names unique by including relative file path from given root dir
     const normalizedDir = directory.replaceAll('\\', '/');

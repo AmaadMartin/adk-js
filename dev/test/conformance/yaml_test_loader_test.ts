@@ -6,6 +6,7 @@
 
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
+import {Readable} from 'node:stream';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 
@@ -145,6 +146,36 @@ describe('batchLoadYamlTestDefs', () => {
     expect(test).toBeDefined();
     expect(test?.name).toBe(expectedKey);
     expect(test?.spec.agent).toBe('test-agent');
+  });
+
+  it('keeps the names a recorded tool argument was written with', async () => {
+    const rootDir = '/root/tests';
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml']),
+    );
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('generated-recordings.yaml')) {
+        return [
+          'recordings:',
+          '  - user_message_index: 0',
+          '    agent_name: test-agent',
+          '    tool_recording:',
+          '      tool_call:',
+          '        name: greet',
+          '        args:',
+          '          user_name: ada',
+        ].join('\n');
+      }
+      return '{}';
+    });
+
+    const tests = await batchLoadYamlTestDefs(rootDir);
+
+    // The schema keys convert; the arguments the agent recorded do not, so a
+    // fixture written by adk-python replays under the names it recorded.
+    expect(
+      tests.get('t1')?.recordings.recordings[0].toolRecording?.toolCall,
+    ).toEqual({name: 'greet', args: {user_name: 'ada'}});
   });
 
   it('should throw an error if a required file is missing', async () => {
