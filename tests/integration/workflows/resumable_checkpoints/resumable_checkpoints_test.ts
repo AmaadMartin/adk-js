@@ -86,10 +86,10 @@ describe('workflow integration — resumable checkpoints', () => {
     ]);
 
     const endIndex = events.findIndex((e) => e.actions?.endOfAgent === true);
-    const lastCheckpoint = events.findLastIndex(
-      (e) => e.actions?.agentState !== undefined,
-    );
-    expect(endIndex).toBeGreaterThan(lastCheckpoint);
+    const checkpointIndexes = events
+      .map((e, i) => (e.actions?.agentState === undefined ? -1 : i))
+      .filter((i) => i >= 0);
+    expect(endIndex).toBeGreaterThan(checkpointIndexes.at(-1)!);
   });
 
   it('writes neither on an app that is not resumable', async () => {
