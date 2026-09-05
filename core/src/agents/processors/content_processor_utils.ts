@@ -101,11 +101,6 @@ export function getContents(
   const includedEvents: Event[] = [];
 
   for (const event of applyRewinds(events)) {
-    if (isCompactedEvent(event)) {
-      includedEvents.push(convertCompactedEvent(event));
-      continue;
-    }
-
     if (
       !shouldIncludeEventInContext(
         event,
@@ -114,6 +109,11 @@ export function getContents(
         includeThoughtsOf(agentName, event, options),
       )
     ) {
+      continue;
+    }
+
+    if (isCompactedEvent(event)) {
+      includedEvents.push(convertCompactedEvent(event));
       continue;
     }
 
@@ -318,6 +318,8 @@ function isPartInvisible(part: Part, includeThoughts: boolean): boolean {
  * {@link accumulateTranscriptions} can turn it into a text content.
  */
 function containsEmptyContent(event: Event, includeThoughts: boolean): boolean {
+  // A compacted event carries its text in `compactedContent`, not in `content`,
+  // so the emptiness test does not apply to it.
   if (isCompactedEvent(event)) {
     return false;
   }

@@ -1269,6 +1269,128 @@ describe('getContents — rewind filtering', () => {
   });
 });
 
+describe('getContents with compacted events', () => {
+  const SUMMARY_TEXT = 'summary of the coordinator conversation';
+
+  function summaryOf(contents: Content[]): Content | undefined {
+    return contents.find((content) =>
+      content.parts?.some((part) => part.text?.includes(SUMMARY_TEXT)),
+    );
+  }
+
+  function userTurn(branch?: string) {
+    return createEvent({
+      author: 'user',
+      branch,
+      content: {role: 'user', parts: [{text: 'hello'}]},
+    });
+  }
+
+  it('drops a compacted summary from a sibling branch', () => {
+    const compacted = createCompactedEvent({
+      author: 'system',
+      branch: 'main.agentB',
+      content: {role: 'model', parts: [{text: SUMMARY_TEXT}]},
+      startTime: 1000,
+      endTime: 2000,
+      compactedContent: SUMMARY_TEXT,
+    });
+
+    const contents = getContents(
+      [compacted, userTurn('main.agentA')],
+      'my_agent',
+      'main.agentA',
+    );
+
+    expect(summaryOf(contents)).toBeUndefined();
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts?.[0].text).toBe('hello');
+  });
+
+  it('keeps a compacted summary from an ancestor branch', () => {
+    const compacted = createCompactedEvent({
+      author: 'system',
+      branch: 'main',
+      content: {role: 'model', parts: [{text: SUMMARY_TEXT}]},
+      startTime: 1000,
+      endTime: 2000,
+      compactedContent: SUMMARY_TEXT,
+    });
+
+    const contents = getContents([compacted], 'my_agent', 'main.agentA');
+
+    expect(contents).toHaveLength(1);
+    expect(contents[0].role).toBe('user');
+    expect(contents[0].parts?.[0].text).toBe(
+      `[Previous Context Summary]:\n${SUMMARY_TEXT}`,
+    );
+  });
+
+  it('keeps a branchless compacted summary on any branch', () => {
+    const compacted = createCompactedEvent({
+      author: 'system',
+      content: {role: 'model', parts: [{text: SUMMARY_TEXT}]},
+      startTime: 1000,
+      endTime: 2000,
+      compactedContent: SUMMARY_TEXT,
+    });
+
+    const contents = getContents([compacted], 'my_agent', 'main.agentA');
+
+    expect(summaryOf(contents)).toBeDefined();
+  });
+
+  it('withholds a compacted summary tagged for another isolation scope', () => {
+    const compacted = createCompactedEvent({
+      author: 'system',
+      isolationScope: 'fc-1',
+      content: {role: 'model', parts: [{text: SUMMARY_TEXT}]},
+      startTime: 1000,
+      endTime: 2000,
+      compactedContent: SUMMARY_TEXT,
+    });
+    // A scoped agent sees only the events that carry its own scope, so the
+    // surviving turn must be tagged `fc-2` too.
+    const inScopeTurn = createEvent({
+      author: 'user',
+      isolationScope: 'fc-2',
+      content: {role: 'user', parts: [{text: 'hello'}]},
+    });
+
+    const contents = getContents(
+      [compacted, inScopeTurn],
+      'my_agent',
+      undefined,
+      'fc-2',
+    );
+
+    expect(summaryOf(contents)).toBeUndefined();
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts?.[0].text).toBe('hello');
+  });
+
+  it('can anchor the current turn on a compacted summary that carries no content', () => {
+    const compacted = createCompactedEvent({
+      author: 'system',
+      startTime: 1000,
+      endTime: 2000,
+      compactedContent: SUMMARY_TEXT,
+    });
+    const agentTurn = createEvent({
+      author: 'my_agent',
+      content: {role: 'model', parts: [{text: 'answer'}]},
+    });
+
+    const contents = getCurrentTurnContents([compacted, agentTurn], 'my_agent');
+
+    expect(contents).toHaveLength(2);
+    expect(contents[0].parts?.[0].text).toBe(
+      `[Previous Context Summary]:\n${SUMMARY_TEXT}`,
+    );
+    expect(contents[1].parts?.[0].text).toBe('answer');
+  });
+});
+
 describe('insertModelInputContext', () => {
   const userContent: Content = {role: 'user', parts: [{text: 'the question'}]};
 
