@@ -50,13 +50,16 @@ import {
   traceCallLlm,
   tracer,
 } from '../telemetry/tracing.js';
+import {isGoogleSearchTool} from '../tools/google_search_tool.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
-import {BaseAgent, BaseAgentConfig} from './base_agent.js';
+import {BaseAgent, BaseAgentConfig, isBaseAgent} from './base_agent.js';
+import {assertNoMisplacedGenerateContentKwargs} from './llm_agent_config_validation.js';
 import {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
 } from './processors/base_llm_processor.js';
+import {getTransferTargets} from './transfer_targets.js';
 
 import {
   generateAuthEvent,
@@ -221,6 +224,31 @@ export type AfterModelCallback =
   | SingleAfterModelCallback[];
 
 /**
+ * A callback that runs when a model call raises an error.
+ *
+ * @param params.context The current callback context.
+ * @param params.request The model request that failed.
+ * @param params.error The error the model call raised.
+ * @returns The response to return to the user. When present, the error is
+ *     ignored and this response is returned instead.
+ */
+export type SingleOnModelErrorCallback = (params: {
+  context: Context;
+  request: LlmRequest;
+  error: Error;
+}) => LlmResponse | undefined | Promise<LlmResponse | undefined>;
+
+/**
+ * A single callback or a list of callbacks.
+ *
+ * When a list of callbacks is provided, the callbacks will be called in the
+ * order they are listed until a callback does not return None.
+ */
+export type OnModelErrorCallback =
+  | SingleOnModelErrorCallback
+  | SingleOnModelErrorCallback[];
+
+/**
  * A callback that runs before a tool is called.
  *
  * @param params.tool The tool to be called.
@@ -276,6 +304,36 @@ export type SingleAfterToolCallback = (params: {
 export type AfterToolCallback =
   | SingleAfterToolCallback
   | SingleAfterToolCallback[];
+
+/**
+ * A callback that runs when a tool call raises an error.
+ *
+ * @param params.tool The tool that was called.
+ * @param params.args The arguments to the tool.
+ * @param params.context Context for the tool call.
+ * @param params.error The error the tool call raised.
+ * @returns The tool result to return. When present, the error is ignored and
+ *     this result answers the call instead.
+ */
+export type SingleOnToolErrorCallback = (params: {
+  tool: BaseTool;
+  args: Record<string, unknown>;
+  context: Context;
+  error: Error;
+}) =>
+  | Record<string, unknown>
+  | undefined
+  | Promise<Record<string, unknown> | undefined>;
+
+/**
+ * A single callback or a list of callbacks.
+ *
+ * When a list of callbacks is provided, the callbacks will be called in the
+ * order they are listed until a callback does not return None.
+ */
+export type OnToolErrorCallback =
+  | SingleOnToolErrorCallback
+  | SingleOnToolErrorCallback[];
 
 /** A list of examples or an example provider. */
 export type ExamplesUnion = Example[] | BaseExampleProvider;
@@ -357,6 +415,14 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    */
   mode?: 'single_turn' | 'task';
 
+  /**
+   * Runs the agent once per item of its node input when it is a workflow node.
+   *
+   * `buildNode` wraps such an agent in a parallel worker. Mirrors Python's
+   * `Agent(parallel_worker=...)`.
+   */
+  parallelWorker?: boolean;
+
   /** The input schema when agent is used as a tool. */
   inputSchema?: LlmAgentSchema;
 
@@ -383,6 +449,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   afterModelCallback?: AfterModelCallback;
 
   /**
+   * Callbacks to be called when a model call raises an error.
+   */
+  onModelErrorCallback?: OnModelErrorCallback;
+
+  /**
    * Callbacks to be called before calling the tool.
    */
   beforeToolCallback?: BeforeToolCallback;
@@ -391,6 +462,11 @@ export interface LlmAgentConfig extends BaseAgentConfig {
    * Callbacks to be called after calling the tool.
    */
   afterToolCallback?: AfterToolCallback;
+
+  /**
+   * Callbacks to be called when a tool call raises an error.
+   */
+  onToolErrorCallback?: OnToolErrorCallback;
 
   /**
    * Processors to run before the LLM request is sent.
@@ -414,10 +490,60 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   codeExecutor?: BaseCodeExecutor;
 }
 
+/**
+ * Rejects a value in `tools` that must not become a tool.
+ *
+ * `BaseAgent` extends `BaseNode`, so the agent check comes first. Without it an
+ * agent listed in `tools` is silently wrapped as a `NodeTool` rather than being
+ * reported as the misconfiguration it is.
+ *
+ * @param toolUnion One entry of an agent's `tools`.
+ * @throws Error naming the entry and what to do with it instead.
+ */
+function validateToolUnion(toolUnion: ToolUnion): void {
+  if (isBaseAgent(toolUnion)) {
+    throw new Error(
+      `Agent '${toolUnion.name}' cannot be wrapped as a NodeTool. Agents ` +
+        'should be invoked as sub-agents.',
+    );
+  }
+  if (isBaseNode(toolUnion) && !toolUnion.description) {
+    throw new Error(
+      `Workflow/Node '${toolUnion.name}' must have a description to be ` +
+        'wrapped as a tool.',
+    );
+  }
+}
+
+/**
+ * Resolves one entry of an agent's `tools` into the tools the model sees.
+ *
+ * @param toolUnion The entry to resolve.
+ * @param context The context a toolset resolves its tools against.
+ * @param getModel The agent's model, which a substituted sub-agent runs on.
+ *     Called only when a substitution happens, so resolving a model an agent
+ *     never uses cannot fail the whole tool list.
+ * @param multipleTools Whether the model will see more than one tool, which is
+ *     what a built-in tool cannot be used with.
+ */
 async function convertToolUnionToTools(
   toolUnion: ToolUnion,
-  context?: ReadonlyContext,
+  context: ReadonlyContext | undefined,
+  getModel: () => string | BaseLlm,
+  multipleTools: boolean,
 ): Promise<BaseTool[]> {
+  validateToolUnion(toolUnion);
+  if (
+    multipleTools &&
+    isGoogleSearchTool(toolUnion) &&
+    toolUnion.bypassMultiToolsLimit
+  ) {
+    // Imported here rather than at the top of the file: the module builds an
+    // LlmAgent, so a static import would close the cycle.
+    const {createGoogleSearchAgent, GoogleSearchAgentTool} =
+      await import('../tools/google_search_agent_tool.js');
+    return [new GoogleSearchAgentTool(createGoogleSearchAgent(getModel()))];
+  }
   if (isBaseTool(toolUnion)) {
     return [toolUnion];
   }
@@ -434,6 +560,79 @@ async function convertToolUnionToTools(
  * Defined once and shared by all LlmAgent instances.
  */
 const LLM_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.llmAgent');
+
+const DEFAULT_MODEL_SYMBOL = Symbol.for('google.adk.llmAgent.defaultModel');
+const DEFAULT_LIVE_MODEL_SYMBOL = Symbol.for(
+  'google.adk.llmAgent.defaultLiveModel',
+);
+
+/**
+ * The default model overrides, held on `globalThis` rather than on the class.
+ *
+ * A bundler inlines `@google/adk` into an agent's bundle, so one process can
+ * hold two copies of `LlmAgent`. A class-level field would be private to the
+ * copy that wrote it, and the CLI's override would never reach the agent. The
+ * shared key mirrors the `Symbol.for('google.adk.*')` brands used for the same
+ * reason elsewhere.
+ */
+const defaultModelHolder: typeof globalThis & {
+  [DEFAULT_MODEL_SYMBOL]?: string | BaseLlm;
+  [DEFAULT_LIVE_MODEL_SYMBOL]?: string | BaseLlm;
+} = globalThis;
+
+/** A model name together with the {@link BaseLlm} last built from it. */
+interface ResolvedModel {
+  name: string;
+  llm: BaseLlm;
+}
+
+/**
+ * Returns the resolution for `name`, reusing `memo` when it names that model.
+ *
+ * `LLMRegistry.newLlm` builds a new instance on every call — its cache holds
+ * the model class, not the instance — so an agent that keeps no memo hands out
+ * a different `BaseLlm` on every read of its canonical model.
+ */
+function resolveModelName(
+  memo: ResolvedModel | undefined,
+  name: string,
+): ResolvedModel {
+  return memo?.name === name ? memo : {name, llm: LLMRegistry.newLlm(name)};
+}
+
+/** Rejects a default model that no agent could resolve. */
+function validateDefaultModel(label: string, model: string | BaseLlm): void {
+  if (!isBaseLlm(model) && typeof model !== 'string') {
+    throw new Error(
+      `${label} must be a model name (string) or BaseLlm instance, got ` +
+        `${typeof model}.`,
+    );
+  }
+  if (model === '') {
+    throw new Error(`${label} must be a non-empty string.`);
+  }
+}
+
+/** Resolves a default model override, or the built-in default behind it. */
+function resolveDefaultModel(
+  override: string | BaseLlm | undefined,
+  builtIn: string,
+): BaseLlm {
+  const model = override ?? builtIn;
+  return isBaseLlm(model) ? model : LLMRegistry.newLlm(model);
+}
+
+/** The nearest ancestor of `agent` that is an {@link LlmAgent}. */
+function nearestLlmAgentAncestor(agent: BaseAgent): LlmAgent | undefined {
+  let ancestor = agent.parentAgent;
+  while (ancestor) {
+    if (isLlmAgent(ancestor)) {
+      return ancestor;
+    }
+    ancestor = ancestor.parentAgent;
+  }
+  return undefined;
+}
 
 /**
  * Type guard to check if an object is an instance of LlmAgent.
@@ -456,6 +655,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   /** A unique symbol to identify ADK LLM agent class. */
   readonly [LLM_AGENT_SIGNATURE_SYMBOL] = true;
 
+  /** The model an agent uses when it sets none and inherits none. */
+  static readonly DEFAULT_MODEL = 'gemini-3.5-flash';
+
+  /** The model live mode uses when an agent sets none and inherits none. */
+  static readonly DEFAULT_LIVE_MODEL = 'gemini-live-2.5-flash-native-audio';
+
   model?: string | BaseLlm;
   instruction: string | InstructionProvider;
   /** @deprecated Use GlobalInstructionPlugin instead. */
@@ -476,6 +681,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   readonly includeContentsExplicit: boolean;
   mode?: 'single_turn' | 'task';
+  /** See {@link LlmAgentConfig.parallelWorker}. */
+  parallelWorker?: boolean;
   inputSchema?: Schema;
   outputSchema?: Schema;
   /**
@@ -496,13 +703,18 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   private _finishTaskTool?: FinishTaskTool;
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
+  onModelErrorCallback?: OnModelErrorCallback;
   beforeToolCallback?: BeforeToolCallback;
   afterToolCallback?: AfterToolCallback;
+  onToolErrorCallback?: OnToolErrorCallback;
   requestProcessors: BaseLlmRequestProcessor[];
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
+  private resolvedModel?: ResolvedModel;
+  private resolvedLiveModel?: ResolvedModel;
 
   constructor(config: LlmAgentConfig) {
+    assertNoMisplacedGenerateContentKwargs(config);
     // Node defaults for an agent used in a graph, matching adk-python's
     // `build_node`: an agent re-runs on resume (its turn is what the reply is
     // addressed to), and a task-mode agent holds the graph until it produces an
@@ -516,6 +728,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.instruction = config.instruction ?? '';
     this.globalInstruction = config.globalInstruction ?? '';
     this.tools = config.tools ?? [];
+    this.tools.forEach(validateToolUnion);
     this.generateContentConfig = config.generateContentConfig;
     this.disallowTransferToParent = config.disallowTransferToParent ?? false;
     this.disallowTransferToPeers = config.disallowTransferToPeers ?? false;
@@ -530,11 +743,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       ? zodObjectToSchema(config.outputSchema)
       : config.outputSchema;
     this.mode = config.mode;
+    this.parallelWorker = config.parallelWorker;
     this.outputKey = config.outputKey;
     this.beforeModelCallback = config.beforeModelCallback;
     this.afterModelCallback = config.afterModelCallback;
+    this.onModelErrorCallback = config.onModelErrorCallback;
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
+    this.onToolErrorCallback = config.onToolErrorCallback;
     this.codeExecutor = config.codeExecutor;
 
     // TODO - b/425992518: Define these processor arrays.
@@ -588,16 +804,31 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // Validate generateContentConfig.
     if (config.generateContentConfig) {
       if (config.generateContentConfig.tools) {
-        throw new Error('All tools must be set via LlmAgent.tools.');
+        throw new Error(
+          'All tools must be set via LlmAgent.tools, not via ' +
+            'generateContentConfig.tools. Move your tools to the ' +
+            'LlmAgent(tools=[...]) parameter.',
+        );
       }
       if (config.generateContentConfig.systemInstruction) {
         throw new Error(
-          'System instruction must be set via LlmAgent.instruction.',
+          'System instruction must be set via LlmAgent.instruction, not via ' +
+            'generateContentConfig.systemInstruction. Move your instruction ' +
+            'to LlmAgent(instruction="...").',
         );
       }
       if (config.generateContentConfig.responseSchema) {
         throw new Error(
-          'Response schema must be set via LlmAgent.output_schema.',
+          'Response schema must be set via LlmAgent.outputSchema, not via ' +
+            'generateContentConfig.responseSchema. Move your schema to ' +
+            'LlmAgent(outputSchema=...).',
+        );
+      }
+      if (config.generateContentConfig.httpOptions?.baseUrl) {
+        throw new Error(
+          'Base URL is a transport setting and must be set on the model or ' +
+            'its client, not via ' +
+            'LlmAgent.generateContentConfig.httpOptions.baseUrl.',
         );
       }
     } else {
@@ -623,9 +854,41 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * Overrides the model used by an agent that sets none and inherits none.
+   *
+   * The override is process-wide, so it belongs to an entry point such as the
+   * CLI rather than to library code. Pass {@link LlmAgent.DEFAULT_MODEL} to
+   * restore the built-in default.
+   *
+   * @param model Model name or instance.
+   * @throws Error if given an empty name or a value of another type.
+   */
+  static setDefaultModel(model: string | BaseLlm): void {
+    validateDefaultModel('Default model', model);
+    defaultModelHolder[DEFAULT_MODEL_SYMBOL] = model;
+  }
+
+  /**
+   * Overrides the live-mode model for an agent that sets none and inherits
+   * none. See {@link LlmAgent.setDefaultModel}.
+   *
+   * @param model Model name or instance.
+   * @throws Error if given an empty name or a value of another type.
+   */
+  static setDefaultLiveModel(model: string | BaseLlm): void {
+    validateDefaultModel('Default live model', model);
+    defaultModelHolder[DEFAULT_LIVE_MODEL_SYMBOL] = model;
+  }
+
+  /**
    * The resolved BaseLlm instance.
    *
-   * When not set, the agent will inherit the model from its ancestor.
+   * Resolution order: an explicit BaseLlm, this agent's own model name, the
+   * nearest LlmAgent ancestor, then the default set by
+   * {@link LlmAgent.setDefaultModel} (built-in {@link LlmAgent.DEFAULT_MODEL}).
+   *
+   * Reading this twice returns the same instance while {@link model} is
+   * unchanged, and a new one after it is reassigned.
    */
   get canonicalModel(): BaseLlm {
     if (isBaseLlm(this.model)) {
@@ -633,17 +896,48 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     if (typeof this.model === 'string' && this.model) {
-      return LLMRegistry.newLlm(this.model);
+      this.resolvedModel = resolveModelName(this.resolvedModel, this.model);
+      return this.resolvedModel.llm;
     }
 
-    let ancestorAgent = this.parentAgent;
-    while (ancestorAgent) {
-      if (isLlmAgent(ancestorAgent)) {
-        return ancestorAgent.canonicalModel;
-      }
-      ancestorAgent = ancestorAgent.parentAgent;
+    const ancestorAgent = nearestLlmAgentAncestor(this);
+    return ancestorAgent
+      ? ancestorAgent.canonicalModel
+      : resolveDefaultModel(
+          defaultModelHolder[DEFAULT_MODEL_SYMBOL],
+          LlmAgent.DEFAULT_MODEL,
+        );
+  }
+
+  /**
+   * The resolved BaseLlm instance for live mode.
+   *
+   * Live mode resolves separately because the model that serves turn-by-turn
+   * requests is not the model that serves a Live API session. The order matches
+   * {@link canonicalModel}, but a model-less agent ends at the default set by
+   * {@link LlmAgent.setDefaultLiveModel} (built-in
+   * {@link LlmAgent.DEFAULT_LIVE_MODEL}).
+   */
+  get canonicalLiveModel(): BaseLlm {
+    if (isBaseLlm(this.model)) {
+      return this.model;
     }
-    throw new Error(`No model found for ${this.name}.`);
+
+    if (typeof this.model === 'string' && this.model) {
+      this.resolvedLiveModel = resolveModelName(
+        this.resolvedLiveModel,
+        this.model,
+      );
+      return this.resolvedLiveModel.llm;
+    }
+
+    const ancestorAgent = nearestLlmAgentAncestor(this);
+    return ancestorAgent
+      ? ancestorAgent.canonicalLiveModel
+      : resolveDefaultModel(
+          defaultModelHolder[DEFAULT_LIVE_MODEL_SYMBOL],
+          LlmAgent.DEFAULT_LIVE_MODEL,
+        );
   }
 
   /**
@@ -708,10 +1002,31 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   async canonicalTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const resolvedTools: BaseTool[] = [];
     for (const toolUnion of this.tools) {
-      const tools = await convertToolUnionToTools(toolUnion, context);
+      const tools = await this.resolveToolUnion(toolUnion, context);
       resolvedTools.push(...tools);
     }
     return resolvedTools;
+  }
+
+  /**
+   * Resolves one entry of {@link tools}, substituting a built-in tool that
+   * cannot be used alongside the others.
+   *
+   * A transfer target counts as another tool because the model reaches it
+   * through `transfer_to_agent`.
+   */
+  private async resolveToolUnion(
+    toolUnion: ToolUnion,
+    context?: ReadonlyContext,
+  ): Promise<BaseTool[]> {
+    const multipleTools =
+      this.tools.length > 1 || getTransferTargets(this).length > 0;
+    return convertToolUnionToTools(
+      toolUnion,
+      context,
+      () => this.canonicalModel,
+      multipleTools,
+    );
   }
 
   /**
@@ -751,6 +1066,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * The resolved onModelErrorCallback field as a list of
+   * SingleOnModelErrorCallback.
+   *
+   * This method is only for use by Agent Development Kit.
+   */
+  get canonicalOnModelErrorCallbacks(): SingleOnModelErrorCallback[] {
+    return LlmAgent.normalizeCallbackArray(this.onModelErrorCallback);
+  }
+
+  /**
    * The resolved beforeToolCallback field as a list of
    * BeforeToolCallback.
    *
@@ -767,6 +1092,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   get canonicalAfterToolCallbacks(): SingleAfterToolCallback[] {
     return LlmAgent.normalizeCallbackArray(this.afterToolCallback);
+  }
+
+  /**
+   * The resolved onToolErrorCallback field as a list of
+   * SingleOnToolErrorCallback.
+   *
+   * This method is only for use by Agent Development Kit.
+   */
+  get canonicalOnToolErrorCallbacks(): SingleOnToolErrorCallback[] {
+    return LlmAgent.normalizeCallbackArray(this.onToolErrorCallback);
   }
 
   /**
@@ -994,7 +1329,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // =========================================================================
     applyLiveRunConfig(invocationContext.runConfig, llmRequest);
 
-    const llm = this.canonicalModel;
+    const llm = this.canonicalLiveModel;
+    // Preprocess stamped the turn-by-turn model name on the request, and
+    // `connect()` reads the name from there.
+    llmRequest.model = llm.model;
     let reconnectAttempts = 0;
 
     // Outer reconnect loop. Re-enters on recoverable failures when a session
@@ -1138,7 +1476,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     for (const toolUnion of this.tools) {
       const toolContext = new Context({invocationContext});
       const tools = (
-        await convertToolUnionToTools(
+        await this.resolveToolUnion(
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
@@ -1435,6 +1773,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       toolsDict: llmRequest.toolsDict,
       beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
       afterToolCallbacks: this.canonicalAfterToolCallbacks,
+      onToolErrorCallbacks: this.canonicalOnToolErrorCallbacks,
     });
     if (!functionResponseEvent) {
       return;
@@ -1515,7 +1854,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
       // process all tools from this tool union
       const tools = (
-        await convertToolUnionToTools(
+        await this.resolveToolUnion(
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
@@ -1710,6 +2049,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           toolsDict: llmRequest.toolsDict,
           beforeToolCallbacks: this.canonicalBeforeToolCallbacks,
           afterToolCallbacks: this.canonicalAfterToolCallbacks,
+          onToolErrorCallbacks: this.canonicalOnToolErrorCallbacks,
         });
         return {event};
       } catch (error) {
@@ -1948,6 +2288,47 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     return undefined;
   }
 
+  /**
+   * Offers a failed model call to the plugins, then to this agent's own
+   * on-model-error callbacks.
+   *
+   * @returns The first response offered, or undefined when none recovers the
+   *     error.
+   */
+  private async handleOnModelError(
+    invocationContext: InvocationContext,
+    llmRequest: LlmRequest,
+    error: Error,
+    modelResponseEvent: Event,
+  ): Promise<LlmResponse | undefined> {
+    const callbackContext = new Context({
+      invocationContext,
+      eventActions: modelResponseEvent.actions,
+    });
+
+    const pluginResponse =
+      await invocationContext.pluginManager.runOnModelErrorCallback({
+        callbackContext,
+        llmRequest,
+        error,
+      });
+    if (pluginResponse) {
+      return pluginResponse;
+    }
+
+    for (const callback of this.canonicalOnModelErrorCallbacks) {
+      const callbackResponse = await callback({
+        context: callbackContext,
+        request: llmRequest,
+        error,
+      });
+      if (callbackResponse) {
+        return callbackResponse;
+      }
+    }
+    return undefined;
+  }
+
   protected async *runAndHandleError<T extends LlmResponse | Event>(
     responseGenerator: AsyncGenerator<T, void, void>,
     invocationContext: InvocationContext,
@@ -1965,23 +2346,28 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     } catch (modelError: unknown) {
       // Return an LlmResponse with error details.
       // Note: this will cause agent to work better if there's a loop.
-      const callbackContext = new Context({
-        invocationContext,
-        eventActions: modelResponseEvent.actions,
-      });
-
       // Wrapped LLM should throw Error-typed errors
       if (modelError instanceof Error) {
-        // Try plugins to recover from the error
-        const onModelErrorCallbackResponse =
-          await invocationContext.pluginManager.runOnModelErrorCallback({
-            callbackContext: callbackContext,
-            llmRequest: llmRequest,
-            error: modelError as Error,
-          });
+        // Try the plugins, then this agent's callbacks, to recover.
+        const onModelErrorCallbackResponse = await this.handleOnModelError(
+          invocationContext,
+          llmRequest,
+          modelError,
+          modelResponseEvent,
+        );
 
         if (onModelErrorCallbackResponse) {
-          yield onModelErrorCallbackResponse as T;
+          // This generator yields whatever the wrapped one yields. Where that
+          // is an event, a bare LlmResponse would reach the caller without the
+          // event fields it reads, so merge it as `postprocess` does.
+          yield (
+            modelResponseEvent.actions
+              ? createEvent({
+                  ...modelResponseEvent,
+                  ...onModelErrorCallbackResponse,
+                })
+              : onModelErrorCallbackResponse
+          ) as T;
         } else {
           // If no plugins, just return the message.
           let errorCode = 'UNKNOWN_ERROR';

@@ -39,10 +39,14 @@ export type {
   InstructionProvider,
   LlmAgentConfig,
   LlmAgentSchema,
+  OnModelErrorCallback,
+  OnToolErrorCallback,
   SingleAfterModelCallback,
   SingleAfterToolCallback,
   SingleBeforeModelCallback,
   SingleBeforeToolCallback,
+  SingleOnModelErrorCallback,
+  SingleOnToolErrorCallback,
   ToolUnion,
 } from './agents/llm_agent.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
@@ -311,7 +315,16 @@ export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
 } from './tools/google_maps_grounding_tool.js';
-export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
+export {
+  GoogleSearchAgentTool,
+  createGoogleSearchAgent,
+} from './tools/google_search_agent_tool.js';
+export {
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  isGoogleSearchTool,
+} from './tools/google_search_tool.js';
+export type {GoogleSearchToolParams} from './tools/google_search_tool.js';
 export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,

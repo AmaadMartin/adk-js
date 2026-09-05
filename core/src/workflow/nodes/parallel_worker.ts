@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseNode} from '../base_node.js';
+import {BaseNode, isBaseNode} from '../base_node.js';
 import {isNodeInterruptedError} from '../errors.js';
 import {RunnableNode} from '../graph.js';
 import {NodeContext} from '../node_context.js';
@@ -65,7 +65,9 @@ export class ParallelWorker extends BaseNode {
   private readonly inner: BaseNode;
 
   constructor(inner: RunnableNode, config: ParallelWorkerConfig = {}) {
-    const built = buildNode(inner);
+    // An already-built node needs no conversion, and rebuilding an agent that
+    // asked for this wrapper (`LlmAgent.parallelWorker`) would wrap it again.
+    const built = isBaseNode(inner) ? inner : buildNode(inner);
     super({name: built.name, rerunOnResume: true});
     if (
       config.maxParallelWorkers !== undefined &&

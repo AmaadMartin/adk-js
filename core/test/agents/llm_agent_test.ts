@@ -16,15 +16,19 @@ import {
   Context,
   ContextCompactorRequestProcessor,
   createEvent,
+  createGoogleSearchAgent,
   createSession,
   Event,
   FunctionTool,
+  GoogleSearchTool,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   LlmResponse,
   LongRunningFunctionTool,
+  node,
+  ParallelWorker,
   PluginManager,
   RunAsyncToolRequest,
   Runner,
@@ -1427,5 +1431,140 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent Google Search multi-tool workaround', () => {
+  const searchOnly = new GoogleSearchTool({bypassMultiToolsLimit: true});
+  // A BaseLlm instance rather than a name: resolving a name would build a real
+  // Gemini client, which needs credentials these tests have no use for.
+  const model = new MockLlm(null);
+
+  function otherTool(): FunctionTool<z3.ZodObject<z3.ZodRawShape>> {
+    return new FunctionTool({
+      name: 'other_tool',
+      description: 'another tool',
+      parameters: z3.object({}),
+      execute: () => 'ok',
+    });
+  }
+
+  it('leaves the search tool alone when it is the only tool', async () => {
+    const agent = new LlmAgent({
+      name: 'searcher',
+      model,
+      tools: [searchOnly],
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(await agent.canonicalTools()).toEqual([searchOnly]);
+  });
+
+  it('substitutes a search sub-agent when another tool is present', async () => {
+    const agent = new LlmAgent({
+      name: 'searcher',
+      model,
+      tools: [searchOnly, otherTool()],
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'google_search_agent',
+      'other_tool',
+    ]);
+  });
+
+  it('leaves the search tool alone when the bypass is not requested', async () => {
+    const search = new GoogleSearchTool();
+    const agent = new LlmAgent({
+      name: 'searcher',
+      model,
+      tools: [search, otherTool()],
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'google_search',
+      'other_tool',
+    ]);
+  });
+
+  it('substitutes when the agent can transfer, even with one tool', async () => {
+    const agent = new LlmAgent({
+      name: 'searcher',
+      model,
+      tools: [searchOnly],
+      subAgents: [new LlmAgent({name: 'helper'})],
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['google_search_agent']);
+  });
+
+  it('does not substitute for a lone search tool without transfer targets', async () => {
+    const agent = new LlmAgent({
+      name: 'searcher',
+      model,
+      tools: [searchOnly],
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(await agent.canonicalTools()).toEqual([searchOnly]);
+  });
+
+  it('runs the search sub-agent on the parent agent model', async () => {
+    const agent = new LlmAgent({
+      name: 'searcher',
+      model,
+      tools: [searchOnly, otherTool()],
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    const [searchAgentTool] = await agent.canonicalTools();
+    const searchAgent = createGoogleSearchAgent(model);
+
+    expect(searchAgentTool.name).toBe(searchAgent.name);
+    expect(searchAgent.canonicalModel).toBe(model);
+    expect(searchAgent.tools).toHaveLength(1);
+  });
+});
+
+describe('LlmAgent parallelWorker', () => {
+  it('is unset by default', () => {
+    expect(new LlmAgent({name: 'worker'}).parallelWorker).toBeUndefined();
+  });
+
+  it('carries the value it was configured with', () => {
+    expect(
+      new LlmAgent({name: 'worker', parallelWorker: true}).parallelWorker,
+    ).toBe(true);
+  });
+
+  it('makes buildNode wrap the agent in a parallel worker', () => {
+    const agent = new LlmAgent({name: 'worker', parallelWorker: true});
+
+    expect(node(agent)).toBeInstanceOf(ParallelWorker);
+  });
+
+  it('leaves an agent that did not ask for it unwrapped', () => {
+    const agent = new LlmAgent({name: 'worker'});
+
+    expect(node(agent)).toBe(agent);
+  });
+
+  it('lets an explicit option turn the wrapper off', () => {
+    const agent = new LlmAgent({name: 'worker', parallelWorker: true});
+
+    expect(node(agent, {parallelWorker: false})).toBe(agent);
   });
 });
