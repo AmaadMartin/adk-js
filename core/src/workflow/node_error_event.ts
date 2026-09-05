@@ -84,6 +84,11 @@ export function createNodeErrorEvent(
  * rather than the transport's class name, and it counts only as a string — an
  * HTTP client's numeric `.status` is a code, not a status. `UNKNOWN_ERROR` is
  * left for a thrown value that is neither an `Error` nor carries either field.
+ *
+ * The status rung and the class-name rung both mirror `NodeRunner` in
+ * `google/adk-python` (`src/google/adk/workflow/_node_runner.py`, the
+ * `error_code=` argument of the error event it builds). The `code` rung is
+ * adk-js's own, kept between the two.
  */
 function errorCodeOf(error: unknown): string {
   const status = (error as {status?: unknown} | null | undefined)?.status;

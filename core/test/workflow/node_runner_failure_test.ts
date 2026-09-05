@@ -12,7 +12,9 @@
  *
  * The retry-policy tests in that file are covered here by
  * `node_execution_test.ts` and `node_error_event_test.ts`; this file ports the
- * error-event cases those two do not reach. Test names are kept verbatim.
+ * error-event cases those two do not reach. Test names are kept verbatim, and
+ * every one of them exists on adk-python's default branch — including the two
+ * about the error code, which a checkout older than 2026-08-13 does not have.
  */
 
 import {describe, expect, it} from 'vitest';
