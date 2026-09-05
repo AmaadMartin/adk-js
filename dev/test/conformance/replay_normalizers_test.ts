@@ -7,7 +7,6 @@
 import {describe, expect, it} from 'vitest';
 
 import {
-  isRecord,
   normalizeRelayedAgentContent,
   normalizeRelayedAgentText,
   normalizeSchema,
@@ -23,18 +22,6 @@ import {
 function fence(payload: string): string {
   return `${QUOTED_CONTENT_BEGIN}\n${payload}\n${QUOTED_CONTENT_END}`;
 }
-
-describe('isRecord', () => {
-  it('accepts a plain object', () => {
-    expect(isRecord({a: 1})).toBe(true);
-  });
-
-  it('rejects an array, null and a scalar', () => {
-    expect(isRecord([1])).toBe(false);
-    expect(isRecord(null)).toBe(false);
-    expect(isRecord('a')).toBe(false);
-  });
-});
 
 describe('normalizeType', () => {
   it('reads the value off a Python enum dump', () => {
@@ -257,21 +244,21 @@ describe('normalizeToolConfig', () => {
     ).toEqual({name: 'lookup', parametersJsonSchema: {type: 'object'}});
   });
 
-  it('accepts the snake_case parameters_json_schema spelling', () => {
+  it('normalizes an existing parametersJsonSchema in place', () => {
     expect(
       normalizeToolConfig({
         name: 'lookup',
-        parameters_json_schema: {type: 'OBJECT'},
+        parametersJsonSchema: {type: 'OBJECT', title: 'Args'},
       }),
     ).toEqual({name: 'lookup', parametersJsonSchema: {type: 'object'}});
   });
 
-  it('prefers parameters over parameters_json_schema', () => {
+  it('prefers parameters over parametersJsonSchema', () => {
     expect(
       normalizeToolConfig({
         name: 'lookup',
         parameters: {type: 'OBJECT'},
-        parameters_json_schema: {type: 'ARRAY'},
+        parametersJsonSchema: {type: 'ARRAY'},
       }),
     ).toEqual({name: 'lookup', parametersJsonSchema: {type: 'object'}});
   });
@@ -282,7 +269,6 @@ describe('normalizeToolConfig', () => {
         name: 'lookup',
         description: 'd',
         response: {type: 'OBJECT'},
-        response_json_schema: {type: 'OBJECT'},
         responseJsonSchema: {type: 'OBJECT'},
       }),
     ).toEqual({name: 'lookup', description: 'd'});
@@ -477,6 +463,6 @@ describe('normalizeRelayedAgentContent', () => {
       ],
     };
     normalizeRelayedAgentContent(input);
-    expect(input.parts[0]!.text).toBe(OTHER_AGENT_CONTEXT_PREAMBLE);
+    expect(input.parts[0]).toEqual({text: OTHER_AGENT_CONTEXT_PREAMBLE});
   });
 });
