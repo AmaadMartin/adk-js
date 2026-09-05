@@ -97,6 +97,22 @@ describe('getAllowedRequestHosts', () => {
   it('still disables the guard for "*" even with extraAllowedHosts set', () => {
     expect(getAllowedRequestHosts('*', ['proxy.example'])).toBeNull();
   });
+
+  it('vouches for no host on a regex: origin', () => {
+    // A pattern names no single host, so it must not widen the guard. `new
+    // URL()` reads "regex:" as the scheme and leaves the hostname empty,
+    // which the malformed-origin path already drops.
+    const origin = 'regex:https://.*\\.example\\.com';
+
+    expect(getAllowedRequestHosts(origin)).toEqual(new Set());
+    expect(
+      isDnsRebindingRequest(
+        'a.example.com',
+        'localhost',
+        getAllowedRequestHosts(origin),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('isDnsRebindingRequest', () => {
