@@ -36,7 +36,7 @@ const COMMAND = 'sh skills/skill1/scripts/run.sh';
 /** An error envelope the skill tools return instead of throwing. */
 interface ErrorResponse {
   error: string;
-  errorCode: string;
+  error_code: string;
 }
 
 class StubCodeExecutor extends BaseCodeExecutor {
@@ -120,7 +120,7 @@ describe('environment command confirmation gate', () => {
       }),
     })) as ErrorResponse;
 
-    expect(result.errorCode).toBe('CONFIRMATION_REJECTED');
+    expect(result.error_code).toBe('CONFIRMATION_REJECTED');
     expect(result.error).toBe(
       'Skill script command was not confirmed and was rejected.',
     );
@@ -169,7 +169,7 @@ describe('environment command confirmation gate', () => {
       toolContext,
     })) as ErrorResponse;
 
-    expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+    expect(result.error_code).toBe('INVALID_ARGUMENTS');
     expect(toolContext.actions.requestedToolConfirmations).toEqual({});
   });
 
@@ -186,7 +186,7 @@ describe('environment command confirmation gate', () => {
       toolContext,
     })) as ErrorResponse;
 
-    expect(result.errorCode).toBe('SCRIPT_NOT_FOUND');
+    expect(result.error_code).toBe('SCRIPT_NOT_FOUND');
     expect(toolContext.actions.requestedToolConfirmations).toEqual({});
   });
 
@@ -226,7 +226,7 @@ describe('environment materialization path guard', () => {
       env,
     )) as ErrorResponse;
 
-    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error_code).toBe('EXECUTION_ERROR');
     expect(result.error).toContain('Path traversal detected');
     expect(result.error).toContain('references/../../../etc/passwd');
     expect(env.writeCalls).toEqual([]);
@@ -252,7 +252,7 @@ describe('environment materialization path guard', () => {
       env,
     )) as ErrorResponse;
 
-    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error_code).toBe('EXECUTION_ERROR');
     expect(result.error).toContain('Path traversal detected');
     expect(env.writeCalls).toEqual([]);
   });
@@ -283,7 +283,7 @@ describe('environment materialization path guard', () => {
 
     const result = (await runWithSkill(skill, env)) as ErrorResponse;
 
-    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error_code).toBe('EXECUTION_ERROR');
     expect(result.error).toContain('Path traversal detected');
     expect(env.writeCalls).toEqual([]);
   });

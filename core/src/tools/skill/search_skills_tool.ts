@@ -15,14 +15,12 @@ import {SkillToolset} from './skill_toolset.js';
 
 @experimental
 export class SearchSkillsTool extends SkillTool {
-  static readonly TOOL_NAME = SEARCH_SKILLS_TOOL_NAME;
-
   constructor(toolset: SkillToolset) {
     if (!toolset.registry) {
       throw new Error('SearchSkillsTool requires a configured skill registry.');
     }
     super(toolset, {
-      name: toolset.toolName(SearchSkillsTool.TOOL_NAME),
+      name: toolset.toolName(SEARCH_SKILLS_TOOL_NAME),
       description:
         toolset.registry.searchToolDescription?.() ||
         'Searches for relevant skills in the registry based on a semantic or keyword query.',
