@@ -185,4 +185,59 @@ describe('FileArtifactService', () => {
       });
     });
   });
+
+  describe('user-namespace listing', () => {
+    async function serviceWithBothScopes(): Promise<FileArtifactService> {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'session.txt',
+        artifact: {text: '.'},
+      });
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'user:profile.txt',
+        artifact: {text: '.'},
+      });
+
+      return service;
+    }
+
+    it('lists only the user namespace when the session is omitted', async () => {
+      const service = await serviceWithBothScopes();
+
+      try {
+        const keys = await service.listArtifactKeys({
+          appName: 'test-app',
+          userId: 'test-user',
+        });
+
+        expect(keys).toEqual(['user:profile.txt']);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('still lists both scopes when the session is given', async () => {
+      const service = await serviceWithBothScopes();
+
+      try {
+        const keys = await service.listArtifactKeys({
+          appName: 'test-app',
+          userId: 'test-user',
+          sessionId: 'test-session',
+        });
+
+        expect(keys).toEqual(['session.txt', 'user:profile.txt']);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
 });

@@ -26,9 +26,17 @@ export function isInMemoryConnectionString(uri: string): boolean {
  * An in-memory implementation of the ArtifactService.
  */
 export class InMemoryArtifactService implements BaseArtifactService {
-  private readonly artifacts: Record<
+  /**
+   * The stored artifact versions, keyed by storage key.
+   *
+   * The key is `session/<app>/<user>/<session>/<filename>` for a session
+   * artifact and `user/<app>/<user>/<filename>` for a user artifact, with every
+   * segment encoded by `encodeURIComponent`. The entries are live, so a
+   * mutation is visible to every later read.
+   */
+  readonly artifacts: Record<
     string,
-    {part: Part; metadata: ArtifactVersion}[]
+    {data: Part; artifactVersion: ArtifactVersion}[]
   > = {};
 
   saveArtifact({
@@ -52,7 +60,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
     }
 
     const version = this.artifacts[path].length;
-    const metadata: ArtifactVersion = {
+    const artifactVersion: ArtifactVersion = {
       version,
       customMetadata,
     };
@@ -60,10 +68,10 @@ export class InMemoryArtifactService implements BaseArtifactService {
     if (!artifact.inlineData && artifact.text === undefined) {
       const fileData = artifact.fileData!;
 
-      metadata.mimeType = fileData.mimeType;
+      artifactVersion.mimeType = fileData.mimeType;
     }
 
-    this.artifacts[path].push({part: artifact, metadata});
+    this.artifacts[path].push({data: artifact, artifactVersion});
 
     return Promise.resolve(version);
   }
@@ -82,18 +90,16 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve(undefined);
     }
 
-    if (version === undefined) {
-      version = versions.length - 1;
-    }
+    const index = versionIndex(versions.length, version);
 
-    if (!versions[version]) {
+    if (index === undefined) {
       logger.warn(
         `[InMemoryArtifactService] loadArtifact: Artifact ${filename} version ${version} not found`,
       );
       return Promise.resolve(undefined);
     }
 
-    return Promise.resolve(versions[version].part);
+    return Promise.resolve(versions[index].data);
   }
 
   listArtifactKeys({
@@ -101,12 +107,15 @@ export class InMemoryArtifactService implements BaseArtifactService {
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = artifactPrefix('session', appName, userId, sessionId);
+    const sessionPrefix =
+      sessionId === undefined
+        ? undefined
+        : artifactPrefix('session', appName, userId, sessionId);
     const userPrefix = artifactPrefix('user', appName, userId);
     const filenames: string[] = [];
 
     for (const path in this.artifacts) {
-      if (path.startsWith(sessionPrefix)) {
+      if (sessionPrefix !== undefined && path.startsWith(sessionPrefix)) {
         filenames.push(decodeURIComponent(path.slice(sessionPrefix.length)));
       } else if (path.startsWith(userPrefix)) {
         filenames.push(decodeURIComponent(path.slice(userPrefix.length)));
@@ -165,7 +174,7 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve([]);
     }
 
-    return Promise.resolve(artifacts.map((a) => a.metadata));
+    return Promise.resolve(artifacts.map((a) => a.artifactVersion));
   }
 
   getArtifactVersion({
@@ -182,16 +191,28 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve(undefined);
     }
 
-    if (version === undefined) {
-      version = versions.length - 1;
+    const index = versionIndex(versions.length, version);
+
+    if (index === undefined) {
+      return Promise.resolve(undefined);
     }
 
-    if (versions[version]) {
-      return Promise.resolve(versions[version].metadata);
-    }
-
-    return Promise.resolve(undefined);
+    return Promise.resolve(versions[index].artifactVersion);
   }
+}
+
+/**
+ * Resolves a caller-supplied version to a stored index.
+ *
+ * A negative version counts from the end, as Python list indexing does, so the
+ * default of -1 is the newest version.
+ *
+ * @return The index, or undefined when it falls outside the stored range.
+ */
+function versionIndex(length: number, version = -1): number | undefined {
+  const index = version < 0 ? version + length : version;
+
+  return index >= 0 && index < length ? index : undefined;
 }
 
 /**
