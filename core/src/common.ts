@@ -13,6 +13,8 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {codeConfigSchema} from './agents/common_configs.js';
+export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -148,13 +150,236 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  getDeveloperInstructions,
+  getToolsByAgentName,
+} from './evaluation/app_details.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {
+  DEFAULT_EVAL_PARALLELISM,
+  InferenceStatus,
+} from './evaluation/base_eval_service.js';
+export type {
+  BaseEvalService,
+  EvaluateConfig,
+  EvaluateRequest,
+  InferenceConfig,
+  InferenceRequest,
+  InferenceResult,
+} from './evaluation/base_eval_service.js';
+export {evalModel, optionalField} from './evaluation/common.js';
+export type {
+  EvalDumpOptions,
+  EvalModel,
+  EvalModelOptions,
+  ExtraKeysPolicy,
+} from './evaluation/common.js';
+export {
+  DEFAULT_LIVE_TIMEOUT_SECONDS,
+  MISSING_EVAL_DEPENDENCIES_MESSAGE,
+} from './evaluation/constants.js';
+export {CustomMetricEvaluator} from './evaluation/custom_metric_evaluator.js';
+export type {CustomMetricFunction} from './evaluation/custom_metric_evaluator.js';
+export {
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+  isIntermediateData,
+  isInvocationEvents,
+  validateEvalCase,
+} from './evaluation/eval_case.js';
+export type {
+  ConversationScenario,
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
+} from './evaluation/eval_case.js';
+export {
+  DEFAULT_EVAL_CONFIG,
+  getEvalMetricsFromConfig,
+  getEvaluationCriteriaOrDefault,
+  parseEvalConfig,
+} from './evaluation/eval_config.js';
+export type {
+  Criterion,
+  CustomMetricCodeConfig,
+  CustomMetricConfig,
+  EvalConfig,
+  LiveModelConfig,
+  UserSimulatorConfig,
+} from './evaluation/eval_config.js';
+export {
+  DEFAULT_JUDGE_MODEL,
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
+  EvalStatus,
+  PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  getConfigCustomFunctionPath,
+  getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+  parseBaseCriterion,
+  parseEvalMetric,
+  parseEvalMetricResult,
+  parseHallucinationsCriterion,
+  parseInterval,
+  parseJudgeModelOptions,
+  parseLlmAsAJudgeCriterion,
+  parseLlmBackedUserSimulatorCriterion,
+  parseMetricInfo,
+  parseMetricValueInfo,
+  parseRubricsBasedCriterion,
+  parseToolTrajectoryCriterion,
+  resolveJudgeModelOptions,
+  setConfigCustomFunctionPath,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricCriterion,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
+  HallucinationsCriterion,
+  Interval,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+  ParsedLlmBackedUserSimulatorCriterion,
+  ParsedRubricsBasedCriterion,
+  ParsedToolTrajectoryCriterion,
+  ResolvedJudgeModelOptions,
+  RubricsBasedCriterion,
+  Threshold,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export type {EvalCaseResult} from './evaluation/eval_result.js';
+export {parseRubric, parseRubricScore} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export {getEvalRuntime, setEvalRuntime} from './evaluation/eval_runtime.js';
+export type {
+  EvalRuntime,
+  EvalServiceParams,
+} from './evaluation/eval_runtime.js';
+export type {EvalSet} from './evaluation/eval_set.js';
+export type {
+  EvalSetResult,
+  EvalSetResultsManager,
+} from './evaluation/eval_set_results_manager.js';
+export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
+export {
+  BASE_CRITERION_TYPE,
+  emptyEvaluationResult,
+  getCriterionType,
+  getEvalStatus,
+  getTextFromContent,
+  validateBaseCriterion,
+  validateInvocationLengths,
+} from './evaluation/evaluator.js';
+export type {
+  CriterionType,
+  EvaluationResult,
+  Evaluator,
+  EvaluatorClass,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {RougeEvaluator} from './evaluation/final_response_match_v1.js';
+export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
+export {
+  LocalEvalService,
+  createEvalSessionId,
+} from './evaluation/local_eval_service.js';
+export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
+export {
+  MetricEvaluatorRegistry,
+  defaultMetricEvaluatorRegistry,
+  registerCustomMetricsFromConfig,
+} from './evaluation/metric_evaluator_registry.js';
+export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
+export {ResponseEvaluator} from './evaluation/response_evaluator.js';
+export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
+export {rouge1Score, tokenizeForRouge} from './evaluation/rouge_scorer.js';
+export type {RougeScore} from './evaluation/rouge_scorer.js';
+export {
+  DEFAULT_USER_SIMULATOR_AUDIO_MODEL,
+  DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
+  DEFAULT_USER_SIMULATOR_VOICE_NAME,
+} from './evaluation/simulation/llm_audio_user_simulator.js';
+export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
+export type {LlmBackedUserSimulatorConfig} from './evaluation/simulation/llm_backed_user_simulator.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
+export {
+  DEFAULT_MAX_ALLOWED_INVOCATIONS,
+  DEFAULT_USER_SIMULATOR_MODEL,
+  DEFAULT_USER_SIMULATOR_THINKING_BUDGET,
+  UserSimulatorStatus,
+  getRegisteredUserSimulator,
+  parseBaseUserSimulatorConfig,
+  registerUserSimulator,
+  registeredUserSimulatorTypes,
+  unregisterUserSimulator,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  BaseUserSimulatorConfig,
+  NextUserMessage,
+  UserSimulator,
+  UserSimulatorFactory,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
+export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
+export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
+export {
+  MultiTurnVertexAiEvalFacade,
+  SingleTurnVertexAiEvalFacade,
+  VertexAiEvalFacade,
+  resolveVertexAiEvalClientConfig,
+} from './evaluation/vertex_ai_eval_facade.js';
+export type {
+  VertexAgentConfig,
+  VertexAgentData,
+  VertexAgentEvent,
+  VertexAggregatedMetricResult,
+  VertexAiEvalClient,
+  VertexAiEvalClientConfig,
+  VertexAiEvalFacadeOptions,
+  VertexAiEvalRequest,
+  VertexConversationTurn,
+  VertexEvalCase,
+  VertexEvalCaseRow,
+  VertexEvalMetricSpec,
+  VertexEvaluationDataset,
+  VertexEvaluationResult,
+} from './evaluation/vertex_ai_eval_facade.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
@@ -212,12 +437,21 @@ export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
+export {finalizeDynamicInstructions} from './models/llm_request.js';
 export type {LlmRequest} from './models/llm_request.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export {Sampler, isSampler} from './optimization/sampler.js';
+export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
@@ -343,7 +577,11 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
-export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {
+  EVAL_CLIENT_LABEL,
+  getClientLabels,
+  runWithClientLabel,
+} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
