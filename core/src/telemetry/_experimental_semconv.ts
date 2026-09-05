@@ -86,32 +86,32 @@ const UNSERIALIZABLE_TOOL = 'UnserializableTool';
  * that downstream OpenTelemetry consumers read. They match adk-python's output
  * byte for byte, so they do not follow the repository's `camelCase` style.
  */
-interface TextPart {
+export interface TextPart {
   content: string;
   type: 'text';
 }
 
-interface BlobPart {
+export interface BlobPart {
   mime_type: string;
   /** Base64, because `@google/genai` encodes `Blob.data` as a string. */
   data: string;
   type: 'blob';
 }
 
-interface FileDataPart {
+export interface FileDataPart {
   mime_type: string;
   uri: string;
   type: 'file_data';
 }
 
-interface ToolCallPart {
+export interface ToolCallPart {
   id: string;
   name: string;
   arguments: AnyValueMap | null;
   type: 'tool_call';
 }
 
-interface ToolCallResponsePart {
+export interface ToolCallResponsePart {
   id: string;
   response: AnyValueMap | null;
   type: 'tool_call_response';
@@ -180,9 +180,8 @@ export interface ExtendedUsageMetadata extends GenerateContentResponseUsageMetad
 /**
  * The telemetry decisions this module reads.
  *
- * Declared here rather than imported: the `TelemetryConfig` that will supply
- * these is on the `parity` branch, not on `main`. It satisfies this interface
- * structurally, so wiring the two together needs no change to either.
+ * Structural rather than a class, so any object carrying the three decisions
+ * satisfies it, including one that exposes them as getters.
  */
 export interface ExperimentalSemconvConfig {
   readonly shouldUseExperimentalGenaiSemconv: boolean;
