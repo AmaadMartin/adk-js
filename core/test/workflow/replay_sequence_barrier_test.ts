@@ -15,10 +15,7 @@
  */
 
 import {describe, expect, it, vi} from 'vitest';
-import {
-  ReplaySequenceBarrier,
-  sequenceKey,
-} from '../../src/workflow/utils/replay_sequence_barrier.js';
+import {ReplaySequenceBarrier} from '../../src/workflow/utils/replay_sequence_barrier.js';
 
 describe('ReplaySequenceBarrier', () => {
   it('test_barrier_initialization', () => {
@@ -110,7 +107,12 @@ describe('ReplaySequenceBarrier — adk-js specifics', () => {
     }
   });
 
-  it('builds a barrier key from a node name and a run id', () => {
-    expect(sequenceKey('NodeA', '2')).toBe('NodeA@2');
+  it('releases every waiter when the run is torn down', async () => {
+    const barrier = new ReplaySequenceBarrier(['NodeA@1', 'NodeB@1'], 10);
+    const waitingForB = barrier.wait('NodeB@1');
+
+    barrier.dispose();
+
+    await expect(waitingForB).resolves.toBeUndefined();
   });
 });

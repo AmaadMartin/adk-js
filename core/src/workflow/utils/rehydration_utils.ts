@@ -22,7 +22,6 @@ import {
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   responseSchemasByInterruptId,
 } from './hitl_utils.js';
-import {sequenceKey} from './replay_sequence_barrier.js';
 
 const RESULT_KEY = 'result';
 
@@ -330,36 +329,61 @@ function isTerminalEvent(event: Event): boolean {
 }
 
 /**
- * The order in which this workflow's direct children completed, as
- * `<childName>@<runId>` keys, for `ReplaySequenceBarrier`.
+ * The order in which this workflow's direct children completed, one key per
+ * child, for `ReplaySequenceBarrier`.
  *
  * Ported from `google/adk-python` `workflow/utils/_replay_manager.py`
  * `_scan_sequence`, reduced to what a static graph needs.
  *
  * Only terminal events count. A node that emitted nothing but state updates
- * produced no recorded completion, so nothing about it needs ordering, and
- * including it would block the barrier on a key that never advances.
+ * recorded no completion, so nothing about it needs ordering.
  *
- * The reference reads the run id out of the event's node path. TypeScript node
- * paths carry none for static graph nodes, so runs are numbered positionally
- * here, exactly as {@link reconstructNodeRuns} numbers them: the Nth terminal
- * event for a node is its Nth run. Keys are therefore unique by construction,
- * and the reference's "move a repeated key to the end" rule cannot apply.
+ * A node that completed more than once keeps its FIRST position. Two
+ * divergences from the reference meet here, and both come from the same cause.
+ *
+ * The reference keys each run of a node separately, because its node paths
+ * carry a run id. TypeScript static-graph paths carry none, so a key can only
+ * name the node. Per-event numbering is not an option: a node writes more
+ * terminal events across a multi-turn pause than the resuming turn gives it
+ * activations — a gate records an interrupt in one turn and its output in the
+ * next, but activates once when the graph replays — so a numbered key would
+ * sit in the sequence unreachable, and every key behind it would starve.
+ *
+ * Given one key per node, the reference's "remove, then append" rule inverts
+ * into a deadlock. A node the graph loops back to completes again after its own
+ * successors, so keeping its last position orders it behind the nodes it feeds,
+ * and its first replayed activation waits for a node that cannot run until that
+ * activation finishes. First-completion order cannot do this: a node first
+ * completes after the nodes it depends on, and a replay activates them in that
+ * same order.
  */
 export function replaySequence(events: Event[], parentPath?: string): string[] {
   const keyFor = keyFn(parentPath);
-  const runCounts = new Map<string, number>();
+  const seen = new Set<string>();
   const sequence: string[] = [];
   for (const event of events) {
     const name = keyFor(event);
-    if (!name || !isTerminalEvent(event)) {
+    if (!name || seen.has(name)) {
       continue;
     }
-    const run = (runCounts.get(name) ?? 0) + 1;
-    runCounts.set(name, run);
-    sequence.push(sequenceKey(name, String(run)));
+    if (isReplayEcho(event) || !isTerminalEvent(event)) {
+      continue;
+    }
+    seen.add(name);
+    sequence.push(name);
   }
   return sequence;
+}
+
+/**
+ * Whether a workflow emitted `event` to echo a node's already recorded output,
+ * rather than the node emitting it by running.
+ *
+ * The echo carries the node's own path and output, so a scan reads it as one
+ * more run of that node unless it is skipped here.
+ */
+function isReplayEcho(event: Event): boolean {
+  return event.nodeInfo?.replayed === true;
 }
 
 /** Shared scan that groups node events by the key returned by `keyFor`. */
@@ -432,9 +456,10 @@ function reconstructRuns(
       continue;
     }
 
-    // 2. Node events.
+    // 2. Node events. A workflow's echo of an already recovered output is not
+    //    the node running, so it opens no run of its own.
     const key = keyFor(event);
-    if (!key) {
+    if (!key || isReplayEcho(event)) {
       continue;
     }
     const node = currentRun(key);
