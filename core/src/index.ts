@@ -87,12 +87,7 @@ export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
-export {
-  TopSpanProcessor,
-  getPropagatedContext,
-  isAgentEngine,
-} from './telemetry/agent_engine.js';
-export type {TraceContextHeaders} from './telemetry/agent_engine.js';
+export * from './telemetry/agent_engine.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
