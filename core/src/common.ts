@@ -155,6 +155,154 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {
+  DEFAULT_EVAL_PARALLELISM,
+  InferenceStatus,
+} from './evaluation/base_eval_service.js';
+export type {
+  BaseEvalService,
+  EvaluateConfig,
+  EvaluateRequest,
+  InferenceConfig,
+  InferenceRequest,
+  InferenceResult,
+} from './evaluation/base_eval_service.js';
+export {evalModel} from './evaluation/common.js';
+export type {
+  EvalDumpOptions,
+  EvalModel,
+  EvalModelOptions,
+  ExtraKeysPolicy,
+} from './evaluation/common.js';
+export {
+  DEFAULT_LIVE_TIMEOUT_SECONDS,
+  MISSING_EVAL_DEPENDENCIES_MESSAGE,
+} from './evaluation/constants.js';
+export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export type {
+  ConversationScenario,
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+  SessionState,
+  StaticConversation,
+} from './evaluation/eval_case.js';
+export {
+  DEFAULT_EVAL_CONFIG,
+  getEvalMetricsFromConfig,
+  getEvaluationCriteriaOrDefault,
+  parseEvalConfig,
+} from './evaluation/eval_config.js';
+export type {
+  Criterion,
+  CustomMetricCodeConfig,
+  CustomMetricConfig,
+  EvalConfig,
+  LiveModelConfig,
+} from './evaluation/eval_config.js';
+export {
+  DEFAULT_JUDGE_MODEL,
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
+  EvalStatus,
+  PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  getConfigCustomFunctionPath,
+  getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+  parseBaseCriterion,
+  parseEvalMetric,
+  parseEvalMetricResult,
+  parseHallucinationsCriterion,
+  parseInterval,
+  parseJudgeModelOptions,
+  parseLlmAsAJudgeCriterion,
+  parseLlmBackedUserSimulatorCriterion,
+  parseMetricInfo,
+  parseMetricValueInfo,
+  parseRubricsBasedCriterion,
+  parseToolTrajectoryCriterion,
+  resolveJudgeModelOptions,
+  setConfigCustomFunctionPath,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricCriterion,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
+  HallucinationsCriterion,
+  Interval,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+  ParsedLlmBackedUserSimulatorCriterion,
+  ParsedRubricsBasedCriterion,
+  ParsedToolTrajectoryCriterion,
+  ResolvedJudgeModelOptions,
+  RubricsBasedCriterion,
+  Threshold,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export type {EvalCaseResult} from './evaluation/eval_result.js';
+export {parseRubric, parseRubricScore} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export type {EvalSet} from './evaluation/eval_set.js';
+export type {
+  EvalSetResult,
+  EvalSetResultsManager,
+} from './evaluation/eval_set_results_manager.js';
+export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
+export type {
+  CriterionType,
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
+export {
+  LocalEvalService,
+  createEvalSessionId,
+} from './evaluation/local_eval_service.js';
+export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
+export {
+  MetricEvaluatorRegistry,
+  defaultMetricEvaluatorRegistry,
+} from './evaluation/metric_evaluator_registry.js';
+export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
+export {
+  UserSimulatorStatus,
+  registerUserSimulator,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  BaseUserSimulatorConfig,
+  NextUserMessage,
+  UserSimulator,
+  UserSimulatorFactory,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
+export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
+export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
@@ -218,6 +366,28 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export {
+  LocalEvalSampler,
+  extractSingleInvocationInfo,
+  extractToolCallData,
+} from './optimization/local_eval_sampler.js';
+export type {
+  CapturedEvalData,
+  CapturedInvocation,
+  CapturedMetricResult,
+  InvocationInfo,
+  LocalEvalSamplerConfig,
+  LocalEvalSamplerOptions,
+  ToolCallData,
+} from './optimization/local_eval_sampler.js';
+export {Sampler, isSampler} from './optimization/sampler.js';
+export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
