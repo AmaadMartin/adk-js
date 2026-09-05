@@ -93,7 +93,8 @@ function envNumber(name: string, fallback: number): number {
   if (raw === undefined) {
     return fallback;
   }
-  const parsed = Number(raw);
+  // `Number('')` is 0, which would silently disable the interval it sets.
+  const parsed = raw.trim() === '' ? Number.NaN : Number(raw);
   if (!Number.isFinite(parsed)) {
     logger.warn(
       `Found invalid value for ${name}=${JSON.stringify(raw)}, using default ${fallback}`,
@@ -166,7 +167,7 @@ export class RequestDrivenMetricReader
    * point-4 reference for the current stretch of activity, so a collect from a
    * long-past busy period cannot make a short request look overdue.
    */
-  private busyStart: number | undefined;
+  private busyStart: number;
   private collecting = false;
   private nextDue: number;
   private shuttingDown = false;
@@ -195,7 +196,8 @@ export class RequestDrivenMetricReader
     this.floorMs =
       options.floorMillis ??
       envNumber(AGENT_ENGINE_METRICS_FLOOR_ENV, MIN_EXPORT_INTERVAL_MS);
-    this.nextDue = this.now() + this.periodMs;
+    this.busyStart = this.now();
+    this.nextDue = this.busyStart + this.periodMs;
   }
 
   private due(now: number): boolean {
@@ -209,9 +211,6 @@ export class RequestDrivenMetricReader
   }
 
   private overdue15(now: number): boolean {
-    if (this.busyStart === undefined) {
-      return false;
-    }
     const reference =
       this.lastCollect === undefined
         ? this.busyStart
