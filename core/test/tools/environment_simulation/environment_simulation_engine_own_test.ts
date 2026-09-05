@@ -26,6 +26,7 @@ import {
 } from '@google/adk';
 import {createMockStrategy} from '@google/adk/tools/environment_simulation/environment_simulation_engine.js';
 import {logger} from '@google/adk/utils/logger.js';
+import {createSeededRandom} from '@google/adk/utils/random_utils.js';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -254,6 +255,37 @@ describe('EnvironmentSimulationEngine injection rules', () => {
     );
 
     expect(result).toEqual({error_code: 404, error_message: 'not found'});
+  });
+
+  it('does not fire when the draw equals the probability exactly', async () => {
+    const probe = createSeededRandom();
+    probe.seed(100);
+    const exactDraw = probe.next();
+    const engine = new EnvironmentSimulationEngine(
+      makeConfig({
+        toolSimulationConfigs: [
+          createToolSimulationConfig({
+            toolName: 'test_tool',
+            injectionConfigs: [
+              createInjectionConfig({
+                injectionProbability: exactDraw,
+                randomSeed: 100,
+                injectedResponse: {injected: true},
+              }),
+            ],
+            mockStrategyType: MockStrategy.MOCK_STRATEGY_TOOL_SPEC,
+          }),
+        ],
+      }),
+    );
+
+    const result = await engine.simulate(
+      new FakeTool('test_tool'),
+      {},
+      makeToolContext(),
+    );
+
+    expect(result).toEqual({stateful_parameters: [], mocked: true});
   });
 
   it('tries the next rule when the first one does not fire', async () => {
