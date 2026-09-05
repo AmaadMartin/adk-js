@@ -92,10 +92,12 @@ export class ParallelWorker extends BaseNode {
   private readonly inner: BaseNode;
 
   constructor(inner: RunnableNode, config: ParallelWorkerConfig = {}) {
-    if (isStartNode(inner)) {
+    const built = buildNode(inner);
+    // Matched by name, the way graph validation identifies the sentinel, so
+    // both the `'START'` string and the START node itself are refused.
+    if (built.name === START.name) {
       throw new Error('ParallelWorker cannot wrap a START node.');
     }
-    const built = buildNode(inner);
     super({
       name: built.name,
       rerunOnResume: true,
@@ -279,11 +281,6 @@ export class ParallelWorker extends BaseNode {
 
     return {results, failure, interrupted, interruptIds};
   }
-}
-
-/** Whether a value names the graph entry sentinel, in either of its forms. */
-function isStartNode(value: unknown): boolean {
-  return value === 'START' || value === START;
 }
 
 /** Whether the invocation running `ctx` has been cancelled. */
