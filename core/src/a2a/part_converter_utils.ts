@@ -25,6 +25,17 @@ import {
 import {A2AMetadataKeys} from './metadata_converter_utils.js';
 
 /**
+ * Converts a single A2A part into GenAI parts.
+ *
+ * An implementation may return one part, several parts, or nothing at all for
+ * a part it does not handle. Callers flatten the arrays and drop the empty
+ * results.
+ */
+export type A2APartToGenAIPartConverter = (
+  a2aPart: A2APart,
+) => GenAIPart | GenAIPart[] | undefined | null;
+
+/**
  * The types of data parts.
  */
 enum DataPartType {
