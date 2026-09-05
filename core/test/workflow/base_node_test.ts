@@ -225,8 +225,8 @@ describe('toSerializable', () => {
     });
   });
 
-  // toStrictEqual, not toEqual: toEqual ignores the prototype, so a Report
-  // that was never dumped still matches a plain {title} object.
+  // toStrictEqual, not toEqual: toEqual ignores the prototype, so an undumped
+  // Report still matches a plain {title} object.
   it('dumps an object exposing toJSON()', () => {
     expect(toSerializable(new Report('top'))).toStrictEqual({title: 'top'});
   });
