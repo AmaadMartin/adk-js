@@ -109,3 +109,58 @@ a request. The server accepts a value written without its leading slash
 rejects nothing, which matches adk-python.
 
 The A2A agent card is not rewritten with the prefix.
+
+## Default app name
+
+Every app-scoped route names its app: `/apps/my_agent/users/u/sessions`. Set
+`ADK_DEFAULT_APP_NAME` and the server also answers the app-less form:
+
+```console
+$ ADK_DEFAULT_APP_NAME=my_agent adk web ./agents
+$ curl localhost:8000/users/u/sessions
+```
+
+Three path shapes are rewritten: `/users/...`, `/app-info`, and
+`/trigger/...`. Everything else is left alone, including `/list-apps`, which
+is about the server rather than one app. The variable is read once, when the
+server is built.
+
+The name is not checked against the apps the loader can find. A variable
+naming an app that does not exist produces the same 404 the rewritten path
+would.
+
+## Dev UI logo
+
+`logoText` and `logoImageUrl` replace the ADK logo in the developer UI:
+
+```console
+$ adk web ./agents --logo_text Acme \
+    --logo_image_url https://acme.example/logo.png
+```
+
+Both are required together. The server throws when only one is set, before it
+binds a port. They are `adk web` options only, because `adk api_server` serves
+no UI.
+
+The UI reads them from two places. The server writes
+`assets/config/runtime-config.json` under the directory it serves the UI
+bundle from, so the values are there when the page loads, and it answers
+`GET /dev-ui/config` with them as well. Keys the shipped
+`runtime-config.json` already holds are preserved, and the `logo` key is
+removed when neither option is set. The same file carries `backendUrl`, from
+`urlPrefix`, and the telemetry consent the ADK CLI recorded.
+
+A write failure is reported at error level and does not stop the server. The
+UI then falls back to its built-in defaults.
+
+## Default LLM model
+
+`defaultLlmModel` is the model an agent falls back to when it sets none:
+
+```console
+$ adk web ./agents --default_llm_model gemini-2.5-flash
+```
+
+It is applied through `LlmAgent.setDefaultModel`, which holds the model
+process-wide. It therefore reaches every agent in the process, not only the
+ones this server serves.

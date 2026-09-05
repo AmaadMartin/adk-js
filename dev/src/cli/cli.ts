@@ -124,7 +124,11 @@ function getApiServerOptions(
     host: options['host'],
     port: parseInt(options['port'], 10),
     allowOrigins: options['allow_origins'],
-    allowedHosts: getAllowedHosts(options['allowed_hosts']),
+    allowedHosts: splitCommaSeparated(options['allowed_hosts']),
+    extraPlugins: splitCommaSeparated(options['extra_plugins']),
+    logoText: options['logo_text'],
+    logoImageUrl: options['logo_image_url'],
+    defaultLlmModel: options['default_llm_model'],
     ...resolveServices({
       baseDir: getAbsolutePath(agentsDir),
       sessionServiceUri: options['session_service_uri'],
@@ -143,20 +147,20 @@ function getApiServerOptions(
 }
 
 /**
- * Splits the comma-separated --allowed_hosts value into a list, dropping
+ * Splits a comma-separated option value into a list, dropping
  * empty/whitespace-only entries. An unset or empty option yields undefined
- * rather than [], so it composes with ServerOptions.allowedHosts?: string[]
- * without callers needing to special-case "no value provided".
+ * rather than [], so it composes with the optional array options on
+ * ServerOptions without callers needing to special-case "no value provided".
  */
-function getAllowedHosts(option?: string): string[] | undefined {
+function splitCommaSeparated(option?: string): string[] | undefined {
   if (!option) {
     return undefined;
   }
-  const hosts = option
+  const entries = option
     .split(',')
-    .map((host) => host.trim())
+    .map((entry) => entry.trim())
     .filter(Boolean);
-  return hosts.length > 0 ? hosts : undefined;
+  return entries.length > 0 ? entries : undefined;
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -243,6 +247,28 @@ const DEFAULT_LLM_MODEL_OPTION = new Option(
   'Optional. Sets the default LLM model used when the agent does not set a ' +
     'model explicitly.',
 );
+const EXTRA_PLUGINS_OPTION = new Option(
+  '--extra_plugins <string>',
+  'Optional. Fully qualified name of a plugin to attach to every served ' +
+    'agent, written as <module specifier>#<export>. A name may resolve to a ' +
+    'plugin instance or to a plugin class. Repeat the option, or separate ' +
+    'the names with commas, to attach more than one.',
+  // Repeating the option appends, matching adk-python's `multiple=True`. The
+  // names are joined rather than collected into an array so the value stays
+  // the string the option declares, and one splitter handles both spellings.
+).argParser((value: string, previous?: string) =>
+  previous ? `${previous},${value}` : value,
+);
+const LOGO_TEXT_OPTION = new Option(
+  '--logo_text <string>',
+  'Optional. Text the dev UI draws beside its logo. Requires ' +
+    '--logo_image_url.',
+);
+const LOGO_IMAGE_URL_OPTION = new Option(
+  '--logo_image_url <string>',
+  'Optional. URL of the image the dev UI draws as its logo. Requires ' +
+    '--logo_text.',
+);
 const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
 AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 
@@ -292,6 +318,12 @@ interface ServerCommandOptions {
    * that option on `api_server` only, so `web` must reject it.
    */
   autoCreateSession?: boolean;
+  /**
+   * Whether the command accepts `--logo_text` and `--logo_image_url`. They
+   * brand the dev UI, so adk-python declares them on `web` only and
+   * `api_server` must reject them.
+   */
+  logo?: boolean;
 }
 
 /**
@@ -329,10 +361,16 @@ function addServerCommand(
     .addOption(DISABLE_FEATURES_OPTION)
     .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(USE_LOCAL_STORAGE_OPTION)
-    .addOption(NO_USE_LOCAL_STORAGE_OPTION);
+    .addOption(NO_USE_LOCAL_STORAGE_OPTION)
+    .addOption(EXTRA_PLUGINS_OPTION)
+    .addOption(DEFAULT_LLM_MODEL_OPTION);
 
   if (server.autoCreateSession) {
     serverCommand.addOption(AUTO_CREATE_SESSION_OPTION);
+  }
+
+  if (server.logo) {
+    serverCommand.addOption(LOGO_TEXT_OPTION).addOption(LOGO_IMAGE_URL_OPTION);
   }
 
   serverCommand.action(
@@ -387,6 +425,7 @@ export function createProgram(): Command {
     description: 'Start ADK web server',
     serveDebugUI: true,
     startFailureMessage: 'Error starting web server:',
+    logo: true,
   });
 
   addServerCommand(program, logger, {

@@ -17,7 +17,8 @@ import dotenv from 'dotenv';
 import {Application} from 'express';
 import * as path from 'node:path';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {AgentFileOptions} from '../utils/agent_loader.js';
+import {ServerAgentLoader} from '../utils/base_agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {createServerLogger} from '../utils/logger.js';
 import {AdkApiServer} from './adk_api_server.js';
@@ -33,7 +34,7 @@ export interface ApiServerOptions {
   /** Serve the dev UI and the dev-only endpoints. */
   web: boolean;
   /** Loader for agent instances. Defaults to one reading `agentsDir`. */
-  agentLoader?: AgentLoader;
+  agentLoader?: ServerAgentLoader;
   /** How the default loader compiles and bundles an agent file. */
   agentFileLoadOptions?: AgentFileOptions;
   /**
@@ -107,6 +108,20 @@ export interface ApiServerOptions {
   logger?: Logger;
   /** Level the logger reports at. Defaults to `LogLevel.INFO`. */
   logLevel?: LogLevel;
+  /**
+   * Fully-qualified names, `<module specifier>#<export>`, of plugins to
+   * attach to every agent the server serves.
+   */
+  extraPlugins?: string[];
+  /** Text the dev UI draws beside its logo. Needs {@link logoImageUrl}. */
+  logoText?: string;
+  /** Image the dev UI draws as its logo. Needs {@link logoText}. */
+  logoImageUrl?: string;
+  /**
+   * Model the served agents fall back to when they set none of their own.
+   * Held process-wide, as `LlmAgent.setDefaultModel` does.
+   */
+  defaultLlmModel?: string;
 }
 
 /**
@@ -150,6 +165,10 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     reloadAgents: options.reloadAgents ?? false,
     urlPrefix: options.urlPrefix,
     autoCreateSession: options.autoCreateSession,
+    extraPlugins: options.extraPlugins,
+    logoText: options.logoText,
+    logoImageUrl: options.logoImageUrl,
+    defaultLlmModel: options.defaultLlmModel,
     logger,
     logLevel: options.logLevel,
   });

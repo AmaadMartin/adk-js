@@ -20,7 +20,7 @@ import {createRequire} from 'node:module';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-import type {BaseAgentLoader} from './base_agent_loader.js';
+import type {ServerAgentLoader} from './base_agent_loader.js';
 import {
   createTempDir,
   getAbsolutePath,
@@ -428,7 +428,7 @@ export class AgentFile {
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
  */
-export class AgentLoader implements BaseAgentLoader {
+export class AgentLoader implements ServerAgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private readonly loadFailures: Record<string, AgentLoadFailure> = {};

@@ -273,6 +273,23 @@ describe('createApiServer', () => {
       expect(options.logger).toBe(logger);
       expect(options.logLevel).toBe(LogLevel.DEBUG);
     });
+
+    it('forwards the plugin, logo and default-model options', () => {
+      createApiServer({
+        agentsDir,
+        web: true,
+        extraPlugins: ['./audit.js#AuditPlugin'],
+        logoText: 'Acme',
+        logoImageUrl: 'https://acme.example/logo.png',
+        defaultLlmModel: 'gemini-2.5-flash',
+      });
+
+      const options = serverOptions();
+      expect(options.extraPlugins).toEqual(['./audit.js#AuditPlugin']);
+      expect(options.logoText).toBe('Acme');
+      expect(options.logoImageUrl).toBe('https://acme.example/logo.png');
+      expect(options.defaultLlmModel).toBe('gemini-2.5-flash');
+    });
   });
 
   describe('traceToCloud', () => {
