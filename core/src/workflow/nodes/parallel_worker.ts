@@ -11,19 +11,12 @@ import {NodeContext} from '../node_context.js';
 import {RetryConfig} from '../retry_config.js';
 import {buildNode} from '../utils/workflow_graph_utils.js';
 
-/**
- * Default concurrency when `maxParallelWorkers` is not set. Bounded so a
- * data-driven list length can't fan out into an unbounded burst of concurrent
- * inner runs (a rate-limit / cost hazard when the inner node is an LLM or a
- * remote tool). Pass `Infinity` for explicitly unbounded concurrency.
- */
-const DEFAULT_MAX_PARALLEL_WORKERS = 8;
-
 /** Options for a {@link ParallelWorker}. */
 export interface ParallelWorkerConfig {
   /**
-   * Maximum number of items processed concurrently. Defaults to
-   * `DEFAULT_MAX_PARALLEL_WORKERS` (8); pass `Infinity` for unbounded.
+   * Maximum number of items processed concurrently. Unbounded when unset, so
+   * every item of the list runs at once — set this when the inner node is an
+   * LLM or a remote tool and the list length is data-driven.
    */
   maxParallelWorkers?: number;
   /** Retry configuration for the fan-out as a whole. */
@@ -35,6 +28,7 @@ export interface ParallelWorkerConfig {
 /**
  * A node that runs a wrapped node once per item of a list input, preserving
  * order, bounded by `maxParallelWorkers`, and stopping on the first error.
+ * Without `maxParallelWorkers` every item runs at once, matching Python.
  *
  * Ported from `google/adk-python` `workflow/_parallel_worker.py`. A non-list
  * input is treated as a single-element list. Each item runs via
@@ -104,7 +98,7 @@ export class ParallelWorker extends BaseNode {
 
     const results = new Array<unknown>(items.length);
     const poolSize = Math.min(
-      this.maxParallelWorkers ?? DEFAULT_MAX_PARALLEL_WORKERS,
+      this.maxParallelWorkers ?? items.length,
       items.length,
     );
 

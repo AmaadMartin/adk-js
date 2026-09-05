@@ -59,7 +59,7 @@ describe('ParallelWorker', () => {
     expect(peak).toBe(2);
   });
 
-  it('bounds concurrency by the default when maxParallelWorkers is unset', async () => {
+  it('runs every item concurrently when maxParallelWorkers is unset', async () => {
     let active = 0;
     let peak = 0;
     const inner = new FunctionNode('track', async (_c, n: number) => {
@@ -69,13 +69,12 @@ describe('ParallelWorker', () => {
       active--;
       return n;
     });
-    // 20 items with no explicit limit must not fan out to 20 concurrent runs.
     const {output} = await driveNode(
       new ParallelWorker(inner),
       Array.from({length: 20}, (_v, i) => i),
     );
     expect(output).toHaveLength(20);
-    expect(peak).toBe(8); // DEFAULT_MAX_PARALLEL_WORKERS
+    expect(peak).toBe(20);
   });
 
   it('rejects maxParallelWorkers < 1', () => {
