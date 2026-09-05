@@ -172,12 +172,18 @@ export async function searchCatalog(
     const searchLocation =
       input.location ?? deps.settings.location ?? DEFAULT_SEARCH_LOCATION;
     try {
-      const [entries] = await client.searchEntries({
-        name: `projects/${input.project_id}/locations/${searchLocation}`,
-        query: constructSearchQuery(input),
-        pageSize: input.page_size ?? DEFAULT_PAGE_SIZE,
-        semanticSearch: true,
-      });
+      const [entries] = await client.searchEntries(
+        {
+          name: `projects/${input.project_id}/locations/${searchLocation}`,
+          query: constructSearchQuery(input),
+          pageSize: input.page_size ?? DEFAULT_PAGE_SIZE,
+          semanticSearch: true,
+        },
+        // `searchEntries` is a paged gax method whose `autoPaginate` defaults
+        // to true, which walks every page and reduces `pageSize` to a
+        // per-request size. adk-python reads one page, so ask for one page.
+        {autoPaginate: false},
+      );
 
       const results = entries.flatMap((result) => {
         const entry = result.dataplexEntry;

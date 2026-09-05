@@ -93,7 +93,9 @@ class FakeBigQueryState {
   dataplexOptions: RecordedDataplexOptions[] = [];
   /** Every `searchEntries` request, in order. */
   searchRequests: unknown[] = [];
-  /** What `searchEntries` returns. */
+  /** The gax call options of every `searchEntries` call, in order. */
+  searchCallOptions: Array<{autoPaginate?: boolean} | undefined> = [];
+  /** Every entry the catalog holds, across all pages. */
   searchResults: unknown[] = [];
   /** Thrown by `searchEntries` when set. */
   searchError?: unknown;
@@ -236,10 +238,24 @@ export class FakeCatalogServiceClient {
     bigQueryState.dataplexOptions.push(options);
   }
 
-  async searchEntries(request: unknown): Promise<[unknown[]]> {
+  /**
+   * Models gax's paged `searchEntries`: with `autoPaginate` left at its
+   * default of true, gax walks every page and hands back the whole result
+   * set, so `pageSize` only bounds one request. Setting it to false returns
+   * the first page alone.
+   */
+  async searchEntries(
+    request: {pageSize?: number | null},
+    options?: {autoPaginate?: boolean},
+  ): Promise<[unknown[]]> {
     bigQueryState.searchRequests.push(request);
+    bigQueryState.searchCallOptions.push(options);
     if (bigQueryState.searchError) {
       throw bigQueryState.searchError;
+    }
+    if (options?.autoPaginate === false) {
+      const pageSize = request.pageSize ?? bigQueryState.searchResults.length;
+      return [bigQueryState.searchResults.slice(0, pageSize)];
     }
     return [bigQueryState.searchResults];
   }

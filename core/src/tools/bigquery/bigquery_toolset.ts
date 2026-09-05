@@ -96,10 +96,10 @@ export class BigQueryToolset extends BaseToolset {
   }
 
   /**
-   * Releases the BigQuery clients the tools opened.
+   * Drops the BigQuery clients the tools built.
    *
    * adk-python's `close()` is a no-op because it builds a client per call.
-   * This one caches them, so it has something to release.
+   * This one caches them, so it has something to drop.
    */
   override async close(): Promise<void> {
     this.clients.close();

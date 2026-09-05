@@ -219,6 +219,38 @@ describe('searchCatalog', () => {
     );
   });
 
+  it('returns one page, not every page the catalog matches', async () => {
+    bigQueryState.searchResults = Array.from({length: 7}, (_, i) => ({
+      dataplexEntry: {name: `entry-${i}`},
+    }));
+
+    const result = await searchCatalog(
+      {prompt: 'a', project_id: 'my-project', page_size: 2},
+      deps(),
+    );
+
+    expect(bigQueryState.searchCallOptions[0]).toEqual({autoPaginate: false});
+    expect(result).toMatchObject({status: 'SUCCESS'});
+    expect(
+      (result as {results: unknown[]}).results.map(
+        (entry) => (entry as {name: string}).name,
+      ),
+    ).toEqual(['entry-0', 'entry-1']);
+  });
+
+  it('caps an unbounded search at the default page size', async () => {
+    bigQueryState.searchResults = Array.from({length: 25}, (_, i) => ({
+      dataplexEntry: {name: `entry-${i}`},
+    }));
+
+    const result = await searchCatalog(
+      {prompt: 'a', project_id: 'my-project'},
+      deps(),
+    );
+
+    expect((result as {results: unknown[]}).results).toHaveLength(10);
+  });
+
   it('asks for a semantic search of the requested page size', async () => {
     await searchCatalog(
       {prompt: 'a', project_id: 'my-project', page_size: 25},
