@@ -46,7 +46,7 @@ function createConfig(): BigQueryCredentialsConfig {
 
 /** Puts a usable credential in the session-state cache. */
 function cacheValidToken(toolContext: Context) {
-  toolContext.state.set(BIGQUERY_TOKEN_CACHE_KEY, {
+  toolContext.state.set(`${BIGQUERY_TOKEN_CACHE_KEY}_${CLIENT_ID}`, {
     accessToken: 'cached-access-token',
     expiresAt: Date.now() + ONE_HOUR_MS,
   } satisfies OAuth2Auth);

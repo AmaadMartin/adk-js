@@ -39,12 +39,8 @@ const credentials = new BigQueryCredentialsConfig({
   clientSecret: process.env.OAUTH_CLIENT_SECRET,
 });
 
-function list_datasets() {
-  return undefined;
-}
-
 const listDatasets = new BigQueryTool({
-  name: list_datasets.name,
+  name: 'list_datasets',
   description: 'Lists the BigQuery datasets in a project.',
   parameters: z.object({projectId: z.string()}),
   credentials,
@@ -81,13 +77,17 @@ that yields a token that has not expired:
 
 1. The credential held by the config, which the manager writes back after every
    successful resolution.
-2. The token cached in session state under `bigquery_token_cache`.
+2. The token cached in session state under
+   `bigquery_token_cache_<clientId>`.
 3. A refresh of the expired token, when it carries a refresh token.
 4. The OAuth authorization-code flow, through `Context.requestCredential`.
 
 A refresh that the token endpoint rejects is logged at debug level and falls
-through to the flow. Tools that share one `BigQueryCredentialsConfig` share the
-cached token, so an end user authorizes once per session.
+through to the flow. Every tool configured with the same client id shares the
+cached token, so an end user authorizes once per session. Two tools configured
+with different OAuth clients never read each other's grant, because the client
+id is part of both the cache key and the key the OAuth response is stored
+under.
 
 Only the access token, the refresh token and the expiry reach session state. The
 client id and the client secret stay on the config object in memory, because a

@@ -9,7 +9,10 @@ import {OAuth2Client} from 'google-auth-library';
 import {InputValidationError} from '../../errors/input_validation_error.js';
 import {experimental} from '../../utils/experimental.js';
 
-/** The session-state key the resolved BigQuery OAuth token is cached under. */
+/**
+ * The prefix of the session-state key the resolved BigQuery OAuth token is
+ * cached under. The client id is appended when the config names one.
+ */
 export const BIGQUERY_TOKEN_CACHE_KEY = 'bigquery_token_cache';
 
 /** The scope requested when the caller names none. */
