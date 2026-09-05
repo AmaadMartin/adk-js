@@ -24,6 +24,9 @@ export const DEFAULT_MEMORIES_COLLECTION = 'memories';
 /** Firestore commits at most this many writes in one batch. */
 const MAX_BATCH_WRITES = 500;
 
+/** The timestamp a memory entry carries when its stored value is unusable. */
+const EPOCH_ISO = new Date(0).toISOString();
+
 /** Options for {@link FirestoreMemoryService}. */
 export interface FirestoreMemoryServiceOptions {
   /** An existing Firestore client. A default client is created when omitted. */
@@ -208,11 +211,10 @@ function toMemoryEntries(documents: DocumentData[]): MemoryEntry[] {
     }
 
     const author: unknown = data['author'];
-    const timestamp: unknown = data['timestamp'];
     entries.push({
       content,
       author: typeof author === 'string' ? author : '',
-      timestamp: formatTimestamp(typeof timestamp === 'number' ? timestamp : 0),
+      timestamp: formatTimestamp(data['timestamp']),
     });
   }
   return entries;
@@ -229,7 +231,14 @@ function isContent(value: unknown): value is Content {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Formats an epoch-milliseconds timestamp as an ISO 8601 string. */
-function formatTimestamp(timestamp: number): string {
-  return new Date(timestamp).toISOString();
+/**
+ * Formats a stored epoch-milliseconds timestamp as an ISO 8601 string.
+ *
+ * A value that is missing, is not a number, or falls outside the range a
+ * `Date` can hold reads as the epoch. `toISOString()` throws on such a value,
+ * which would drop every other entry the same query found.
+ */
+function formatTimestamp(timestamp: unknown): string {
+  const date = new Date(typeof timestamp === 'number' ? timestamp : 0);
+  return Number.isNaN(date.getTime()) ? EPOCH_ISO : date.toISOString();
 }
