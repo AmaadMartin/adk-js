@@ -23,7 +23,12 @@ import {
   TaskPushNotificationConfig,
   TaskQueryParams,
 } from '@a2a-js/sdk';
-import {Client, RequestOptions, Transport} from '@a2a-js/sdk/client';
+import {
+  Client,
+  ClientFactory,
+  RequestOptions,
+  Transport,
+} from '@a2a-js/sdk/client';
 import {A2AStreamEventData} from '@google/adk';
 
 /** Thrown by the transport methods this fake does not implement. */
@@ -118,7 +123,7 @@ export class RecordingTransport implements Transport {
     return Promise.reject(new Error(UNSUPPORTED));
   }
 
-  async *resubscribeTask(
+  resubscribeTask(
     _params: TaskIdParams,
   ): AsyncGenerator<A2AStreamEventData, void, undefined> {
     throw new Error(UNSUPPORTED);
@@ -131,4 +136,19 @@ export function createRecordingClient(
   card: AgentCard = createTestAgentCard(),
 ): Client {
   return new Client(transport, card);
+}
+
+/** A factory that hands out a fixed client instead of dialling the remote. */
+export class StubClientFactory extends ClientFactory {
+  /** The card each `createFromAgentCard` call was given, in order. */
+  readonly createdFor: AgentCard[] = [];
+
+  constructor(private readonly client: Client) {
+    super();
+  }
+
+  override async createFromAgentCard(agentCard: AgentCard): Promise<Client> {
+    this.createdFor.push(agentCard);
+    return this.client;
+  }
 }

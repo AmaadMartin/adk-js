@@ -48,6 +48,7 @@ import {
   createRecordingClient,
   createTestAgentCard,
   RecordingTransport,
+  StubClientFactory,
 } from './a2a_client_fakes.js';
 
 const CARD_URL = 'https://example.com';
@@ -149,20 +150,18 @@ function createAgent(
 /** Records every card fetch and answers each with `card`. */
 function stubCardFetch(card: AgentCard): Array<Record<string, string>> {
   const seen: Array<Record<string, string>> = [];
-  vi.stubGlobal(
-    'fetch',
-    async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const headers: Record<string, string> = {};
-      new Headers(init?.headers).forEach((value, name) => {
-        headers[name] = value;
-      });
-      seen.push(headers);
-      return new Response(JSON.stringify(card), {
-        status: 200,
-        headers: {'content-type': 'application/json'},
-      });
-    },
-  );
+  const fetchStub: typeof fetch = async (_input, init) => {
+    const headers: Record<string, string> = {};
+    new Headers(init?.headers).forEach((value, name) => {
+      headers[name] = value;
+    });
+    seen.push(headers);
+    return new Response(JSON.stringify(card), {
+      status: 200,
+      headers: {'content-type': 'application/json'},
+    });
+  };
+  vi.stubGlobal('fetch', fetchStub);
   return seen;
 }
 
@@ -257,6 +256,29 @@ describe('RemoteA2AAgent card request interceptors', () => {
       'Bearer AAA',
       'Bearer BBB',
     ]);
+  });
+
+  it('builds a client per invocation when no client is supplied', async () => {
+    const card = createTestAgentCard();
+    const seen = stubCardFetch(card);
+    const transport = new RecordingTransport([agentMessage('hi')]);
+    const factory = new StubClientFactory(
+      createRecordingClient(transport, card),
+    );
+    const agent = new RemoteA2AAgent({
+      name: 'remote_agent',
+      agentCard: CARD_URL,
+      clientFactory: factory,
+      cardRequestInterceptors: [
+        {beforeRequest: async () => ({headers: {authorization: 'Bearer x'}})},
+      ],
+    });
+
+    await drain(agent, createContext());
+    await drain(agent, createContext());
+
+    expect(seen).toHaveLength(2);
+    expect(factory.createdFor).toHaveLength(2);
   });
 
   it('test_ensure_resolved_caches_card_without_interceptor', async () => {
@@ -443,6 +465,41 @@ describe('RemoteA2AAgent converter slots', () => {
     expect(events[0].content?.parts).toEqual([{text: 'converted'}]);
   });
 
+  it('drops a part its converter returns undefined for', async () => {
+    const frame: Message = {
+      kind: 'message',
+      messageId: 'resp-1',
+      role: 'agent',
+      parts: [
+        {kind: 'text', text: 'keep'},
+        {kind: 'text', text: 'drop'},
+      ],
+    };
+    const part: A2APartToGenAIPartConverter = (a2aPart) =>
+      a2aPart.kind === 'text' && a2aPart.text === 'drop'
+        ? undefined
+        : {text: 'keep'};
+    const {agent} = createAgent([frame], {a2aPartConverter: part});
+
+    const events = await drain(agent, createContext());
+
+    expect(events[0].content?.parts).toEqual([{text: 'keep'}]);
+  });
+
+  it('expands a part its converter returns an array for', async () => {
+    const part: A2APartToGenAIPartConverter = () => [
+      {text: 'one'},
+      {text: 'two'},
+    ];
+    const {agent} = createAgent([agentMessage('original')], {
+      a2aPartConverter: part,
+    });
+
+    const events = await drain(agent, createContext());
+
+    expect(events[0].content?.parts).toEqual([{text: 'one'}, {text: 'two'}]);
+  });
+
   it('produces the default conversion when no slot is set', async () => {
     const frame = agentMessage('hello there');
     const {agent} = createAgent([frame]);
@@ -624,6 +681,26 @@ describe('RemoteA2AAgent request interceptors', () => {
       'afterCallback',
       'afterInterceptor',
     ]);
+  });
+
+  it('runs the existing after-request callback on the non-streaming path', async () => {
+    const card = createTestAgentCard({capabilities: {streaming: false}});
+    const seen: string[] = [];
+    const {agent} = createAgent(
+      [agentMessage('hi')],
+      {
+        afterRequestCallbacks: [
+          (_ctx, resp) => {
+            seen.push(resp.kind);
+          },
+        ],
+      },
+      card,
+    );
+
+    await drain(agent, createContext());
+
+    expect(seen).toEqual(['message']);
   });
 
   it('turns a rejecting hook into an error event', async () => {

@@ -28,7 +28,7 @@ export function isRemoteCardSource(source: string): boolean {
   return source.startsWith('http://') || source.startsWith('https://');
 }
 
-/** Per-request options for {@link resolveAgentCard}. */
+/** Per-request options for `resolveAgentCard`. */
 export interface ResolveAgentCardOptions {
   /** Extra HTTP headers to send with the card fetch. */
   headers?: Record<string, string>;
