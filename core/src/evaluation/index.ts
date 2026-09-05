@@ -29,6 +29,8 @@ export type {
   ExtraKeysPolicy,
 } from './common.js';
 export type {ConversationScenario} from './conversation_scenarios.js';
+export {assembleDialogueHistory} from './dialogue_history.js';
+export type {DialogueHistory} from './dialogue_history.js';
 export {
   getAllToolCalls,
   getAllToolCallsWithResponses,
@@ -163,6 +165,7 @@ export type {
   RubricResponse,
 } from './rubric_based_evaluator.js';
 export {RubricBasedFinalResponseQualityV1Evaluator} from './rubric_based_final_response_quality_v1.js';
+export {RubricBasedMultiTurnTrajectoryEvaluator} from './rubric_based_multi_turn_trajectory_evaluator.js';
 export {RubricBasedToolUseV1Evaluator} from './rubric_based_tool_use_quality_v1.js';
 export {SafetyEvaluatorV1} from './safety_evaluator.js';
 export type {SafetyEvaluatorV1Options} from './safety_evaluator.js';

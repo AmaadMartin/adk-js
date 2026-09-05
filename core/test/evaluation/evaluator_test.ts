@@ -282,6 +282,15 @@ describe('getTextFromContent', () => {
       getTextFromContent({role: 'model', parts: [{text: 'a'}, {text: 'b'}]}),
     ).toBe('a\nb');
   });
+
+  it('joins with the separator it is given', () => {
+    expect(
+      getTextFromContent(
+        {role: 'model', parts: [{text: 'a'}, {text: 'b'}]},
+        ' ',
+      ),
+    ).toBe('a b');
+  });
 });
 
 describe('emptyEvaluationResult', () => {
