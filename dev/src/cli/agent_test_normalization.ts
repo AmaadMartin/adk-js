@@ -29,7 +29,7 @@ export type NormalizedEvent = Record<string, unknown>;
  * Event fields that differ between two runs of the same conversation, and are
  * therefore dropped before a live run is compared with a recorded fixture.
  */
-export const EXCLUDED_EVENT_FIELDS: ReadonlySet<string> = new Set([
+export const EXCLUDED_EVENT_FIELDS: readonly string[] = [
   'id',
   'timestamp',
   'invocationId',
@@ -40,28 +40,16 @@ export const EXCLUDED_EVENT_FIELDS: ReadonlySet<string> = new Set([
   'cacheMetadata',
   'logprobsResult',
   'citationMetadata',
-]);
-
-/**
- * Two more volatile fields: the Interactions API issues `interactionId`, and
- * only the live API emits `turnComplete`. They are held apart from
- * {@link EXCLUDED_EVENT_FIELDS} so the value of that public constant stays
- * stable, as adk-python holds them in a private set for the same reason.
- */
-const EXTRA_EXCLUDED_EVENT_FIELDS: readonly string[] = [
+  // The Interactions API issues `interactionId`, and only the live API emits
+  // `turnComplete`.
   'interactionId',
   'turnComplete',
 ];
 
-const ALL_EXCLUDED_EVENT_FIELDS: readonly string[] = [
-  ...EXCLUDED_EVENT_FIELDS,
-  ...EXTRA_EXCLUDED_EVENT_FIELDS,
-];
-
 /**
  * Event fields a rebuilt fixture drops. Narrower than
- * {@link ALL_EXCLUDED_EVENT_FIELDS}: a rebuilt fixture keeps the ids it has
- * just made canonical, and loses only what a rerun cannot reproduce.
+ * {@link EXCLUDED_EVENT_FIELDS}: a rebuilt fixture keeps the ids it has just
+ * made canonical, and loses only what a rerun cannot reproduce.
  */
 const REBUILD_EXCLUDED_EVENT_FIELDS: readonly string[] = [
   'timestamp',
@@ -118,25 +106,19 @@ function toSnakeCase(name: string): string {
 /**
  * Canonicalizes events for comparison.
  *
- * The two sides of a fixture comparison arrive in different shapes: `isJson`
- * events are parsed from the fixture, and the others are live {@link Event}
- * objects. Both are camelCase plain objects in adk-js, so one code path serves
- * them; a live event goes through JSON first, which drops its `undefined`
- * values and its non-serializable brand.
+ * One code path serves both sides: a live {@link Event} and a recorded event
+ * are both camelCase plain objects here, and a live event goes through JSON
+ * first, which drops its `undefined` values and its non-serializable brand.
  *
  * @param events The live or recorded events to canonicalize.
- * @param isJson Whether the events were parsed from a fixture file.
  * @returns A canonicalized copy of each event. The inputs are not modified.
  */
-export function normalizeEvents(
-  events: readonly unknown[],
-  isJson: boolean,
-): NormalizedEvent[] {
-  return events.map((event) => normalizeEvent(event, isJson));
+export function normalizeEvents(events: readonly unknown[]): NormalizedEvent[] {
+  return events.map(normalizeEvent);
 }
 
-function normalizeEvent(event: unknown, isJson: boolean): NormalizedEvent {
-  const normalized = stripFields(event, ALL_EXCLUDED_EVENT_FIELDS, isJson);
+function normalizeEvent(event: unknown): NormalizedEvent {
+  const normalized = stripFields(event, EXCLUDED_EVENT_FIELDS);
   stripThoughtSignatures(normalized);
   dropHumanInTheLoopRole(normalized);
   normalizeLongRunningToolIds(normalized);
@@ -158,7 +140,7 @@ export function normalizeRebuiltEvents(
   events: readonly Event[],
 ): NormalizedEvent[] {
   return events.map((event) => {
-    const rebuilt = stripFields(event, REBUILD_EXCLUDED_EVENT_FIELDS, false);
+    const rebuilt = stripFields(event, REBUILD_EXCLUDED_EVENT_FIELDS);
     stripThoughtSignatures(rebuilt);
     // `createEvent` defaults this to `[]` where adk-python leaves it unset, so
     // a rebuilt fixture would otherwise carry the empty list on every event.
@@ -178,16 +160,13 @@ export function normalizeRebuiltEvents(
 function stripFields(
   event: unknown,
   excluded: readonly string[],
-  isJson: boolean,
 ): NormalizedEvent {
   const stripped = JSON.parse(JSON.stringify(event)) as NormalizedEvent;
   for (const field of excluded) {
     delete stripped[field];
-    if (isJson) {
-      // A fixture written by the adk-python runner spells the same field
-      // `invocation_id`; a live adk-js event never does.
-      delete stripped[toSnakeCase(field)];
-    }
+    // A hand-written fixture may spell the field `invocation_id`, as
+    // adk-python's normalize_events also allows for.
+    delete stripped[toSnakeCase(field)];
   }
   for (const [key, value] of Object.entries(stripped)) {
     if (value === null) {

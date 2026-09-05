@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export {EXCLUDED_EVENT_FIELDS} from './cli/agent_test_normalization.js';
 export type {NormalizedEvent} from './cli/agent_test_normalization.js';
 export {
   getTestFiles,

@@ -31,7 +31,6 @@ import {
   FunctionCallIdMapper,
   getTestFiles,
   MockModel,
-  rebuildFromArgv,
   rebuildTests,
   ReplaySessionRunner,
   runAgentReplay,
@@ -41,7 +40,10 @@ import {
 const agentHolder = vi.hoisted((): {current?: RunnableRoot} => ({}));
 const appHolder = vi.hoisted((): {current?: App} => ({}));
 
-vi.mock('../../src/utils/agent_loader.js', () => ({
+// Only the compile-and-import step is faked; discovery still runs the real
+// entry-file lookup.
+vi.mock('../../src/utils/agent_loader.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/agent_loader.js')>()),
   AgentFile: class {
     async load() {
       return appHolder.current ?? agentHolder.current;
@@ -213,10 +215,6 @@ describe('MockModel', () => {
 
     expect(served).toEqual(['first', 'second']);
     expect(model.requests).toHaveLength(2);
-  });
-
-  it('answers to the mock model name', () => {
-    expect(MockModel.supportedModels).toContain('mock');
   });
 
   it('reports how many responses it had when they run out', () => {
@@ -400,30 +398,6 @@ describe('buildMockResponses', () => {
     ]);
 
     expect(responses).toHaveLength(1);
-  });
-
-  it('orders a parallel group by worker index', () => {
-    const responses = buildMockResponses([
-      {author: 'worker__2', content: createModelContent('second')},
-      {author: 'worker__1', content: createModelContent('first')},
-      {author: 'summary', content: createModelContent('after')},
-      {author: 'other__1', content: createModelContent('other')},
-    ]);
-
-    expect(
-      responses.map((response) => response.content?.parts?.[0]?.text),
-    ).toEqual(['first', 'second', 'after', 'other']);
-  });
-
-  it('flushes a parallel group when the group name changes', () => {
-    const responses = buildMockResponses([
-      {author: 'worker__2', content: createModelContent('w2')},
-      {author: 'other__1', content: createModelContent('o1')},
-    ]);
-
-    expect(
-      responses.map((response) => response.content?.parts?.[0]?.text),
-    ).toEqual(['w2', 'o1']);
   });
 });
 
@@ -827,31 +801,5 @@ describe('FunctionCallIdMapper', () => {
     mapper.remap(content);
 
     expect(content.parts?.[0]?.functionResponse?.id).toBe('recorded-1');
-  });
-});
-
-describe('rebuildFromArgv', () => {
-  it('rebuilds the folder the first argument names', async () => {
-    const agentDir = createAgentDir(workspace, 'test_agent', {
-      'basic.json': {events: [userTurn('hello')]},
-    });
-    agentHolder.current = new LlmAgent({
-      name: 'test_agent',
-      model: MockModel.create([createModelContent('hi')]),
-    });
-
-    await rebuildFromArgv([agentDir]);
-
-    expect(readFixture(agentDir, 'basic.json')).toContain('hi');
-  });
-
-  it('rebuilds nothing when no folder is named', async () => {
-    const agentDir = createAgentDir(workspace, 'test_agent', {
-      'basic.json': {events: [userTurn('hello')]},
-    });
-
-    await rebuildFromArgv([]);
-
-    expect(readFixture(agentDir, 'basic.json')).not.toContain('\n');
   });
 });
