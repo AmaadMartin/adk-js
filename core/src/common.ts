@@ -313,6 +313,22 @@ export {
 } from './tools/google_maps_grounding_tool.js';
 export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
 export {
+  GoogleTool,
+  GoogleToolStatus,
+  authorizationRequiredMessage,
+} from './tools/google_tool.js';
+export type {
+  GoogleToolErrorResponse,
+  GoogleToolExecuteContext,
+  GoogleToolExecuteFunction,
+  GoogleToolOptions,
+} from './tools/google_tool.js';
+export {
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
+} from './tools/google_tool_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/google_tool_credentials.js';
+export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
 } from './tools/load_artifacts_tool.js';
