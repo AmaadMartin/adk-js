@@ -12,6 +12,9 @@ npm run sample -- samples/skills/environment_skill_toolset
 
 Then ask: `how many words are in notes.txt?`
 
+The environment's working directory is `workspace/`, and `workspace/notes.txt`
+ships with the sample for the skill to count.
+
 The command runs on the host, so `run_skill_script` pauses for a confirmation
 before it runs. Approve the tool call to see the output.
 
