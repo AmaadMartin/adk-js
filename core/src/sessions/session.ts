@@ -52,6 +52,20 @@ export interface Session {
    * The last update time of the session.
    */
   lastUpdateTime: number;
+
+  /**
+   * The exact storage revision this session was loaded at, set by persistent
+   * session services.
+   *
+   * `FirestoreSessionService` compares it against the stored document on the
+   * next write, so a session one process read does not overwrite a session
+   * another process read earlier.
+   *
+   * This is internal bookkeeping: callers should not set it. A session built
+   * by hand, or read from a service that tracks no revision, leaves it
+   * undefined.
+   */
+  storageUpdateMarker?: string;
 }
 
 /**
@@ -73,5 +87,6 @@ export function createSession(
     state: params.state || {},
     events: params.events || [],
     lastUpdateTime: params.lastUpdateTime || 0,
+    storageUpdateMarker: params.storageUpdateMarker,
   };
 }
