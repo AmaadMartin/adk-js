@@ -350,7 +350,7 @@ export class PluginManager {
     tool: BaseTool;
     toolArgs: Record<string, unknown>;
     toolContext: Context;
-    result: Record<string, unknown>;
+    result: unknown;
   }): Promise<Record<string, unknown> | undefined> {
     return (await this.runCallbacks(
       this.plugins,
