@@ -15,11 +15,13 @@
  */
 
 import {Storage} from '@google-cloud/storage';
-import {asStorageAuthClient} from '@google/adk';
 import {OAuth2Client} from 'google-auth-library';
 import {IncomingHttpHeaders, Server, createServer} from 'node:http';
 import {AddressInfo} from 'node:net';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
+// Not part of the package barrel: it is a compatibility shim between two
+// copies of google-auth-library, not something an application calls.
+import {asStorageAuthClient} from '../../../src/integrations/gcs/client.js';
 
 const TOKEN = 'test-access-token';
 const HOUR_MS = 60 * 60 * 1000;
