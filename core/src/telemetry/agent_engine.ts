@@ -241,6 +241,13 @@ function noteRequestStart(reader: RequestDrivenMetricReader): void {
 type ResponseChunk = string | Uint8Array;
 
 /**
+ * The encoding `res.write` accepts, taken from its own signature. Node
+ * declares it as `BufferEncoding`, a type-only global the lint configuration
+ * does not know about.
+ */
+type ResponseEncoding = Parameters<Response['write']>[1];
+
+/**
  * Replaces `res.end` so the metric drain runs after the body is written and
  * before the response is finalized.
  *
@@ -253,7 +260,7 @@ function drainBeforeResponseEnd(res: Response, drain: () => Promise<void>) {
 
   res.end = (
     chunkOrCallback?: ResponseChunk | (() => void),
-    encodingOrCallback?: BufferEncoding | (() => void),
+    encodingOrCallback?: ResponseEncoding | (() => void),
     callback?: () => void,
   ): Response => {
     const done =
