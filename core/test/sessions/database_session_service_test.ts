@@ -11,11 +11,12 @@ import {
   Event,
   State,
 } from '@google/adk';
-import {MikroORM} from '@mikro-orm/core';
+import {Options as MikroDBOptions, MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {ENTITIES} from '../../src/sessions/db/schema.js';
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -739,5 +740,122 @@ describe('isDatabaseConnectionString', () => {
       false,
     ); // Has = and ; but no common keys
     expect(isDatabaseConnectionString('Server=myServer')).toBe(false); // Missing semicolon implies not a full connection string or just a weird config
+  });
+});
+
+describe('DatabaseSessionService additional options', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Reads the options a service hands to MikroORM, without opening a database. */
+  async function captureInitOptions(
+    service: DatabaseSessionService,
+  ): Promise<MikroDBOptions> {
+    const initSpy = vi
+      .spyOn(MikroORM, 'init')
+      .mockRejectedValue(new Error('halt'));
+
+    await expect(service.init()).rejects.toThrow('halt');
+
+    const captured = initSpy.mock.calls[0][0];
+    if (!captured) {
+      expect.fail('MikroORM.init received no options');
+    }
+    return captured;
+  }
+
+  it('passes additional options through when built from a connection string', async () => {
+    const options = await captureInitOptions(
+      new DatabaseSessionService('sqlite://:memory:', {
+        pool: {min: 1, max: 3},
+      }),
+    );
+
+    expect(options.pool).toEqual({min: 1, max: 3});
+    expect(options.dbName).toBe(':memory:');
+    expect(options.driver).toBe(SqliteDriver);
+  });
+
+  it('keeps the connection string as the source of the driver and database name', async () => {
+    const options = await captureInitOptions(
+      new DatabaseSessionService('sqlite://:memory:', {
+        dbName: 'ignored.db',
+      }),
+    );
+
+    expect(options.dbName).toBe(':memory:');
+    expect(options.driver).toBe(SqliteDriver);
+  });
+
+  it('keeps the ADK entity list when built from a connection string', async () => {
+    const options = await captureInitOptions(
+      new DatabaseSessionService('sqlite://:memory:', {entities: []}),
+    );
+
+    expect(options.entities).toBe(ENTITIES);
+  });
+
+  it('keeps the ADK entity list when built from an options object', async () => {
+    const options = await captureInitOptions(
+      new DatabaseSessionService(
+        {dbName: ':memory:', driver: SqliteDriver},
+        {entities: []},
+      ),
+    );
+
+    expect(options.entities).toBe(ENTITIES);
+  });
+
+  it('applies additional options beneath an explicit options object', async () => {
+    const options = await captureInitOptions(
+      new DatabaseSessionService(
+        {dbName: ':memory:', driver: SqliteDriver, allowGlobalContext: true},
+        {debug: true, allowGlobalContext: false},
+      ),
+    );
+
+    expect(options.debug).toBe(true);
+    expect(options.allowGlobalContext).toBe(true);
+  });
+
+  it('still demands a driver on the options object itself', () => {
+    expect(
+      () => new DatabaseSessionService({}, {driver: SqliteDriver}),
+    ).toThrow('Driver is required when passing options object.');
+  });
+
+  it('creates and reads back a session built from a connection string with additional options', async () => {
+    const service = new DatabaseSessionService('sqlite://:memory:', {
+      allowGlobalContext: true,
+    });
+    // The spy calls through, so it hands back the ORM the service opened.
+    // Closing it needs no reach into the private field.
+    const initSpy = vi.spyOn(MikroORM, 'init');
+
+    try {
+      await service.init();
+      const created = await service.createSession({
+        appName: 'merge-app',
+        userId: 'merge-user',
+        state: {'foo': 'bar'},
+        sessionId: 'merge-session',
+      });
+
+      const read = await service.getSession({
+        appName: 'merge-app',
+        userId: 'merge-user',
+        sessionId: created.id,
+      });
+
+      expect(read?.id).toBe('merge-session');
+      expect(read?.state['foo']).toBe('bar');
+    } finally {
+      const opened = initSpy.mock.results[0];
+      if (opened?.type !== 'return') {
+        expect.fail('MikroORM.init did not return an ORM');
+      }
+      await (await opened.value).close();
+    }
   });
 });
