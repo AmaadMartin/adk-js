@@ -19,7 +19,7 @@ import {getTextFromContent} from './evaluator.js';
 const NO_TOOL_CALLS_TEXT = 'No intermediate steps were taken.';
 
 /** The indent of the JSON a judge model reads, matching adk-python. */
-const JSON_INDENT = 2;
+export const JSON_INDENT = 2;
 
 /**
  * A tool call's arguments and a tool response's payload are agent data, not

@@ -6,13 +6,15 @@
 
 /**
  * Ported from `google/adk-python`
- * `tests/unittests/evaluation/test_llm_as_judge_utils.py`, covering the four
- * helpers this change adds. Each `it()` keeps the Python test name, so the two
- * suites stay greppable against each other.
+ * `tests/unittests/evaluation/test_llm_as_judge_utils.py`, covering the five
+ * helpers this change adds. Each ported `it()` keeps the Python test name, so
+ * the two suites stay greppable against each other. The `it()` blocks with a
+ * prose name cover the paths the Python suite does not reach.
  */
 
 import {
   AppDetails,
+  formatPromptTemplate,
   getAverageRubricScore,
   getToolCallsAndResponsesAsJsonStr,
   getToolDeclarationsAsJsonStr,
@@ -149,6 +151,41 @@ describe('getToolDeclarationsAsJsonStr', () => {
       tool_declarations: {weatherAgent: []},
     });
   });
+
+  it('keys the declarations by agent name, in snake_case', () => {
+    const appDetails: AppDetails = {
+      agentDetails: {
+        root: {
+          name: 'root',
+          toolDeclarations: [{functionDeclarations: [{name: 'tool1'}]}],
+        },
+        helper: {name: 'helper', toolDeclarations: []},
+      },
+    };
+
+    expect(getToolDeclarationsAsJsonStr(appDetails)).toBe(
+      `{
+  "tool_declarations": {
+    "root": [
+      {
+        "function_declarations": [
+          {
+            "name": "tool1"
+          }
+        ]
+      }
+    ],
+    "helper": []
+  }
+}`,
+    );
+  });
+
+  it('reports an empty map when the app declares no agent', () => {
+    expect(getToolDeclarationsAsJsonStr({})).toBe(
+      '{\n  "tool_declarations": {}\n}',
+    );
+  });
 });
 
 describe('getToolCallsAndResponsesAsJsonStr', () => {
@@ -234,5 +271,38 @@ describe('getToolCallsAndResponsesAsJsonStr', () => {
         },
       ],
     });
+  });
+});
+
+describe('formatPromptTemplate', () => {
+  it('fills every named placeholder', () => {
+    expect(formatPromptTemplate('a {one} b {two}', {one: '1', two: '2'})).toBe(
+      'a 1 b 2',
+    );
+  });
+
+  it('scans the template once, so a value naming a placeholder is inert', () => {
+    expect(
+      formatPromptTemplate('{first}|{second}', {
+        first: 'holds {second}',
+        second: 'REAL',
+      }),
+    ).toBe('holds {second}|REAL');
+  });
+
+  it('leaves a placeholder the values do not cover in place', () => {
+    expect(formatPromptTemplate('{known} {unknown}', {known: 'x'})).toBe(
+      'x {unknown}',
+    );
+  });
+
+  it('unescapes a doubled brace', () => {
+    expect(formatPromptTemplate('{{ {name} }}', {name: 'x'})).toBe('{ x }');
+  });
+
+  it('passes a value containing a replacement pattern through unchanged', () => {
+    expect(formatPromptTemplate('{name}', {name: '$& and $1'})).toBe(
+      '$& and $1',
+    );
   });
 });

@@ -9,10 +9,10 @@
  * `google/adk/evaluation`). It currently covers the eval case data model, the
  * accessors that read a recorded trajectory, the contract every metric
  * evaluator implements, the `ResponseEvaluator`, `LlmAsJudge`,
- * `FinalResponseMatchV2Evaluator`, `SafetyEvaluatorV1` and
- * `RubricBasedToolUseV1Evaluator` evaluators that stand on it, the metric info
- * providers that describe each prebuilt metric, and the user simulation half
- * under `./simulation`.
+ * `FinalResponseMatchV2Evaluator`, `HallucinationsV1Evaluator`,
+ * `SafetyEvaluatorV1` and `RubricBasedToolUseV1Evaluator` evaluators that
+ * stand on it, the metric info providers that describe each prebuilt metric,
+ * and the user simulation half under `./simulation`.
  */
 
 export {getDeveloperInstructions, getToolsByAgentName} from './app_details.js';
@@ -49,22 +49,29 @@ export {
   DEFAULT_JUDGE_MODEL,
   DEFAULT_JUDGE_NUM_SAMPLES,
   DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
   EvalStatus,
   PrebuiltMetrics,
+  ToolTrajectoryMatchType,
   getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+  parseHallucinationsCriterion,
   parseLlmAsAJudgeCriterion,
   parseMetricInfo,
   parseRubricsBasedCriterion,
+  resolveJudgeModelOptions,
 } from './eval_metrics.js';
 export type {
   BaseCriterion,
   CriterionParser,
   EvalMetric,
   EvalMetricCriterion,
+  HallucinationsCriterion,
   Interval,
   JudgeModelOptions,
   LlmAsAJudgeCriterion,
   LlmAsAJudgeMetric,
+  LlmBackedUserSimulatorCriterion,
   MetricInfo,
   MetricInfoProvider,
   MetricValueInfo,
@@ -73,6 +80,7 @@ export type {
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
   Threshold,
+  ToolTrajectoryCriterion,
 } from './eval_metrics.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export {
@@ -98,6 +106,9 @@ export {
   parseCritique,
 } from './final_response_match_v2.js';
 export type {AutoRaterPromptValues} from './final_response_match_v2.js';
+// The metric's own segmentation, validation and context helpers stay internal,
+// as they are in adk-python. Only the evaluator is public.
+export {HallucinationsV1Evaluator} from './hallucinations_v1.js';
 export {LlmAsJudge} from './llm_as_judge.js';
 export type {AutoRaterScore, LlmAsJudgeOptions} from './llm_as_judge.js';
 export {

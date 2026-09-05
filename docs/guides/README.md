@@ -112,6 +112,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   invocations.
 - [Evaluator](evaluation/evaluator/index.md) - The contract an evaluation metric implements, its result shapes, and the criterion type it validates against.
 - [Final response match v2](evaluation/final_response_match_v2/index.md) - The LLM-as-a-judge metric that scores an agent's final response against a golden one.
+- [Hallucinations v1](evaluation/hallucinations_v1/index.md) - The LLM-as-a-judge metric that scores an agent's response for claims its context does not support.
 - [Live eval inference](evaluation/live_inference/index.md) - Driving that same
   simulated conversation over a bidirectional audio connection, for an agent or
   a workflow root, and grading the transcript it produces.
