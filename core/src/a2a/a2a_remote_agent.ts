@@ -183,14 +183,24 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
     if (this.a2aConfig.agentCard) {
       this.card = await this.resolveCard(this.a2aConfig.agentCard, context);
-
-      if (!this.client) {
-        const factory = this.a2aConfig.clientFactory || new ClientFactory();
-        this.client = await factory.createFromAgentCard(this.card);
-      }
+      this.client = await this.buildClient(this.card);
     }
 
     this.isInitialized = true;
+  }
+
+  /** The card source when it is a URL this agent fetches, otherwise nothing. */
+  private remoteCardUrl(): string | undefined {
+    const source = this.a2aConfig.agentCard;
+    return typeof source === 'string' && isRemoteCardSource(source)
+      ? source
+      : undefined;
+  }
+
+  /** The caller's own client, or one the factory builds for `card`. */
+  private async buildClient(card: AgentCard): Promise<Client> {
+    const factory = this.a2aConfig.clientFactory || new ClientFactory();
+    return this.a2aConfig.client ?? factory.createFromAgentCard(card);
   }
 
   /**
@@ -202,13 +212,12 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     source: AgentCard | string,
     context: InvocationContext,
   ): Promise<AgentCard> {
-    const headers =
-      typeof source === 'string' && isRemoteCardSource(source)
-        ? await executeBeforeCardRequestInterceptors(
-            this.a2aConfig.cardRequestInterceptors,
-            context,
-          )
-        : undefined;
+    const headers = this.remoteCardUrl()
+      ? await executeBeforeCardRequestInterceptors(
+          this.a2aConfig.cardRequestInterceptors,
+          context,
+        )
+      : undefined;
     return resolveAgentCard(source, {headers});
   }
 
@@ -223,17 +232,10 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
   private async ensureResolved(
     context: InvocationContext,
   ): Promise<{client: Client; card?: AgentCard}> {
-    const source = this.a2aConfig.agentCard;
-    if (
-      typeof source === 'string' &&
-      isRemoteCardSource(source) &&
-      this.a2aConfig.cardRequestInterceptors?.length
-    ) {
+    const source = this.remoteCardUrl();
+    if (source && this.a2aConfig.cardRequestInterceptors?.length) {
       const card = await this.resolveCard(source, context);
-      const factory = this.a2aConfig.clientFactory || new ClientFactory();
-      const client =
-        this.a2aConfig.client ?? (await factory.createFromAgentCard(card));
-      return {client, card};
+      return {client: await this.buildClient(card), card};
     }
 
     await this.init(context);
@@ -350,9 +352,10 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       if (intercepted.params.requestMetadata) {
         params.metadata = intercepted.params.requestMetadata;
       }
-      // Spread rather than passed positionally: with no interceptor headers
-      // the send keeps its single-argument shape, so nothing downstream sees a
-      // trailing `undefined` it did not see before.
+      // Spread, not positional: an injected `Client` is a caller's own object,
+      // and with no interceptor headers it must still see the one-argument send
+      // it saw before. Three tests in remote_agent_test.ts and
+      // request_metadata_test.ts pin that arity.
       const sendOptions: [RequestOptions] | [] = intercepted.params.headers
         ? [{serviceParameters: intercepted.params.headers}]
         : [];
