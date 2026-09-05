@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Evaluation
+
+- [MultiTurnToolUseQualityV1Evaluator](evaluation/multi_turn_tool_use_quality_evaluator/index.md) - Scoring the tool calls an agent made across a whole conversation, with the Vertex AI multi-turn tool use quality metric.
+
 ### Tools
 
 #### Retrieval
