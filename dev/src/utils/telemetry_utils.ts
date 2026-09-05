@@ -9,6 +9,7 @@ import {
   getGcpResource,
   maybeSetOtelProviders,
   OTelHooks,
+  resolveGoogleAuth,
 } from '@google/adk';
 import {HrTime} from '@opentelemetry/api';
 import {
@@ -162,16 +163,19 @@ async function setupGcpTelemetryExperimental(
     });
   }
 
+  // Resolved once, so that the exporters and the resource name the same
+  // project. It is undefined when the process is not authenticated, which
+  // leaves `getGcpExporters` to warn rather than throw.
+  const googleAuth = await resolveGoogleAuth();
   const gcpExporters = await getGcpExporters({
     enableTracing: true,
-    enableLogging: false,
+    enableLogging: true,
     enableMetrics: true,
+    googleAuth,
   });
   otelHooksToAdd.push(gcpExporters);
 
-  const otelResource = getGcpResource();
-
-  maybeSetOtelProviders(otelHooksToAdd, otelResource);
+  maybeSetOtelProviders(otelHooksToAdd, getGcpResource(googleAuth?.projectId));
 }
 
 async function setupTelemetryFromEnvExperimental(
