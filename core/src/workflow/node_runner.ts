@@ -7,6 +7,7 @@
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event} from '../events/event.js';
+import type {EventActions} from '../events/event_actions.js';
 import {carryDeltaStamp} from '../sessions/state_write_order.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
@@ -90,9 +91,9 @@ export interface ExecuteChildNodeParams {
   resumeInputs?: Record<string, unknown>;
   /**
    * Output from a previous run, carried forward on resume when the node had
-   * both output and interrupts. An engine-level parameter, deliberately not on
-   * {@link RunNodeOptions}: adk-python exposes the same capability on the
-   * `NodeRunner` constructor and no production caller passes it.
+   * both output and interrupts. On the engine seam rather than
+   * {@link RunNodeOptions}, matching adk-python's `NodeRunner` constructor; the
+   * consumer is `Workflow`'s resume path, which carries `prior.input` today.
    */
   priorOutput?: unknown;
   /** Unresolved interrupt ids from a previous run, carried forward on resume. */
@@ -262,11 +263,19 @@ async function runChildNode({
     let inputRecorded = false;
     while (!succeeded) {
       resetState(child);
-      // Inside the loop, because `resetState` clears exactly the fields prior
-      // state populates: applying it once before the loop would drop it on the
-      // second attempt. adk-python rebuilds the child context per attempt and
-      // re-applies it there for the same reason.
-      applyPriorState({child, priorOutput, priorInterruptIds});
+      // Per attempt, not once before the loop: `resetState` clears exactly
+      // these fields, and adk-python rebuilds the child context per attempt for
+      // the same reason. A carried-forward output was emitted last turn, so it
+      // must not be flushed again.
+      if (priorOutput !== undefined) {
+        child.output = priorOutput;
+        child.outputEmitted = true;
+      }
+      for (const id of priorInterruptIds ?? []) {
+        if (!child.interruptIds.includes(id)) {
+          child.interruptIds.push(id);
+        }
+      }
       child.attemptCount = nodeState.attemptCount;
       try {
         inputRecorded = await runAttempt({
@@ -488,45 +497,10 @@ function resetState(childNodeContext: NodeContext): void {
   }
 }
 
-interface ApplyPriorStateParams {
-  child: NodeContext;
-  priorOutput: unknown;
-  priorInterruptIds: readonly string[] | undefined;
-}
-
-/**
- * Restores the output and interrupt ids a previous turn left unresolved.
- *
- * The output is marked as already emitted: an event carried it last turn, so
- * {@link flushOutputAndDeltas} must not emit it a second time.
- */
-function applyPriorState({
-  child,
-  priorOutput,
-  priorInterruptIds,
-}: ApplyPriorStateParams): void {
-  if (priorOutput !== undefined) {
-    child.output = priorOutput;
-    child.outputEmitted = true;
-  }
-  for (const id of priorInterruptIds ?? []) {
-    if (!child.interruptIds.includes(id)) {
-      child.interruptIds.push(id);
-    }
-  }
-}
-
-/**
- * Whether an event carries something besides its output, and so must still
- * reach the stream once a delegating parent suppresses that output.
- *
- * Mirrors `_has_non_output_content` in `google/adk-python`
- * `workflow/_node_runner.py`.
- */
-function hasNonOutputContent(event: Event): boolean {
+/** Whether `actions` carries a state or artifact delta. */
+function hasDeltas({stateDelta, artifactDelta}: EventActions): boolean {
   return (
-    Object.keys(event.actions.stateDelta).length > 0 ||
-    Object.keys(event.actions.artifactDelta).length > 0
+    Object.keys(stateDelta).length > 0 || Object.keys(artifactDelta).length > 0
   );
 }
 
@@ -563,13 +537,10 @@ function drainDelta<T>(
  * Mirrors `_flush_deltas` in `google/adk-python` `workflow/_node_runner.py`.
  */
 function flushDeltas(event: Event, child: NodeContext): void {
-  const {stateDelta, artifactDelta} = child.actions;
-  if (
-    Object.keys(stateDelta).length === 0 &&
-    Object.keys(artifactDelta).length === 0
-  ) {
+  if (!hasDeltas(child.actions)) {
     return;
   }
+  const {stateDelta, artifactDelta} = child.actions;
   event.actions.stateDelta = drainDelta(stateDelta, event.actions.stateDelta);
   event.actions.artifactDelta = drainDelta(
     artifactDelta,
@@ -606,10 +577,7 @@ function flushOutputAndDeltas({
     !child.outputEmitted &&
     !child.outputDelegated;
   const hasUnflushedRoute = child.route !== undefined && !child.routeEmitted;
-  const {stateDelta, artifactDelta} = child.actions;
-  const hasDeltas =
-    Object.keys(stateDelta).length > 0 || Object.keys(artifactDelta).length > 0;
-  if (!hasDeferredOutput && !hasUnflushedRoute && !hasDeltas) {
+  if (!hasDeferredOutput && !hasUnflushedRoute && !hasDeltas(child.actions)) {
     return;
   }
 
@@ -745,7 +713,9 @@ async function runOnce({
     if (event.output !== undefined) {
       child.output = event.output;
       if (child.outputDelegated) {
-        if (!hasNonOutputContent(event)) {
+        // Nothing but the output, which the delegate already emitted: drop the
+        // event entirely (adk-python `_has_non_output_content`).
+        if (!hasDeltas(event.actions)) {
           return;
         }
         event.output = undefined;

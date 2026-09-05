@@ -126,7 +126,9 @@ describe('node runner — output delegation', () => {
     const {child, events} = await driveNodeRunner(node);
 
     expect(child.output).toBe('delegated_value');
-    expect(events.filter((e) => e.output !== undefined)).toHaveLength(0);
+    // Nothing but the output, which the delegate already emitted: the event is
+    // dropped rather than emptied and pushed.
+    expect(events).toHaveLength(0);
   });
 
   it('test_delegated_ctx_output_not_emitted', async () => {
@@ -138,7 +140,7 @@ describe('node runner — output delegation', () => {
     const {child, events} = await driveNodeRunner(node);
 
     expect(child.output).toBe('delegated_direct');
-    expect(events.filter((e) => e.output !== undefined)).toHaveLength(0);
+    expect(events).toHaveLength(0);
   });
 
   it('test_delegated_output_preserves_event_details', async () => {
