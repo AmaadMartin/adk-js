@@ -261,6 +261,43 @@ describe('A2AAgentExecutor parity with adk-python', () => {
     );
   });
 
+  it('converts published artifact parts with the configured converter', async () => {
+    willYield([
+      createEvent({
+        author: 'test_agent',
+        content: {role: 'model', parts: [{text: 'original'}]},
+      }),
+    ]);
+
+    await new A2AAgentExecutor({
+      runner,
+      genAiPartConverter: () => ({kind: 'text', text: 'converted'}),
+    }).execute(requestContext(), eventBus);
+
+    const artifact = published[2];
+    if (artifact?.kind !== 'artifact-update') {
+      return expect.fail(`third published event is ${artifact?.kind}`);
+    }
+    expect((artifact.artifact.parts[0] as TextPart).text).toBe('converted');
+  });
+
+  it('drops an artifact whose parts the configured converter discards', async () => {
+    willYield([
+      createEvent({
+        author: 'test_agent',
+        content: {role: 'model', parts: [{text: 'original'}]},
+      }),
+    ]);
+
+    await new A2AAgentExecutor({
+      runner,
+      genAiPartConverter: () => undefined,
+    }).execute(requestContext(), eventBus);
+
+    // Submitted task, working, terminal: the artifact update had no parts.
+    expect(published).toHaveLength(3);
+  });
+
   it('test_resolve_runner_direct_instance', async () => {
     willYield([]);
 

@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  TaskArtifactUpdateEvent,
-  TaskStatusUpdateEvent,
-  TextPart,
-} from '@a2a-js/sdk';
+import {TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
 import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
@@ -305,92 +301,6 @@ describe('A2AAgentExecutor', () => {
         runConfig: {maxLlmCalls: 7, remoteDelivered: true},
       }),
     );
-  });
-
-  it('converts published artifact parts with the configured converter', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(mockSession);
-
-    async function* mockRunAsync() {
-      yield createEvent({
-        author: 'model',
-        content: {role: 'model', parts: [{text: 'original'}]},
-        partial: false,
-        actions: createEventActions(),
-      });
-    }
-
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
-
-    const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
-      genAiPartConverter: () => ({kind: 'text', text: 'converted'}),
-    });
-
-    await executor.execute(createRequestContext(), mockEventBus);
-
-    const artifactEvent = mockEventBus.publish.mock
-      .calls[2][0] as TaskArtifactUpdateEvent;
-    expect(artifactEvent.kind).toBe('artifact-update');
-    expect((artifactEvent.artifact.parts[0] as TextPart).text).toBe(
-      'converted',
-    );
-  });
-
-  it('drops an artifact whose parts the configured converter discards', async () => {
-    const mockSession = {
-      id: 'session-id',
-      userId: 'test-user',
-      appName: 'test-app',
-      events: [],
-      state: {},
-    } as unknown as Session;
-    mockSessionService.getSession.mockResolvedValue(mockSession);
-
-    async function* mockRunAsync() {
-      yield createEvent({
-        author: 'model',
-        content: {role: 'model', parts: [{text: 'original'}]},
-        partial: false,
-        actions: createEventActions(),
-      });
-    }
-
-    vi.mocked(Runner).mockImplementation(((config: RunnerConfig) => {
-      return {
-        appName: config?.appName,
-        sessionService: config?.sessionService,
-        runAsync: mockRunAsync,
-      } as unknown as Runner;
-    }) as unknown as () => Runner);
-
-    const executor = new A2AAgentExecutor({
-      runner: {
-        appName: 'test-app',
-        sessionService: mockSessionService,
-      } as unknown as RunnerConfig,
-      genAiPartConverter: () => undefined,
-    });
-
-    await executor.execute(createRequestContext(), mockEventBus);
-
-    // Task + working + terminal only: the artifact update carried no parts.
-    expect(mockEventBus.publish).toHaveBeenCalledTimes(3);
   });
 
   it('should fail cancelTask because it is not implemented', async () => {
