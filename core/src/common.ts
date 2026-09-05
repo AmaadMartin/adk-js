@@ -689,6 +689,8 @@ export type {
 } from './optimization/data_types.js';
 export {Sampler, isSampler} from './optimization/sampler.js';
 export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
+export {SimplePromptOptimizer} from './optimization/simple_prompt_optimizer.js';
+export type {SimplePromptOptimizerConfig} from './optimization/simple_prompt_optimizer.js';
 export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
 export type {
   BuildPlanningInstructionParams,
