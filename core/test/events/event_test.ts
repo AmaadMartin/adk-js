@@ -465,3 +465,38 @@ describe('Event Utils', () => {
     });
   });
 });
+
+describe('UI widget payload round trip', () => {
+  const widget = {
+    id: 'call-1',
+    provider: 'mcp',
+    payload: {
+      resource_uri: 'ui://charts/bar',
+      tool: {name: 'render_chart'},
+      tool_args: {series_data: [1, 2]},
+    },
+  };
+
+  it('keeps the snake_case payload keys through the snake_case transform', () => {
+    const event = createEvent({
+      actions: createEventActions({renderUiWidgets: [widget]}),
+    });
+
+    const actions = transformToSnakeCaseEvent(event).actions as Record<
+      string,
+      unknown
+    >;
+
+    expect(actions.render_ui_widgets).toEqual([widget]);
+  });
+
+  it('keeps the snake_case payload keys through the camelCase transform', () => {
+    const snakeEvent = transformToSnakeCaseEvent(
+      createEvent({actions: createEventActions({renderUiWidgets: [widget]})}),
+    );
+
+    const restored = transformToCamelCaseEvent(snakeEvent);
+
+    expect(restored.actions.renderUiWidgets).toEqual([widget]);
+  });
+});

@@ -12,6 +12,11 @@ import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer, OptionalPeer} from '../../utils/optional_peer.js';
 
+import {
+  createRecordingFetch,
+  mcpHttpDebugStorage,
+} from './http_debug_recorder.js';
+
 /**
  * The optional peer backing every MCP connection.
  *
@@ -115,7 +120,12 @@ export class MCPSessionManager {
           break;
         }
         case 'StreamableHTTPConnectionParams': {
-          const options = this.connectionParams.transportOptions ?? {};
+          // A copy, not the caller's object: `createSession` runs once per tool
+          // call and would otherwise wrap the recorder around itself again on
+          // every call, recording one exchange N times.
+          const options: StreamableHTTPClientTransportOptions = {
+            ...this.connectionParams.transportOptions,
+          };
 
           if (
             !options.requestInit &&
@@ -124,6 +134,16 @@ export class MCPSessionManager {
             options.requestInit = {
               headers: this.connectionParams.header as Record<string, string>,
             };
+          }
+
+          // Only when a caller asked for a recording: with no sink the
+          // transport options stay exactly as the caller configured them.
+          const sink = mcpHttpDebugStorage.getStore();
+          if (sink) {
+            options.fetch = createRecordingFetch(
+              options.fetch ?? globalThis.fetch,
+              sink,
+            );
           }
 
           const {StreamableHTTPClientTransport} = await loadOptionalPeer(

@@ -10,6 +10,8 @@ import {AuthConfig} from '../auth/auth_tool.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
+import {UiWidget} from './ui_widget.js';
+
 /**
  * Represents the actions attached to an event.
  */
@@ -71,6 +73,14 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * UI widgets a host should render alongside this event's response.
+   *
+   * Left `undefined` until something renders a widget, so an event that
+   * carries no widget stays a default actions object.
+   */
+  renderUiWidgets?: UiWidget[];
 }
 
 /**
@@ -116,7 +126,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.requestedToolConfirmations) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
-    actions.escalate === undefined
+    actions.escalate === undefined &&
+    actions.renderUiWidgets === undefined
   );
 }
 
@@ -132,6 +143,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
+ * 3. **`renderUiWidgets`** — concatenated in source order. Parallel function
+ *    responses each render their own widget, and last-writer-wins would drop
+ *    every widget but the last.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -179,6 +193,12 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.renderUiWidgets) {
+      result.renderUiWidgets = [
+        ...(result.renderUiWidgets ?? []),
+        ...source.renderUiWidgets,
+      ];
     }
   }
   return result;

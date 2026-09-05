@@ -28,6 +28,14 @@ export interface Logger {
   error(...args: unknown[]): void;
 
   setLogLevel(level: LogLevel): void;
+
+  /**
+   * Whether this logger would emit a message at `level`.
+   *
+   * Optional so an existing custom {@link Logger} keeps compiling. Callers
+   * should go through {@link isLogLevelEnabled}, which supplies the default.
+   */
+  isEnabledFor?(level: LogLevel): boolean;
 }
 
 class SimpleLogger implements Logger {
@@ -61,6 +69,10 @@ class SimpleLogger implements Logger {
 
   setLogLevel(level: LogLevel): void {
     this.logLevel = level;
+  }
+
+  isEnabledFor(level: LogLevel): boolean {
+    return this.logLevel <= level;
   }
 
   log(level: LogLevel, ...messages: unknown[]): void {
@@ -109,6 +121,9 @@ class SimpleLogger implements Logger {
  */
 class NoOpLogger implements Logger {
   setLogLevel(_level: LogLevel): void {}
+  isEnabledFor(_level: LogLevel): boolean {
+    return false;
+  }
   log(_level: LogLevel, ..._args: unknown[]): void {}
   debug(..._args: unknown[]): void {}
   info(..._args: unknown[]): void {}
@@ -144,6 +159,18 @@ export function resetLogger(): void {
  */
 export function setLogLevel(level: LogLevel) {
   logger.setLogLevel(level);
+}
+
+/**
+ * Whether the current logger would emit a message at `level`.
+ *
+ * Callers use this to skip work that only exists to produce a log record, such
+ * as capturing HTTP exchanges for a debug dump. A logger that cannot report its
+ * level answers `false`: turning capture on for a logger that will discard the
+ * result costs work and risks retaining data nobody reads.
+ */
+export function isLogLevelEnabled(level: LogLevel): boolean {
+  return currentLogger.isEnabledFor?.(level) ?? false;
 }
 
 /**
