@@ -8,11 +8,8 @@ import {AuthConfig} from '../../auth/auth_tool.js';
 import {SchemaLike} from '../../utils/schema.js';
 import {BaseNode, isBaseNode, START} from '../base_node.js';
 import {NodeLike} from '../graph.js';
-import {
-  AFTER_NODE_COPY,
-  NODE_BUILDERS,
-  PARALLEL_WORKER_FACTORY,
-} from '../node_builders.js';
+import {isWorkflowNode} from '../node.js';
+import {NODE_BUILDERS, PARALLEL_WORKER_FACTORY} from '../node_builders.js';
 import {prepareRetryConfig, RetryConfig} from '../retry_config.js';
 
 /**
@@ -69,50 +66,14 @@ export type ParallelWorkerFactory = (
  * Returns whether a value is a plain object literal (a `RoutingMap`) rather than
  * a class instance such as a node/tool/agent.
  */
-export function isPlainObject(value: unknown): boolean {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
-}
-
-/**
- * The complete key set of {@link BuildNodeOptions}.
- *
- * `satisfies Record<keyof BuildNodeOptions, true>` rejects both a missing key
- * and an unknown one, so the set cannot drift from the interface.
- */
-const BUILD_NODE_OPTION_KEYS: ReadonlySet<string> = new Set(
-  Object.keys({
-    name: true,
-    description: true,
-    rerunOnResume: true,
-    retryConfig: true,
-    timeout: true,
-    inputSchema: true,
-    outputSchema: true,
-    stateSchema: true,
-    authConfig: true,
-    isolationScope: true,
-    parallelWorker: true,
-    maxParallelWorkers: true,
-  } satisfies Record<keyof BuildNodeOptions, true>),
-);
-
-/**
- * Returns whether a value is a {@link BuildNodeOptions} literal.
- *
- * `node()` tells its two call forms apart by this, and "plain object" alone is
- * not enough to decide: `{name: 'a', runAsync: fn}` is a plain object too, and
- * has to reach {@link buildNode} so it is rejected as an unsupported node-like
- * value rather than read as options.
- */
-export function isBuildNodeOptions(value: unknown): value is BuildNodeOptions {
-  return (
-    isPlainObject(value) &&
-    Object.keys(value as object).every((key) => BUILD_NODE_OPTION_KEYS.has(key))
-  );
 }
 
 /**
@@ -245,6 +206,29 @@ const NODE_DECLARED_KEYS = ['authConfig'] as const satisfies ReadonlyArray<
   Exclude<keyof BuildNodeOptions, keyof BaseNode>
 >;
 
+/** Every key {@link BuildNodeOptions} declares, from the two lists above. */
+const BUILD_NODE_OPTION_KEYS: ReadonlySet<string> = new Set([
+  ...OVERRIDABLE_KEYS,
+  ...NODE_DECLARED_KEYS,
+  'parallelWorker',
+  'maxParallelWorkers',
+] satisfies ReadonlyArray<keyof BuildNodeOptions>);
+
+/**
+ * Returns whether a value is a {@link BuildNodeOptions} literal.
+ *
+ * `node()` tells its two call forms apart by this, and "plain object" alone is
+ * not enough to decide: `{name: 'a', runAsync: fn}` is a plain object too, and
+ * `node_api_test.ts` requires it to reach {@link buildNode} and be rejected as
+ * an unsupported node-like value rather than read as options.
+ */
+export function isBuildNodeOptions(value: unknown): value is BuildNodeOptions {
+  return (
+    isPlainObject(value) &&
+    Object.keys(value).every((key) => BUILD_NODE_OPTION_KEYS.has(key))
+  );
+}
+
 /**
  * Returns a copy of `node` with the given node properties replaced, or `node`
  * itself when nothing is being overridden.
@@ -309,7 +293,11 @@ function cloneWithOverrides(
         : undefined,
     });
   }
-  AFTER_NODE_COPY(clone);
+  if (isWorkflowNode(clone)) {
+    // The copy carries the original's wrapper, which fans out over the
+    // original. Discard it so the copy builds one around itself.
+    clone.rebuildParallelWorker();
+  }
   return clone;
 }
 
@@ -319,8 +307,8 @@ function cloneWithOverrides(
  *
  * Keeping the prototype keeps the node's class and behaviour, and copying own
  * properties carries the `BaseNode` brand over. The caller is responsible for
- * anything derived from a replaced property — see {@link cloneWithOverrides}
- * for `preparedRetryConfig` and {@link AFTER_NODE_COPY} for a parallel-worker
+ * anything derived from a replaced property — see {@link cloneWithOverrides},
+ * which recomputes `preparedRetryConfig` and rebuilds a parallel-worker
  * wrapper.
  */
 export function copyNodeWithPrototype<T extends BaseNode>(

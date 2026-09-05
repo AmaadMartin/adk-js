@@ -55,7 +55,7 @@ class CountingNode extends WorkflowNode<number, number> {
     this.counters = config.counters;
   }
 
-  protected override createParallelWorker(): BaseNode | undefined {
+  protected override createParallelWorker(): BaseNode {
     this.counters.built++;
     return super.createParallelWorker();
   }
@@ -69,17 +69,6 @@ class CountingNode extends WorkflowNode<number, number> {
   }
 }
 
-/** A node whose wrapper never gets built, to reach the dispatch guard. */
-class NoWorkerNode extends WorkflowNode<string, string> {
-  protected override createParallelWorker(): BaseNode | undefined {
-    return undefined;
-  }
-
-  protected async *runNodeImpl(_ctx: NodeContext, input: string) {
-    yield input;
-  }
-}
-
 describe('WorkflowNode — parallel worker', () => {
   it('sets rerunOnResume before the node runs', () => {
     // The engine reads the flag when it schedules the node, which is before
@@ -88,14 +77,6 @@ describe('WorkflowNode — parallel worker', () => {
       new NamingNode({name: 'eager', parallelWorker: true}).rerunOnResume,
     ).toBe(true);
     expect(new NamingNode({name: 'plain'}).rerunOnResume).toBe(false);
-  });
-
-  it('throws when the parallel worker was not built', async () => {
-    const missing = new NoWorkerNode({name: 'no_worker', parallelWorker: true});
-
-    await expect(driveNode(missing, ['x'])).rejects.toThrow(
-      'inner node is not initialized for parallel worker.',
-    );
   });
 
   it('bounds the fan-out with maxParallelWorkers', async () => {
