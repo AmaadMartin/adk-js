@@ -10,6 +10,7 @@ import {describe, expect, it} from 'vitest';
 import {
   getContents,
   getCurrentTurnContents,
+  insertModelInputContext,
   mergeFunctionResponseEvents,
   removeClientFunctionCallId,
 } from '../../../src/agents/processors/content_processor_utils.js';
@@ -1159,6 +1160,143 @@ describe('getContents', () => {
     expect(scraperContents[1].parts?.[0].text).toBe('For context:');
     expect(scraperContents[1].parts?.[1].text).toContain('research data');
     expect(scraperContents[2].parts?.[0].text).toBe('scraped output');
+  });
+});
+
+describe('getContents — rewind filtering', () => {
+  function userEvent(invocationId: string, text: string) {
+    return createEvent({
+      invocationId,
+      author: 'user',
+      content: {role: 'user', parts: [{text}]},
+    });
+  }
+
+  function modelEvent(invocationId: string, text: string) {
+    return createEvent({
+      invocationId,
+      author: 'agent',
+      content: {role: 'model', parts: [{text}]},
+    });
+  }
+
+  const rewoundHistory = [
+    userEvent('inv1', 'question one'),
+    modelEvent('inv1', 'answer one'),
+    userEvent('inv2', 'question two'),
+    modelEvent('inv2', 'answer two'),
+    createEvent({
+      invocationId: 'inv3',
+      author: 'user',
+      actions: {rewindBeforeInvocationId: 'inv2'},
+    }),
+    userEvent('inv3', 'question three'),
+  ];
+
+  it('drops the rewound turns from the returned contents', () => {
+    const contents = getContents(rewoundHistory, 'agent');
+
+    expect(contents.map((c) => c.parts?.[0].text)).toEqual([
+      'question one',
+      'answer one',
+      'question three',
+    ]);
+  });
+
+  it('honours a rewind from getCurrentTurnContents', () => {
+    // The turn anchors on the only user event, so the rewind marker and the
+    // invocation it annuls both sit inside the current-turn slice.
+    const contents = getCurrentTurnContents(
+      [
+        userEvent('inv1', 'question one'),
+        modelEvent('inv1', 'answer one'),
+        modelEvent('inv2', 'answer two'),
+        createEvent({
+          invocationId: 'inv3',
+          author: 'agent',
+          actions: {rewindBeforeInvocationId: 'inv2'},
+        }),
+      ],
+      'agent',
+    );
+
+    expect(contents.map((c) => c.parts?.[0].text)).toEqual([
+      'question one',
+      'answer one',
+    ]);
+  });
+});
+
+describe('insertModelInputContext', () => {
+  const userContent: Content = {role: 'user', parts: [{text: 'the question'}]};
+
+  it('inserts the block immediately before the user content', () => {
+    const contents: Content[] = [
+      {role: 'user', parts: [{text: 'earlier turn'}]},
+      {role: 'user', parts: [{text: 'the question'}]},
+    ];
+
+    insertModelInputContext(
+      contents,
+      [{role: 'user', parts: [{text: 'a document'}]}],
+      userContent,
+    );
+
+    expect(contents.map((c) => c.parts?.[0].text)).toEqual([
+      'earlier turn',
+      'a document',
+      'the question',
+    ]);
+  });
+
+  it('inserts at the front when the user content is absent', () => {
+    const contents: Content[] = [{role: 'user', parts: [{text: 'a reply'}]}];
+
+    insertModelInputContext(
+      contents,
+      [{role: 'user', parts: [{text: 'a document'}]}],
+      userContent,
+    );
+
+    expect(contents.map((c) => c.parts?.[0].text)).toEqual([
+      'a document',
+      'a reply',
+    ]);
+  });
+
+  it('inserts at the front when there is no user content at all', () => {
+    const contents: Content[] = [{role: 'user', parts: [{text: 'a reply'}]}];
+
+    insertModelInputContext(contents, [
+      {role: 'user', parts: [{text: 'a document'}]},
+    ]);
+
+    expect(contents.map((c) => c.parts?.[0].text)).toEqual([
+      'a document',
+      'a reply',
+    ]);
+  });
+
+  it('does nothing for an empty block', () => {
+    const contents: Content[] = [
+      {role: 'user', parts: [{text: 'the question'}]},
+    ];
+
+    insertModelInputContext(contents, [], userContent);
+
+    expect(contents).toHaveLength(1);
+  });
+
+  it('deep-copies the block so the caller keeps its own array', () => {
+    const block: Content[] = [{role: 'user', parts: [{text: 'a document'}]}];
+    const contents: Content[] = [
+      {role: 'user', parts: [{text: 'the question'}]},
+    ];
+
+    insertModelInputContext(contents, block, userContent);
+    contents[0].parts![0].text = 'edited';
+
+    expect(block[0].parts?.[0].text).toBe('a document');
   });
 });
 
