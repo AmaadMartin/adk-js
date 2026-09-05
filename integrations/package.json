@@ -45,10 +45,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@google-cloud/firestore": "^9.0.1",
+    "@google-cloud/firestore": "^8.7.1",
     "@google/adk": "^2.0.0"
-  },
-  "engines": {
-    "node": ">=22"
   }
 }

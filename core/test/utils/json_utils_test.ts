@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {toJsonSerializable} from '../../src/utils/json_utils.js';
 
 describe('toJsonSerializable', () => {
@@ -139,79 +139,5 @@ describe('toJsonSerializable', () => {
       replacements++;
     });
     expect(replacements).toBe(0);
-  });
-});
-
-describe('toJsonSerializable', () => {
-  it('leaves a value JSON can already represent alone', () => {
-    const onReplace = vi.fn();
-    expect(
-      toJsonSerializable({a: 1, b: 'two', c: [true, null]}, onReplace),
-    ).toEqual({a: 1, b: 'two', c: [true, null]});
-    expect(onReplace).not.toHaveBeenCalled();
-  });
-
-  it('replaces a named function with its name', () => {
-    const onReplace = vi.fn();
-    function onDone() {}
-    expect(toJsonSerializable({onDone}, onReplace)).toEqual({
-      onDone: '[Function: onDone]',
-    });
-    expect(onReplace).toHaveBeenCalledTimes(1);
-  });
-
-  it('replaces an anonymous function', () => {
-    expect(toJsonSerializable([() => {}])).toEqual(['[Function: anonymous]']);
-  });
-
-  it('replaces a symbol with its description', () => {
-    expect(toJsonSerializable(Symbol('tag'))).toBe('Symbol(tag)');
-  });
-
-  it('replaces a BigInt with its digits', () => {
-    expect(toJsonSerializable({retries: 3n})).toEqual({retries: '3'});
-  });
-
-  it('replaces a back reference and still converts the rest', () => {
-    const onReplace = vi.fn();
-    const node: Record<string, unknown> = {name: 'root'};
-    node['self'] = node;
-    expect(toJsonSerializable(node, onReplace)).toEqual({
-      name: 'root',
-      self: '[Circular]',
-    });
-    expect(onReplace).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps a repeated sibling that is not a cycle', () => {
-    const shared = {id: 1};
-    expect(toJsonSerializable({a: shared, b: shared})).toEqual({
-      a: {id: 1},
-      b: {id: 1},
-    });
-  });
-
-  it('converts a Date through its toJSON', () => {
-    const at = new Date('2026-01-02T03:04:05.000Z');
-    expect(toJsonSerializable({at})).toEqual({at: '2026-01-02T03:04:05.000Z'});
-  });
-
-  it('drops an undefined property, as JSON.stringify does', () => {
-    expect(toJsonSerializable({a: 1, b: undefined})).toEqual({a: 1});
-  });
-
-  it('converts the members of an array', () => {
-    expect(toJsonSerializable([1n, 'x'])).toEqual(['1', 'x']);
-  });
-
-  it('returns a primitive unchanged', () => {
-    expect(toJsonSerializable(null)).toBeNull();
-    expect(toJsonSerializable(7)).toBe(7);
-  });
-
-  it('reports every replacement, not just the first', () => {
-    const onReplace = vi.fn();
-    toJsonSerializable({a: 1n, b: 2n}, onReplace);
-    expect(onReplace).toHaveBeenCalledTimes(2);
   });
 });

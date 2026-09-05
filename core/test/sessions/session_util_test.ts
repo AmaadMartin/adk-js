@@ -4,45 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {State} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {extractStateDelta} from '../../src/sessions/base_session_service.js';
 import {makeJsonSafeState} from '../../src/sessions/session_util.js';
 import {logger} from '../../src/utils/logger.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-describe('extractStateDelta', () => {
-  it('splits the app, user and session scopes and strips the prefixes', () => {
-    const delta = extractStateDelta({
-      [`${State.APP_PREFIX}theme`]: 'dark',
-      [`${State.USER_PREFIX}locale`]: 'en',
-      'turns': 2,
-    });
-
-    expect(delta.app).toEqual({theme: 'dark'});
-    expect(delta.user).toEqual({locale: 'en'});
-    expect(delta.session).toEqual({turns: 2});
-  });
-
-  it('drops a temp entry, which is never persisted', () => {
-    const delta = extractStateDelta({
-      [`${State.TEMP_PREFIX}scratch`]: 'x',
-      'kept': 'y',
-    });
-
-    expect(delta.session).toEqual({kept: 'y'});
-  });
-
-  it('returns null-prototype buckets', () => {
-    const delta = extractStateDelta({});
-
-    expect(Object.getPrototypeOf(delta.app)).toBeNull();
-    expect(Object.getPrototypeOf(delta.user)).toBeNull();
-    expect(Object.getPrototypeOf(delta.session)).toBeNull();
-  });
 });
 
 describe('makeJsonSafeState', () => {

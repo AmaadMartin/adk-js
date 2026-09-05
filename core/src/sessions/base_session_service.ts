@@ -97,6 +97,56 @@ export interface ListSessionsResponse {
   totalPages: number;
 }
 
+/** The pagination half of a {@link ListSessionsResponse}. */
+export type PaginationMeta = Pick<
+  ListSessionsResponse,
+  'page' | 'limit' | 'totalItems' | 'totalPages'
+>;
+
+/**
+ * Applies the `limit`/`offset`/`page` contract to an ordered session list.
+ *
+ * Every session service reports the same pagination metadata, so they share
+ * this. Omitting `limit` returns a single page holding everything after
+ * `offset`. `page` takes precedence over `offset`, as
+ * {@link ListSessionsRequest} says.
+ *
+ * @param sessions The full ordered result set.
+ * @param request The request whose pagination fields to apply.
+ * @return The requested slice, and the metadata describing it.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  {limit, offset, page}: ListSessionsRequest,
+): {sessions: Session[]; meta: PaginationMeta} {
+  const totalItems = sessions.length;
+
+  if (limit === undefined) {
+    return {
+      sessions: offset ? sessions.slice(offset) : sessions,
+      meta: {
+        page: 1,
+        limit: totalItems,
+        totalItems,
+        totalPages: totalItems === 0 ? 0 : 1,
+      },
+    };
+  }
+
+  const start = page !== undefined ? (page - 1) * limit : (offset ?? 0);
+  const effectivePage =
+    page ?? (limit === 0 ? 1 : Math.floor(start / limit) + 1);
+  return {
+    sessions: sessions.slice(start, start + limit),
+    meta: {
+      page: effectivePage,
+      limit,
+      totalItems,
+      totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
+    },
+  };
+}
+
 /**
  * Base class for session services.
  *
