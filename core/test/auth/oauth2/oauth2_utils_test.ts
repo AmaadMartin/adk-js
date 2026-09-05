@@ -13,6 +13,7 @@ import {
   fetchOAuth2Tokens,
   getTokenEndpoint,
   isTokenExpired,
+  normalizeAuthUri,
   parseAuthorizationCode,
   RefreshTokenParams,
 } from '../../../src/auth/oauth2/oauth2_utils.js';
@@ -170,6 +171,32 @@ describe('oauth2_utils', () => {
         ),
       ).rejects.toThrow('SSRF protection');
       expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('normalizeAuthUri', () => {
+    it('returns undefined for undefined', () => {
+      expect(normalizeAuthUri(undefined)).toBeUndefined();
+    });
+
+    it('leaves a uri with no fragment unchanged', () => {
+      expect(normalizeAuthUri('https://cb?code=a')).toBe('https://cb?code=a');
+    });
+
+    it("drops a trailing '#'", () => {
+      expect(normalizeAuthUri('https://cb?code=a#')).toBe('https://cb?code=a');
+    });
+
+    it("drops only one '#'", () => {
+      expect(normalizeAuthUri('https://cb?code=a##')).toBe(
+        'https://cb?code=a#',
+      );
+    });
+
+    it('leaves a non-empty fragment unchanged', () => {
+      expect(normalizeAuthUri('https://cb?code=a#frag')).toBe(
+        'https://cb?code=a#frag',
+      );
     });
   });
 
