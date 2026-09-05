@@ -18,12 +18,33 @@ class TestExecutor extends BaseCodeExecutor {
   }
 }
 
+/** A subclass that picks its own deadline, as adk-python's subclasses do. */
+class DeadlineExecutor extends BaseCodeExecutor {
+  constructor() {
+    super();
+    this.timeoutSeconds = 120;
+  }
+
+  async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    return {stdout: '', stderr: '', outputFiles: []};
+  }
+}
+
 describe('BaseCodeExecutor', () => {
   it('should have default values', () => {
     const executor = new TestExecutor();
     expect(executor.optimizeDataFile).toBe(false);
     expect(executor.stateful).toBe(false);
     expect(executor.errorRetryAttempts).toBe(2);
+  });
+
+  it('defaults timeoutSeconds to undefined', () => {
+    expect(new TestExecutor().timeoutSeconds).toBeUndefined();
+  });
+
+  it('lets a subclass set timeoutSeconds', () => {
+    const executor: BaseCodeExecutor = new DeadlineExecutor();
+    expect(executor.timeoutSeconds).toBe(120);
   });
 
   it('should have default delimiters', () => {
