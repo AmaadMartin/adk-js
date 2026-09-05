@@ -12,6 +12,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -31,7 +32,7 @@ import {
   Session,
   ToolProcessLlmRequest,
 } from '@google/adk';
-import {Content, Schema, Type} from '@google/genai';
+import {Content, Environment, Schema, Type} from '@google/genai';
 import {
   afterEach,
   beforeEach,
@@ -1427,5 +1428,101 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent toolset request processing', () => {
+  /** A model that records the request it was asked to answer. */
+  class RecordingLlm extends BaseLlm {
+    readonly requests: LlmRequest[] = [];
+
+    constructor() {
+      super({model: 'recording-llm'});
+    }
+
+    async *generateContentAsync(
+      request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.requests.push(request);
+      yield {content: {role: 'model', parts: [{text: 'done'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  /** The one tool RecordingToolset exposes, which records its own turn. */
+  class RecordedTool extends BaseTool {
+    constructor(private readonly order: string[]) {
+      super({name: 'recorded_tool', description: 'A recorded tool.'});
+    }
+
+    async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
+      return {};
+    }
+
+    override async processLlmRequest(
+      params: ToolProcessLlmRequest,
+    ): Promise<void> {
+      this.order.push('tool');
+      params.llmRequest.toolsDict[this.name] = this;
+    }
+  }
+
+  /** A toolset that records the order it and its tool processed the request. */
+  class RecordingToolset extends BaseToolset {
+    readonly order: string[] = [];
+
+    constructor() {
+      super([]);
+    }
+
+    override async getTools(): Promise<BaseTool[]> {
+      return [new RecordedTool(this.order)];
+    }
+
+    override async close(): Promise<void> {}
+
+    override async processLlmRequest(
+      _toolContext: Context,
+      llmRequest: LlmRequest,
+    ): Promise<void> {
+      this.order.push('toolset');
+      llmRequest.config = llmRequest.config ?? {};
+      llmRequest.config.tools = [
+        ...(llmRequest.config.tools ?? []),
+        {computerUse: {environment: Environment.ENVIRONMENT_BROWSER}},
+      ];
+    }
+  }
+
+  it('runs a toolset before its own tools, and applies what it set', async () => {
+    const toolset = new RecordingToolset();
+    const model = new RecordingLlm();
+    const agent = new LlmAgent({
+      name: 'toolset_agent',
+      model,
+      tools: [toolset],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_toolset',
+      session: createSession({
+        id: 'sess_toolset',
+        appName: 'toolset_app',
+        userId: 'test_user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _event of agent.runAsync(invocationContext)) {
+      // Drain the turn.
+    }
+
+    expect(toolset.order).toEqual(['toolset', 'tool']);
+    expect(model.requests[0].config?.tools).toContainEqual({
+      computerUse: {environment: Environment.ENVIRONMENT_BROWSER},
+    });
   });
 });
