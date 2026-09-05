@@ -225,23 +225,25 @@ describe('toSerializable', () => {
     });
   });
 
+  // toStrictEqual, not toEqual: toEqual ignores the prototype, so a Report
+  // that was never dumped still matches a plain {title} object.
   it('dumps an object exposing toJSON()', () => {
-    expect(toSerializable(new Report('top'))).toEqual({title: 'top'});
+    expect(toSerializable(new Report('top'))).toStrictEqual({title: 'top'});
   });
 
   it('dumps a toJSON() object nested in an array and in a plain object', () => {
-    expect(toSerializable([new Report('a'), new Report('b')])).toEqual([
+    expect(toSerializable([new Report('a'), new Report('b')])).toStrictEqual([
       {title: 'a'},
       {title: 'b'},
     ]);
-    expect(toSerializable({latest: new Report('c')})).toEqual({
+    expect(toSerializable({latest: new Report('c')})).toStrictEqual({
       latest: {title: 'c'},
     });
   });
 
   it('recurses into what toJSON() returns', () => {
     const wrapper = {toJSON: () => ({inner: new Report('deep')})};
-    expect(toSerializable(wrapper)).toEqual({inner: {title: 'deep'}});
+    expect(toSerializable(wrapper)).toStrictEqual({inner: {title: 'deep'}});
   });
 
   it('returns a Map and a Set as they are', () => {
