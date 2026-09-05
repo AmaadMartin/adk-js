@@ -157,3 +157,9 @@ error naming the feature and the install command.
 Every call builds its own client and drops it. Two end users of one agent hold
 different credentials, so a cached client would serve one user's buckets to
 another. `close()` therefore has nothing to release and resolves immediately.
+
+The credential is adapted on its way to the client. `@google-cloud/storage@7`
+pins `google-auth-library@^9` and ADK pins `^10`, so npm keeps two copies, and
+the two report request headers differently. ADK converts between them. You do
+not have to do anything about this, but it is why the object the storage client
+holds is not the credential you passed in.
