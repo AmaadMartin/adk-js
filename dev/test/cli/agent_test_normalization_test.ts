@@ -233,6 +233,13 @@ describe('makeSortKey', () => {
     expect(ordered.map((event) => event['author'])).toEqual(['a', 'ab']);
   });
 
+  it('keeps two events with the same key in their original order', () => {
+    const first = {author: 'a', seq: 1};
+    const second = {author: 'a', seq: 1};
+
+    expect(sortBySortKey([first, second])).toEqual([first, second]);
+  });
+
   it('reads a missing author and a non-string node path as empty', () => {
     expect(makeSortKey({nodeInfo: {path: 42}}).startsWith('\u0000\u0000')).toBe(
       true,
@@ -433,6 +440,31 @@ describe('normalizeIds', () => {
 
     expect(normalized.content?.parts?.[0]?.functionCall?.id).toBe('fc-1');
     expect(normalized.longRunningToolIds).toEqual(['kept']);
+  });
+
+  it('cannot pair a response with a call that has no name', () => {
+    const events = [
+      createEvent({
+        author: 'agent',
+        content: {role: 'model', parts: [{functionCall: {id: 'random-1'}}]},
+      }),
+      createEvent({
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {functionResponse: {name: 'roll', response: {}}},
+            {functionResponse: {response: {}}},
+          ],
+        },
+      }),
+    ];
+
+    const normalized = normalizeIds(events);
+
+    const responses = normalized[1].content?.parts ?? [];
+    expect(responses[0].functionResponse?.id).toBeUndefined();
+    expect(responses[1].functionResponse?.id).toBeUndefined();
   });
 });
 
