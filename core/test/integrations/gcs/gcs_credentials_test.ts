@@ -121,13 +121,13 @@ describe('GCSCredentialsConfig token cache key', () => {
       clientSecret: 'def',
     });
 
-    expect(config.tokenCacheKey).toBe(GCS_TOKEN_CACHE_KEY);
+    expect(config.tokenCacheKey).toBe('gcs_token_cache');
   });
 
   it('is set for a pre-built client', () => {
     const config = new GCSCredentialsConfig({credentials: genericClient()});
 
-    expect(config.tokenCacheKey).toBe(GCS_TOKEN_CACHE_KEY);
+    expect(config.tokenCacheKey).toBe('gcs_token_cache');
   });
 
   it('is set for an external access token key', () => {
@@ -135,7 +135,7 @@ describe('GCSCredentialsConfig token cache key', () => {
       externalAccessTokenKey: 'my_gcs_token',
     });
 
-    expect(config.tokenCacheKey).toBe(GCS_TOKEN_CACHE_KEY);
+    expect(config.tokenCacheKey).toBe('gcs_token_cache');
   });
 });
 
