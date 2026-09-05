@@ -13,7 +13,8 @@ owns three things the protocol does not:
 
 - **The session.** The executor maps the A2A `contextId` onto an ADK session,
   and the A2A caller onto the user id `A2A_USER_<contextId>`. One A2A context
-  is therefore one continuing conversation.
+  is therefore one continuing conversation. The session is loaded with its
+  event history, which the pause check below reads.
 - **The event translation.** Each ADK event with content becomes an A2A
   artifact update. The run then ends in exactly one terminal status event:
   `failed`, `input-required`, or `completed`.
@@ -71,10 +72,10 @@ A value that is none of those raises a `TypeError` naming what it received, so
 a misconfigured deployment fails at the boundary rather than deep inside the
 `Runner` constructor:
 
-- `Runner factory must return a Runner instance, got <type>` when a factory
-  returns the wrong thing.
-- `Runner must be a Runner instance or a callable that returns a Runner, got
-<type>` when the option itself is wrong.
+- When a factory returns the wrong thing:
+  `Runner factory must return a Runner or a runner config, got <type>`.
+- When the option itself is wrong:
+  `Runner must be a Runner instance or a callable that returns a Runner, got <type>`.
 
 ## Event metadata
 
@@ -96,8 +97,8 @@ Artifact updates carry more: the invocation id, the author, the branch, and any
 citation, grounding or usage metadata the ADK event had. The invocation keys
 are merged on top of those, never in place of them, so a client can read both.
 
-The extension URL is exported as `NEW_A2A_ADK_INTEGRATION_EXTENSION`. A Python
-peer publishes the same key with the same value.
+The extension URL is `https://google.github.io/adk-docs/a2a/a2a-extension/`. A
+Python peer publishes the same key with the same value.
 
 ## Failure modes
 
