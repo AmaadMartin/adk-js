@@ -9,13 +9,15 @@
  * full ADK barrel.
  *
  * This is the only entry point. `@google/adk` does not re-export it, so an
- * application that never reads Spanner does not carry `@google-cloud/spanner`
- * in its bundle.
+ * application that never reads or administers Spanner does not carry
+ * `@google-cloud/spanner` in its bundle.
  */
 
-// Only what a caller configuring or reading a `SpannerToolset` names. The
-// validators run from the constructor, and the tool definitions, the name
-// prefix and the credentials manager stay internal to this module.
+// Only what a caller configuring or reading a `SpannerToolset` or a
+// `SpannerAdminToolset` names. The validators run from the constructor, and
+// the tool definitions, the name prefix and the credentials manager stay
+// internal to this module.
+export * from './admin_toolset.js';
 export type {SpannerAuthClient} from './client.js';
 export {
   APPROXIMATE_NEAREST_NEIGHBORS,

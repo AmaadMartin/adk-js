@@ -57,9 +57,10 @@ export class SpannerCredentialsConfig extends BaseGoogleCredentialsConfig {
 }
 
 /**
- * How the Spanner tools obtain credentials, as `SpannerToolset` accepts them.
- * Exactly one of three shapes is valid, which TypeScript cannot express, so
- * the {@link SpannerToolset} constructor enforces it at runtime:
+ * How the Spanner tools obtain credentials, as `SpannerToolset` and
+ * `SpannerAdminToolset` accept them. Exactly one of three shapes is valid,
+ * which TypeScript cannot express, so each toolset constructor enforces it at
+ * runtime:
  *
  *   1. `authClient` alone — one identity for every end user.
  *   2. `externalAccessTokenKey` alone — a token another component already
