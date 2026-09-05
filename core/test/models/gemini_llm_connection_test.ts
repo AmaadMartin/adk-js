@@ -244,6 +244,67 @@ describe('GeminiLlmConnection', () => {
     });
   });
 
+  describe('sendAudioStreamEnd', () => {
+    it('should send audioStreamEnd client message', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      await connection.sendAudioStreamEnd();
+      expect(mockSession.sendRealtimeInput).toHaveBeenCalledWith({
+        audioStreamEnd: true,
+      });
+    });
+  });
+
+  describe('sendContent partial turns', () => {
+    it('should leave the turn open for a partial update', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'half a '}]};
+
+      await connection.sendContent(content, true);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: false,
+      });
+    });
+
+    it('should keep sendClientContent for a partial Gemini 3.x text turn', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-3.1-flash-live',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'half a '}]};
+
+      await connection.sendContent(content, true);
+
+      expect(mockSession.sendRealtimeInput).not.toHaveBeenCalled();
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: false,
+      });
+    });
+
+    it('should complete the turn for an explicit partial false', async () => {
+      const connection = new GeminiLlmConnection(
+        mockSession,
+        'gemini-2.5-flash',
+      );
+      const content: Content = {role: 'user', parts: [{text: 'whole turn'}]};
+
+      await connection.sendContent(content, false);
+
+      expect(mockSession.sendClientContent).toHaveBeenCalledWith({
+        turns: [content],
+        turnComplete: true,
+      });
+    });
+  });
+
   describe('close', () => {
     it('should close the session', async () => {
       const connection = new GeminiLlmConnection(
