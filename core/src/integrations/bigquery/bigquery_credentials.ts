@@ -20,17 +20,6 @@ export const BIGQUERY_SCOPES: readonly string[] = [
 ];
 
 /**
- * The BigQuery scope on its own.
- *
- * Despite its name this is not the default; {@link BIGQUERY_SCOPES} is.
- * adk-python publishes both constants and applies {@link BIGQUERY_SCOPES}, so
- * the two stay distinct here rather than collapsed into one.
- */
-export const BIGQUERY_DEFAULT_SCOPE: readonly string[] = [
-  'https://www.googleapis.com/auth/bigquery',
-];
-
-/**
  * How a BigQuery tool obtains credentials (experimental).
  *
  * The config defaults its scopes to {@link BIGQUERY_SCOPES} and caches the
