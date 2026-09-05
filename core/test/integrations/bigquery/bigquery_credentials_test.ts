@@ -34,7 +34,10 @@ function expectNoMode(build: () => unknown): void {
 
 // Ported from adk-python
 // tests/unittests/integrations/bigquery/test_bigquery_credentials.py @ main.
-// Each `it()` string is the Python test name, verbatim.
+// Each `it()` string is the Python test name, verbatim. 8 of the reference's 9
+// tests port. `test_invalid_property_raises_error` does not: it asserts
+// pydantic's `extra="forbid"`, and the base class runs no equivalent key check,
+// so no runtime assertion can observe the guarantee.
 describe('BigQueryCredentialsConfig ported reference tests', () => {
   it('test_valid_credentials_object_auth_credentials', () => {
     const credentials = genericClient();
@@ -133,22 +136,6 @@ describe('BigQueryCredentialsConfig ported reference tests', () => {
 
   it('test_empty_configuration_raises_error', () => {
     expectNoMode(() => new BigQueryCredentialsConfig());
-  });
-
-  it('test_invalid_property_raises_error', () => {
-    // pydantic's `extra="forbid"` rejects an unknown field at runtime.
-    // TypeScript rejects it at compile time instead: the base class assigns
-    // whatever object it is handed, so this is the only place the guarantee
-    // can be pinned.
-    const build = () =>
-      new BigQueryCredentialsConfig({
-        clientId: 'test_client_id',
-        clientSecret: 'test_client_secret',
-        // @ts-expect-error `nonExistentField` is not a GoogleCredentialsConfigOptions member.
-        nonExistentField: 'some value',
-      });
-
-    expect(build().clientId).toBe('test_client_id');
   });
 });
 
