@@ -315,8 +315,9 @@ async function getAdkSession(
   // Fetched with its full event history, unlike adk-python's
   // `_resolve_session`, which passes `num_recent_events=0` because it only
   // probes for existence. These events feed `getUnansweredRequestEvent`, which
-  // decides whether a pending human-in-the-loop request is still open.
-  // Suppressing the history would blind that gate.
+  // decides whether a pending human-in-the-loop request is still open. Asking
+  // for no events would blind that gate: VertexAiSessionService returns an
+  // event-less session for `numRecentEvents: 0`.
   const session = await sessionService.getSession({
     appName,
     userId,
