@@ -53,9 +53,15 @@ export const PARENT_REQUIRES_SINGLE_TURN_MESSAGE =
 /**
  * The composition mode an {@link AntigravityAgent} runs in under an ADK parent.
  *
- * `'single_turn'` is what allows this agent to have a parent at all: the parent
- * composes the task, session history is not forwarded, and each call is an
- * independent conversation.
+ * `'single_turn'` is what allows this agent to have a parent at all. Each call
+ * is an independent conversation: no conversation id is stored, and the id an
+ * earlier turn stored is not read back.
+ *
+ * What supplies the request differs from adk-python. As a workflow node the
+ * parent composes it, and the node input becomes the prompt. In an agent tree
+ * it is still `ctx.userContent`, because adk-js has no `_SingleTurnAgentTool`
+ * equivalent: an `LlmAgent` parent neither exposes a single-turn child as an
+ * inline `request` tool nor excludes it from its transfer targets.
  */
 export type AntigravityAgentMode = 'single_turn';
 
@@ -465,7 +471,10 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
       author: this.name,
       branch: ctx.branch,
       actions: {
-        stateDelta: {[this.conversationIdStateKey()]: conversationId},
+        // `null`, not `undefined`, so the clearing entry survives being
+        // serialized with the event and replayed. Both read back as "no stored
+        // id", but `JSON.stringify` drops an `undefined` value.
+        stateDelta: {[this.conversationIdStateKey()]: conversationId ?? null},
       },
     });
   }

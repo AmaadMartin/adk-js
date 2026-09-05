@@ -38,6 +38,33 @@ import {
 
 const CLIENT_CALL_ID = 'call_1';
 
+/**
+ * The trajectories this stand-in has kept, keyed by conversation id.
+ *
+ * A real local harness keeps them under `saveDir`, and that is what lets a
+ * later turn resume an earlier conversation. Modelling it matters: the wrapper
+ * reads an empty history after a resume as the harness having silently dropped
+ * the conversation, and fails the turn. A config with no `saveDir` gets nothing
+ * back here, which is the forgetful setup the wrapper warns about.
+ */
+const savedTrajectories = new Map<string, AntigravityStep[]>();
+
+/** The steps this conversation already holds, from the turns before it. */
+function loadTrajectory(
+  config: AntigravityAgentConfig,
+  conversationId: string,
+): AntigravityStep[] {
+  if (!config.saveDir) {
+    return [];
+  }
+  let steps = savedTrajectories.get(conversationId);
+  if (!steps) {
+    steps = [];
+    savedTrajectories.set(conversationId, steps);
+  }
+  return steps;
+}
+
 /** The client tools the harness was given, i.e. the bridged ADK children. */
 function clientTools(config: AntigravityAgentConfig): AntigravityTool[] {
   return (config.tools ?? []).filter(
@@ -59,10 +86,12 @@ function postToolCallHooks(config: AntigravityAgentConfig): PostToolCallHook[] {
  * does, so the sample shows the whole round trip.
  */
 class StandInConversation implements SdkConversation {
-  readonly history: AntigravityStep[] = [];
   private prompt = '';
 
-  constructor(private readonly config: AntigravityAgentConfig) {}
+  constructor(
+    private readonly config: AntigravityAgentConfig,
+    readonly history: AntigravityStep[],
+  ) {}
 
   async send(prompt: string): Promise<void> {
     this.prompt = prompt;
@@ -120,9 +149,12 @@ class StandInAgent implements SdkAgent {
   readonly conversationId: string;
 
   constructor(config: AntigravityAgentConfig) {
-    this.conversation = new StandInConversation(config);
     // A real client mints an id, or reuses `config.conversationId` on a resume.
     this.conversationId = config.conversationId ?? 'sample-conversation-000000';
+    this.conversation = new StandInConversation(
+      config,
+      loadTrajectory(config, this.conversationId),
+    );
   }
 
   async connect(): Promise<SdkAgent> {
