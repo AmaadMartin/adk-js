@@ -92,6 +92,18 @@ describe('toSerializable', () => {
     expect(toSerializable(broken)).toBe(broken);
   });
 
+  it('propagates a throwing property getter', () => {
+    // Only toJSON() is guarded. A getter that throws is a defect in the value,
+    // and validateOutput turns it into a NodeSchemaValidationError naming the
+    // node, which beats silently storing the unflattened object.
+    const hostile = {
+      get boom(): unknown {
+        throw new Error('nope');
+      },
+    };
+    expect(() => toSerializable(hostile)).toThrow('nope');
+  });
+
   it('still flattens the rest of the tree when one toJSON throws', () => {
     const broken = {
       toJSON() {
