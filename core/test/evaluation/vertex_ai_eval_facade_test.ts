@@ -6,24 +6,24 @@
 
 import {
   AgentDetails,
-  ConversationScenario,
   EvalStatus,
   Invocation,
   InvocationEvents,
-  MultiTurnVertexAiEvalFacade,
   VertexAiEvalClient,
   VertexAiEvalRequest,
   VertexEvaluationResult,
 } from '@google/adk';
 import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
+// MultiTurnVertexAiEvalFacade is internal: adk-python keeps it private, so it
+// is not exported from the package root.
+import {MultiTurnVertexAiEvalFacade} from '../../src/evaluation/vertex_ai_eval_facade.js';
 
 function invocation(query: string, response: string): Invocation {
   return {
     invocationId: '',
     userContent: {parts: [{text: query}]},
     finalResponse: {parts: [{text: response}]},
-    creationTimestamp: 0,
   };
 }
 
@@ -39,7 +39,6 @@ function turn(options: {
     invocationId: options.id,
     userContent: {parts: [{text: options.query}]},
     finalResponse: {parts: [{text: options.response}]},
-    creationTimestamp: 0,
     intermediateData: options.intermediateData,
     appDetails: options.agentDetails
       ? {agentDetails: options.agentDetails}
@@ -64,11 +63,6 @@ class FakeEvalClient implements VertexAiEvalClient {
 function scored(meanScore: number): VertexEvaluationResult {
   return {summaryMetrics: [{meanScore}]};
 }
-
-const SCENARIO: ConversationScenario = {
-  startingPrompt: 'book me a table',
-  conversationPlan: 'ask for a table, then change the time',
-};
 
 describe('MultiTurnVertexAiEvalFacade', () => {
   const TOOLS: Tool[] = [
@@ -280,19 +274,5 @@ describe('MultiTurnVertexAiEvalFacade', () => {
     expect(client.requests[0].dataset.evalCases?.[0].agentData.agents).toEqual(
       {},
     );
-  });
-
-  it('accepts and ignores a conversation scenario', async () => {
-    const withScenario = new FakeEvalClient([scored(0.9)]);
-    const withoutScenario = new FakeEvalClient([scored(0.9)]);
-
-    await facadeWith(withScenario).evaluateInvocations(
-      conversation(),
-      undefined,
-      SCENARIO,
-    );
-    await facadeWith(withoutScenario).evaluateInvocations(conversation());
-
-    expect(withScenario.requests).toEqual(withoutScenario.requests);
   });
 });

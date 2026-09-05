@@ -107,15 +107,16 @@ result and sends no request.
 Golden invocations are optional. When you pass them, the two lists must have
 the same length, or the returned promise rejects with `InputValidationError`.
 
-`evaluateInvocations` also accepts a `ConversationScenario`. This metric ignores
-it; the parameter is on the shared `Evaluator` contract so that one caller
-drives a scenario-aware metric and this one.
-
 ## Differences from adk-python
 
 - `adk-python` builds a Vertex AI client from `GOOGLE_CLOUD_PROJECT` and
   `GOOGLE_CLOUD_LOCATION`. Here you supply the client, so ADK reads no
   credentials.
+- `adk-python`'s `Evaluator` contract carries a third `conversation_scenario`
+  argument, for metrics that grade how closely an agent followed a simulated
+  user's plan. `adk-js` has no such metric yet, so its contract stops at the
+  golden invocations. It is an optional argument, so a scenario-aware metric
+  can add it back without breaking a caller.
 - `adk-python` registers this evaluator in its metric evaluator registry, so an
   eval config naming `multi_turn_trajectory_quality_v1` resolves to it. Here it
   is not registered, because the registry seeds only metrics that need no

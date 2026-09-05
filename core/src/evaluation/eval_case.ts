@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, GroundingMetadata} from '@google/genai';
+import {Content} from '@google/genai';
 
 import {AppDetails} from './app_details.js';
 
@@ -17,9 +17,6 @@ export interface InvocationEvent {
   author: string;
 
   content?: Content;
-
-  /** The grounding metadata the model attached to the event. */
-  groundingMetadata?: GroundingMetadata;
 }
 
 /** Events that occurred during one invocation. */
@@ -38,11 +35,6 @@ export interface Invocation {
 
   /** The route the agent took to reach {@link finalResponse}. */
   intermediateData?: InvocationEvents;
-
-  /**
-   * Creation time in seconds since the epoch, for debugging. Defaults to 0.
-   */
-  creationTimestamp?: number;
 
   /** Details about the app that served this invocation. */
   appDetails?: AppDetails;
