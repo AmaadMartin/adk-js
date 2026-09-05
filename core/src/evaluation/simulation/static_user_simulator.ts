@@ -6,7 +6,7 @@
 
 import {Event} from '../../events/event.js';
 import {Invocation} from '../eval_case.js';
-import {Evaluator} from '../evaluator.js';
+import type {Evaluator} from '../evaluator.js';
 import {
   NextUserMessage,
   UserSimulator,

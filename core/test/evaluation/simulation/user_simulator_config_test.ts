@@ -72,8 +72,15 @@ describe('parseBaseUserSimulatorConfig', () => {
     );
   });
 
-  it('rejects a value that is not an object at all', () => {
-    expect(() => parseBaseUserSimulatorConfig('not a config')).toThrow(
+  it.each([
+    ['a string', 'not a config'],
+    ['a number', 7],
+    ['null', null],
+  ])('rejects %s, which is not an object at all', (_name, raw) => {
+    expect(() => parseBaseUserSimulatorConfig(raw)).toThrow(
+      InputValidationError,
+    );
+    expect(() => parseBaseUserSimulatorConfig(raw)).toThrow(
       'Expect config of type `BaseUserSimulatorConfig`.',
     );
   });
@@ -82,6 +89,14 @@ describe('parseBaseUserSimulatorConfig', () => {
     const error = captureError(() => parseBaseUserSimulatorConfig({type: 7}));
 
     expect(error.cause).toMatchObject({issues: [{path: ['type']}]});
+  });
+
+  it('keeps the schema error as the cause for a non-object', () => {
+    const error = captureError(() =>
+      parseBaseUserSimulatorConfig('not a config'),
+    );
+
+    expect(error.cause).toBeInstanceOf(z.ZodError);
   });
 });
 

@@ -198,3 +198,19 @@ await generateResponses({
   call.
 - The simulator ignores the conversation history it is given. The script is
   fixed, so the agent's replies cannot change what the user says next.
+
+## Failure modes
+
+Every rejection below is an `InputValidationError`.
+
+- A case that carries neither a `conversation` nor a `conversationScenario`:
+  `Neither static invocations nor conversation scenario provided in EvalCase.
+Provide exactly one.`
+- A case that carries both: `Both static invocations and conversation scenario
+provided in EvalCase. Provide exactly one.`
+- A scenario case whose config names no registered simulator: ``No
+UserSimulator registered for config type `<type>`. Register one via
+`registerUserSimulator()`. Currently registered: <types>.`` The list reads
+  `none` when the registry is empty.
+- A constructor argument that is not a config object: ``Expect config of type
+`BaseUserSimulatorConfig`.``
