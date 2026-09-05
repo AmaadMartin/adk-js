@@ -194,6 +194,16 @@ export class ParallelWorker extends BaseNode {
       });
     };
 
+    // A claimant notices a cancelled invocation at the top of its loop, but one
+    // parked on an in-flight item never gets there. Winding down from the
+    // signal itself is what bounds that case; `stopFanOut` is idempotent, so
+    // the abort it issues re-enters this listener harmlessly.
+    if (itemAbort.signal.aborted) {
+      stopFanOut();
+    } else {
+      itemAbort.signal.addEventListener('abort', stopFanOut, {once: true});
+    }
+
     const recordFailure = (index: number, error: unknown): void => {
       // An interrupt is a pause, not a failure. An error from an item this
       // fan-out itself cancelled is cancellation fallout, and must not outrank
