@@ -44,11 +44,29 @@ export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export {
-  TopSpanProcessor,
+  clearAgentEngineMetricsSetupCache,
+  getAgentEngineMetricsSetup,
   getPropagatedContext,
   isAgentEngine,
+  maybeInstallRequestMetricsMiddleware,
+  telemetryUserAgentHeaders,
+  TopSpanProcessor,
 } from './telemetry/agent_engine.js';
-export type {TraceContextHeaders} from './telemetry/agent_engine.js';
+export type {
+  ClosableResponse,
+  MetricsFlushingMiddleware,
+  MiddlewareCapableApp,
+  TraceContextHeaders,
+} from './telemetry/agent_engine.js';
+export {
+  buildRequestDrivenMetrics,
+  RequestDrivenMetricReader,
+} from './telemetry/agent_engine_metric_exporter.js';
+export type {
+  MetricsState,
+  RequestDrivenMetricReaderHooks,
+  RequestDrivenMetricReaderOptions,
+} from './telemetry/agent_engine_metric_exporter.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest

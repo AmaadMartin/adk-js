@@ -13,6 +13,9 @@ import {GoogleAuth} from 'google-auth-library';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
+import {getAgentEngineMetricsSetup} from './agent_engine.js';
+import {MIN_EXPORT_INTERVAL_MS} from './agent_engine_metric_exporter.js';
+import {createGcpMetricExporter} from './gcp_metric_exporter.js';
 import {OtelExportersConfig, OTelHooks} from './setup.js';
 
 const GCP_PROJECT_ERROR_MESSAGE =
@@ -47,17 +50,27 @@ async function createCloudTraceProcessor(
 async function createCloudMetricReader(
   projectId: string,
 ): Promise<PeriodicExportingMetricReader> {
-  const {MetricExporter} = await loadOptionalPeer(
-    {
-      packageName: '@google-cloud/opentelemetry-cloud-monitoring-exporter',
-      feature: 'getGcpExporters({enableMetrics: true})',
-    },
-    () => import('@google-cloud/opentelemetry-cloud-monitoring-exporter'),
-  );
   return new PeriodicExportingMetricReader({
-    exporter: new MetricExporter({projectId}),
-    exportIntervalMillis: 5000,
+    exporter: await createGcpMetricExporter(projectId),
+    exportIntervalMillis: MIN_EXPORT_INTERVAL_MS,
   });
+}
+
+/**
+ * Builds the metric reader and span processors Google Cloud export needs.
+ *
+ * On Agent Engine the request-driven reader replaces the periodic one, and
+ * brings the span processor that drives it.
+ */
+async function createMetricHooks(projectId: string): Promise<OTelHooks> {
+  const agentEngine = await getAgentEngineMetricsSetup();
+  if (agentEngine === undefined) {
+    return {metricReaders: [await createCloudMetricReader(projectId)]};
+  }
+  return {
+    metricReaders: [agentEngine.reader],
+    spanProcessors: [agentEngine.spanProcessor],
+  };
 }
 
 export async function getGcpExporters(
@@ -75,13 +88,16 @@ export async function getGcpExporters(
     return {};
   }
 
+  const metricHooks = enableMetrics
+    ? await createMetricHooks(projectId)
+    : {};
+
   return {
-    spanProcessors: enableTracing
-      ? [await createCloudTraceProcessor(projectId)]
-      : [],
-    metricReaders: enableMetrics
-      ? [await createCloudMetricReader(projectId)]
-      : [],
+    spanProcessors: [
+      ...(enableTracing ? [await createCloudTraceProcessor(projectId)] : []),
+      ...(metricHooks.spanProcessors ?? []),
+    ],
+    metricReaders: metricHooks.metricReaders ?? [],
     logRecordProcessors: [],
   };
 }
