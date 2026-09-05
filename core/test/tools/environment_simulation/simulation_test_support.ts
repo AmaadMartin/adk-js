@@ -53,6 +53,27 @@ class FakeSimulationLlm extends BaseLlm {
 
 LLMRegistry.register(FakeSimulationLlm);
 
+/** The model name whose answer arrives with parts that carry no text. */
+export const PARTLESS_SIMULATION_MODEL = 'partless-simulation-model';
+
+/** A model whose stream carries responses with nothing to read. */
+class PartlessSimulationLlm extends BaseLlm {
+  static override readonly supportedModels = [PARTLESS_SIMULATION_MODEL];
+
+  async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+    yield {};
+    yield {content: {role: 'model'}};
+    yield {content: {role: 'model', parts: [{}]}};
+    yield {content: {role: 'model', parts: [{text: '{"ok": true}'}]}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('The partless simulation model has no live connection.');
+  }
+}
+
+LLMRegistry.register(PartlessSimulationLlm);
+
 /**
  * Queues one answer for the next call to the fake model.
  *
