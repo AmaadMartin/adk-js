@@ -317,11 +317,7 @@ export {
   GoogleMapsGroundingTool,
 } from './tools/google_maps_grounding_tool.js';
 export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
-export {
-  GoogleTool,
-  GoogleToolStatus,
-  authorizationRequiredMessage,
-} from './tools/google_tool.js';
+export {GoogleTool, GoogleToolStatus} from './tools/google_tool.js';
 export type {
   GoogleToolErrorResponse,
   GoogleToolExecuteContext,

@@ -30,7 +30,14 @@ export interface GcsClientOptions {
   project?: string;
 }
 
-/** Copies a `Headers` into the plain object older callers expect. */
+/**
+ * Copies a `Headers` into the plain object the older contract expects.
+ *
+ * `Object.fromEntries` would say this in one line, but this repository's `lib`
+ * is `["ES2022", "DOM"]` with no `dom.iterable`, so the `Headers` type here
+ * declares neither `[Symbol.iterator]` nor `entries()`. `forEach` is the only
+ * accessor it does declare.
+ */
 function plainHeaders(headers: Headers): Record<string, string> {
   const plain: Record<string, string> = {};
   headers.forEach((value, key) => {
@@ -43,18 +50,21 @@ function plainHeaders(headers: Headers): Record<string, string> {
  * Adapts adk's auth client to the contract `@google-cloud/storage` expects.
  *
  * `@google-cloud/storage@7` pins `google-auth-library@^9` and adk pins `^10`,
- * so npm keeps two copies of it and the two disagree on two members.
+ * so npm keeps two copies and they disagree on `getRequestHeaders()`. v10
+ * resolves it to a WHATWG `Headers`, whose entries are not own enumerable
+ * properties. v9 merges the result with `Object.assign` (`googleauth.js`,
+ * `authorizeRequest`), which copies nothing off a `Headers`, so the
+ * `Authorization` header is dropped and every request goes out
+ * unauthenticated. Resolving to a plain object restores it.
  *
- * `getRequestHeaders()` is the one that matters. v10 resolves it to a WHATWG
- * `Headers`, whose entries are not own enumerable properties. v9 merges the
- * result with `Object.assign` (`googleauth.js`, `authorizeRequest`), which
- * copies nothing off a `Headers`, so the `Authorization` header is dropped and
- * every request goes out unauthenticated. Returning a plain object restores
- * it. `core/test/integrations/gcs/storage_auth_test.ts` pins this against the
- * real package over HTTP, because a mocked client cannot show it.
+ * `core/test/integrations/gcs/storage_auth_test.ts` is what guards this. It
+ * has to be: a mocked storage client cannot show a header reaching the wire,
+ * and the compiler does not reject the unadapted client either, because the
+ * two declarations are loose enough in both directions here.
  *
- * `gaxios` is the other: v10 renamed it to `transporter`. Nothing in the
- * storage stack reads it, but the v9 contract declares it.
+ * `gaxios` is v10's `transporter` under its old name. Nothing in the storage
+ * stack reads it, but the v9 contract declares it, so leaving it out is itself
+ * a type error.
  *
  * Delegation is through the prototype, so the adapter keeps the client's own
  * token refresh and the storage stack still reads every other member off it.
@@ -69,10 +79,12 @@ export function asStorageAuthClient(client: AuthClient): StorageAuthClient {
       plainHeaders(await client.getRequestHeaders(url)),
     gaxios: client.transporter,
   });
-  // The two copies of `gaxios`, the package, declare incompatible `Gaxios`
-  // types, so `transporter` cannot be made to satisfy both. It is the last
-  // difference between the copies, and the storage stack never reads it. The
-  // two members it does read are adapted above, under test.
+  // The two copies of the `gaxios` package declare incompatible `Gaxios`
+  // types, so `transporter` cannot satisfy both. The directive sits on the
+  // return because that is where the compiler reports it; a directive on the
+  // property is unused (TS2578) and the error stands. It therefore covers the
+  // adaptation above as well, which is why that is pinned by the test named
+  // above rather than by the compiler.
   // @ts-expect-error incompatible Gaxios types across two google-auth-library copies
   return adapter;
 }

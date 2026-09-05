@@ -11,31 +11,18 @@
  * `tools/google_api_tool`, so that an agent gets one integrated way to
  * administer Cloud Storage buckets, with the developer in control of the
  * credentials and of whether the agent may write at all.
+ *
+ * `GcsAdminToolset` is the entry point. The five bucket functions, the client
+ * factory and the auth shim it is built from stay internal: an application
+ * configures the toolset and the toolset calls them.
  */
 
-export {
-  createBucket,
-  deleteBucket,
-  getBucket,
-  listBuckets,
-  updateBucket,
-  type BucketOptions,
-  type CreateBucketOptions,
-  type GcsAdminToolResult,
-  type ListBucketsOptions,
-  type UpdateBucketOptions,
-} from './admin_tool.js';
+export {type GcsAdminToolResult} from './admin_tool.js';
 export {
   DEFAULT_GCS_TOOL_NAME_PREFIX,
   GcsAdminToolset,
   type GcsAdminToolsetOptions,
 } from './admin_toolset.js';
-export {
-  GCS_PEER,
-  GCS_USER_AGENT,
-  getGcsClient,
-  type GcsClientOptions,
-} from './client.js';
 export {
   GCS_DEFAULT_SCOPE,
   GCS_TOKEN_CACHE_KEY,

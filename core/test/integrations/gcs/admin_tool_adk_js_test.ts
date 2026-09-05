@@ -9,15 +9,17 @@
  * of the five tools, and the paging and patching branches.
  */
 
+// Not part of the package barrel: the toolset is the public surface, and
+// it is what calls these.
+import {OAuth2Client} from 'google-auth-library';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   createBucket,
   deleteBucket,
   getBucket,
   listBuckets,
   updateBucket,
-} from '@google/adk';
-import {OAuth2Client} from 'google-auth-library';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/integrations/gcs/admin_tool.js';
 
 import {gcsFakeHooks, resetGcsFakes, storageInstances} from './gcs_fakes.js';
 
