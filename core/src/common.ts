@@ -307,6 +307,15 @@ export type {
   ToolOptions,
 } from './tools/function_tool.js';
 export {getUserChoiceTool} from './tools/get_user_choice_tool.js';
+export type {
+  DiscoveryDocument,
+  DiscoveryMethod,
+  DiscoveryParameter,
+  DiscoveryResource,
+  DiscoverySchema,
+} from './tools/google_api_tool/discovery_document.js';
+export {GoogleApiTool} from './tools/google_api_tool/google_api_tool.js';
+export type {GoogleApiToolOptions} from './tools/google_api_tool/google_api_tool.js';
 export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
@@ -349,6 +358,11 @@ export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
 export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
+export type {
+  ClosableDispatcher,
+  DispatcherRequestInit,
+  HttpDispatcher,
+} from './utils/ssl_utils.js';
 export {Task} from './utils/task.js';
 export type {TaskExecutable} from './utils/task.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
@@ -389,6 +403,7 @@ export {
   RestApiTool,
   createRestApiTool,
 } from './tools/openapi_tool/rest_api_tool.js';
+export type {RestApiToolOptions} from './tools/openapi_tool/rest_api_tool.js';
 
 // Workflow (parity port of google/adk-python `google/adk/workflow`). Named
 // explicitly (not `export *`) so the top-level surface stays intentional and

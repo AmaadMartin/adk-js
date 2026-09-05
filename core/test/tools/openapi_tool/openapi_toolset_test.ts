@@ -6,12 +6,25 @@
 
 import {
   AuthCredentialTypes,
+  Context,
+  createSession,
+  HttpDispatcher,
+  InvocationContext,
   OpenApiSpecParser,
   OpenAPIToolset,
+  PluginManager,
   ReadonlyContext,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockedFunction,
+  vi,
+} from 'vitest';
 
 describe('OpenAPIToolset', () => {
   const mockSpec: OpenAPIV3.Document = {
@@ -442,5 +455,71 @@ describe('OpenApiSpecParser', () => {
       'multiProp'
     ] as OpenAPIV3.SchemaObject;
     expect(multiPropSchema.type).toEqual(['string', 'integer']);
+  });
+});
+
+describe('OpenAPIToolset dispatcher', () => {
+  const spec: OpenAPIV3.Document = {
+    openapi: '3.0.0',
+    info: {title: 'Test API', version: '1.0.0'},
+    servers: [{url: 'https://api.example.com'}],
+    paths: {
+      '/users': {
+        get: {
+          operationId: 'getUsers',
+          summary: 'Get users',
+          responses: {'200': {description: 'Successful response'}},
+        },
+      },
+    },
+  };
+
+  /** A dispatcher the application built itself. */
+  const dispatcher: HttpDispatcher = {dispatch: () => true};
+
+  const originalFetch = globalThis.fetch;
+  let fetchMock: MockedFunction<typeof globalThis.fetch>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response('{}', {headers: {'content-type': 'application/json'}}),
+    );
+    globalThis.fetch = fetchMock;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        session: createSession({id: 'test-session', appName: 'test-app'}),
+        pluginManager: new PluginManager(),
+      }),
+    });
+  }
+
+  /** Runs the toolset's only tool and returns the `fetch` options it sent. */
+  async function runTool(toolset: OpenAPIToolset) {
+    const [tool] = await toolset.getTools();
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+    return fetchMock.mock.calls[0][1] ?? {};
+  }
+
+  it('sends no dispatcher when the toolset sets none', async () => {
+    const init = await runTool(new OpenAPIToolset({specDict: spec}));
+
+    expect(init).not.toHaveProperty('dispatcher');
+  });
+
+  it('sends the dispatcher the toolset was built with', async () => {
+    const init = await runTool(
+      new OpenAPIToolset({specDict: spec, dispatcher}),
+    );
+
+    expect(init).toHaveProperty('dispatcher', dispatcher);
   });
 });
