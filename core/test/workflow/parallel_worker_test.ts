@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {Event} from '../../src/events/event.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
+import {resetLogger, setLogger} from '../../src/utils/logger.js';
 import {START} from '../../src/workflow/base_node.js';
 import {isNodeTimeoutError} from '../../src/workflow/errors.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
@@ -364,6 +365,327 @@ describe('ParallelWorker human-in-the-loop', () => {
       '1:auto',
       '2:ok',
       '3:auto',
+    ]);
+  });
+});
+
+// The suites below are ported from google/adk-python
+// tests/unittests/workflow/test_workflow_parallel_worker.py @ main. Each test
+// names the Python test it came from, so a reviewer can grep the original.
+describe('ParallelWorker cancellation', () => {
+  // test_parallel_worker_failure_propagates_and_cancels_others
+  it('propagates the failing item error and stops the ones in flight', async () => {
+    const completed: number[] = [];
+    let finishItemZero!: () => void;
+    const itemZeroDone = new Promise<void>((resolve) => {
+      finishItemZero = resolve;
+    });
+    let parkItemTwo!: () => void;
+    const itemTwoParked = new Promise<void>((resolve) => {
+      parkItemTwo = resolve;
+    });
+    let itemTwoCancelled = false;
+
+    // The interleaving is established by handshake rather than by racing
+    // sleeps: item 1 may only fail once item 0 has finished and item 2 is
+    // parked.
+    const inner = new FunctionNode(
+      'items',
+      async (ctx: NodeContext, n: number) => {
+        if (n === 0) {
+          completed.push(0);
+          finishItemZero();
+          return 'item-0_processed';
+        }
+        if (n === 1) {
+          await itemZeroDone;
+          await itemTwoParked;
+          throw new Error('item-1 failed');
+        }
+        parkItemTwo();
+        await new Promise<void>((resolve) => {
+          ctx.abortSignal?.addEventListener('abort', () => resolve(), {
+            once: true,
+          });
+          // Bounded, so a worker that never cancels this item fails the
+          // assertions below instead of hanging the runner.
+          setTimeout(resolve, 1000);
+        });
+        itemTwoCancelled = ctx.abortSignal?.aborted === true;
+        if (itemTwoCancelled) {
+          return undefined;
+        }
+        completed.push(2);
+        return 'item-2_processed';
+      },
+    );
+
+    await expect(
+      driveNode(new ParallelWorker(inner), [0, 1, 2]),
+    ).rejects.toThrow('item-1 failed');
+    expect(completed).toEqual([0]);
+    expect(itemTwoCancelled).toBe(true);
+  });
+
+  // test_parallel_worker_cancels_in_flight_items
+  it('cancels the items still in flight when the invocation is aborted', async () => {
+    const items = [0, 1];
+    const startItem: Array<() => void> = [];
+    const started = items.map(
+      (i) =>
+        new Promise<void>((resolve) => {
+          startItem[i] = resolve;
+        }),
+    );
+    const cancelled = new Set<number>();
+
+    const inner = new FunctionNode(
+      'hang',
+      async (ctx: NodeContext, i: number) => {
+        startItem[i]();
+        await new Promise<void>((resolve) => {
+          ctx.abortSignal?.addEventListener(
+            'abort',
+            () => {
+              cancelled.add(i);
+              resolve();
+            },
+            {once: true},
+          );
+          // Bounded, so an item left running fails the assertion below rather
+          // than hanging the runner.
+          setTimeout(resolve, 1000);
+        });
+        return `item-${i}_processed`;
+      },
+    );
+
+    const controller = new AbortController();
+    const run = driveNode(
+      new ParallelWorker(inner),
+      items,
+      createIc({}, controller.signal),
+    );
+    await Promise.all(started);
+    controller.abort();
+    const {output} = await run;
+
+    expect([...cancelled].sort()).toEqual(items);
+    // Aborted mid-flight, so no partial list is emitted.
+    expect(output).toBeUndefined();
+  });
+
+  // test_parallel_worker_gives_up_on_item_that_ignores_cancellation
+  it('gives up on an item that ignores its cancellation, and says so', async () => {
+    vi.useFakeTimers({shouldAdvanceTime: true});
+    const warnings: string[] = [];
+    setLogger({
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: (...args: unknown[]) => {
+        warnings.push(args.map((arg) => String(arg)).join(' '));
+      },
+      error: () => {},
+    });
+
+    let startItem!: () => void;
+    const started = new Promise<void>((resolve) => {
+      startItem = resolve;
+    });
+    let releaseItem!: () => void;
+    const released = new Promise<void>((resolve) => {
+      releaseItem = resolve;
+    });
+
+    const inner = new FunctionNode('stubborn', async (_c, item: string) => {
+      startItem();
+      // Never observes ctx.abortSignal: it keeps running past the cancellation
+      // until the test lets go.
+      await released;
+      return `${item}_processed`;
+    });
+
+    try {
+      const controller = new AbortController();
+      const run = driveNode(
+        new ParallelWorker(inner),
+        ['item1'],
+        createIc({}, controller.signal),
+      );
+      await started;
+      controller.abort();
+      // The first pass lets the worker cancel the item and arm its drain
+      // timer; the second fires it.
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(5000);
+      const {output} = await run;
+
+      expect(warnings.join('\n')).toContain('did not stop within');
+      expect(output).toBeUndefined();
+    } finally {
+      releaseItem();
+      resetLogger();
+      vi.useRealTimers();
+    }
+  });
+
+  // adk-js regression guard: the drain cap must not truncate a healthy fan-out.
+  it('does not cap a slow fan-out at the drain timeout', async () => {
+    vi.useFakeTimers({shouldAdvanceTime: true});
+    try {
+      const inner = new FunctionNode('slow', async (_c, n: number) => {
+        await new Promise((resolve) => setTimeout(resolve, 8000));
+        return n * 2;
+      });
+      const run = driveNode(new ParallelWorker(inner), [1, 2]);
+      await vi.advanceTimersByTimeAsync(8000);
+
+      expect((await run).output).toEqual([2, 4]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('ParallelWorker failure ordering', () => {
+  // test_parallel_worker_simultaneous_failures_raise_lowest_index
+  it('raises the lowest-index failure when items fail together', async () => {
+    // Item 1 rejects first in wall-clock order, so a worker that surfaced the
+    // first rejection it observed would surface item-1's error.
+    const inner = new FunctionNode('fail', async (_c, n: number) => {
+      if (n === 0) {
+        await Promise.resolve();
+      }
+      throw new Error(`item-${n} failed`);
+    });
+
+    for (let run = 0; run < 10; run++) {
+      await expect(
+        driveNode(new ParallelWorker(inner), [0, 1]),
+      ).rejects.toThrow('item-0 failed');
+    }
+  });
+
+  // test_parallel_worker_preserves_input_order_regardless_of_completion_order
+  it('preserves input order regardless of completion order', async () => {
+    const finished: number[] = [];
+    const inner = new FunctionNode('delayed', async (_c, n: number) => {
+      // Descending delays, so item 0 finishes last.
+      await new Promise((resolve) => setTimeout(resolve, (3 - n) * 10));
+      finished.push(n);
+      return `item${n}_res`;
+    });
+
+    const {output} = await driveNode(new ParallelWorker(inner), [0, 1, 2]);
+
+    expect(finished).toEqual([2, 1, 0]);
+    expect(output).toEqual(['item0_res', 'item1_res', 'item2_res']);
+  });
+});
+
+describe('ParallelWorker over a nested workflow', () => {
+  // test_parallel_worker_can_wrap_nested_workflow
+  it('maps a nested workflow across the list', async () => {
+    const nested = new Workflow({
+      name: 'nested',
+      edges: [
+        [
+          'START',
+          new FunctionNode(
+            'process',
+            (_c, item: string) => `${item}_processed`,
+          ),
+        ],
+      ],
+    });
+
+    const {output} = await driveNode(new ParallelWorker(nested), [
+      'item1',
+      'item2',
+    ]);
+
+    expect(output).toEqual(['item1_processed', 'item2_processed']);
+  });
+});
+
+describe('ParallelWorker human-in-the-loop under a concurrency limit', () => {
+  // test_parallel_worker_hitl_respects_parallel_workers_limits
+  it('keeps the limit across a pause, then completes on resume', async () => {
+    const started: string[] = [];
+    const inner = new FunctionNode(
+      'review',
+      (ctx: NodeContext, item: string) => {
+        started.push(item);
+        if (item !== 'item1') {
+          return `${item}_processed`;
+        }
+        const answer = ctx.resumeInputs['req_item1'];
+        return answer === undefined
+          ? new RequestInput({
+              interruptId: 'req_item1',
+              message: 'Input for item1',
+            })
+          : `item1_${String(answer)}`;
+      },
+      {rerunOnResume: true},
+    );
+
+    const wf = new Workflow({
+      name: 'pw_hitl_limit_wf',
+      dynamicEntry: async (ctx) => {
+        const worker = new ParallelWorker(inner, {maxParallelWorkers: 2});
+        const result = await ctx.runNode(worker, ['item1', 'item2', 'item3']);
+        return result.output;
+      },
+    });
+
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'u1',
+    });
+    const runner = new Runner({appName: 'test_app', agent: wf, sessionService});
+
+    const turn1: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: 'u1',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'go'}]},
+    })) {
+      turn1.push(event);
+    }
+
+    expect(turn1.some(hasRequestInputFunctionCall)).toBe(true);
+    // The limit of 2 holds across the pause: item3 was never claimed.
+    expect(started).toEqual(['item1', 'item2']);
+    expect(turn1.some((e) => Array.isArray(e.output))).toBe(false);
+
+    const turn2: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: 'u1',
+      sessionId: session.id,
+      newMessage: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              id: 'req_item1',
+              name: 'adk_request_input',
+              response: {result: 'ok'},
+            },
+          },
+        ],
+      },
+    })) {
+      turn2.push(event);
+    }
+
+    expect(turn2.find((e) => Array.isArray(e.output))?.output).toEqual([
+      'item1_ok',
+      'item2_processed',
+      'item3_processed',
     ]);
   });
 });
