@@ -218,6 +218,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Attaching plugins to the agents an API server serves](server/api_server_plugins/index.md) - Naming plugins with `--extra_plugins`, and configuring the BigQuery analytics plugin per app with `plugins.yaml`.
 - [Configuring the ADK API server](server/api_server_configuration/index.md) - The credential service, automatic session creation and URL prefix options of `AdkApiServer`.
 - [CORS origins](server/cors_origins/index.md) - Accepting a family of browser origins with one `regex:` pattern, and the deprecated `AdkWebServer` alias.
+- [The API server's eval endpoints](server/eval_endpoints/index.md) - Creating eval sets over HTTP, recording a session as an eval case, running a set, and reading the results back.
 
 ### Sessions
 
