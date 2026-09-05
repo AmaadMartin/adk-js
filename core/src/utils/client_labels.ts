@@ -99,30 +99,3 @@ export function getTrackingHeaders(): Record<string, string> {
     [USER_AGENT_HEADER]: headerValue,
   };
 }
-
-/**
- * Merges the ADK tracking headers into `headers`.
- *
- * A caller's own label is kept and is not repeated when the tracking headers
- * already carry it.
- */
-export function mergeTrackingHeaders(
-  headers?: Record<string, string>,
-): Record<string, string> {
-  const merged: Record<string, string> = {...headers};
-  for (const [key, trackingValue] of Object.entries(getTrackingHeaders())) {
-    const callerValue = merged[key];
-    if (!callerValue) {
-      merged[key] = trackingValue;
-      continue;
-    }
-    const parts = trackingValue.split(' ');
-    for (const callerPart of callerValue.split(' ')) {
-      if (!parts.includes(callerPart)) {
-        parts.push(callerPart);
-      }
-    }
-    merged[key] = parts.join(' ');
-  }
-  return merged;
-}

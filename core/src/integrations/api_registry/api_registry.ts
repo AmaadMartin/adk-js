@@ -8,12 +8,13 @@ import {GoogleAuth} from 'google-auth-library';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {ToolPredicate} from '../../tools/base_toolset.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
-import {mergeTrackingHeaders} from '../../utils/client_labels.js';
+import {getTrackingHeaders} from '../../utils/client_labels.js';
 import {deprecated} from '../../utils/deprecated.js';
 import {formatError} from '../../utils/error_utils.js';
 import {resolveAuthHeaders} from '../../utils/google_auth_headers.js';
 import {
   getWithClientCert,
+  HttpGetResult,
   loadDefaultClientCerts,
   MtlsClientCerts,
   MtlsEndpoint,
@@ -23,11 +24,10 @@ import {
 import {AgentRegistrySingleMCPToolset} from '../agent_registry/agent_registry_mcp_toolset.js';
 
 /** Base URL of the API Registry service. */
-export const API_REGISTRY_URL = 'https://cloudapiregistry.googleapis.com';
+const API_REGISTRY_URL = 'https://cloudapiregistry.googleapis.com';
 
 /** Base URL of the mutual-TLS API Registry service. */
-export const API_REGISTRY_MTLS_URL =
-  'https://cloudapiregistry.mtls.googleapis.com';
+const API_REGISTRY_MTLS_URL = 'https://cloudapiregistry.mtls.googleapis.com';
 
 const API_REGISTRY_API_VERSION = 'v1beta';
 
@@ -38,8 +38,8 @@ const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 const DEFAULT_LOCATION = 'global';
 
-/** Budget for one listing page fetched over mutual TLS. */
-const MTLS_REQUEST_TIMEOUT_MS = 60_000;
+/** Budget for one listing page, on either transport. */
+const LISTING_REQUEST_TIMEOUT_MS = 60_000;
 
 /** An MCP server as the API Registry v1beta listing returns it. */
 export interface ApiRegistryMcpServer {
@@ -78,7 +78,7 @@ export interface ApiRegistryToolsetOptions {
 }
 
 /** Returns the API Registry base URL for the current mTLS configuration. */
-export function apiRegistryBaseUrl(hasClientCert: boolean): string {
+function apiRegistryBaseUrl(hasClientCert: boolean): string {
   const setting = mtlsEndpointSetting();
   const useMtls =
     setting === MtlsEndpoint.ALWAYS ||
@@ -91,11 +91,15 @@ async function getListingPage(
   url: string,
   headers: Record<string, string>,
   certs?: MtlsClientCerts,
-): Promise<{ok: boolean; status: number; body: string}> {
+): Promise<HttpGetResult> {
   if (certs) {
-    return getWithClientCert(url, headers, certs, MTLS_REQUEST_TIMEOUT_MS);
+    return getWithClientCert(url, headers, certs, LISTING_REQUEST_TIMEOUT_MS);
   }
-  const response = await fetch(url, {method: 'GET', headers});
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(LISTING_REQUEST_TIMEOUT_MS),
+  });
   return {
     ok: response.ok,
     status: response.status,
@@ -196,10 +200,11 @@ export class ApiRegistry {
     const baseUrl = apiRegistryBaseUrl(certs !== undefined);
     // Resolved outside listApiRegistryMcpServers so that a credentials failure
     // propagates unwrapped, as it does in adk-python.
-    const headers = mergeTrackingHeaders({
+    const headers = {
+      ...getTrackingHeaders(),
       'Content-Type': 'application/json',
       ...(await resolveAuthHeaders(this.auth, baseUrl)),
-    });
+    };
     return listApiRegistryMcpServers(
       baseUrl,
       this.projectId,

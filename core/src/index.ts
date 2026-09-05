@@ -44,8 +44,6 @@ export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export {
-  API_REGISTRY_MTLS_URL,
-  API_REGISTRY_URL,
   ApiRegistry,
   type ApiRegistryOptions,
   type ApiRegistryToolsetOptions,

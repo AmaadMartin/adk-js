@@ -13,8 +13,8 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 import {
   collectResponseBody,
-  createClientCertAgent,
   getWithClientCert,
+  HttpGetResult,
   loadDefaultClientCerts,
   MtlsEndpoint,
   mtlsEndpointSetting,
@@ -262,19 +262,6 @@ describe('loadDefaultClientCerts', () => {
   });
 });
 
-describe('createClientCertAgent', () => {
-  it('presents the certificate material on its connections', () => {
-    const agent = createClientCertAgent({
-      cert: FAKE_CERT,
-      key: FAKE_KEY,
-      passphrase: 'hunter2',
-    });
-    expect(agent.options.cert).toBe(FAKE_CERT);
-    expect(agent.options.key).toBe(FAKE_KEY);
-    expect(agent.options.passphrase).toBe('hunter2');
-  });
-});
-
 describe('collectResponseBody', () => {
   let server: http.Server;
   let baseUrl: string;
@@ -303,10 +290,10 @@ describe('collectResponseBody', () => {
   });
 
   /** Issues a real GET and reads it back through collectResponseBody. */
-  function get(): Promise<{ok: boolean; status: number; body: string}> {
+  function get(): Promise<HttpGetResult> {
     return new Promise((resolve, reject) => {
       const request = http.request(baseUrl, {method: 'GET'}, (response) => {
-        collectResponseBody(request, response).then(resolve, reject);
+        collectResponseBody(response).then(resolve, reject);
       });
       request.on('error', reject);
       request.end();
@@ -335,18 +322,6 @@ describe('collectResponseBody', () => {
       status: 404,
       body: 'nope',
     });
-  });
-
-  it('abandons a response body that exceeds the size cap', async () => {
-    const megabyte = 'a'.repeat(1024 * 1024);
-    respond = (response) => {
-      response.writeHead(200);
-      for (let written = 0; written <= 10; written++) {
-        response.write(megabyte);
-      }
-      response.end();
-    };
-    await expect(get()).rejects.toThrow('was abandoned');
   });
 });
 
