@@ -7,10 +7,12 @@
 import {Event as AdkEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {A2AEvent, createTaskArtifactUpdateEvent} from './a2a_event.js';
+import {ExecutorContext} from './executor_context.js';
 import {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
   toA2APart,
+  toA2AParts,
   toGenAIPart,
 } from './part_converter_utils.js';
 
@@ -35,6 +37,22 @@ export type AdkEventToA2AEventsConverterImpl = (
 ) => A2AEvent[];
 
 /**
+ * Converts one ADK event into the A2A events that represent it, reading the
+ * executor context rather than the artifact map.
+ *
+ * Mirrors `AdkEventToA2AEventsConverter` in
+ * `google/adk/a2a/converters/event_converter.py`, which
+ * `a2a/executor/config.py` declares as `event_converter` for its legacy
+ * executor. `ctx.requestContext` carries the task id and the context id that
+ * the Python signature passes separately.
+ */
+export type AdkEventToA2AEventsConverter = (
+  adkEvent: AdkEvent,
+  ctx: ExecutorContext,
+  genAiPartConverter: GenAIPartToA2APartConverter,
+) => A2AEvent[];
+
+/**
  * Converts one ADK event into a single artifact update carrying its parts.
  *
  * An event with no convertible parts produces no A2A event. A partial event
@@ -51,8 +69,10 @@ export function toA2AArtifactUpdateEventsFromArtifactMap(
   contextId: string,
   genAiPartConverter: GenAIPartToA2APartConverter = toA2APart,
 ): A2AEvent[] {
-  const parts = (adkEvent.content?.parts ?? []).map((part) =>
-    genAiPartConverter(part, adkEvent.longRunningToolIds ?? []),
+  const parts = toA2AParts(
+    adkEvent.content?.parts,
+    adkEvent.longRunningToolIds,
+    genAiPartConverter,
   );
   if (parts.length === 0) {
     return [];
@@ -91,6 +111,13 @@ export interface A2aAgentExecutorConverterConfig {
   genAiPartConverter?: GenAIPartToA2APartConverter;
 
   /**
+   * Converts one ADK event, reading the executor context. It has no default,
+   * and the executor prefers it over {@link
+   * A2aAgentExecutorConverterConfig.adkEventConverter} when both are set.
+   */
+  eventConverter?: AdkEventToA2AEventsConverter;
+
+  /**
    * Converts one ADK event. Defaults to
    * `toA2AArtifactUpdateEventsFromArtifactMap`.
    */
@@ -98,11 +125,16 @@ export interface A2aAgentExecutorConverterConfig {
 }
 
 /**
- * A converter config with every slot filled.
+ * The validated converters the executor runs, with every default applied.
+ *
+ * The executor reads every converter from here, so this is the only place the
+ * defaults are decided. `eventConverter` stays optional: it declares no
+ * default, and the executor falls through to `adkEventConverter` without it.
  */
 export interface ResolvedA2aAgentExecutorConfig {
   a2aPartConverter: A2APartToGenAIPartConverter;
   genAiPartConverter: GenAIPartToA2APartConverter;
+  eventConverter?: AdkEventToA2AEventsConverter;
   adkEventConverter: AdkEventToA2AEventsConverterImpl;
 }
 
@@ -110,11 +142,13 @@ export interface ResolvedA2aAgentExecutorConfig {
 const CONVERTER_FIELDS = [
   'a2aPartConverter',
   'genAiPartConverter',
+  'eventConverter',
   'adkEventConverter',
 ] as const;
 
 /**
- * Fills every unset converter slot with the default the config declares.
+ * Validates every converter slot, and fills each unset defaulted one with the
+ * default the config declares.
  *
  * adk-python declares the same defaults on a pydantic model
  * (`A2aAgentExecutorConfig` in `google/adk/a2a/executor/config.py`), which
@@ -142,6 +176,7 @@ export function resolveA2aAgentExecutorConfig(
   return {
     a2aPartConverter: config.a2aPartConverter ?? toGenAIPart,
     genAiPartConverter: config.genAiPartConverter ?? toA2APart,
+    eventConverter: config.eventConverter,
     adkEventConverter:
       config.adkEventConverter ?? toA2AArtifactUpdateEventsFromArtifactMap,
   };
