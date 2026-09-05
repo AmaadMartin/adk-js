@@ -16,7 +16,21 @@ export type {
   BeforeA2ARequestCallback,
   RemoteA2AAgentConfig,
 } from './a2a_remote_agent.js';
+export {
+  executeAfterRequestInterceptors,
+  executeBeforeCardRequestInterceptors,
+  executeBeforeRequestInterceptors,
+  isA2AMessage,
+} from './a2a_remote_agent_interceptors.js';
+export type {
+  A2ABeforeRequestResult,
+  A2ACardRequestConfig,
+  A2ACardRequestInterceptor,
+  A2ARequestInterceptor,
+  A2ARequestParameters,
+} from './a2a_remote_agent_interceptors.js';
 export {getA2AAgentCard} from './agent_card.js';
+export type {ResolveAgentCardOptions} from './agent_card.js';
 export {A2AAgentExecutor} from './agent_executor.js';
 export type {
   AfterEventCallback,
@@ -32,4 +46,13 @@ export {
 } from './agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
+export type {
+  A2AArtifactUpdateToEventConverter,
+  A2AEventConverters,
+  A2AMessageToEventConverter,
+  A2AStatusUpdateToEventConverter,
+  A2ATaskToEventConverter,
+  A2AToAdkEventConverter,
+} from './event_converter_utils.js';
 export type {ExecutorContext} from './executor_context.js';
+export type {A2APartToGenAIPartConverter} from './part_converter_utils.js';

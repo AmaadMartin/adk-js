@@ -30,6 +30,38 @@ import {
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
 
+/** Whether an agent card source names a location fetched over the network. */
+export function isRemoteCardSource(source: string): boolean {
+  return source.startsWith('http://') || source.startsWith('https://');
+}
+
+/** Per-request options for {@link resolveAgentCard}. */
+export interface ResolveAgentCardOptions {
+  /** Extra HTTP headers to send with the card fetch. */
+  headers?: Record<string, string>;
+}
+
+/**
+ * Wraps `fetch` so the card request carries the caller's headers. Returns
+ * `undefined` when there is nothing to add, so the resolver keeps its own
+ * implementation.
+ */
+function buildCardFetch(
+  options: ResolveAgentCardOptions,
+): typeof fetch | undefined {
+  const {headers} = options;
+  if (!headers) {
+    return undefined;
+  }
+  return (input, init = {}) => {
+    const merged = new Headers(init.headers);
+    for (const [name, value] of Object.entries(headers)) {
+      merged.set(name, value);
+    }
+    return fetch(input, {...init, headers: merged});
+  };
+}
+
 /**
  * A single-letter URL protocol, which is a Windows drive letter rather than a
  * scheme: `new URL('C:\\cards\\card.json')` parses with `protocol === 'c:'`.
@@ -47,9 +79,14 @@ const WINDOWS_DRIVE_PROTOCOL = /^[a-z]:$/i;
  * redirect from the card endpoint is refused rather than followed. Loopback and
  * private addresses stay allowed: they are where a locally served or
  * VPC-internal peer agent lives.
+ *
+ * @param agentCard - A card object, a URL to fetch it from, or a file path.
+ * @param options - Extra headers for a URL source. Ignored otherwise.
+ * @returns The resolved card.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
+  options: ResolveAgentCardOptions = {},
 ): Promise<AgentCard> {
   if (typeof agentCard === 'object') {
     return agentCard;
@@ -59,7 +96,7 @@ export async function resolveAgentCard(
   if (url && isHttpUrl(url)) {
     await assertHostAllowed(url);
     const resolver = new DefaultAgentCardResolver({
-      fetchImpl: noRedirectFetch(agentCard),
+      fetchImpl: noRedirectFetch(agentCard, options),
     });
     return resolver.resolve(agentCard);
   }
@@ -105,11 +142,16 @@ async function readAgentCardFile(
 /**
  * Builds the `fetch` the card resolver uses, which refuses a redirect instead
  * of following it. A redirect is the only way the card host, rather than the
- * developer, picks where the request lands.
+ * developer, picks where the request lands. The caller's headers, if any, are
+ * merged into every request.
  */
-function noRedirectFetch(source: string): typeof fetch {
+function noRedirectFetch(
+  source: string,
+  options: ResolveAgentCardOptions = {},
+): typeof fetch {
+  const baseFetch = buildCardFetch(options) ?? fetch;
   return async (input, init) => {
-    const response = await fetch(input, {...init, redirect: 'manual'});
+    const response = await baseFetch(input, {...init, redirect: 'manual'});
     if (isRedirect(response.status)) {
       throw new Error(
         `Refusing to follow a redirect while fetching the agent card from ${source} ` +
