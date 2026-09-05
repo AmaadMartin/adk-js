@@ -42,7 +42,6 @@ const pkg: CorePackageJson = JSON.parse(
  * that subsystem.
  */
 const OPTIONAL_SUBSYSTEM_PEERS = [
-  '@google-cloud/firestore',
   '@google-cloud/opentelemetry-cloud-monitoring-exporter',
   '@google-cloud/opentelemetry-cloud-trace-exporter',
   '@google-cloud/storage',
@@ -73,7 +72,6 @@ describe('core/package.json install weight', () => {
   );
 
   it.each([
-    '@google-cloud/firestore',
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',
     '@google-cloud/storage',
@@ -112,7 +110,6 @@ describe('core/package.json subpath exports', () => {
       './a2a',
       './artifacts/gcs',
       './sessions/database',
-      './sessions/firestore',
       './telemetry/gcp',
       './tools/mcp',
     ]);

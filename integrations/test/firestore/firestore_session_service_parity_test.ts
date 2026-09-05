@@ -19,10 +19,10 @@ import {
   createEvent,
   createEventActions,
   createSession,
-  FirestoreSessionService,
   SessionNotFoundError,
   StaleSessionError,
 } from '@google/adk';
+import {FirestoreSessionService} from '@google/adk-integrations';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   FakeFirestore,
@@ -30,10 +30,10 @@ import {
   FakeTimestamp,
   RecordedWrite,
   SERVER_TIMESTAMP,
-} from './fake_firestore.js';
+} from './firestore_session_test_doubles.js';
 
 vi.mock('@google-cloud/firestore', async () => {
-  const fake = await import('./fake_firestore.js');
+  const fake = await import('./firestore_session_test_doubles.js');
   return {Firestore: fake.FakeFirestore, FieldValue: fake.FakeFieldValue};
 });
 

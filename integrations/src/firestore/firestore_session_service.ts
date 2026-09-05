@@ -4,54 +4,59 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
+import {randomUUID} from 'node:crypto';
+
+import {
   CollectionReference,
   DocumentReference,
   FieldValue,
   Firestore,
   Query,
   QueryDocumentSnapshot,
-  Settings,
   Transaction,
 } from '@google-cloud/firestore';
-
-import {AlreadyExistsError} from '../../errors/already_exists_error.js';
-import {SessionNotFoundError} from '../../errors/session_not_found_error.js';
-import {StaleSessionError} from '../../errors/stale_session_error.js';
-import {Event} from '../../events/event.js';
 import {
+  AlreadyExistsError,
   AppendEventRequest,
+  applyTempDeltaState,
   BaseSessionService,
+  CompositeSessionKey,
+  createSession,
   CreateSessionRequest,
   DeleteSessionRequest,
+  Event,
+  extractStateDelta,
+  getLogger,
   GetSessionConfig,
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
+  makeJsonSafeState,
   mergeStates,
-  trimTempDeltaState,
-} from '../../sessions/base_session_service.js';
-import {
-  CompositeSessionKey,
-  createSession,
   Session,
-} from '../../sessions/session.js';
-import {State} from '../../sessions/state.js';
-import {randomUUID} from '../../utils/env_aware_utils.js';
-import {logger} from '../../utils/logger.js';
-import {loadOptionalPeer} from '../../utils/optional_peer.js';
-import {runSerialized} from '../../utils/serial_queue.js';
+  SessionNotFoundError,
+  StaleSessionError,
+  State,
+  toJsonSerializable,
+  trimTempDeltaState,
+} from '@google/adk';
+
+const logger = getLogger();
 
 /** Default root collection, overridable per service or by environment. */
-const DEFAULT_ROOT_COLLECTION = 'adk-session';
+export const DEFAULT_ROOT_COLLECTION = 'adk-session';
 
 /** Environment variable that overrides the default root collection. */
 const ROOT_COLLECTION_ENV_VAR = 'ADK_FIRESTORE_ROOT_COLLECTION';
 
-const DEFAULT_SESSIONS_COLLECTION = 'sessions';
-const DEFAULT_EVENTS_COLLECTION = 'events';
-const DEFAULT_APP_STATE_COLLECTION = 'app_states';
-const DEFAULT_USER_STATE_COLLECTION = 'user_states';
+/** Subcollection holding one document per session, under a user. */
+export const DEFAULT_SESSIONS_COLLECTION = 'sessions';
+/** Subcollection holding one document per event, under a session. */
+export const DEFAULT_EVENTS_COLLECTION = 'events';
+/** Collection holding one app-scoped state document per app. */
+export const DEFAULT_APP_STATE_COLLECTION = 'app_states';
+/** Collection holding user-scoped state documents, keyed by app. */
+export const DEFAULT_USER_STATE_COLLECTION = 'user_states';
 
 /** Subcollection holding one document per user, under an app document. */
 const USERS_COLLECTION = 'users';
@@ -60,14 +65,11 @@ const USERS_COLLECTION = 'users';
 const DELETING_STATUS = 'DELETING';
 
 /** Firestore caps a single batched write at 500 operations. */
-const MAX_BATCH_SIZE = 500;
+const MAX_BATCH_DELETES = 500;
 
 const STALE_SESSION_ERROR_MESSAGE =
   'The session has been modified in storage since it was loaded. ' +
   'Please reload the session before appending more events.';
-
-/** The `@google-cloud/firestore` module namespace. */
-type FirestoreModule = typeof import('@google-cloud/firestore');
 
 /** A session document as this service writes it. */
 interface StoredSessionDocument {
@@ -86,13 +88,6 @@ interface StoredEventDocument {
   event_data?: Event;
 }
 
-/** The three scopes a state map splits into. */
-interface ScopedState {
-  app: Record<string, unknown>;
-  user: Record<string, unknown>;
-  session: Record<string, unknown>;
-}
-
 /** Pagination metadata carried by {@link ListSessionsResponse}. */
 type PaginationMeta = Pick<
   ListSessionsResponse,
@@ -102,117 +97,16 @@ type PaginationMeta = Pick<
 /** Options for {@link FirestoreSessionService}. */
 export interface FirestoreSessionServiceOptions {
   /**
-   * An existing Firestore client. One is constructed on first use when this is
-   * omitted.
+   * An existing Firestore client. A default client, reading Application
+   * Default Credentials, is created when this is omitted.
    */
   client?: Firestore;
 
   /**
    * Root collection name. Defaults to `ADK_FIRESTORE_ROOT_COLLECTION`, then to
-   * `adk-session`.
+   * {@link DEFAULT_ROOT_COLLECTION}.
    */
   rootCollection?: string;
-
-  /**
-   * Settings for the client this service constructs when `client` is omitted.
-   *
-   * This has no adk-python counterpart. The client is built lazily behind the
-   * optional peer dependency, so this is the only way to point it at a
-   * project without constructing the client yourself.
-   */
-  settings?: Settings;
-}
-
-/**
- * Splits a state map into its app, user and session scopes.
- *
- * `temp:` keys are dropped: they are never persisted. `app:` and `user:` keys
- * lose their prefix, because each scope is stored in its own document.
- *
- * `database_session_service.ts` inlines the same split for the SQL backend.
- */
-function extractStateDelta(state: Record<string, unknown>): ScopedState {
-  // Null-prototype maps: a `__proto__` key copied into a plain object literal
-  // reaches the inherited setter and re-parents the map instead of storing the
-  // entry. See `trimTempState` in `base_session_service.ts`.
-  const scoped: ScopedState = {
-    app: Object.create(null),
-    user: Object.create(null),
-    session: Object.create(null),
-  };
-  for (const [key, value] of Object.entries(state)) {
-    if (key.startsWith(State.APP_PREFIX)) {
-      scoped.app[key.slice(State.APP_PREFIX.length)] = value;
-    } else if (key.startsWith(State.USER_PREFIX)) {
-      scoped.user[key.slice(State.USER_PREFIX.length)] = value;
-    } else if (!key.startsWith(State.TEMP_PREFIX)) {
-      scoped.session[key] = value;
-    }
-  }
-  return scoped;
-}
-
-/**
- * Coerces a map into a form that survives `JSON.stringify`.
- *
- * A bare `JSON.stringify` drops a function-valued or symbol-valued key without
- * a word, and throws outright on a circular reference. Replacing the value
- * with its string form keeps the key, keeps the write, and makes the loss
- * visible in the log. A value carrying `toJSON` goes through it, so a `Date`
- * persists as its ISO string.
- *
- * @param map The map to coerce.
- * @param subject Names the map in the warning, e.g. `session state`.
- */
-function makeJsonSafe(
-  map: Record<string, unknown>,
-  subject: string,
-): Record<string, unknown> {
-  let replaced = false;
-  const replace = (_key: string, value: unknown): unknown => {
-    const type = typeof value;
-    if (type !== 'function' && type !== 'symbol' && type !== 'bigint') {
-      return value;
-    }
-    replaced = true;
-    return String(value);
-  };
-
-  let safe: Record<string, unknown>;
-  try {
-    safe = JSON.parse(JSON.stringify(map, replace)) as Record<string, unknown>;
-  } catch {
-    // A circular reference defeats the whole-map pass. Isolate it to the key
-    // that holds it rather than losing every other key with it.
-    replaced = true;
-    safe = {};
-    for (const [key, value] of Object.entries(map)) {
-      safe[key] = toJsonSafeValue(value, replace);
-    }
-  }
-
-  if (replaced) {
-    // The values themselves are never logged: state can hold user data.
-    logger.warn(
-      `Some ${subject} values are not JSON-serializable (e.g. functions) and ` +
-        'were replaced with a string representation before writing to ' +
-        'Firestore.',
-    );
-  }
-  return safe;
-}
-
-/** Coerces one state value, falling back to its string form. */
-function toJsonSafeValue(
-  value: unknown,
-  replace: (key: string, value: unknown) => unknown,
-): unknown {
-  try {
-    const json = JSON.stringify(value, replace);
-    return json === undefined ? undefined : (JSON.parse(json) as unknown);
-  } catch {
-    return String(value);
-  }
 }
 
 /** True when `value` exposes `method` as a callable returning a number. */
@@ -235,9 +129,9 @@ function hasNumericMethod<K extends string>(
  * hand-written document, and a raw number is passed through unchanged: adk-js
  * measures `lastUpdateTime` in milliseconds throughout.
  */
-function toLastUpdateTime(value: unknown): number {
+export function toLastUpdateTime(value: unknown): number {
   if (typeof value === 'number') {
-    return value;
+    return Number.isFinite(value) ? value : 0;
   }
   if (hasNumericMethod(value, 'toMillis')) {
     return value.toMillis();
@@ -249,44 +143,20 @@ function toLastUpdateTime(value: unknown): number {
 }
 
 /** Reads a stored `state` field, which may be JSON text or a map. */
-function parseStoredState(
-  raw: string | Record<string, unknown> | undefined,
-): Record<string, unknown> {
+function parseSessionState(raw: unknown): Record<string, unknown> {
   if (typeof raw === 'string') {
     return JSON.parse(raw) as Record<string, unknown>;
   }
-  return raw ?? {};
-}
-
-/**
- * Applies the `temp:` keys of an event delta to the in-memory session state.
- *
- * adk-python's `BaseSessionService` does this for every service; adk-js's does
- * not, so this service does it itself. A later agent in the same invocation
- * reads the values back (e.g. `outputKey: 'temp:x'` inside a SequentialAgent).
- * The keys are trimmed from the event before it is persisted.
- */
-function applyTempState(session: Session, event: Event): void {
-  for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-    if (!key.startsWith(State.TEMP_PREFIX)) {
-      continue;
-    }
-    // `defineProperty` always creates an own property; a plain assignment of
-    // `__proto__` would reach the inherited setter instead.
-    Object.defineProperty(session.state, key, {
-      value,
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
-  }
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
 }
 
 /** The event as the plain JSON stored in its document's `event_data` field. */
-function toEventData(event: Event): Record<string, unknown> {
+function toEventData(event: Event): unknown {
   // The event carries the same state delta the session state does, so it hits
   // the same unserializable values and needs the same coercion.
-  return makeJsonSafe({...event}, 'event');
+  return toJsonSerializable({...event});
 }
 
 /** Orders sessions by last update time, then user, then id — all ascending. */
@@ -346,6 +216,8 @@ function buildEventsQuery(
 ): Query {
   let query: Query = events.orderBy('timestamp');
   if (config?.afterTimestamp) {
+    // adk-js measures every timestamp in milliseconds, as
+    // `DatabaseSessionService` does; adk-python measures them in seconds.
     query = query.where('timestamp', '>=', new Date(config.afterTimestamp));
   }
   if (config?.numRecentEvents !== undefined) {
@@ -354,13 +226,66 @@ function buildEventsQuery(
   return query;
 }
 
-/** A lock key that no session id containing a separator can collide with. */
+/**
+ * A lock key for one session.
+ *
+ * A JSON tuple cannot collide: a separator-joined string would, if an
+ * identifier contained the separator.
+ */
 function toSessionLockKey({
   appName,
   userId,
   sessionId,
 }: CompositeSessionKey): string {
-  return `${appName}\u0000${userId}\u0000${sessionId}`;
+  return JSON.stringify([appName, userId, sessionId]);
+}
+
+function ignore(): void {}
+
+/**
+ * Runs `work` after every item already queued under `key`.
+ *
+ * Work under the same key runs one item at a time, in submission order. The
+ * map holds one entry per key with work in flight, and drops the entry once
+ * the last item settles, so it does not grow for the life of the process.
+ * This is the promise-chain equivalent of adk-python's per-session
+ * `asyncio.Lock` and its reference count.
+ *
+ * @param queue The queue state, one `Map` per group of related work.
+ * @param key Items sharing a key run one at a time.
+ * @param work The work to run. Its result, including a rejection, is returned
+ *   to the caller and never leaks into the next item.
+ * @return What `work` resolves to.
+ */
+function runSerialized<T>(
+  queue: Map<string, Promise<unknown>>,
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const queued = queue.get(key);
+  const result = queued ? queued.then(work) : work();
+
+  // The queued promise must never reject, or one failure would fail every
+  // item waiting behind it.
+  const settled = result.then(ignore, ignore);
+  queue.set(key, settled);
+  void settled.then(() => {
+    // Drop the entry only when nothing queued behind this item, so the queue
+    // does not keep one entry per key forever.
+    if (queue.get(key) === settled) {
+      queue.delete(key);
+    }
+  });
+  return result;
+}
+
+/** Reads a state document inside a transaction, defaulting to an empty map. */
+async function readStateDocument(
+  t: Transaction,
+  ref: DocumentReference,
+): Promise<Record<string, unknown>> {
+  const snap = await t.get(ref);
+  return snap.data() ?? {};
 }
 
 /**
@@ -398,7 +323,8 @@ function toSessionLockKey({
  * at. `appendEvent` rejects a write whose revision storage has moved past,
  * with {@link StaleSessionError}, instead of overwriting newer history.
  *
- * Requires the optional peer dependency `@google-cloud/firestore`.
+ * Authentication uses Application Default Credentials unless the caller
+ * supplies its own client.
  */
 export class FirestoreSessionService extends BaseSessionService {
   /** Root collection holding one document per app. */
@@ -412,18 +338,14 @@ export class FirestoreSessionService extends BaseSessionService {
   /** Collection holding user-scoped state documents, keyed by app. */
   readonly userStateCollection = DEFAULT_USER_STATE_COLLECTION;
 
-  private readonly injectedClient?: Firestore;
-  private readonly settings?: Settings;
-  private clientPromise?: Promise<Firestore>;
-  private modulePromise?: Promise<FirestoreModule>;
+  private readonly client: Firestore;
 
   /** Appends in flight per session, so writes to one session serialize. */
   private readonly sessionLocks = new Map<string, Promise<unknown>>();
 
   constructor(options: FirestoreSessionServiceOptions = {}) {
     super();
-    this.injectedClient = options.client;
-    this.settings = options.settings;
+    this.client = options.client ?? new Firestore();
     // Truthiness, matching adk-python's `or` chain: an empty string falls
     // through to the environment variable and then to the default.
     this.rootCollection =
@@ -439,8 +361,8 @@ export class FirestoreSessionService extends BaseSessionService {
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
     const id = sessionId || randomUUID();
-    const db = await this.getClient();
-    const now = await this.serverTimestamp();
+    const db = this.client;
+    const now = FieldValue.serverTimestamp();
 
     const sessionRef = this.getSessionsRef(db, appName, userId).doc(id);
     const appRef = this.getAppStateRef(db, appName);
@@ -449,7 +371,7 @@ export class FirestoreSessionService extends BaseSessionService {
     // App and user state are written natively, so a Date stays a Date. Only
     // the session bucket is JSON-encoded, so only it is coerced.
     const scoped = extractStateDelta(state ?? {});
-    const sessionState = makeJsonSafe(scoped.session, 'session state');
+    const sessionState = makeJsonSafeState(scoped.session);
 
     const sessionData = {
       id,
@@ -502,7 +424,7 @@ export class FirestoreSessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
-    const db = await this.getClient();
+    const db = this.client;
     const sessionRef = this.getSessionsRef(db, appName, userId).doc(sessionId);
     const snap = await sessionRef.get();
     // An absent document reads back as no data at all, and an empty body
@@ -541,7 +463,7 @@ export class FirestoreSessionService extends BaseSessionService {
       state: mergeStates(
         appSnap.data() ?? {},
         userSnap.data() ?? {},
-        parseStoredState(data.state),
+        parseSessionState(data.state),
       ),
       events,
       lastUpdateTime: toLastUpdateTime(data.updateTime),
@@ -553,7 +475,7 @@ export class FirestoreSessionService extends BaseSessionService {
     request: ListSessionsRequest,
   ): Promise<ListSessionsResponse> {
     const {appName, userId, order} = request;
-    const db = await this.getClient();
+    const db = this.client;
 
     // The `appName` filter is what keeps other apps out of the
     // collection-group scan, which spans every app's `sessions` subcollection.
@@ -578,7 +500,7 @@ export class FirestoreSessionService extends BaseSessionService {
         state: mergeStates(
           appState,
           userStates.get(data.userId ?? '') ?? {},
-          parseStoredState(data.state),
+          parseSessionState(data.state),
         ),
         events: [],
         lastUpdateTime: toLastUpdateTime(data.updateTime),
@@ -598,7 +520,7 @@ export class FirestoreSessionService extends BaseSessionService {
     userId,
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
-    const db = await this.getClient();
+    const db = this.client;
     const sessionRef = this.getSessionsRef(db, appName, userId).doc(sessionId);
 
     // Best effort: the delete must proceed even when the marker cannot be
@@ -623,7 +545,7 @@ export class FirestoreSessionService extends BaseSessionService {
     for await (const doc of events) {
       batch.delete(doc.ref);
       pending++;
-      if (pending >= MAX_BATCH_SIZE) {
+      if (pending >= MAX_BATCH_DELETES) {
         await batch.commit();
         batch = db.batch();
         pending = 0;
@@ -644,11 +566,13 @@ export class FirestoreSessionService extends BaseSessionService {
       return event;
     }
 
-    applyTempState(session, event);
+    // Temp values have to reach the in-memory session before the delta is
+    // trimmed, so a later agent in the same invocation can read them.
+    applyTempDeltaState(session, event);
     event = trimTempDeltaState(event);
 
-    const db = await this.getClient();
-    const scoped = extractStateDelta(event.actions.stateDelta);
+    const db = this.client;
+    const scoped = extractStateDelta(event.actions?.stateDelta ?? {});
     const sessionRef = this.getSessionsRef(
       db,
       session.appName,
@@ -656,7 +580,7 @@ export class FirestoreSessionService extends BaseSessionService {
     ).doc(session.id);
     const appRef = this.getAppStateRef(db, session.appName);
     const userRef = this.getUserStateRef(db, session.appName, session.userId);
-    const now = await this.serverTimestamp();
+    const now = FieldValue.serverTimestamp();
 
     // Two appends racing on one session would both read the same revision and
     // one would lose its write. Firestore's transaction retry cannot help: the
@@ -713,12 +637,12 @@ export class FirestoreSessionService extends BaseSessionService {
           // and reaches this write from an earlier event. Coerce the whole
           // merged map, not just this event's delta.
           const merged = Object.assign(
-            extractStateDelta(session.state).session,
+            sessionOnlyState(session.state),
             scoped.session,
           );
           const newRevision = currentRevision + 1;
           t.update(sessionRef, {
-            state: JSON.stringify(makeJsonSafe(merged, 'session state')),
+            state: JSON.stringify(makeJsonSafeState(merged)),
             updateTime: now,
             revision: newRevision,
           });
@@ -737,37 +661,6 @@ export class FirestoreSessionService extends BaseSessionService {
     session.storageUpdateMarker = String(revision);
     session.lastUpdateTime = event.timestamp;
     return super.appendEvent({session, event});
-  }
-
-  /**
-   * Loads `@google-cloud/firestore` once, translating a missing install into
-   * an error naming the feature and the install command.
-   */
-  private loadModule(): Promise<FirestoreModule> {
-    this.modulePromise ??= loadOptionalPeer(
-      {
-        packageName: '@google-cloud/firestore',
-        feature: 'FirestoreSessionService',
-      },
-      () => import('@google-cloud/firestore'),
-    );
-    return this.modulePromise;
-  }
-
-  /** Resolves the client, constructing one on first use when none was given. */
-  private getClient(): Promise<Firestore> {
-    this.clientPromise ??= this.injectedClient
-      ? Promise.resolve(this.injectedClient)
-      : this.loadModule().then(
-          ({Firestore: Client}) => new Client(this.settings),
-        );
-    return this.clientPromise;
-  }
-
-  /** The sentinel Firestore replaces with the commit time of the write. */
-  private async serverTimestamp(): Promise<FieldValue> {
-    const {FieldValue: Field} = await this.loadModule();
-    return Field.serverTimestamp();
   }
 
   private getSessionsRef(
@@ -848,11 +741,24 @@ export class FirestoreSessionService extends BaseSessionService {
   }
 }
 
-/** Reads a state document inside a transaction, defaulting to an empty map. */
-async function readStateDocument(
-  t: Transaction,
-  ref: DocumentReference,
-): Promise<Record<string, unknown>> {
-  const snap = await t.get(ref);
-  return snap.data() ?? {};
+/**
+ * Keeps only the session-scoped keys of a state map.
+ *
+ * `app:` and `user:` entries live in their own documents, and `temp:` entries
+ * are never persisted, so the session document stores neither.
+ */
+function sessionOnlyState(
+  state: Record<string, unknown>,
+): Record<string, unknown> {
+  const sessionOnly: Record<string, unknown> = Object.create(null);
+  for (const [key, value] of Object.entries(state)) {
+    if (
+      !key.startsWith(State.APP_PREFIX) &&
+      !key.startsWith(State.USER_PREFIX) &&
+      !key.startsWith(State.TEMP_PREFIX)
+    ) {
+      sessionOnly[key] = value;
+    }
+  }
+  return sessionOnly;
 }

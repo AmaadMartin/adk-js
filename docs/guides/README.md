@@ -11,9 +11,7 @@ This index is the only table of contents. A guide that is not listed here is unr
 ### Sessions
 
 - [FirestoreSessionService](sessions/firestore_session_service/index.md) -
-  Storing sessions in Google Cloud Firestore: the document layout it shares
-  with adk-python, the state scopes, rejecting stale writes, the index
-  `listSessions` needs, and what a delete removes.
+  Storing sessions in Google Cloud Firestore, and rejecting a stale write.
 
 ### Tools
 
