@@ -57,14 +57,15 @@ export function emptyEvent(): Event {
 /**
  * Builds the stream `Runner.runAsync` returns.
  *
- * @param events The events to yield, or an error to throw instead.
+ * @param events The events to yield. Anything that is not an array is thrown
+ *   instead, so a test can drive the error path with a non-Error value too.
  * @return A generator function suitable for `mockImplementation`.
  */
 export function streamOf(
-  events: Event[] | Error,
+  events: Event[] | Error | string,
 ): () => AsyncGenerator<Event, void, void> {
   return async function* stream(): AsyncGenerator<Event, void, void> {
-    if (events instanceof Error) throw events;
+    if (!Array.isArray(events)) throw events;
     for (const event of events) yield event;
   };
 }

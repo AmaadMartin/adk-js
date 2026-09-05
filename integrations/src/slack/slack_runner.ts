@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getLogger, Runner} from '@google/adk';
+import {getLogger, loadOptionalPeer, Runner} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import type {App, SayFn, SocketModeReceiver} from '@slack/bolt';
 
@@ -13,50 +13,6 @@ const THINKING_TEXT = '_Thinking..._';
 
 /** Prefix of the message shown to the user when the run throws. */
 const ERROR_PREFIX = 'Sorry, I encountered an error: ';
-
-/** Node's error codes for an unresolvable module, in ESM and in CJS. */
-const MODULE_NOT_FOUND_CODES = new Set([
-  'ERR_MODULE_NOT_FOUND',
-  'MODULE_NOT_FOUND',
-]);
-
-/**
- * Returns whether `err` is Node reporting that `@slack/bolt` is not installed.
- *
- * Any other failure — a syntax error, a missing transitive dependency — has to
- * reach the caller unchanged instead of being reported as "install the peer".
- */
-function isSlackBoltMissing(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    'code' in err &&
-    typeof err.code === 'string' &&
-    MODULE_NOT_FOUND_CODES.has(err.code) &&
-    err.message.includes('@slack/bolt')
-  );
-}
-
-/**
- * Loads `@slack/bolt`, which is an optional peer dependency.
- *
- * @return The Bolt module namespace.
- * @throws If the package is not installed, an error naming SlackRunner and the
- *   install command. Any other load failure is rethrown unchanged.
- */
-async function importSlackBolt() {
-  try {
-    return await import('@slack/bolt');
-  } catch (err: unknown) {
-    if (!isSlackBoltMissing(err)) throw err;
-    throw new Error(
-      'SlackRunner requires the optional peer dependency "@slack/bolt", ' +
-        'which is not installed. It is optional so that applications that do ' +
-        'not use SlackRunner are not made to download it. Install it with:' +
-        '\n\n  npm install @slack/bolt\n',
-      {cause: err},
-    );
-  }
-}
 
 /**
  * The fields `app_mention` and the handled `message` subtypes have in common.
@@ -229,7 +185,10 @@ export class SlackRunner {
     if (this.receiver) {
       throw new Error('SlackRunner is already started.');
     }
-    const {SocketModeReceiver} = await importSlackBolt();
+    const {SocketModeReceiver} = await loadOptionalPeer(
+      {packageName: '@slack/bolt', feature: 'SlackRunner'},
+      () => import('@slack/bolt'),
+    );
     const receiver = new SocketModeReceiver({appToken});
     receiver.init(this.slackApp);
     this.receiver = receiver;

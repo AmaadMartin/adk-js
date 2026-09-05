@@ -227,6 +227,26 @@ describe('handleSlackMessage', () => {
     });
   });
 
+  it('reports a thrown value that is not an Error', async () => {
+    const {runner, client, say, update} = fixture;
+    // A rejected promise can carry anything; the reference formats it with
+    // str(e), so a non-Error must still reach the user.
+    fixture.runAsync.mockImplementation(streamOf('channel_not_found'));
+
+    await handleSlackMessage({
+      runner,
+      client,
+      event: {text: 'hi', user: USER, channel: CHANNEL, ts: EVENT_TS},
+      say,
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      channel: CHANNEL,
+      ts: THINKING_TS,
+      text: 'Sorry, I encountered an error: channel_not_found',
+    });
+  });
+
   it('propagates a failure to report the error', async () => {
     const {runner, client} = fixture;
     const say = vi.fn(async () => {
