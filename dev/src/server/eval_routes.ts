@@ -423,14 +423,13 @@ class EvalRouteHandlers {
         toRunEvalResult(result, evalSetId),
       );
     } catch (error: unknown) {
-      // The eval runtime is loaded through a seam this build may not have
-      // filled, which is adk-js's equivalent of adk-python's
-      // ModuleNotFoundError on `local_eval_service`.
-      const message =
-        errorMessage(error) === MISSING_EVAL_DEPENDENCIES_MESSAGE
-          ? MISSING_EVAL_DEPENDENCIES_MESSAGE
-          : errorMessage(error);
-      this.fail(res, 400, message);
+      const message = errorMessage(error);
+      // `getEvalRuntime` reports exactly this when nothing installed a
+      // runtime, which is adk-js's equivalent of adk-python's
+      // ModuleNotFoundError on `local_eval_service`. Every other failure is a
+      // 500, as it is there.
+      const status = message === MISSING_EVAL_DEPENDENCIES_MESSAGE ? 400 : 500;
+      this.fail(res, status, message);
       return undefined;
     }
   }
@@ -505,15 +504,18 @@ class EvalRouteHandlers {
     );
   }
 
+  /**
+   * adk-python answers 400 here when importing its registry raises
+   * ModuleNotFoundError. adk-js has no such import to fail: the registry is
+   * part of `@google/adk` and always seeds its standard metrics, so there is
+   * no empty case to report.
+   */
   listMetricsInfo(req: Request, res: Response): void {
     // The metrics do not depend on the app, as in adk-python, which ignores
     // its `app_name` here too.
-    const metricsInfo = defaultMetricEvaluatorRegistry().getRegisteredMetrics();
-    if (metricsInfo.length === 0) {
-      this.fail(res, 400, MISSING_EVAL_DEPENDENCIES_MESSAGE);
-      return;
-    }
-    res.json({metricsInfo} satisfies ListMetricsInfoResponse);
+    res.json({
+      metricsInfo: defaultMetricEvaluatorRegistry().getRegisteredMetrics(),
+    } satisfies ListMetricsInfoResponse);
   }
 
   private getEvalSet(req: Request): Promise<EvalSet | undefined> {
