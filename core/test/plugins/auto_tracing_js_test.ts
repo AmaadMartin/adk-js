@@ -272,6 +272,7 @@ describe('AutoTracingPlugin on JavaScript shapes', () => {
       {type: 'service_account', private_key: SENTINEL_TOKEN},
       {serviceAccountCredential: {privateKey: SENTINEL_TOKEN}},
       {scopes: ['a'], useDefaultCredential: true},
+      {scopes: ['a'], useIdToken: true},
       {scheme: 'bearer', credentials: {token: SENTINEL_TOKEN}},
       {username: 'u', password: SENTINEL_TOKEN},
       {clientId: 'c', clientSecret: SENTINEL_TOKEN},
@@ -288,6 +289,46 @@ describe('AutoTracingPlugin on JavaScript shapes', () => {
     expect(safeRepr({accessToken: SENTINEL_TOKEN, rows: [1]}, CAPS)).toBe(
       '{accessToken: <String>, rows: [1]}',
     );
+  });
+
+  it('wraps a prototype that names no constructor', async () => {
+    const bareProto: {helper(): number} = Object.create(null);
+    bareProto.helper = function helper(): number {
+      return 1;
+    };
+    const holder: {helper(): number} = Object.create(bareProto);
+
+    await instrument({graph: {holder}});
+
+    expect(holder.helper()).toBe(1);
+    // No constructor to name the owner with, so the span is the bare name.
+    expect(spanNames()).toContain('helper');
+  });
+
+  it('carries on when rebinding a property throws', async () => {
+    const hostile = new Proxy(
+      {
+        blocked(): number {
+          return 1;
+        },
+      },
+      {
+        defineProperty(): never {
+          throw new Error('rebinding refused');
+        },
+      },
+    );
+    const sibling = {
+      survivor(): number {
+        return 2;
+      },
+    };
+
+    await instrument({graph: {hostile, sibling}});
+
+    expect(isWrapped(hostile.blocked)).toBe(false);
+    expect(sibling.survivor()).toBe(2);
+    expect(spanNames()).toContain('survivor');
   });
 
   it('keeps the yields of a wrapped generator identical to the original', async () => {

@@ -21,7 +21,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
-import {afterAll, beforeEach, describe, expect, it} from 'vitest';
+import {afterAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   AUTO_TRACING_WRAPPED,
@@ -451,5 +451,82 @@ describe('safeRepr rendering', () => {
 
   it('renders a non-string Map key without applying the name rules', () => {
     expect(safeRepr(new Map([[1, 'v']]), CAPS)).toBe("Map(1) {1 => 'v'}");
+  });
+
+  it('names the masked value even when it is absent or prototype-less', () => {
+    expect(safeRepr({token: null}, CAPS)).toBe('{token: <Null>}');
+    expect(safeRepr({token: undefined}, CAPS)).toBe('{token: <Undefined>}');
+    expect(safeRepr({token: Object.create(null)}, CAPS)).toBe(
+      '{token: <Object>}',
+    );
+    // A prototype whose `constructor` is not callable names nothing.
+    expect(safeRepr({token: Object.create({constructor: 42})}, CAPS)).toBe(
+      '{token: <Object>}',
+    );
+  });
+
+  it('renders a function with no name as anonymous', () => {
+    const nameless = Object.defineProperty(
+      function (): number {
+        return 1;
+      },
+      'name',
+      {value: ''},
+    );
+
+    expect(safeRepr(nameless, CAPS)).toBe('<Function anonymous>');
+  });
+});
+
+describe('positionalParamNames source parsing', () => {
+  it('refuses a class and a signature it cannot read plainly', () => {
+    class Widget {
+      render(a: number): number {
+        return a;
+      }
+    }
+
+    expect(positionalParamNames(Widget)).toEqual([]);
+    expect(positionalParamNames((a = 1) => a)).toEqual([]);
+    expect(positionalParamNames(({a}: {a: number}) => a)).toEqual([]);
+    expect(positionalParamNames(Widget.prototype.render)).toEqual(['a']);
+  });
+
+  it('reads an arrow that declares its one parameter without parentheses', () => {
+    // Prettier writes `(x) => x` here, so the source a project using
+    // `arrowParens: "avoid"` would emit is supplied directly.
+    const spy = vi
+      .spyOn(Function.prototype, 'toString')
+      .mockReturnValue('value => value * 2');
+    try {
+      expect(positionalParamNames(syncShape)).toEqual(['value']);
+
+      spy.mockReturnValue('something the parser cannot read');
+      expect(positionalParamNames(syncShape)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('recordIoOnSpan filtering', () => {
+  it('drops a secret-named pair a caller supplied itself', () => {
+    const span = tracer.startSpan('record_io_filters');
+
+    recordIoOnSpan({
+      span,
+      pairs: [
+        {name: 'token', value: `'${SENTINEL_TOKEN}'`},
+        {name: 'user', value: "'alice'"},
+      ],
+      result: 'ok',
+      error: undefined,
+      caps: CAPS,
+    });
+    span.end();
+
+    const attributes = attributesOf('record_io_filters');
+    expect(attributes).not.toHaveProperty('adk.fn.arg.token');
+    expect(attributes['adk.fn.arg.user']).toBe("'alice'");
   });
 });
