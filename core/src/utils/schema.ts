@@ -108,6 +108,32 @@ export function parseWithSchema<T>(
 }
 
 /**
+ * Renders a schema validation failure as one `path: message` line per issue.
+ *
+ * Zod v3 and v4 both attach an `issues` array to the error {@link
+ * parseWithSchema} throws. An error carrying none — a `refine` predicate that
+ * threw, say — renders as itself, so a caller relaying the failure still says
+ * why it failed.
+ */
+export function describeSchemaIssues(error: unknown): string[] {
+  const issues =
+    typeof error === 'object' && error !== null && 'issues' in error
+      ? error.issues
+      : undefined;
+  if (!Array.isArray(issues)) {
+    return [String(error)];
+  }
+  const described = issues as ReadonlyArray<{
+    path?: ReadonlyArray<string | number>;
+    message?: string;
+  }>;
+  return described.map(({path, message}) => {
+    const location = path?.join('.') ?? '';
+    return location ? `${location}: ${message}` : `${message}`;
+  });
+}
+
+/**
  * Renders a {@link SchemaLike} as a plain JSON Schema object.
  *
  * Zod v3 and v4 schemas are converted with their respective serializers. A

@@ -42,8 +42,11 @@ const reporter = new LlmAgent({
 ```
 
 The agent declares `finish_task` to the model with those two fields as its
-parameters, and appends `FINISH_TASK_INSTRUCTION` to the request so the model
-knows not to call it early.
+parameters, and appends an instruction to the request so the model knows not to
+call it early.
+
+Validation uses the schema as you wrote it, not the genai form derived from it,
+so a `refine` predicate still rejects a value the converted schema would accept.
 
 ## What a validation failure returns
 
@@ -63,58 +66,21 @@ ends the task, so a validation failure leaves the loop running.
 ## Non-object schemas and the `result` wrapper
 
 The GenAI API requires object-typed tool parameters, so a schema that is not an
-object is wrapped under one key. `getOutputWrapperKey` reports which:
-
-```ts
-import {getOutputWrapperKey} from '@google/adk';
-import {z} from 'zod/v4';
-
-getOutputWrapperKey(z.object({summary: z.string()})); // undefined
-getOutputWrapperKey(z.array(z.string())); // 'result'
-getOutputWrapperKey(); // undefined — the default schema is an object
-```
-
-An agent declaring `outputSchema: z.array(z.string())` therefore takes its
-output under `result`:
+object is wrapped under a single `result` key. An agent declaring an array
+output therefore takes its output under `result`:
 
 ```json
 {
   "type": "object",
-  "properties": {"result": {"type": "array", "items": {"type": "string"}}},
+  "properties": {"result": {"type": "array", "items": {"type": "STRING"}}},
   "required": ["result"]
 }
 ```
 
-`extractOutput` reverses the wrapping, so a caller reading the node output sees
-the array itself rather than the wrapper.
-
-Wrapping moves the schema into a property, which would take its `$defs` block
-with it and leave every `#/$defs/...` pointer dangling. The tool lifts `$defs`
-and `$schema` back to the root of the parameters document, so the pointers still
-resolve.
+`tool.wrapperKey` reports the key in use, and is `undefined` for an object
+schema. `extractOutput` reverses the wrapping, so a caller reading the node
+output sees the array itself rather than the wrapper.
 
 The decision keys off the schema's declared `type` alone, matching adk-python. A
 schema that lists `properties` but declares no `type` counts as a non-object and
 is wrapped.
-
-## Building the tool for an agent
-
-`FinishTaskTool.forAgent` is the form `LlmAgent` uses. It records the agent name
-and prefers `outputSchemaSource` — the schema as you wrote it — for validation,
-because rendering a Zod schema into the genai dialect drops refinements:
-
-```ts
-import {FinishTaskTool} from '@google/adk';
-import {z} from 'zod/v4';
-
-const tool = FinishTaskTool.forAgent({
-  name: 'reporter',
-  outputSchema: z.object({count: z.number().int()}),
-  outputSchemaSource: z
-    .object({count: z.number().int()})
-    .refine((value) => value.count % 2 === 0, 'count must be even'),
-});
-```
-
-The declaration still comes from `outputSchema`, so the model is shown the same
-parameters either way.

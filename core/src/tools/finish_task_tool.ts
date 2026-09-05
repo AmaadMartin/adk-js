@@ -8,8 +8,11 @@ import {FunctionDeclaration, Schema, Type} from '@google/genai';
 
 import {appendInstructions} from '../models/llm_request.js';
 import {logger} from '../utils/logger.js';
-import {parseWithSchema, SchemaLike, toJsonSchema} from '../utils/schema.js';
-import {isZodSchema} from '../utils/simple_zod_to_json.js';
+import {
+  describeSchemaIssues,
+  parseWithSchema,
+  SchemaLike,
+} from '../utils/schema.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -30,10 +33,10 @@ export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
  * The parameter a non-object output schema is wrapped under, because the GenAI
  * API requires object-typed tool parameters.
  */
-export const FINISH_TASK_DEFAULT_WRAPPER_KEY = 'result';
+const DEFAULT_WRAPPER_KEY = 'result';
 
-/** The instruction {@link FinishTaskTool} appends to the request. */
-export const FINISH_TASK_INSTRUCTION =
+/** The instruction the tool appends to every request that declares it. */
+const FINISH_TASK_INSTRUCTION =
   'Do NOT call `finish_task` prematurely. Use your available tools to fully' +
   ' complete every aspect of the task first. If the task is unclear, ask' +
   ' the user for clarification before proceeding. Once the task is fully' +
@@ -53,132 +56,20 @@ const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
 };
 
 /**
- * JSON Schema keys that only carry meaning at the root of a document: the
- * definition block a `$ref` addresses from the root, and the dialect
- * declaration. Nesting a schema under a wrapper property would take them with
- * it, so they are lifted back out.
- */
-const ROOT_ONLY_KEYS = ['$defs', '$schema'] as const;
-
-/**
- * The task agent {@link FinishTaskTool.forAgent} reads.
- *
- * Structural rather than an `LlmAgent` import, so the tool does not depend on
- * the agent module — the same reason adk-python declares its `LlmAgent` import
- * under `TYPE_CHECKING`.
- */
-export interface FinishTaskAgent {
-  /** The agent's name, recorded on the tool for diagnostics. */
-  readonly name: string;
-  /** The agent's output schema, as the declaration renders it. */
-  readonly outputSchema?: SchemaLike;
-  /** The agent's output schema as the caller supplied it. */
-  readonly outputSchemaSource?: SchemaLike;
-}
-
-/** Options for the {@link FinishTaskTool} constructor. */
-export interface FinishTaskToolOptions {
-  /** The name of the task agent the tool belongs to. */
-  taskAgentName?: string;
-  /**
-   * The schema arguments are validated against, when it differs from the
-   * declared one. Defaults to the declared output schema.
-   */
-  validationSchema?: SchemaLike;
-}
-
-/**
  * The key `finish_task` arguments wrap the task output under, or `undefined`
  * when the schema is object-typed and the output sits at the top level of the
  * arguments.
  *
  * Mirrors adk-python's `_finish_task_tool.FinishTaskTool.__init__`, which keys
  * the decision off the declared `type` alone: a schema that declares
- * `properties` but no `type` counts as a non-object and is wrapped.
+ * `properties` but no `type` counts as a non-object and is wrapped. A schema
+ * deserialized from JSON carries a lowercase `type`, so the comparison ignores
+ * case rather than testing the genai `Type` enum member.
  */
-export function getOutputWrapperKey(
-  outputSchema?: SchemaLike,
-): string | undefined {
-  const schema = outputSchema ?? DEFAULT_TASK_OUTPUT_SCHEMA;
-  return schemaTypeName(schema) === 'object'
+function outputWrapperKey(schema: Schema): string | undefined {
+  return schema.type?.toLowerCase() === 'object'
     ? undefined
-    : FINISH_TASK_DEFAULT_WRAPPER_KEY;
-}
-
-/**
- * The schema's declared top-level type, lowercased.
- *
- * A genai `Schema` and a raw JSON Schema record both carry `type` directly, in
- * either casing, and are read here rather than through `toJsonSchema`:
- * `genaiSchemaToJsonSchema` maps types through the genai `Type` enum, so it
- * drops a lowercase `'object'` it does not recognise.
- */
-function schemaTypeName(schema: SchemaLike): string | undefined {
-  const document = isZodSchema(schema)
-    ? toJsonSchema(schema)
-    : (schema as Record<string, unknown>);
-  const type = document['type'];
-  return typeof type === 'string' ? type.toLowerCase() : undefined;
-}
-
-/** The `required` key list an object schema declares. */
-function requiredKeys(schema: SchemaLike): string[] {
-  const required = toJsonSchema(schema)['required'];
-  return Array.isArray(required)
-    ? required.filter((key): key is string => typeof key === 'string')
-    : [];
-}
-
-/**
- * Wraps a schema document under `wrapperKey`, hoisting its root-only keys to
- * the root of the wrapping document so its `$ref` pointers still resolve.
- */
-function wrapWithHoistedRootKeys(
-  wrapperKey: string,
-  document: Record<string, unknown>,
-): Record<string, unknown> {
-  const inner = {...document};
-  const hoisted: Record<string, unknown> = {};
-  for (const key of ROOT_ONLY_KEYS) {
-    if (inner[key] !== undefined) {
-      hoisted[key] = inner[key];
-      delete inner[key];
-    }
-  }
-  return {
-    ...hoisted,
-    type: 'object',
-    properties: {[wrapperKey]: inner},
-    required: [wrapperKey],
-  };
-}
-
-/** The shape Zod v3 and Zod v4 both give a validation issue. */
-interface SchemaIssue {
-  readonly path: readonly PropertyKey[];
-  readonly message: string;
-}
-
-/**
- * One `path: message` line per issue a schema validation error carries.
- *
- * An error carrying no issue list — a `refine` predicate that threw, say — is
- * rendered as itself, so the model still sees why the call failed.
- */
-function describeIssues(error: unknown): string[] {
-  const issues =
-    typeof error === 'object' && error !== null && 'issues' in error
-      ? (error as {issues: unknown}).issues
-      : undefined;
-  return Array.isArray(issues)
-    ? (issues as SchemaIssue[]).map(describeIssue)
-    : [String(error)];
-}
-
-/** One `path: message` line for a single validation issue. */
-function describeIssue({path, message}: SchemaIssue): string {
-  const location = path.join('.');
-  return location ? `${location}: ${message}` : message;
+    : DEFAULT_WRAPPER_KEY;
 }
 
 /**
@@ -194,7 +85,7 @@ function describeIssue({path, message}: SchemaIssue): string {
  */
 export class FinishTaskTool extends BaseTool {
   /** The schema describing the expected task output. */
-  readonly outputSchema: SchemaLike;
+  readonly outputSchema: Schema;
   /**
    * When the output schema is a non-object (primitive/array), the value is
    * wrapped under this key (the GenAI API requires object-typed parameters).
@@ -209,7 +100,21 @@ export class FinishTaskTool extends BaseTool {
   /** The `required` keys of an object output schema. */
   private readonly requiredKeys: readonly string[];
 
-  constructor(outputSchema?: SchemaLike, options: FinishTaskToolOptions = {}) {
+  /**
+   * @param outputSchema The expected task output, defaulting to a single
+   *   `result` string.
+   * @param taskAgentName The name of the task agent this tool belongs to,
+   *   named in the log line a validation failure writes.
+   * @param validationSchema The schema arguments are checked against,
+   *   defaulting to `outputSchema`. A task agent passes its schema as the
+   *   caller supplied it, because the genai form derived from it drops the
+   *   refinements and custom messages the caller wrote.
+   */
+  constructor(
+    outputSchema?: Schema,
+    taskAgentName?: string,
+    validationSchema?: SchemaLike,
+  ) {
     const schema = outputSchema ?? DEFAULT_TASK_OUTPUT_SCHEMA;
     let description =
       'Signal that this agent has completed its delegated task. Call this' +
@@ -219,54 +124,21 @@ export class FinishTaskTool extends BaseTool {
     }
     super({name: FINISH_TASK_TOOL_NAME, description});
     this.outputSchema = schema;
-    this.wrapperKey = getOutputWrapperKey(schema);
-    this.taskAgentName = options.taskAgentName;
-    this.validationSchema = options.validationSchema ?? schema;
-    this.requiredKeys = this.wrapperKey ? [] : requiredKeys(schema);
-  }
-
-  /**
-   * Builds the tool for a task agent, reading its output schema and capturing
-   * its name — the form adk-python's constructor takes.
-   *
-   * Arguments are checked against `outputSchemaSource` where the agent has one,
-   * because the genai conversion loses the refinements and custom messages the
-   * caller wrote. The declaration still comes from `outputSchema`, so the
-   * preference leaves it unchanged.
-   */
-  static forAgent(taskAgent: FinishTaskAgent): FinishTaskTool {
-    return new FinishTaskTool(taskAgent.outputSchema, {
-      taskAgentName: taskAgent.name,
-      validationSchema: taskAgent.outputSchemaSource ?? taskAgent.outputSchema,
-    });
+    this.wrapperKey = outputWrapperKey(schema);
+    this.taskAgentName = taskAgentName;
+    this.validationSchema = validationSchema ?? schema;
+    this.requiredKeys = this.wrapperKey ? [] : (schema.required ?? []);
   }
 
   override _getDeclaration(): FunctionDeclaration {
-    const {name, description, outputSchema, wrapperKey} = this;
-    // Only the Zod serializers emit a definitions block, so only they need the
-    // hoist. A genai `Schema` keeps the declaration it has always produced.
-    if (isZodSchema(outputSchema)) {
-      const document = toJsonSchema(outputSchema);
-      return {
-        name,
-        description,
-        parametersJsonSchema: wrapperKey
-          ? wrapWithHoistedRootKeys(wrapperKey, document)
-          : document,
-      };
-    }
-    const genaiSchema = outputSchema as Schema;
-    return {
-      name,
-      description,
-      parameters: wrapperKey
-        ? {
-            type: Type.OBJECT,
-            properties: {[wrapperKey]: genaiSchema},
-            required: [wrapperKey],
-          }
-        : genaiSchema,
-    };
+    const parameters: Schema = this.wrapperKey
+      ? {
+          type: Type.OBJECT,
+          properties: {[this.wrapperKey]: this.outputSchema},
+          required: [this.wrapperKey],
+        }
+      : this.outputSchema;
+    return {name: this.name, description: this.description, parameters};
   }
 
   override async processLlmRequest(
@@ -303,7 +175,7 @@ export class FinishTaskTool extends BaseTool {
     try {
       parseWithSchema(this.validationSchema, value);
     } catch (error) {
-      return this.validationError(describeIssues(error));
+      return this.validationError(describeSchemaIssues(error));
     }
     return FINISH_TASK_SUCCESS_RESULT;
   }
