@@ -43,7 +43,6 @@ function mock(
   return strategy.mock({
     tool,
     args,
-    toolContext: undefined,
     toolConnectionMap,
     stateStore,
   });

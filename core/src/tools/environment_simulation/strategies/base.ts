@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../../../agents/context.js';
 import {BaseTool} from '../../base_tool.js';
 import {ToolConnectionMap} from '../tool_connection_map.js';
 
@@ -20,9 +19,6 @@ export interface MockRequest {
 
   /** The arguments the agent called the tool with. */
   args: Record<string, unknown>;
-
-  /** The context of the tool call, absent when the strategy is called alone. */
-  toolContext: Context | undefined;
 
   /** How the analyzed tools share state, absent when analysis did not run. */
   toolConnectionMap: ToolConnectionMap | undefined;

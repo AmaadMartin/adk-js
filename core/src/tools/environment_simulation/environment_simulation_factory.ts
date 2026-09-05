@@ -4,25 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Context} from '../../agents/context.js';
-import {BaseTool} from '../base_tool.js';
+import {SingleBeforeToolCallback} from '../../agents/llm_agent.js';
 
 import {EnvironmentSimulationConfig} from './environment_simulation_config.js';
 import {EnvironmentSimulationEngine} from './environment_simulation_engine.js';
 import {EnvironmentSimulationPlugin} from './environment_simulation_plugin.js';
-
-/**
- * Answers a tool call from a simulated environment, or `undefined` to run the
- * real tool.
- *
- * WARNING: This feature is **experimental** and its API or behavior may change
- * in future releases.
- */
-export type EnvironmentSimulationCallback = (
-  tool: BaseTool,
-  args: Record<string, unknown>,
-  toolContext: Context,
-) => Promise<Record<string, unknown> | undefined>;
 
 /**
  * Builds the two ways to run an agent against a simulated environment.
@@ -36,18 +22,19 @@ export type EnvironmentSimulationCallback = (
  */
 export class EnvironmentSimulationFactory {
   /**
-   * Creates a simulation callback for callers who wire callbacks on an agent.
+   * Creates a simulation callback to set as an agent's `beforeToolCallback`.
    *
    * @param config The simulation to run.
-   * @returns A function shaped like a `beforeToolCallback`.
+   * @returns A callback that answers a tool call, or returns `undefined` to
+   *     run the real tool.
    * @throws {Error} When the `ENVIRONMENT_SIMULATION` feature is disabled.
    */
   static createCallback(
     config: EnvironmentSimulationConfig,
-  ): EnvironmentSimulationCallback {
+  ): SingleBeforeToolCallback {
     const simulatorEngine = new EnvironmentSimulationEngine(config);
-    return (tool, args, toolContext) =>
-      simulatorEngine.simulate(tool, args, toolContext);
+    return ({tool, args, context}) =>
+      simulatorEngine.simulate(tool, args, context);
   }
 
   /**

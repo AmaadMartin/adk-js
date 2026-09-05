@@ -336,7 +336,6 @@ describe('createMockStrategy', () => {
       strategy.mock({
         tool: new FakeTool('test_tool'),
         args: {},
-        toolContext: undefined,
         toolConnectionMap: undefined,
         stateStore: {},
       }),

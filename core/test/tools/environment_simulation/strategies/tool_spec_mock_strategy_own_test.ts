@@ -49,7 +49,6 @@ function mock(
   return strategy.mock({
     tool: new FakeTool(options.toolName ?? 'create_ticket'),
     args: options.args ?? {},
-    toolContext: undefined,
     toolConnectionMap: options.toolConnectionMap,
     stateStore: options.stateStore ?? {},
     environmentData: options.environmentData,

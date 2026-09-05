@@ -19,9 +19,9 @@ of three things:
 - It asks a model to invent a response from the tool's own declaration.
 
 `EnvironmentSimulationFactory` builds the plugin. Build the configuration with
-the factories described in the
-[environment simulation config guide](../environment_simulation_config/index.md),
-which validate their input and fill in the defaults adk-python applies.
+`createEnvironmentSimulationConfig`, `createToolSimulationConfig`,
+`createInjectionConfig` and `createInjectedError`, which validate their input
+and fill in the defaults adk-python applies.
 
 ## Get started
 
@@ -156,12 +156,16 @@ across many.
 
 ## Using a callback instead of a plugin
 
-`createCallback` returns the same logic shaped like a `beforeToolCallback`, for
-callers who wire callbacks on an agent:
+`createCallback` returns the same logic as a `SingleBeforeToolCallback`, so it
+can be set on one agent rather than on the whole runner:
 
 ```ts
-const simulate = EnvironmentSimulationFactory.createCallback(config);
-const result = await simulate(tool, args, toolContext);
+const agent = new LlmAgent({
+  name: 'travel_agent',
+  model: 'gemini-flash-latest',
+  tools: [getWeather, bookFlight],
+  beforeToolCallback: EnvironmentSimulationFactory.createCallback(config),
+});
 ```
 
 It returns `undefined` when the real tool should run. Each call to
