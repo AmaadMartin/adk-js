@@ -135,7 +135,6 @@ export class ParallelWorker extends BaseNode {
     );
 
     let nextIndex = 0;
-    let inFlight = 0;
     // Keyed by item index rather than by completion order: when several items
     // fail together the lowest input index is the one that propagates, so the
     // surfaced error is the same on every run and on replay. A Map checked by
@@ -147,18 +146,19 @@ export class ParallelWorker extends BaseNode {
     let interrupted = false;
     const interruptIds: string[] = [];
 
-    // The signals that would have cancelled the items anyway: the node's own
-    // (set by the engine under a deadline or an external abort) and the
-    // invocation's.
-    const upstream = [
-      ...new Set([ctx.abortSignal, ctx.invocationContext.abortSignal]),
-    ].filter((signal): signal is AbortSignal => signal !== undefined);
-    const isAborted = (): boolean => upstream.some((signal) => signal.aborted);
+    // Whatever would have cancelled the items anyway, as one signal: the
+    // node's own (set by the engine under a deadline or an external abort) and
+    // the invocation's.
+    const upstream = AbortSignal.any(
+      [ctx.abortSignal, ctx.invocationContext.abortSignal].filter(
+        (signal): signal is AbortSignal => signal !== undefined,
+      ),
+    );
 
-    // Chained to the upstream signals, so aborting ours stops the items without
+    // Chained to the upstream signal, so aborting ours stops the items without
     // detaching them from the invocation's or the workflow's signal.
     const itemAbort = new AbortController();
-    const childSignal = AbortSignal.any([itemAbort.signal, ...upstream]);
+    const childSignal = AbortSignal.any([itemAbort.signal, upstream]);
 
     let resolveStop!: () => void;
     const stopRequested = new Promise<void>((resolve) => {
@@ -169,12 +169,10 @@ export class ParallelWorker extends BaseNode {
       stopping = true;
       resolveStop();
     };
-    for (const signal of upstream) {
-      if (signal.aborted) {
-        requestStop();
-      } else {
-        signal.addEventListener('abort', requestStop, {once: true});
-      }
+    if (upstream.aborted) {
+      requestStop();
+    } else {
+      upstream.addEventListener('abort', requestStop, {once: true});
     }
 
     // Keep claiming the next item until the list is exhausted, an item fails or
@@ -185,7 +183,6 @@ export class ParallelWorker extends BaseNode {
         if (i >= items.length) {
           break;
         }
-        inFlight++;
         try {
           // Key each child by its item index (not completion order): the runId
           // makes the run deterministic, and the distinct node path makes each
@@ -230,8 +227,6 @@ export class ParallelWorker extends BaseNode {
           }
           requestStop();
           break;
-        } finally {
-          inFlight--;
         }
       }
     };
@@ -244,16 +239,14 @@ export class ParallelWorker extends BaseNode {
         itemAbort.abort();
         if (!(await settlesWithin(pool, CANCELLED_ITEM_DRAIN_TIMEOUT_MS))) {
           logger.warn(
-            `Node ${this.name}: ${inFlight} item(s) did not stop within ` +
+            `Node ${this.name}: item(s) did not stop within ` +
               `${CANCELLED_ITEM_DRAIN_TIMEOUT_MS / 1000}s of being cancelled; ` +
               `abandoning them.`,
           );
         }
       }
     } finally {
-      for (const signal of upstream) {
-        signal.removeEventListener('abort', requestStop);
-      }
+      upstream.removeEventListener('abort', requestStop);
     }
 
     if (errors.size > 0) {
@@ -267,7 +260,7 @@ export class ParallelWorker extends BaseNode {
       }
       return;
     }
-    if (isAborted()) {
+    if (upstream.aborted) {
       // Aborted mid-flight: `results` may have holes for unscheduled items, so
       // don't emit a wrong partial list — the invocation is being torn down.
       return;
