@@ -51,6 +51,7 @@ export {
   ToolTrajectoryMatchType,
   getMetricThreshold,
   normalizeToolTrajectoryMatchType,
+  parseEvalMetricResult,
   parseHallucinationsCriterion,
   parseLlmAsAJudgeCriterion,
   parseMetricInfo,

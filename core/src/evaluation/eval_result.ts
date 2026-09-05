@@ -6,7 +6,12 @@
 
 import {z} from 'zod';
 import {Session} from '../sessions/session.js';
-import {evalModel, optionalField, type EvalModel} from './common.js';
+import {
+  evalModel,
+  optionalField,
+  payloadField,
+  type EvalModel,
+} from './common.js';
 import {
   EvalMetric,
   EvalMetricResult,
@@ -73,25 +78,6 @@ export interface EvalSetResult {
 }
 
 /**
- * A field carrying a value that another evaluation module owns.
- *
- * `Session`, `Invocation` and the metric results have no schema in this
- * package, so the value passes through by reference. That is what
- * adk-python's `arbitrary_types_allowed` does. Every payload this module holds
- * is an object, so the guard rejects a scalar, a `null` and an array without
- * looking at what is inside. A caller that needs the payload itself validated
- * has `parseEvalMetricResult` in `eval_metrics.ts`.
- */
-function payloadField<T>(): z.ZodType<T> {
-  return z.custom<T>(
-    (value) =>
-      typeof value === 'object' && value !== null && !Array.isArray(value),
-  );
-}
-
-const EVAL_RESULT_OPTIONS = {extraKeys: 'allow'} as const;
-
-/**
  * Validates an {@link EvalCaseResult} payload.
  *
  * `eval_result.py` builds both models on a plain pydantic `BaseModel`, whose
@@ -118,7 +104,7 @@ const evalCaseResultModel: EvalModel<EvalCaseResult> = evalModel(
     sessionDetails: optionalField(payloadField<Session>()),
     userId: optionalField(z.string()),
   },
-  {...EVAL_RESULT_OPTIONS, name: 'EvalCaseResult'},
+  {extraKeys: 'allow', name: 'EvalCaseResult'},
 );
 
 /** Validates an {@link EvalSetResult} payload. */
@@ -130,7 +116,7 @@ const evalSetResultModel: EvalModel<EvalSetResult> = evalModel(
     evalCaseResults: z.array(evalCaseResultModel.schema).default([]),
     creationTimestamp: z.number().default(0),
   },
-  {...EVAL_RESULT_OPTIONS, name: 'EvalSetResult'},
+  {extraKeys: 'allow', name: 'EvalSetResult'},
 );
 
 /**
@@ -144,7 +130,8 @@ const evalSetResultModel: EvalModel<EvalSetResult> = evalModel(
  *
  * The metric, invocation and session payloads pass through by reference and
  * keep the spelling they arrived in. Only the fields this model names are
- * renamed.
+ * renamed. To validate a metric result as well, pass it to
+ * {@link parseEvalMetricResult}.
  *
  * @throws {InputValidationError} When the payload omits `finalEvalStatus`,
  *   `evalMetricResultPerInvocation` or `sessionId`, or names an eval status
