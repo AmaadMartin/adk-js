@@ -140,7 +140,7 @@ const evalSetResultModel: EvalModel<EvalSetResult> = evalModel(
  *
  * The metric, invocation and session payloads pass through by reference and
  * keep the spelling they arrived in. Only the fields this model names are
- * renamed. See {@link payloadField}.
+ * renamed.
  *
  * @throws {InputValidationError} When the payload omits `finalEvalStatus`,
  *   `evalMetricResultPerInvocation` or `sessionId`, or names an eval status
