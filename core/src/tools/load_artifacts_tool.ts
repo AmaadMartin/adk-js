@@ -25,6 +25,25 @@ const TEXT_LIKE_MIME_TYPES = new Set([
   'application/xml',
 ]);
 
+/**
+ * Narrows a model-supplied `artifact_names` value to a list of strings.
+ *
+ * Returns `undefined` when the value is anything other than an array of
+ * strings, so callers can reject it. An absent value is an empty list.
+ */
+function parseArtifactNames(value: unknown): string[] | undefined {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const names = value.filter(
+    (name): name is string => typeof name === 'string',
+  );
+  return names.length === value.length ? names : undefined;
+}
+
 function normalizeMimeType(mimeType?: string): string | undefined {
   if (!mimeType) {
     return undefined;
@@ -113,7 +132,13 @@ export class LoadArtifactsTool extends BaseTool {
   }
 
   override async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
-    const artifactNames = (args['artifact_names'] as string[]) || [];
+    const artifactNames = parseArtifactNames(args['artifact_names']);
+    if (!artifactNames) {
+      return {
+        error: "'artifact_names' must be a list of strings.",
+        error_code: 'INVALID_ARGUMENTS',
+      };
+    }
     return {
       artifact_names: artifactNames,
       status:
@@ -186,9 +211,16 @@ export class LoadArtifactsTool extends BaseTool {
           if (functionResponse && functionResponse.name === this.name) {
             const response =
               (functionResponse.response as Record<string, unknown>) || {};
-            const artifactNames =
-              (response['artifact_names'] as string[]) || [];
-            for (const name of artifactNames) {
+            const responseArtifactNames = parseArtifactNames(
+              response['artifact_names'],
+            );
+            if (!responseArtifactNames) {
+              logger.warn(
+                'Ignoring invalid artifact_names in load_artifacts response.',
+              );
+              continue;
+            }
+            for (const name of responseArtifactNames) {
               if (name && !namesToLoad.includes(name)) {
                 namesToLoad.push(name);
               }

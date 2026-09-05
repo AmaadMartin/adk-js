@@ -6,12 +6,28 @@
 
 import {
   Context,
-  LOAD_ARTIFACTS,
+  getLogger,
   LlmRequest,
+  LOAD_ARTIFACTS,
   LoadArtifactsTool,
 } from '@google/adk';
 import {Blob, Part, Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+
+const RUN_ASYNC_STATUS =
+  'artifact contents temporarily inserted and removed. to access these artifacts, call load_artifacts tool again.';
+
+const INVALID_ARTIFACT_NAMES_RESULT = {
+  error: "'artifact_names' must be a list of strings.",
+  error_code: 'INVALID_ARGUMENTS',
+};
+
+const INVALID_ARTIFACT_NAMES_WARNING =
+  'Ignoring invalid artifact_names in load_artifacts response.';
+
+function spyOnWarn() {
+  return vi.spyOn(getLogger(), 'warn').mockImplementation(() => {});
+}
 
 class StubToolContext {
   private artifactsByName: Record<string, Part>;
@@ -32,6 +48,11 @@ class StubToolContext {
   async loadArtifact(name: string): Promise<Part | undefined> {
     return this.artifactsByName[name];
   }
+}
+
+/** Builds a `Context` backed by {@link StubToolContext}. */
+function stubContext(artifactsByName: Record<string, Part> = {}): Context {
+  return new StubToolContext(artifactsByName) as unknown as Context;
 }
 
 describe('LoadArtifactsTool', () => {
@@ -651,5 +672,163 @@ describe('LoadArtifactsTool', () => {
       c.parts?.some((p) => p.text === `Artifact ${artifactName} is:`),
     );
     expect(addedContent).toBeUndefined();
+  });
+
+  describe('artifact_names validation', () => {
+    const emptyToolContext = stubContext();
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('rejects non-string entries in artifact_names', async () => {
+      const tool = new LoadArtifactsTool();
+
+      const result = await tool.runAsync({
+        args: {artifact_names: ['valid.txt', 123]},
+        toolContext: emptyToolContext,
+      });
+
+      expect(result).toEqual(INVALID_ARTIFACT_NAMES_RESULT);
+    });
+
+    it('rejects a bare string artifact_names', async () => {
+      const tool = new LoadArtifactsTool();
+
+      const result = await tool.runAsync({
+        args: {artifact_names: 'a.txt'},
+        toolContext: emptyToolContext,
+      });
+
+      expect(result).toEqual(INVALID_ARTIFACT_NAMES_RESULT);
+    });
+
+    it('rejects a null artifact_names', async () => {
+      const tool = new LoadArtifactsTool();
+
+      const result = await tool.runAsync({
+        args: {artifact_names: null},
+        toolContext: emptyToolContext,
+      });
+
+      expect(result).toEqual(INVALID_ARTIFACT_NAMES_RESULT);
+    });
+
+    it('returns an empty list when artifact_names is absent', async () => {
+      const tool = new LoadArtifactsTool();
+
+      const result = await tool.runAsync({
+        args: {},
+        toolContext: emptyToolContext,
+      });
+
+      expect(result).toEqual({
+        artifact_names: [],
+        status: RUN_ASYNC_STATUS,
+      });
+    });
+
+    it('ignores a malformed artifact_names in a function response', async () => {
+      const warnSpy = spyOnWarn();
+      const toolContext = stubContext({'ok.txt': {text: 'hello'}});
+
+      const llmRequest: LlmRequest = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: 'load_artifacts',
+                  response: {artifact_names: ['ok.txt', 42]},
+                },
+              },
+            ],
+          },
+        ],
+        toolsDict: {},
+        liveConnectConfig: {},
+      };
+
+      const tool = new LoadArtifactsTool();
+      await tool.processLlmRequest({toolContext, llmRequest});
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(INVALID_ARTIFACT_NAMES_WARNING);
+      expect(llmRequest.contents.length).toEqual(1);
+      expect(llmRequest.config?.systemInstruction).toContain(
+        'You have a list of artifacts',
+      );
+    });
+
+    it('ignores a non-array artifact_names in a function response', async () => {
+      const warnSpy = spyOnWarn();
+      const toolContext = stubContext({'ok.txt': {text: 'hello'}});
+
+      const llmRequest: LlmRequest = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: 'load_artifacts',
+                  response: {artifact_names: 'ok.txt'},
+                },
+              },
+            ],
+          },
+        ],
+        toolsDict: {},
+        liveConnectConfig: {},
+      };
+
+      const tool = new LoadArtifactsTool();
+      await tool.processLlmRequest({toolContext, llmRequest});
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(INVALID_ARTIFACT_NAMES_WARNING);
+      expect(llmRequest.contents.length).toEqual(1);
+    });
+
+    it('still loads a valid response when another in the same turn is malformed', async () => {
+      const warnSpy = spyOnWarn();
+      const toolContext = stubContext({'ok.txt': {text: 'hello'}});
+
+      const llmRequest: LlmRequest = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: 'load_artifacts',
+                  response: {artifact_names: ['bad', {}]},
+                },
+              },
+              {
+                functionResponse: {
+                  name: 'load_artifacts',
+                  response: {artifact_names: ['ok.txt']},
+                },
+              },
+            ],
+          },
+        ],
+        toolsDict: {},
+        liveConnectConfig: {},
+      };
+
+      const tool = new LoadArtifactsTool();
+      await tool.processLlmRequest({toolContext, llmRequest});
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(INVALID_ARTIFACT_NAMES_WARNING);
+      expect(llmRequest.contents.length).toEqual(2);
+      expect(llmRequest.contents[1].parts![0].text).toEqual(
+        'Artifact ok.txt is:',
+      );
+      expect(llmRequest.contents[1].parts![1].text).toEqual('hello');
+    });
   });
 });
