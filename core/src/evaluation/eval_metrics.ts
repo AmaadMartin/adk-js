@@ -24,9 +24,6 @@ export enum PrebuiltMetrics {
   MULTI_TURN_TOOL_USE_QUALITY_V1 = 'multi_turn_tool_use_quality_v1',
 }
 
-/** The value a metric's score is compared against to decide pass from fail. */
-export type Threshold = number;
-
 /**
  * The criterion a metric is judged against.
  *
@@ -35,8 +32,8 @@ export type Threshold = number;
  * can read its own criterion out of a value validated as a base one.
  */
 export interface BaseCriterion {
-  /** The threshold to be used by the metric. */
-  threshold: Threshold;
+  /** The score at or above which the metric passes. */
+  threshold: number;
 }
 
 /** A metric used to evaluate one aspect of an eval case. */

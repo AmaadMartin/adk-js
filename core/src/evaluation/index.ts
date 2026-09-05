@@ -6,16 +6,13 @@
 
 /**
  * The ADK evaluation module (a parity port of `google/adk-python`'s
- * `google/adk/evaluation`). It currently covers the two facades over the
- * Vertex AI Gen AI evaluation service, and the data types they name.
+ * `google/adk/evaluation`). It currently covers the multi-turn facade over the
+ * Vertex AI Gen AI evaluation service, and the data types it names.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
 export type {ConversationScenario} from './conversation_scenarios.js';
-export {isInvocationEvents} from './eval_case.js';
 export type {
-  IntermediateData,
-  IntermediateDataType,
   Invocation,
   InvocationEvent,
   InvocationEvents,
@@ -25,7 +22,7 @@ export {
   PrebuiltMetrics,
   getMetricThreshold,
 } from './eval_metrics.js';
-export type {BaseCriterion, EvalMetric, Threshold} from './eval_metrics.js';
+export type {BaseCriterion, EvalMetric} from './eval_metrics.js';
 export type {
   EvaluationResult,
   Evaluator,
@@ -33,24 +30,17 @@ export type {
 } from './evaluator.js';
 export {MultiTurnToolUseQualityV1Evaluator} from './multi_turn_tool_use_quality_evaluator.js';
 export type {MultiTurnToolUseQualityV1EvaluatorOptions} from './multi_turn_tool_use_quality_evaluator.js';
-export {
-  MultiTurnVertexAiEvalFacade,
-  SingleTurnVertexAiEvalFacade,
-  VertexAiEvalFacade,
-  resolveVertexAiEvalClientConfig,
-} from './vertex_ai_eval_facade.js';
+export {MultiTurnVertexAiEvalFacade} from './vertex_ai_eval_facade.js';
 export type {
   VertexAgentConfig,
   VertexAgentData,
   VertexAgentEvent,
   VertexAggregatedMetricResult,
   VertexAiEvalClient,
-  VertexAiEvalClientConfig,
   VertexAiEvalFacadeOptions,
   VertexAiEvalRequest,
   VertexConversationTurn,
   VertexEvalCase,
-  VertexEvalCaseRow,
   VertexEvalMetricSpec,
   VertexEvaluationDataset,
   VertexEvaluationResult,
