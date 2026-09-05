@@ -9,7 +9,6 @@ import {BaseNode, START} from '../base_node.js';
 import {isNodeInterruptedError} from '../errors.js';
 import {RunnableNode} from '../graph.js';
 import {NodeContext} from '../node_context.js';
-import {RetryConfig} from '../retry_config.js';
 import {buildNode} from '../utils/workflow_graph_utils.js';
 
 /**
@@ -49,8 +48,6 @@ export interface ParallelWorkerConfig {
    * LLM or a remote tool and the list length is data-driven.
    */
   maxParallelWorkers?: number;
-  /** Retry configuration for the fan-out as a whole. */
-  retryConfig?: RetryConfig;
   /** Maximum time, in seconds, for the whole fan-out to complete. */
   timeout?: number;
 }
@@ -72,11 +69,17 @@ export interface ParallelWorkerConfig {
  * node — which is also where the worker's own name comes from.
  *
  * Notes:
- * - **Two levels of retry/timeout.** `retryConfig`/`timeout` in
- *   {@link ParallelWorkerConfig} apply to the fan-out as a whole. The same
- *   options passed to `buildNode` apply to the wrapped node, once per item;
- *   set those by wrapping the value yourself —
- *   `new ParallelWorker(node(myAgent, {timeout: 5}))`.
+ * - **Two levels of timeout.** `timeout` in {@link ParallelWorkerConfig}
+ *   bounds the fan-out as a whole. The same option passed to `buildNode`
+ *   bounds the wrapped node, once per item; set that by wrapping the value
+ *   yourself — `new ParallelWorker(node(myAgent, {timeout: 5}))`.
+ * - **No `retryConfig`.** The worker deliberately takes none, unlike
+ *   adk-python. A retried fan-out re-enters `ctx.runNode` for every item, and
+ *   the dynamic scheduler hands back the recorded run for an item it has
+ *   already seen — including one that was cancelled when a sibling failed,
+ *   whose recorded output is empty. The retry would therefore return a list
+ *   with silent holes in it. Wrap the inner node with `node(x, {retryConfig})`
+ *   to retry an individual item.
  * - **All-or-nothing.** If any item throws, one error is rethrown and the
  *   already-computed sibling outputs are discarded. When several items fail
  *   together the lowest input index wins, so the surfaced error is the same on
@@ -104,12 +107,7 @@ export class ParallelWorker extends BaseNode {
     if (built === START) {
       throw new Error('ParallelWorker cannot wrap a START node.');
     }
-    super({
-      name: built.name,
-      rerunOnResume: true,
-      retryConfig: config.retryConfig,
-      timeout: config.timeout,
-    });
+    super({name: built.name, rerunOnResume: true, timeout: config.timeout});
     if (
       config.maxParallelWorkers !== undefined &&
       config.maxParallelWorkers < 1

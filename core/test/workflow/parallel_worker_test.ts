@@ -11,6 +11,7 @@ import {InMemorySessionService} from '../../src/sessions/in_memory_session_servi
 import {resetLogger, setLogger} from '../../src/utils/logger.js';
 import {START} from '../../src/workflow/base_node.js';
 import {isNodeTimeoutError} from '../../src/workflow/errors.js';
+import {node} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {JoinNode} from '../../src/workflow/nodes/join_node.js';
@@ -19,7 +20,12 @@ import {RequestInput} from '../../src/workflow/request_input.js';
 import {hasRequestInputFunctionCall} from '../../src/workflow/utils/hitl_utils.js';
 import {buildNode} from '../../src/workflow/utils/workflow_graph_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';
-import {createIc, driveNode, replyAgent} from './test_helpers.js';
+import {
+  createIc,
+  driveNode,
+  driveWorkflow,
+  replyAgent,
+} from './test_helpers.js';
 
 describe('ParallelWorker', () => {
   it('maps a list input through the inner node, preserving order', async () => {
@@ -91,37 +97,10 @@ describe('ParallelWorker', () => {
     );
   });
 
-  it('accepts retryConfig and timeout and passes them to BaseNode', () => {
+  it('accepts a timeout and passes it to BaseNode', () => {
     const inner = new FunctionNode('x', (_c, v) => v);
-    const retryConfig = {maxAttempts: 3};
-    const worker = new ParallelWorker(inner, {retryConfig, timeout: 30});
 
-    expect(worker.timeout).toBe(30);
-    expect(worker.retryConfig).toBe(retryConfig);
-    // BaseNode derives this from retryConfig, so it proves the option reached
-    // the base class rather than only a field on the subclass.
-    expect(worker.preparedRetryConfig).toBeDefined();
-  });
-
-  it('retries the whole fan-out when the worker declares a retryConfig', async () => {
-    let attempts = 0;
-    const inner = new FunctionNode('flaky', (_c, n: number) => {
-      if (n === 1) {
-        attempts++;
-        if (attempts === 1) {
-          throw new Error('first attempt fails');
-        }
-      }
-      return n * 2;
-    });
-    const worker = new ParallelWorker(inner, {
-      retryConfig: {maxAttempts: 2, initialDelay: 0, jitter: 0},
-    });
-
-    const {output} = await driveNode(worker, [1, 2]);
-
-    expect(output).toEqual([2, 4]);
-    expect(attempts).toBe(2);
+    expect(new ParallelWorker(inner, {timeout: 30}).timeout).toBe(30);
   });
 
   it('fails the fan-out with NodeTimeoutError when the worker timeout fires', async () => {
@@ -597,6 +576,60 @@ describe('ParallelWorker failure ordering', () => {
 
     expect(finished).toEqual([2, 1, 0]);
     expect(output).toEqual(['item0_res', 'item1_res', 'item2_res']);
+  });
+});
+
+describe('ParallelWorker options inside a real Workflow', () => {
+  // The worker's own timeout must bound the fan-out on the path production
+  // takes, where ctx.runNode goes through the dynamic scheduler.
+  it('fails the fan-out with NodeTimeoutError under a workflow scheduler', async () => {
+    const inner = new FunctionNode('slow', async (ctx: NodeContext, n) => {
+      await new Promise<void>((resolve) => {
+        ctx.abortSignal?.addEventListener('abort', () => resolve(), {
+          once: true,
+        });
+        setTimeout(resolve, 1000);
+      });
+      return n;
+    });
+    const worker = new ParallelWorker(inner, {timeout: 0.05});
+    const wf = new Workflow({name: 'timeout_wf', edges: [['START', worker]]});
+
+    const err = await driveWorkflow(wf, [1, 2]).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(isNodeTimeoutError(err)).toBe(true);
+  });
+
+  // The worker takes no retryConfig; this is the per-item alternative its
+  // documentation points at.
+  it('retries a single item when the inner node declares a retryConfig', async () => {
+    const attempts = new Map<number, number>();
+    const flaky = node(
+      (_c: NodeContext, n: number) => {
+        const seen = (attempts.get(n) ?? 0) + 1;
+        attempts.set(n, seen);
+        if (n === 1 && seen === 1) {
+          throw new Error('first attempt fails');
+        }
+        return n * 2;
+      },
+      {
+        name: 'flaky',
+        retryConfig: {maxAttempts: 2, initialDelay: 0, jitter: 0},
+      },
+    );
+    const wf = new Workflow({
+      name: 'item_retry_wf',
+      edges: [['START', new ParallelWorker(flaky)]],
+    });
+
+    const {output} = await driveWorkflow(wf, [1, 2]);
+
+    expect(output).toEqual([2, 4]);
+    expect(attempts.get(1)).toBe(2);
   });
 });
 
