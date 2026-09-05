@@ -246,9 +246,18 @@ export type {
   GEPARootAgentOptimizerResult,
   RootAgentGepaAdapterParams,
 } from './optimization/gepa_root_agent_optimizer.js';
-export {requireStaticInstruction} from './optimization/gepa_utils.js';
 export {
   AGENT_PROMPT_NAME,
+  AgentGepaAdapter,
+  GEPARootAgentPromptOptimizer,
+} from './optimization/gepa_root_agent_prompt_optimizer.js';
+export type {
+  AgentGepaAdapterParams,
+  GEPARootAgentPromptOptimizerConfig,
+  GEPARootAgentPromptOptimizerResult,
+} from './optimization/gepa_root_agent_prompt_optimizer.js';
+export {requireStaticInstruction} from './optimization/gepa_utils.js';
+export {
   SKILL_KEY_PREFIX,
   skillComponentKey,
 } from './optimization/instruction_proposal.js';

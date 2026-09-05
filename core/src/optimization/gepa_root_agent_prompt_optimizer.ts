@@ -4,15 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ThinkingLevel, type GenerateContentConfig} from '@google/genai';
+import type {GenerateContentConfig} from '@google/genai';
 
-import type {LlmAgent, ToolUnion} from '../agents/llm_agent.js';
+import type {LlmAgent} from '../agents/llm_agent.js';
 import type {BaseLlm} from '../models/base_llm.js';
 import {LLMRegistry, type BaseLlmType} from '../models/registry.js';
-import {
-  isSkillToolset,
-  type SkillToolset,
-} from '../tools/skill/skill_toolset.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {AgentOptimizer, type OptimizeParams} from './agent_optimizer.js';
@@ -21,24 +17,15 @@ import type {
   OptimizerResult,
   UnstructuredSamplingResult,
 } from './data_types.js';
-import type {
-  EvaluationBatch,
-  GepaAdapter,
-  GepaEngine,
-  ReflectionLm,
-} from './gepa_engine.js';
-import {AGENT_PROMPT_NAME} from './gepa_root_agent_prompt_optimizer.js';
+import type {EvaluationBatch, GepaAdapter, GepaEngine} from './gepa_engine.js';
 import {
   generateReflectionResponse,
   requireStaticInstruction,
 } from './gepa_utils.js';
-import {
-  extractNewInstruction,
-  renderProposalPrompt,
-  SKILL_KEY_PREFIX,
-  skillComponentKey,
-} from './instruction_proposal.js';
 import type {ExampleSet, Sampler} from './sampler.js';
+
+/** The GEPA component key holding the root agent's instruction. */
+export const AGENT_PROMPT_NAME = 'agent_prompt';
 
 /**
  * Score for an example absent from the sampling result. It assumes the [0, 1]
@@ -46,16 +33,19 @@ import type {ExampleSet, Sampler} from './sampler.js';
  */
 const MISSING_EXAMPLE_SCORE = 0;
 
+/** The reflection model's thinking budget, in tokens. */
+const DEFAULT_THINKING_BUDGET = 10240;
+
 /** Thrown when an optimization runs without a GEPA engine. */
 const MISSING_ENGINE_MESSAGE =
-  'GEPARootAgentOptimizer requires a GEPA engine, which ADK does not ' +
+  'GEPARootAgentPromptOptimizer requires a GEPA engine, which ADK does not ' +
   'bundle. GEPA is an external search algorithm, so applications that do ' +
   'not optimize prompts are not made to carry it. Pass an implementation of ' +
   'the GepaEngine interface as `config.engine`.';
 
-/** Configuration options for {@link GEPARootAgentOptimizer}. */
-export interface GEPARootAgentOptimizerConfig {
-  /** The model that reads the eval results and rewrites the instructions. */
+/** Configuration options for {@link GEPARootAgentPromptOptimizer}. */
+export interface GEPARootAgentPromptOptimizerConfig {
+  /** The model that reads the eval results and rewrites the instruction. */
   optimizerModel?: string;
 
   /** The generation config for the optimizer model. */
@@ -77,120 +67,55 @@ export interface GEPARootAgentOptimizerConfig {
   engine?: GepaEngine;
 }
 
-/** Defaults matching adk-python's `GEPARootAgentOptimizerConfig`. */
+/** Defaults matching adk-python's `GEPARootAgentPromptOptimizerConfig`. */
 const DEFAULT_CONFIG: Required<
-  Omit<GEPARootAgentOptimizerConfig, 'runDir' | 'engine'>
+  Omit<GEPARootAgentPromptOptimizerConfig, 'runDir' | 'engine'>
 > = {
-  optimizerModel: 'gemini-3.5-flash',
+  optimizerModel: 'gemini-2.5-flash',
   modelConfiguration: {
     thinkingConfig: {
       includeThoughts: true,
-      thinkingLevel: ThinkingLevel.HIGH,
+      thinkingBudget: DEFAULT_THINKING_BUDGET,
     },
   },
   maxMetricCalls: 100,
   reflectionMinibatchSize: 3,
 };
 
-/** The final result of a {@link GEPARootAgentOptimizer} run. */
-export interface GEPARootAgentOptimizerResult extends OptimizerResult<AgentWithScores> {
+/** The final result of a {@link GEPARootAgentPromptOptimizer} run. */
+export interface GEPARootAgentPromptOptimizerResult extends OptimizerResult<AgentWithScores> {
   /** The raw result the GEPA engine reported. */
   gepaResult?: Record<string, unknown>;
 }
 
-/** Parameters for the {@link RootAgentGepaAdapter} constructor. */
-export interface RootAgentGepaAdapterParams {
-  /** The agent each candidate is rebuilt from. */
+/** Parameters for the {@link AgentGepaAdapter} constructor. */
+export interface AgentGepaAdapterParams {
+  /** The agent whose root instruction each candidate replaces. */
   initialAgent: LlmAgent;
 
   /** The scoring the caller already trusts. */
   sampler: Sampler<UnstructuredSamplingResult>;
-
-  /** The model call that rewrites one component. */
-  reflectionLm: ReflectionLm;
-}
-
-/** Returns a copy of the toolset carrying the candidate's skill instructions. */
-function updateSkillToolset(
-  toolset: SkillToolset,
-  candidate: Record<string, string>,
-): SkillToolset {
-  const newSkills = Object.values(toolset.skills).map((skill) => {
-    const instructions = candidate[skillComponentKey(skill.frontmatter.name)];
-    return instructions === undefined ? skill : {...skill, instructions};
-  });
-  return toolset.cloneWithUpdatedSkills(newSkills);
 }
 
 /**
- * Rebuilds the agent from one candidate.
+ * The bridge between a GEPA engine and an ADK agent.
  *
- * The instruction and the tools are passed to a single `clone` call. Assigning
- * the tools afterwards would leave the clone's config holding the original
- * toolsets, so cloning the result again would lose the candidate's skill
- * instructions.
+ * It clones the initial agent with each candidate instruction, and delegates
+ * the scoring to the caller's {@link Sampler}.
  */
-function createAgentFromCandidate(
-  initialAgent: LlmAgent,
-  candidate: Record<string, string>,
-): LlmAgent {
-  const instruction =
-    candidate[AGENT_PROMPT_NAME] ?? requireStaticInstruction(initialAgent);
-  const tools: ToolUnion[] = initialAgent.tools.map((tool) =>
-    isSkillToolset(tool) ? updateSkillToolset(tool, candidate) : tool,
-  );
-  return initialAgent.clone({instruction, tools});
-}
-
-/** Returns the seed candidate: every skill's instructions, then the prompt. */
-function buildSeedCandidate(
-  initialAgent: LlmAgent,
-  instruction: string,
-): Record<string, string> {
-  const seedCandidate: Record<string, string> = {};
-  for (const tool of initialAgent.tools) {
-    if (!isSkillToolset(tool)) {
-      continue;
-    }
-    for (const skill of Object.values(tool.skills)) {
-      seedCandidate[skillComponentKey(skill.frontmatter.name)] =
-        skill.instructions;
-    }
-  }
-  // Added last so an engine that walks the components in order optimizes the
-  // skills before the core instruction.
-  seedCandidate[AGENT_PROMPT_NAME] = instruction;
-  return seedCandidate;
-}
-
-/**
- * The bridge between a GEPA engine and an ADK root agent and its skills.
- *
- * Each candidate carries the agent's core instruction under
- * {@link AGENT_PROMPT_NAME} and one entry per skill under
- * {@link skillComponentKey}. The adapter rebuilds the agent from a candidate,
- * delegates the scoring to the caller's {@link Sampler}, and asks the
- * reflection model for the next text of each component.
- */
-export class RootAgentGepaAdapter implements GepaAdapter<
+export class AgentGepaAdapter implements GepaAdapter<
   string,
   Record<string, unknown>,
   Record<string, unknown>
 > {
   private readonly initialAgent: LlmAgent;
   private readonly sampler: Sampler<UnstructuredSamplingResult>;
-  private readonly reflectionLm: ReflectionLm;
   private readonly trainExampleIds: Set<string>;
   private readonly validationExampleIds: Set<string>;
 
-  constructor({
-    initialAgent,
-    sampler,
-    reflectionLm,
-  }: RootAgentGepaAdapterParams) {
+  constructor({initialAgent, sampler}: AgentGepaAdapterParams) {
     this.initialAgent = initialAgent;
     this.sampler = sampler;
-    this.reflectionLm = reflectionLm;
     this.trainExampleIds = new Set(sampler.getTrainExampleIds());
     this.validationExampleIds = new Set(sampler.getValidationExampleIds());
   }
@@ -202,10 +127,13 @@ export class RootAgentGepaAdapter implements GepaAdapter<
   ): Promise<
     EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
   > {
-    logger.debug(`Evaluating agent on batch [${batch}]`);
+    const prompt = candidate[AGENT_PROMPT_NAME];
+    logger.debug(
+      `Evaluating agent on batch [${batch}] with prompt:\n${prompt}`,
+    );
 
     const result = await this.sampler.sampleAndScore({
-      candidate: createAgentFromCandidate(this.initialAgent, candidate),
+      candidate: this.initialAgent.clone({instruction: prompt}),
       exampleSet: this.resolveExampleSet(batch),
       batch,
       captureFullEvalData: captureTraces,
@@ -250,51 +178,16 @@ export class RootAgentGepaAdapter implements GepaAdapter<
       );
     }
 
-    const dataset: Record<string, Array<Record<string, unknown>>> = {};
-    for (const component of componentsToUpdate) {
-      dataset[component] = [];
-    }
+    const dataset = scores.map((score, index) => ({
+      [AGENT_PROMPT_NAME]: candidate[AGENT_PROMPT_NAME],
+      'score': score,
+      'eval_data': trajectories[index],
+    }));
 
-    scores.forEach((score, index) => {
-      const evalData = trajectories[index];
-      // snake_case because the reflection model reads these keys, and
-      // adk-python writes them that way.
-      const entry = {'score': score, 'eval_data': evalData};
-      const serialized = JSON.stringify(evalData);
-
-      for (const component of componentsToUpdate) {
-        if (!component.startsWith(SKILL_KEY_PREFIX)) {
-          dataset[component].push(entry);
-          continue;
-        }
-        // A skill only learns from the examples that exercised it.
-        if (serialized.includes(component.slice(SKILL_KEY_PREFIX.length))) {
-          dataset[component].push(entry);
-        }
-      }
-    });
-
-    return dataset;
-  }
-
-  async proposeNewTexts(
-    candidate: Record<string, string>,
-    reflectiveDataset: Record<string, Array<Record<string, unknown>>>,
-    componentsToUpdate: string[],
-  ): Promise<Record<string, string>> {
-    const newTexts: Record<string, string> = {};
-    for (const component of componentsToUpdate) {
-      const prompt = renderProposalPrompt(
-        component,
-        candidate[component],
-        reflectiveDataset[component],
-      );
-      newTexts[component] = extractNewInstruction(
-        await this.reflectionLm(prompt),
-        component,
-      );
-    }
-    return newTexts;
+    // The same data serves every component, of which there should be only one.
+    return Object.fromEntries(
+      componentsToUpdate.map((component) => [component, dataset]),
+    );
   }
 
   /** Reports which example set a batch of UIDs belongs to. */
@@ -310,21 +203,22 @@ export class RootAgentGepaAdapter implements GepaAdapter<
 }
 
 /**
- * An optimizer that rewrites a root agent's instruction and the instructions
- * of every skill it exposes, in one GEPA search.
+ * An optimizer that improves the root agent instruction with the GEPA
+ * framework.
  *
  * ADK bundles no GEPA engine, so the caller supplies one as `config.engine`.
  */
 @experimental
-export class GEPARootAgentOptimizer extends AgentOptimizer<
+export class GEPARootAgentPromptOptimizer extends AgentOptimizer<
   UnstructuredSamplingResult,
   AgentWithScores
 > {
-  private readonly config: GEPARootAgentOptimizerConfig & typeof DEFAULT_CONFIG;
+  private readonly config: GEPARootAgentPromptOptimizerConfig &
+    typeof DEFAULT_CONFIG;
   private readonly llmClass: BaseLlmType;
   private llm?: BaseLlm;
 
-  constructor(config: GEPARootAgentOptimizerConfig = {}) {
+  constructor(config: GEPARootAgentPromptOptimizerConfig = {}) {
     super();
     this.config = {...DEFAULT_CONFIG, ...config};
     this.llmClass = LLMRegistry.resolve(this.config.optimizerModel);
@@ -343,18 +237,18 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
   }
 
   /**
-   * Runs the GEPA search over the root agent's instruction and its skills.
+   * Runs the GEPA search over the root agent's instruction.
    *
    * @param params The agent to start from, and the sampler that scores
-   *     candidates. Sub-agent instructions are left alone.
-   * @returns The Pareto front of rebuilt agents, plus the raw engine result.
+   *     candidates. Only the root agent's instruction is optimized.
+   * @returns The Pareto front of optimized agents, plus the raw engine result.
    * @throws If no GEPA engine is configured, or if the initial instruction is
    *     not a static string.
    */
   override async optimize({
     initialAgent,
     sampler,
-  }: OptimizeParams<UnstructuredSamplingResult>): Promise<GEPARootAgentOptimizerResult> {
+  }: OptimizeParams<UnstructuredSamplingResult>): Promise<GEPARootAgentPromptOptimizerResult> {
     const engine = this.config.engine;
     if (!engine) {
       throw new Error(MISSING_ENGINE_MESSAGE);
@@ -362,7 +256,8 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
 
     if (initialAgent.subAgents.length > 0) {
       logger.warn(
-        'The GEPARootAgentOptimizer will not optimize prompts for sub-agents.',
+        'The GEPARootAgentPromptOptimizer will not optimize prompts for ' +
+          'sub-agents.',
       );
     }
 
@@ -378,21 +273,20 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
     }
 
     const seedInstruction = requireStaticInstruction(initialAgent);
-    const reflectionLm: ReflectionLm = (prompt) =>
-      generateReflectionResponse({
-        llm: this.resolveLlm(),
-        model: this.config.optimizerModel,
-        config: this.config.modelConfiguration,
-        prompt,
-      });
 
     const engineResult = await engine.optimize({
-      seedCandidate: buildSeedCandidate(initialAgent, seedInstruction),
+      seedCandidate: {[AGENT_PROMPT_NAME]: seedInstruction},
       trainset: trainIds,
       valset: valIds,
-      adapter: new RootAgentGepaAdapter({initialAgent, sampler, reflectionLm}),
+      adapter: new AgentGepaAdapter({initialAgent, sampler}),
       maxMetricCalls: this.config.maxMetricCalls,
-      reflectionLm,
+      reflectionLm: (prompt) =>
+        generateReflectionResponse({
+          llm: this.resolveLlm(),
+          model: this.config.optimizerModel,
+          config: this.config.modelConfiguration,
+          prompt,
+        }),
       reflectionMinibatchSize: this.config.reflectionMinibatchSize,
       runDir: this.config.runDir,
     });
@@ -408,7 +302,9 @@ export class GEPARootAgentOptimizer extends AgentOptimizer<
 
     return {
       optimizedAgents: candidates.map((candidate, index) => ({
-        optimizedAgent: createAgentFromCandidate(initialAgent, candidate),
+        optimizedAgent: initialAgent.clone({
+          instruction: candidate[AGENT_PROMPT_NAME],
+        }),
         overallScore: valAggregateScores[index],
       })),
       gepaResult: engineResult.toDict(),
