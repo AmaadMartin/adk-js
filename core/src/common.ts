@@ -527,9 +527,13 @@ export {
   DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
   DEFAULT_USER_SIMULATOR_VOICE_NAME,
   LLM_AUDIO_USER_SIMULATOR_TYPE,
+  parseLlmAudioUserSimulatorConfig,
 } from './evaluation/simulation/llm_audio_user_simulator.js';
 export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
-export {LLM_BACKED_USER_SIMULATOR_TYPE} from './evaluation/simulation/llm_backed_user_simulator.js';
+export {
+  LLM_BACKED_USER_SIMULATOR_TYPE,
+  parseLlmBackedUserSimulatorConfig,
+} from './evaluation/simulation/llm_backed_user_simulator.js';
 export type {LlmBackedUserSimulatorConfig} from './evaluation/simulation/llm_backed_user_simulator.js';
 export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
 export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';

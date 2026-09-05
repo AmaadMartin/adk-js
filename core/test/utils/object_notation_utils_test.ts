@@ -6,6 +6,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {
+  isRecord,
   toCamelCase,
   toSnakeCase,
 } from '../../src/utils/object_notation_utils.js';
@@ -154,6 +155,7 @@ describe('toSnakeCase', () => {
 
 describe('preserveKeysAtAnyDepth', () => {
   const OPAQUE = new Set(['state_delta', 'stateDelta']);
+  const OPAQUE_ARGS: ReadonlySet<string> = new Set(['args']);
 
   it('preserves a key nested below a path the caller cannot enumerate', () => {
     const obj = {
@@ -179,5 +181,51 @@ describe('preserveKeysAtAnyDepth', () => {
     expect(toCamelCase(obj, [], OPAQUE)).toEqual({
       otherMap: {userName: 'Ada'},
     });
+  });
+
+  it('preserves the value of a named key however deep it sits', () => {
+    const obj = {
+      outer_key: {inner_key: {args: {tool_arg: 1}, other_key: {nested_key: 2}}},
+    };
+
+    expect(toCamelCase(obj, [], OPAQUE_ARGS)).toEqual({
+      outerKey: {innerKey: {args: {tool_arg: 1}, otherKey: {nestedKey: 2}}},
+    });
+  });
+
+  it('preserves a named key inside an array element', () => {
+    const obj = {calls: [{args: {tool_arg: 1}, call_id: 'a'}]};
+
+    expect(toCamelCase(obj, [], OPAQUE_ARGS)).toEqual({
+      calls: [{args: {tool_arg: 1}, callId: 'a'}],
+    });
+  });
+
+  it('converts every key when no key is named', () => {
+    const obj = {outer_key: {args: {tool_arg: 1}}};
+
+    expect(toCamelCase(obj)).toEqual({outerKey: {args: {toolArg: 1}}});
+  });
+
+  it('preserves a named key when converting to snake_case', () => {
+    const obj = {outerKey: {args: {toolArg: 1}}};
+
+    expect(toSnakeCase(obj, [], OPAQUE_ARGS)).toEqual({
+      outer_key: {args: {toolArg: 1}},
+    });
+  });
+});
+
+describe('isRecord', () => {
+  it.each([
+    ['a plain object', {}, true],
+    ['an object with keys', {a: 1}, true],
+    ['an array', [1], false],
+    ['null', null, false],
+    ['a string', 'x', false],
+    ['a number', 1, false],
+    ['undefined', undefined, false],
+  ])('reports %s as %s', (_name, value, expected) => {
+    expect(isRecord(value)).toBe(expected);
   });
 });

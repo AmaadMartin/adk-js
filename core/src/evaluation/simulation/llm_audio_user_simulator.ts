@@ -58,11 +58,18 @@ export interface LlmAudioUserSimulatorConfig extends LlmUserSimulatorConfig {
   includeTextWithAudio?: boolean;
 }
 
-/** Validates an {@link LlmAudioUserSimulatorConfig} payload. */
+/**
+ * Validates an {@link LlmAudioUserSimulatorConfig} payload.
+ *
+ * A payload that names no `type` gets this one, so a caller can validate a
+ * section on its own without repeating the discriminator.
+ */
 export const llmAudioUserSimulatorConfigModel: EvalModel<LlmAudioUserSimulatorConfig> =
   evalModel(
     {
-      type: z.literal(LLM_AUDIO_USER_SIMULATOR_TYPE),
+      type: z
+        .literal(LLM_AUDIO_USER_SIMULATOR_TYPE)
+        .default(LLM_AUDIO_USER_SIMULATOR_TYPE),
       ...llmUserSimulatorConfigShape,
       audioModel: z.string().default(DEFAULT_USER_SIMULATOR_AUDIO_MODEL),
       audioModelConfiguration: z
@@ -81,3 +88,18 @@ export const llmAudioUserSimulatorConfigModel: EvalModel<LlmAudioUserSimulatorCo
     },
     {name: 'LlmAudioUserSimulatorConfig', extraKeys: 'allow'},
   );
+
+/**
+ * Validates an audio user simulator payload and applies every default.
+ *
+ * A key the config does not name is kept, so a simulator can read a setting
+ * of its own out of a validated config.
+ *
+ * @throws {InputValidationError} When the payload names another `type`, or
+ *   gives a field a value of the wrong kind.
+ */
+export function parseLlmAudioUserSimulatorConfig(
+  raw: unknown,
+): LlmAudioUserSimulatorConfig {
+  return llmAudioUserSimulatorConfigModel.parse(raw);
+}

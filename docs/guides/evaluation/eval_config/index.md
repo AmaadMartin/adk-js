@@ -87,6 +87,36 @@ const names = metrics.map((metric) => metric.metricName);
 // ['tool_trajectory_avg_score', 'final_response_match_v2', 'my_custom_metric']
 ```
 
+`parseEvalConfig` reads the same document from a value you already have:
+
+```typescript
+import {parseEvalConfig} from '@google/adk';
+
+const config = parseEvalConfig(JSON.parse(contents));
+```
+
+## Custom metrics
+
+A custom metric needs an entry in `criteria`, which gives it a threshold, and
+an entry in `customMetrics`, which says where its scoring function lives. The
+`codeConfig` is the same code reference the declarative agent loader reads:
+`name` is a `<module specifier>#<export>` pair such as `'./metrics.js#score'`,
+it cannot be empty, and no other key is allowed. `metricInfo` is optional, and
+describes the metric to the eval framework.
+
+Read the recorded function path back with `getConfigCustomFunctionPath`, which
+returns `undefined` for a metric the config named no function for:
+
+```typescript
+import {
+  getConfigCustomFunctionPath,
+  getEvalMetricsFromConfig,
+} from '@google/adk';
+
+const metrics = getEvalMetricsFromConfig(config);
+const path = getConfigCustomFunctionPath(metrics[0]);
+```
+
 ## Reading the user simulator section
 
 `userSimulatorConfig` is a union, so narrow it on `type` before you read the
@@ -106,11 +136,31 @@ const audioModel =
 // 'my-tts'
 ```
 
+Both simulator configs share the settings of the model that writes the user's
+messages: `model`, `modelConfiguration`, `maxAllowedInvocations`,
+`customInstructions` and `includeFunctionCalls`. `llm_audio` adds `audioModel`,
+`audioModelConfiguration` and `includeTextWithAudio`.
+
 Parsing applies the same defaults adk-python applies, so a section that names
 only its `type` comes back with the model, the model configuration, the
-invocation limit and the rest already filled in. A key the config shape does
-not name is kept rather than dropped, which is how a simulator reads a setting
-this package does not model.
+invocation limit and the rest already filled in. A section of
+`{"type": "llm_backed"}` gets a `model` of `'gemini-2.5-flash'`, a
+`maxAllowedInvocations` of 20, and an `includeFunctionCalls` of false. A key the
+config shape does not name is kept rather than dropped, which is how a simulator
+reads a setting this package does not model. This is the one place an
+unrecognized key is not an error; `codeConfig` and `metricInfo` both reject one.
+
+Validate a section on its own when you do not have a whole document, which is
+useful in a test:
+
+```typescript
+import {parseLlmBackedUserSimulatorConfig} from '@google/adk';
+
+const simulator = parseLlmBackedUserSimulatorConfig({model: 'my-model'});
+```
+
+The section gets its own `type` when the payload names none, and a payload that
+names another simulator's `type` is rejected.
 
 ## Building a config in code
 
@@ -130,3 +180,17 @@ const config: EvalConfig = {
 
 const metrics = getEvalMetricsFromConfig(config);
 ```
+
+## Failure modes
+
+`parseEvalConfig` throws an `InputValidationError` when it cannot make sense of
+the document. The error names the accepted values when a section names a `type`
+no simulator answers to:
+
+```
+An eval config names a user simulator of type "typo_type_name". The supported
+types are 'llm_backed' and 'llm_audio'.
+```
+
+An `InputValidationError` a schema raised carries the underlying `ZodError` as
+its `cause`, so a caller that wants the structured issues can read them.
