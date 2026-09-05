@@ -24,18 +24,19 @@ The document layout matches adk-python's `FirestoreSessionService` field for
 field. A team can run both SDKs against one Firestore database: adk-js reads
 the sessions adk-python wrote, and adk-python reads the sessions adk-js wrote.
 
-`@google-cloud/firestore` is an optional peer dependency, so installing
-`@google/adk` does not pull in a Firestore client you never use. Install it
-yourself:
+The service ships in `@google/adk-integrations`, which declares
+`@google-cloud/firestore` as a dependency. Install the package and the client
+comes with it:
 
 ```bash
-npm install @google-cloud/firestore
+npm install @google/adk-integrations
 ```
 
 ## Get started
 
 ```ts
-import {createEvent, FirestoreSessionService} from '@google/adk';
+import {createEvent} from '@google/adk';
+import {FirestoreSessionService} from '@google/adk-integrations';
 
 const service = new FirestoreSessionService();
 
@@ -55,17 +56,17 @@ const reloaded = await service.getSession({
 });
 ```
 
-The client is built on first use, from application default credentials. Pass
-`settings` to configure it, or `client` to supply one you built yourself:
+The default client reads application default credentials. Pass `client` to
+name a project, a database or an emulator:
 
 ```ts
-const service = new FirestoreSessionService({
-  settings: {projectId: 'my-project'},
+import {Firestore} from '@google-cloud/firestore';
+
+const scoped = new FirestoreSessionService({
+  client: new Firestore({projectId: 'my-project'}),
+  rootCollection: 'my-sessions',
 });
 ```
-
-`samples/sessions/firestore_session_service/` runs this round trip against the
-Firestore emulator, which needs no credentials.
 
 ## Document layout
 
@@ -103,26 +104,11 @@ document holds `event_data`, `timestamp`, `appName` and `userId`.
 the whole process with `ADK_FIRESTORE_ROOT_COLLECTION`:
 
 ```ts
-try {
-  await service.appendEvent({session, event});
-} catch (err: unknown) {
-  // Match on the name, not with `instanceof`: an application that ends up with
-  // two copies of `@google/adk` throws one class and imports the other.
-  if (!(err instanceof Error) || err.name !== 'StaleSessionError') {
-    throw err;
-  }
-  const fresh = await service.getSession({
-    appName: session.appName,
-    userId: session.userId,
-    sessionId: session.id,
-  });
-  if (fresh) {
-    await service.appendEvent({session: fresh, event});
-  }
-}
+const service = new FirestoreSessionService({rootCollection: 'my-sessions'});
 ```
 
-The explicit option wins, then the environment variable, then the default.
+The explicit option wins, then the environment variable, then the default. An
+empty string counts as unset and falls through to the next one.
 
 ## State scopes
 
@@ -152,11 +138,7 @@ the write transaction, and throws `StaleSessionError` when storage has moved
 on. Recover by loading the session again and replaying the turn:
 
 ```ts
-import {
-  createEvent,
-  FirestoreSessionService,
-  StaleSessionError,
-} from '@google/adk';
+import {StaleSessionError} from '@google/adk';
 
 try {
   await service.appendEvent({session, event});
@@ -169,7 +151,9 @@ try {
     userId: session.userId,
     sessionId: session.id,
   });
-  await service.appendEvent({session: fresh!, event});
+  if (fresh) {
+    await service.appendEvent({session: fresh, event});
+  }
 }
 ```
 
@@ -208,13 +192,12 @@ in the client after the whole result set is read.
 
 ## Errors
 
-| Condition                                      | Error                                              |
-| ---------------------------------------------- | -------------------------------------------------- |
-| `createSession` with an id that already exists | `AlreadyExistsError`                               |
-| `appendEvent` on a missing session             | `SessionNotFoundError`                             |
-| `appendEvent` on a session storage moved past  | `StaleSessionError`                                |
-| `appendEvent` on a session being deleted       | `Error`, naming the session                        |
-| `@google-cloud/firestore` not installed        | `Error` naming the feature and the install command |
+| Condition                                      | Error                       |
+| ---------------------------------------------- | --------------------------- |
+| `createSession` with an id that already exists | `AlreadyExistsError`        |
+| `appendEvent` on a missing session             | `SessionNotFoundError`      |
+| `appendEvent` on a session storage moved past  | `StaleSessionError`         |
+| `appendEvent` on a session being deleted       | `Error`, naming the session |
 
 `getSession` for a session that is not there is not an error: it resolves
 `undefined`.

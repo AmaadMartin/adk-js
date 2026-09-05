@@ -6,27 +6,24 @@
 
 /**
  * Behaviour adk-js has and adk-python does not, so the ported suite in
- * `firestore_session_service_test.ts` cannot cover it: millisecond timestamps,
- * the paginated `listSessions` contract, and the optional peer dependency.
+ * `firestore_session_service_parity_test.ts` cannot cover it: millisecond
+ * timestamps, the paginated `listSessions` contract, and the root-collection
+ * precedence chain.
  */
 
 import {Firestore} from '@google-cloud/firestore';
-import {
-  createEvent,
-  createEventActions,
-  createSession,
-  FirestoreSessionService,
-} from '@google/adk';
+import {createEvent, createEventActions, createSession} from '@google/adk';
+import {FirestoreSessionService} from '@google/adk-integrations';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   FakeFirestore,
   fakeFirestores,
   FakeTimestamp,
   RecordedWrite,
-} from './fake_firestore.js';
+} from './firestore_session_test_doubles.js';
 
 vi.mock('@google-cloud/firestore', async () => {
-  const fake = await import('./fake_firestore.js');
+  const fake = await import('./firestore_session_test_doubles.js');
   return {Firestore: fake.FakeFirestore, FieldValue: fake.FakeFieldValue};
 });
 
@@ -466,7 +463,8 @@ describe('FirestoreSessionService appendEvent', () => {
       String(sessionUpdates()[0].data['state']),
     ) as Record<string, unknown>;
     expect(state['ok']).toBe(1);
-    expect(typeof state['loop']).toBe('string');
+    // Only the back-reference is replaced, so the rest of the object survives.
+    expect(state['loop']).toEqual({name: 'loop', self: '[Circular]'});
   });
 });
 
