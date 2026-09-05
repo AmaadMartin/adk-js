@@ -83,7 +83,7 @@ export abstract class BaseMockStrategy {
  */
 @experimental
 export class TracingMockStrategy extends BaseMockStrategy {
-  async mock(): Promise<Record<string, unknown>> {
+  async mock(_params: MockStrategyParams): Promise<Record<string, unknown>> {
     return {status: 'error', error_message: 'Not implemented'};
   }
 }
