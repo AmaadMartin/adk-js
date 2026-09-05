@@ -1,0 +1,3 @@
+A skill is a folder of instructions, resources and scripts.
+The agent loads the instructions on demand, then runs a bundled script.
+This file exists so the word-count skill has something to count.
