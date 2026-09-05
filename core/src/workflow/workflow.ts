@@ -369,16 +369,7 @@ export class Workflow extends BaseNode {
         break;
       }
 
-      let result: CompletedTask;
-      try {
-        result = await Promise.race(loop.pending.values());
-      } catch (error) {
-        // A replay divergence rejects the race itself rather than resolving
-        // with an error result, so it never reaches the branch below.
-        loop.errorShutDown = true;
-        await this.cleanupPending(loop, abortController);
-        throw error;
-      }
+      const result = await Promise.race(loop.pending.values());
       loop.pending.delete(result.name);
       // Release whichever replayed completion the recording puts next. A fresh
       // node advances nothing, because it is not in the sequence.
@@ -923,6 +914,9 @@ function isTaskModeNode(node: BaseNode): boolean {
 /**
  * Queues a completion the resumed run recovered instead of executing, held
  * until the recorded sequence reaches it.
+ *
+ * A divergence rejects the wait. That is reported as this node failing its
+ * replay, so it takes the same path out of the loop as a node that threw.
  */
 function queueReplayedCompletion(
   loop: LoopState,
@@ -932,9 +926,10 @@ function queueReplayedCompletion(
   loop.replayedNodes.add(nodeName);
   loop.pending.set(
     nodeName,
-    loop.sequenceBarrier
-      .wait(nodeName)
-      .then(() => ({name: nodeName, childCtx})),
+    loop.sequenceBarrier.wait(nodeName).then(
+      () => ({name: nodeName, childCtx}),
+      (error) => ({name: nodeName, error}),
+    ),
   );
 }
 
