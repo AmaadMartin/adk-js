@@ -86,13 +86,29 @@ export interface ExtendedOAuth2 extends OpenAPIV3.OAuth2SecurityScheme {
 }
 
 /**
+ * Authenticates against a Google Cloud auth provider, named by its resource
+ * path. Google Cloud Agent Registry binds a registered resource to one of
+ * these; it has no OpenAPI 3.0 counterpart.
+ */
+export interface GcpAuthProviderScheme extends CustomAuthScheme {
+  type: 'gcpAuthProviderScheme';
+  /** Resource path of the auth provider. */
+  name: string;
+  scopes?: string[];
+  /** Redirect that overrides the one the auth provider declares. */
+  continueUri?: string;
+}
+
+/**
  * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
- * OpenIdConnectWithConfig, and external schemes that extend CustomAuthScheme.
+ * OpenIdConnectWithConfig, {@link GcpAuthProviderScheme}, and external schemes
+ * that extend CustomAuthScheme.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
   | OpenIdConnectWithConfig
   | ExtendedOAuth2
+  | GcpAuthProviderScheme
   | CustomAuthScheme;
 
 /**

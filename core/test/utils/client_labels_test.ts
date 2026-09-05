@@ -151,6 +151,13 @@ describe('client_labels', () => {
   });
 
   describe('getTrackingHeaders', () => {
+    it('should identify ADK in both tracking headers', () => {
+      const headers = getTrackingHeaders();
+      const expected = getClientLabels().join(' ');
+      expect(headers['x-goog-api-client']).toBe(expected);
+      expect(headers['user-agent']).toBe(expected);
+    });
+
     it('sends the same joined labels under both header names', () => {
       const headers = getTrackingHeaders();
 

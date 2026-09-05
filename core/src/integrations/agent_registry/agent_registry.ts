@@ -15,7 +15,7 @@ import {GoogleAuth} from 'google-auth-library';
 import {RemoteA2AAgent} from '../../a2a/a2a_remote_agent.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
-import {AuthScheme} from '../../auth/auth_schemes.js';
+import {AuthScheme, GcpAuthProviderScheme} from '../../auth/auth_schemes.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
 import {mergeTrackingHeaders} from '../../utils/client_labels.js';
 import {logger} from '../../utils/logger.js';
@@ -33,7 +33,6 @@ import {
   ConnectionUriFilter,
   ConnectionUriResult,
   Endpoint,
-  GcpAuthProviderScheme,
   ListAgentsResponse,
   ListBindingsResponse,
   ListEndpointsResponse,
@@ -511,8 +510,10 @@ export class AgentRegistry {
    * Creates a {@link RemoteA2AAgent} for a registered A2A Agent.
    *
    * adk-python also resolves the agent's auth provider binding here and hands
-   * the scheme to `RemoteA2aAgent`. `RemoteA2AAgent` has no way to apply a
-   * credential yet, so this does not resolve a scheme it could not use.
+   * the scheme to `RemoteA2aAgent`. Unlike {@link getMcpToolset}, this resolves
+   * no binding: `RemoteA2AAgent` cannot apply a credential to its outgoing
+   * calls, so a resolved scheme would cost a `bindings` request and change
+   * nothing. Pass an already-authenticated `client` instead.
    */
   async getRemoteA2AAgent(
     agentName: string,

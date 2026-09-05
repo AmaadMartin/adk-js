@@ -249,6 +249,7 @@ export type {
   AuthScheme,
   CustomAuthScheme,
   ExtendedOAuth2,
+  GcpAuthProviderScheme,
   OpenIdConnectWithConfig,
 } from './auth/auth_schemes.js';
 export {isAuthConfig} from './auth/auth_tool.js';
