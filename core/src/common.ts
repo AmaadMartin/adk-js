@@ -26,6 +26,7 @@ export {
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
   InvocationContextParams,
+  SetAgentStateOptions,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';
 export {LiveRequestQueue} from './agents/live_request_queue.js';
@@ -149,6 +150,10 @@ export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  LlmCallsLimitExceededError,
+  isLlmCallsLimitExceededError,
+} from './errors/llm_calls_limit_exceeded_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
@@ -178,6 +183,11 @@ export type {
 } from './events/event.js';
 export {createEventActions} from './events/event_actions.js';
 export type {EventActions} from './events/event_actions.js';
+export {filterSessionEvents} from './events/event_filters.js';
+export type {
+  SessionEventFilterOptions,
+  SessionEventFilterScope,
+} from './events/event_filters.js';
 export {EventType, toStructuredEvents} from './events/structured_events.js';
 export type {
   ActivityEvent,
