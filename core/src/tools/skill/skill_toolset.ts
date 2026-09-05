@@ -62,6 +62,7 @@ export function isSkillToolset(obj: unknown): obj is SkillToolset {
   );
 }
 
+/** Options for {@link SkillToolset}. */
 export interface SkillToolsetOptions {
   codeExecutor?: BaseCodeExecutor;
   additionalTools?: Array<BaseTool | BaseToolset>;
