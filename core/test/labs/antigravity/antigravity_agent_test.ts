@@ -783,6 +783,21 @@ describe('AntigravityAgent conversation id', () => {
     expect(deltas(events)).toEqual([{[STATE_KEY]: CID}]);
   });
 
+  it('records a changed id once when the turn also has history', async () => {
+    // A resumed conversation the runtime re-identified: an event records the
+    // new id, and the end-of-turn check must not record it a second time.
+    const agent = new AntigravityAgent({
+      name: 'agy',
+      antigravityConfig: makeConfig(),
+      agentFactory: () =>
+        new FakeSdkAgent(stepsOnce, OTHER_CID, [textStep(0, 'earlier')]),
+    });
+
+    const events = await runOnce(agent, runCtx({[STATE_KEY]: CID}));
+
+    expect(deltas(events)).toEqual([{[STATE_KEY]: OTHER_CID}]);
+  });
+
   it('test_single_turn_neither_reads_nor_writes_the_id', async () => {
     const {factory, configs} = capturingFactory(
       new FakeSdkAgent(stepsOnce, CID),
