@@ -291,6 +291,20 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {
+  BaseMockStrategy,
+  TracingMockStrategy,
+} from './tools/environment_simulation/strategies/base.js';
+export type {MockRequest} from './tools/environment_simulation/strategies/base.js';
+export {ToolSpecMockStrategy} from './tools/environment_simulation/strategies/tool_spec_mock_strategy.js';
+export {
+  StatefulParameterSchema,
+  ToolConnectionMapSchema,
+} from './tools/environment_simulation/tool_connection_map.js';
+export type {
+  StatefulParameter,
+  ToolConnectionMap,
+} from './tools/environment_simulation/tool_connection_map.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
