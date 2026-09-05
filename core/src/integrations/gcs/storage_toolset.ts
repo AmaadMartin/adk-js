@@ -9,11 +9,30 @@ import type {Storage} from '@google-cloud/storage';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
+import {FunctionTool} from '../../tools/function_tool.js';
 import {experimental} from '../../utils/experimental.js';
 import {createGcsClient} from './client.js';
 import {GcsCredentialsConfig} from './gcs_credentials.js';
 import {GcsCapability} from './settings.js';
-import {createGcsReadTools, createGcsWriteTools} from './storage_tool.js';
+import {
+  createObject,
+  createObjectParameters,
+  deleteObjects,
+  deleteObjectsParameters,
+  errorResult,
+  getObjectData,
+  getObjectDataParameters,
+  getObjectMetadata,
+  getObjectMetadataParameters,
+  listObjects,
+  listObjectsParameters,
+  type GcsErrorResult,
+} from './storage_tool.js';
+
+/** Joins the toolset prefix to a tool name, or leaves the name bare. */
+function prefixed(prefix: string | undefined, name: string): string {
+  return prefix ? `${prefix}_${name}` : name;
+}
 
 /** The name prefix every Cloud Storage tool carries by default. */
 export const DEFAULT_GCS_TOOL_NAME_PREFIX = 'gcs';
@@ -28,11 +47,11 @@ export interface GcsToolsetOptions {
   /** How to authenticate. Defaults to Application Default Credentials. */
   credentialsConfig?: GcsCredentialsConfig;
   /**
-   * Which operations to expose. Defaults to `[GcsCapability.READ_ONLY]`, so a
-   * toolset built with no options never exposes a write tool. This default may
-   * change in future versions.
+   * Which operations to expose. Defaults to {@link GcsCapability.READ_ONLY},
+   * so a toolset built with no options never exposes a write tool. This
+   * default may change in future versions.
    */
-  capabilities?: GcsCapability[];
+  capability?: GcsCapability;
   /** The project id to bill. Left to the SDK's resolution when omitted. */
   project?: string;
   /**
@@ -56,7 +75,7 @@ export interface GcsToolsetOptions {
  * that changes a bucket.
  *
  * ```ts
- * const toolset = new GcsToolset({capabilities: [GcsCapability.READ_WRITE]});
+ * const toolset = new GcsToolset({capability: GcsCapability.READ_WRITE});
  * ```
  *
  * Requires the optional peer dependency `@google-cloud/storage`, which is
@@ -64,7 +83,7 @@ export interface GcsToolsetOptions {
  */
 @experimental
 export class GcsToolset extends BaseToolset {
-  private readonly capabilities: GcsCapability[];
+  private readonly capability: GcsCapability;
   private readonly credentialsConfig?: GcsCredentialsConfig;
   private readonly project?: string;
   private clientPromise?: Promise<Storage>;
@@ -74,13 +93,13 @@ export class GcsToolset extends BaseToolset {
       options.toolFilter ?? [],
       options.prefix ?? DEFAULT_GCS_TOOL_NAME_PREFIX,
     );
-    this.capabilities = options.capabilities ?? [GcsCapability.READ_ONLY];
+    this.capability = options.capability ?? GcsCapability.READ_ONLY;
     this.credentialsConfig = options.credentialsConfig;
     this.project = options.project;
   }
 
   /**
-   * Returns the tools this toolset's capabilities allow, after the tool
+   * Returns the tools this toolset's capability allows, after the tool
    * filter.
    *
    * @param context Used to evaluate a predicate filter. A predicate filter is
@@ -104,20 +123,68 @@ export class GcsToolset extends BaseToolset {
     this.clientPromise = undefined;
   }
 
-  /** The tools the configured capabilities allow, before filtering. */
+  /** The tools the configured capability allows, before filtering. */
   private buildTools(): BaseTool[] {
-    const getClient = () => this.getClient();
-    const tools: BaseTool[] = [];
-    if (
-      this.capabilities.includes(GcsCapability.READ_ONLY) ||
-      this.capabilities.includes(GcsCapability.READ_WRITE)
-    ) {
-      tools.push(...createGcsReadTools(getClient, this.prefix));
-    }
-    if (this.capabilities.includes(GcsCapability.READ_WRITE)) {
-      tools.push(...createGcsWriteTools(getClient, this.prefix));
+    const prefix = this.prefix;
+    const tools: BaseTool[] = [
+      new FunctionTool({
+        name: prefixed(prefix, 'get_object_data'),
+        description: 'Get the content/data of a GCS object (blob).',
+        parameters: getObjectDataParameters,
+        execute: (input) => this.run(input, getObjectData),
+      }),
+      new FunctionTool({
+        name: prefixed(prefix, 'get_object_metadata'),
+        description: 'Get metadata information about a GCS object (blob).',
+        parameters: getObjectMetadataParameters,
+        execute: (input) => this.run(input, getObjectMetadata),
+      }),
+      new FunctionTool({
+        name: prefixed(prefix, 'list_objects'),
+        description: 'List object names in a GCS bucket.',
+        parameters: listObjectsParameters,
+        execute: (input) => this.run(input, listObjects),
+      }),
+    ];
+    if (this.capability === GcsCapability.READ_WRITE) {
+      tools.push(
+        new FunctionTool({
+          name: prefixed(prefix, 'create_object'),
+          description:
+            'Create a new object (blob) in a GCS bucket from provided data or a local file.',
+          parameters: createObjectParameters,
+          execute: (input) => this.run(input, createObject),
+        }),
+        new FunctionTool({
+          name: prefixed(prefix, 'delete_objects'),
+          description:
+            'Delete multiple objects (blobs) from a GCS bucket. Note: a GCS ' +
+            'bucket must be empty before it can be deleted. Use this tool to ' +
+            'delete all objects if you intend to delete the bucket.',
+          parameters: deleteObjectsParameters,
+          execute: (input) => this.run(input, deleteObjects),
+        }),
+      );
     }
     return tools;
+  }
+
+  /**
+   * Runs one operation against this toolset's client, so that a client that
+   * cannot be built is reported as an error record like any other failure
+   * rather than thrown at the model.
+   */
+  private async run<A, R>(
+    args: A,
+    operation: (client: Storage, args: A) => Promise<R>,
+  ): Promise<R | GcsErrorResult> {
+    let client: Storage;
+    try {
+      client = await this.getClient();
+    } catch (err) {
+      return errorResult(err);
+    }
+    return operation(client, args);
   }
 
   /**

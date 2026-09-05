@@ -15,16 +15,16 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
 import type {Storage} from '@google-cloud/storage';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+import {createGcsClient} from '../../../src/integrations/gcs/client.js';
 import {
-  createGcsClient,
   createObject,
   deleteObjects,
   getObjectData,
   getObjectMetadata,
   listObjects,
-} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-
+} from '../../../src/integrations/gcs/storage_tool.js';
 import {FakeApiError} from './fake_gcs_storage.js';
 
 const {FakeStorage, fakeGcs} = await vi.hoisted(

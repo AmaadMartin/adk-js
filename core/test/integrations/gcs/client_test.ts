@@ -9,12 +9,13 @@
  * `tests/unittests/integrations/gcs/test_client.py`, at upstream `main`.
  */
 
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+
 import {
   createGcsClient,
-  GCS_DEFAULT_SCOPE,
   GCS_TOOL_USER_AGENT,
-} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/integrations/gcs/client.js';
+import {GCS_DEFAULT_SCOPE} from '../../../src/integrations/gcs/gcs_credentials.js';
 
 const {FakeStorage, fakeGcs} = await vi.hoisted(
   async () => import('./fake_gcs_storage.js'),

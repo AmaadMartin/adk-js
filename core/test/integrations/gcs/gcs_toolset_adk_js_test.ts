@@ -103,7 +103,7 @@ describe('GcsToolset', () => {
 
   it('runs a write tool once read-write is asked for', async () => {
     const toolset = new GcsToolset({
-      capabilities: [GcsCapability.READ_WRITE],
+      capability: GcsCapability.READ_WRITE,
     });
 
     const result = await runTool(toolset, 'gcs_create_object', {
@@ -139,7 +139,7 @@ describe('GcsToolset', () => {
     const bucket = fakeGcs.bucket(BUCKET);
     bucket.put('gone.txt', Buffer.from('x'));
     const toolset = new GcsToolset({
-      capabilities: [GcsCapability.READ_WRITE],
+      capability: GcsCapability.READ_WRITE,
     });
 
     const result = await runTool(toolset, 'gcs_delete_objects', {
