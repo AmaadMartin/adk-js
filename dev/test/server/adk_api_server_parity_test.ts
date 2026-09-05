@@ -12,7 +12,6 @@
  */
 
 import {
-  BasePlugin,
   createEvent,
   Event,
   InMemorySessionService,
@@ -23,10 +22,9 @@ import {
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
-import {BigQueryAnalyticsPluginOptions} from '../../src/server/plugins_config.js';
 import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
 
 const APP_NAME = 'bq_app';
@@ -51,21 +49,32 @@ class SilentAgent extends LlmAgent {
   }
 }
 
-/** Stands in for the BigQuery plugin and records that the runner ran it. */
-class SpyAnalyticsPlugin extends BasePlugin {
-  readonly invocationIds: string[] = [];
+/** Options each construction of the analytics plugin was given. */
+const constructedWith = vi.hoisted(() => [] as unknown[]);
 
-  constructor(readonly options: BigQueryAnalyticsPluginOptions) {
-    super('bigquery_agent_analytics');
-  }
+/** Invocations the analytics plugin's beforeRun callback observed. */
+const observedInvocations = vi.hoisted(() => [] as string[]);
 
-  override async beforeRunCallback(params: {
-    invocationContext: InvocationContext;
-  }): Promise<undefined> {
-    this.invocationIds.push(params.invocationContext.invocationId);
-    return undefined;
+vi.mock('@google/adk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@google/adk')>();
+  class FakeBigQueryAgentAnalyticsPlugin extends actual.BasePlugin {
+    constructor(options: unknown) {
+      super('bigquery_agent_analytics');
+      constructedWith.push(options);
+    }
+
+    override async beforeRunCallback(params: {
+      invocationContext: {invocationId: string};
+    }): Promise<undefined> {
+      observedInvocations.push(params.invocationContext.invocationId);
+      return undefined;
+    }
   }
-}
+  return {
+    ...actual,
+    BigQueryAgentAnalyticsPlugin: FakeBigQueryAgentAnalyticsPlugin,
+  };
+});
 
 /** Serves one in-memory agent, so no agent file has to be compiled. */
 class StubAgentFile extends AgentFile {
@@ -97,6 +106,7 @@ class StubAgentLoader extends AgentLoader {
 }
 
 describe('api_server plugins.yaml parity', () => {
+  const originalCwd = process.cwd();
   let agentsDir: string;
   let sessionService: InMemorySessionService;
   let server: AdkApiServer;
@@ -105,10 +115,13 @@ describe('api_server plugins.yaml parity', () => {
     agentsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-parity-'));
     await fs.mkdir(path.join(agentsDir, APP_NAME));
     sessionService = new InMemorySessionService();
+    constructedWith.length = 0;
+    observedInvocations.length = 0;
   });
 
   afterEach(async () => {
     await server.stop();
+    process.chdir(originalCwd);
     await fs.rm(agentsDir, {recursive: true, force: true});
   });
 
@@ -135,66 +148,59 @@ describe('api_server plugins.yaml parity', () => {
       path.join(agentsDir, APP_NAME, 'plugins.yaml'),
       PLUGINS_YAML_CONTENT,
     );
-    const built: SpyAnalyticsPlugin[] = [];
     server = new AdkApiServer({
       agentsDir,
       agentLoader: new StubAgentLoader(APP_NAME),
       sessionService,
-      bigQueryAnalyticsPluginFactory: async (options) => {
-        const plugin = new SpyAnalyticsPlugin(options);
-        built.push(plugin);
-        return plugin;
-      },
     });
     await server.start();
 
     const response = await runOnce();
 
     expect(response.status).toBe(200);
-    expect(built).toHaveLength(1);
-    expect(built[0].options).toEqual({
-      projectId: 'test-project',
-      datasetId: 'test-dataset',
-      tableId: 'test-table',
-      location: 'US',
-    });
-    expect(built[0].invocationIds).toHaveLength(1);
+    expect(constructedWith).toEqual([
+      {
+        projectId: 'test-project',
+        datasetId: 'test-dataset',
+        tableId: 'test-table',
+        location: 'US',
+      },
+    ]);
+    expect(observedInvocations).toHaveLength(1);
   });
 
   it('attaches no plugin when the app has no plugins.yaml', async () => {
-    let called = false;
     server = new AdkApiServer({
       agentsDir,
       agentLoader: new StubAgentLoader(APP_NAME),
       sessionService,
-      bigQueryAnalyticsPluginFactory: async () => {
-        called = true;
-        return undefined;
-      },
     });
     await server.start();
 
     const response = await runOnce();
 
     expect(response.status).toBe(200);
-    expect(called).toBe(false);
+    expect(constructedWith).toEqual([]);
   });
 
-  it('starts and serves the app when the factory builds no plugin', async () => {
+  // Without an agentsDir there is no directory the app came from, so the
+  // server must not fall back to the working directory and read whatever
+  // plugins.yaml happens to sit there.
+  it('does not read a plugins.yaml under the working directory', async () => {
     await fs.writeFile(
       path.join(agentsDir, APP_NAME, 'plugins.yaml'),
       PLUGINS_YAML_CONTENT,
     );
+    process.chdir(agentsDir);
     server = new AdkApiServer({
-      agentsDir,
       agentLoader: new StubAgentLoader(APP_NAME),
       sessionService,
-      bigQueryAnalyticsPluginFactory: async () => undefined,
     });
     await server.start();
 
     const response = await runOnce();
 
     expect(response.status).toBe(200);
+    expect(constructedWith).toEqual([]);
   });
 });

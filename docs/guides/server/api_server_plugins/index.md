@@ -12,7 +12,8 @@ its own plugins on its `App`, and the server passes those through untouched.
 `plugins.yaml` is for a plugin an operator wants to add without editing the
 app: the server reads `<agentsDir>/<appName>/plugins.yaml` once, when it builds
 that app's runner, and attaches the plugin after the app's own. The file format
-is shared with ADK Python, so its keys are snake_case.
+is shared with ADK Python, so its keys are snake_case. A server given no
+`agentsDir` has no directory to read from, and attaches nothing.
 
 Only one plugin is configurable this way today: the BigQuery agent analytics
 plugin, under the `bigquery_agent_analytics` key. The server does not import
@@ -53,7 +54,13 @@ await server.start();
 ```
 
 The `echo` app now runs with the analytics plugin attached, and any agent that
-declares no model uses `gemini-2.5-flash`.
+declares no model uses `gemini-2.5-flash`. `--default_llm_model` is the same
+option on the command line:
+
+```console
+$ adk web ./agents --default_llm_model gemini-2.5-flash
+$ adk api_server ./agents --default_llm_model gemini-2.5-flash
+```
 
 ## What `plugins.yaml` must set
 
@@ -72,29 +79,6 @@ the parse error propagate instead, which fails the request with a 500.
 The runner receives the app's own plugins first, then the plugin from
 `plugins.yaml`. Order decides which plugin sees a callback first, and which one
 can short-circuit the others.
-
-## Supplying the plugin yourself
-
-`bigQueryAnalyticsPluginFactory` replaces the default import. The server calls
-it with the options it read from `plugins.yaml`, and attaches whatever it
-returns. Return `undefined` to attach nothing:
-
-```ts
-import {BasePlugin} from '@google/adk';
-import {AdkApiServer} from '@google/adk-devtools';
-
-class AuditPlugin extends BasePlugin {
-  constructor(readonly datasetId: string) {
-    super('bigquery_agent_analytics');
-  }
-}
-
-const server = new AdkApiServer({
-  agentsDir: './agents',
-  bigQueryAnalyticsPluginFactory: async (options) =>
-    new AuditPlugin(options.datasetId),
-});
-```
 
 ## Setting the default model
 

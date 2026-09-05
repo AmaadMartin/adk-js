@@ -16,9 +16,6 @@ const PLUGINS_YAML_FILENAME = 'plugins.yaml';
 /** Top-level key holding the BigQuery agent analytics block. */
 const BIGQUERY_ANALYTICS_KEY = 'bigquery_agent_analytics';
 
-/** Export the default factory looks for on `@google/adk`. */
-const BIGQUERY_PLUGIN_EXPORT = 'BigQueryAgentAnalyticsPlugin';
-
 /** Block keys that must all be set before the plugin is attached. */
 const REQUIRED_BIGQUERY_KEYS = [
   'project_id',
@@ -37,12 +34,7 @@ export interface BigQueryAgentAnalyticsYaml {
   dataset_location?: string;
 }
 
-/** Parsed `plugins.yaml`. Unknown keys are ignored, as in adk-python. */
-export interface PluginsYaml {
-  bigquery_agent_analytics?: BigQueryAgentAnalyticsYaml;
-}
-
-/** Options handed to {@link BigQueryAnalyticsPluginFactory}. */
+/** Constructor options of `BigQueryAgentAnalyticsPlugin`. */
 export interface BigQueryAnalyticsPluginOptions {
   projectId: string;
   datasetId: string;
@@ -52,16 +44,16 @@ export interface BigQueryAnalyticsPluginOptions {
 }
 
 /**
- * Builds the BigQuery analytics plugin for one app. Returns undefined when the
- * plugin cannot be built, in which case the app runs without it.
+ * `@google/adk` plus the analytics plugin, which a build of `@google/adk`
+ * predating that plugin does not export. Declared optional so this module keeps
+ * serving the app against such a build rather than failing to compile against
+ * it.
  */
-export type BigQueryAnalyticsPluginFactory = (
-  options: BigQueryAnalyticsPluginOptions,
-) => Promise<BasePlugin | undefined>;
-
-type BigQueryPluginConstructor = new (
-  options: BigQueryAnalyticsPluginOptions,
-) => BasePlugin;
+type AdkAnalyticsExports = typeof import('@google/adk') & {
+  BigQueryAgentAnalyticsPlugin?: new (
+    options: BigQueryAnalyticsPluginOptions,
+  ) => BasePlugin;
+};
 
 /** Narrows to a plain object, so an array or null does not pass as one. */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,28 +66,19 @@ function optionalString(value: unknown): string | undefined {
 }
 
 /**
- * Narrows a dynamically imported export to a plugin constructor. A dynamic
- * import yields `unknown`, and callability is the only property that can be
- * checked before the constructor runs.
- */
-function isPluginConstructor(
-  value: unknown,
-): value is BigQueryPluginConstructor {
-  return typeof value === 'function';
-}
-
-/**
- * Reads `<agentsDir>/<appName>/plugins.yaml`.
+ * Reads the `bigquery_agent_analytics` block of
+ * `<agentsDir>/<appName>/plugins.yaml`.
  *
- * Returns undefined when the file is absent, and also when it cannot be parsed
- * — adk-python lets `yaml.safe_load` raise there, which fails the whole runner;
- * this server logs a warning and runs the app without its plugins instead.
+ * Returns undefined when the file is absent, declares no such block, or cannot
+ * be parsed. adk-python lets `yaml.safe_load` raise on the last of those, which
+ * fails the whole runner; this server logs a warning and runs the app without
+ * the plugin instead.
  */
-export async function readPluginsYaml(
+export async function readBigQueryAnalyticsYaml(
   agentsDir: string,
   appName: string,
   logger: Logger,
-): Promise<PluginsYaml | undefined> {
+): Promise<BigQueryAgentAnalyticsYaml | undefined> {
   const yamlPath = path.join(agentsDir, appName, PLUGINS_YAML_FILENAME);
   if (!(await isFileExists(yamlPath))) {
     return undefined;
@@ -105,15 +88,13 @@ export async function readPluginsYaml(
     const parsed: unknown = yaml.load(await fs.readFile(yamlPath, 'utf-8'));
     const block = isRecord(parsed) ? parsed[BIGQUERY_ANALYTICS_KEY] : undefined;
     if (!isRecord(block)) {
-      return {};
+      return undefined;
     }
     return {
-      bigquery_agent_analytics: {
-        project_id: optionalString(block['project_id']),
-        dataset_id: optionalString(block['dataset_id']),
-        table_id: optionalString(block['table_id']),
-        dataset_location: optionalString(block['dataset_location']),
-      },
+      project_id: optionalString(block['project_id']),
+      dataset_id: optionalString(block['dataset_id']),
+      table_id: optionalString(block['table_id']),
+      dataset_location: optionalString(block['dataset_location']),
     };
   } catch (e: unknown) {
     logger.warn(`Ignoring ${yamlPath}:`, e);
@@ -147,40 +128,19 @@ export function toBigQueryAnalyticsOptions(
 }
 
 /**
- * Resolves {@link BIGQUERY_PLUGIN_EXPORT} from `@google/adk` at call time,
- * mirroring adk-python's deferred import. A build of `@google/adk` that does
- * not export it logs a warning and attaches no plugin, so the server starts.
- */
-export function createBigQueryAnalyticsPlugin(
-  logger: Logger,
-): BigQueryAnalyticsPluginFactory {
-  return async (options: BigQueryAnalyticsPluginOptions) => {
-    const adk: object = await import('@google/adk');
-    const pluginClass =
-      BIGQUERY_PLUGIN_EXPORT in adk ? adk[BIGQUERY_PLUGIN_EXPORT] : undefined;
-    if (!isPluginConstructor(pluginClass)) {
-      logger.warn(
-        `Not attaching the BigQuery agent analytics plugin: the installed ` +
-          `@google/adk does not export ${BIGQUERY_PLUGIN_EXPORT}.`,
-      );
-      return undefined;
-    }
-    return new pluginClass(options);
-  };
-}
-
-/**
  * Builds the app's BigQuery analytics plugin from its `plugins.yaml`, or
  * returns undefined when the file is absent, incomplete or unreadable.
+ *
+ * `@google/adk` is imported here rather than at the top of the module, so a
+ * server that serves no app declaring the plugin never loads it. That mirrors
+ * adk-python's deferred import.
  */
 export async function loadBigQueryAnalyticsPlugin(
   agentsDir: string,
   appName: string,
-  factory: BigQueryAnalyticsPluginFactory,
   logger: Logger,
 ): Promise<BasePlugin | undefined> {
-  const pluginsYaml = await readPluginsYaml(agentsDir, appName, logger);
-  const block = pluginsYaml?.bigquery_agent_analytics;
+  const block = await readBigQueryAnalyticsYaml(agentsDir, appName, logger);
   if (!block) {
     return undefined;
   }
@@ -189,5 +149,14 @@ export async function loadBigQueryAnalyticsPlugin(
   if (!options) {
     return undefined;
   }
-  return factory(options);
+
+  const adk: AdkAnalyticsExports = await import('@google/adk');
+  if (!adk.BigQueryAgentAnalyticsPlugin) {
+    logger.warn(
+      `Not attaching the BigQuery agent analytics plugin: the installed ` +
+        `@google/adk does not export BigQueryAgentAnalyticsPlugin.`,
+    );
+    return undefined;
+  }
+  return new adk.BigQueryAgentAnalyticsPlugin(options);
 }

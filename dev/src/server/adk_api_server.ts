@@ -55,11 +55,7 @@ import {
   getAllowedRequestHosts,
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
-import {
-  BigQueryAnalyticsPluginFactory,
-  createBigQueryAnalyticsPlugin,
-  loadBigQueryAnalyticsPlugin,
-} from './plugins_config.js';
+import {loadBigQueryAnalyticsPlugin} from './plugins_config.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -108,12 +104,6 @@ interface ServerOptions {
    * `@google/adk`.
    */
   defaultLlmModel?: string;
-  /**
-   * Builds the BigQuery analytics plugin from an app's `plugins.yaml`. The
-   * default resolves `BigQueryAgentAnalyticsPlugin` from `@google/adk` at call
-   * time, mirroring adk-python's deferred import.
-   */
-  bigQueryAnalyticsPluginFactory?: BigQueryAnalyticsPluginFactory;
 }
 
 export class AdkApiServer {
@@ -161,13 +151,12 @@ export class AdkApiServer {
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
   /**
-   * Directory an app's `plugins.yaml` is read from. Defaults to the working
-   * directory, matching {@link AgentLoader}'s own default, so the two agree
-   * when neither is given a path.
+   * Directory an app's `plugins.yaml` is read from. Unset when the caller
+   * supplied its own `agentLoader` and no directory, in which case there is no
+   * path to read the file from and no plugin is attached.
    */
-  private readonly agentsDir: string;
+  private readonly agentsDir?: string;
   private readonly defaultLlmModel?: string;
-  private readonly bigQueryAnalyticsPluginFactory: BigQueryAnalyticsPluginFactory;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -206,11 +195,8 @@ export class AdkApiServer {
     // to the authenticator, which rejects a token that is not usable.
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
-    this.agentsDir = options.agentsDir ?? process.cwd();
+    this.agentsDir = options.agentsDir;
     this.defaultLlmModel = options.defaultLlmModel;
-    this.bigQueryAnalyticsPluginFactory =
-      options.bigQueryAnalyticsPluginFactory ??
-      createBigQueryAnalyticsPlugin(this.logger);
     this.app = express();
   }
 
@@ -1245,12 +1231,13 @@ export class AdkApiServer {
       const agent = isAppInstance ? agentOrApp.rootAgent : agentOrApp;
       // The runner concatenates the app's own plugins ahead of these, so the
       // analytics plugin ends up last, as it does in adk-python.
-      const bigQueryPlugin = await loadBigQueryAnalyticsPlugin(
-        this.agentsDir,
-        appName,
-        this.bigQueryAnalyticsPluginFactory,
-        this.logger,
-      );
+      const bigQueryPlugin = this.agentsDir
+        ? await loadBigQueryAnalyticsPlugin(
+            this.agentsDir,
+            appName,
+            this.logger,
+          )
+        : undefined;
       this.runnerCache[appName] = new Runner({
         app: isAppInstance ? agentOrApp : undefined,
         appName,
