@@ -8,6 +8,8 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -1513,5 +1515,67 @@ describe('Runner reserved function call rejection', () => {
     });
 
     expect(error).toBeUndefined();
+  });
+});
+
+/** A toolset that records its closes, and can fail them. */
+class RecordingToolset extends BaseToolset {
+  closeCount = 0;
+
+  constructor(private readonly failOnClose = false) {
+    super([]);
+  }
+
+  async getTools(): Promise<BaseTool[]> {
+    return [];
+  }
+
+  async close(): Promise<void> {
+    this.closeCount++;
+    if (this.failOnClose) {
+      throw new Error('toolset close failed');
+    }
+  }
+}
+
+describe('Runner.close', () => {
+  it("closes the root agent's toolsets", async () => {
+    const toolset = new RecordingToolset();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({name: 'root', tools: [toolset]}),
+      sessionService: new InMemorySessionService(),
+    });
+
+    await runner.close();
+
+    expect(toolset.closeCount).toBe(1);
+  });
+
+  it('is safe to call twice', async () => {
+    const toolset = new RecordingToolset();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({name: 'root', tools: [toolset]}),
+      sessionService: new InMemorySessionService(),
+    });
+
+    await runner.close();
+    await runner.close();
+
+    expect(toolset.closeCount).toBe(2);
+  });
+
+  it('does not reject when a toolset close throws', async () => {
+    const failing = new RecordingToolset(true);
+    const healthy = new RecordingToolset();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent: new LlmAgent({name: 'root', tools: [failing, healthy]}),
+      sessionService: new InMemorySessionService(),
+    });
+
+    await expect(runner.close()).resolves.toBeUndefined();
+    expect(healthy.closeCount).toBe(1);
   });
 });

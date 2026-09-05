@@ -8,10 +8,12 @@ import {Content, FunctionDeclaration, Type} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
+import {RunConfig, StreamingMode} from '../agents/run_config.js';
 import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
+import {parseWithSchema} from '../utils/schema.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {State} from '../sessions/state.js';
@@ -86,10 +88,11 @@ export class AgentTool extends BaseTool {
     if (isLlmAgent(this.agent) && this.agent.inputSchema) {
       declaration = {
         name: this.name,
+        // The agent's description, never the input schema's: a schema
+        // describes the arguments, not what calling the agent does.
         description: this.description,
-        // TODO(b/425992518): We should not use the agent's input schema as is.
-        // It should be validated and possibly transformed. Consider similar
-        // logic to one we have in Python ADK.
+        // `LlmAgent.inputSchema` is the schema as supplied, already converted
+        // into the genai dialect the declaration needs.
         parameters: this.agent.inputSchema,
       };
     } else {
@@ -130,15 +133,21 @@ export class AgentTool extends BaseTool {
     // returned verbatim below, which is the intended effect of
     // skipSummarization.
 
-    const hasInputSchema = isLlmAgent(this.agent) && this.agent.inputSchema;
+    // The source form is preferred: converting a schema into the genai dialect
+    // drops the Zod refinements and transforms that validation needs.
+    const inputSchema = isLlmAgent(this.agent)
+      ? (this.agent.inputSchemaSource ?? this.agent.inputSchema)
+      : undefined;
     const content: Content = {
       role: 'user',
       parts: [
         {
-          // TODO(b/425992518): Should be validated. Consider similar
-          // logic to one we have in Python ADK.
-          text: hasInputSchema
-            ? JSON.stringify(args)
+          // With a schema the text must stay a bare JSON document: the wrapped
+          // agent re-validates it against that same schema, so any prose here
+          // fails that parse. Validating here catches arguments the model got
+          // wrong at the tool boundary instead of inside the sub-agent.
+          text: inputSchema
+            ? JSON.stringify(parseWithSchema(inputSchema, args))
             : (args['request'] as string),
         },
       ],
@@ -157,56 +166,95 @@ export class AgentTool extends BaseTool {
       credentialService: toolContext.invocationContext.credentialService,
     });
 
-    const session = await runner.sessionService.getOrCreateSession({
-      appName: this.agent.name,
-      userId: toolContext.invocationContext.userId,
-      sessionId: toolContext.invocationContext.session.id,
-      state: toolContext.state.toRecord(),
-    });
+    try {
+      const session = await runner.sessionService.getOrCreateSession({
+        appName: this.agent.name,
+        userId: toolContext.invocationContext.userId,
+        sessionId: toolContext.invocationContext.session.id,
+        state: toolContext.state.toRecord(),
+      });
 
-    if (toolContext.abortSignal?.aborted) {
-      return '';
-    }
-
-    let lastEvent: Event | undefined;
-    for await (const event of runner.runAsync({
-      userId: session.userId,
-      sessionId: session.id,
-      newMessage: content,
-      abortSignal: toolContext.abortSignal,
-    })) {
       if (toolContext.abortSignal?.aborted) {
-        return;
+        return '';
       }
 
-      if (event.actions.stateDelta) {
-        const filteredDelta = Object.fromEntries(
-          Object.entries(event.actions.stateDelta).filter(
-            ([key]) => !key.startsWith(State.TEMP_PREFIX),
-          ),
-        );
-        if (Object.keys(filteredDelta).length > 0) {
-          toolContext.state.update(filteredDelta);
+      let lastEvent: Event | undefined;
+      for await (const event of runner.runAsync({
+        userId: session.userId,
+        sessionId: session.id,
+        newMessage: content,
+        runConfig: nestedRunConfig(toolContext.invocationContext.runConfig),
+        abortSignal: toolContext.abortSignal,
+      })) {
+        if (toolContext.abortSignal?.aborted) {
+          return;
         }
+
+        if (event.actions.stateDelta) {
+          const filteredDelta = Object.fromEntries(
+            Object.entries(event.actions.stateDelta).filter(
+              ([key]) => !key.startsWith(State.TEMP_PREFIX),
+            ),
+          );
+          if (Object.keys(filteredDelta).length > 0) {
+            toolContext.state.update(filteredDelta);
+          }
+        }
+
+        lastEvent = event;
       }
 
-      lastEvent = event;
+      if (!lastEvent?.content?.parts?.length) {
+        return '';
+      }
+
+      const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
+      // Exclude thoughts from the merged text.
+      const mergedText = lastEvent.content.parts
+        .filter((part) => !part.thought)
+        .map((part) => part.text)
+        .filter((text) => text)
+        .join('\n');
+
+      // With an output schema the merged text is parsed, but it is not yet
+      // validated against that schema.
+      return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
+    } finally {
+      // The runner is local to this call, so nothing else holds what it holds:
+      // release it however the run ended, including the aborted early returns.
+      await runner.close();
     }
-
-    if (!lastEvent?.content?.parts?.length) {
-      return '';
-    }
-
-    const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
-    // Exclude thoughts from the merged text.
-    const mergedText = lastEvent.content.parts
-      .filter((part) => !part.thought)
-      .map((part) => part.text)
-      .filter((text) => text)
-      .join('\n');
-
-    // TODO - b/425992518: In case of output schema, the output should be
-    // validated. Consider similar logic to one we have in Python ADK.
-    return hasOutputSchema ? JSON.parse(mergedText) : mergedText;
   }
+}
+
+/**
+ * The run config for the nested run, derived from the caller's.
+ *
+ * The wrapped agent runs as part of the caller's invocation, so it obeys the
+ * caller's run settings. Without this the nested run falls back to the
+ * `RunConfig` defaults: a `maxLlmCalls` ceiling of 500 whatever the caller
+ * asked for, and none of the caller's own settings. The count stays
+ * per-invocation, so the ceiling bounds the nested run rather than being
+ * shared with the caller's.
+ *
+ * Two settings do not carry over. `supportCfc` describes how the caller's own
+ * model executes; handing it to another agent replaces that agent's code
+ * executor, and refuses to run it unless its model is a Gemini 2 one. And only
+ * the last event's content becomes the tool result, so a streamed nested run
+ * would leave a partial chunk as the answer — the nested run is always unary.
+ *
+ * The caller's config is never mutated, and is forwarded as-is when neither
+ * override applies.
+ */
+function nestedRunConfig(runConfig?: RunConfig): RunConfig | undefined {
+  if (!runConfig) {
+    return undefined;
+  }
+  const unary =
+    runConfig.streamingMode === undefined ||
+    runConfig.streamingMode === StreamingMode.NONE;
+  if (!runConfig.supportCfc && unary) {
+    return runConfig;
+  }
+  return {...runConfig, supportCfc: false, streamingMode: StreamingMode.NONE};
 }
