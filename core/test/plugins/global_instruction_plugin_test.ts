@@ -314,7 +314,7 @@ describe('GlobalInstructionPlugin', () => {
     expect(events.length).toBeGreaterThan(0);
     expect(mockLlm.lastRequest).toBeDefined();
     expect(mockLlm.lastRequest?.config?.systemInstruction).toBe(
-      'Global application instruction.\n\nYou are an agent. Your internal name is "test_agent".\n\nAgent specific instruction.',
+      'Global application instruction.\n\nAgent specific instruction.\n\nYou are an agent. Your internal name is "test_agent".',
     );
   });
 });

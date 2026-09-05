@@ -18,6 +18,7 @@ import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
+import {ContextCacheConfig} from './context_cache_config.js';
 import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
@@ -64,6 +65,8 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  /** Context cache configuration for this invocation. */
+  contextCacheConfig?: ContextCacheConfig;
 }
 
 /**
@@ -268,6 +271,12 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Context cache configuration for this invocation. Context caching is
+   * enabled for the invocation only while this is set.
+   */
+  readonly contextCacheConfig?: ContextCacheConfig;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -289,6 +298,7 @@ export class InvocationContext {
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
+    this.contextCacheConfig = params.contextCacheConfig;
     // Inherit the parent invocation's cost manager when one is available.
 
     // Child contexts created for sub-agents, agent transfers and loop

@@ -16,6 +16,8 @@ import {
   Transcription,
 } from '@google/genai';
 
+import {CacheMetadata} from './cache_metadata.js';
+
 /**
  * LLM response class that provides the first candidate response from the
  * model if available. Otherwise, returns error code and message.
@@ -112,6 +114,17 @@ export interface LlmResponse {
 
   /** The session ID of the Live session. */
   liveSessionId?: string;
+
+  /**
+   * Context cache metadata when caching served this response.
+   *
+   * It carries the cache identity, its use count and its lifecycle. The model
+   * layer records it here, and because `Event` extends `LlmResponse` it
+   * reaches the session. `ContextCacheRequestProcessor` reads it back off the
+   * session's events to build the next request. No `adk-js` model layer writes
+   * it yet.
+   */
+  cacheMetadata?: CacheMetadata;
 }
 
 /**
