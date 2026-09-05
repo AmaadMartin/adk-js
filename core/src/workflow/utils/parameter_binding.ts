@@ -127,18 +127,9 @@ export function bindParameters(
 
   const args: Record<string, unknown> = {};
   for (const descriptor of req.descriptors) {
-    if (!fromNodeInput && descriptor.name === NODE_INPUT_PARAMETER) {
-      args[descriptor.name] = coerce(descriptor, req.nodeInput, req.nodeName);
-      continue;
-    }
-    const present = source
-      ? descriptor.name in source
-      : req.state.has(descriptor.name);
+    const {present, value} = readParameter(req, source, descriptor.name);
     if (present) {
-      const raw = source
-        ? source[descriptor.name]
-        : req.state.get(descriptor.name);
-      args[descriptor.name] = coerce(descriptor, raw, req.nodeName);
+      args[descriptor.name] = coerce(descriptor, value, req.nodeName);
     } else if (descriptor.hasDefault) {
       args[descriptor.name] = descriptor.defaultValue;
     } else if (descriptor.required) {
@@ -199,6 +190,30 @@ export function parameterFieldSchema(
     return isZodSchema(field) ? field : undefined;
   }
   return (schema as Schema).properties?.[name];
+}
+
+/**
+ * Reads one parameter from its source: whether the source holds it, and the
+ * value it holds.
+ *
+ * `source` is present only in `'nodeInput'` mode. In `'state'` mode the
+ * parameter literally named `nodeInput` receives the raw node input instead of
+ * a state entry, mirroring Python's identically-special `node_input`. An
+ * absent node input counts as absent, so the parameter falls to its default or
+ * is left unbound rather than being validated as `undefined`.
+ */
+function readParameter(
+  req: BindParametersRequest,
+  source: Record<string, unknown> | undefined,
+  name: string,
+): {present: boolean; value: unknown} {
+  if (!source && name === NODE_INPUT_PARAMETER) {
+    return {present: req.nodeInput !== undefined, value: req.nodeInput};
+  }
+  if (source) {
+    return {present: name in source, value: source[name]};
+  }
+  return {present: req.state.has(name), value: req.state.get(name)};
 }
 
 /**
