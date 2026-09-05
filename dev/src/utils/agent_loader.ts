@@ -714,11 +714,9 @@ async function resolvePackageMain(
     ? ['']
     : JS_FILES_EXTENSIONS;
 
-  return findFirstFile(suffixes.map((suffix) => `${resolved}${suffix}`));
-}
+  for (const suffix of suffixes) {
+    const candidate = `${resolved}${suffix}`;
 
-async function findFirstFile(paths: string[]): Promise<string | undefined> {
-  for (const candidate of paths) {
     if (await isFile(candidate)) {
       return candidate;
     }
