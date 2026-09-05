@@ -313,6 +313,31 @@ describe('TestAgentRegistry', () => {
     });
   });
 
+  it('searchMcpServers with no options sends an empty body', async () => {
+    routeFetch({'mcpServers:search': {mcpServers: []}});
+
+    await registry.searchMcpServers();
+
+    expect(JSON.parse(String(onlyCall().init?.body))).toEqual({});
+  });
+
+  it('makeRequest posts an empty body when the caller supplies none', async () => {
+    routeFetch({'test-path': {key: 'value'}});
+
+    await registry.makeRequest('test-path', undefined, {method: 'POST'});
+
+    expect(onlyCall().init?.method).toBe('POST');
+    expect(onlyCall().init?.body).toBe('{}');
+  });
+
+  it('names a thrown value that is not an Error', async () => {
+    fetchMock.mockRejectedValue('socket closed');
+
+    await expect(registry.makeRequest('test-path')).rejects.toThrow(
+      'API request failed: socket closed',
+    );
+  });
+
   it('searchAgents with no options sends an empty body', async () => {
     routeFetch({'agents:search': {agents: []}});
 
