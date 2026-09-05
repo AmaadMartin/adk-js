@@ -212,7 +212,7 @@ export function normalizeSchemaDict(data: unknown): unknown {
   if ('$defs' in data) {
     const defs = data['$defs'];
     const resolved = resolveRefs(data, isRecord(defs) ? defs : {});
-    source = isRecord(resolved) ? {...resolved} : data;
+    source = isRecord(resolved) ? {...resolved} : {...data};
     delete source['$defs'];
   }
 
