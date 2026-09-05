@@ -232,6 +232,37 @@ describe('BigQueryToolset execute_sql description', () => {
   });
 });
 
+describe('BigQueryToolset settings binding', () => {
+  it('test_get_tools_binds_distinct_settings_per_toolset', async () => {
+    resetFakes({plannedJobs: [plannedJob('SELECT')], rows: []});
+    const protectedTools = await new BigQueryToolset({
+      bigqueryToolConfig: {
+        writeMode: WriteMode.PROTECTED,
+        maxQueryResultRows: 11,
+      },
+    }).getTools();
+    const allowedTools = await new BigQueryToolset({
+      bigqueryToolConfig: {
+        writeMode: WriteMode.ALLOWED,
+        maxQueryResultRows: 22,
+      },
+    }).getTools();
+
+    await toolNamed(allowedTools, 'execute_sql').runAsync({
+      args: {projectId: PROJECT, query: 'SELECT 1'},
+      toolContext: makeContext(),
+    });
+
+    // The allowed toolset runs its own row cap, and does not plan the query
+    // first the way the protected one would.
+    expect(fakeState.bigquery.calls.queries[0].maxResults).toBe(22);
+    expect(fakeState.bigquery.calls.queryJobs).toHaveLength(0);
+    expect(toolNamed(protectedTools, 'execute_sql').description).not.toBe(
+      toolNamed(allowedTools, 'execute_sql').description,
+    );
+  });
+});
+
 describe('BigQueryToolset tool calls', () => {
   beforeEach(() => {
     resetFakes(
