@@ -257,10 +257,8 @@ export class Workflow extends BaseNode {
       ctx.session?.events ?? [],
       ctx.invocationId,
     );
-    const rehydrated = reconstructNodeRuns(
-      runEvents,
-      ctx.nodePath || undefined,
-    );
+    const parentPath = ctx.nodePath || undefined;
+    const rehydrated = reconstructNodeRuns(runEvents, parentPath);
     this.applyResumeInputs(ctx, runEvents);
 
     if (this.dynamicEntry) {
@@ -272,7 +270,7 @@ export class Workflow extends BaseNode {
     loop.rehydrated = rehydrated;
     loop.abortSignal = abortController.signal;
     loop.sequenceBarrier = new ReplaySequenceBarrier(
-      replaySequence(runEvents, ctx.nodePath || undefined),
+      replaySequence(runEvents, parentPath),
     );
 
     this.seedStartTriggers(loop, ctx, nodeInput);
