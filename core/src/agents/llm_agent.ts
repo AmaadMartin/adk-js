@@ -67,7 +67,13 @@ import {
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
-import {InvocationContext, requireAgent} from './invocation_context.js';
+import {clearCanonicalToolsCache} from './canonical_tools.js';
+import {
+  drainInvocationEvents,
+  InvocationContext,
+  QueuedInvocationEvent,
+  requireAgent,
+} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
@@ -552,25 +558,21 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       TOOL_FILTER_REQUEST_PROCESSOR,
     ];
 
-    if (
-      !config.requestProcessors &&
-      config.contextCompactors &&
-      config.contextCompactors.length > 0
-    ) {
+    if (!config.requestProcessors) {
+      // Always in the pipeline: an agent that declares no compactors still
+      // honours the compaction policy its App declares, which only arrives
+      // per invocation. With neither, the processor does nothing.
+      const compactionProcessor = new ContextCompactorRequestProcessor(
+        config.contextCompactors ?? [],
+      );
       // Find where CONTENT_REQUEST_PROCESSOR is to place compaction immediately before it.
       const contentIndex = this.requestProcessors.indexOf(
         CONTENT_REQUEST_PROCESSOR,
       );
       if (contentIndex !== -1) {
-        this.requestProcessors.splice(
-          contentIndex,
-          0,
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
+        this.requestProcessors.splice(contentIndex, 0, compactionProcessor);
       } else {
-        this.requestProcessors.push(
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
+        this.requestProcessors.push(compactionProcessor);
       }
     }
 
@@ -1124,6 +1126,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     invocationContext: InvocationContext,
     llmRequest: LlmRequest,
   ): AsyncGenerator<Event, void, void> {
+    // A tool set can change between steps, so the memo covers this step only.
+    clearCanonicalToolsCache(invocationContext);
+
     for (const processor of this.requestProcessors) {
       for await (const event of processor.runAsync(
         invocationContext,
@@ -1458,6 +1463,9 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       liveConnectConfig: {},
     };
 
+    // A tool set can change between steps, so the memo covers this step only.
+    clearCanonicalToolsCache(invocationContext);
+
     // =========================================================================
     // Preprocess before calling the LLM
     // =========================================================================
@@ -1697,7 +1705,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // so those events interleave into this agent's output stream. The tool runs
     // in a self-contained task that captures its result/error and always closes
     // the queue, so there is a single error path (no unhandled rejection).
-    const eventQueue = new AsyncQueue<Event>();
+    const eventQueue = new AsyncQueue<QueuedInvocationEvent>();
     invocationContext.eventQueue = eventQueue;
     const toolTask = (async (): Promise<{
       event: Event | null;
@@ -1718,9 +1726,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         eventQueue.close();
       }
     })();
-    for await (const queuedEvent of eventQueue) {
-      yield queuedEvent;
-    }
+    yield* drainInvocationEvents(eventQueue);
     const {event: functionResponseEvent, error: toolError} = await toolTask;
     invocationContext.eventQueue = undefined;
     if (toolError) {

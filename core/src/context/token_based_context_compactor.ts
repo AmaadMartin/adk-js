@@ -54,6 +54,11 @@ export class TokenBasedContextCompactor implements BaseContextCompactor {
   shouldCompact(
     invocationContext: InvocationContext,
   ): boolean | Promise<boolean> {
+    // One token compaction per invocation, as adk-python's runner enforces
+    // through `skip_token_compaction`.
+    if (invocationContext.tokenCompactionChecked) {
+      return false;
+    }
     const events = invocationContext.session.events;
     const activeEvents = getActiveEvents(events);
     const rawEvents = activeEvents.filter((e) => !isCompactedEvent(e));
@@ -120,6 +125,7 @@ export class TokenBasedContextCompactor implements BaseContextCompactor {
     }
 
     invocationContext.session.events.push(compactedEvent);
+    invocationContext.tokenCompactionChecked = true;
   }
 }
 
