@@ -157,6 +157,56 @@ describe('BigQueryToolset', () => {
     );
   });
 
+  it('test_get_execute_sql_without_settings_returns_the_read_only_tool', async () => {
+    const toolset = new BigQueryToolset();
+
+    const executeSql = (await toolset.getTools()).find(
+      (tool) => tool.name === 'execute_sql',
+    );
+
+    expect(executeSql?.description).toBe(
+      executeSqlDescription(WriteMode.BLOCKED),
+    );
+  });
+
+  it.each([
+    {
+      writeMode: WriteMode.PROTECTED,
+      id: 'test_get_execute_sql_protected_mode_swaps_in_the_protected_docstring',
+      marker: 'Only a temporary table or a temporary model can be created',
+    },
+    {
+      writeMode: WriteMode.ALLOWED,
+      id: 'test_get_execute_sql_allowed_mode_swaps_in_the_write_docstring',
+      marker: 'To overwrite an existing destination table',
+    },
+  ])('$id', async ({writeMode, marker}) => {
+    const toolset = new BigQueryToolset({bigqueryToolConfig: {writeMode}});
+
+    const executeSql = (await toolset.getTools()).find(
+      (tool) => tool.name === 'execute_sql',
+    );
+
+    expect(executeSql?.description).toBe(executeSqlDescription(writeMode));
+    expect(executeSql?.description).toContain(marker);
+  });
+
+  it('test_get_execute_sql_does_not_mutate_the_shared_read_only_tool', async () => {
+    const readOnly = new BigQueryToolset();
+    const readOnlyDescription = (await readOnly.getTools()).find(
+      (tool) => tool.name === 'execute_sql',
+    )?.description;
+
+    new BigQueryToolset({
+      bigqueryToolConfig: {writeMode: WriteMode.ALLOWED},
+    });
+
+    expect(readOnlyDescription).toBe(executeSqlDescription(WriteMode.BLOCKED));
+    expect(executeSqlDescription(WriteMode.BLOCKED)).not.toBe(
+      executeSqlDescription(WriteMode.ALLOWED),
+    );
+  });
+
   it('test_get_execute_sql_write_modes_get_distinct_docstrings', async () => {
     const descriptions = await Promise.all(
       [WriteMode.BLOCKED, WriteMode.PROTECTED, WriteMode.ALLOWED].map(

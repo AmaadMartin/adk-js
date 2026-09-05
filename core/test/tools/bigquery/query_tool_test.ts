@@ -14,6 +14,7 @@ import {
   analyzeContribution,
   BIGQUERY_SESSION_INFO_KEY,
   BigQueryClientCache,
+  BQ_USER_AGENT,
   createBigQueryToolConfig,
   detectAnomalies,
   executeSql,
@@ -370,6 +371,97 @@ describe('executeSql', () => {
 });
 
 describe('job labels', () => {
+  it('test_execute_sql_bq_client_creation', async () => {
+    bigQueryState.replies = [{statementType: 'SELECT', rows: []}];
+
+    await executeSql(
+      SELECT_QUERY,
+      deps({applicationName: 'my-agent', location: 'EU'}),
+      toolContext(),
+    );
+
+    expect(bigQueryState.clientOptions[0]).toMatchObject({
+      projectId: 'test-project',
+      location: 'EU',
+      userAgent: `${BQ_USER_AGENT} my-agent execute_sql`,
+    });
+  });
+
+  it.each([
+    {
+      id: 'forecast',
+      call: (toolDeps: BigQueryToolDeps) =>
+        forecast(
+          {
+            project_id: 'test-project',
+            history_data: 'd.t',
+            timestamp_col: 'ts',
+            data_col: 'value',
+          },
+          toolDeps,
+          toolContext(),
+        ),
+    },
+    {
+      id: 'analyze_contribution',
+      call: (toolDeps: BigQueryToolDeps) =>
+        analyzeContribution(
+          {
+            project_id: 'test-project',
+            input_data: 'd.t',
+            contribution_metric: 'SUM(m)',
+            dimension_id_cols: ['dim'],
+            is_test_col: 'is_test',
+          },
+          toolDeps,
+          toolContext(),
+        ),
+    },
+    {
+      id: 'detect_anomalies',
+      call: (toolDeps: BigQueryToolDeps) =>
+        detectAnomalies(
+          {
+            project_id: 'test-project',
+            history_data: 'd.t',
+            times_series_timestamp_col: 'ts',
+            times_series_data_col: 'value',
+          },
+          toolDeps,
+          toolContext(),
+        ),
+    },
+  ])('test_ml_tool_job_labels ($id)', async ({id, call}) => {
+    bigQueryState.replies = [{statementType: 'SELECT', rows: []}];
+
+    await call(deps({writeMode: WriteMode.PROTECTED}));
+
+    expect(bigQueryState.queryJobs[0].labels).toEqual({
+      'adk-bigquery-tool': id,
+    });
+  });
+
+  it('test_ml_tool_user_job_labels_augment_internal_labels', async () => {
+    bigQueryState.replies = [{statementType: 'SELECT', rows: []}];
+
+    await forecast(
+      {
+        project_id: 'test-project',
+        history_data: 'd.t',
+        timestamp_col: 'ts',
+        data_col: 'value',
+      },
+      deps({jobLabels: {team: 'data'}, applicationName: 'my-agent'}),
+      toolContext(),
+    );
+
+    expect(bigQueryState.queryJobs[0].labels).toEqual({
+      'team': 'data',
+      'adk-bigquery-tool': 'forecast',
+      'adk-bigquery-application-name': 'my-agent',
+    });
+  });
+
   it('test_execute_sql_job_labels', async () => {
     bigQueryState.replies = [{statementType: 'SELECT', rows: []}];
 
