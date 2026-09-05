@@ -20,6 +20,12 @@ Planning for an `LlmAgent` through its `planner` option: the model's built-in th
 
 - [Planners](planners/index.md) - `BasePlanner`, `BuiltInPlanner`, `PlanReActPlanner`, and the `isBasePlanner` and `isBuiltInPlanner` type guards.
 
+### Models
+
+- [ConformanceTestGemini](models/conformance_replay/index.md) - Replaying
+  recorded LLM responses, and verifying that the runtime asked for what was
+  recorded.
+
 ### Tools
 
 #### Retrieval
