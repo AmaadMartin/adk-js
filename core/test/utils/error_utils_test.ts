@@ -5,10 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {
-  formatError,
-  isFileNotFoundError,
-} from '../../src/utils/error_utils.js';
+import {formatError, isFileNotFoundError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
