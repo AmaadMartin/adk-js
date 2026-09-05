@@ -110,6 +110,9 @@ async function startTriggerServer(
             },
           })
         : Promise.reject(new Error(`App not found: ${appName}`)),
+    // AgentLoader is a class with private state whose constructor registers
+    // five process listeners, so a stub is cast rather than subclassed. This
+    // is the same technique dev/test/server/adk_api_server_test.ts uses.
   } as unknown as AgentLoader;
 
   const server = new AdkApiServer({
