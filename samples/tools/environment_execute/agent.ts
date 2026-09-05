@@ -6,19 +6,10 @@
 
 /**
  * ExecuteTool: run a shell command in an environment
- *
- * `ExecuteTool` gives an agent one tool, `Execute`, that runs a shell command
- * in a `BaseEnvironment` working directory and returns the exit code, stdout
- * and stderr.
+ * See docs/guides/tools/execute_tool/index.md.
  *
  * WARNING: `LocalEnvironment` runs the command on THIS machine with no
- * sandboxing. Every call therefore pauses for your confirmation first, and the
- * agent only runs the command after you approve it. There is no way to switch
- * that gate off.
- *
- * The environment must be initialized before the tool uses it. `ExecuteTool`
- * does not do this for you, and a command run against an uninitialized
- * environment comes back as `{status: 'error'}`.
+ * sandboxing. Every call pauses for your confirmation first.
  *
  * Run:
  *   npm run sample -- samples/tools/environment_execute/agent.ts

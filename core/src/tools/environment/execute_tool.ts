@@ -15,8 +15,13 @@ import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {REQUIRE_CONFIRMATION_MESSAGE} from '../tool_confirmation.js';
-import {DEFAULT_TIMEOUT_SECONDS, MAX_OUTPUT_CHARS} from './constants.js';
 import {truncate} from './truncate.js';
+
+/** Execution timeout in seconds. Fixed, as in adk-python's `DEFAULT_TIMEOUT`. */
+const DEFAULT_TIMEOUT_SECONDS = 30;
+
+/** Default cap on the characters returned to the model per output stream. */
+const MAX_OUTPUT_CHARS = 30_000;
 
 /**
  * Description shown to the model. Copied verbatim from adk-python's

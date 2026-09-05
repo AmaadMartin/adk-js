@@ -133,6 +133,5 @@ Pass `maxOutputChars` to change the cap:
 new ExecuteTool(environment, {maxOutputChars: 10_000});
 ```
 
-Lengths count UTF-16 code units, so an emoji counts as two. adk-python counts
-code points, where it counts as one, so the reported total can differ between
-the two SDKs for such text. The cut never splits a surrogate pair.
+Lengths count code points, matching adk-python, so an emoji counts as one and
+the cut never splits a surrogate pair.
