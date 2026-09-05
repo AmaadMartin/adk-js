@@ -20,7 +20,7 @@ import {
   GcpAuthProviderScheme,
   isGcpAuthProviderScheme,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   createAuthConfig,
   createAuthScheme,
@@ -34,6 +34,22 @@ const CREDENTIAL: AuthCredential = {
   authType: AuthCredentialTypes.HTTP,
   http: {scheme: 'Bearer', credentials: {token: 'delegate-token'}},
 };
+
+/** What a credentials service returns to produce {@link CREDENTIAL}. */
+const SERVICE_CREDENTIALS = {
+  header: 'Authorization: Bearer',
+  token: 'delegate-token',
+};
+
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: vi.fn(() => ({
+    getClient: () =>
+      Promise.resolve({
+        getRequestHeaders: () =>
+          Promise.resolve(new Headers({authorization: 'Bearer fake-token'})),
+      }),
+  })),
+}));
 
 /** Records the arguments the router forwarded. */
 class RecordingProvider implements CredentialsProvider {
@@ -52,6 +68,10 @@ class RecordingProvider implements CredentialsProvider {
 }
 
 describe('GcpAuthProvider', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('test_supported_auth_schemes', () => {
     const provider = new GcpAuthProvider();
 
@@ -114,17 +134,49 @@ describe('GcpAuthProvider', () => {
     expect(iamConnectorProvider.calls).toHaveLength(0);
   });
 
-  it('rejects a connector resource name when no connector delegate is injected', async () => {
+  it('routes a connector name to the default connector delegate', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({done: true, response: SERVICE_CREDENTIALS}),
+        {
+          status: 200,
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
     const provider = new GcpAuthProvider();
 
-    await expect(
-      provider.getAuthCredential(
-        createAuthConfig(createAuthScheme({name: CONNECTOR_NAME})),
-        createContext(),
-      ),
-    ).rejects.toThrow(
-      `IAM Connector auth providers are not supported yet; pass an ` +
-        `iamConnectorProvider to handle '${CONNECTOR_NAME}'.`,
+    const credential = await provider.getAuthCredential(
+      createAuthConfig(createAuthScheme({name: CONNECTOR_NAME})),
+      createContext(),
+    );
+
+    expect(credential).toEqual(CREDENTIAL);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `https://iamconnectorcredentials.googleapis.com/v1alpha/` +
+        `${CONNECTOR_NAME}/credentials:retrieve`,
+    );
+  });
+
+  it('routes an auth provider name to the default Agent Identity delegate', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({success: SERVICE_CREDENTIALS}), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const authScheme = createAuthScheme();
+    const provider = new GcpAuthProvider();
+
+    const credential = await provider.getAuthCredential(
+      createAuthConfig(authScheme),
+      createContext(),
+    );
+
+    expect(credential).toEqual(CREDENTIAL);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `https://agentidentitycredentials.googleapis.com/v1/` +
+        `${authScheme.name}/credentials:retrieve`,
     );
   });
 });
