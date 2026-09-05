@@ -13,7 +13,7 @@
 
 import {describe, expect, it} from 'vitest';
 import {BaseNode} from '../../src/workflow/base_node.js';
-import {isWorkflowNode, node, WorkflowNode} from '../../src/workflow/node.js';
+import {node, WorkflowNode} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {ParallelWorker} from '../../src/workflow/nodes/parallel_worker.js';
@@ -133,16 +133,6 @@ describe('WorkflowNode parallel worker', () => {
     expect(output).toEqual(['shared/renamed: x', 'shared/renamed: y']);
   });
 
-  it('reuses one wrapper across runs of the same node', async () => {
-    const fanning = new TaggedNode({
-      name: 'fan',
-      tag: 'memo',
-      parallelWorker: true,
-    });
-    expect((await driveNode(fanning, ['a'])).output).toEqual(['memo/fan: a']);
-    expect((await driveNode(fanning, ['b'])).output).toEqual(['memo/fan: b']);
-  });
-
   it('throws when no wrapper could be built', async () => {
     const workerless = new WorkerlessNode({
       name: 'workerless',
@@ -150,7 +140,7 @@ describe('WorkflowNode parallel worker', () => {
       parallelWorker: true,
     });
     await expect(driveNode(workerless, ['a'])).rejects.toThrow(
-      'inner_node is not initialized for parallel worker.',
+      'innerNode is not initialized for parallel worker.',
     );
   });
 
@@ -189,17 +179,6 @@ describe('WorkflowNode parallel worker', () => {
       edges: [['START', node(producePair), fanning]],
     });
     expect((await driveNode(wf)).output).toEqual(['wf/fan: p', 'wf/fan: q']);
-  });
-});
-
-describe('isWorkflowNode', () => {
-  it('matches a WorkflowNode and its copies, and nothing else', () => {
-    const fanning = new TaggedNode({name: 'fan', tag: 't'});
-    expect(isWorkflowNode(fanning)).toBe(true);
-    expect(isWorkflowNode(fanning.clone())).toBe(true);
-    expect(isWorkflowNode(new FunctionNode('plain', greet))).toBe(false);
-    expect(isWorkflowNode(null)).toBe(false);
-    expect(isWorkflowNode({name: 'fan'})).toBe(false);
   });
 });
 

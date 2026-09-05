@@ -426,7 +426,6 @@ export {
   isRequestInput,
   isRunnableRoot,
   isWorkflow,
-  isWorkflowNode,
   node,
   normalizeRetryExceptions,
   prepareRetryConfig,
