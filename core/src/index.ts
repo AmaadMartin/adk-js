@@ -26,6 +26,7 @@ export type {
   LangGraphAgentConfig,
   LangGraphThreadConfig,
 } from './agents/langgraph_agent.js';
+export {mcpInstructionProvider} from './agents/mcp_instruction_provider.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
 export {
   GcsArtifactService,
