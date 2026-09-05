@@ -198,6 +198,7 @@ export {
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
 export {
+  BIGQUERY_DEFAULT_SCOPE,
   BIGQUERY_SCOPES,
   BIGQUERY_TOKEN_CACHE_KEY,
   BigQueryCredentialsConfig,

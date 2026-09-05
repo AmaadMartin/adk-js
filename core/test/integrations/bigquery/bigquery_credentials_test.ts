@@ -5,6 +5,7 @@
  */
 
 import {
+  BIGQUERY_DEFAULT_SCOPE,
   BIGQUERY_SCOPES,
   BIGQUERY_TOKEN_CACHE_KEY,
   BaseGoogleCredentialsConfig,
@@ -144,6 +145,13 @@ describe('BigQueryCredentialsConfig constants', () => {
       'https://www.googleapis.com/auth/bigquery',
       'https://www.googleapis.com/auth/dataplex.read-write',
     ]);
+  });
+
+  it('pins the single BigQuery scope, which is not the default', () => {
+    expect(BIGQUERY_DEFAULT_SCOPE).toEqual([
+      'https://www.googleapis.com/auth/bigquery',
+    ]);
+    expect(BIGQUERY_DEFAULT_SCOPE).not.toEqual(BIGQUERY_SCOPES);
   });
 
   it('pins the session-state key adk-python caches under', () => {

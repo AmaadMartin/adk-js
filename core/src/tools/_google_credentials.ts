@@ -35,6 +35,12 @@ export interface GoogleCredentialsConfigOptions {
   scopes?: string[];
 }
 
+/** The OAuth client details an authorized-user client carries. */
+export interface OAuth2UserIdentity {
+  _clientId?: string;
+  _clientSecret?: string;
+}
+
 /**
  * Narrows an auth client to one that carries end-user OAuth2 client details.
  *
@@ -47,7 +53,7 @@ export interface GoogleCredentialsConfigOptions {
  */
 export function isOAuth2UserClient(
   client: AuthClient,
-): client is AuthClient & {_clientId?: string; _clientSecret?: string} {
+): client is AuthClient & OAuth2UserIdentity {
   return (
     ('_clientId' in client && typeof client._clientId === 'string') ||
     ('_clientSecret' in client && typeof client._clientSecret === 'string')

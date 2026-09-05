@@ -81,12 +81,21 @@ modes carry their own grant, so a scope list there is rejected.
 
 ## Scopes
 
-`BIGQUERY_SCOPES` holds both scopes and is applied only when the resolved
-configuration carries no scopes of its own. Scopes you pass yourself survive
-untouched.
+The module publishes two scope constants, and only one of them is the default.
+`BIGQUERY_SCOPES` holds both scopes and is what the configuration applies.
+`BIGQUERY_DEFAULT_SCOPE` holds the BigQuery scope alone. Despite its name it is
+not the default; adk-python publishes both constants and applies
+`BIGQUERY_SCOPES`, and adk-js keeps that split rather than renaming either one.
+
+`BIGQUERY_SCOPES` is applied only when the resolved configuration carries no
+scopes of its own. Scopes you pass yourself survive untouched.
 
 ```ts
-import {BIGQUERY_SCOPES, BigQueryCredentialsConfig} from '@google/adk';
+import {
+  BIGQUERY_DEFAULT_SCOPE,
+  BIGQUERY_SCOPES,
+  BigQueryCredentialsConfig,
+} from '@google/adk';
 
 const wide = new BigQueryCredentialsConfig({
   clientId: process.env.OAUTH_CLIENT_ID,
@@ -96,6 +105,7 @@ const wide = new BigQueryCredentialsConfig({
 
 wide.scopes; // ['https://www.googleapis.com/auth/cloud-platform']
 BIGQUERY_SCOPES.length; // 2
+BIGQUERY_DEFAULT_SCOPE; // ['https://www.googleapis.com/auth/bigquery']
 ```
 
 An authorized-user credential from a previous consent flow already records what
