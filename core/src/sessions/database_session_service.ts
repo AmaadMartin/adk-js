@@ -68,17 +68,29 @@ export class DatabaseSessionService extends BaseSessionService {
   private initialized = false;
   private options?: MikroDBOptions;
   private connectionString?: string;
+  private additionalOptions?: MikroDBOptions;
 
-  constructor(connectionStringOrOptions: MikroDBOptions | string) {
+  /**
+   * @param connectionStringOrOptions A connection URI, or MikroORM options.
+   * @param additionalOptions Further MikroORM options, such as pool sizing or
+   *   driver options. The first argument wins every key it sets, and the ADK
+   *   entity list is never replaceable.
+   */
+  constructor(
+    connectionStringOrOptions: MikroDBOptions | string,
+    additionalOptions?: MikroDBOptions,
+  ) {
     super();
     if (typeof connectionStringOrOptions === 'string') {
       this.connectionString = connectionStringOrOptions;
+      this.additionalOptions = additionalOptions;
     } else {
       if (!connectionStringOrOptions.driver) {
         throw new Error('Driver is required when passing options object.');
       }
 
       this.options = {
+        ...additionalOptions,
         ...connectionStringOrOptions,
         entities: ENTITIES,
       };
@@ -91,7 +103,10 @@ export class DatabaseSessionService extends BaseSessionService {
     }
 
     if (this.connectionString && (!this.options || !this.options.driver)) {
-      this.options = await getConnectionOptionsFromUri(this.connectionString);
+      this.options = {
+        ...this.additionalOptions,
+        ...(await getConnectionOptionsFromUri(this.connectionString)),
+      };
     }
 
     this.orm = await MikroORM.init(this.options!);
