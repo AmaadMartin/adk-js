@@ -11,7 +11,7 @@ import {
   OAuth2Client,
 } from 'google-auth-library';
 import {InputValidationError} from '../../errors/input_validation_error.js';
-import {getClientLabels} from '../../utils/client_labels.js';
+import {getTrackingHeaders} from '../../utils/client_labels.js';
 import {base64Decode} from '../../utils/env_aware_utils.js';
 import {formatError} from '../../utils/error_utils.js';
 
@@ -21,10 +21,6 @@ const CLOUD_PLATFORM_SCOPES = [
 const GLOBAL_HOST = 'parametermanager.googleapis.com';
 const API_VERSION = 'v1';
 const REGIONAL_HOST_TEMPLATE = 'parametermanager.{location}.rep.googleapis.com';
-const MTLS_REGIONAL_HOST_TEMPLATE =
-  'parametermanager.{location}.rep.mtls.googleapis.com';
-const MTLS_ENDPOINT_ENV = 'GOOGLE_API_USE_MTLS_ENDPOINT';
-const USE_CLIENT_CERTIFICATE_ENV = 'GOOGLE_API_USE_CLIENT_CERTIFICATE';
 /** Google Cloud location IDs hold only lowercase letters, digits and hyphens. */
 const LOCATION_PATTERN = /^[a-z0-9-]+$/;
 /**
@@ -61,33 +57,9 @@ export interface ParameterManagerClientOptions {
 }
 
 /**
- * Reports whether the environment asks for the mutual-TLS regional host.
- *
- * `GOOGLE_API_USE_MTLS_ENDPOINT` decides: `always` takes the mutual-TLS host,
- * `never` takes the plain one, and `auto` takes the mutual-TLS one only when
- * `GOOGLE_API_USE_CLIENT_CERTIFICATE` is `true`. An unset or unrecognised
- * setting reads as `auto`. Both variables are read case insensitively.
- */
-function useMtlsHost(): boolean {
-  const setting = (process.env[MTLS_ENDPOINT_ENV] ?? '').toLowerCase();
-  if (setting === 'always') {
-    return true;
-  }
-  if (setting === 'never') {
-    return false;
-  }
-  return (
-    (process.env[USE_CLIENT_CERTIFICATE_ENV] ?? '').toLowerCase() === 'true'
-  );
-}
-
-/**
  * Builds the host to call. The location reaches the hostname, so a value
  * holding a dot or a slash would send the request, and its bearer token, to a
  * host the caller did not intend.
- *
- * simplicity: this duplicates `getApiEndpoint` from the shared mTLS utilities,
- * which adk-js does not carry yet. Collapse the two once that helper lands.
  */
 function resolveHost(location?: string): string {
   if (!location) {
@@ -96,11 +68,8 @@ function resolveHost(location?: string): string {
   if (!LOCATION_PATTERN.test(location)) {
     throw new InputValidationError(`Invalid location: ${location}`);
   }
-  const template = useMtlsHost()
-    ? MTLS_REGIONAL_HOST_TEMPLATE
-    : REGIONAL_HOST_TEMPLATE;
   // The replacement is a function so a `$&` in the location cannot expand.
-  return template.replace('{location}', () => location);
+  return REGIONAL_HOST_TEMPLATE.replace('{location}', () => location);
 }
 
 function parseServiceAccountJson(serviceAccountJson: string): JWTInput {
@@ -140,21 +109,6 @@ function createAuth(options: ParameterManagerClientOptions): GoogleAuth {
   return new GoogleAuth({scopes: CLOUD_PLATFORM_SCOPES});
 }
 
-function renderUrl(host: string, resourceName: string): string {
-  return `https://${host}/${API_VERSION}/${resourceName}:render`;
-}
-
-/**
- * Headers that identify this SDK to the API.
- *
- * simplicity: the shared `getTrackingHeaders` helper is not in adk-js yet.
- * Call it here once it is.
- */
-function trackingHeaders(): Record<string, string> {
-  const headerValue = getClientLabels().join(' ');
-  return {'x-goog-api-client': headerValue, 'user-agent': headerValue};
-}
-
 /**
  * A client for retrieving parameters from Google Cloud Parameter Manager.
  *
@@ -162,9 +116,8 @@ function trackingHeaders(): Record<string, string> {
  * preexisting authorization token, falling back to Application Default
  * Credentials when neither is provided.
  *
- * `GOOGLE_API_USE_MTLS_ENDPOINT` selects the mutual-TLS regional host, but
- * this client presents no client certificate, so such a host rejects the
- * connection unless the runtime supplies one.
+ * Only the standard endpoint is supported; the mutual-TLS variant
+ * (`parametermanager.{location}.rep.mtls.googleapis.com`) is not implemented.
  */
 export class ParameterManagerClient {
   private readonly auth: GoogleAuth;
@@ -213,8 +166,8 @@ export class ParameterManagerClient {
     // Proto3 JSON omits an unset bytes field and an empty one alike, so an
     // empty parameter arrives with no key.
     const {data} = await client.request<RenderParameterVersionResponse>({
-      url: renderUrl(this.host, resourceName),
-      headers: trackingHeaders(),
+      url: `https://${this.host}/${API_VERSION}/${resourceName}:render`,
+      headers: getTrackingHeaders(),
     });
     return base64Decode(data.renderedPayload ?? '');
   }

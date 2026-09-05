@@ -19,7 +19,7 @@ import {
   version,
 } from '@google/adk';
 import type {Credentials, GoogleAuthOptions} from 'google-auth-library';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 /** The request options {@link ParameterManagerClient} sends to the auth client. */
 interface RequestOptions {
@@ -72,14 +72,10 @@ vi.mock('google-auth-library', () => ({
 }));
 
 const SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
-const MTLS_ENDPOINT_ENV = 'GOOGLE_API_USE_MTLS_ENDPOINT';
-const USE_CLIENT_CERTIFICATE_ENV = 'GOOGLE_API_USE_CLIENT_CERTIFICATE';
 const RESOURCE_NAME =
   'projects/test-project/locations/global/parameters/test-param/versions/latest';
 const GLOBAL_URL = `https://parametermanager.googleapis.com/v1/${RESOURCE_NAME}:render`;
 const REGIONAL_HOST = 'parametermanager.us-central1.rep.googleapis.com';
-const MTLS_REGIONAL_HOST =
-  'parametermanager.us-central1.rep.mtls.googleapis.com';
 const SERVICE_ACCOUNT = {
   type: 'service_account',
   project_id: 'test-project',
@@ -107,14 +103,8 @@ function recordedHost(): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubEnv(MTLS_ENDPOINT_ENV, undefined);
-  vi.stubEnv(USE_CLIENT_CERTIFICATE_ENV, undefined);
   mocks.getClient.mockResolvedValue({request: mocks.request});
   mocks.request.mockResolvedValue(renderResponse('parameter-value'));
-});
-
-afterEach(() => {
-  vi.unstubAllEnvs();
 });
 
 describe('ParameterManagerClient ported reference tests', () => {
@@ -351,48 +341,5 @@ describe('ParameterManagerClient getParameter', () => {
     expect(recordedRequest().url).toBe(
       `https://${REGIONAL_HOST}/v1/${regionalName}:render`,
     );
-  });
-});
-
-describe('ParameterManagerClient mutual-TLS host selection', () => {
-  it.each<[string | undefined, string | undefined, string]>([
-    ['always', undefined, MTLS_REGIONAL_HOST],
-    ['auto', 'true', MTLS_REGIONAL_HOST],
-    [undefined, 'true', MTLS_REGIONAL_HOST],
-    ['auto', undefined, REGIONAL_HOST],
-    ['auto', 'false', REGIONAL_HOST],
-    ['never', 'true', REGIONAL_HOST],
-    ['yes', 'true', MTLS_REGIONAL_HOST],
-    ['yes', undefined, REGIONAL_HOST],
-  ])(
-    'uses %s / %s to pick the regional host',
-    async (endpointSetting, certificateFlag, expectedHost) => {
-      vi.stubEnv(MTLS_ENDPOINT_ENV, endpointSetting);
-      vi.stubEnv(USE_CLIENT_CERTIFICATE_ENV, certificateFlag);
-
-      const client = new ParameterManagerClient({location: 'us-central1'});
-      await client.getParameter(RESOURCE_NAME);
-
-      expect(recordedHost()).toBe(expectedHost);
-    },
-  );
-
-  it('reads the settings case insensitively', async () => {
-    vi.stubEnv(MTLS_ENDPOINT_ENV, 'AUTO');
-    vi.stubEnv(USE_CLIENT_CERTIFICATE_ENV, 'TRUE');
-
-    const client = new ParameterManagerClient({location: 'us-central1'});
-    await client.getParameter(RESOURCE_NAME);
-
-    expect(recordedHost()).toBe(MTLS_REGIONAL_HOST);
-  });
-
-  it('keeps the global host when no location is given', async () => {
-    vi.stubEnv(MTLS_ENDPOINT_ENV, 'always');
-
-    const client = new ParameterManagerClient();
-    await client.getParameter(RESOURCE_NAME);
-
-    expect(recordedHost()).toBe('parametermanager.googleapis.com');
   });
 });

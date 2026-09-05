@@ -6,7 +6,10 @@
 
 import {getClientLabels, runWithClientLabel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {parseUserAgent} from '../../src/utils/client_labels.js';
+import {
+  getTrackingHeaders,
+  parseUserAgent,
+} from '../../src/utils/client_labels.js';
 
 describe('client_labels', () => {
   describe('parseUserAgent', () => {
@@ -99,6 +102,15 @@ describe('client_labels', () => {
     it('should return exactly two labels in Node.js environment by default', () => {
       const labels = getClientLabels();
       expect(labels).toHaveLength(2);
+    });
+  });
+
+  describe('getTrackingHeaders', () => {
+    it('should send the joined labels as both tracking headers', () => {
+      const headers = getTrackingHeaders();
+      const expected = getClientLabels().join(' ');
+      expect(headers['x-goog-api-client']).toBe(expected);
+      expect(headers['user-agent']).toBe(expected);
     });
   });
 
