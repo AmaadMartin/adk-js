@@ -701,7 +701,7 @@ function isFrameworkRequest(event: RecordedEvent, content: Content): boolean {
  * generates, in call order, so a recorded `functionResponse` answers the call
  * the run actually made.
  */
-class FunctionCallIdMapper {
+export class FunctionCallIdMapper {
   private readonly idMap = new Map<string, string>();
   private consumed = 0;
 
@@ -771,15 +771,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Rebuilds the fixtures the command line names, reporting each outcome.
+ *
+ * @param args The command line arguments after the script name.
+ */
+export async function rebuildFromArgv(args: readonly string[]): Promise<void> {
+  const folder = args[0];
+  if (folder === undefined) {
+    logger.info('Usage: node agent_test_runner.js <folder>');
+    return;
+  }
+  for (const result of await rebuildTests(folder)) {
+    logger.info(`${result.status} ${result.testFile}`);
+  }
+}
+
 /** Mirrors adk-python's `python agent_test_runner.py <folder>` entry point. */
 if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  void rebuildTests(process.argv[2] ?? process.cwd()).catch(
-    (error: unknown) => {
-      logger.error(errorMessage(error));
-      process.exitCode = 1;
-    },
-  );
+  void rebuildFromArgv(process.argv.slice(2));
 }

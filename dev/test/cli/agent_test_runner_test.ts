@@ -8,6 +8,8 @@
 // google/adk-python tests/unittests/cli/test_agent_test_runner.py (main).
 
 import {
+  App,
+  createEvent,
   FunctionTool,
   LlmAgent,
   LlmRequest,
@@ -26,20 +28,23 @@ import {z} from 'zod';
 import {
   buildMockResponses,
   extractUserContent,
+  FunctionCallIdMapper,
   getTestFiles,
   MockModel,
+  rebuildFromArgv,
   rebuildTests,
   ReplaySessionRunner,
   runAgentReplay,
 } from '../../src/cli/agent_test_runner.js';
 
-/** The agent the stubbed `AgentFile` hands back, set per test. */
+/** What the stubbed `AgentFile` hands back, set per test. */
 const agentHolder = vi.hoisted((): {current?: RunnableRoot} => ({}));
+const appHolder = vi.hoisted((): {current?: App} => ({}));
 
 vi.mock('../../src/utils/agent_loader.js', () => ({
   AgentFile: class {
     async load() {
-      return agentHolder.current;
+      return appHolder.current ?? agentHolder.current;
     }
     async dispose() {}
   },
@@ -97,6 +102,7 @@ let workspace: string;
 beforeEach(() => {
   workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-agent-test-'));
   agentHolder.current = undefined;
+  appHolder.current = undefined;
 });
 
 afterEach(() => {
@@ -280,6 +286,18 @@ describe('extractUserContent', () => {
     });
   });
 
+  it('rebuilds a function response that records neither an id nor a name', () => {
+    expect(
+      extractUserContent({
+        author: 'user',
+        content: {role: 'user', parts: [{functionResponse: {}}]},
+      }),
+    ).toEqual({
+      role: 'user',
+      parts: [{functionResponse: {}}],
+    });
+  });
+
   it('skips an event another author wrote', () => {
     expect(
       extractUserContent({
@@ -325,6 +343,14 @@ describe('buildMockResponses', () => {
     expect(
       responses.map((response) => response.content?.parts?.[0]?.text),
     ).toEqual(['first', 'second']);
+  });
+
+  it('ignores a turn that is neither a user nor a model turn', () => {
+    expect(
+      buildMockResponses([
+        {author: 'dice_agent', content: {role: 'system', parts: [{text: 'x'}]}},
+      ]),
+    ).toEqual([]);
   });
 
   it('drops the model turn ADK synthesizes after set_model_response', () => {
@@ -423,6 +449,22 @@ describe('runAgentReplay', () => {
       'basic.json': {
         events: [{author: 'dice_agent', content: createModelContent('hi')}],
       },
+    });
+
+    const result = await runAgentReplay(
+      agentDir,
+      path.join(agentDir, 'tests', 'basic.json'),
+    );
+
+    expect(result).toEqual({
+      status: 'skipped',
+      reason: expect.stringContaining('Could not find user message'),
+    });
+  });
+
+  it('skips a fixture whose opening user turn holds no text', async () => {
+    const agentDir = createAgentDir(workspace, 'dice_agent', {
+      'basic.json': {events: [userTurn('')]},
     });
 
     const result = await runAgentReplay(
@@ -687,7 +729,108 @@ describe('rebuildTests', () => {
     expect(results[0].reason).toContain('agent entry file');
   });
 
+  it('rebuilds an agent the entry file exports as an App', async () => {
+    const agentDir = createAgentDir(workspace, 'test_agent', {
+      'basic.json': {events: [userTurn('hello')]},
+    });
+    agentHolder.current = undefined;
+    appHolder.current = new App({
+      name: 'test_app',
+      rootAgent: new LlmAgent({
+        name: 'test_agent',
+        model: MockModel.create([createModelContent('hi')]),
+      }),
+    });
+
+    expect((await rebuildTests(agentDir))[0].status).toBe('rebuilt');
+    expect(readFixture(agentDir, 'basic.json')).toContain('hi');
+  });
+
+  it('skips a fixture whose events are not a list', async () => {
+    const agentDir = createAgentDir(workspace, 'test_agent', {
+      'basic.json': {events: 'not a list'},
+    });
+
+    expect((await rebuildTests(agentDir))[0].status).toBe('skipped');
+  });
+
   it('returns nothing when the folder holds no fixture', async () => {
     expect(await rebuildTests(workspace)).toEqual([]);
+  });
+});
+
+describe('FunctionCallIdMapper', () => {
+  it('answers a recorded response with the id the live call was given', () => {
+    const mapper = new FunctionCallIdMapper(['recorded-1']);
+    mapper.absorb([
+      createEvent({
+        author: 'dice_agent',
+        content: createModelContent({
+          functionCall: {id: 'live-1', name: 'roll_dice'},
+        }),
+      }),
+    ]);
+    const content: Content = {
+      role: 'user',
+      parts: [
+        {functionResponse: {id: 'recorded-1', name: 'roll_dice'}},
+        {functionResponse: {id: 'unknown', name: 'roll_dice'}},
+        {text: 'no response here'},
+      ],
+    };
+
+    mapper.remap(content);
+
+    expect(content.parts?.map((part) => part.functionResponse?.id)).toEqual([
+      'live-1',
+      'unknown',
+      undefined,
+    ]);
+  });
+
+  it('stops pairing once the recorded ids run out', () => {
+    const mapper = new FunctionCallIdMapper([]);
+    mapper.absorb([
+      createEvent({
+        author: 'dice_agent',
+        content: createModelContent({
+          functionCall: {id: 'live-1', name: 'roll_dice'},
+        }),
+      }),
+    ]);
+    const content: Content = {
+      role: 'user',
+      parts: [{functionResponse: {id: 'recorded-1'}}],
+    };
+
+    mapper.remap(content);
+
+    expect(content.parts?.[0]?.functionResponse?.id).toBe('recorded-1');
+  });
+});
+
+describe('rebuildFromArgv', () => {
+  it('rebuilds the folder the first argument names', async () => {
+    const agentDir = createAgentDir(workspace, 'test_agent', {
+      'basic.json': {events: [userTurn('hello')]},
+    });
+    agentHolder.current = new LlmAgent({
+      name: 'test_agent',
+      model: MockModel.create([createModelContent('hi')]),
+    });
+
+    await rebuildFromArgv([agentDir]);
+
+    expect(readFixture(agentDir, 'basic.json')).toContain('hi');
+  });
+
+  it('rebuilds nothing when no folder is named', async () => {
+    const agentDir = createAgentDir(workspace, 'test_agent', {
+      'basic.json': {events: [userTurn('hello')]},
+    });
+
+    await rebuildFromArgv([]);
+
+    expect(readFixture(agentDir, 'basic.json')).not.toContain('\n');
   });
 });
