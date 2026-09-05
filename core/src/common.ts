@@ -155,6 +155,49 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export type {
+  ConversationScenario,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+} from './evaluation/eval_case.js';
+export {
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
+  EvalStatus,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricCriterion,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  ParsedLlmBackedUserSimulatorCriterion,
+  ResolvedJudgeModelOptions,
+  Threshold,
+} from './evaluation/eval_metrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export type {
+  AutoRaterScore,
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
+export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
+export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
