@@ -70,7 +70,7 @@ scores are enough.
 | `OptimizerResult<T>`         | `optimizedAgents` | yes      | The Pareto front.                       |
 
 `UnstructuredSamplingResult` extends `SamplingResult`, so it carries `scores`
-too.
+too. An `overallScore` of `0` is a real score, not an absent one.
 
 ## Extend the types with your own metrics
 
@@ -101,3 +101,18 @@ const front: OptimizerResult<AgentWithLatency> = {
 ```
 
 Both agents stay in the front because neither wins on both measures.
+
+## Relationship to ADK Python
+
+These types mirror `google.adk.optimization.data_types` field for field, under
+the names TypeScript uses.
+
+| ADK Python                   | ADK TypeScript               |
+| ---------------------------- | ---------------------------- |
+| `SamplingResult`             | `SamplingResult`             |
+| `UnstructuredSamplingResult` | `UnstructuredSamplingResult` |
+| `AgentWithScores`            | `AgentWithScores`            |
+| `OptimizerResult[T]`         | `OptimizerResult<T>`         |
+| `optimized_agent`            | `optimizedAgent`             |
+| `overall_score`              | `overallScore`               |
+| `optimized_agents`           | `optimizedAgents`            |
