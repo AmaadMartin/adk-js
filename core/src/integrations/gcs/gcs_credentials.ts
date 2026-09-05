@@ -169,7 +169,7 @@ export class GcsCredentialsManager {
       throw new Error(
         'The authorization flow returned no refresh token, which' +
           ' @google-cloud/storage requires to authenticate. Request offline' +
-          ' access, or pass an authClient instead.',
+          ' access, or set applicationDefaultCredentials instead.',
       );
     }
 

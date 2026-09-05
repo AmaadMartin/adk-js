@@ -148,6 +148,18 @@ describe('gcs_list_buckets', () => {
     ]);
   });
 
+  it('omits an empty next page token', async () => {
+    registry.reset({bucketNames: ['a'], nextQuery: {pageToken: ''}});
+    const tool = await getTool(readWriteToolset(), 'gcs_list_buckets');
+
+    const result = await tool.runAsync({
+      args: {project_id: 'p', page_size: 10},
+      toolContext: createToolContext(),
+    });
+
+    expect(result).toEqual({status: 'SUCCESS', results: ['a']});
+  });
+
   it('lists every bucket without a query when no page size is given', async () => {
     registry.reset({bucketNames: ['a', 'b']});
     const tool = await getTool(readWriteToolset(), 'gcs_list_buckets');
@@ -229,5 +241,76 @@ describe('gcs_update_bucket', () => {
       'b',
       {iamConfiguration: {uniformBucketLevelAccess: {enabled: false}}},
     ]);
+  });
+});
+
+describe('a completed authorization flow', () => {
+  /**
+   * The session state `Context.getAuthResponse` reads a finished flow from.
+   * `AuthHandler` namespaces the credential key with `temp:`.
+   */
+  function completedFlowState(
+    oauth2: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {'temp:gcs_token_cache': {authType: 'oauth2', oauth2}};
+  }
+
+  beforeEach(() => {
+    registry.reset({metadata: {name: 'b'}});
+  });
+
+  it('caches the authorized user and authenticates the call with it', async () => {
+    const toolset = createToolset({credentialsConfig: TEST_CREDENTIALS});
+    const tool = await getTool(toolset, 'gcs_get_bucket');
+    const context = createToolContext({
+      state: completedFlowState({
+        accessToken: 'fresh-access-token',
+        refreshToken: 'fresh-refresh-token',
+        expiresAt: 1893456000000,
+      }),
+    });
+
+    const result = await tool.runAsync({
+      args: {bucket_name: 'b'},
+      toolContext: context,
+    });
+
+    expect(result).toEqual({status: 'SUCCESS', results: {name: 'b'}});
+    expect(registry.only().options).toMatchObject({
+      credentials: {
+        type: 'authorized_user',
+        client_id: 'abc',
+        client_secret: 'def',
+        refresh_token: 'fresh-refresh-token',
+      },
+      clientOptions: {
+        credentials: {
+          access_token: 'fresh-access-token',
+          expiry_date: 1893456000000,
+        },
+      },
+    });
+    // The next call reads the cache rather than the flow.
+    expect(context.state.get('gcs_token_cache')).toMatchObject({
+      refreshToken: 'fresh-refresh-token',
+    });
+  });
+
+  it('reports a flow that returned no refresh token as an ERROR result', async () => {
+    const toolset = createToolset({credentialsConfig: TEST_CREDENTIALS});
+    const tool = await getTool(toolset, 'gcs_get_bucket');
+
+    const result = await tool.runAsync({
+      args: {bucket_name: 'b'},
+      toolContext: createToolContext({
+        state: completedFlowState({accessToken: 'access-only'}),
+      }),
+    });
+
+    expect(result).toMatchObject({status: 'ERROR'});
+    expect((result as {error_details: string}).error_details).toContain(
+      'no refresh token',
+    );
+    expect(registry.built).toHaveLength(0);
   });
 });
