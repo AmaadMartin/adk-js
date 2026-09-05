@@ -17,6 +17,7 @@ import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   createEvent,
 } from '@google/adk';
+import {GoogleAuth} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {RestIamConnectorCredentialsClient} from '../../../src/integrations/agent_identity/iam_connector_credentials_client.js';
 import {IamConnectorCredentialsProvider} from '../../../src/integrations/agent_identity/iam_connector_credentials_provider.js';
@@ -120,16 +121,21 @@ describe('IamConnectorCredentialsProvider', () => {
   });
 
   it('test_get_auth_credential_reuses_client_on_same_thread', async () => {
-    const createClient = vi.fn(
-      () => new FakeConnectorClient(() => bearerOperation()),
+    // A Response body reads once, so each call needs its own.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(bearerOperation()), {status: 200}),
+      ),
     );
-    const provider = new IamConnectorCredentialsProvider({createClient});
+    vi.mocked(GoogleAuth).mockClear();
+    const provider = new IamConnectorCredentialsProvider();
     const context = createContext();
 
     await provider.getAuthCredential(authScheme, context);
     await provider.getAuthCredential(authScheme, context);
 
-    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(GoogleAuth)).toHaveBeenCalledTimes(1);
   });
 
   it('test_get_client_with_env_var', async () => {

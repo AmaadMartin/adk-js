@@ -126,14 +126,13 @@ describe('AgentIdentityCredentialsProvider', () => {
         new Response(JSON.stringify(bearerSuccess()), {status: 200}),
       ),
     );
+    vi.mocked(GoogleAuth).mockClear();
     const provider = new AgentIdentityCredentialsProvider();
     const context = createContext();
 
     await provider.getAuthCredential(authScheme, context);
     await provider.getAuthCredential(authScheme, context);
 
-    // Two requests, but only one client: the second call reuses the first
-    // client rather than resolving credentials again.
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(vi.mocked(GoogleAuth)).toHaveBeenCalledTimes(1);
   });

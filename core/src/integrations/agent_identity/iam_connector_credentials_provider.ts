@@ -16,12 +16,11 @@ import {CredentialsProvider} from './agent_identity_credentials_provider.js';
 import {
   CredentialsResourceNoun,
   CredentialsServiceName,
-  NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS,
-  NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS,
+  baseRetrieveRequest,
   constructAuthCredential,
   isConsentCompleted,
+  pollUntil,
   retrievalFailure,
-  sleep,
 } from './credentials_utils.js';
 import {
   IamConnectorCredentialsClient,
@@ -33,28 +32,8 @@ import {
 
 /** Options for {@link IamConnectorCredentialsProvider}. */
 export interface IamConnectorCredentialsProviderOptions {
-  /** A ready client to use, instead of building one. */
+  /** A ready client to use, instead of the REST one built on first use. */
   client?: IamConnectorCredentialsClient;
-
-  /** Builds the client on first use. Defaults to the REST client. */
-  createClient?: () => IamConnectorCredentialsClient;
-}
-
-function buildRetrieveRequest(
-  userId: string,
-  authScheme: GcpAuthProviderScheme,
-): RetrieveConnectorCredentialsRequest {
-  const request: RetrieveConnectorCredentialsRequest = {
-    userId,
-    forceRefresh: false,
-  };
-  if (authScheme.scopes) {
-    request.scopes = authScheme.scopes;
-  }
-  if (authScheme.continueUri) {
-    request.continueUri = authScheme.continueUri;
-  }
-  return request;
 }
 
 /** The credentials of a completed operation, which must carry some. */
@@ -87,12 +66,9 @@ function operationFailure(operation: RetrieveCredentialsOperation): Error {
 @experimental
 export class IamConnectorCredentialsProvider implements CredentialsProvider {
   private client?: IamConnectorCredentialsClient;
-  private readonly createClient: () => IamConnectorCredentialsClient;
 
   constructor(options?: IamConnectorCredentialsProviderOptions) {
     this.client = options?.client;
-    this.createClient =
-      options?.createClient ?? (() => new RestIamConnectorCredentialsClient());
   }
 
   /**
@@ -144,7 +120,10 @@ export class IamConnectorCredentialsProvider implements CredentialsProvider {
     if (operation.metadata?.consentPending) {
       let completed: RetrieveCredentialsOperation;
       try {
-        completed = await this.pollCredentials(userId, authScheme);
+        completed = await pollUntil(
+          () => this.retrieveCredentials(userId, authScheme),
+          (operation) => Boolean(operation.done),
+        );
       } catch (error: unknown) {
         throw retrievalFailure(
           userId,
@@ -182,34 +161,15 @@ export class IamConnectorCredentialsProvider implements CredentialsProvider {
     );
   }
 
-  private getClient(): IamConnectorCredentialsClient {
-    this.client ??= this.createClient();
-    return this.client;
-  }
-
   private retrieveCredentials(
     userId: string,
     authScheme: GcpAuthProviderScheme,
   ): Promise<RetrieveCredentialsOperation> {
-    return this.getClient().retrieveCredentials(
-      authScheme.name,
-      buildRetrieveRequest(userId, authScheme),
-    );
-  }
-
-  /** Polls until the operation completes, and returns the completed one. */
-  private async pollCredentials(
-    userId: string,
-    authScheme: GcpAuthProviderScheme,
-  ): Promise<RetrieveCredentialsOperation> {
-    const endTime = Date.now() + NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS;
-    while (Date.now() < endTime) {
-      const operation = await this.retrieveCredentials(userId, authScheme);
-      if (operation.done) {
-        return operation;
-      }
-      await sleep(NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS);
-    }
-    throw new Error('Timeout waiting for credentials.');
+    this.client ??= new RestIamConnectorCredentialsClient();
+    const request: RetrieveConnectorCredentialsRequest = {
+      ...baseRetrieveRequest(userId, authScheme),
+      forceRefresh: false,
+    };
+    return this.client.retrieveCredentials(authScheme.name, request);
   }
 }

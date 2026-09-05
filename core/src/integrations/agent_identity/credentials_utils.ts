@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GoogleAuth} from 'google-auth-library';
 import {Context} from '../../agents/context.js';
 import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../agents/framework_function_calls.js';
 import {
@@ -11,6 +12,8 @@ import {
   AuthCredentialTypes,
 } from '../../auth/auth_credential.js';
 import {getFunctionCalls, getFunctionResponses} from '../../events/event.js';
+import {sleep} from '../../utils/async_utils.js';
+import {GcpAuthProviderScheme} from '../agent_registry/types.js';
 
 /** How long to wait between polls while the service reports no credential. */
 export const NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS = 1000;
@@ -36,6 +39,33 @@ export enum CredentialsResourceNoun {
   CONNECTOR = 'connector',
 }
 
+/** The request fields both credentials services accept. */
+export interface BaseRetrieveRequest {
+  /** The identity of the end user. */
+  userId: string;
+
+  /** The OAuth scopes the caller needs. */
+  scopes?: string[];
+
+  /** Where the service sends the user once consent completes. */
+  continueUri?: string;
+}
+
+/** Where one credentials service serves `credentials:retrieve`. */
+export interface CredentialsEndpoint {
+  /** The service host, which an environment variable may override. */
+  host: string;
+
+  /** The API version segment of the path. */
+  apiVersion: string;
+
+  /** The auth provider or connector resource name. */
+  resource: string;
+
+  /** The service, as it names itself in a failed-request error. */
+  service: CredentialsServiceName;
+}
+
 /** The header/token pair both credentials services return on success. */
 export interface HeaderCredentials {
   /** The HTTP header that carries the token, e.g. `Authorization: Bearer`. */
@@ -45,9 +75,41 @@ export interface HeaderCredentials {
   token?: string;
 }
 
-/** Sleeps for `ms` milliseconds. */
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Posts a `credentials:retrieve` request and returns the parsed body.
+ *
+ * Both credentials services expose the same method under a different host and
+ * API version, so they differ only in the arguments below.
+ *
+ * @param request The retrieval request, sent as the JSON body.
+ * @returns The parsed response body.
+ * @throws Error If the service answers with a non-2xx status. The message
+ *     carries the status and body, neither of which holds a credential.
+ */
+export async function postRetrieveCredentials<T>(
+  auth: GoogleAuth,
+  target: CredentialsEndpoint,
+  request: object,
+): Promise<T> {
+  const url =
+    `https://${target.host}/${target.apiVersion}/${target.resource}` +
+    `/credentials:retrieve`;
+  const client = await auth.getClient();
+  const headers = await client.getRequestHeaders(url);
+  headers.set('Content-Type', 'application/json');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `${target.service} request failed with status ${response.status}: ` +
+        `${await response.text()}`,
+    );
+  }
+  return (await response.json()) as T;
 }
 
 /** The error both providers throw when the upstream call fails. */
@@ -150,4 +212,42 @@ export function isConsentCompleted(context: Context): boolean {
     }
   }
   return false;
+}
+
+/** The retrieve request fields taken from the scheme and the context. */
+export function baseRetrieveRequest(
+  userId: string,
+  authScheme: GcpAuthProviderScheme,
+): BaseRetrieveRequest {
+  const request: BaseRetrieveRequest = {userId};
+  if (authScheme.scopes) {
+    request.scopes = authScheme.scopes;
+  }
+  if (authScheme.continueUri) {
+    request.continueUri = authScheme.continueUri;
+  }
+  return request;
+}
+
+/**
+ * Repeats `fetchOnce` until it answers with a terminal value.
+ *
+ * @param fetchOnce Asks the service for the current state.
+ * @param isTerminal True once the service has stopped saying "not yet".
+ * @returns The first terminal value.
+ * @throws Error If the poll window closes first.
+ */
+export async function pollUntil<T>(
+  fetchOnce: () => Promise<T>,
+  isTerminal: (value: T) => boolean,
+): Promise<T> {
+  const endTime = Date.now() + NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS;
+  while (Date.now() < endTime) {
+    const value = await fetchOnce();
+    if (isTerminal(value)) {
+      return value;
+    }
+    await sleep(NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS);
+  }
+  throw new Error('Timeout waiting for credentials.');
 }
