@@ -96,9 +96,10 @@ The walk starts at `invocationContext.agent`, plus any object in `extraTargets`.
 It deliberately does not touch:
 
 - **accessor properties.** The walk reads property _descriptors_, so a getter never fires during discovery.
-- **methods the runtime owns.** Every prototype reachable from a global, plus the iterator and generator prototypes, stops the prototype chain. The set is derived from the runtime rather than listed, because a list would miss `URL.prototype` or the async generator prototype, and wrapping one of those changes every value in the process.
+- **anything the runtime owns.** Past the three container kinds above, the walk descends only into a plain object or a class instance. A `Buffer`, a `URL`, a `Date`, an `AbortSignal`, `process` — each reports a built-in tag of its own, so its methods belong to the runtime rather than to your agent, and it is left alone together with its prototypes. A subclass of one is left alone with it. Every prototype reachable from a global stops the chain as well, as a second line.
 - **class constructors**, symbol-keyed methods, and names starting with `_`.
 - **anything already wrapped.** The marker is `Symbol.for('adk.auto_tracing.wrapped')`, taken from the global symbol registry so that two copies of `@google/adk` in one runtime agree. A second pass, or a second plugin, re-wraps nothing.
+- **itself.** A wrapper reached from inside the plugin's own tracing work calls straight through without opening a span. The tracer runs ordinary functions of its own, and if one of them were instrumented then opening a span would call it, which would open a span, until the stack ran out. That is not hypothetical: the OpenTelemetry SDK uses a `Buffer` while it opens a span.
 
 A wrapped function is observationally identical to the original: same return value, same thrown error, same yields in the same order, the same `name`, the same arity, and any property attached to it. A generator's yields all pass through; only the sample recorded on the span is capped. Failing to wrap one property is logged at debug level and never aborts the pass.
 

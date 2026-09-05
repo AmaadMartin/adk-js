@@ -23,6 +23,7 @@ import {
   createCaps,
   isClassConstructor,
   isMap,
+  isPlainTagged,
   isSet,
   isTraced,
   isTracedFunction,
@@ -229,6 +230,16 @@ export class AutoTracingPlugin extends BasePlugin {
       for (const item of value) {
         this.walk(item, depth + 1, state);
       }
+      return;
+    }
+    // Past the three container kinds above, only a plain object or a class
+    // instance is descended into. Every other kind belongs to the runtime --
+    // a Buffer, a URL, an AbortSignal, `process` -- and its methods are the
+    // runtime's, not the agent's. The tag is what says so, rather than a list
+    // of globals: Node defines `Buffer` and `process` as lazy accessors, so a
+    // scan of the globals cannot see them without firing unrelated
+    // deprecation getters.
+    if (!isPlainTagged(value)) {
       return;
     }
     for (const [key, descriptor] of ownValueEntries(value)) {

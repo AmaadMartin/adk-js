@@ -6,7 +6,8 @@
 
 /** Shared fixtures for the AutoTracingPlugin test files. */
 
-import {type Attributes, type Tracer} from '@opentelemetry/api';
+import {context, type Attributes, type Tracer} from '@opentelemetry/api';
+import {AsyncLocalStorageContextManager} from '@opentelemetry/context-async-hooks';
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -33,6 +34,14 @@ export const provider = new BasicTracerProvider({
   spanProcessors: [new SimpleSpanProcessor(exporter)],
 });
 export const tracer: Tracer = provider.getTracer('auto-tracing-test');
+
+/**
+ * Context propagation, so a span opened inside another one is parented to it.
+ * Without a context manager the API's default keeps no active span and every
+ * span comes out a root.
+ */
+export const contextManager = new AsyncLocalStorageContextManager();
+context.setGlobalContextManager(contextManager.enable());
 
 /** A plain object holding an ADK OAuth2 credential, shape for shape. */
 export function sentinelCredential(): Record<string, unknown> {

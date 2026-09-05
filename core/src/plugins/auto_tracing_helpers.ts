@@ -11,7 +11,13 @@
  * Ported from adk-python `src/google/adk/plugins/auto_tracing_helpers.py`.
  */
 
-import {isSpanContextValid, type Span, type Tracer} from '@opentelemetry/api';
+import {
+  context,
+  isSpanContextValid,
+  trace,
+  type Span,
+  type Tracer,
+} from '@opentelemetry/api';
 
 import {AuthCredentialTypes} from '../auth/auth_credential.js';
 import {formatError} from '../utils/error_utils.js';
@@ -211,6 +217,18 @@ export function isMap(value: object): value is Map<unknown, unknown> {
 
 export function isSet(value: object): value is Set<unknown> {
   return hasTag(value, 'Set');
+}
+
+/**
+ * Whether `value` is an ordinary object or a class instance, rather than a
+ * kind the runtime owns.
+ *
+ * Every built-in reports a tag of its own -- `Uint8Array` for a Buffer, and
+ * `URL`, `Promise` or `process` for the rest -- while a plain object and a
+ * class instance both report `Object`.
+ */
+export function isPlainTagged(value: object): boolean {
+  return hasTag(value, 'Object');
 }
 
 function isError(value: object): value is Error {
@@ -689,6 +707,30 @@ function isAsyncFunction(
   return hasTag(fn, 'AsyncFunction');
 }
 
+/**
+ * True while a wrapper is inside its own tracing work.
+ *
+ * The tracer's own code path runs ordinary functions, and any of them may be
+ * one the plugin has wrapped. `Buffer.prototype` is the concrete case: the
+ * OpenTelemetry SDK uses a Buffer while it opens a span, so tracing that call
+ * opens another span, which calls it again, until the stack runs out. A
+ * wrapper reached while this is set calls straight through instead.
+ *
+ * The flag is only ever held across synchronous work, never across an `await`
+ * or a `yield`, so two concurrent calls cannot see each other's.
+ */
+let recordingSpan = false;
+
+/** Runs the plugin's own tracing work, which is never itself traced. */
+function whileRecording<T>(action: () => T): T {
+  recordingSpan = true;
+  try {
+    return action();
+  } finally {
+    recordingSpan = false;
+  }
+}
+
 /** Calls `fn` with the wrapper's own receiver and arguments, untouched. */
 function invoke<R>(
   fn: (...args: never[]) => R,
@@ -770,11 +812,15 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       this: unknown,
       ...args: never[]
     ): AsyncGenerator<unknown, void, unknown> {
+      if (recordingSpan) {
+        yield* invoke(target, this, args);
+        return;
+      }
       // A generator suspends at every yield, so its span cannot stay
       // context-active across the suspension without leaking the context into
       // the consumer's frame. The span is ended in `finally`, which also
       // covers a consumer that breaks out of the loop early.
-      const span = tracer.startSpan(displayName);
+      const span = whileRecording(() => tracer.startSpan(displayName));
       const items: unknown[] = [];
       let total = 0;
       let failure: unknown;
@@ -790,8 +836,10 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
         failure = error;
         throw error;
       } finally {
-        finish(span, args, new StreamResult(items, caps, total), failure);
-        span.end();
+        whileRecording(() => {
+          finish(span, args, new StreamResult(items, caps, total), failure);
+          span.end();
+        });
       }
     }, fn);
   }
@@ -802,7 +850,11 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       this: unknown,
       ...args: never[]
     ): Generator<unknown, void, unknown> {
-      const span = tracer.startSpan(displayName);
+      if (recordingSpan) {
+        yield* invoke(target, this, args);
+        return;
+      }
+      const span = whileRecording(() => tracer.startSpan(displayName));
       const items: unknown[] = [];
       let total = 0;
       let failure: unknown;
@@ -818,8 +870,10 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
         failure = error;
         throw error;
       } finally {
-        finish(span, args, new StreamResult(items, caps, total), failure);
-        span.end();
+        whileRecording(() => {
+          finish(span, args, new StreamResult(items, caps, total), failure);
+          span.end();
+        });
       }
     }, fn);
   }
@@ -830,34 +884,44 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       this: unknown,
       ...args: never[]
     ): Promise<unknown> {
-      return tracer.startActiveSpan(displayName, async (span) => {
-        try {
-          const result = await invoke(target, this, args);
-          finish(span, args, result, undefined);
-          return result;
-        } catch (error: unknown) {
-          finish(span, args, undefined, error);
-          throw error;
-        } finally {
-          span.end();
-        }
-      });
+      if (recordingSpan) {
+        return invoke(target, this, args);
+      }
+      // startSpan plus context.with rather than startActiveSpan, so that the
+      // span's creation is guarded without the call it wraps being guarded too.
+      const span = whileRecording(() => tracer.startSpan(displayName));
+      const active = trace.setSpan(context.active(), span);
+      try {
+        const result = await context.with(active, () =>
+          invoke(target, this, args),
+        );
+        whileRecording(() => finish(span, args, result, undefined));
+        return result;
+      } catch (error: unknown) {
+        whileRecording(() => finish(span, args, undefined, error));
+        throw error;
+      } finally {
+        whileRecording(() => span.end());
+      }
     }, fn);
   }
 
   const target = fn;
   return markWrapper(function (this: unknown, ...args: never[]): unknown {
-    return tracer.startActiveSpan(displayName, (span) => {
-      try {
-        const result = invoke(target, this, args);
-        finish(span, args, result, undefined);
-        return result;
-      } catch (error: unknown) {
-        finish(span, args, undefined, error);
-        throw error;
-      } finally {
-        span.end();
-      }
-    });
+    if (recordingSpan) {
+      return invoke(target, this, args);
+    }
+    const span = whileRecording(() => tracer.startSpan(displayName));
+    const active = trace.setSpan(context.active(), span);
+    try {
+      const result = context.with(active, () => invoke(target, this, args));
+      whileRecording(() => finish(span, args, result, undefined));
+      return result;
+    } catch (error: unknown) {
+      whileRecording(() => finish(span, args, undefined, error));
+      throw error;
+    } finally {
+      whileRecording(() => span.end());
+    }
   }, fn);
 }

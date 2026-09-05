@@ -635,6 +635,13 @@ describe('positionalParamNames source parsing', () => {
       spy.mockReturnValue('function truncated(a, b');
       expect(positionalParamNames(syncShape)).toEqual([]);
       expect(restParamName(syncShape)).toBeUndefined();
+
+      // An escaped quote must not end the default early, or the comma after
+      // it splits the list and the next parameter loses its name. The source
+      // is supplied directly because esbuild rewrites an escaped string in
+      // this file into a template literal, leaving no escape to exercise.
+      spy.mockReturnValue("function f(greeting = 'it\\'s, really', token) {}");
+      expect(positionalParamNames(syncShape)).toEqual(['greeting', 'token']);
     } finally {
       spy.mockRestore();
     }

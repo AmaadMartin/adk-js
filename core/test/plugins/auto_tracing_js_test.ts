@@ -169,16 +169,26 @@ describe('AutoTracingPlugin on JavaScript shapes', () => {
     const asyncGeneratorPrototype: object = Object.getPrototypeOf(
       Object.getPrototypeOf(live),
     );
+    class Helper {
+      assist(): string {
+        return 'ok';
+      }
+    }
     const graph = {
       failure: new AppError('held'),
       pending: Promise.resolve(1),
       when: new Date(0),
-      // Host types the walk reaches through an ordinary field. None of them is
-      // named in the plugin's source, which is the point: the stop set is
-      // derived from the runtime rather than listed by hand.
+      // Runtime types the walk reaches through an ordinary field. None of them
+      // is named in the plugin's source, which is the point: no list of
+      // globals can see `Buffer` or `process`, which Node defines lazily.
+      payload: Buffer.from('hello world'),
       url: new URL('https://example.com'),
       signal: new AbortController().signal,
       live,
+      proc: process,
+      // A plain class instance beside them, to show the rule is about the
+      // runtime's kinds and not about depth.
+      helper: new Helper(),
     };
 
     await instrument({graph});
@@ -191,12 +201,103 @@ describe('AutoTracingPlugin on JavaScript shapes', () => {
       URL.prototype.toJSON,
       EventTarget.prototype.addEventListener,
       Object.getOwnPropertyDescriptor(asyncGeneratorPrototype, 'next')?.value,
+      Object.getOwnPropertyDescriptor(Buffer.prototype, 'toJSON')?.value,
+      process.hrtime,
+      // A subclass of a runtime type is left alone with it: its instance
+      // reports the runtime's tag, and telling the two apart is not worth
+      // reaching into `Error.prototype` by mistake.
+      AppError.prototype.hint,
     ]) {
       expect(isWrapped(method)).toBe(false);
     }
-    // The stop set blocks the runtime's own prototypes, not the subclass above
-    // them.
-    expect(isWrapped(AppError.prototype.hint)).toBe(true);
+    expect(isWrapped(Helper.prototype.assist)).toBe(true);
+  });
+
+  it('survives an agent that holds bytes on a public field', async () => {
+    // The OpenTelemetry SDK uses a Buffer while it opens a span. A wrapped
+    // Buffer method therefore opens a span to call itself, and the run dies
+    // with a RangeError. Two things stop that: the walk leaves a Buffer alone,
+    // and a wrapper reached from inside the plugin's own tracing work calls
+    // straight through.
+    const graph = {
+      payload: Buffer.from('hello world'),
+      read(): string {
+        return graph.payload.toString('utf8');
+      },
+    };
+
+    await instrument({graph});
+
+    expect(graph.read()).toBe('hello world');
+    expect(attributesOf('read')['adk.fn.return']).toBe("'hello world'");
+  });
+
+  it('calls straight through when reached from inside the tracing work', async () => {
+    const graph = {
+      hot(x: number): number {
+        return x;
+      },
+      async hotAsync(x: number): Promise<number> {
+        return x;
+      },
+      *hotGen(x: number): Generator<number> {
+        yield x;
+      },
+      async *hotAsyncGen(x: number): AsyncGenerator<number> {
+        yield x;
+      },
+    };
+    await instrument({graph});
+
+    // Stand in for a runtime function on the tracer's own path that the walk
+    // wrapped anyway — `Buffer.prototype` is the real one. Without the guard
+    // each of these recurses until the stack ends.
+    const reentrant: unknown[] = [];
+    const realStartSpan = tracer.startSpan.bind(tracer);
+    tracer.startSpan = (...args: Parameters<typeof realStartSpan>) => {
+      reentrant.push(graph.hot(1));
+      reentrant.push([...graph.hotGen(2)]);
+      // An async function's body runs synchronously up to its first await, so
+      // this reaches the guard while the flag is still set.
+      void graph.hotAsync(3);
+      return realStartSpan(...args);
+    };
+    try {
+      expect(graph.hot(42)).toBe(42);
+      expect(await graph.hotAsync(43)).toBe(43);
+      expect([...graph.hotGen(44)]).toEqual([44]);
+      const collected: number[] = [];
+      for await (const item of graph.hotAsyncGen(45)) {
+        collected.push(item);
+      }
+      expect(collected).toEqual([45]);
+    } finally {
+      tracer.startSpan = realStartSpan;
+    }
+
+    expect(reentrant.length).toBeGreaterThan(0);
+    // Each outer call is traced exactly once; no re-entrant call adds a span.
+    expect(spanNames().filter((name) => name === 'hot')).toEqual(['hot']);
+    expect(spanNames().filter((name) => name === 'hotGen')).toEqual(['hotGen']);
+  });
+
+  it('keeps a nested call under the span of the function that made it', async () => {
+    const graph = {
+      outer(): number {
+        return graph.inner();
+      },
+      inner(): number {
+        return 1;
+      },
+    };
+    await instrument({graph});
+
+    graph.outer();
+
+    const spans = exporter.getFinishedSpans();
+    const outer = spans.find((span) => span.name === 'outer');
+    const inner = spans.find((span) => span.name === 'inner');
+    expect(inner?.parentSpanContext?.spanId).toBe(outer?.spanContext().spanId);
   });
 
   it('does not wrap a class constructor held on the graph', async () => {
