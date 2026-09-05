@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### A2A
+
+- [A2AAgentExecutor](a2a/agent_executor/index.md) - Serving an ADK agent over the Agent2Agent protocol, and the events it publishes.
+
 ### Artifacts
 
 Versioned binary and text storage (`Part` payloads) scoped to an individual session or shared across a user's sessions via the `user:` prefix.
