@@ -398,7 +398,7 @@ describe('ApiRegistry', () => {
     ).resolves.toEqual({'x-caller': 'yes'});
   });
 
-  it('skips a nameless server instead of evicting a named one', async () => {
+  it('does not index a server whose name is missing or empty', async () => {
     respondWith({
       mcpServers: [
         {name: 'test-mcp-server-1', urls: ['mcp.server1.com']},
@@ -408,9 +408,15 @@ describe('ApiRegistry', () => {
     });
 
     const registry = new ApiRegistry({projectId: PROJECT_ID});
-    const toolset = await registry.getToolset('test-mcp-server-1');
 
+    const toolset = await registry.getToolset('test-mcp-server-1');
     expect(toolset.connectionParams.url).toBe('https://mcp.server1.com');
+    await expect(registry.getToolset('')).rejects.toThrow(
+      'not found in API Registry',
+    );
+    await expect(registry.getToolset('undefined')).rejects.toThrow(
+      'not found in API Registry',
+    );
   });
 
   it('keeps the last server when a name repeats across pages', async () => {
