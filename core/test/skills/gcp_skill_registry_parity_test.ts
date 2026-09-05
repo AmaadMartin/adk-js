@@ -29,6 +29,7 @@ import {
   DEFAULT_BASE_URL,
   RESOURCE_PARENT,
   RecordedTransport,
+  RequestOptions,
   Responder,
   TEST_LOCATION,
   TEST_PROJECT,
@@ -94,7 +95,7 @@ function serveSkill(
 }
 
 /** Fetches a skill and reports the URL of the first request it made. */
-async function firstRequestUrl(): Promise<string> {
+async function firstRequestUrl(): Promise<RequestOptions['url']> {
   const transport = serveSkill({defaultRevision: REVISION});
   await new GCPSkillRegistry().getSkill('my-skill');
   return transport.calls[0].url;
