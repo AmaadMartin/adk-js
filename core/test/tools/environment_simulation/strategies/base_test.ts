@@ -15,6 +15,7 @@ import {
   BaseTool,
   Context,
   FeatureName,
+  FeatureStage,
   FunctionTool,
   InvocationContext,
   LlmAgent,
@@ -23,6 +24,7 @@ import {
   ToolConnectionMap,
   TracingMockStrategy,
   createSession,
+  getFeatureConfig,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -82,6 +84,9 @@ class EchoStrategy extends BaseMockStrategy {
   }
 }
 
+/** A subclass that adds nothing, so it inherits the base `mock()`. */
+class BareStrategy extends BaseMockStrategy {}
+
 /** The stateStore example from the developer guide, run as written. */
 class TicketStrategy extends BaseMockStrategy {
   override async mock(request: MockRequest): Promise<Record<string, unknown>> {
@@ -116,6 +121,40 @@ describe('BaseMockStrategy', () => {
         );
       },
     );
+  });
+
+  it('refuses to construct the base class while ENVIRONMENT_SIMULATION is disabled', async () => {
+    await withTemporaryFeatureOverride(
+      FeatureName.ENVIRONMENT_SIMULATION,
+      false,
+      () => {
+        expect(() => new BaseMockStrategy()).toThrowError(
+          'Feature ENVIRONMENT_SIMULATION is not enabled.',
+        );
+      },
+    );
+  });
+
+  it('constructs the base class directly, as adk-python does', async () => {
+    await withEnvironmentSimulation(() => {
+      expect(() => new BaseMockStrategy()).not.toThrow();
+    });
+  });
+
+  it('rejects from the base mock() because it has no implementation', async () => {
+    await withEnvironmentSimulation(async () => {
+      await expect(new BaseMockStrategy().mock(makeRequest())).rejects.toThrow(
+        /not implemented/i,
+      );
+    });
+  });
+
+  it('rejects from a subclass that does not override mock()', async () => {
+    await withEnvironmentSimulation(async () => {
+      await expect(new BareStrategy().mock(makeRequest())).rejects.toThrow(
+        /not implemented/i,
+      );
+    });
   });
 
   it('calls the subclass implementation of mock()', async () => {
@@ -232,5 +271,18 @@ describe('TracingMockStrategy', () => {
     await withEnvironmentSimulation(() => {
       expect(new TracingMockStrategy()).toBeInstanceOf(BaseMockStrategy);
     });
+  });
+});
+
+describe('the ENVIRONMENT_SIMULATION feature entry', () => {
+  it('is experimental and on by default, as adk-python registers it', () => {
+    expect(getFeatureConfig(FeatureName.ENVIRONMENT_SIMULATION)).toEqual({
+      stage: FeatureStage.EXPERIMENTAL,
+      defaultOn: true,
+    });
+  });
+
+  it('lets a strategy be constructed without any override', () => {
+    expect(() => new TracingMockStrategy()).not.toThrow();
   });
 });
