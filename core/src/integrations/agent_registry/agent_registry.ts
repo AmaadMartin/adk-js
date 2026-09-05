@@ -510,18 +510,37 @@ export class AgentRegistry {
   /**
    * Creates a {@link RemoteA2AAgent} for a registered A2A Agent.
    *
-   * adk-python also resolves the agent's auth provider binding here and hands
-   * the scheme to `RemoteA2aAgent`. `RemoteA2AAgent` has no way to apply a
-   * credential yet, so this does not resolve a scheme it could not use.
+   * When `authScheme` is omitted, it is resolved from the agent's auth provider
+   * binding. The returned agent carries the scheme and the credential; a caller
+   * reads them off the agent, because the outbound A2A request does not apply
+   * them yet.
+   *
+   * @param agentName Resource name of the A2A Agent.
+   * @param options.authScheme Scheme to use as is, skipping the binding lookup.
+   * @param options.authCredential Credential for the scheme.
+   * @param options.continueUri Continue URI that overrides the auth provider's
+   *     own.
    */
   async getRemoteA2AAgent(
     agentName: string,
     options?: {
       client?: Client;
       clientFactory?: ClientFactory;
+      authScheme?: AuthScheme;
+      authCredential?: AuthCredential;
+      continueUri?: string;
     },
   ): Promise<RemoteA2AAgent> {
     const agentInfo = await this.getAgentInfo(agentName);
+
+    const authScheme =
+      options?.authScheme ??
+      (await this.resolveAuthProviderScheme(
+        agentInfo.agentId,
+        `Agent ${agentName}`,
+        options?.continueUri,
+      ));
+    const authCredential = options?.authCredential;
 
     // Try to use the full agent card if available
     const card = agentInfo.card || {};
@@ -536,6 +555,8 @@ export class AgentRegistry {
         description: agentCard.description,
         client: options?.client,
         clientFactory: options?.clientFactory,
+        authScheme,
+        authCredential,
       });
     }
 
@@ -585,6 +606,8 @@ export class AgentRegistry {
       description,
       client: options?.client,
       clientFactory: options?.clientFactory,
+      authScheme,
+      authCredential,
     });
   }
 }
