@@ -747,6 +747,7 @@ export type {
   CacheClient,
   CacheScope,
 } from './models/gemini_context_cache_manager.js';
+export {Gemma} from './models/gemma_llm.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export {LiteLlm} from './models/lite_llm.js';
