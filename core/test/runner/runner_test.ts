@@ -1515,3 +1515,63 @@ describe('Runner reserved function call rejection', () => {
     expect(error).toBeUndefined();
   });
 });
+
+describe('Runner resumability wiring', () => {
+  /** Records whether the context the runner built reports itself resumable. */
+  class ResumabilityProbeAgent extends BaseAgent {
+    isResumable: boolean | undefined;
+
+    protected async *runAsyncImpl(
+      context: InvocationContext,
+    ): AsyncGenerator<Event, void, void> {
+      this.isResumable = context.isResumable;
+      yield createEvent({
+        invocationId: context.invocationId,
+        author: this.name,
+        content: {role: 'model', parts: [{text: 'ok'}]},
+      });
+    }
+
+    protected async *runLiveImpl(
+      _context: InvocationContext,
+    ): AsyncGenerator<Event, void, void> {
+      // Not needed for this test.
+    }
+  }
+
+  async function runProbe(
+    resumabilityConfig?: ReturnType<typeof createResumabilityConfig>,
+  ): Promise<boolean | undefined> {
+    const agent = new ResumabilityProbeAgent({name: 'probe'});
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      resumabilityConfig,
+    });
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Draining the run is what makes the probe record the flag.
+    }
+    return agent.isResumable;
+  }
+
+  it('reports the invocation resumable when the runner is configured for it', async () => {
+    expect(await runProbe(createResumabilityConfig({isResumable: true}))).toBe(
+      true,
+    );
+  });
+
+  it('reports the invocation not resumable without a config', async () => {
+    expect(await runProbe()).toBe(false);
+  });
+});

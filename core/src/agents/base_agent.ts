@@ -8,6 +8,7 @@ import {Content} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {createEvent, Event} from '../events/event.js';
+import type {EventActions} from '../events/event_actions.js';
 
 import {
   runAsyncGeneratorWithOtelContext,
@@ -435,6 +436,31 @@ export abstract class BaseAgent<
     return new InvocationContext({
       ...parentContext,
       agent: this,
+    });
+  }
+
+  /**
+   * Builds the checkpoint event that carries this agent's state recorded on
+   * `ctx`. The event has no content: it exists so that a resumed invocation can
+   * read the agent's progress back out of the session.
+   *
+   * @param ctx The invocation context holding the state.
+   * @return The checkpoint event to yield.
+   */
+  protected createAgentStateEvent(ctx: InvocationContext): Event {
+    const actions: Partial<EventActions> = {};
+    const agentState = ctx.agentStates[this.name];
+    if (agentState !== undefined) {
+      actions.agentState = agentState;
+    }
+    if (ctx.endOfAgents[this.name]) {
+      actions.endOfAgent = true;
+    }
+    return createEvent({
+      invocationId: ctx.invocationId,
+      author: this.name,
+      branch: ctx.branch,
+      actions,
     });
   }
 

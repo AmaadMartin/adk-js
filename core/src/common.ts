@@ -25,6 +25,8 @@ export {
 } from './agents/functions.js';
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
+  AgentState,
+  AgentStateUpdate,
   InvocationContextParams,
   WorkflowInstructionScope,
 } from './agents/invocation_context.js';

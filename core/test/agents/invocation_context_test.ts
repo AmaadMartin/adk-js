@@ -9,6 +9,7 @@ import {
   BaseAgentConfig,
   Event,
   InvocationContext,
+  InvocationContextParams,
   LoopAgent,
   PluginManager,
   Session,
@@ -170,5 +171,237 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+function makeContext(
+  overrides: Partial<InvocationContextParams> = {},
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'inv-1',
+    agent: new LoopAgent({name: 'agent1'}),
+    session: makeSession(),
+    pluginManager: new PluginManager(),
+    ...overrides,
+  });
+}
+
+/** Records its own checkpoint on whatever context it is handed. */
+class CheckpointingAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    context.setAgentState(this.name, {agentState: {step: 'done'}});
+    yield createEvent({author: this.name});
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for this test.
+  }
+}
+
+describe('InvocationContext.isResumable', () => {
+  it('is false when no resumability config is set', () => {
+    expect(makeContext().isResumable).toBe(false);
+  });
+
+  it('is false when the config disables resumption', () => {
+    expect(
+      makeContext({resumabilityConfig: {isResumable: false}}).isResumable,
+    ).toBe(false);
+  });
+
+  it('is true when the config enables resumption', () => {
+    expect(
+      makeContext({resumabilityConfig: {isResumable: true}}).isResumable,
+    ).toBe(true);
+  });
+
+  it('survives clone, which copies fields but not accessors', () => {
+    const parent = makeContext({resumabilityConfig: {isResumable: true}});
+    expect(parent.clone().isResumable).toBe(true);
+  });
+});
+
+describe('InvocationContext.setAgentState', () => {
+  it('marks the agent finished and drops its checkpoint', () => {
+    const context = makeContext();
+    context.setAgentState('agent1', {agentState: {step: 'one'}});
+
+    context.setAgentState('agent1', {endOfAgent: true});
+
+    expect(context.endOfAgents).toEqual({agent1: true});
+    expect(context.agentStates).toEqual({});
+  });
+
+  it('records a checkpoint and clears the finished flag', () => {
+    const context = makeContext();
+    context.setAgentState('agent1', {endOfAgent: true});
+
+    context.setAgentState('agent1', {agentState: {step: 'one'}});
+
+    expect(context.agentStates).toEqual({agent1: {step: 'one'}});
+    expect(context.endOfAgents).toEqual({agent1: false});
+  });
+});
+
+describe('InvocationContext agent-state sharing', () => {
+  it('shares the records with a clone, so a branch write reaches the parent', () => {
+    const parent = makeContext();
+    const branch = parent.clone({branch: 'parallel.sub'});
+
+    branch.setAgentState('sub', {agentState: {step: 'one'}});
+
+    expect(parent.agentStates).toEqual({sub: {step: 'one'}});
+    expect(parent.endOfAgents).toEqual({sub: false});
+  });
+
+  it('shares the records with the context BaseAgent builds for a sub-agent', async () => {
+    const subAgent = new CheckpointingAgent({name: 'sub'});
+    const parent = makeContext({agent: subAgent});
+
+    for await (const _ of subAgent.runAsync(parent)) {
+      // Draining the run is what makes the sub-agent record its checkpoint.
+    }
+
+    expect(parent.agentStates).toEqual({sub: {step: 'done'}});
+  });
+});
+
+/** A model event requesting one long-running function call. */
+function makeLongRunningCallEvent(callId: string): Event {
+  return createEvent({
+    invocationId: 'inv-1',
+    author: 'agent1',
+    content: {
+      role: 'model',
+      parts: [{functionCall: {id: callId, name: 'ask'}}],
+    },
+    longRunningToolIds: [callId],
+  });
+}
+
+describe('InvocationContext.shouldPauseInvocation', () => {
+  it('does not pause an event with no long-running tool id', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    event.longRunningToolIds = [];
+
+    expect(makeContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause an event that omits the long-running id field', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    delete event.longRunningToolIds;
+
+    expect(makeContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause an event with no function call', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent1',
+      content: {role: 'model', parts: [{text: 'hi'}]},
+      longRunningToolIds: ['call-1'],
+    });
+
+    expect(makeContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause on a call that is not long-running', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    event.longRunningToolIds = ['other-call'];
+
+    expect(makeContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause on a function call with no id', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent1',
+      content: {role: 'model', parts: [{functionCall: {name: 'ask'}}]},
+      longRunningToolIds: ['call-1'],
+    });
+
+    expect(makeContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('pauses when nothing in the session answers the call', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    const context = makeContext();
+    context.session.events.push(event);
+
+    expect(context.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('pauses when the event is not in the session at all', () => {
+    const event = makeLongRunningCallEvent('call-1');
+
+    expect(makeContext().shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('does not pause when a later user event answers the call on a sub-branch', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    const context = makeContext();
+    context.session.events.push(
+      event,
+      createEvent({
+        invocationId: 'inv-1',
+        author: 'user',
+        branch: 'agent1.ask@call-1',
+        content: {role: 'user', parts: [{text: 'my answer'}]},
+      }),
+    );
+
+    expect(context.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('pauses when the later user event is on a sub-branch of another call', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    const context = makeContext();
+    context.session.events.push(
+      event,
+      createEvent({
+        invocationId: 'inv-1',
+        author: 'user',
+        branch: 'agent1.ask@call-2',
+        content: {role: 'user', parts: [{text: 'my answer'}]},
+      }),
+    );
+
+    expect(context.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('pauses when the answering user event precedes the call', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    const context = makeContext();
+    context.session.events.push(
+      createEvent({
+        invocationId: 'inv-1',
+        author: 'user',
+        branch: 'agent1.ask@call-1',
+        content: {role: 'user', parts: [{text: 'too early'}]},
+      }),
+      event,
+    );
+
+    expect(context.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('pauses when a later event on the answering branch is not from the user', () => {
+    const event = makeLongRunningCallEvent('call-1');
+    const context = makeContext();
+    context.session.events.push(
+      event,
+      createEvent({
+        invocationId: 'inv-1',
+        author: 'agent1',
+        branch: 'agent1.ask@call-1',
+        content: {role: 'model', parts: [{text: 'still working'}]},
+      }),
+    );
+
+    expect(context.shouldPauseInvocation(event)).toBe(true);
   });
 });
