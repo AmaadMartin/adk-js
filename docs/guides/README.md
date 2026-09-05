@@ -175,6 +175,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Models
 
 - [CacheMetadata](models/cache_metadata/index.md) - Describing the context cache that served a response, and deciding when to refresh it.
+- [ConformanceTestGemini and the replay normalizers](models/conformance_replay/index.md) - Replaying a recorded model call, and verifying the request that asked for it.
 - [GeminiContextCacheManager](models/context_caching/index.md) - Reusing a
   stable Gemini prompt prefix through an explicit server-side context cache.
 - [gemini_llm_connection](models/gemini_llm_connection/index.md) - Driving a Gemini Live session: replaying history, sending turns and realtime input, and reading responses.
