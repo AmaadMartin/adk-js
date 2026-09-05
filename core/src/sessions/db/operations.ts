@@ -41,11 +41,14 @@ const SQLITE_KNEX_DIALECT = 'sqlite3';
 
 /**
  * Backends whose dialect implements `SELECT ... FOR UPDATE`, matching
- * adk-python's `_supports_row_level_locking`.
+ * adk-python's `_supports_row_level_locking`. `postgres` is the second
+ * spelling an adk-js connection URL may use for the same backend, not a
+ * second SQLAlchemy dialect.
  */
 const ROW_LEVEL_LOCKING_BACKENDS: ReadonlySet<string> = new Set([
   'mariadb',
   'mysql',
+  'postgres',
   'postgresql',
 ]);
 

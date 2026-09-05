@@ -221,8 +221,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [DatabaseSessionService](sessions/database_session_service/index.md) -
   Storing sessions in SQL, the connection URLs it accepts, the engine settings
-  each backend gets, rejecting stale writes, reading user state, releasing the
-  connection pool, and opening a legacy database adk-python wrote.
+  each backend gets, which backends take a row-level lock, how a timestamp is
+  stored, rejecting stale writes, reading user state, releasing the connection
+  pool, and opening a legacy database adk-python wrote.
 - [Migrating a pickle sessions database](sessions/pickle_migration/index.md) - Copying an adk-python v0 (pickle) sessions database into the v1 (JSON) layout `DatabaseSessionService` can open.
 - [Session resolution](sessions/session_resolution/index.md) - How a runner
   resolves the session id you give it, and when it creates a missing session.

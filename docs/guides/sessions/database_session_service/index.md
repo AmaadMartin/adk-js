@@ -160,6 +160,7 @@ outside a transaction, so a read cannot write through it. `createSession`,
 `appendEvent` takes a row-level write lock on the session row, but only on
 MariaDB, MySQL and PostgreSQL. sqlite compiles `SELECT ... FOR UPDATE` away,
 and SQL Server turns it into a table hint, so neither is asked for the lock.
+An unrecognized backend is not locked either, which is safe everywhere.
 
 ## Reading a session
 

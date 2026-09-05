@@ -81,8 +81,8 @@ describe('DatabaseSessionService naive datetime handling', () => {
     });
   }
 
-  it('runs under a non-UTC process timezone', () => {
-    expect(new Date().getTimezoneOffset()).not.toBe(0);
+  it('runs under a non-UTC process timezone with a half-hour offset', () => {
+    expect(new Date().getTimezoneOffset() % 60).not.toBe(0);
   });
 
   it('reads a zone-less timestamp adk-python wrote as UTC', async () => {
@@ -106,6 +106,12 @@ describe('DatabaseSessionService naive datetime handling', () => {
     const loaded = await loadTestSession();
 
     expect(loaded?.lastUpdateTime).toBe(PYTHON_WRITTEN_INSTANT);
+  });
+
+  it('refuses an options object that names no driver', () => {
+    expect(() => new DatabaseSessionService({dbName: dbPath})).toThrow(
+      'Driver is required when passing options object.',
+    );
   });
 
   it('lets an options object keep the process timezone', async () => {
@@ -212,6 +218,14 @@ describe('getConnectionOptionsFromUri timezone handling', () => {
   it('asks SQL Server for UTC, which adk-python does not enumerate', async () => {
     const options = await getConnectionOptionsFromUri(
       'mssql://user:pass@localhost:1433/db',
+    );
+
+    expect(options.forceUtcTimezone).toBe(true);
+  });
+
+  it('asks for UTC through the postgres URL alias as well', async () => {
+    const options = await getConnectionOptionsFromUri(
+      'postgres://user:pass@localhost:5432/db',
     );
 
     expect(options.forceUtcTimezone).toBe(true);
