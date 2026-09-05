@@ -314,3 +314,29 @@ export function isFileNotFoundError(err: unknown): boolean {
     err.code === 'ENOENT'
   );
 }
+
+/** gRPC `NOT_FOUND` status code. */
+const GRPC_NOT_FOUND = 5;
+
+/** HTTP `404 Not Found` status code. */
+const HTTP_NOT_FOUND = 404;
+
+/**
+ * True when a thrown value reports the requested resource as missing.
+ *
+ * gRPC transports report NOT_FOUND as a numeric `code`; the `@google/genai`
+ * `ApiClient` throws an `ApiError` carrying a numeric `status` instead. Matched
+ * structurally, not with `instanceof`: `@google-cloud/vertexai` resolves its own
+ * copy of `@google/genai`, so its `ApiError` is a different class object.
+ *
+ * @param error The thrown or rejected value to inspect.
+ * @return True when the value carries a not-found status.
+ */
+export function isNotFoundError(error: unknown): boolean {
+  const err = error as {code?: number; status?: number} | null | undefined;
+  return (
+    err?.code === GRPC_NOT_FOUND ||
+    err?.code === HTTP_NOT_FOUND ||
+    err?.status === HTTP_NOT_FOUND
+  );
+}

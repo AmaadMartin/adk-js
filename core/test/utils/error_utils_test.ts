@@ -8,6 +8,7 @@ import {describe, expect, it} from 'vitest';
 import {
   formatError,
   isAbortError,
+  isNotFoundError,
   timeoutErrorName,
   truncateBody,
 } from '../../src/utils/error_utils.js';
@@ -355,5 +356,40 @@ describe('timeoutErrorName', () => {
     const second = new AggregateError([first], 'second');
     first.errors.push(second);
     expect(timeoutErrorName(second)).toBeUndefined();
+  });
+});
+
+describe('isNotFoundError', () => {
+  it('matches the gRPC NOT_FOUND code', () => {
+    expect(isNotFoundError(Object.assign(new Error('gone'), {code: 5}))).toBe(
+      true,
+    );
+  });
+
+  it('matches an HTTP 404 in the code field', () => {
+    expect(isNotFoundError(Object.assign(new Error('gone'), {code: 404}))).toBe(
+      true,
+    );
+  });
+
+  it('matches an HTTP 404 in the status field', () => {
+    expect(
+      isNotFoundError(Object.assign(new Error('gone'), {status: 404})),
+    ).toBe(true);
+  });
+
+  it('rejects another server status', () => {
+    expect(
+      isNotFoundError(Object.assign(new Error('boom'), {status: 500})),
+    ).toBe(false);
+  });
+
+  it('rejects an error carrying no status at all', () => {
+    expect(isNotFoundError(new Error('boom'))).toBe(false);
+  });
+
+  it('rejects null and undefined', () => {
+    expect(isNotFoundError(null)).toBe(false);
+    expect(isNotFoundError(undefined)).toBe(false);
   });
 });
