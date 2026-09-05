@@ -326,6 +326,25 @@ describe('Node-level state schema and inheritance', () => {
     ).toThrow(/not declared in the state schema/);
   });
 
+  it('rejects an undeclared outputKey at run time when the node has its own schema', async () => {
+    // A node carrying its own `stateSchema` is exempt from the construction
+    // check and answers to that schema instead. This keeps the agent
+    // `outputKey` write path pinned on the first run, where the construction
+    // check cannot reach it.
+    const agent = replyAgent('writer', 'hi', {
+      outputKey: 'undeclaredKey',
+      stateSchema: schema,
+    });
+    const wf = new Workflow({
+      name: 'agent_output_key_runtime',
+      stateSchema: schema,
+      edges: [['START', agent]],
+    });
+    await expect(driveWorkflow(wf, 'x')).rejects.toThrow(
+      /not declared in the state schema/,
+    );
+  });
+
   it('accepts a declared outputKey written by an agent node', async () => {
     const agent = replyAgent('writer', 'hi', {outputKey: 'label'});
     const wf = new Workflow({

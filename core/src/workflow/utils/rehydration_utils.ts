@@ -301,30 +301,21 @@ function keyFn(parentPath?: string): (event: Event) => string | undefined {
     event.nodeInfo?.path ? nodeNameFromPath(event.nodeInfo.path) : event.author;
 }
 
-/**
- * Whether a terminal result is present: an output, a route, or a raised
- * interrupt. One rule, asked either of a single event or of the run that event
- * accumulates into.
- */
-function isTerminal(
-  output: unknown,
-  route: unknown,
-  interruptCount: number,
-): boolean {
-  return output !== undefined || route !== undefined || interruptCount > 0;
-}
-
 /** Whether a run has reached a terminal result, so the next event is a new run. */
 function isRunClosed(node: RehydratedNode): boolean {
-  return isTerminal(node.output, node.route, node.interruptIds.size);
+  return (
+    node.output !== undefined ||
+    node.route !== undefined ||
+    node.interruptIds.size > 0
+  );
 }
 
 /** Whether `event` closes the run that emitted it. */
 function isTerminalEvent(event: Event): boolean {
-  return isTerminal(
-    event.output,
-    event.route,
-    event.longRunningToolIds?.length ?? 0,
+  return (
+    event.output !== undefined ||
+    event.route !== undefined ||
+    (event.longRunningToolIds?.length ?? 0) > 0
   );
 }
 
