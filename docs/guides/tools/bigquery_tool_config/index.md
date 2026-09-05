@@ -51,21 +51,13 @@ const guarded = createBigQueryToolConfig({
 });
 ```
 
-## Fields
+## Fields and defaults
 
-| Field                | Type                     | Default             | Purpose                                                                                         |
-| -------------------- | ------------------------ | ------------------- | ----------------------------------------------------------------------------------------------- |
-| `writeMode`          | `WriteMode`              | `WriteMode.BLOCKED` | Which write operations a tool may perform.                                                      |
-| `maximumBytesBilled` | `number`                 | unset               | Cap on the bytes one query may bill.                                                            |
-| `maxQueryResultRows` | `number`                 | `50`                | Cap on the rows a query returns.                                                                |
-| `applicationName`    | `string`                 | unset               | Added to the BigQuery user agent and to the job labels.                                         |
-| `computeProjectId`   | `string`                 | unset               | Project the compute runs in.                                                                    |
-| `location`           | `string`                 | unset               | [Location](https://cloud.google.com/bigquery/docs/locations) of the data and the compute.       |
-| `jobLabels`          | `Record<string, string>` | unset               | [Labels](https://cloud.google.com/bigquery/docs/labels-intro) added to every job the tools run. |
-
-`writeMode` and `maxQueryResultRows` are required on the resolved type, because
-the factory always sets them. Every other field is optional and stays
-`undefined` when you do not pass it.
+`writeMode` defaults to `WriteMode.BLOCKED` and `maxQueryResultRows` to `50`.
+Both are required on the resolved type, because the factory always sets them.
+`maximumBytesBilled`, `applicationName`, `computeProjectId`, `location` and
+`jobLabels` are optional and stay `undefined` until you pass them. Each field
+carries its own documentation on the `BigQueryToolConfig` type.
 
 `applicationName` and `jobLabels` are for usage discovery and tracking. Do not
 use them for security-sensitive decisions.
@@ -74,19 +66,14 @@ use them for security-sensitive decisions.
 
 `createBigQueryToolConfig` throws `InputValidationError` and never returns a
 half-valid config. It rejects an unknown key, which is how adk-python's
-`extra='forbid'` behaves, and it rejects a field of the wrong type. Note that
-the field names are camelCase here, so the adk-python spellings `write_mode`
-and `job_labels` are unknown keys.
+`extra='forbid'` behaves, and it rejects a field of the wrong type. The field
+names are camelCase here, so the adk-python spellings `write_mode` and
+`job_labels` are unknown keys.
 
-Three fields carry a rule of their own.
-
-| Rule                                                   | Message                                                                                                                                                                                                                                            |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumBytesBilled` below the 10 MB on-demand minimum | `In BigQuery on-demand pricing, charges are rounded up to the nearest MB, with a minimum 10 MB data processed per table referenced by the query, and with a minimum 10 MB data processed per query. So maximumBytesBilled must be set >=10485760.` |
-| `applicationName` contains a space                     | `Application name should not contain spaces.`                                                                                                                                                                                                      |
-| more than 20 job labels                                | `Only up to 20 job labels can be provided`                                                                                                                                                                                                         |
-| an empty job label key                                 | `Label keys cannot be empty.`                                                                                                                                                                                                                      |
-| a job label key starting with `adk-bigquery-`          | `Label key cannot start with "adk-bigquery-" as it is reserved for internal usage, found "<key>".`                                                                                                                                                 |
+Three fields carry a rule of their own. `maximumBytesBilled` must be at least
+the 10 MB BigQuery on-demand minimum. `applicationName` must not contain a
+space. `jobLabels` is limited to 20 entries, and a key may not be empty or
+start with the reserved `adk-bigquery-` prefix.
 
 ```ts
 import {InputValidationError, createBigQueryToolConfig} from '@google/adk';
@@ -107,9 +94,3 @@ keeps that behaviour so the two SDKs agree.
 
 The `adk-bigquery-` prefix is reserved only at the start of a key. A key such
 as `team-adk-bigquery-owner` is allowed.
-
-## Freshness
-
-The returned config is a fresh object. It shares no reference with the
-argument you passed, so mutating the result — or mutating its `jobLabels` —
-leaves your input untouched.

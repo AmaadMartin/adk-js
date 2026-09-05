@@ -20,6 +20,13 @@ import {describe, expect, it} from 'vitest';
 
 const MINIMUM_BYTES_BILLED = 10_485_760;
 
+/**
+ * The factory reports every shape rejection under its own prefix. The tests
+ * pin that prefix rather than zod's wording, which is not this port's
+ * contract.
+ */
+const INVALID_SHAPE_MESSAGE = /^Invalid BigQueryToolConfig:/;
+
 const INVALID_BYTES_BILLED_MESSAGE =
   'In BigQuery on-demand pricing, charges are rounded up to the nearest MB,' +
   ' with a minimum 10 MB data processed per table referenced by the query,' +
@@ -100,13 +107,13 @@ describe('BigQuery tool config', () => {
 
     it('test_bigquery_tool_config_invalid_labels[invalid-type]', () => {
       expect(() => createFromJson('{"jobLabels": "invalid"}')).toThrow(
-        /expected record, received string/,
+        INVALID_SHAPE_MESSAGE,
       );
     });
 
     it('test_bigquery_tool_config_invalid_labels[non-str-value]', () => {
       expect(() => createFromJson('{"jobLabels": {"key": 123}}')).toThrow(
-        /expected string, received number/,
+        INVALID_SHAPE_MESSAGE,
       );
     });
 
@@ -228,7 +235,7 @@ describe('BigQuery tool config', () => {
 
     it('rejects an unknown key', () => {
       expect(() => createFromJson('{"region": "us-central1"}')).toThrow(
-        /Invalid BigQueryToolConfig/,
+        INVALID_SHAPE_MESSAGE,
       );
     });
 
@@ -248,19 +255,19 @@ describe('BigQuery tool config', () => {
 
     it('rejects a write mode outside the enum', () => {
       expect(() => createFromJson('{"writeMode": "readonly"}')).toThrow(
-        /Invalid option/,
+        INVALID_SHAPE_MESSAGE,
       );
     });
 
     it('rejects a fractional row cap', () => {
       expect(() => createFromJson('{"maxQueryResultRows": 1.5}')).toThrow(
-        /expected int/,
+        INVALID_SHAPE_MESSAGE,
       );
     });
 
     it('rejects params that are not an object', () => {
       expect(() => createFromJson('"not-an-object"')).toThrow(
-        /expected object, received string/,
+        INVALID_SHAPE_MESSAGE,
       );
     });
 

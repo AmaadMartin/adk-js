@@ -160,18 +160,6 @@ function validateApplicationName(value: string | undefined): void {
   }
 }
 
-function validateJobLabelKey(key: string): void {
-  if (!key) {
-    throw new InputValidationError('Label keys cannot be empty.');
-  }
-  if (key.startsWith(RESERVED_JOB_LABEL_PREFIX)) {
-    throw new InputValidationError(
-      `Label key cannot start with "${RESERVED_JOB_LABEL_PREFIX}" as it is` +
-        ` reserved for internal usage, found "${key}".`,
-    );
-  }
-}
-
 function validateJobLabels(labels: Record<string, string> | undefined): void {
   if (labels === undefined) {
     return;
@@ -183,20 +171,25 @@ function validateJobLabels(labels: Record<string, string> | undefined): void {
     );
   }
   for (const key of keys) {
-    validateJobLabelKey(key);
+    if (!key) {
+      throw new InputValidationError('Label keys cannot be empty.');
+    }
+    if (key.startsWith(RESERVED_JOB_LABEL_PREFIX)) {
+      throw new InputValidationError(
+        `Label key cannot start with "${RESERVED_JOB_LABEL_PREFIX}" as it is` +
+          ` reserved for internal usage, found "${key}".`,
+      );
+    }
   }
 }
 
 /**
  * Creates a validated {@link BigQueryToolConfig}.
  *
- * The returned config is a fresh object: it shares no reference with `params`,
- * so mutating it, or mutating its `jobLabels`, leaves the caller's input
- * untouched.
- *
  * @param params Optional {@link BigQueryToolConfig} fields. Unset fields take
  *     their defaults: {@link WriteMode.BLOCKED} and 50 result rows.
- * @returns A validated {@link BigQueryToolConfig}.
+ * @returns A validated {@link BigQueryToolConfig}, freshly built and sharing
+ *     no reference with `params`.
  * @throws {InputValidationError} When `params` carries an unknown key or a
  *     field of the wrong type, when `maximumBytesBilled` is below the BigQuery
  *     on-demand minimum, when `applicationName` contains a space, or when
@@ -216,13 +209,9 @@ export function createBigQueryToolConfig(
   validateApplicationName(config.applicationName);
   validateJobLabels(config.jobLabels);
   return {
+    ...config,
     writeMode: config.writeMode ?? WriteMode.BLOCKED,
-    maximumBytesBilled: config.maximumBytesBilled,
     maxQueryResultRows:
       config.maxQueryResultRows ?? DEFAULT_MAX_QUERY_RESULT_ROWS,
-    applicationName: config.applicationName,
-    computeProjectId: config.computeProjectId,
-    location: config.location,
-    jobLabels: config.jobLabels,
   };
 }
