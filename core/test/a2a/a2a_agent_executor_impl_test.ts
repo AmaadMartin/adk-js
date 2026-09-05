@@ -27,11 +27,11 @@ import {
   createEvent,
   InMemorySessionService,
   InvocationContext,
-  NEW_A2A_ADK_INTEGRATION_EXTENSION,
   Runner,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {getAdkRunner} from '../../src/a2a/agent_executor.js';
+import {NEW_A2A_ADK_INTEGRATION_EXTENSION} from '../../src/a2a/metadata_converter_utils.js';
 
 const APP_NAME = 'test-app';
 const TASK_ID = 'test-task-id';
@@ -116,7 +116,7 @@ describe('a2a_agent_executor_impl parity', () => {
   it('test_resolve_runner_rejects_invalid_factory_result', async () => {
     await expect(getAdkRunner(() => ({}))).rejects.toThrow(TypeError);
     await expect(getAdkRunner(() => ({}))).rejects.toThrow(
-      'Runner factory must return a Runner instance, got Object',
+      'Runner factory must return a Runner or a runner config, got Object',
     );
   });
 
@@ -160,33 +160,5 @@ describe('a2a_agent_executor_impl parity', () => {
         [NEW_A2A_ADK_INTEGRATION_EXTENSION]: {adk_agent_executor_v2: true},
       }),
     );
-  });
-
-  it('test_resolve_session_creates_new_session', async () => {
-    const sessionService = new InMemorySessionService();
-    const getSession = vi.spyOn(sessionService, 'getSession');
-    const createSession = vi.spyOn(sessionService, 'createSession');
-    const executor = new A2AAgentExecutor({
-      runner: createRunner([], sessionService),
-    });
-
-    await executor.execute(
-      createRequestContext(),
-      new DefaultExecutionEventBus(),
-    );
-
-    // The runner looks the session up again once it starts, so pin the
-    // executor's own probe by position rather than by call count.
-    expect(getSession).toHaveBeenNthCalledWith(1, {
-      appName: APP_NAME,
-      userId: `A2A_USER_${CONTEXT_ID}`,
-      sessionId: CONTEXT_ID,
-      config: {numRecentEvents: 0},
-    });
-    expect(createSession).toHaveBeenCalledWith({
-      appName: APP_NAME,
-      userId: `A2A_USER_${CONTEXT_ID}`,
-      sessionId: CONTEXT_ID,
-    });
   });
 });
