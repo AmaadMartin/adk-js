@@ -29,9 +29,7 @@ const LINE_PATTERN = /[^\r\n]*(?:\r\n|\r|\n|$)/g;
  * yields its last line.
  */
 function splitLinesKeepingTerminators(text: string): string[] {
-  // The pattern matches an empty line, so it always matches at least once and
-  // `match` never returns null, even for an empty string.
-  const lines = text.match(LINE_PATTERN)!;
+  const lines = Array.from(text.matchAll(LINE_PATTERN), (match) => match[0]);
   if (lines.length > 0 && lines[lines.length - 1] === '') {
     lines.pop();
   }

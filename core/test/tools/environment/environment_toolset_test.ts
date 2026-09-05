@@ -17,7 +17,7 @@ import {
   ExecutionResult,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {makeConfirmedContext} from './environment/environment_test_utils.js';
+import {makeConfirmedContext} from './environment_test_utils.js';
 
 /** Fake environment to return customized execution and read results. */
 class FakeEnvironment extends BaseEnvironment {
