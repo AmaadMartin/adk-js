@@ -533,16 +533,22 @@ function toWrites(
  * `../../.ssh/authorized_keys` would otherwise let a skill write anywhere the
  * environment can reach. This is a lexical check: it stops a traversing name,
  * and it does not survive a symlink the environment already contains.
+ *
+ * `resourcePath` is relative to `skillDir`, and only it is normalized.
+ * `skillDir` is passed through untouched, because an environment reports its
+ * working directory in its own form: resolving a drive-letter path through
+ * POSIX rules would graft the host's current directory onto the front of it.
  */
 function resolveInSkillDir(skillDir: string, resourcePath: string): string {
-  const base = path.posix.resolve(skillDir);
-  const target = path.posix.resolve(base, resourcePath);
-  if (!target.startsWith(`${base}/`)) {
+  // A backslash is folded into a separator as well: a remote sandbox is POSIX,
+  // but a LocalEnvironment on Windows treats a backslash as one.
+  const target = path.posix.normalize(resourcePath.replace(/\\/g, '/'));
+  if (target === '..' || target.startsWith('../')) {
     throw new Error(
       `Path traversal detected: '${resourcePath}' resolves outside of ${skillDir}`,
     );
   }
-  return target;
+  return `${skillDir}/${target}`;
 }
 
 /** Renders a thrown value as `<Name>: <message>`, truncating a long message. */
