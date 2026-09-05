@@ -27,11 +27,7 @@ import {
   LlmResponse,
 } from '@google/adk';
 
-import {
-  isRecord,
-  normalizeRelayedAgentContent,
-  normalizeToolConfig,
-} from './replay_normalizers.js';
+import {dumpRequest} from './replay_normalizers.js';
 
 /**
  * Matches the default in `Gemini`'s constructor
@@ -39,17 +35,6 @@ import {
  * a live one would.
  */
 const DEFAULT_REPLAY_MODEL = 'gemini-2.5-flash';
-
-/**
- * Request fields that legitimately vary between two runs of the same
- * conversation, and so take no part in the comparison.
- */
-const EXCLUDED_CONFIG_FIELDS: readonly string[] = [
-  // A live handle rather than request data.
-  'abortSignal',
-  'httpOptions',
-  'labels',
-];
 
 /** One recorded LLM call. */
 export interface ReplayLlmRecording {
@@ -101,71 +86,6 @@ export function isReplayVerificationError(
   e: unknown,
 ): e is ReplayVerificationError {
   return e instanceof Error && e.name === 'ReplayVerificationError';
-}
-
-function isEmptyContainer(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.length === 0;
-  }
-  return isRecord(value) && Object.keys(value).length === 0;
-}
-
-/**
- * Deep-copies `value`, dropping properties that are absent or empty.
- *
- * This stands in for Pydantic's `exclude_none` plus `exclude_defaults`.
- * TypeScript cannot know a field's declared default, so emptiness is the
- * closest available proxy: a field explicitly set to `false`, `0` or `''`
- * survives, and so can only differ if one side genuinely set it.
- */
-function pruneEmptyValues(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(pruneEmptyValues);
-  }
-  if (!isRecord(value)) {
-    return value;
-  }
-  const result: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    // A live request spells an absent field `undefined`; a recording loaded
-    // from YAML spells the same field `null`.
-    if (entry == null) {
-      continue;
-    }
-    const pruned = pruneEmptyValues(entry);
-    if (isEmptyContainer(pruned)) {
-      continue;
-    }
-    result[key] = pruned;
-  }
-  return result;
-}
-
-/**
- * Reduces a request to the data worth comparing.
- *
- * `toolsDict` holds live `BaseTool` instances, so it is dropped rather than
- * copied. `liveConnectConfig` and the excluded config fields are the same
- * exclusions adk-python passes to `model_dump`.
- */
-function dumpRequest(request: LlmRequest): unknown {
-  const {
-    toolsDict: _toolsDict,
-    liveConnectConfig: _liveConnectConfig,
-    config,
-    ...rest
-  } = request;
-  const dumped: Record<string, unknown> = {...rest};
-  if (config) {
-    const comparableConfig: Record<string, unknown> = {...config};
-    for (const field of EXCLUDED_CONFIG_FIELDS) {
-      delete comparableConfig[field];
-    }
-    dumped['config'] = comparableConfig;
-  }
-  return normalizeRelayedAgentContent(
-    normalizeToolConfig(pruneEmptyValues(dumped)),
-  );
 }
 
 /**
@@ -221,14 +141,14 @@ export class ConformanceTestGemini extends BaseLlm {
     this.agentName = config.agentName;
     this.userMessageIndex = config.userMessageIndex;
     this.replayIndex = config.replayIndex;
-    this.agentLlmRecordings = config.recordings.recordings
-      .filter(
-        (recording) =>
-          recording.agentName === config.agentName &&
-          recording.userMessageIndex === config.userMessageIndex &&
-          recording.llmRecording,
-      )
-      .map((recording) => recording.llmRecording!);
+    this.agentLlmRecordings = config.recordings.recordings.flatMap(
+      (recording) =>
+        recording.agentName === config.agentName &&
+        recording.userMessageIndex === config.userMessageIndex &&
+        recording.llmRecording
+          ? [recording.llmRecording]
+          : [],
+    );
   }
 
   /**

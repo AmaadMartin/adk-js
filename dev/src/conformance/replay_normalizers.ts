@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {LlmRequest} from '@google/adk';
+
 /**
  * Normalizers that absorb formatting-only differences between a recorded LLM
- * request and the request a replayed run produces.
+ * request and the request a replayed run produces, and the dump step that
+ * feeds them.
  *
  * Ported from adk-python's
  * `src/google/adk/cli/conformance/_conformance_test_google_llm.py`. They are
@@ -59,24 +62,16 @@ const DOCUMENTATION_SCHEMA_KEYS: readonly string[] = [
   'description',
 ];
 
-/**
- * Keys that mark an object as a function declaration when it also has a `name`.
- *
- * adk-python only knows the snake_case spellings because it compares its own
- * dumps. adk-js reads the recorded side through a loader that may have
- * camelCased it, so both spellings are accepted on input.
- */
+/** Keys that mark an object as a function declaration when it also has a `name`. */
 const FUNCTION_DECLARATION_KEYS: readonly string[] = [
   'description',
   'parameters',
-  'parameters_json_schema',
   'parametersJsonSchema',
 ];
 
 /** Parameter schema spellings, in the order adk-python prefers them. */
 const PARAMETER_SCHEMA_KEYS: readonly string[] = [
   'parameters',
-  'parameters_json_schema',
   'parametersJsonSchema',
 ];
 
@@ -86,7 +81,6 @@ const PARAMETERS_JSON_SCHEMA_KEY = 'parametersJsonSchema';
 /** Declaration keys that describe the response rather than the call. */
 const RESPONSE_DECLARATION_KEYS: readonly string[] = [
   'response',
-  'response_json_schema',
   'responseJsonSchema',
 ];
 
@@ -99,7 +93,7 @@ const TRANSFER_TO_AGENT_TOOL = 'transfer_to_agent';
 const TRANSFER_TO_AGENT_DESCRIPTION = 'Transfer the question to another agent.';
 
 /** Narrows a value to a plain keyed object, excluding arrays and null. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -248,18 +242,6 @@ function isFunctionDeclaration(data: Record<string, unknown>): boolean {
   return 'name' in data && FUNCTION_DECLARATION_KEYS.some((key) => key in data);
 }
 
-function firstDefined(
-  data: Record<string, unknown>,
-  keys: readonly string[],
-): unknown {
-  for (const key of keys) {
-    if (data[key] !== undefined) {
-      return data[key];
-    }
-  }
-  return undefined;
-}
-
 function normalizeFunctionDeclaration(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -271,7 +253,9 @@ function normalizeFunctionDeclaration(
     result['description'] = result['description'].trim();
   }
 
-  const parameterSchema = firstDefined(result, PARAMETER_SCHEMA_KEYS);
+  const parameterSchema = PARAMETER_SCHEMA_KEYS.map((key) => result[key]).find(
+    (value) => value !== undefined,
+  );
   for (const key of PARAMETER_SCHEMA_KEYS) {
     delete result[key];
   }
@@ -367,4 +351,80 @@ export function normalizeRelayedAgentContent(data: unknown): unknown {
     return {...data, parts: parts.map(normalizeRelayedPart)};
   }
   return mapValues(data, normalizeRelayedAgentContent);
+}
+
+/**
+ * Request fields that legitimately vary between two runs of the same
+ * conversation, and so take no part in the comparison.
+ */
+const EXCLUDED_CONFIG_FIELDS: readonly string[] = [
+  // A live handle rather than request data.
+  'abortSignal',
+  'httpOptions',
+  'labels',
+];
+
+function isEmptyContainer(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  return isRecord(value) && Object.keys(value).length === 0;
+}
+
+/**
+ * Deep-copies `value`, dropping properties that are absent or empty.
+ *
+ * This stands in for Pydantic's `exclude_none` plus `exclude_defaults`.
+ * TypeScript cannot know a field's declared default, so emptiness is the
+ * closest available proxy: a field explicitly set to `false`, `0` or `''`
+ * survives, and so can only differ if one side genuinely set it.
+ */
+function pruneEmptyValues(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(pruneEmptyValues);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    // A live request spells an absent field `undefined`; a recording loaded
+    // from YAML spells the same field `null`.
+    if (entry == null) {
+      continue;
+    }
+    const pruned = pruneEmptyValues(entry);
+    if (isEmptyContainer(pruned)) {
+      continue;
+    }
+    result[key] = pruned;
+  }
+  return result;
+}
+
+/**
+ * Reduces a request to the data worth comparing.
+ *
+ * `toolsDict` holds live `BaseTool` instances, so it is dropped rather than
+ * copied. `liveConnectConfig` and the excluded config fields are the same
+ * exclusions adk-python passes to `model_dump`.
+ */
+export function dumpRequest(request: LlmRequest): unknown {
+  const {
+    toolsDict: _toolsDict,
+    liveConnectConfig: _liveConnectConfig,
+    config,
+    ...rest
+  } = request;
+  const dumped: Record<string, unknown> = {...rest};
+  if (config) {
+    const comparableConfig: Record<string, unknown> = {...config};
+    for (const field of EXCLUDED_CONFIG_FIELDS) {
+      delete comparableConfig[field];
+    }
+    dumped['config'] = comparableConfig;
+  }
+  return normalizeRelayedAgentContent(
+    normalizeToolConfig(pruneEmptyValues(dumped)),
+  );
 }

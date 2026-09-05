@@ -70,11 +70,14 @@ function textsOf(responses: LlmResponse[]): Array<string | undefined> {
 
 async function captureError(
   generator: AsyncGenerator<LlmResponse, void>,
-): Promise<unknown> {
+): Promise<Error> {
   try {
     await collect(generator);
   } catch (e: unknown) {
-    return e;
+    if (e instanceof Error) {
+      return e;
+    }
+    throw e;
   }
   return expect.fail('expected the replay to throw');
 }
@@ -212,7 +215,7 @@ describe('ConformanceTestGemini over-request', () => {
     const error = await captureError(replay.generateContentAsync(request()));
 
     expect(isReplayVerificationError(error)).toBe(true);
-    expect((error as Error).message).toBe(
+    expect(error.message).toBe(
       `Runtime sent more LLM requests than expected for agent '${AGENT}' at ` +
         'userMessageIndex 0. Expected 1, but got request at index 1',
     );
@@ -224,7 +227,7 @@ describe('ConformanceTestGemini over-request', () => {
     const error = await captureError(replay.generateContentAsync(request()));
 
     expect(isReplayVerificationError(error)).toBe(true);
-    expect((error as Error).message).toContain('Expected 0');
+    expect(error.message).toContain('Expected 0');
   });
 });
 
@@ -281,10 +284,10 @@ describe('ConformanceTestGemini request verification', () => {
     );
 
     expect(isReplayVerificationError(error)).toBe(true);
-    expect((error as Error).message).toContain(
+    expect(error.message).toContain(
       `LLM request mismatch in turn 0 for agent '${AGENT}' (index 0)`,
     );
-    expect((error as Error).message).toContain('goodbye');
+    expect(error.message).toContain('goodbye');
   });
 
   it('throws when the live request declares an extra tool', async () => {
@@ -306,7 +309,7 @@ describe('ConformanceTestGemini request verification', () => {
     );
 
     expect(isReplayVerificationError(error)).toBe(true);
-    expect((error as Error).message).toContain('extra');
+    expect(error.message).toContain('extra');
   });
 
   it('throws when the system instruction differs', async () => {
@@ -317,7 +320,7 @@ describe('ConformanceTestGemini request verification', () => {
     );
 
     expect(isReplayVerificationError(error)).toBe(true);
-    expect((error as Error).message).toContain('be terse');
+    expect(error.message).toContain('be terse');
   });
 
   it('yields nothing before a failed verification', async () => {
