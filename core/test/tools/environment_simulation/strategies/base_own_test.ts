@@ -12,6 +12,7 @@
 
 import {
   BaseMockStrategy,
+  BaseTool,
   Context,
   FeatureName,
   FunctionTool,
@@ -38,9 +39,9 @@ function makeToolContext(): Context {
   return new Context({invocationContext});
 }
 
-function makeTool(): FunctionTool {
+function makeTool(name = 'get_weather'): BaseTool {
   return new FunctionTool({
-    name: 'get_weather',
+    name,
     description: 'Reports the weather.',
     parameters: z.object({city: z.string()}),
     execute: () => 'sunny',
@@ -79,6 +80,21 @@ class EchoStrategy extends BaseMockStrategy {
       environmentData: request.environmentData,
       tracing: request.tracing,
     };
+  }
+}
+
+/** The stateStore example from the developer guide, run as written. */
+class TicketStrategy extends BaseMockStrategy {
+  override async mock(request: MockRequest): Promise<Record<string, unknown>> {
+    if (request.tool.name === 'create_ticket') {
+      request.stateStore['ticket_id'] = 'T-1';
+      return {status: 'ok', ticketId: 'T-1'};
+    }
+    const ticketId = request.stateStore['ticket_id'];
+    if (ticketId === undefined) {
+      return {status: 'error', errorMessage: 'no ticket has been created'};
+    }
+    return {status: 'ok', ticketId};
   }
 }
 
@@ -148,6 +164,37 @@ describe('BaseMockStrategy', () => {
       expect(result.stateStore).toBe(stateStore);
       expect(result.environmentData).toBe('a support desk');
       expect(result.tracing).toBe('create_ticket -> close_ticket');
+    });
+  });
+
+  it('carries a creating call to a consuming call through stateStore', async () => {
+    await withEnvironmentSimulation(async () => {
+      const strategy = new TicketStrategy();
+      const stateStore: Record<string, unknown> = {};
+
+      const created = await strategy.mock(
+        makeRequest({tool: makeTool('create_ticket'), stateStore}),
+      );
+      const closed = await strategy.mock(
+        makeRequest({tool: makeTool('close_ticket'), stateStore}),
+      );
+
+      expect(created).toEqual({status: 'ok', ticketId: 'T-1'});
+      expect(stateStore).toEqual({ticket_id: 'T-1'});
+      expect(closed).toEqual({status: 'ok', ticketId: 'T-1'});
+    });
+  });
+
+  it('reports an error when the consuming call finds no stored state', async () => {
+    await withEnvironmentSimulation(async () => {
+      const result = await new TicketStrategy().mock(
+        makeRequest({tool: makeTool('close_ticket'), stateStore: {}}),
+      );
+
+      expect(result).toEqual({
+        status: 'error',
+        errorMessage: 'no ticket has been created',
+      });
     });
   });
 });
