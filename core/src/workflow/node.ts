@@ -150,12 +150,11 @@ export abstract class WorkflowNode<
    * with `parallelWorker` off, so the copy's {@link runImpl} dispatches to
    * {@link runNodeImpl} instead of recursing back into the wrapper.
    *
-   * Override it to supply a different wrapper.
+   * Called only when `parallelWorker` is set. An override may return
+   * `undefined` to decline, which fails the run rather than quietly skipping
+   * the fan-out.
    */
   protected createParallelWorker(): BaseNode | undefined {
-    if (!this.parallelWorker) {
-      return undefined;
-    }
     return buildNode(this.clone({parallelWorker: false}), {
       parallelWorker: true,
       maxParallelWorkers: this.maxParallelWorkers,
