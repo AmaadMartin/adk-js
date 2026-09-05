@@ -14,6 +14,8 @@ import {
   Part,
   Tool,
 } from '@google/genai';
+import type {ReadonlyContext} from '../agents/readonly_context.js';
+import type {RemoteMcpServer} from '../tools/remote_mcp_server.js';
 import {logger} from '../utils/logger.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
@@ -943,4 +945,63 @@ export async function* generateContentViaInteractions(
     logger.info('Interaction response received from the model.');
     yield convertInteractionToLlmResponse(interaction);
   }
+}
+
+/**
+ * Maps a {@link RemoteMcpServer} and its resolved headers onto the
+ * `mcp_server` tool param the Interactions API accepts.
+ *
+ * The param is built by hand rather than through `types.McpServer` so that
+ * `allowed_tools` survives, and so the "not supported in Vertex AI"
+ * restriction on `Tool.mcpServers` does not apply.
+ *
+ * @param server The server description.
+ * @param resolvedHeaders The static headers already merged with any
+ *   `headerProvider` output.
+ * @return The tool param.
+ */
+export function buildMcpServerParam(
+  server: RemoteMcpServer,
+  resolvedHeaders: Record<string, string>,
+): Interactions.Tool.MCPServer {
+  const param: Interactions.Tool.MCPServer = {
+    type: 'mcp_server',
+    url: server.url,
+  };
+  // Guarded on `undefined`, not on truthiness: an empty name and an empty
+  // allowed-tools list are meaningful and are forwarded.
+  if (server.name !== undefined) {
+    param.name = server.name;
+  }
+  if (Object.keys(resolvedHeaders).length > 0) {
+    param.headers = resolvedHeaders;
+  }
+  if (server.allowedTools !== undefined) {
+    param.allowed_tools = [{tools: [...server.allowedTools]}];
+  }
+  return param;
+}
+
+/**
+ * Resolves a {@link RemoteMcpServer} for one turn into its `mcp_server` tool
+ * param, minting the runtime headers.
+ *
+ * The static headers are copied first, then the `headerProvider` output is
+ * assigned over the copy, so the provider wins on a key conflict. An error
+ * from the provider propagates: a failed token mint must be loud, not a
+ * silently missing header.
+ *
+ * @param server The server description.
+ * @param context The context of the turn being resolved.
+ * @return The tool param.
+ */
+export async function resolveRemoteMcpServerParam(
+  server: RemoteMcpServer,
+  context: ReadonlyContext,
+): Promise<Interactions.Tool.MCPServer> {
+  const resolvedHeaders: Record<string, string> = {...server.headers};
+  if (server.headerProvider !== undefined) {
+    Object.assign(resolvedHeaders, await server.headerProvider(context));
+  }
+  return buildMcpServerParam(server, resolvedHeaders);
 }
