@@ -155,6 +155,147 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {
+  DEFAULT_EVAL_PARALLELISM,
+  InferenceStatus,
+} from './evaluation/base_eval_service.js';
+export type {
+  BaseEvalService,
+  EvaluateConfig,
+  EvaluateRequest,
+  InferenceConfig,
+  InferenceRequest,
+  InferenceResult,
+} from './evaluation/base_eval_service.js';
+export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
+export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
+export {
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+  isIntermediateData,
+  isInvocationEvents,
+  validateEvalCase,
+} from './evaluation/eval_case.js';
+export type {
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
+} from './evaluation/eval_case.js';
+export {
+  EvalStatus,
+  PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export type {EvalCaseResult} from './evaluation/eval_result.js';
+export {
+  addRubricsToInvocation,
+  copyEvalCaseRubricsToActualInvocations,
+  copyInvocationRubricsToActualInvocations,
+} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export type {EvalSet} from './evaluation/eval_set.js';
+export type {
+  EvalSetResult,
+  EvalSetResultsManager,
+} from './evaluation/eval_set_results_manager.js';
+export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
+export {
+  convertEventsToEvalInvocations,
+  generateInferencesFromAgentModule,
+  generateInferencesFromRootAgent,
+  generateInferencesFromRootAgentLive,
+  generateResponses,
+  generateResponsesFromSession,
+  normalizeLiveTranscriptions,
+} from './evaluation/evaluation_generator.js';
+export type {
+  EvalCaseResponses,
+  EvalRow,
+  EvalRunParams,
+} from './evaluation/evaluation_generator.js';
+export {
+  BASE_CRITERION_TYPE,
+  emptyEvaluationResult,
+  getCriterionType,
+  getEvalStatus,
+  getTextFromContent,
+  validateBaseCriterion,
+  validateInvocationLengths,
+} from './evaluation/evaluator.js';
+export type {
+  CriterionType,
+  EvaluationResult,
+  Evaluator,
+  EvaluatorClass,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {RougeEvaluator} from './evaluation/final_response_match_v1.js';
+export {
+  EVAL_SESSION_ID_PREFIX,
+  LocalEvalService,
+  createEvalSessionId,
+  generateFinalEvalStatus,
+} from './evaluation/local_eval_service.js';
+export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
+export {
+  MetricEvaluatorRegistry,
+  defaultMetricEvaluatorRegistry,
+} from './evaluation/metric_evaluator_registry.js';
+export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
+export {ResponseEvaluator} from './evaluation/response_evaluator.js';
+export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
+export {rouge1Score, tokenizeForRouge} from './evaluation/rouge_scorer.js';
+export type {RougeScore} from './evaluation/rouge_scorer.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
+export {
+  UserSimulatorStatus,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
+export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
+export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
+export {SingleTurnVertexAiEvalFacade} from './evaluation/vertex_ai_eval_facade.js';
+export type {
+  VertexAggregatedMetricResult,
+  VertexAiEvalClient,
+  VertexAiEvalFacadeOptions,
+  VertexAiEvalRequest,
+  VertexEvalCaseRow,
+  VertexEvalMetricSpec,
+  VertexEvaluationDataset,
+  VertexEvaluationResult,
+} from './evaluation/vertex_ai_eval_facade.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
@@ -343,7 +484,12 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
-export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {
+  EVAL_CLIENT_LABEL,
+  getClientLabels,
+  runWithClientLabel,
+} from './utils/client_labels.js';
+export {mapConcurrent} from './utils/concurrency_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';

@@ -8,6 +8,7 @@ import {
   CitationMetadata,
   Content,
   FinishReason,
+  FunctionCall,
   GenerateContentResponse,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
@@ -161,4 +162,21 @@ export function createLlmResponse(
     errorMessage: 'Unknown error.',
     usageMetadata: usageMetadata,
   };
+}
+
+/**
+ * Returns the function calls in the response, in the order the model emitted
+ * them.
+ */
+export function getFunctionCalls(response: LlmResponse): FunctionCall[] {
+  const funcCalls = [];
+  if (response.content && response.content.parts) {
+    for (const part of response.content.parts) {
+      if (part.functionCall) {
+        funcCalls.push(part.functionCall);
+      }
+    }
+  }
+
+  return funcCalls;
 }

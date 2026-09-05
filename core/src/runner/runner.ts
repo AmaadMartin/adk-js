@@ -477,11 +477,30 @@ export class Runner {
       );
     } finally {
       span.end();
-      const toolsets = isBaseAgent(this.agent)
-        ? getAllToolsets(this.agent)
-        : [];
-      await Promise.allSettled(toolsets.map((t) => t.close()));
+      await this.closeToolsets();
     }
+  }
+
+  /**
+   * Closes the toolsets the runner's root declares.
+   *
+   * A failure to close one toolset does not stop the others, and none of them
+   * fails the run that is ending.
+   */
+  private async closeToolsets(): Promise<void> {
+    const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
+    await Promise.allSettled(toolsets.map((t) => t.close()));
+  }
+
+  /**
+   * Releases the resources this runner holds.
+   *
+   * Call it when the runner is no longer needed. It is safe to call after
+   * `runAsync`, which closes the toolsets itself, because closing a toolset
+   * twice is not an error.
+   */
+  async close(): Promise<void> {
+    await this.closeToolsets();
   }
 
   /**

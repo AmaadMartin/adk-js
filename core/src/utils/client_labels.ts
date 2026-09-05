@@ -13,6 +13,9 @@ const LANGUAGE_LABEL = 'gl-typescript';
 const AGENT_ENGINE_TELEMETRY_TAG = 'remote_reasoning_engine';
 const AGENT_ENGINE_TELEMETRY_ENV_VARIABLE_NAME = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 
+/** Client label attached to every model call an eval run makes. */
+export const EVAL_CLIENT_LABEL = `google-adk-eval/${version}`;
+
 const clientLabelLocalStorage = new AsyncLocalStorage<string>();
 
 const USER_AGENT_PATTERNS = [
