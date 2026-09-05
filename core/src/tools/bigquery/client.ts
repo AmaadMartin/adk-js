@@ -117,9 +117,9 @@ export async function getDataplexCatalogClient(
  * The BigQuery clients one toolset has opened.
  *
  * A tool call reuses the client of an identical earlier call, and
- * {@link BigQueryToolset.close} releases the whole set. adk-python builds a
- * fresh client per call and has nothing to release; adk-js keeps the clients
- * so that a long-lived agent does not rebuild one per tool call.
+ * {@link BigQueryToolset.close} drops the whole set. adk-python builds a
+ * fresh client per call; adk-js keeps them so that a long-lived agent does
+ * not rebuild one per tool call.
  */
 export class BigQueryClientCache {
   private readonly clients = new Map<string, Promise<BigQuery>>();
@@ -153,7 +153,10 @@ export class BigQueryClientCache {
     return client;
   }
 
-  /** Releases every client this cache has opened. */
+  /**
+   * Drops every client this cache has built, so the next request builds a
+   * fresh one. The Node BigQuery client holds no connection to tear down.
+   */
   close(): void {
     this.clients.clear();
   }

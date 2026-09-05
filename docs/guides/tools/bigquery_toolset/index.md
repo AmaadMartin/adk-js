@@ -73,11 +73,11 @@ export const rootAgent = new LlmAgent({
 | `ask_data_insights`    | Answers a question about named tables in one call.      |
 | `search_catalog`       | Finds datasets and tables by description, via Dataplex. |
 
-`forecast`, `analyze_contribution` and `detect_anomalies` each train a
-temporary BigQuery ML model, which needs a session. A `BLOCKED` toolset
-refuses the last two outright; `analyze_contribution` and `detect_anomalies`
-narrow an `ALLOWED` toolset to a session for their two statements, so the
-model they create cannot outlive the call.
+`forecast` calls `AI.FORECAST` and trains nothing, so it runs in any write
+mode. `analyze_contribution` and `detect_anomalies` each train a temporary
+BigQuery ML model, which needs a session: a `BLOCKED` toolset refuses them
+outright, and an `ALLOWED` one is narrowed to a session for their two
+statements, so the model they create cannot outlive the call.
 
 ## Choosing the tools to expose
 
@@ -156,7 +156,9 @@ produces the same keys.
 ## Releasing the clients
 
 The toolset caches one BigQuery client per project, location and user agent.
-`close()` releases them:
+`close()` drops them, so the next tool call builds a fresh one. The Node
+BigQuery client holds no connection to tear down, so there is nothing further
+to close:
 
 ```ts
 await toolset.close();
