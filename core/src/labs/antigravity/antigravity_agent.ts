@@ -251,25 +251,37 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
           }
         }
       }
-      if (!recorded && active.agent.conversation.history.length > 0) {
-        const delta = this.idDeltaIfChanged(ctx, active, storedId);
-        if (delta) {
-          yield delta;
-        }
-      }
+      yield* this.flushIdIfPending(ctx, active, storedId, recorded);
     } catch (error: unknown) {
       // A harness error mid-turn leaves a resumable conversation behind, so the
       // block after the loop never runs on that path; the id is persisted here
       // before re-raising, or the next turn orphans it. A consumer that
       // abandons the generator lands on `finally`, never here, so no yield can
-      // answer it.
-      if (!recorded && active.agent.conversation.history.length > 0) {
-        const delta = this.idDeltaIfChanged(ctx, active, storedId);
-        if (delta) {
-          yield delta;
-        }
-      }
+      // answer it — which is why this is not a `finally`.
+      yield* this.flushIdIfPending(ctx, active, storedId, recorded);
       throw error;
+    }
+  }
+
+  /**
+   * Records the conversation id if the turn ended without recording it.
+   *
+   * Only when the conversation has history: "did we yield an event" is not the
+   * same question as "does this conversation exist", and recording an id for a
+   * genuinely empty turn makes the next resume look silently dropped.
+   */
+  private async *flushIdIfPending(
+    ctx: InvocationContext,
+    active: ActiveConversation,
+    storedId: string | undefined,
+    recorded: boolean,
+  ): AsyncGenerator<Event, void, void> {
+    if (recorded || active.agent.conversation.history.length === 0) {
+      return;
+    }
+    const delta = this.idDeltaIfChanged(ctx, active, storedId);
+    if (delta) {
+      yield delta;
     }
   }
 
@@ -521,30 +533,39 @@ function extractUserPrompt(ctx: InvocationContext): string {
   return '';
 }
 
-/**
- * Rejects adoption of `agent` by an ADK parent unless it runs single-turn.
- *
- * `BaseAgent` declares `parentAgent` as a plain field, which a subclass may not
- * override with an accessor pair (TS2611), so the guard is installed on the
- * instance. `setParentAgentForSubAgents` assigns the field directly, and this
- * is what it reaches.
- */
-function guardParentAdoption(agent: AntigravityAgent): void {
-  let parent = agent.parentAgent;
-  // `BaseAgent`'s constructor has already applied `options.parentAgent` by the
-  // time the guard is installed, so the value it starts from is checked too,
-  // not only the later assignments.
+/** Throws unless `agent` may be adopted by `parent`. */
+function assertAdoptable(
+  agent: AntigravityAgent,
+  parent: BaseAgent | undefined,
+): void {
   if (parent !== undefined && agent.mode !== 'single_turn') {
     throw new Error(PARENT_REQUIRES_SINGLE_TURN_MESSAGE);
   }
+}
+
+/**
+ * Rejects adoption of `agent` by an ADK parent unless it runs single-turn.
+ *
+ * The check has to intercept the assignment, because that is the only moment
+ * it happens: a parent's constructor adopts its children through
+ * `setParentAgentForSubAgents`, which writes the field directly. Checking at
+ * run time instead would let a mis-built agent tree construct cleanly and fail
+ * a turn later, and it is `BaseAgent(...)` that the stack trace should name.
+ *
+ * `BaseAgent` declares `parentAgent` as a plain field, and a subclass may not
+ * override a field with an accessor pair (TS2611), so the descriptor is
+ * installed on the instance instead. The value the constructor already applied
+ * is checked too, not only later assignments.
+ */
+function guardParentAdoption(agent: AntigravityAgent): void {
+  let parent = agent.parentAgent;
+  assertAdoptable(agent, parent);
   Object.defineProperty(agent, 'parentAgent', {
     configurable: true,
     enumerable: true,
     get: () => parent,
     set: (value: BaseAgent | undefined) => {
-      if (value !== undefined && agent.mode !== 'single_turn') {
-        throw new Error(PARENT_REQUIRES_SINGLE_TURN_MESSAGE);
-      }
+      assertAdoptable(agent, value);
       parent = value;
     },
   });

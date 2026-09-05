@@ -124,12 +124,9 @@ function builtinToolStep(
   error = '',
 ): AntigravityStep {
   return {
-    id: BUILTIN_CALL_ID,
     stepIndex: 2,
-    trajectoryId: 'traj_1',
     type: 'TOOL_CALL',
     source: 'MODEL',
-    target: 'TARGET_ENVIRONMENT',
     status,
     content,
     error,
@@ -144,11 +141,9 @@ function clientToolActiveStep(): AntigravityStep {
   // The only step that ever carries a client tool's call, so the only chance
   // to emit the function call.
   return {
-    id: CLIENT_CALL_ID,
     stepIndex: 1,
     type: 'TOOL_CALL',
     source: 'MODEL',
-    target: 'TARGET_ENVIRONMENT',
     status: 'ACTIVE',
     content: '',
     toolCalls: [
@@ -167,7 +162,6 @@ function clientToolDoneStep(): AntigravityStep {
     stepIndex: 1,
     type: 'TOOL_CALL',
     source: 'MODEL',
-    target: 'TARGET_ENVIRONMENT',
     status: 'DONE',
     content: 'Calling custom tool "naming_reviewer"',
     toolCalls: [],
@@ -515,7 +509,6 @@ describe('convertStepToEvents', () => {
         stepIndex: 0,
         type: 'TEXT_RESPONSE',
         source: 'MODEL',
-        thinking: 'reasoning...',
         content: '',
       }),
     ).toEqual([]);
