@@ -125,14 +125,16 @@ export interface A2aAgentExecutorConverterConfig {
 }
 
 /**
- * A converter config with every defaulted slot filled.
+ * The validated converters the executor runs, with every default applied.
  *
- * `eventConverter` is absent because it has no default. The executor reads it
- * from the config it was given.
+ * The executor reads every converter from here, so this is the only place the
+ * defaults are decided. `eventConverter` stays optional: it declares no
+ * default, and the executor falls through to `adkEventConverter` without it.
  */
 export interface ResolvedA2aAgentExecutorConfig {
   a2aPartConverter: A2APartToGenAIPartConverter;
   genAiPartConverter: GenAIPartToA2APartConverter;
+  eventConverter?: AdkEventToA2AEventsConverter;
   adkEventConverter: AdkEventToA2AEventsConverterImpl;
 }
 
@@ -174,6 +176,7 @@ export function resolveA2aAgentExecutorConfig(
   return {
     a2aPartConverter: config.a2aPartConverter ?? toGenAIPart,
     genAiPartConverter: config.genAiPartConverter ?? toA2APart,
+    eventConverter: config.eventConverter,
     adkEventConverter:
       config.adkEventConverter ?? toA2AArtifactUpdateEventsFromArtifactMap,
   };

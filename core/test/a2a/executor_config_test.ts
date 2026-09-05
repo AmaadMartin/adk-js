@@ -11,6 +11,7 @@ import {
   A2aAgentExecutorConverterConfig,
   A2AEvent,
   Event as AdkEvent,
+  AdkEventToA2AEventsConverter,
   AdkEventToA2AEventsConverterImpl,
   BaseSessionService,
   createEvent,
@@ -87,8 +88,18 @@ describe('resolveA2aAgentExecutorConfig', () => {
     expect(Object.keys(resolved).sort()).toEqual([
       'a2aPartConverter',
       'adkEventConverter',
+      'eventConverter',
       'genAiPartConverter',
     ]);
+  });
+
+  it('carries a supplied eventConverter through, with no default for it', () => {
+    const eventConverter: AdkEventToA2AEventsConverter = () => [];
+
+    expect(resolveA2aAgentExecutorConfig({}).eventConverter).toBeUndefined();
+    expect(resolveA2aAgentExecutorConfig({eventConverter}).eventConverter).toBe(
+      eventConverter,
+    );
   });
 
   it('keeps every supplied converter', () => {

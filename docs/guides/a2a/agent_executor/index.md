@@ -87,11 +87,11 @@ Returning an empty array publishes nothing for that ADK event.
 | -------------------- | ------------------------------------------ |
 | `a2aPartConverter`   | `toGenAIPart`                              |
 | `genAiPartConverter` | `toA2APart`                                |
-| `eventConverter`     | none                                       |
 | `adkEventConverter`  | `toA2AArtifactUpdateEventsFromArtifactMap` |
 
-`resolveA2aAgentExecutorConfig` applies those defaults. The executor calls it
-in its constructor.
+`resolveA2aAgentExecutorConfig` applies those defaults, and the executor calls
+it in its constructor. `eventConverter` is the one slot with no default. The
+next section says what the executor does when you leave it unset.
 
 ## Converting an event from the executor context
 
