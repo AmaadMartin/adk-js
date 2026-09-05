@@ -409,6 +409,9 @@ export interface ToSessionOptions {
   /**
    * The exact storage revision the caller read the row at, which
    * `DatabaseSessionService` compares against on the next write.
+   *
+   * A caller inside a transaction supplies the revision it read there.
+   * Omitting it takes the row's own marker.
    */
   storageUpdateMarker?: string;
 }
@@ -419,6 +422,11 @@ export interface ToSessionOptions {
  * Mirrors adk-python's `get_update_timestamp`, which returns seconds. adk-js
  * measures `Session.lastUpdateTime` and `Event.timestamp` in milliseconds
  * throughout, so this keeps milliseconds.
+ *
+ * adk-python also reads a naive column value as UTC by hand. A driver hands
+ * MikroORM a `Date`, which already names an instant, so there is nothing to
+ * correct here. Its `update_timestamp_tz` returns the same value, so it has
+ * no counterpart.
  */
 export function getUpdateTimestamp(row: StorageSession): number {
   return row.updateTime.getTime();
@@ -440,7 +448,7 @@ export function toSession(
     state: options.state,
     events: options.events ?? [],
     lastUpdateTime: getUpdateTimestamp(row),
-    storageUpdateMarker: options.storageUpdateMarker,
+    storageUpdateMarker: options.storageUpdateMarker ?? row.getUpdateMarker(),
   });
 }
 

@@ -6,11 +6,15 @@
 
 import {
   Entity,
+  EntityProperty,
   Index,
   ManyToOne,
+  Platform,
   PrimaryKey,
   Property,
   Ref,
+  ref,
+  Type,
 } from '@mikro-orm/core';
 import {
   Event,
@@ -33,7 +37,70 @@ import {
 } from './schema.js';
 
 /** Suffix appended to a value truncated to fit a legacy column. */
-const TRUNCATION_SUFFIX = '...[truncated]';
+export const TRUNCATION_SUFFIX = '...[truncated]';
+
+/**
+ * Column widths and index names the legacy layout shares with the current one.
+ *
+ * They are declared in {@link './schema.js'} and re-exported here, because the
+ * legacy schema reads them as its own constants.
+ */
+export {DEFAULT_MAX_VARCHAR_LENGTH, EVENTS_TIMESTAMP_INDEX_NAME};
+
+/**
+ * The default character set of the platforms whose `blob` holds only 64 KiB.
+ *
+ * MikroORM's `Platform` exposes no dialect name, and neither `instanceof` nor
+ * `constructor.name` can stand in for one: two copies of a driver package in
+ * one runtime defeat the first, and a bundler defeats the second. MySQL and
+ * MariaDB are exactly the platforms MikroORM defaults to `utf8mb4`, so their
+ * charset is the identity this type dispatches on. A test pins the mapping
+ * against the real `MySqlPlatform`, which ships in the shared knex package;
+ * the other platforms live in driver packages this repository does not
+ * install, so their tests describe a platform by the two values it returns.
+ */
+const MYSQL_FAMILY_DEFAULT_CHARSET = 'utf8mb4';
+
+/** The MySQL and MariaDB column that holds a blob of any size. */
+const LONG_BLOB_COLUMN_TYPE = 'longblob';
+
+/**
+ * Returns the column a platform needs for a pickled value.
+ *
+ * The counterpart of adk-python's `DynamicPickleType.load_dialect_impl`. A
+ * MySQL `BLOB` holds 64 KiB, which a large `stateDelta` overruns, and the
+ * insert fails rather than truncating. adk-python also has a Spanner branch;
+ * adk-js has no Spanner driver, so there is nothing to dispatch to.
+ *
+ * @param platform The platform the column is declared for.
+ * @return The column type.
+ */
+export function pickleBlobColumnType(
+  platform: Pick<Platform, 'getDefaultCharset' | 'getBlobDeclarationSQL'>,
+): string {
+  return platform.getDefaultCharset() === MYSQL_FAMILY_DEFAULT_CHARSET
+    ? LONG_BLOB_COLUMN_TYPE
+    : platform.getBlobDeclarationSQL();
+}
+
+/** The `actions` column, widened to `LONGBLOB` on MySQL and MariaDB. */
+export class PickleBlobType extends Type<Uint8Array | null, Buffer | null> {
+  override convertToDatabaseValue(value: Uint8Array | null): Buffer | null {
+    return value ? Buffer.from(value) : null;
+  }
+
+  override convertToJSValue(value: Buffer | null): Uint8Array | null {
+    return value ?? null;
+  }
+
+  override getColumnType(_prop: EntityProperty, platform: Platform): string {
+    return pickleBlobColumnType(platform);
+  }
+
+  override compareAsType(): string {
+    return 'Buffer';
+  }
+}
 
 /**
  * The `events` table as adk-python wrote it before the v1 schema.
@@ -131,9 +198,15 @@ export class StorageEventV0 {
   })
   longRunningToolIdsJson?: string;
 
-  /** A Python pickle of the event's actions. */
-  @Property({type: 'blob', nullable: true})
-  actions?: Buffer;
+  /**
+   * A Python pickle of the event's actions.
+   *
+   * {@link PickleBlobType} widens the column to `LONGBLOB` on MySQL and
+   * MariaDB, whose `BLOB` holds only 64 KiB. A large `stateDelta` overruns
+   * that, and the insert fails rather than truncating.
+   */
+  @Property({type: PickleBlobType, nullable: true})
+  actions?: Uint8Array;
 
   /**
    * The session this event belongs to, read through the key columns above.
@@ -141,7 +214,9 @@ export class StorageEventV0 {
    * This relation carries the `ON DELETE CASCADE` foreign key, so a deleted
    * session takes its events with it. `ownColumns: []` leaves `appName`,
    * `userId` and `sessionId` owning their columns, because they are primary
-   * keys that callers set by name.
+   * keys that callers set by name. That is also why MikroORM's snapshot
+   * comparator cannot write a null over the foreign-key columns of a row whose
+   * relation is unset: the scalar properties hold them.
    *
    * The referenced columns are listed in the order of the `sessions` primary
    * key. InnoDB only accepts a foreign key whose referenced columns lead an
@@ -158,7 +233,22 @@ export class StorageEventV0 {
     nullable: true,
     ref: true,
   })
-  session?: Ref<StorageSession>;
+  storageSession?: Ref<StorageSession>;
+
+  /**
+   * The ids of the tool calls this event started and did not finish.
+   *
+   * `persist: false` keeps the accessor out of the table: the pair reads and
+   * writes {@link StorageEventV0.longRunningToolIdsJson}, which is the column.
+   */
+  @Property({persist: false})
+  get longRunningToolIds(): string[] {
+    return longRunningToolIdsOf(this) ?? [];
+  }
+
+  set longRunningToolIds(value: string[] | undefined) {
+    setLongRunningToolIds(this, value);
+  }
 
   [PrimaryKey.name]?: [string, string, string, string];
 }
@@ -244,6 +334,16 @@ function jsonColumn(
 }
 
 /**
+ * The session an event belongs to, as either side of storage names it.
+ *
+ * adk-python's `StorageEvent.from_event` takes the `Session`. A caller inside
+ * the write transaction already holds the {@link StorageSession} row instead,
+ * and handing that over also populates the relation. Both carry the three key
+ * columns a legacy row copies, which is all the row needs.
+ */
+export type EventSessionOwner = Session | StorageSession;
+
+/**
  * Builds a legacy row from an {@link Event}.
  *
  * The JSON columns hold the same snake_cased shape adk-python's
@@ -259,7 +359,7 @@ function jsonColumn(
  * @throws If the event's actions hold a value with no Python counterpart.
  */
 export function storageEventV0FromEvent(
-  session: Session,
+  session: EventSessionOwner,
   event: Event,
 ): StorageEventV0 {
   return updateStorageEventV0(new StorageEventV0(), session, event);
@@ -280,7 +380,7 @@ export function storageEventV0FromEvent(
  */
 export function updateStorageEventV0(
   row: StorageEventV0,
-  session: Session,
+  session: EventSessionOwner,
   event: Event,
 ): StorageEventV0 {
   const snakeCased = transformToSnakeCaseEvent(event);
@@ -289,11 +389,14 @@ export function updateStorageEventV0(
   row.appName = session.appName;
   row.userId = session.userId;
   row.sessionId = session.id;
+  if (session instanceof StorageSession) {
+    row.storageSession = ref(session);
+  }
   row.invocationId = event.invocationId;
   row.author = event.author ?? '';
   row.branch = event.branch;
   row.timestamp = new Date(event.timestamp);
-  row.actions = Buffer.from(dumpEventActions(event.actions));
+  row.actions = dumpEventActions(event.actions);
   row.partial = event.partial;
   row.turnComplete = event.turnComplete;
   row.errorCode = event.errorCode;

@@ -225,6 +225,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Session state and its scopes](sessions/state/index.md) - Session state and
   the app:, user: and temp: prefixes that decide what is shared and what is
   stored.
+- [The legacy v0 session schema](sessions/legacy_v0_schema/index.md) - Reading
+  and writing a sessions database that adk-python 1.19.0 to 1.21.0 created,
+  including the restricted decoder for its pickled event actions.
 - [User state and temp state](sessions/user_and_temp_state/index.md) - Reading
   `user:` state without a session id, and how `temp:` state stays readable for
   one invocation without reaching storage.
