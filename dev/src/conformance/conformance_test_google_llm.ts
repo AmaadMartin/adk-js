@@ -127,7 +127,9 @@ function pruneEmptyValues(value: unknown): unknown {
   }
   const result: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (entry === undefined || entry === null) {
+    // A live request spells an absent field `undefined`; a recording loaded
+    // from YAML spells the same field `null`.
+    if (entry == null) {
       continue;
     }
     const pruned = pruneEmptyValues(entry);
