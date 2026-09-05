@@ -118,12 +118,115 @@ describe('describeParameters', () => {
     expect(describeParameters(z4.string())).toEqual([]);
   });
 
-  it('leaves a parameter unvalidated when its schema has no Zod equivalent', () => {
-    // A recursive Zod v3 schema serializes to a `$ref` cycle, which has no
-    // finite inlining, so this field compiles to no validator.
-    const tree: z3.ZodType = z3.lazy(() => z3.object({child: tree.optional()}));
+  it('leaves a genai Schema parameter unvalidated when it has no Zod equivalent', () => {
+    // A pattern Zod cannot compile — the kind of thing that arrives on a tool
+    // declaration off the wire — leaves that one field unchecked.
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {tricky: {type: Type.STRING, pattern: '([unclosed'}},
+    };
 
-    expect(descriptorFor(z3.object({tree}), 'tree').validate).toBeUndefined();
+    expect(descriptorFor(schema, 'tricky').validate).toBeUndefined();
+  });
+
+  it('describes a genai Schema from its required list and validates its fields', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        city: {type: Type.STRING},
+        days: {type: Type.INTEGER},
+      },
+      required: ['city'],
+    };
+
+    const city = descriptorFor(schema, 'city');
+    const days = descriptorFor(schema, 'days');
+
+    expect(city).toMatchObject({required: true, expectsString: true});
+    expect(days).toMatchObject({required: false, expectsString: false});
+    expect(city.validate?.('Paris')).toBe('Paris');
+    expect(() => days.validate?.('not a number')).toThrow();
+  });
+
+  it('keeps a Zod field as its own validator, so coercion survives', () => {
+    // Rendering the field as JSON Schema and compiling it back would erase the
+    // coercion: `z.coerce.number()` round-trips to a bare `{type: 'number'}`.
+    const coerced = descriptorFor(z4.object({n: z4.coerce.number()}), 'n');
+    const coercedV3 = descriptorFor(z3.object({n: z3.coerce.number()}), 'n');
+
+    expect(coerced.validate?.('42')).toBe(42);
+    expect(coercedV3.validate?.('42')).toBe(42);
+  });
+
+  it('keeps a custom refinement, which JSON Schema cannot carry', () => {
+    const refined = descriptorFor(
+      z4.object({word: z4.string().refine((s) => s.length > 2)}),
+      'word',
+    );
+
+    expect(refined.validate?.('abc')).toBe('abc');
+    expect(() => refined.validate?.('a')).toThrow();
+  });
+
+  it.each([
+    {id: 'date', schema: z4.object({v: z4.date()})},
+    {id: 'instanceof', schema: z4.object({v: z4.instanceof(Date)})},
+    {
+      id: 'transform',
+      schema: z4.object({v: z4.string().transform((s) => s.length)}),
+    },
+  ])('describes a field JSON Schema cannot express ($id)', ({schema}) => {
+    // Rendering the whole object as JSON Schema throws for each of these, which
+    // used to abort node construction and lose every other parameter with it.
+    const descriptors = describeParameters(schema);
+
+    expect(descriptors.map((d) => d.name)).toEqual(['v']);
+    expect(descriptors[0]).toMatchObject({
+      required: true,
+      hasDefault: false,
+      expectsString: false,
+    });
+  });
+
+  it('validates a field JSON Schema cannot express', () => {
+    const when = new Date('2026-01-01T00:00:00Z');
+    const dated = descriptorFor(z4.object({v: z4.date()}), 'v');
+    const transformed = descriptorFor(
+      z4.object({v: z4.string().transform((s) => s.length)}),
+      'v',
+    );
+
+    expect(dated.validate?.(when)).toBe(when);
+    expect(() => dated.validate?.('not a date')).toThrow();
+    expect(transformed.validate?.('abcd')).toBe(4);
+  });
+
+  it('treats a field with an async refinement as required', () => {
+    // A synchronous probe of an async refinement throws. Reporting the field as
+    // required matches what binding a value to it would find.
+    const asyncField = z4
+      .string()
+      .optional()
+      .refine(async (v) => v !== 'no');
+
+    expect(descriptorFor(z4.object({v: asyncField}), 'v')).toMatchObject({
+      required: true,
+      hasDefault: false,
+    });
+  });
+
+  it('describes the other parameters of a schema holding an inexpressible field', () => {
+    const descriptors = describeParameters(
+      z4.object({
+        name: z4.string(),
+        when: z4.date(),
+        count: z4.number().default(3),
+      }),
+    );
+
+    expect(descriptors.map((d) => d.name)).toEqual(['name', 'when', 'count']);
+    expect(descriptors[0].expectsString).toBe(true);
+    expect(descriptors[2]).toMatchObject({hasDefault: true, defaultValue: 3});
   });
 });
 
