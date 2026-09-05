@@ -123,13 +123,15 @@ export function describeSchemaIssues(error: unknown): string[] {
   if (!Array.isArray(issues)) {
     return [String(error)];
   }
+  // Zod declares `path` and `message` on every issue in both major versions,
+  // and `parseWithSchema` throws nothing else carrying an `issues` array.
   const described = issues as ReadonlyArray<{
-    path?: ReadonlyArray<string | number>;
-    message?: string;
+    path: ReadonlyArray<string | number>;
+    message: string;
   }>;
   return described.map(({path, message}) => {
-    const location = path?.join('.') ?? '';
-    return location ? `${location}: ${message}` : `${message}`;
+    const location = path.join('.');
+    return location ? `${location}: ${message}` : message;
   });
 }
 
