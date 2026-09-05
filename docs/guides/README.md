@@ -8,6 +8,5 @@ implementation. For the official ADK documentation, visit
 
 ### Workflow
 
-- [BaseNode names, paths and serialization](workflow/base_node/index.md) - The
-  node name rule, resolving a node's position in the tree, and the flattening
-  applied to schema-validated data.
+- [BaseNode names and serialization](workflow/base_node/index.md) - The node
+  name rule and the flattening applied to schema-validated data.
