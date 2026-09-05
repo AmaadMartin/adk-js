@@ -10,6 +10,8 @@ import {
   BaseLlmConnection,
   BaseTool,
   Event,
+  Gemini,
+  GeminiParams,
   InMemoryArtifactService,
   InMemorySessionService,
   LiveRequestQueue,
@@ -148,6 +150,38 @@ class FakeLiveLlm extends BaseLlm {
     connection.sendDelayMs = this.sendDelayMs;
     this.connections.push(connection);
     return connection;
+  }
+}
+
+/**
+ * A Gemini whose live connections are scripted, so the reconnect path can be
+ * exercised against a real backend variant without a real connection.
+ */
+class FakeGeminiLive extends Gemini {
+  private readonly inner: FakeLiveLlm;
+
+  /** Runs on every connect, so a test can seed the live config. */
+  onConnect?: (llmRequest: LlmRequest) => void;
+
+  constructor(
+    params: GeminiParams,
+    responses: Array<Array<LlmResponse | Error>>,
+  ) {
+    super(params);
+    this.inner = new FakeLiveLlm(responses);
+  }
+
+  get llmRequestsSeen(): LlmRequest[] {
+    return this.inner.llmRequestsSeen;
+  }
+
+  get connections(): RecordingConnection[] {
+    return this.inner.connections;
+  }
+
+  override connect(llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    this.onConnect?.(llmRequest);
+    return this.inner.connect(llmRequest);
   }
 }
 
@@ -531,13 +565,101 @@ describe('Runner.runLive', () => {
     expect(
       llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption?.handle,
     ).toBe('handle-1');
+    // Transparent resumption is Vertex-only, so a non-Gemini model never
+    // requests it.
     expect(
       llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption?.transparent,
-    ).toBe(true);
+    ).toBeUndefined();
     // First connect had no resumption handle set.
     expect(
       llm.llmRequestsSeen[0].liveConnectConfig?.sessionResumption?.handle,
     ).toBeUndefined();
+  });
+
+  describe('transparent resumption on reconnect', () => {
+    /** Drops one connection, so the runner reconnects exactly once. */
+    const GO_AWAY_THEN_DONE: Array<Array<LlmResponse | Error>> = [
+      [
+        {liveSessionResumptionUpdate: {newHandle: 'handle-1'}},
+        {goAway: {timeLeft: '1s'}},
+      ],
+      [{turnComplete: true}],
+    ];
+
+    async function drainLiveRun(llm: FakeGeminiLive): Promise<void> {
+      const agent = new LlmAgent({name: 'agent', model: llm});
+      const runner = new Runner({
+        appName: TEST_APP_ID,
+        agent,
+        sessionService,
+        artifactService,
+      });
+      const queue = new LiveRequestQueue();
+      queue.close();
+      for await (const _ of runner.runLive({
+        userId: TEST_USER_ID,
+        sessionId: TEST_SESSION_ID,
+        liveRequestQueue: queue,
+      })) {
+        // drain
+      }
+    }
+
+    it('asks for it on the Vertex AI backend', async () => {
+      const llm = new FakeGeminiLive(
+        {
+          model: 'gemini-2.5-flash',
+          vertexai: true,
+          project: 'p',
+          location: 'us-central1',
+        },
+        GO_AWAY_THEN_DONE,
+      );
+
+      await drainLiveRun(llm);
+
+      expect(llm.connections.length).toBe(2);
+      expect(
+        llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption,
+      ).toEqual({handle: 'handle-1', transparent: true});
+    });
+
+    it('does not ask for it on the Gemini API backend', async () => {
+      const llm = new FakeGeminiLive(
+        {model: 'gemini-2.5-flash', apiKey: 'test-key'},
+        GO_AWAY_THEN_DONE,
+      );
+
+      await drainLiveRun(llm);
+
+      expect(llm.connections.length).toBe(2);
+      expect(
+        llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption,
+      ).toEqual({handle: 'handle-1'});
+    });
+
+    it('keeps a resumption config the caller already set', async () => {
+      const llm = new FakeGeminiLive(
+        {
+          model: 'gemini-2.5-flash',
+          vertexai: true,
+          project: 'p',
+          location: 'us-central1',
+        },
+        GO_AWAY_THEN_DONE,
+      );
+      llm.onConnect = (llmRequest) => {
+        llmRequest.liveConnectConfig.sessionResumption ??= {
+          transparent: false,
+        };
+      };
+
+      await drainLiveRun(llm);
+
+      expect(
+        llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption,
+      ).toEqual({handle: 'handle-1', transparent: false});
+    });
   });
 
   it('uses an externally provided session resumption handle on first connect', async () => {
