@@ -19,6 +19,14 @@ import {isGemini3xFlashLive} from '../utils/model_name.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
 import {LlmResponse} from './llm_response.js';
 
+/** Adds the live session id to a response once the id is known. */
+function withLiveSessionId(
+  response: LlmResponse,
+  liveSessionId: string | undefined,
+): LlmResponse {
+  return liveSessionId ? {...response, liveSessionId} : response;
+}
+
 /** The Gemini model connection. */
 export class GeminiLlmConnection implements BaseLlmConnection {
   constructor(
@@ -133,15 +141,15 @@ export class GeminiLlmConnection implements BaseLlmConnection {
   }
 
   /**
-   * Builds a full text response.
+   * Receives the model responses until the connection closes.
    *
-   * The text should not be partial and the returned LlmResponse is not be
-   * partial.
+   * `LiveResponseAggregator` maps each server message to the responses a
+   * caller consumes: it aggregates streamed text, flushes transcriptions,
+   * accumulates the grounding metadata of a turn, buffers tool calls and
+   * remaps live token usage. Every response carries the live session id once
+   * the server reports it in its setup acknowledgement.
    *
-   * @param text The text to be included in the response.
-   * @param isThought Whether the text is a thought.
-   * @param groundingMetadata The grounding metadata to include.
-   * @returns An LlmResponse containing the full text.
+   * @returns A generator of LlmResponse.
    */
   async *receive(): AsyncGenerator<LlmResponse, void, void> {
     if (!this.messageQueue) {
@@ -149,17 +157,19 @@ export class GeminiLlmConnection implements BaseLlmConnection {
     }
 
     const aggregator = new LiveResponseAggregator(this.modelVersion);
+    let liveSessionId: string | undefined;
 
     for await (const message of this.messageQueue) {
       logger.debug('Got LLM Live message:', message);
+      liveSessionId ??= message.setupComplete?.sessionId;
 
       for (const response of aggregator.processMessage(message)) {
-        yield response;
+        yield withLiveSessionId(response, liveSessionId);
       }
     }
 
     for (const response of aggregator.close()) {
-      yield response;
+      yield withLiveSessionId(response, liveSessionId);
     }
   }
 

@@ -109,6 +109,43 @@ export function isGemini3xFlashLive(modelString: string | undefined): boolean {
 }
 
 /**
+ * Check if the model is a Gemini 3.5 Live Translate model.
+ *
+ * @param modelString Either a simple model name or path-based model name
+ * @return true if it's a Gemini 3.5 Live Translate model, false otherwise.
+ */
+export function isGemini35LiveTranslate(
+  modelString: string | undefined,
+): boolean {
+  if (!modelString) {
+    return false;
+  }
+  return extractModelName(modelString).startsWith('gemini-3.5-live-translate');
+}
+
+/**
+ * Check if the model is a Gemini 3.x Live model.
+ *
+ * Live Translate models are excluded. They are Gemini 3.x live models, but they
+ * support a different feature set. Use {@link isGemini35LiveTranslate} for
+ * those.
+ *
+ * @param modelString Either a simple model name or path-based model name
+ * @return true if it's a Gemini 3.x Live model, false otherwise.
+ */
+export function isGemini3xLive(modelString: string | undefined): boolean {
+  if (!modelString) {
+    return false;
+  }
+  const modelName = extractModelName(modelString);
+  return (
+    modelName.startsWith('gemini-3.') &&
+    modelName.includes('-live') &&
+    !isGemini35LiveTranslate(modelString)
+  );
+}
+
+/**
  * Returns True when Gemini model-id validation should be bypassed.
  */
 export function isGeminiModelIdCheckDisabled(): boolean {

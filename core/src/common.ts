@@ -213,6 +213,7 @@ export type {BaseLlmConnection} from './models/base_llm_connection.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
+export {InteractionStatus} from './models/llm_response.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
@@ -346,7 +347,12 @@ export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
-export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
+export {
+  isGemini2OrAbove,
+  isGemini35LiveTranslate,
+  isGemini3xFlashLive,
+  isGemini3xLive,
+} from './utils/model_name.js';
 export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export {Task} from './utils/task.js';
