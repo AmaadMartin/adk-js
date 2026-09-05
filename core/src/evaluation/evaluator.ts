@@ -87,13 +87,10 @@ export function validateInvocationLengths(
   }
 }
 
-/** Returns the status of a score, which is absent when nothing was scored. */
-export function getEvalStatus(
-  score: number | undefined,
-  threshold: number,
-): EvalStatus {
-  if (score === undefined) {
-    return EvalStatus.NOT_EVALUATED;
-  }
+/**
+ * Returns the status of a score. A caller that scored nothing reports
+ * {@link EvalStatus.NOT_EVALUATED} itself, rather than asking here.
+ */
+export function getEvalStatus(score: number, threshold: number): EvalStatus {
   return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
 }
