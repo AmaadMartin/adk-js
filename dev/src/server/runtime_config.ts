@@ -7,8 +7,8 @@
 import {Logger} from '@google/adk';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import {isRecord} from '../utils/file_utils.js';
 import {readTelemetryConsent} from '../utils/telemetry_config.js';
+import {isRecord} from '../utils/type_utils.js';
 
 /** Location of the config file, relative to the dev UI's asset directory. */
 const RUNTIME_CONFIG_RELATIVE_PATH = [
@@ -21,10 +21,8 @@ const RUNTIME_CONFIG_RELATIVE_PATH = [
 export const LOGO_CONFIG_ERROR_MESSAGE =
   'Both --logo-text and --logo-image-url must be defined when using logo config.';
 
-/** Branding and routing the dev UI reads at boot. */
+/** Branding the dev UI reads at boot. */
 export interface RuntimeConfigOptions {
-  /** Path prefix the dev UI calls the backend under. Defaults to `''`. */
-  urlPrefix?: string;
   /** Text shown in the dev UI logo. Requires `logoImageUrl`. */
   logoText?: string;
   /** Image shown in the dev UI logo. Requires `logoText`. */
@@ -79,7 +77,9 @@ export function setupRuntimeConfig(
   const configPath = path.join(webAssetsDir, ...RUNTIME_CONFIG_RELATIVE_PATH);
   const config = readRuntimeConfig(configPath, logger);
 
-  config['backendUrl'] = options.urlPrefix ?? '';
+  // adk-python writes its `url_prefix` here. This server does not mount under
+  // a prefix, so the dev UI always calls it at the root.
+  config['backendUrl'] = '';
   config['telemetry'] = readTelemetryConsent(logger) ?? null;
 
   if (options.logoText || options.logoImageUrl) {

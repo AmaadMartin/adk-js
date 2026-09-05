@@ -14,11 +14,11 @@ import {NextFunction, Request, RequestHandler, Response} from 'express';
 export const DEFAULT_APP_NAME_ENV_VAR = 'ADK_DEFAULT_APP_NAME';
 
 /**
- * Path shapes that are rewritten under `/apps/<defaultAppName>`. Taken from
- * adk-python's `_DefaultAppRewriteMiddleware`. `/trigger/` has no route on
- * this server yet; it is kept so the two SDKs rewrite the same set.
+ * Path shapes that are rewritten under `/apps/<defaultAppName>`. These are the
+ * shapes adk-python's `_DefaultAppRewriteMiddleware` rewrites that this server
+ * also serves.
  */
-const REWRITTEN_PATH_PATTERNS = [/^\/users\//, /^\/app-info$/, /^\/trigger\//];
+const REWRITTEN_PATH_PATTERNS = [/^\/users\//, /^\/app-info$/];
 
 /**
  * Returns middleware that serves an app-name-less path as the default app's.

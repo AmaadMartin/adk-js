@@ -98,8 +98,8 @@ On the command line, separate several plugins with commas:
 $ adk api_server ./agents --extra_plugins ./plugins/audit.js#AuditPlugin,@acme/adk-metrics#MetricsPlugin
 ```
 
-The server loads the plugins once and shares them across every app it serves.
-A plugin that holds per-app state will therefore see every app.
+The server builds a plugin instance for each app it serves, so a plugin that
+holds per-app state stays scoped to one app.
 
 A specifier that cannot be imported, or that names something which is not a
 plugin, is reported at error level and skipped. The server still starts and the
@@ -107,14 +107,13 @@ other plugins still load.
 
 ## Serving one app without naming it
 
-Set `ADK_DEFAULT_APP_NAME` and the server serves three path shapes as if they
+Set `ADK_DEFAULT_APP_NAME` and the server serves two path shapes as if they
 began with `/apps/<name>`:
 
 | Client path             | Served as                             |
 | ----------------------- | ------------------------------------- |
 | `/users/u1/sessions/s1` | `/apps/my_agent/users/u1/sessions/s1` |
 | `/app-info`             | `/apps/my_agent/app-info`             |
-| `/trigger/...`          | `/apps/my_agent/trigger/...`          |
 
 ```console
 $ ADK_DEFAULT_APP_NAME=my_agent adk api_server ./agents

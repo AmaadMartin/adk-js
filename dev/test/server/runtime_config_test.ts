@@ -82,12 +82,6 @@ describe('setupRuntimeConfig', () => {
     expect(readWrittenConfig()['telemetry']).toBe(false);
   });
 
-  it('writes the configured backend URL prefix', () => {
-    setupRuntimeConfig(webAssetsDir, {urlPrefix: '/adk'}, logger);
-
-    expect(readWrittenConfig()['backendUrl']).toBe('/adk');
-  });
-
   it('ends the file with a newline and two-space indentation', () => {
     setupRuntimeConfig(webAssetsDir, {}, logger);
 

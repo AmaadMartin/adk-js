@@ -51,12 +51,6 @@ describe('defaultAppRewriteMiddleware', () => {
     );
   });
 
-  it('rewrites a trigger path', () => {
-    expect(rewrite('myAgent', '/trigger/pubsub').url).toBe(
-      '/apps/myAgent/trigger/pubsub',
-    );
-  });
-
   it('leaves a path that only starts like app-info alone', () => {
     expect(rewrite('myAgent', '/app-infos').url).toBe('/app-infos');
   });

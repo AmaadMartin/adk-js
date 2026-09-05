@@ -7,7 +7,7 @@
 import {BasePlugin, Logger} from '@google/adk';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {isRecord} from '../utils/file_utils.js';
+import {isRecord} from '../utils/type_utils.js';
 
 /** Export read from a module when the specifier names none. */
 const DEFAULT_EXPORT_NAME = 'default';
