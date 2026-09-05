@@ -159,3 +159,59 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
   }
   return recursiveConvert(mcpSchema);
 }
+
+/** The only `format` values the Gemini API accepts for a numeric type. */
+const GEMINI_NUMERIC_FORMATS = new Set(['int32', 'int64']);
+
+/** The only `format` values the Gemini API accepts for a string type. */
+const GEMINI_STRING_FORMATS = new Set(['date-time', 'enum']);
+
+function isFormatSupportedByGemini(
+  type: Type | undefined,
+  format: string,
+): boolean {
+  switch (type) {
+    case Type.INTEGER:
+    case Type.NUMBER:
+      return GEMINI_NUMERIC_FORMATS.has(format);
+    case Type.STRING:
+      return GEMINI_STRING_FORMATS.has(format);
+    default:
+      return false;
+  }
+}
+
+/**
+ * Returns a copy of `schema` with every `format` the Gemini API rejects
+ * removed, recursing through `properties`, `items` and `anyOf`.
+ *
+ * A Zod string validator renders as `format: 'email'`, `'uri'` or `'date'`,
+ * none of which the Gemini API accepts, so a declaration carrying one is
+ * refused. Mirrors adk-python
+ * `tools/_gemini_schema_util.py::_sanitize_schema_formats_for_gemini`.
+ *
+ * The argument is never mutated: callers share their schemas.
+ */
+export function sanitizeSchemaFormatsForGemini(schema: Schema): Schema {
+  const sanitized: Schema = {...schema};
+  if (schema.format && !isFormatSupportedByGemini(schema.type, schema.format)) {
+    delete sanitized.format;
+  }
+  if (schema.properties) {
+    sanitized.properties = Object.fromEntries(
+      Object.entries(schema.properties).map(([name, property]) => [
+        name,
+        sanitizeSchemaFormatsForGemini(property),
+      ]),
+    );
+  }
+  if (schema.items) {
+    sanitized.items = sanitizeSchemaFormatsForGemini(schema.items);
+  }
+  if (schema.anyOf) {
+    sanitized.anyOf = schema.anyOf.map((branch) =>
+      sanitizeSchemaFormatsForGemini(branch),
+    );
+  }
+  return sanitized;
+}

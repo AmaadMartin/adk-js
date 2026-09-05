@@ -62,18 +62,6 @@ export type ParallelWorkerFactory = (
 ) => BaseNode;
 
 /**
- * Returns whether a value is a plain object literal (a `RoutingMap`) rather than
- * a class instance such as a node/tool/agent.
- */
-export function isPlainObject(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-/**
  * Returns whether a value can be converted into a workflow node via
  * {@link buildNode}: the `'START'` sentinel, an existing {@link BaseNode}, or a
  * value matched by a registered {@link NodeBuilder}.

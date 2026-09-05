@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Type} from '@google/genai';
+import {Schema, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {toGeminiSchema} from '../../src/utils/gemini_schema_util.js';
+import {
+  sanitizeSchemaFormatsForGemini,
+  toGeminiSchema,
+} from '../../src/utils/gemini_schema_util.js';
 
 interface MCPToolSchema {
   type: 'object';
@@ -444,5 +447,97 @@ describe('toGeminiSchema', () => {
         {type: Type.STRING},
       ],
     });
+  });
+});
+
+describe('sanitizeSchemaFormatsForGemini', () => {
+  it('keeps int32 and int64 on a numeric type', () => {
+    const sanitized = sanitizeSchemaFormatsForGemini({
+      type: Type.OBJECT,
+      properties: {
+        count: {type: Type.INTEGER, format: 'int32'},
+        size: {type: Type.NUMBER, format: 'int64'},
+      },
+    });
+
+    expect(sanitized.properties!['count'].format).toBe('int32');
+    expect(sanitized.properties!['size'].format).toBe('int64');
+  });
+
+  it('drops any other format on a numeric type', () => {
+    const sanitized = sanitizeSchemaFormatsForGemini({
+      type: Type.INTEGER,
+      format: 'uint8',
+    });
+
+    expect(sanitized.format).toBeUndefined();
+    expect(sanitized.type).toBe(Type.INTEGER);
+  });
+
+  it('keeps date-time and enum on a string type', () => {
+    const sanitized = sanitizeSchemaFormatsForGemini({
+      type: Type.OBJECT,
+      properties: {
+        seenAt: {type: Type.STRING, format: 'date-time'},
+        kind: {type: Type.STRING, format: 'enum'},
+      },
+    });
+
+    expect(sanitized.properties!['seenAt'].format).toBe('date-time');
+    expect(sanitized.properties!['kind'].format).toBe('enum');
+  });
+
+  it('drops any other format on a string type', () => {
+    const sanitized = sanitizeSchemaFormatsForGemini({
+      type: Type.OBJECT,
+      properties: {
+        contact: {type: Type.STRING, format: 'email'},
+        home: {type: Type.STRING, format: 'uri'},
+        born: {type: Type.STRING, format: 'date'},
+      },
+    });
+
+    expect(sanitized.properties!['contact'].format).toBeUndefined();
+    expect(sanitized.properties!['home'].format).toBeUndefined();
+    expect(sanitized.properties!['born'].format).toBeUndefined();
+  });
+
+  it('drops a format carried by any other type', () => {
+    const sanitized = sanitizeSchemaFormatsForGemini({
+      type: Type.BOOLEAN,
+      format: 'int32',
+    });
+
+    expect(sanitized.format).toBeUndefined();
+  });
+
+  it('recurses through items and anyOf', () => {
+    const sanitized = sanitizeSchemaFormatsForGemini({
+      type: Type.ARRAY,
+      items: {
+        anyOf: [
+          {type: Type.STRING, format: 'email'},
+          {type: Type.STRING, format: 'date-time'},
+        ],
+      },
+    });
+
+    expect(sanitized.items!.anyOf![0].format).toBeUndefined();
+    expect(sanitized.items!.anyOf![1].format).toBe('date-time');
+  });
+
+  it('does not mutate the schema it is given', () => {
+    const schema: Schema = {
+      type: Type.OBJECT,
+      properties: {
+        contact: {type: Type.STRING, format: 'email'},
+        tags: {type: Type.ARRAY, items: {type: Type.STRING, format: 'uri'}},
+      },
+    };
+    const before = JSON.stringify(schema);
+
+    sanitizeSchemaFormatsForGemini(schema);
+
+    expect(JSON.stringify(schema)).toBe(before);
   });
 });

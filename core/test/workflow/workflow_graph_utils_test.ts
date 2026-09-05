@@ -13,24 +13,8 @@ import {ParallelWorker} from '../../src/workflow/nodes/parallel_worker.js';
 import {
   buildNode,
   isNodeLike,
-  isPlainObject,
 } from '../../src/workflow/utils/workflow_graph_utils.js';
 import {driveNode, FnNode} from './test_helpers.js';
-
-describe('isPlainObject', () => {
-  it('is true for object literals', () => {
-    expect(isPlainObject({})).toBe(true);
-    expect(isPlainObject({a: 1})).toBe(true);
-    expect(isPlainObject(Object.create(null))).toBe(true);
-  });
-
-  it('is false for arrays, null, primitives and class instances', () => {
-    expect(isPlainObject([])).toBe(false);
-    expect(isPlainObject(null)).toBe(false);
-    expect(isPlainObject('x')).toBe(false);
-    expect(isPlainObject(new FnNode('n', (_c, i) => i))).toBe(false);
-  });
-});
 
 describe('isNodeLike', () => {
   it('recognizes START and BaseNode instances', () => {

@@ -10,6 +10,7 @@
  * Ported from `google/adk-python` `workflow/utils/_graph_parser.py`.
  */
 
+import {isPlainObject} from '../../utils/object_utils.js';
 import {BaseNode} from '../base_node.js';
 import {
   ChainElement,
@@ -20,7 +21,7 @@ import {
   RouteValue,
   RoutingMap,
 } from '../graph.js';
-import {buildNode, isNodeLike, isPlainObject} from './workflow_graph_utils.js';
+import {buildNode, isNodeLike} from './workflow_graph_utils.js';
 
 /**
  * Normalizes a routing-map key back to its typed {@link RouteValue}. JS object

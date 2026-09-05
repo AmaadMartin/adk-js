@@ -18,6 +18,7 @@ import {
   createEvent,
   createSession,
   Event,
+  EventType,
   FunctionTool,
   InMemorySessionService,
   InvocationContext,
@@ -30,6 +31,7 @@ import {
   Runner,
   Session,
   ToolProcessLlmRequest,
+  toStructuredEvents,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
 import {
@@ -1427,5 +1429,166 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent set_model_response flow', () => {
+  const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
+
+  const personSchema = z4.object({
+    name: z4.string(),
+    nickname: z4.string().nullable(),
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** Answers with one scripted response per turn, then with plain text. */
+  class ScriptedLlm extends BaseLlm {
+    readonly requests: LlmRequest[] = [];
+
+    constructor(
+      model: string,
+      private readonly script: LlmResponse[],
+    ) {
+      super({model});
+    }
+
+    async *generateContentAsync(
+      request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.requests.push(request);
+      yield this.script[this.requests.length - 1] ?? {
+        content: {role: 'model', parts: [{text: 'done'}]},
+      };
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  function setModelResponseCall(args: Record<string, unknown>): LlmResponse {
+    return {
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'set_model_response', args}}],
+      },
+    };
+  }
+
+  async function runAgent(script: LlmResponse[]): Promise<{
+    events: Event[];
+    llm: ScriptedLlm;
+    session: Session;
+  }> {
+    const llm = new ScriptedLlm('gemini-1.5-pro', script);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: llm,
+      outputKey: 'person',
+      outputSchema: personSchema,
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+    });
+    const session = createSession({
+      id: 'sess_flow',
+      events: [],
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_flow',
+      session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+    return {events, llm, session};
+  }
+
+  it('promotes a validated call to the final model event', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const {events, llm} = await runAgent([
+      setModelResponseCall({name: 'Alice', nickname: null}),
+    ]);
+
+    const last = events[events.length - 1];
+    expect(last.content?.parts?.[0].text).toBe('{"name":"Alice"}');
+    // The promoted event ends the turn, so the model is not asked again.
+    expect(llm.requests).toHaveLength(1);
+  });
+
+  it('writes the validated value to outputKey', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const {events} = await runAgent([
+      setModelResponseCall({name: 'Alice', nickname: null}),
+    ]);
+
+    const written = events
+      .map((event) => event.actions.stateDelta['person'])
+      .filter((value) => value !== undefined);
+    expect(written[written.length - 1]).toEqual({name: 'Alice'});
+  });
+
+  it('publishes the validated value on the function response event', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const {events} = await runAgent([
+      setModelResponseCall({name: 'Alice', nickname: 'Al'}),
+    ]);
+
+    const published = events.find(
+      (event) => event.actions.setModelResponse !== undefined,
+    );
+    expect(published?.actions.setModelResponse).toEqual({
+      name: 'Alice',
+      nickname: 'Al',
+    });
+  });
+
+  it('reports the turn as finished exactly once', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const {events} = await runAgent([
+      setModelResponseCall({name: 'Alice', nickname: null}),
+    ]);
+
+    // Marking the function response final as well would finish the turn twice.
+    const finished = events
+      .flatMap((event) => toStructuredEvents(event))
+      .filter((structured) => structured.type === EventType.FINISHED);
+    expect(finished).toHaveLength(1);
+  });
+
+  it('gives the model another turn when the call fails validation', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const {events, llm} = await runAgent([
+      setModelResponseCall({name: 42, nickname: null}),
+    ]);
+
+    const functionResponse = events
+      .flatMap((event) => event.content?.parts ?? [])
+      .find((part) => part.functionResponse?.name === 'set_model_response');
+    const response = functionResponse?.functionResponse?.response as
+      | {error?: string}
+      | undefined;
+    expect(response?.error).toContain('Validation Error found');
+    expect(events.every((event) => !event.actions.setModelResponse)).toBe(true);
+    // The turn continues, so the model is called again with the error.
+    expect(llm.requests).toHaveLength(2);
   });
 });
