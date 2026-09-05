@@ -1,0 +1,5 @@
+bigquery_agent_analytics:
+  project_id: fixture-project
+  dataset_id: fixture_dataset
+  table_id: fixture_events
+  dataset_location: US
