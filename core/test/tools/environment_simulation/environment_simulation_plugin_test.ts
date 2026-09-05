@@ -19,10 +19,16 @@
 import {
   BaseTool,
   Context,
+  createSession,
   EnvironmentSimulationPlugin,
+  FunctionTool,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   ToolCallSimulator,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {z} from 'zod';
 
 interface RecordedCall {
   tool: BaseTool;
@@ -45,14 +51,32 @@ class RecordingSimulator implements ToolCallSimulator {
   }
 }
 
+const weatherTool = new FunctionTool({
+  name: 'get_weather',
+  description: 'Returns the weather of a city.',
+  parameters: z.object({city: z.string()}),
+  execute: async ({city}) => ({city, conditions: 'real'}),
+});
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv_environment_simulation',
+      session: createSession({id: 'session-1', appName: 'demo'}),
+      agent: new LlmAgent({name: 'weather_agent', model: 'test_model'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
+
 describe('EnvironmentSimulationPlugin', () => {
   it('test_before_tool_callback', async () => {
     const simulated = {temperature: 21};
     const simulator = new RecordingSimulator(simulated);
     const plugin = new EnvironmentSimulationPlugin(simulator);
-    const tool = {name: 'get_weather'} as BaseTool;
+    const tool = weatherTool;
     const toolArgs = {};
-    const toolContext = {agentName: 'weather_agent'} as unknown as Context;
+    const toolContext = createToolContext();
 
     const result = await plugin.beforeToolCallback({
       tool,

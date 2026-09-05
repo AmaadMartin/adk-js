@@ -11,8 +11,8 @@
 
 import {
   BasePlugin,
-  BaseTool,
   Context,
+  createSession,
   EnvironmentSimulationPlugin,
   FeatureName,
   functionsExportedForTestingOnly,
@@ -22,10 +22,9 @@ import {
   LlmAgent,
   overrideFeatureEnabled,
   PluginManager,
-  Session,
   ToolCallSimulator,
 } from '@google/adk';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {z} from 'zod';
 
 const {handleFunctionCallList} = functionsExportedForTestingOnly;
@@ -57,10 +56,36 @@ class AlwaysAnsweringPlugin extends BasePlugin {
   }
 }
 
-const tool = {name: 'get_weather'} as BaseTool;
-const toolContext = {agentName: 'weather_agent'} as unknown as Context;
+let weatherToolRuns = 0;
+
+const weatherTool = new FunctionTool({
+  name: 'get_weather',
+  description: 'Returns the weather of a city.',
+  parameters: z.object({city: z.string()}),
+  execute: async ({city}) => {
+    weatherToolRuns++;
+    return {city, conditions: 'real'};
+  },
+});
+
+function createInvocationContext(plugins: BasePlugin[]): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'inv_environment_simulation',
+    session: createSession({id: 'session-1', appName: 'demo'}),
+    agent: new LlmAgent({name: 'weather_agent', model: 'test_model'}),
+    pluginManager: new PluginManager(plugins),
+  });
+}
+
+function createToolContext(): Context {
+  return new Context({invocationContext: createInvocationContext([])});
+}
 
 describe('EnvironmentSimulationPlugin own', () => {
+  beforeEach(() => {
+    weatherToolRuns = 0;
+  });
+
   afterEach(() => {
     overrideFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION, undefined);
   });
@@ -77,9 +102,9 @@ describe('EnvironmentSimulationPlugin own', () => {
     );
 
     const result = await plugin.beforeToolCallback({
-      tool,
+      tool: weatherTool,
       toolArgs: {city: 'Paris'},
-      toolContext,
+      toolContext: createToolContext(),
     });
 
     expect(result).toBeUndefined();
@@ -89,7 +114,11 @@ describe('EnvironmentSimulationPlugin own', () => {
     const plugin = new EnvironmentSimulationPlugin(new RejectingSimulator());
 
     await expect(
-      plugin.beforeToolCallback({tool, toolArgs: {}, toolContext}),
+      plugin.beforeToolCallback({
+        tool: weatherTool,
+        toolArgs: {city: 'Paris'},
+        toolContext: createToolContext(),
+      }),
     ).rejects.toThrow('simulator unavailable');
   });
 
@@ -106,15 +135,8 @@ describe('EnvironmentSimulationPlugin own', () => {
   });
 
   it('short circuits the plugin chain only when the simulator answers', async () => {
-    const realTool = new FunctionTool({
-      name: 'get_weather',
-      description: 'Returns the weather of a city.',
-      parameters: z.object({city: z.string()}),
-      execute: async ({city}) => ({city, conditions: 'real'}),
-    });
     const fallback = {conditions: 'fallback'};
     const simulated = {conditions: 'simulated'};
-
     const answering = new PluginManager([
       new EnvironmentSimulationPlugin(new FixedSimulator(simulated)),
       new AlwaysAnsweringPlugin(fallback),
@@ -123,38 +145,27 @@ describe('EnvironmentSimulationPlugin own', () => {
       new EnvironmentSimulationPlugin(new FixedSimulator(undefined)),
       new AlwaysAnsweringPlugin(fallback),
     ]);
-    const params = {tool: realTool, toolArgs: {city: 'Paris'}, toolContext};
+    const params = {
+      tool: weatherTool,
+      toolArgs: {city: 'Paris'},
+      toolContext: createToolContext(),
+    };
 
     expect(await answering.runBeforeToolCallback(params)).toBe(simulated);
     expect(await declining.runBeforeToolCallback(params)).toBe(fallback);
   });
 
   it('answers a function call without running the real tool', async () => {
-    let realToolRuns = 0;
-    const realTool = new FunctionTool({
-      name: 'get_weather',
-      description: 'Returns the weather of a city.',
-      parameters: z.object({city: z.string()}),
-      execute: async ({city}) => {
-        realToolRuns++;
-        return {city, conditions: 'real'};
-      },
-    });
-    const invocationContext = new InvocationContext({
-      invocationId: 'inv_environment_simulation',
-      session: {} as Session,
-      agent: new LlmAgent({name: 'weather_agent', model: 'test_model'}),
-      pluginManager: new PluginManager([
-        new EnvironmentSimulationPlugin(
-          new FixedSimulator({city: 'Paris', conditions: 'simulated'}),
-        ),
-      ]),
-    });
+    const invocationContext = createInvocationContext([
+      new EnvironmentSimulationPlugin(
+        new FixedSimulator({city: 'Paris', conditions: 'simulated'}),
+      ),
+    ]);
 
     const event = await handleFunctionCallList({
       invocationContext,
       functionCalls: [{id: 'fc-1', name: 'get_weather', args: {city: 'Paris'}}],
-      toolsDict: {'get_weather': realTool},
+      toolsDict: {'get_weather': weatherTool},
       beforeToolCallbacks: [],
       afterToolCallbacks: [],
     });
@@ -163,6 +174,26 @@ describe('EnvironmentSimulationPlugin own', () => {
       city: 'Paris',
       conditions: 'simulated',
     });
-    expect(realToolRuns).toBe(0);
+    expect(weatherToolRuns).toBe(0);
+  });
+
+  it('runs the real tool when the simulator declines the function call', async () => {
+    const invocationContext = createInvocationContext([
+      new EnvironmentSimulationPlugin(new FixedSimulator(undefined)),
+    ]);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [{id: 'fc-1', name: 'get_weather', args: {city: 'Paris'}}],
+      toolsDict: {'get_weather': weatherTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      city: 'Paris',
+      conditions: 'real',
+    });
+    expect(weatherToolRuns).toBe(1);
   });
 });
