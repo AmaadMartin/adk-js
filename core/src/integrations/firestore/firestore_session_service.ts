@@ -11,7 +11,6 @@ import type {
   FieldValue,
   Firestore,
   Query,
-  Settings,
   Timestamp,
   Transaction,
 } from '@google-cloud/firestore';
@@ -28,6 +27,7 @@ import {
   AppendEventRequest,
   applyTempState,
   BaseSessionService,
+  compareSessions,
   CreateSessionRequest,
   DeleteSessionRequest,
   extractStateDelta,
@@ -36,13 +36,13 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
+  paginateSessions,
   ScopedStateDelta,
   trimTempDeltaState,
   validateGetSessionConfig,
 } from '../../sessions/base_session_service.js';
 import {createSession, Session} from '../../sessions/session.js';
 import {makeJsonSafeState} from '../../sessions/session_util.js';
-import {State} from '../../sessions/state.js';
 import {randomUUID} from '../../utils/env_aware_utils.js';
 import {formatError} from '../../utils/error_utils.js';
 import {toJsonObject} from '../../utils/json_utils.js';
@@ -81,8 +81,6 @@ const ROOT_COLLECTION_ENV_VAR = 'ADK_FIRESTORE_ROOT_COLLECTION';
 export interface FirestoreSessionServiceOptions {
   /** A pre-configured client. One is created on first use when omitted. */
   client?: Firestore;
-  /** Settings for the client this service creates. Ignored when `client` is set. */
-  settings?: Settings;
   /**
    * The root collection sessions are stored under. Defaults to the
    * `ADK_FIRESTORE_ROOT_COLLECTION` environment variable, then to
@@ -156,16 +154,7 @@ function sessionScopedState(
   session: Session,
   delta: Record<string, unknown>,
 ): Record<string, unknown> {
-  const scoped: Record<string, unknown> = Object.create(null);
-  for (const [key, value] of Object.entries(session.state)) {
-    if (
-      !key.startsWith(State.APP_PREFIX) &&
-      !key.startsWith(State.USER_PREFIX) &&
-      !key.startsWith(State.TEMP_PREFIX)
-    ) {
-      scoped[key] = value;
-    }
-  }
+  const scoped = extractStateDelta(session.state).session;
   Object.assign(scoped, delta);
   return makeJsonSafeState(scoped);
 }
@@ -212,52 +201,6 @@ async function readEvents(query: Query): Promise<Event[]> {
   return events;
 }
 
-/** Orders listed sessions by update time, then user id, then session id. */
-function compareSessions(
-  order: ListSessionsRequest['order'],
-): (a: Session, b: Session) => number {
-  const direction = order === 'desc' ? -1 : 1;
-  return (a, b) =>
-    direction * (a.lastUpdateTime - b.lastUpdateTime) ||
-    a.userId.localeCompare(b.userId) ||
-    a.id.localeCompare(b.id);
-}
-
-/**
- * Slices a sorted session list into the page the request asked for.
- *
- * Matches `InMemorySessionService`: with no `limit` the whole list comes back
- * as one page, and `page` takes precedence over `offset`.
- */
-function paginate(
-  all: Session[],
-  {limit, offset, page}: ListSessionsRequest,
-): ListSessionsResponse {
-  const totalItems = all.length;
-  if (limit === undefined) {
-    return {
-      sessions: offset ? all.slice(offset) : all,
-      page: 1,
-      limit: totalItems,
-      totalItems,
-      totalPages: totalItems === 0 ? 0 : 1,
-    };
-  }
-
-  const effectiveOffset =
-    page !== undefined ? (page - 1) * limit : (offset ?? 0);
-  const effectivePage =
-    page ?? (limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1);
-
-  return {
-    sessions: all.slice(effectiveOffset, effectiveOffset + limit),
-    page: effectivePage,
-    limit,
-    totalItems,
-    totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
-  };
-}
-
 /**
  * A session service backed by Google Cloud Firestore.
  *
@@ -280,14 +223,12 @@ export class FirestoreSessionService extends BaseSessionService {
   readonly rootCollection: string;
 
   private readonly injectedClient?: Firestore;
-  private readonly settings?: Settings;
   private readonly sessionLocks = new KeyedMutex();
   private runtimePromise?: Promise<FirestoreRuntime>;
 
   constructor(options: FirestoreSessionServiceOptions = {}) {
     super();
     this.injectedClient = options.client;
-    this.settings = options.settings;
     this.rootCollection =
       options.rootCollection ??
       process.env[ROOT_COLLECTION_ENV_VAR] ??
@@ -310,7 +251,7 @@ export class FirestoreSessionService extends BaseSessionService {
       },
       () => import('@google-cloud/firestore'),
     ).then((ns) => ({
-      client: this.injectedClient ?? new ns.Firestore(this.settings),
+      client: this.injectedClient ?? new ns.Firestore(),
       FieldValue: ns.FieldValue,
       Timestamp: ns.Timestamp,
     }));
@@ -491,7 +432,7 @@ export class FirestoreSessionService extends BaseSessionService {
     });
     all.sort(compareSessions(order));
 
-    return paginate(all, request);
+    return paginateSessions(all, request);
   }
 
   /**

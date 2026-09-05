@@ -100,8 +100,8 @@ class FakeFirestoreStore {
   readonly getAllPaths: string[][] = [];
   readonly deletedPaths: string[] = [];
   readonly batchDeletedPaths: string[] = [];
-  /** The settings each client was constructed with, newest last. */
-  readonly clientSettings: unknown[] = [];
+  /** How many clients the service has constructed. */
+  clientCount = 0;
   batchCount = 0;
   batchCommitCount = 0;
   /** Rejects the next `runTransaction` call with this error when set. */
@@ -117,7 +117,7 @@ class FakeFirestoreStore {
     this.getAllPaths.length = 0;
     this.deletedPaths.length = 0;
     this.batchDeletedPaths.length = 0;
-    this.clientSettings.length = 0;
+    this.clientCount = 0;
     this.batchCount = 0;
     this.batchCommitCount = 0;
     this.transactionFailure = undefined;
@@ -402,8 +402,8 @@ class FakeWriteBatch {
 
 /** The `Firestore` stand-in the mocked module exports. */
 export class FakeFirestore {
-  constructor(settings?: unknown) {
-    fakeFirestore.clientSettings.push(settings);
+  constructor() {
+    fakeFirestore.clientCount += 1;
   }
 
   collection(collectionId: string): FakeCollectionReference {

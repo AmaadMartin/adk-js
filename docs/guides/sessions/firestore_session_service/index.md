@@ -79,9 +79,6 @@ const service = new FirestoreSessionService({
 });
 ```
 
-`settings` is the alternative when you only want to configure the client the
-service builds. It is ignored when you pass `client`.
-
 ## Document layout
 
 ```text
