@@ -7,6 +7,7 @@
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type {RequestOptions} from '@modelcontextprotocol/sdk/shared/protocol.js';
 
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
@@ -24,9 +25,30 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
+const MS_PER_SECOND = 1000;
+
+/** Whether a streamable HTTP session terminates its server session on close. */
+const DEFAULT_TERMINATE_ON_CLOSE = true;
+
+/**
+ * Tears a server-side session down before its client is closed. Only a
+ * streamable HTTP session has one; a stdio session has nothing to release.
+ */
+type SessionTerminator = () => Promise<void>;
+
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
+}
+
+/**
+ * Builds the SDK request options for the `initialize` handshake. Returns
+ * `undefined` when no timeout was configured, so the SDK's own default stands.
+ */
+function connectOptions(timeoutSeconds?: number): RequestOptions | undefined {
+  return timeoutSeconds === undefined
+    ? undefined
+    : {timeout: timeoutSeconds * MS_PER_SECOND};
 }
 
 /**
@@ -37,6 +59,10 @@ function logTransportError(err: unknown): void {
 export interface StdioConnectionParams {
   type: 'StdioConnectionParams';
   serverParams: StdioServerParameters;
+  /**
+   * Seconds to wait for the MCP server to complete the `initialize` handshake.
+   * When unset, the MCP SDK's own 60s request timeout applies.
+   */
   timeout?: number;
 }
 
@@ -59,8 +85,24 @@ export interface StreamableHTTPConnectionParams {
    * This field will be ignored if transportOptions is provided even if no headers are specified in transportOptions.
    */
   header?: Record<string, unknown>;
+  /**
+   * Seconds to wait for the MCP server to complete the `initialize` handshake.
+   * When unset, the MCP SDK's own 60s request timeout applies.
+   */
   timeout?: number;
+  /**
+   * Seconds to wait between reads on the Server-Sent Events (SSE) stream.
+   *
+   * Not currently applied: `StreamableHTTPClientTransportOptions` in the MCP
+   * TypeScript SDK exposes no read-idle timeout to forward it to. The field is
+   * kept for source compatibility, and for parity with the Python SDK, which
+   * forwards it as the httpx read timeout.
+   */
   sseReadTimeout?: number;
+  /**
+   * Whether closing this session also sends the MCP `DELETE` that terminates
+   * the server-side session. Defaults to `true`.
+   */
   terminateOnClose?: boolean;
   transportOptions?: StreamableHTTPClientTransportOptions;
 }
@@ -87,7 +129,14 @@ export type MCPConnectionParams =
  */
 export class MCPSessionManager {
   private readonly connectionParams: MCPConnectionParams;
-  private readonly activeSessions = new Set<Client>();
+  /**
+   * Live sessions, each mapped to the teardown that must run before its client
+   * is closed. A stdio session maps to `undefined`.
+   */
+  private readonly activeSessions = new Map<
+    Client,
+    SessionTerminator | undefined
+  >();
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
@@ -99,6 +148,7 @@ export class MCPSessionManager {
       () => import('@modelcontextprotocol/sdk/client/index.js'),
     );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
+    let terminate: SessionTerminator | undefined;
 
     try {
       switch (this.connectionParams.type) {
@@ -111,7 +161,10 @@ export class MCPSessionManager {
             this.connectionParams.serverParams,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport);
+          await client.connect(
+            transport,
+            connectOptions(this.connectionParams.timeout),
+          );
           break;
         }
         case 'StreamableHTTPConnectionParams': {
@@ -135,7 +188,16 @@ export class MCPSessionManager {
             options,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport);
+          await client.connect(
+            transport,
+            connectOptions(this.connectionParams.timeout),
+          );
+          if (
+            this.connectionParams.terminateOnClose ??
+            DEFAULT_TERMINATE_ON_CLOSE
+          ) {
+            terminate = () => transport.terminateSession();
+          }
           break;
         }
         default: {
@@ -150,18 +212,32 @@ export class MCPSessionManager {
       });
     }
 
-    this.activeSessions.add(client);
+    this.activeSessions.set(client, terminate);
     return client;
   }
 
   async closeSession(client: Client): Promise<void> {
-    if (this.activeSessions.has(client)) {
-      this.activeSessions.delete(client);
-      await client.close();
+    if (!this.activeSessions.has(client)) {
+      return;
     }
+    const terminate = this.activeSessions.get(client);
+    this.activeSessions.delete(client);
+
+    if (terminate) {
+      // The DELETE is sent on the transport's abort signal, which
+      // `client.close()` aborts, so it has to go first. A server that refuses
+      // it must not mask the caller's own result: `closeSession` runs from a
+      // `finally` block on every read path.
+      try {
+        await terminate();
+      } catch (err) {
+        logger.warn('Failed to terminate MCP session: ' + formatError(err));
+      }
+    }
+    await client.close();
   }
 
   getActiveSessions(): Client[] {
-    return Array.from(this.activeSessions);
+    return Array.from(this.activeSessions.keys());
   }
 }
