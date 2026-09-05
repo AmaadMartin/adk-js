@@ -10,10 +10,9 @@ import {carryDeltaStamp} from '../../sessions/state_write_order.js';
 import {SchemaLike} from '../../utils/schema.js';
 import {BaseNode, BaseNodeConfig, isContent, toContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
-import {isRequestInput, RequestInput} from '../request_input.js';
+import {RequestInput} from '../request_input.js';
 import {
   createAuthRequestEvent,
-  createRequestInputEvent,
   hasAuthCredential,
   processAuthResume,
 } from '../utils/hitl_utils.js';
@@ -308,16 +307,6 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
   }
 
   protected override toEvent(ctx: NodeContext, data: unknown): Event | null {
-    // Checked before the state delta is drained: draining marks those keys as
-    // attached, so an early return after it would lose them. `BaseNode.run`
-    // already converts a yielded RequestInput, so this only catches one handed
-    // to `toEvent` directly. Python's `_to_event` returns the RequestInput
-    // itself; here the override's return type is `Event | null`, so it returns
-    // the interrupt event `run` would have produced.
-    if (isRequestInput(data)) {
-      return createRequestInputEvent(data);
-    }
-
     const stateDelta = this.pendingStateDelta(ctx);
 
     if (data === null || data === undefined) {
