@@ -201,11 +201,13 @@ describe('SkillToolset against a real LocalEnvironment', () => {
   afterEach(async () => {
     // A killed command can still hold the directory on Windows, which is why
     // the removal retries rather than failing the test that just passed.
+    // A killed command can still hold the directory on Windows until it exits,
+    // so the removal retries rather than failing the test that just passed.
     await fs.rm(workspace, {
       recursive: true,
       force: true,
-      maxRetries: 5,
-      retryDelay: 100,
+      maxRetries: 20,
+      retryDelay: 250,
     });
   });
 
@@ -302,7 +304,7 @@ describe('SkillToolset against a real LocalEnvironment', () => {
       args: {
         skill_name: 'skill1',
         script_path: 'run.js',
-        command: `"${process.execPath}" -e "setTimeout(() => {}, 5000)"`,
+        command: `"${process.execPath}" -e "setTimeout(() => {}, 1500)"`,
       },
       toolContext: createConfirmedContext(),
     })) as {timed_out: boolean};

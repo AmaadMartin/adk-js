@@ -95,8 +95,8 @@ describe('SkillToolset driven by a Runner', () => {
     await fs.rm(workspace, {
       recursive: true,
       force: true,
-      maxRetries: 5,
-      retryDelay: 100,
+      maxRetries: 20,
+      retryDelay: 250,
     });
   });
 
