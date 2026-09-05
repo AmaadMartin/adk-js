@@ -14,7 +14,6 @@ import {
   BigQueryCredentialsConfig,
   DEFAULT_BIGQUERY_SCOPES,
 } from '@google/adk';
-import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 import {BigQueryCredentialsManager} from '../../../src/tools/bigquery/bigquery_credentials.js';
 import {createToolContext} from './bigquery_test_utils.js';
@@ -40,8 +39,7 @@ function requestedScopes(scheme: AuthScheme): string[] {
   if (scheme.type !== 'oauth2') {
     return expect.fail(`expected an oauth2 scheme, got ${scheme.type}`);
   }
-  const flows = (scheme as OpenAPIV3.OAuth2SecurityScheme).flows;
-  return Object.keys(flows.authorizationCode?.scopes ?? {});
+  return Object.keys(scheme.flows.authorizationCode?.scopes ?? {});
 }
 
 /**

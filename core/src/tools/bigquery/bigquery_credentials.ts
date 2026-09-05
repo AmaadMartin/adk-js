@@ -102,6 +102,13 @@ function toBigQueryCredentials(
   return {clientId, clientSecret, refreshToken};
 }
 
+/** What the interactive authorization flow needs to ask for a credential. */
+interface BigQueryOAuthFlow {
+  authScheme: AuthScheme;
+  clientId: string;
+  clientSecret: string;
+}
+
 /**
  * Resolves the OAuth credential the BigQuery tools run with, and drives the
  * interactive authorization flow when no usable credential exists yet.
@@ -111,10 +118,10 @@ function toBigQueryCredentials(
  * authorization. That is where adk-python caches it too.
  */
 export class BigQueryCredentialsManager {
-  private readonly authScheme: AuthScheme;
+  /** Set when the caller supplied a credential; then no flow ever runs. */
   private readonly configuredCredentials?: BigQueryCredentials;
-  private readonly clientId: string;
-  private readonly clientSecret: string;
+  /** Set when the caller supplied a client pair; then the flow runs. */
+  private readonly flow?: BigQueryOAuthFlow;
 
   /**
    * @param config The credential the tools authenticate with.
@@ -135,9 +142,6 @@ export class BigQueryCredentialsManager {
         config.credentials,
         'BigQueryCredentialsConfig.credentials',
       );
-      this.clientId = this.configuredCredentials.clientId;
-      this.clientSecret = this.configuredCredentials.clientSecret;
-      this.authScheme = buildAuthScheme(DEFAULT_BIGQUERY_SCOPES);
       return;
     }
 
@@ -147,9 +151,11 @@ export class BigQueryCredentialsManager {
           'clientId and clientSecret pair.',
       );
     }
-    this.clientId = config.clientId;
-    this.clientSecret = config.clientSecret;
-    this.authScheme = buildAuthScheme(config.scopes ?? DEFAULT_BIGQUERY_SCOPES);
+    this.flow = {
+      authScheme: buildAuthScheme(config.scopes ?? DEFAULT_BIGQUERY_SCOPES),
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+    };
   }
 
   /**
@@ -170,15 +176,16 @@ export class BigQueryCredentialsManager {
       return cached;
     }
 
-    if (this.configuredCredentials) {
+    const flow = this.flow;
+    if (!flow) {
       return this.configuredCredentials;
     }
 
     const authConfig: AuthConfig = {
-      authScheme: this.authScheme,
+      authScheme: flow.authScheme,
       rawAuthCredential: {
         authType: AuthCredentialTypes.OAUTH2,
-        oauth2: {clientId: this.clientId, clientSecret: this.clientSecret},
+        oauth2: {clientId: flow.clientId, clientSecret: flow.clientSecret},
       },
       credentialKey: BIGQUERY_CREDENTIAL_KEY,
     };
@@ -191,8 +198,8 @@ export class BigQueryCredentialsManager {
 
     const credentials = toBigQueryCredentials(
       {
-        clientId: this.clientId,
-        clientSecret: this.clientSecret,
+        clientId: flow.clientId,
+        clientSecret: flow.clientSecret,
         refreshToken: authResponse.oauth2.refreshToken,
       },
       'The BigQuery authorization response',

@@ -103,27 +103,36 @@ export class BigQueryTool<
       description: options.description,
       parameters: options.parameters,
       execute: async (input, toolContext) => {
-        if (!credentialsManager) {
-          return execute(input, undefined, toolContext);
+        // Catching here rather than only in `runAsync` keeps the raw error:
+        // `FunctionTool.runAsync` rethrows a new Error carrying neither the
+        // `cause` nor the HTTP status, which `formatError` needs to report
+        // "(HTTP 403)" alongside the message.
+        try {
+          if (!credentialsManager) {
+            return await execute(input, undefined, toolContext);
+          }
+          if (!toolContext) {
+            throw new Error(`Tool '${name}' requires a tool context.`);
+          }
+          const credentials =
+            await credentialsManager.getValidCredentials(toolContext);
+          if (!credentials) {
+            return (
+              'User authorization is required to access Google services for ' +
+              `${name}. Please complete the authorization flow.`
+            );
+          }
+          return await execute(input, credentials, toolContext);
+        } catch (err: unknown) {
+          return toBigQueryToolError(err);
         }
-        if (!toolContext) {
-          throw new Error(`Tool '${name}' requires a tool context.`);
-        }
-        const credentials =
-          await credentialsManager.getValidCredentials(toolContext);
-        if (!credentials) {
-          return (
-            'User authorization is required to access Google services for ' +
-            `${name}. Please complete the authorization flow.`
-          );
-        }
-        return execute(input, credentials, toolContext);
       },
     });
   }
 
   /**
-   * Runs the tool, reporting any failure as a {@link BigQueryToolError}.
+   * Runs the tool, reporting a failure the `execute` adapter did not see — an
+   * argument that does not match the schema — as a {@link BigQueryToolError}.
    *
    * @param req The model-supplied arguments and the tool context.
    * @return The tool's result, or the error payload.

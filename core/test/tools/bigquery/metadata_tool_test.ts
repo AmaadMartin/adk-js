@@ -161,12 +161,11 @@ describe('BigQuery metadata tools', () => {
       run: () =>
         getTableInfo({project_id: 'p', dataset_id: 'd', table_id: 't'}),
     },
-  ])('reports a failing $name as an error payload', async ({run}) => {
+  ])('propagates a failing $name to its BigQueryTool', async ({run}) => {
+    // The tool wrapper turns the throw into the model-facing error payload;
+    // see core/test/tools/bigquery/bigquery_tool_test.ts.
     fake.failure = new Error('Access Denied: Project p');
 
-    await expect(run()).resolves.toEqual({
-      status: 'ERROR',
-      error_details: 'Access Denied: Project p',
-    });
+    await expect(run()).rejects.toThrow('Access Denied: Project p');
   });
 });
