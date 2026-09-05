@@ -741,6 +741,16 @@ describe('AgentLoader', () => {
   });
 
   describe('AgentLoader', () => {
+    const writeDirFile = async (
+      dirName: string,
+      fileName: string,
+      content: string,
+    ) => {
+      const dir = path.join(tempAgentsDir, dirName);
+      await fs.mkdir(dir, {recursive: true});
+      await fs.writeFile(path.join(dir, fileName), content);
+    };
+
     beforeEach(async () => {
       (fileUtils.createTempDir as Mock).mockImplementation(async () => {
         await fs.mkdir(tempLoaderDir, {recursive: true});
@@ -981,16 +991,6 @@ describe('AgentLoader', () => {
      * (b) of its AgentLoader.
      */
     describe('directory whose entrypoint is index', () => {
-      const writeDirFile = async (
-        dirName: string,
-        fileName: string,
-        content: string,
-      ) => {
-        const dir = path.join(tempAgentsDir, dirName);
-        await fs.mkdir(dir, {recursive: true});
-        await fs.writeFile(path.join(dir, fileName), content);
-      };
-
       it('discovers the directory as an agent', async () => {
         await writeDirFile(
           'pkg_agent',
@@ -1120,6 +1120,103 @@ describe('AgentLoader', () => {
           await loader.disposeAll();
           await fs.rm(nodeModulesIndex, {force: true});
         }
+      });
+    });
+
+    /**
+     * A directory can hold a helper module that happens to be named after an
+     * entrypoint, so a name that carries no agent must not hide a lower
+     * precedence name that does. adk-python pins the same rule in
+     * `test_valid_agent_module_wins_over_mistyped_package_root_agent`.
+     */
+    describe('directory entrypoint fallthrough', () => {
+      const notAnAgentJsContent = 'exports.foo = "bar";';
+
+      it('loads agent.js when app.js exports no agent', async () => {
+        await writeDirFile('mistyped_app', 'app.js', notAnAgentJsContent);
+        await writeDirFile(
+          'mistyped_app',
+          'agent.js',
+          namedAgentJsContent('from_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listAgents()).toContain('mistyped_app');
+        const loaded = await (await loader.getAgentFile('mistyped_app')).load();
+        expect(loaded.name).toBe('from_agent');
+
+        await loader.disposeAll();
+      });
+
+      it('loads index.js when neither app.js nor agent.js exports an agent', async () => {
+        await writeDirFile('two_helpers', 'app.js', notAnAgentJsContent);
+        await writeDirFile('two_helpers', 'agent.js', notAnAgentJsContent);
+        await writeDirFile(
+          'two_helpers',
+          'index.js',
+          namedAgentJsContent('from_index'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listAgents()).toContain('two_helpers');
+        const loaded = await (await loader.getAgentFile('two_helpers')).load();
+        expect(loaded.name).toBe('from_index');
+
+        await loader.disposeAll();
+      });
+
+      it('prefers app.js over agent.js when both are loadable', async () => {
+        await writeDirFile('both_entries', 'app.js', appJsContent);
+        await writeDirFile(
+          'both_entries',
+          'agent.js',
+          namedAgentJsContent('from_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const loaded = await (await loader.getAppFile('both_entries')).load();
+
+        expect(isApp(loaded)).toBe(true);
+        expect((loaded as App).name).toBe('test_app');
+        await loader.disposeAll();
+      });
+
+      it('stops at a candidate that throws and reports it', async () => {
+        await writeDirFile(
+          'broken_app',
+          'app.js',
+          `throw new Error('boom during construction');`,
+        );
+        await writeDirFile(
+          'broken_app',
+          'agent.js',
+          namedAgentJsContent('from_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const failures = await loader.listLoadFailures();
+
+        expect(failures).toHaveLength(1);
+        expect(failures[0].name).toBe('broken_app');
+        expect(failures[0].filePath).toContain('app.js');
+        expect(await loader.listAgents()).not.toContain('broken_app');
+        await expect(loader.getAgentFile('broken_app')).rejects.toThrow(
+          /Agent 'broken_app' failed to load[\s\S]*boom during construction/,
+        );
+
+        await loader.disposeAll();
+      });
+
+      it('skips the directory quietly when no candidate exports an agent', async () => {
+        await writeDirFile('all_helpers', 'app.js', notAnAgentJsContent);
+        await writeDirFile('all_helpers', 'agent.js', notAnAgentJsContent);
+        await writeDirFile('all_helpers', 'index.js', notAnAgentJsContent);
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listAgents()).not.toContain('all_helpers');
+        expect(await loader.listLoadFailures()).toEqual([]);
+
+        await loader.disposeAll();
       });
     });
   });
