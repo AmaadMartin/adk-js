@@ -355,6 +355,7 @@ export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {toJsonSerializable} from './utils/json_utils.js';
+export type {ReplaceListener} from './utils/json_utils.js';
 export {
   LogLevel,
   getLogger,
