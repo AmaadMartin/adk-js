@@ -33,6 +33,7 @@ import {
   ListSessionsResponse,
   makeJsonSafeState,
   mergeStates,
+  paginateSessions,
   Session,
   SessionNotFoundError,
   StaleSessionError,
@@ -51,13 +52,13 @@ export const DEFAULT_ROOT_COLLECTION = 'adk-session';
 const ROOT_COLLECTION_ENV_VAR = 'ADK_FIRESTORE_ROOT_COLLECTION';
 
 /** Subcollection holding one document per session, under a user. */
-export const DEFAULT_SESSIONS_COLLECTION = 'sessions';
+const DEFAULT_SESSIONS_COLLECTION = 'sessions';
 /** Subcollection holding one document per event, under a session. */
-export const DEFAULT_EVENTS_COLLECTION = 'events';
+const DEFAULT_EVENTS_COLLECTION = 'events';
 /** Collection holding one app-scoped state document per app. */
-export const DEFAULT_APP_STATE_COLLECTION = 'app_states';
+const DEFAULT_APP_STATE_COLLECTION = 'app_states';
 /** Collection holding user-scoped state documents, keyed by app. */
-export const DEFAULT_USER_STATE_COLLECTION = 'user_states';
+const DEFAULT_USER_STATE_COLLECTION = 'user_states';
 
 /** Subcollection holding one document per user, under an app document. */
 const USERS_COLLECTION = 'users';
@@ -89,12 +90,6 @@ interface StoredEventDocument {
   /** The event, snake_cased. See {@link toEventData}. */
   event_data?: Record<string, unknown>;
 }
-
-/** Pagination metadata carried by {@link ListSessionsResponse}. */
-type PaginationMeta = Pick<
-  ListSessionsResponse,
-  'page' | 'limit' | 'totalItems' | 'totalPages'
->;
 
 /** Options for {@link FirestoreSessionService}. */
 export interface FirestoreSessionServiceOptions {
@@ -131,7 +126,7 @@ function hasNumericMethod<K extends string>(
  * hand-written document, and a raw number is passed through unchanged: adk-js
  * measures `lastUpdateTime` in milliseconds throughout.
  */
-export function toLastUpdateTime(value: unknown): number {
+function toLastUpdateTime(value: unknown): number {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : 0;
   }
@@ -180,45 +175,6 @@ function compareSessions(a: Session, b: Session): number {
   return a.id < b.id ? -1 : 1;
 }
 
-/**
- * Applies adk-js's pagination contract to an ordered list.
- *
- * Firestore cannot offset a collection-group scan cheaply, and the whole
- * result set is materialised to merge state into it anyway, so the slice
- * happens here. The metadata matches `DatabaseSessionService.listSessions`.
- */
-function paginate(
-  sessions: Session[],
-  {limit, offset, page}: ListSessionsRequest,
-): {sessions: Session[]; meta: PaginationMeta} {
-  const totalItems = sessions.length;
-
-  if (limit === undefined) {
-    return {
-      sessions: offset ? sessions.slice(offset) : sessions,
-      meta: {
-        page: 1,
-        limit: totalItems,
-        totalItems,
-        totalPages: totalItems === 0 ? 0 : 1,
-      },
-    };
-  }
-
-  const start = page !== undefined ? (page - 1) * limit : (offset ?? 0);
-  const effectivePage =
-    page ?? (limit === 0 ? 1 : Math.floor(start / limit) + 1);
-  return {
-    sessions: sessions.slice(start, start + limit),
-    meta: {
-      page: effectivePage,
-      limit,
-      totalItems,
-      totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
-    },
-  };
-}
-
 /** Builds the ordered, filtered events query for {@link GetSessionConfig}. */
 function buildEventsQuery(
   events: CollectionReference,
@@ -249,9 +205,6 @@ function toSessionLockKey({
 }: CompositeSessionKey): string {
   return JSON.stringify([appName, userId, sessionId]);
 }
-
-/** Swallows a settled append's outcome; the caller already has it. */
-function ignoreSettlement(): void {}
 
 /** Reads a state document inside a transaction, defaulting to an empty map. */
 async function readStateDocument(
@@ -303,14 +256,6 @@ async function readStateDocument(
 export class FirestoreSessionService extends BaseSessionService {
   /** Root collection holding one document per app. */
   readonly rootCollection: string;
-  /** Subcollection holding one document per session, under a user. */
-  readonly sessionsCollection = DEFAULT_SESSIONS_COLLECTION;
-  /** Subcollection holding one document per event, under a session. */
-  readonly eventsCollection = DEFAULT_EVENTS_COLLECTION;
-  /** Collection holding one app-scoped state document per app. */
-  readonly appStateCollection = DEFAULT_APP_STATE_COLLECTION;
-  /** Collection holding user-scoped state documents, keyed by app. */
-  readonly userStateCollection = DEFAULT_USER_STATE_COLLECTION;
 
   private readonly client: Firestore;
 
@@ -414,7 +359,10 @@ export class FirestoreSessionService extends BaseSessionService {
     const eventsWanted = config?.numRecentEvents !== 0;
     const [eventDocs, appSnap, userSnap] = await Promise.all([
       eventsWanted
-        ? buildEventsQuery(sessionRef.collection(this.eventsCollection), config)
+        ? buildEventsQuery(
+            sessionRef.collection(DEFAULT_EVENTS_COLLECTION),
+            config,
+          )
             .get()
             .then((query) => query.docs)
         : Promise.resolve([]),
@@ -456,7 +404,7 @@ export class FirestoreSessionService extends BaseSessionService {
     const query = userId
       ? this.getSessionsRef(db, appName, userId).where('appName', '==', appName)
       : db
-          .collectionGroup(this.sessionsCollection)
+          .collectionGroup(DEFAULT_SESSIONS_COLLECTION)
           .where('appName', '==', appName);
     const stored = (await query.get()).docs
       .map((doc) => doc.data() as StoredSessionDocument | undefined)
@@ -485,8 +433,8 @@ export class FirestoreSessionService extends BaseSessionService {
     if (order === 'desc') {
       sessions.reverse();
     }
-    const page = paginate(sessions, request);
-    return {sessions: page.sessions, ...page.meta};
+    const {sessions: slice, meta} = paginateSessions(sessions, request);
+    return {sessions: slice, ...meta};
   }
 
   async deleteSession({
@@ -511,7 +459,7 @@ export class FirestoreSessionService extends BaseSessionService {
     }
 
     const events = sessionRef
-      .collection(this.eventsCollection)
+      .collection(DEFAULT_EVENTS_COLLECTION)
       .stream() as AsyncIterable<QueryDocumentSnapshot>;
 
     let batch = db.batch();
@@ -620,12 +568,15 @@ export class FirestoreSessionService extends BaseSessionService {
             revision: newRevision,
           });
 
-          t.set(sessionRef.collection(this.eventsCollection).doc(event.id), {
-            event_data: toEventData(event),
-            timestamp: now,
-            appName: session.appName,
-            userId: session.userId,
-          });
+          t.set(
+            sessionRef.collection(DEFAULT_EVENTS_COLLECTION).doc(event.id),
+            {
+              event_data: toEventData(event),
+              timestamp: now,
+              appName: session.appName,
+              userId: session.userId,
+            },
+          );
 
           return newRevision;
         }),
@@ -651,7 +602,10 @@ export class FirestoreSessionService extends BaseSessionService {
 
     // The queued promise must never reject, or one failure would fail every
     // append waiting behind it.
-    const settled = result.then(ignoreSettlement, ignoreSettlement);
+    const settled = result.then(
+      () => {},
+      () => {},
+    );
     this.sessionLocks.set(key, settled);
     void settled.then(() => {
       // Drop the entry only when nothing queued behind this append.
@@ -672,11 +626,11 @@ export class FirestoreSessionService extends BaseSessionService {
       .doc(appName)
       .collection(USERS_COLLECTION)
       .doc(userId)
-      .collection(this.sessionsCollection);
+      .collection(DEFAULT_SESSIONS_COLLECTION);
   }
 
   private getAppStateRef(db: Firestore, appName: string): DocumentReference {
-    return db.collection(this.appStateCollection).doc(appName);
+    return db.collection(DEFAULT_APP_STATE_COLLECTION).doc(appName);
   }
 
   private getUserStateRef(
@@ -685,7 +639,7 @@ export class FirestoreSessionService extends BaseSessionService {
     userId: string,
   ): DocumentReference {
     return db
-      .collection(this.userStateCollection)
+      .collection(DEFAULT_USER_STATE_COLLECTION)
       .doc(appName)
       .collection(USERS_COLLECTION)
       .doc(userId);
@@ -720,13 +674,13 @@ export class FirestoreSessionService extends BaseSessionService {
           .map((data) => data.userId)
           .filter((id): id is string => id !== undefined),
       ),
-    ].sort();
+    ];
     if (userIds.length === 0) {
       return states;
     }
 
     const users = db
-      .collection(this.userStateCollection)
+      .collection(DEFAULT_USER_STATE_COLLECTION)
       .doc(appName)
       .collection(USERS_COLLECTION);
     const snaps = await db.getAll(...userIds.map((id) => users.doc(id)));
