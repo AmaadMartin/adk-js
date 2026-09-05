@@ -132,7 +132,7 @@ describe('NodeErrorEvent — a failed node leaves a record', () => {
     expect(errorEvents[0].errorType).toBe('TypeError');
   });
 
-  it('falls back to the error class name when it carries no status or code', async () => {
+  it('falls back to the error class name when it carries no code', async () => {
     const wf = new Workflow({
       name: 'wf',
       edges: [['START', throwingNode('boom', new RangeError('out of range'))]],
