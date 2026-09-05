@@ -85,6 +85,16 @@ describe('FirestoreMemoryService', () => {
       expect(keywordLanes(store)).toEqual(['the', 'and', 'or']);
     });
 
+    it('extends the default stop words when the caller spreads them', async () => {
+      const {service, store} = createService({
+        stopWords: new Set([...DEFAULT_STOP_WORDS, 'agent']),
+      });
+
+      await search(service, 'the agent quick');
+
+      expect(keywordLanes(store)).toEqual(['quick']);
+    });
+
     it('issues one lane per distinct query keyword', async () => {
       const {service, store} = createService();
 
@@ -303,6 +313,13 @@ describe('FirestoreMemoryService', () => {
   });
 
   describe('extractKeywords', () => {
+    it('drops every one of the 133 default stop words', () => {
+      expect(DEFAULT_STOP_WORDS.size).toBe(133);
+      expect(
+        extractKeywords([...DEFAULT_STOP_WORDS].join(' '), DEFAULT_STOP_WORDS),
+      ).toEqual(new Set());
+    });
+
     it('drops digits and non-ASCII letters', () => {
       expect(
         extractKeywords(
