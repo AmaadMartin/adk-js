@@ -102,6 +102,36 @@ describe('node runner — an error event per failed attempt', () => {
     expect(child.output).toBe('Success');
   });
 
+  it('emits one event per attempt when every attempt throws the same error', async () => {
+    // Not in the reference, where each attempt raises a fresh exception. A
+    // node that rethrows one cached error object is the case that decides
+    // whether a retried attempt may claim the error: claiming it here would
+    // leave the later attempts, and the terminal report, with nothing to say.
+    const shared = new CustomRetryableError('Transient error');
+    let attempts = 0;
+    const node = new FnNode(
+      'FlakyNode',
+      () => {
+        attempts += 1;
+        throw shared;
+      },
+      {
+        retryConfig: {
+          maxAttempts: 3,
+          initialDelay: 0,
+          jitter: 0,
+          exceptions: ['CustomRetryableError'],
+        },
+      },
+    );
+
+    const {events, thrown} = await driveNodeRunnerFailure(node);
+
+    expect(attempts).toBe(3);
+    expect(events.filter(isNodeErrorEvent)).toHaveLength(3);
+    expect(thrown).toBe(shared);
+  });
+
   it('test_node_runner_prefers_api_status_for_error_code', async () => {
     const node = new FnNode('ErrNode', () => {
       throw new ClientError();
