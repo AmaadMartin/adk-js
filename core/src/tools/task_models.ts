@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Schema, Type} from '@google/genai';
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
@@ -53,6 +54,59 @@ export interface TaskResult {
   readonly output: unknown;
 }
 
+/** The default input shape for a task agent that declares no input schema. */
+export interface DefaultTaskInput {
+  /** The goal or objective for the task agent. */
+  readonly goal?: string;
+  /** Additional background context for the task agent. */
+  readonly background?: string;
+}
+
+/**
+ * The function declaration parameters for a task agent that declares no input
+ * schema.
+ *
+ * Both fields are optional, so the schema declares no `required` list.
+ *
+ * The reference names two unrelated models `_DefaultTaskInput`. This one is the
+ * `goal`/`background` pair from `agents/llm/task/_task_models.py`, not the
+ * single required `request` string that `tools/agent_tool.py` declares.
+ */
+export const DEFAULT_TASK_INPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    goal: {
+      type: Type.STRING,
+      description: 'The goal or objective for the task agent.',
+    },
+    background: {
+      type: Type.STRING,
+      description: 'Additional background context for the task agent.',
+    },
+  },
+};
+
+/** The default output shape for a task agent that declares no output schema. */
+export interface DefaultTaskOutput {
+  /** A brief summary of what the agent accomplished. */
+  readonly result: string;
+}
+
+/**
+ * The function declaration parameters `FinishTaskTool` falls back to when the
+ * task agent declares no output schema.
+ */
+export const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    result: {
+      type: Type.STRING,
+      description: 'A brief summary of what the agent accomplished.',
+    },
+  },
+  required: ['result'],
+};
+
 const taskRequestSchema = z.preprocess(
   normalizeAgentNameKey,
   z.strictObject({
@@ -65,6 +119,10 @@ const taskRequestSchema = z.preprocess(
 
 const taskResultSchema = z.strictObject({
   output: z.unknown().nonoptional('output is required.'),
+});
+
+const defaultTaskOutputSchema = z.strictObject({
+  result: z.string({error: 'result must be a string.'}),
 });
 
 /**
@@ -112,6 +170,21 @@ export function parseTaskRequest(value: unknown): TaskRequest {
  */
 export function parseTaskResult(value: unknown): TaskResult {
   return parseOrThrow(taskResultSchema, value);
+}
+
+/**
+ * Validates a default task output payload that arrives as `unknown`.
+ *
+ * The reference runs this validation in `FinishTaskTool.run_async`, through the
+ * pydantic adapter it builds from `_DefaultTaskOutput`. `result` is required,
+ * and an unknown key is rejected.
+ *
+ * @param value The value to validate.
+ * @returns A frozen output.
+ * @throws InputValidationError If the value is not a valid default task output.
+ */
+export function parseDefaultTaskOutput(value: unknown): DefaultTaskOutput {
+  return parseOrThrow(defaultTaskOutputSchema, value);
 }
 
 /**
