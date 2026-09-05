@@ -28,8 +28,8 @@ import {
 } from '@google/adk';
 import express, {Request, Response} from 'express';
 
-import {AgentLoader} from '../utils/agent_loader.js';
 import {createEmptyState} from '../utils/agent_state.js';
+import {ServerAgentLoader} from '../utils/base_agent_loader.js';
 import {errorMessage} from '../utils/error_utils.js';
 
 /**
@@ -99,7 +99,7 @@ export interface EvalRouteDependencies {
   evalSetResultsManager: EvalSetResultsManager;
   sessionService: BaseSessionService;
   artifactService: BaseArtifactService;
-  agentLoader: AgentLoader;
+  agentLoader: ServerAgentLoader;
   logger: Logger;
 }
 
@@ -117,7 +117,8 @@ export function registerEvalRoutes(
   options: {serveDebugUI: boolean},
 ): void {
   const handlers = new EvalRouteHandlers(deps);
-  const on = (handle: EvalHandler) => guarded(handle, deps.logger);
+  const on = (handle: EvalHandler, statusByErrorName = STATUS_BY_ERROR_NAME) =>
+    guarded(handle, deps.logger, statusByErrorName);
 
   // The paths adk-js already registered, which answered 501. They stay on
   // every server, because a client may already be calling them.
@@ -131,7 +132,10 @@ export function registerEvalRoutes(
   );
   app.post(
     '/apps/:appName/eval_sets/:evalSetId/add_session',
-    on((req, res) => handlers.addSessionToEvalSet(req, res)),
+    on(
+      (req, res) => handlers.addSessionToEvalSet(req, res),
+      ADD_SESSION_STATUS_BY_ERROR_NAME,
+    ),
   );
   app.get(
     '/apps/:appName/eval_sets/:evalSetId/evals',
@@ -193,7 +197,10 @@ export function registerEvalRoutes(
       '/dev/apps/:appName/eval-sets/:evalSetId/add-session',
       '/dev/apps/:appName/eval_sets/:evalSetId/add_session',
     ],
-    on((req, res) => handlers.addSessionToEvalSet(req, res)),
+    on(
+      (req, res) => handlers.addSessionToEvalSet(req, res),
+      ADD_SESSION_STATUS_BY_ERROR_NAME,
+    ),
   );
   app.get(
     '/dev/apps/:appName/eval_sets/:evalSetId/evals',
@@ -253,7 +260,11 @@ type EvalHandler = (req: Request, res: Response) => void | Promise<void>;
  * module, reaching Cloud Storage -- would otherwise leave the request hanging
  * and take the process down with it.
  */
-function guarded(handle: EvalHandler, logger: Logger): express.RequestHandler {
+function guarded(
+  handle: EvalHandler,
+  logger: Logger,
+  statusByErrorName: Record<string, number>,
+): express.RequestHandler {
   return (req: Request, res: Response) => {
     void (async () => {
       try {
@@ -263,7 +274,7 @@ function guarded(handle: EvalHandler, logger: Logger): express.RequestHandler {
         logger.error(message);
         if (!res.headersSent) {
           res
-            .status(STATUS_BY_ERROR_NAME[errorName(error) ?? ''] ?? 500)
+            .status(statusByErrorName[errorName(error) ?? ''] ?? 500)
             .json({error: message});
         }
       }
@@ -289,9 +300,10 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
 };
 
 /**
- * `add-session` names the eval set in the request rather than addressing it,
- * so an eval set that does not exist is a bad request and not a missing
- * resource. adk-python answers 400 there too.
+ * The map the `add-session` routes are registered with. They name the eval
+ * set and the session in the request rather than addressing them, so
+ * something that does not exist is a bad request and not a missing resource.
+ * adk-python answers 400 there too.
  */
 const ADD_SESSION_STATUS_BY_ERROR_NAME: Record<string, number> = {
   ...STATUS_BY_ERROR_NAME,
@@ -391,18 +403,10 @@ class EvalRouteHandlers {
       creationTimestamp: Date.now() / 1000,
     };
 
-    await this.answer(
-      res,
-      async () => {
-        await this.deps.evalSetsManager.addEvalCase(
-          appName,
-          evalSetId,
-          evalCase,
-        );
-        return evalCase;
-      },
-      ADD_SESSION_STATUS_BY_ERROR_NAME,
-    );
+    await this.answer(res, async () => {
+      await this.deps.evalSetsManager.addEvalCase(appName, evalSetId, evalCase);
+      return evalCase;
+    });
   }
 
   async listEvalsInEvalSet(req: Request, res: Response): Promise<void> {
@@ -610,22 +614,16 @@ class EvalRouteHandlers {
   }
 
   /**
-   * Runs a manager call and answers with whatever it returned, mapping the
-   * error classes the managers raise to the statuses adk-python answers with.
-   * A failure this does not recognise is a 500, as everywhere else in the
-   * server.
+   * Answers with whatever a manager call returned, and with an empty body for
+   * the calls that return nothing. A rejection is left to {@link guarded},
+   * which maps the error classes the managers raise to the statuses
+   * adk-python answers with.
    */
   private async answer(
     res: Response,
     body: () => Promise<EvalSet | EvalCase | EvalSetResult | void>,
-    statusByErrorName: Record<string, number> = STATUS_BY_ERROR_NAME,
   ): Promise<void> {
-    try {
-      res.json((await body()) ?? {});
-    } catch (error: unknown) {
-      const status = statusByErrorName[errorName(error) ?? ''] ?? 500;
-      this.fail(res, status, errorMessage(error));
-    }
+    res.json((await body()) ?? {});
   }
 
   private fail(res: Response, status: number, error: string): void {

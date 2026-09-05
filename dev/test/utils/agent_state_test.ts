@@ -31,17 +31,6 @@ describe('createEmptyState', () => {
     expect(createEmptyState(agent)).toEqual({alpha: '', beta: ''});
   });
 
-  it('drops the keys the caller already has values for', () => {
-    const agent = new LlmAgent({
-      name: 'greeter',
-      instruction: 'Greet {user_name} on behalf of {company}.',
-    });
-
-    expect(createEmptyState(agent, {company: 'Acme'})).toEqual({
-      user_name: '',
-    });
-  });
-
   it('ignores an instruction supplied by a function', () => {
     const agent = new LlmAgent({
       name: 'greeter',

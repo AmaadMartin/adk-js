@@ -31,7 +31,7 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {ServerAgentLoader} from '../../src/utils/base_agent_loader.js';
 import {StubEvalRuntime} from '../cli/stub_eval_runtime.js';
 
 const APP_NAME = 'test_app';
@@ -57,7 +57,7 @@ const ROOT_AGENT = new EchoAgent({
   instruction: 'Answer as {persona} would.',
 });
 
-function loaderFor(agent: LlmAgent): AgentLoader {
+function loaderFor(agent: LlmAgent): ServerAgentLoader {
   return {
     listAgents: () => Promise.resolve([APP_NAME]),
     loadAgent: () => Promise.resolve(agent),
@@ -68,7 +68,7 @@ function loaderFor(agent: LlmAgent): AgentLoader {
           return;
         },
       }),
-  } as unknown as AgentLoader;
+  };
 }
 
 interface HttpResult<T> {
@@ -813,7 +813,7 @@ describe('eval routes, unexpected failures', () => {
       evalSetsManager?: EvalSetsManager;
       evalSetResultsManager?: EvalSetResultsManager;
       sessionService?: BaseSessionService;
-      agentLoader?: AgentLoader;
+      agentLoader?: ServerAgentLoader;
     } = {},
   ): Promise<string> {
     const server = new AdkApiServer({
@@ -890,9 +890,9 @@ describe('eval routes, unexpected failures', () => {
     const baseUrl = await startServer({
       sessionService,
       agentLoader: {
-        listAgents: () => Promise.resolve([APP_NAME]),
+        ...loaderFor(ROOT_AGENT),
         loadAgent: () => Promise.reject(new Error('agent module is broken')),
-      } as unknown as AgentLoader,
+      },
     });
 
     const response = await request<{error: string}>(
