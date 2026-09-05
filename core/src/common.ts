@@ -313,6 +313,24 @@ export {
 } from './tools/google_maps_grounding_tool.js';
 export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
 export {
+  GoogleTool,
+  GoogleToolStatus,
+  authorizationRequiredMessage,
+} from './tools/google_tool.js';
+export type {
+  GoogleToolErrorResponse,
+  GoogleToolExecuteContext,
+  GoogleToolExecuteFunction,
+  GoogleToolOptions,
+} from './tools/google_tool.js';
+// The names below are prefixed because the parity branch carries a second
+// port of this module that already holds the plain ones.
+export {
+  BaseGoogleCredentialsConfig as GoogleToolCredentialsConfig,
+  GoogleCredentialsManager as GoogleToolCredentialsManager,
+} from './tools/google_tool_credentials.js';
+export type {GoogleCredentialsConfigOptions as GoogleToolCredentialsConfigOptions} from './tools/google_tool_credentials.js';
+export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
 } from './tools/load_artifacts_tool.js';
