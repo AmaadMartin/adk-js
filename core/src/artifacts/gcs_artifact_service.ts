@@ -6,6 +6,7 @@
 
 import type {Bucket, File, StorageOptions} from '@google-cloud/storage';
 import {createPartFromBase64, createPartFromText, Part} from '@google/genai';
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
@@ -54,7 +55,9 @@ export class GcsArtifactService implements BaseArtifactService {
       !request.artifact.text &&
       !request.artifact.fileData
     ) {
-      throw new Error('Artifact must have either inlineData or text content.');
+      throw new InputValidationError(
+        'Artifact must have either inlineData or text content.',
+      );
     }
 
     const versions = await this.listVersions(request);
@@ -181,19 +184,27 @@ export class GcsArtifactService implements BaseArtifactService {
     }
   }
 
-  async listArtifactKeys(request: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = `${request.appName}/${request.userId}/${request.sessionId}/`;
-    const usernamePrefix = `${request.appName}/${request.userId}/user/`;
+  async listArtifactKeys({
+    appName,
+    userId,
+    sessionId,
+  }: ListArtifactKeysRequest): Promise<string[]> {
     const bucket = await this.getBucket();
-    const [[sessionFiles], [userSessionFiles]] = await Promise.all([
-      bucket.getFiles({prefix: sessionPrefix}),
-      bucket.getFiles({prefix: usernamePrefix}),
-    ]);
+    const prefixes: Array<[string, string?]> = [
+      [`${appName}/${userId}/user/`, 'user:'],
+    ];
+    if (sessionId !== undefined) {
+      prefixes.push([`${appName}/${userId}/${sessionId}/`]);
+    }
 
-    return [
-      ...extractArtifactKeys(sessionFiles, sessionPrefix),
-      ...extractArtifactKeys(userSessionFiles, usernamePrefix, 'user:'),
-    ].sort((a, b) => a.localeCompare(b));
+    const keys = await Promise.all(
+      prefixes.map(async ([prefix, keyPrefix]) => {
+        const [files] = await bucket.getFiles({prefix});
+        return extractArtifactKeys(files, prefix, keyPrefix);
+      }),
+    );
+
+    return keys.flat().sort((a, b) => a.localeCompare(b));
   }
 
   async deleteArtifact(request: DeleteArtifactRequest): Promise<void> {

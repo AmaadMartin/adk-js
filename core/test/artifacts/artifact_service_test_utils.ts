@@ -13,11 +13,14 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
  *
  * @param createService A function that returns a promise that resolves to the artifact service.
  * @param cleanup A function that returns a promise that cleans up the artifact service.
- * @param suiteName The name of the test suite.
+ * @param emptyArtifactMessage The exact message the backend reports for an
+ *     artifact that carries no payload. Each backend mirrors the wording of its
+ *     adk-python counterpart, so the suite takes it rather than guessing.
  */
 export function runArtifactServiceTests(
   createService: () => Promise<BaseArtifactService>,
   cleanup: () => Promise<void>,
+  emptyArtifactMessage: string,
 ) {
   let service: BaseArtifactService;
   const appName = 'test-app';
@@ -110,7 +113,7 @@ export function runArtifactServiceTests(
           filename: 'test.txt',
           artifact: {} as unknown as Part,
         }),
-      ).rejects.toThrow('Artifact must have either inlineData or text');
+      ).rejects.toThrow(emptyArtifactMessage);
     });
 
     it('increments version number', async () => {

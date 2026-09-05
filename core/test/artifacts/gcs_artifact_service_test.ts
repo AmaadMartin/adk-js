@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GcsArtifactService} from '@google/adk';
+import {GcsArtifactService, InputValidationError} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {runArtifactServiceTests} from './artifact_service_test_utils.js';
 
@@ -114,6 +114,7 @@ describe('GcsArtifactService', () => {
     async () => {
       storageMock.buckets.clear();
     },
+    'Artifact must have either inlineData or text content.',
   );
 
   describe('customMetadata GCS shape', () => {
@@ -362,5 +363,54 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.mimeType).toBe('image/png');
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
     });
+  });
+
+  describe('session-less listArtifactKeys', () => {
+    it('lists the user namespace without a session listing call', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'user:notes.txt',
+        artifact: {text: 'user-scoped'},
+      });
+      await service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'session.txt',
+        artifact: {text: 'session-scoped'},
+      });
+      const getFiles = vi.spyOn(storageMock.bucket(bucketName), 'getFiles');
+
+      const keys = await service.listArtifactKeys({
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+
+      expect(keys).toEqual(['user:notes.txt']);
+      expect(getFiles.mock.calls.map(([options]) => options?.prefix)).toEqual([
+        'test-app/test-user/user/',
+      ]);
+      getFiles.mockRestore();
+    });
+  });
+
+  it('rejects an artifact that carries no payload', async () => {
+    storageMock.buckets.clear();
+    const service = new GcsArtifactService(bucketName);
+
+    await expect(
+      service.saveArtifact({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+        filename: 'empty.txt',
+        artifact: {},
+      }),
+    ).rejects.toThrow(InputValidationError);
   });
 });
