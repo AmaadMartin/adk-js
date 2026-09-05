@@ -197,6 +197,12 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {
+  BIGQUERY_DEFAULT_SCOPE,
+  BIGQUERY_SCOPES,
+  BIGQUERY_TOKEN_CACHE_KEY,
+  BigQueryCredentialsConfig,
+} from './integrations/bigquery/bigquery_credentials.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
@@ -275,6 +281,8 @@ export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
+export {BaseGoogleCredentialsConfig} from './tools/_google_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/_google_credentials.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
