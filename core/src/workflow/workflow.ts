@@ -277,6 +277,13 @@ export class Workflow extends BaseNode {
       return;
     }
     if (output !== undefined) {
+      // An entry that hands back a child's result is reporting the value that
+      // child already emitted, so the workflow must not announce it a second
+      // time. One it computed itself has never been emitted, and does need an
+      // event of its own.
+      if (childEmitted(dynamicState, output)) {
+        ctx.outputDelegated = true;
+      }
       ctx.output = output;
     }
   }
@@ -633,6 +640,10 @@ export class Workflow extends BaseNode {
       .map((name) => loop.nodeOutputs.get(name));
 
     if (terminalOutputs.length === 1) {
+      // The terminal node already emitted this value as its own output event,
+      // so the workflow's end-of-node flush must not put it in the stream a
+      // second time.
+      ctx.outputDelegated = true;
       ctx.output = terminalOutputs[0];
     } else if (terminalOutputs.length > 1) {
       throw new Error(
@@ -734,4 +745,17 @@ function createWorkflowAbort(parentSignal?: AbortSignal): {
     controller,
     dispose: () => parentSignal.removeEventListener('abort', onParentAbort),
   };
+}
+
+/**
+ * Whether a `ctx.runNode` child produced this exact value as its own output,
+ * and so has already announced it on an event of its own.
+ */
+function childEmitted(dynamicState: DynamicNodeState, output: unknown): boolean {
+  for (const run of dynamicState.runs.values()) {
+    if (Object.is(run.output, output)) {
+      return true;
+    }
+  }
+  return false;
 }

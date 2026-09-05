@@ -7,6 +7,7 @@
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event} from '../events/event.js';
+import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
 import {BaseNode} from './base_node.js';
@@ -20,7 +21,12 @@ import {
   NodeTimeoutError,
 } from './errors.js';
 import {NodeContext} from './node_context.js';
-import {claimNodeErrorReport, isNodeErrorEvent} from './node_error_event.js';
+import {
+  claimNodeErrorReport,
+  createNodeErrorEvent,
+  isNodeErrorEvent,
+  isNodeErrorReported,
+} from './node_error_event.js';
 import {createNodeState, NodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
 import {getRetryDelaySeconds, shouldRetryNode} from './utils/retry_utils.js';
@@ -82,6 +88,17 @@ export interface ExecuteChildNodeParams {
    * starts clean instead of re-reading a response it already answered.
    */
   resumeInputs?: Record<string, unknown>;
+  /**
+   * Output from a previous run, carried forward on resume. It counts as
+   * already emitted — the earlier turn's event carries it — so it is not
+   * announced a second time.
+   */
+  priorOutput?: unknown;
+  /**
+   * Unresolved interrupt ids from a previous run, carried forward on resume.
+   * Ids the node raises in this run join them rather than replacing them.
+   */
+  priorInterruptIds?: Iterable<string>;
 }
 
 /**
@@ -144,6 +161,8 @@ async function runChildNode({
     abortSignal,
     nodeState: callerNodeState,
     resumeInputs,
+    priorOutput,
+    priorInterruptIds,
   },
   nodeName,
   nodePath,
@@ -245,6 +264,7 @@ async function runChildNode({
     let inputRecorded = false;
     while (!succeeded) {
       resetState(child);
+      applyPriorState({child, priorOutput, priorInterruptIds});
       child.attemptCount = nodeState.attemptCount;
       try {
         inputRecorded = await runAttempt({
@@ -281,10 +301,20 @@ async function runChildNode({
         // its backoff delay, THEN advance the counter (matches Python
         // semantics).
         const retryConfig = node.preparedRetryConfig;
-        if (
-          !retryConfig ||
-          !shouldRetryNode({error: err, retryConfig, nodeState})
-        ) {
+        const willRetry =
+          !!retryConfig &&
+          shouldRetryNode({error: err, retryConfig, nodeState});
+        reportAttemptFailure({
+          error: err,
+          child,
+          nodeName,
+          branch,
+          isolationScope,
+          attemptCount: nodeState.attemptCount,
+          isFinalAttempt: !willRetry,
+          abortSignal: effectiveAbortSignal,
+        });
+        if (!retryConfig || !willRetry) {
           throw err;
         }
         const delaySeconds = getRetryDelaySeconds({retryConfig, nodeState});
@@ -315,6 +345,8 @@ async function runChildNode({
         child.output = replacedOutput;
       }
     }
+
+    flushOutputAndDeltas({child, nodeName, branch, isolationScope});
 
     if (options.useAsOutput) {
       parent.output = child.output;
@@ -415,8 +447,9 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
 
 /**
  * Reset per-attempt state so a retry starts clean. This covers everything a
- * failed attempt can leave behind on the child context: its output/route,
- * interrupt ids, AND its state writes. A node that calls `ctx.state.set(...)`
+ * failed attempt can leave behind on the child context: its output/route (and
+ * whether either reached an event), interrupt ids, AND its state and artifact
+ * writes. A node that calls `ctx.state.set(...)`
  * and then throws would otherwise leave the failed attempt's writes in the
  * delta, to be committed alongside the successful attempt's. `NodeContext`
  * builds its `State` over this exact `stateDelta` object once (in its
@@ -433,8 +466,40 @@ function resetState(childNodeContext: NodeContext): void {
   childNodeContext.route = undefined;
   childNodeContext.interruptIds = [];
   childNodeContext.reportedError = undefined;
-  for (const key of Object.keys(childNodeContext.actions.stateDelta)) {
-    delete childNodeContext.actions.stateDelta[key];
+  childNodeContext.outputEmitted = false;
+  childNodeContext.routeEmitted = false;
+  clearInPlace(childNodeContext.actions.stateDelta);
+  clearInPlace(childNodeContext.actions.artifactDelta);
+}
+
+interface ApplyPriorStateParams {
+  child: NodeContext;
+  priorOutput?: unknown;
+  priorInterruptIds?: Iterable<string>;
+}
+
+/**
+ * Seeds a previous run's output and unresolved interrupt ids onto the child.
+ *
+ * Applied per attempt rather than once at construction: adk-python builds a
+ * fresh context for every attempt and re-applies the priors to each, while
+ * adk-js reuses one context and clears exactly these fields in
+ * {@link resetState}. The prior output counts as already emitted — the earlier
+ * turn's event carries it — so the end-of-node flush leaves it alone.
+ */
+function applyPriorState({
+  child,
+  priorOutput,
+  priorInterruptIds,
+}: ApplyPriorStateParams): void {
+  if (priorOutput !== undefined) {
+    child.output = priorOutput;
+    child.outputEmitted = true;
+  }
+  for (const id of priorInterruptIds ?? []) {
+    if (!child.interruptIds.includes(id)) {
+      child.interruptIds.push(id);
+    }
   }
 }
 
@@ -478,6 +543,10 @@ async function runOnce({
 }: RunOnceParams): Promise<boolean> {
   let inputRecorded = false;
   const consume = (event: Event): void => {
+    // Read before `enrichEvent`, which stamps the node's own name onto an
+    // unauthored event: after it, every event looks native and the guard below
+    // never fires.
+    const isNativeNodeEvent = !event.author || event.author === nodeName;
     enrichEvent({event, child, nodeName, branch, isolationScope});
     // An event can carry a state delta that never went through `ctx.state`,
     // so the schema is enforced here too rather than only on the setter.
@@ -488,16 +557,26 @@ async function runOnce({
     if (event.output !== undefined) {
       child.output = event.output;
       if (child.outputDelegated) {
-        const stateDelta = event.actions?.stateDelta;
-        if (!stateDelta || Object.keys(stateDelta).length === 0) {
+        if (!hasNonOutputContent(event)) {
           return;
         }
         event.output = undefined;
         event.content = undefined;
       }
+    } else if (event.nodeInfo?.messageAsOutput) {
+      child.output = event.content;
     }
-    if (event.route !== undefined) {
-      child.route = event.route;
+    // Only a native event's decisions belong to this node: a structured parent
+    // (a sequential agent, say) must not bubble up a route or a transfer one of
+    // its nested sub-agents already handled.
+    if (isNativeNodeEvent) {
+      if (event.route !== undefined) {
+        child.route = event.route;
+        child.routeEmitted = true;
+      }
+      if (event.actions?.transferToAgent !== undefined) {
+        child.actions.transferToAgent = event.actions.transferToAgent;
+      }
     }
     if (event.errorCode !== undefined && !isNodeErrorEvent(event)) {
       child.reportedError = {
@@ -521,7 +600,18 @@ async function runOnce({
       };
       inputRecorded = true;
     }
+    // A partial event is a fragment of the one that follows it, so the pending
+    // deltas roll forward and ride the next complete event instead.
+    if (!event.partial) {
+      flushDeltas(event, child);
+    }
     child.channel.push(event);
+    if (event.output !== undefined) {
+      child.outputEmitted = true;
+    }
+    if (event.nodeInfo?.messageAsOutput) {
+      child.outputDelegated = true;
+    }
   };
 
   const parentSignal = child.invocationContext.abortSignal;
@@ -612,6 +702,159 @@ async function runOnce({
     void Promise.resolve(iterator.return?.(undefined)).catch(() => {});
   }
   return inputRecorded;
+}
+
+/** Whether a delta object holds at least one entry. */
+function hasEntries(delta: Record<string, unknown> | undefined): boolean {
+  return !!delta && Object.keys(delta).length > 0;
+}
+
+/** Removes every key from a delta object, keeping the object itself. */
+function clearInPlace(delta: Record<string, unknown>): void {
+  for (const key of Object.keys(delta)) {
+    delete delta[key];
+  }
+}
+
+/**
+ * Whether an event carries anything besides its output, and so is still worth
+ * pushing once a delegated output is stripped from it. Mirrors adk-python's
+ * `_has_non_output_content`.
+ */
+function hasNonOutputContent(event: Event): boolean {
+  return (
+    hasEntries(event.actions?.stateDelta) ||
+    hasEntries(event.actions?.artifactDelta)
+  );
+}
+
+/**
+ * Moves the node's pending state and artifact deltas onto an event, then clears
+ * them so the next event does not report the same writes again.
+ *
+ * Keys the event already carries win: those are the node's own writes on the
+ * event it yielded, and `FunctionNode.toEvent` resolves the same overlap the
+ * same way. The pending entries are cleared in place, because `NodeContext`
+ * builds its `State` over that exact `stateDelta` object, and their write-order
+ * stamps travel with them so a later commit still knows which write came first.
+ */
+function flushDeltas(event: Event, child: NodeContext): void {
+  const {stateDelta, artifactDelta} = child.actions;
+  if (hasEntries(stateDelta)) {
+    const merged = {...stateDelta, ...event.actions.stateDelta};
+    carryDeltaStamps(stateDelta, merged);
+    carryDeltaStamps(event.actions.stateDelta, merged);
+    event.actions.stateDelta = merged;
+    clearInPlace(stateDelta);
+  }
+  if (hasEntries(artifactDelta)) {
+    event.actions.artifactDelta = {
+      ...artifactDelta,
+      ...event.actions.artifactDelta,
+    };
+    clearInPlace(artifactDelta);
+  }
+}
+
+interface FlushOutputAndDeltasParams {
+  child: NodeContext;
+  nodeName: string;
+  branch: string | undefined;
+  isolationScope: string | undefined;
+}
+
+/**
+ * Emits the node's deferred output, its unflushed route and any still-pending
+ * delta as one event, once the node has finished running.
+ *
+ * A node that assigns `ctx.output` instead of yielding it, or that writes
+ * `ctx.state` after its last event, produces a result the session would
+ * otherwise never see: the value reaches the graph in memory, but a resumed run
+ * reads the events. Nothing is emitted when the node already put all of it on
+ * an event, which is the ordinary case. Mirrors adk-python's
+ * `_flush_output_and_deltas`.
+ */
+function flushOutputAndDeltas({
+  child,
+  nodeName,
+  branch,
+  isolationScope,
+}: FlushOutputAndDeltasParams): void {
+  const hasDeferredOutput =
+    child.output !== undefined &&
+    !child.outputEmitted &&
+    !child.outputDelegated;
+  const hasUnflushedRoute = child.route !== undefined && !child.routeEmitted;
+  const hasDeltas =
+    hasEntries(child.actions.stateDelta) ||
+    hasEntries(child.actions.artifactDelta);
+  if (!hasDeferredOutput && !hasUnflushedRoute && !hasDeltas) {
+    return;
+  }
+
+  const event = createEvent({
+    output: hasDeferredOutput ? child.output : undefined,
+    route: hasUnflushedRoute ? child.route : undefined,
+  });
+  flushDeltas(event, child);
+  enrichEvent({event, child, nodeName, branch, isolationScope});
+  child.channel.push(event);
+  if (hasDeferredOutput) {
+    child.outputEmitted = true;
+  }
+  if (hasUnflushedRoute) {
+    child.routeEmitted = true;
+  }
+}
+
+interface ReportAttemptFailureParams {
+  error: unknown;
+  child: NodeContext;
+  nodeName: string;
+  branch: string | undefined;
+  isolationScope: string | undefined;
+  attemptCount: number;
+  isFinalAttempt: boolean;
+  abortSignal: AbortSignal | undefined;
+}
+
+/**
+ * Emits one error event for an attempt that failed, so a failure that is
+ * retried leaves its own trace instead of only the attempt that finally threw.
+ *
+ * A failure already reported in this invocation is left alone: the node that
+ * reported it itself, and the one that threw it below this node, each already
+ * put an event in the stream. The final failure is claimed here, which is what
+ * stops `Workflow.reportNodeError` from reporting it a second time.
+ */
+function reportAttemptFailure({
+  error,
+  child,
+  nodeName,
+  branch,
+  isolationScope,
+  attemptCount,
+  isFinalAttempt,
+  abortSignal,
+}: ReportAttemptFailureParams): void {
+  // A node that failed because the run was cancelled did not really fail, and
+  // adk-js keeps cancellation silent (`Workflow.reportNodeError` skips it too).
+  if (abortSignal?.aborted || isNodeErrorReported(error, child.invocationId)) {
+    return;
+  }
+  if (isFinalAttempt) {
+    claimNodeErrorReport(error, child.invocationId);
+  }
+  const event = createNodeErrorEvent({
+    error,
+    attemptCount,
+    author: nodeName,
+    invocationId: child.invocationId,
+    branch,
+    isolationScope,
+  });
+  enrichEvent({event, child, nodeName, branch, isolationScope});
+  child.channel.push(event);
 }
 
 interface RecordInputForResumeParams {

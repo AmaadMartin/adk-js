@@ -179,6 +179,9 @@ export class DynamicNodeScheduler implements ScheduleDynamicNode {
     if (options.useAsOutput) {
       ctx.output = result.output;
       ctx.route = result.route;
+      // The child emitted this value as its own output, so the caller's
+      // end-of-node flush must not emit it again.
+      ctx.outputDelegated = true;
     }
     return result;
   }

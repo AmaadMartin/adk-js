@@ -41,6 +41,26 @@ export function claimNodeErrorReport(
   return true;
 }
 
+/**
+ * Whether this failure has already been reported in this invocation, without
+ * claiming it.
+ *
+ * The node runner asks before it reports an attempt: a failure that travelled
+ * up from a nested node was recorded where it happened, and must not be
+ * recorded again at every level it passes through. It claims separately, and
+ * only for the attempt it stops retrying on, so a retried failure still reports
+ * each attempt even when the node throws one error object every time.
+ */
+export function isNodeErrorReported(
+  error: unknown,
+  invocationId: string,
+): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  return reportedInvocationIds.get(error) === invocationId;
+}
+
 export function createNodeErrorEvent(
   params: CreateNodeErrorEventParams,
 ): NodeErrorEvent {
@@ -55,10 +75,27 @@ export function createNodeErrorEvent(
   };
 }
 
+/**
+ * The code reported for a failure, most specific first: the API's own canonical
+ * status (`PERMISSION_DENIED`), then a `code` the error carries, then the
+ * error's class name.
+ *
+ * The status wins so a structured code from the service reaches the client
+ * rather than the transport's class name, and it counts only as a string — an
+ * HTTP client's numeric `.status` is a code, not a status. `UNKNOWN_ERROR` is
+ * left for a thrown value that is neither an `Error` nor carries either field.
+ */
 function errorCodeOf(error: unknown): string {
+  const status = (error as {status?: unknown} | null | undefined)?.status;
+  if (typeof status === 'string') {
+    return status;
+  }
   const code = (error as {code?: unknown} | null | undefined)?.code;
   if (typeof code === 'string' || typeof code === 'number') {
     return String(code);
+  }
+  if (error instanceof Error) {
+    return errorName(error);
   }
   return 'UNKNOWN_ERROR';
 }
