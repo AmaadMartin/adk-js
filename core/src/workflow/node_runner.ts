@@ -7,8 +7,7 @@
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event} from '../events/event.js';
-import {createEventActions} from '../events/event_actions.js';
-import {carryDeltaStamps} from '../sessions/state_write_order.js';
+import {mergeEventActions} from '../events/event_actions.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
 import {BaseNode} from './base_node.js';
@@ -502,8 +501,8 @@ function clearInPlace(delta: Record<string, unknown>): void {
 }
 
 /** Whether a delta map holds anything to flush. */
-function hasEntries(delta: Record<string, unknown> | undefined): boolean {
-  return delta !== undefined && Object.keys(delta).length > 0;
+function hasEntries(delta: Record<string, unknown>): boolean {
+  return Object.keys(delta).length > 0;
 }
 
 /**
@@ -522,22 +521,13 @@ function flushDeltasOnto(event: Event, child: NodeContext): void {
   if (!hasEntries(stateDelta) && !hasEntries(artifactDelta)) {
     return;
   }
-  event.actions ??= createEventActions();
-  if (hasEntries(stateDelta)) {
-    const merged = {...stateDelta, ...event.actions.stateDelta};
-    // Without the stamps a late commit can roll a key back over a newer write.
-    carryDeltaStamps(stateDelta, merged);
-    carryDeltaStamps(event.actions.stateDelta, merged);
-    event.actions.stateDelta = merged;
-    clearInPlace(stateDelta);
-  }
-  if (hasEntries(artifactDelta)) {
-    event.actions.artifactDelta = {
-      ...artifactDelta,
-      ...event.actions.artifactDelta,
-    };
-    clearInPlace(artifactDelta);
-  }
+  // The event is the later source, so its own value wins for a key both carry.
+  event.actions = mergeEventActions([
+    {stateDelta, artifactDelta},
+    event.actions ?? {},
+  ]);
+  clearInPlace(stateDelta);
+  clearInPlace(artifactDelta);
 }
 
 interface FlushOutputAndDeltasParams {
