@@ -69,9 +69,10 @@ One document holds one event:
 | `timestamp` | `number`   | `event.timestamp`, in epoch milliseconds       |
 
 `addSessionToMemory` writes nothing for an event that has no content, no text
-in its parts, or only stop words. It commits in batches of 500, which is
-Firestore's cap on one batched write. A failed commit rejects, so the caller
-learns that the session was not stored.
+in its parts, or only stop words. It commits every 500 writes, the same batch
+size adk-python uses, so a long session cannot build one request that Firestore
+rejects for its size. A failed commit rejects, so the caller learns that the
+session was not stored.
 
 A read turns a document back into a `MemoryEntry`. A document whose `content`
 is not an object is skipped with a warning, and so is a whole keyword query
