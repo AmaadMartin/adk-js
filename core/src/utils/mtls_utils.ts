@@ -21,10 +21,7 @@ import type {ClientRequest, IncomingMessage} from 'node:http';
 import * as https from 'node:https';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
-import {promisify} from 'node:util';
 import {logger} from './logger.js';
-
-const execFileAsync = promisify(execFile);
 
 /** Path, relative to the home directory, of the SecureConnect metadata file. */
 const CONTEXT_AWARE_METADATA_PATH = join(
@@ -170,6 +167,19 @@ function parseProviderOutput(output: string): MtlsClientCerts | undefined {
   return passphrase ? {cert, key, passphrase} : {cert, key};
 }
 
+/** Runs `command` and resolves its standard output. */
+function runCommand(command: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command[0], command.slice(1), (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
 /**
  * Loads the client certificate that SecureConnect provides on this machine.
  *
@@ -190,8 +200,7 @@ export async function loadDefaultClientCerts(): Promise<
     return undefined;
   }
   try {
-    const {stdout} = await execFileAsync(command[0], command.slice(1));
-    return parseProviderOutput(stdout);
+    return parseProviderOutput(await runCommand(command));
   } catch {
     // The provider's output carries the private key, so neither it nor the
     // error text it may quote is reported.
