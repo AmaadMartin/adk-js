@@ -12,6 +12,7 @@
  * `FinalResponseMatchV2Evaluator`, `HallucinationsV1Evaluator`,
  * `SafetyEvaluatorV1`, `RubricBasedToolUseV1Evaluator`,
  * `RubricBasedFinalResponseQualityV1Evaluator`,
+ * `RubricBasedMultiTurnTrajectoryEvaluator`,
  * `MultiTurnTaskSuccessV1Evaluator`,
  * `MultiTurnToolUseQualityV1Evaluator` and
  * `MultiTurnTrajectoryQualityV1Evaluator` evaluators that stand on it,
