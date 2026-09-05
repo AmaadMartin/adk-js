@@ -10,11 +10,11 @@ import {AuthScheme} from '../../auth/auth_schemes.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {BaseAuthProvider} from '../../auth/base_auth_provider.js';
 import {experimental} from '../../utils/experimental.js';
-import {GcpAuthProviderScheme} from '../agent_registry/types.js';
 import {
   AgentIdentityCredentialsProvider,
   CredentialsProvider,
 } from './agent_identity_credentials_provider.js';
+import {GcpAuthProviderScheme} from './gcp_auth_provider_scheme.js';
 
 /** The scheme `type` this provider is registered under. */
 export const GCP_AUTH_PROVIDER_SCHEME_TYPE = 'gcpAuthProviderScheme';

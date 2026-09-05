@@ -13,7 +13,6 @@ import {
 import {getFunctionCalls, getFunctionResponses} from '../../events/event.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {GcpAuthProviderScheme} from '../agent_registry/types.js';
 import {
   AgentIdentityCredentialsClient,
   RestAgentIdentityCredentialsClient,
@@ -21,6 +20,7 @@ import {
   RetrieveCredentialsResponse,
   RetrieveCredentialsSuccess,
 } from './agent_identity_credentials_client.js';
+import {GcpAuthProviderScheme} from './gcp_auth_provider_scheme.js';
 
 /** How long to wait between polls while the service reports `pending`. */
 const NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS = 1000;
