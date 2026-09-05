@@ -148,13 +148,122 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {evalModel} from './evaluation/common.js';
+export type {
+  EvalDumpOptions,
+  EvalModel,
+  EvalModelOptions,
+} from './evaluation/common.js';
+export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export type {
+  ConversationScenario,
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+} from './evaluation/eval_case.js';
+export {
+  DEFAULT_JUDGE_MODEL,
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
+  EvalStatus,
+  PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  getConfigCustomFunctionPath,
+  getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+  parseBaseCriterion,
+  parseEvalMetric,
+  parseEvalMetricResult,
+  parseHallucinationsCriterion,
+  parseInterval,
+  parseJudgeModelOptions,
+  parseLlmAsAJudgeCriterion,
+  parseLlmBackedUserSimulatorCriterion,
+  parseMetricInfo,
+  parseMetricValueInfo,
+  parseRubricsBasedCriterion,
+  parseToolTrajectoryCriterion,
+  resolveJudgeModelOptions,
+  setConfigCustomFunctionPath,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricCriterion,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
+  HallucinationsCriterion,
+  Interval,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+  ParsedLlmBackedUserSimulatorCriterion,
+  ParsedToolTrajectoryCriterion,
+  ResolvedJudgeModelOptions,
+  RubricsBasedCriterion,
+  Threshold,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export {parseRubric, parseRubricScore} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export type {
+  CriterionType,
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {MultiTurnTrajectoryQualityV1Evaluator} from './evaluation/multi_turn_trajectory_quality_evaluator.js';
+export type {MultiTurnTrajectoryQualityV1EvaluatorOptions} from './evaluation/multi_turn_trajectory_quality_evaluator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
+export {
+  MultiTurnVertexAiEvalFacade,
+  SingleTurnVertexAiEvalFacade,
+  VertexAiEvalFacade,
+  resolveVertexAiEvalClientConfig,
+} from './evaluation/vertex_ai_eval_facade.js';
+export type {
+  VertexAgentConfig,
+  VertexAgentData,
+  VertexAgentEvent,
+  VertexAggregatedMetricResult,
+  VertexAiEvalClient,
+  VertexAiEvalClientConfig,
+  VertexAiEvalFacadeOptions,
+  VertexAiEvalRequest,
+  VertexConversationTurn,
+  VertexEvalCase,
+  VertexEvalCaseRow,
+  VertexEvalMetricSpec,
+  VertexEvaluationDataset,
+  VertexEvaluationResult,
+} from './evaluation/vertex_ai_eval_facade.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
