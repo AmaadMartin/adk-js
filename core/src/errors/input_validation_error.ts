@@ -10,9 +10,11 @@
 export class InputValidationError extends Error {
   /**
    * @param message A message describing why the input is invalid.
+   * @param options Standard error options. Pass `cause` to keep the underlying
+   *   failure, such as the import error behind an unresolvable module name.
    */
-  constructor(message = 'Invalid input.') {
-    super(message);
+  constructor(message = 'Invalid input.', options?: ErrorOptions) {
+    super(message, options);
     this.name = 'InputValidationError';
   }
 }
