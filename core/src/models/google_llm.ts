@@ -142,6 +142,14 @@ export class Gemini extends BaseLlm {
     /projects\/.+\/locations\/.+\/publishers\/google\/models\/gemini.+/,
   ];
 
+  /**
+   * `generateContent` rejects a client-supplied function call id; the
+   * Interactions API accepts it.
+   */
+  override get pairsToolCallsById(): boolean {
+    return this.useInteractionsApi;
+  }
+
   private _apiClient?: GoogleGenAI;
   private _apiBackend?: GoogleLLMVariant;
   private _trackingHeaders?: Record<string, string>;

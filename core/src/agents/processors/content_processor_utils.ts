@@ -50,6 +50,9 @@ export function removeClientFunctionCallId(content: Content): void {
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
  * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param preserveFunctionCallIds: Keep `adk-` prefixed function call/response
+ *     ids in the request. Set for a provider that pairs a tool call with its
+ *     result by id.
  *
  * @returns A list of processed contents.
  */
@@ -58,6 +61,7 @@ export function getContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  preserveFunctionCallIds = false,
 ): Content[] {
   const filteredEvents: Event[] = [];
 
@@ -86,10 +90,37 @@ export function getContents(
   const contents = [];
   for (const event of resultEvents) {
     const content = cloneDeep(event.content!);
-    removeClientFunctionCallId(content);
+    if (!preserveFunctionCallIds) {
+      removeClientFunctionCallId(content);
+    }
     contents.push(content);
   }
   return contents;
+}
+
+/**
+ * Whether a live event is a model media event carrying inline data (audio,
+ * video, or image).
+ *
+ * Such events are deliberately not persisted to the session to avoid storing
+ * large raw blobs. Media referenced via `fileData` (e.g. saved as artifacts)
+ * and all non-media events (transcriptions, tool calls, usage) are persisted
+ * as in `runAsync`.
+ */
+export function isLiveModelMediaEventWithInlineData(event: Event): boolean {
+  const parts = event.content?.parts;
+  if (!parts?.length) {
+    return false;
+  }
+  return parts.some((part) => {
+    const mimeType = part.inlineData?.mimeType?.toLowerCase();
+    return (
+      mimeType !== undefined &&
+      (mimeType.startsWith('audio/') ||
+        mimeType.startsWith('video/') ||
+        mimeType.startsWith('image/'))
+    );
+  });
 }
 
 /**
@@ -165,6 +196,10 @@ function isRequestInputEvent(event: Event): boolean {
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
+ * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param preserveFunctionCallIds: Keep `adk-` prefixed function call/response
+ *     ids in the request. Set for a provider that pairs a tool call with its
+ *     result by id.
  *
  * @returns A list of contents for the current turn only, preserving context
  *     needed for proper tool execution while excluding conversation history.
@@ -174,6 +209,7 @@ export function getCurrentTurnContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  preserveFunctionCallIds = false,
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
   for (let i = events.length - 1; i >= 0; i--) {
@@ -189,6 +225,7 @@ export function getCurrentTurnContents(
         agentName,
         currentBranch,
         currentIsolationScope,
+        preserveFunctionCallIds,
       );
     }
   }

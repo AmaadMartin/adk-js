@@ -52,6 +52,17 @@ export class RoutedLlm extends BaseLlm {
   }
 
   /**
+   * The router picks a model per request, so the contents are built before the
+   * serving model is known. Only every candidate agreeing makes it safe to keep
+   * the ids.
+   */
+  override get pairsToolCallsById(): boolean {
+    return Object.values(this.models).every(
+      (model) => model.pairsToolCallsById,
+    );
+  }
+
+  /**
    * Generates content by delegating to the selected model.
    */
   async *generateContentAsync(

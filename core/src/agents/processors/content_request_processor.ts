@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getActiveEvents} from '../../context/compaction_utils.js';
+import {
+  getActiveEvents,
+  recoverCompactedFunctionCalls,
+} from '../../context/compaction_utils.js';
 import {Event} from '../../events/event.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {InvocationContext} from '../invocation_context.js';
@@ -42,7 +45,12 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
       return;
     }
 
-    const events = getActiveEvents(invocationContext.session.events);
+    const allEvents = invocationContext.session.events;
+    const events = recoverCompactedFunctionCalls(
+      getActiveEvents(allEvents),
+      allEvents,
+    );
+    const preserveFunctionCallIds = agent.canonicalModel.pairsToolCallsById;
 
     if (agent.includeContents === 'default') {
       // Include full conversation history
@@ -51,6 +59,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
+        preserveFunctionCallIds,
       );
     } else {
       // Include current turn context only (no conversation history).
@@ -59,6 +68,7 @@ export class ContentRequestProcessor implements BaseLlmRequestProcessor {
         agent.name,
         invocationContext.branch,
         invocationContext.isolationScope,
+        preserveFunctionCallIds,
       );
     }
 

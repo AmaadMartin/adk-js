@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {CompactedEvent, createEvent} from '@google/adk';
-import {Content} from '@google/genai';
+import {CompactedEvent, createEvent, Event} from '@google/adk';
+import {Content, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   getContents,
   getCurrentTurnContents,
+  isLiveModelMediaEventWithInlineData,
   mergeFunctionResponseEvents,
   removeClientFunctionCallId,
 } from '../../../src/agents/processors/content_processor_utils.js';
@@ -1203,5 +1204,156 @@ describe('removeClientFunctionCallId', () => {
     expect(() => removeClientFunctionCallId(emptyContent)).not.toThrow();
     const noParts: Content = {role: 'user', parts: []};
     expect(() => removeClientFunctionCallId(noParts)).not.toThrow();
+  });
+});
+
+/**
+ * Builds a model event that calls `roll_die` under the given `adk-` ids.
+ */
+function createCallEvent(ids: string[], timestamp = 1000): Event {
+  return createEvent({
+    author: 'agent',
+    timestamp,
+    content: {
+      role: 'model',
+      parts: ids.map((id) => ({
+        functionCall: {id, name: 'roll_die', args: {sides: 6}},
+      })),
+    },
+  });
+}
+
+/**
+ * Builds a user event that answers `roll_die` for the given `adk-` id.
+ */
+function createResponseEvent(
+  id: string,
+  result: string,
+  timestamp = 2000,
+): Event {
+  return createEvent({
+    author: 'user',
+    timestamp,
+    content: {
+      role: 'user',
+      parts: [{functionResponse: {id, name: 'roll_die', response: {result}}}],
+    },
+  });
+}
+
+describe('getContents with preserveFunctionCallIds', () => {
+  const events = [
+    createCallEvent(['adk-1']),
+    createResponseEvent('adk-1', 'four'),
+  ];
+
+  it('keeps the adk- ids when the option is set', () => {
+    const contents = getContents(events, 'agent', undefined, undefined, true);
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(contents[1].parts?.[0].functionResponse?.id).toBe('adk-1');
+  });
+
+  it('strips the adk- ids by default', () => {
+    const contents = getContents(events, 'agent');
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  it('strips the adk- ids when the option is explicitly false', () => {
+    const contents = getContents(events, 'agent', undefined, undefined, false);
+
+    expect(contents[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(contents[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+
+  it('leaves the source events untouched either way', () => {
+    const sourceEvents = [
+      createCallEvent(['adk-1']),
+      createResponseEvent('adk-1', 'four'),
+    ];
+
+    getContents(sourceEvents, 'agent', undefined, undefined, true);
+    getContents(sourceEvents, 'agent');
+
+    expect(sourceEvents[0].content?.parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(sourceEvents[1].content?.parts?.[0].functionResponse?.id).toBe(
+      'adk-1',
+    );
+  });
+
+  it('is forwarded by getCurrentTurnContents', () => {
+    const turnEvents = [
+      createEvent({
+        author: 'user',
+        timestamp: 500,
+        content: {role: 'user', parts: [{text: 'roll a die'}]},
+      }),
+      ...events,
+    ];
+
+    const preserved = getCurrentTurnContents(
+      turnEvents,
+      'agent',
+      undefined,
+      undefined,
+      true,
+    );
+    const stripped = getCurrentTurnContents(turnEvents, 'agent');
+
+    expect(preserved[0].parts?.[0].functionCall?.id).toBe('adk-1');
+    expect(preserved[1].parts?.[0].functionResponse?.id).toBe('adk-1');
+    expect(stripped[0].parts?.[0].functionCall?.id).toBeUndefined();
+    expect(stripped[1].parts?.[0].functionResponse?.id).toBeUndefined();
+  });
+});
+
+describe('isLiveModelMediaEventWithInlineData', () => {
+  function eventWithParts(parts: Part[]): Event {
+    return createEvent({author: 'agent', content: {role: 'model', parts}});
+  }
+
+  it.each([
+    ['audio/pcm', 'audio/pcm;rate=24000'],
+    ['video', 'video/mp4'],
+    ['image', 'image/png'],
+    ['a mixed-case mime', 'AUDIO/PCM'],
+  ])('is true for %s inline data', (_name, mimeType) => {
+    const event = eventWithParts([{inlineData: {data: 'AAAA', mimeType}}]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(true);
+  });
+
+  it('is false for media referenced by fileData', () => {
+    const event = eventWithParts([
+      {fileData: {fileUri: 'artifact://audio.pcm', mimeType: 'audio/pcm'}},
+    ]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+  });
+
+  it('is false for non-media inline data', () => {
+    const event = eventWithParts([
+      {inlineData: {data: 'AAAA', mimeType: 'text/plain'}},
+    ]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+  });
+
+  it('is false for inline data with no mime type', () => {
+    const event = eventWithParts([{inlineData: {data: 'AAAA'}}]);
+
+    expect(isLiveModelMediaEventWithInlineData(event)).toBe(false);
+  });
+
+  it('is false for an event with no content', () => {
+    expect(
+      isLiveModelMediaEventWithInlineData(createEvent({author: 'agent'})),
+    ).toBe(false);
+  });
+
+  it('is false for an event with an empty parts array', () => {
+    expect(isLiveModelMediaEventWithInlineData(eventWithParts([]))).toBe(false);
   });
 });
