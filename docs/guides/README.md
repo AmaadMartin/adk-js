@@ -1,7 +1,11 @@
 # Developer guides
 
-One guide per feature, grouped by the area it belongs to. Each lives at
-`docs/guides/<topic>/<feature>/index.md`, mirroring adk-python.
+adk-js documentation lives on [adk.dev](https://adk.dev), built from
+[google/adk-docs](https://github.com/google/adk-docs). These pages are the
+exception: per-feature guides kept beside the code, laid out the way adk-python
+lays out `docs/guides/<topic>/<feature>/index.md`.
+
+Maintainers may prefer these on adk.dev instead. Moving them is a file move.
 
 ## Labs
 
