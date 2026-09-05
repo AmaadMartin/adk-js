@@ -88,9 +88,7 @@ export async function getGcpExporters(
     return {};
   }
 
-  const metricHooks = enableMetrics
-    ? await createMetricHooks(projectId)
-    : {};
+  const metricHooks = enableMetrics ? await createMetricHooks(projectId) : {};
 
   return {
     spanProcessors: [

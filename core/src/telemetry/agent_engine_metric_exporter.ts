@@ -309,12 +309,14 @@ export class RequestDrivenMetricReader
     }
   }
 
+  /** Runs a collect, then flushes the wrapped exporter. */
   protected async onForceFlush(): Promise<void> {
     this.pending = this.pending.then(() => this.collectNow());
     await this.pending;
     await this.exporter.forceFlush();
   }
 
+  /** Drains the collects in flight, collects once more, then shuts down. */
   protected async onShutdown(): Promise<void> {
     this.shuttingDown = true;
     await this.pending;

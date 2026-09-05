@@ -28,9 +28,9 @@ import {Context, context, metrics, propagation} from '@opentelemetry/api';
 import {AsyncLocalStorageContextManager} from '@opentelemetry/context-async-hooks';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
 import {
-  MeterProvider as SdkMeterProvider,
   PushMetricExporter,
   ResourceMetrics,
+  MeterProvider as SdkMeterProvider,
 } from '@opentelemetry/sdk-metrics';
 import {
   BasicTracerProvider,
@@ -347,7 +347,10 @@ describe('request-path metric flushing', () => {
     const {next} = drive(spy);
 
     expect(next).toHaveBeenCalledOnce();
-    expect(error).toHaveBeenCalledWith('Metrics request-start hook failed', boom);
+    expect(error).toHaveBeenCalledWith(
+      'Metrics request-start hook failed',
+      boom,
+    );
   });
 
   it('drainMetrics tolerates a reader that submits nothing', async () => {
