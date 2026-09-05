@@ -12,6 +12,7 @@ import {loadOptionalPeer} from '../utils/optional_peer.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
+  createArtifactVersion,
   DeleteArtifactRequest,
   ListArtifactKeysRequest,
   ListVersionsRequest,
@@ -23,6 +24,14 @@ const GCS_FILE_URI_METADATA_KEY = 'adkFileUri';
 const GCS_FILE_MIME_TYPE_METADATA_KEY = 'adkFileMimeType';
 const GCS_DISPLAY_NAME_METADATA_KEY = 'adkDisplayName';
 const GCS_IS_TEXT_METADATA_KEY = 'adkIsText';
+
+/** The blob metadata keys the service owns, rather than the caller. */
+const ADK_METADATA_KEYS: readonly string[] = [
+  GCS_FILE_URI_METADATA_KEY,
+  GCS_FILE_MIME_TYPE_METADATA_KEY,
+  GCS_DISPLAY_NAME_METADATA_KEY,
+  GCS_IS_TEXT_METADATA_KEY,
+];
 
 export class GcsArtifactService implements BaseArtifactService {
   private readonly bucketName: string;
@@ -276,12 +285,13 @@ export class GcsArtifactService implements BaseArtifactService {
 
       const [metadata] = await file.getMetadata();
 
-      return {
+      return createArtifactVersion({
         version,
         mimeType: metadata.contentType,
-        customMetadata: metadata.metadata as Record<string, unknown>,
+        customMetadata: toCustomMetadata(metadata.metadata),
         canonicalUri: file.publicUrl(),
-      };
+        createTime: toUnixSeconds(metadata.timeCreated),
+      });
     } catch (e) {
       logger.warn(
         `[GcsArtifactService] getArtifactVersion: Failed to get artifact version for userId: ${request.userId} sessionId: ${request.sessionId} filename: ${request.filename} version: ${request.version}`,
@@ -290,6 +300,37 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
   }
+}
+
+/**
+ * Reads back the metadata the caller supplied.
+ *
+ * The service stores its own keys in the same blob metadata, so a version
+ * record reports only the keys that came from the caller.
+ *
+ * @param stored The blob metadata GCS reported.
+ * @return The caller's metadata.
+ */
+function toCustomMetadata(
+  stored?: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(stored ?? {}).filter(
+      ([key]) => !ADK_METADATA_KEYS.includes(key),
+    ),
+  );
+}
+
+/**
+ * Converts the RFC 3339 timestamp GCS reports into Unix seconds.
+ *
+ * @param timestamp The timestamp the client reported, if it reported one.
+ * @return The time in Unix seconds, or undefined when GCS reported no usable
+ *     timestamp.
+ */
+function toUnixSeconds(timestamp?: string): number | undefined {
+  const milliseconds = timestamp ? Date.parse(timestamp) : Number.NaN;
+  return Number.isNaN(milliseconds) ? undefined : milliseconds / 1000;
 }
 
 function getFileName({

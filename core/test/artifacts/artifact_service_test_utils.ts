@@ -613,4 +613,68 @@ export function runArtifactServiceTests(
       expect(keysAfterDelete).not.toContain(filename);
     });
   });
+
+  describe('ArtifactVersion metadata defaults', () => {
+    const filename = 'defaults.txt';
+
+    const saveAndRead = async () => {
+      const before = Date.now() / 1000;
+      const version = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'defaults'},
+      });
+      const after = Date.now() / 1000;
+      const metadata = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version,
+      });
+      if (!metadata) {
+        expect.fail('Expected the saved version to report its metadata.');
+      }
+      return {metadata, before, after};
+    };
+
+    it('reports an empty customMetadata when the caller supplies none', async () => {
+      const {metadata} = await saveAndRead();
+
+      expect(metadata.customMetadata).toEqual({});
+    });
+
+    it('reports a canonical URI', async () => {
+      const {metadata} = await saveAndRead();
+
+      expect(metadata.canonicalUri).toBeTypeOf('string');
+      expect(metadata.canonicalUri.length).toBeGreaterThan(0);
+    });
+
+    it('reports a creation time in Unix seconds', async () => {
+      const {metadata, before, after} = await saveAndRead();
+
+      // A clock skew of a second is tolerated; a value in milliseconds is not.
+      expect(metadata.createTime).toBeGreaterThanOrEqual(before - 1);
+      expect(metadata.createTime).toBeLessThanOrEqual(after + 1);
+    });
+
+    it('reports the same defaults from listArtifactVersions', async () => {
+      await saveAndRead();
+
+      const versions = await service.listArtifactVersions({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+
+      expect(versions).toHaveLength(1);
+      expect(versions[0].customMetadata).toEqual({});
+      expect(versions[0].createTime).toBeTypeOf('number');
+      expect(versions[0].canonicalUri.length).toBeGreaterThan(0);
+    });
+  });
 }
