@@ -456,6 +456,22 @@ describe('ApiRegistry', () => {
       ).rejects.not.toThrow('Error fetching MCP servers');
     });
 
+    it('rejects a non-2xx listing status whose body still parses', async () => {
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValue(
+        jsonResponse({error: {message: 'permission denied'}}, 403),
+      );
+
+      const registry = newRegistry();
+
+      await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
+        'Error fetching MCP servers from API Registry',
+      );
+      await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
+        'returned status 403',
+      );
+    });
+
     it('wraps a listing body that is not JSON', async () => {
       fetchMock.mockReset();
       fetchMock.mockResolvedValue(
