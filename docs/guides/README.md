@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Sessions
+
+- [DatabaseSessionService](sessions/database_session_service/index.md) - Storing sessions in a SQL database, and tuning the MikroORM connection behind them.
+
 ### Tools
 
 #### Retrieval
