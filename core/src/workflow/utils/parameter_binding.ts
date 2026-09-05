@@ -17,6 +17,8 @@
  */
 
 import {Content, Schema} from '@google/genai';
+import type {z as z3} from 'zod/v3';
+import type {z as z4} from 'zod/v4';
 import {State} from '../../sessions/state.js';
 import {logger} from '../../utils/logger.js';
 import {
@@ -38,6 +40,9 @@ import {isContent} from '../base_node.js';
  */
 export type ParameterBinding = 'state' | 'nodeInput';
 
+/** One field of a declared Zod object schema, in either dialect. */
+type ZodField = z3.ZodType | z4.ZodType;
+
 /**
  * The declared parameter that receives the raw node input verbatim in
  * `'state'` mode, mirroring Python's identically-special `node_input`
@@ -49,18 +54,25 @@ export const NODE_INPUT_PARAMETER = 'nodeInput';
 export interface ParameterDescriptor {
   /** The parameter, and the schema property, name. */
   name: string;
-  /** Whether the schema lists the parameter in its `required` array. */
+  /** Whether the parameter rejects an absent value. */
   required: boolean;
-  /** The `default` the parameter's own schema declares, if any. */
+  /**
+   * The value the parameter's schema produces for an absent input.
+   *
+   * Resolved once, so a handler that mutates a defaulted object reaches the
+   * same object on the next run. Python's `param.default` behaves the same way.
+   */
   defaultValue?: unknown;
-  /** Whether the parameter's own schema declares a `default`. */
+  /** Whether the parameter's own schema declares a default. */
   hasDefault: boolean;
   /** Whether the parameter's schema is a string, or a union holding one. */
   expectsString: boolean;
   /**
-   * Validator for this parameter alone. Absent when the parameter's schema has
-   * no Zod equivalent, in which case its value passes through unchecked — the
-   * same degradation `parseWithSchema` makes, not a guarantee.
+   * Validator for this parameter alone. A Zod field always has one, and it is
+   * the field itself, so `z.coerce`, `.transform` and `.refine` all run. A
+   * property of a genai `Schema` that has no Zod equivalent has none, and its
+   * value passes through unchecked — the same degradation `parseWithSchema`
+   * makes, not a guarantee.
    */
   validate?: (value: unknown) => unknown;
 }
@@ -83,10 +95,45 @@ export interface BindParametersRequest {
  * Resolves the parameters an object schema declares, so that binding a value
  * costs no schema work per run.
  *
- * Returns an empty list for a schema that declares no properties, the way
- * {@link objectSchemaFields} degrades a schema it cannot decompose.
+ * Returns an empty list for a schema that declares no properties.
  */
 export function describeParameters(schema: SchemaLike): ParameterDescriptor[] {
+  return isZodObject(schema)
+    ? describeZodParameters(schema)
+    : describeDocumentParameters(schema);
+}
+
+/**
+ * Describes each parameter from the Zod field that declares it.
+ *
+ * The field is used as its own validator, rather than being rendered as JSON
+ * Schema and compiled back. The round trip erases whatever JSON Schema cannot
+ * carry — `z.coerce.number()` becomes a bare `{type: 'number'}` and stops
+ * coercing, and a `.refine` predicate disappears — and it throws outright for a
+ * field JSON Schema cannot express at all (`z.date()`, `z.instanceof()`,
+ * `.transform()`), which would abort node construction.
+ */
+function describeZodParameters(
+  schema: z3.ZodObject<z3.ZodRawShape> | z4.ZodObject<z4.ZodRawShape>,
+): ParameterDescriptor[] {
+  return Object.entries(schema.shape).map(([name, field]) => {
+    const absent = parseAbsent(field);
+    return {
+      name,
+      required: !absent.accepted,
+      defaultValue: absent.value,
+      hasDefault: absent.accepted && absent.value !== undefined,
+      expectsString: zodExpectsString(field),
+      validate: (value: unknown) => field.parse(value),
+    };
+  });
+}
+
+/**
+ * Describes each parameter of a genai `Schema` from its JSON Schema document,
+ * which is the only form its properties come in.
+ */
+function describeDocumentParameters(schema: SchemaLike): ParameterDescriptor[] {
   const document = toJsonSchema(schema);
   const properties = asRecord(document['properties']);
   const declaredRequired = document['required'];
@@ -106,6 +153,43 @@ export function describeParameters(schema: SchemaLike): ParameterDescriptor[] {
       validate: validator && ((value: unknown) => validator.parse(value)),
     };
   });
+}
+
+/**
+ * Asks a Zod field what it does with an absent value: whether it accepts one,
+ * and the value it produces when it does.
+ *
+ * Optionality and defaults are read this way rather than from a `required`
+ * array, because the two dialects disagree there — Zod v4 lists a defaulted
+ * field as required and Zod v3 does not.
+ */
+function parseAbsent(field: ZodField): {accepted: boolean; value: unknown} {
+  try {
+    const parsed = field.safeParse(undefined);
+    return {
+      accepted: parsed.success,
+      value: parsed.success ? parsed.data : undefined,
+    };
+  } catch {
+    // An async refinement makes the synchronous parse throw. Treating the field
+    // as required is what binding a value to it would report anyway.
+    return {accepted: false, value: undefined};
+  }
+}
+
+/**
+ * Whether a Zod field accepts a string, so that a `Content` reaching it is
+ * converted to text first.
+ *
+ * A field JSON Schema cannot express counts as not expecting one, which only
+ * means no conversion is attempted for it.
+ */
+function zodExpectsString(field: ZodField): boolean {
+  try {
+    return expectsString(toJsonSchema(field));
+  } catch {
+    return false;
+  }
 }
 
 /**
