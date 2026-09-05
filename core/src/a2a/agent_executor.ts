@@ -360,10 +360,12 @@ async function getAdkRunner(
   }
 
   if (!isRunnerConfig(runnerOrConfig)) {
+    // The type only: the value itself may carry credentials.
+    const got = runnerOrConfig === null ? 'null' : typeof runnerOrConfig;
     throw new TypeError(
       fromFactory
-        ? `Runner factory must return a Runner instance, got ${describeType(runnerOrConfig)}`
-        : `Runner must be a Runner instance or a callable that returns a Runner, got ${describeType(runnerOrConfig)}`,
+        ? `Runner factory must return a Runner instance, got ${got}`
+        : `Runner must be a Runner instance or a callable that returns a Runner, got ${got}`,
     );
   }
 
@@ -380,12 +382,4 @@ function isRunnerConfig(value: unknown): value is RunnerConfig {
   return (
     typeof value === 'object' && value !== null && 'sessionService' in value
   );
-}
-
-/**
- * Names the type of a rejected value for an error message. Reports the type
- * only: the value itself may carry credentials.
- */
-function describeType(value: unknown): string {
-  return value === null ? 'null' : typeof value;
 }
