@@ -194,6 +194,8 @@ async function runChildNode({
     isolationScope,
     // A node's own schema wins; otherwise it answers to its parent's.
     stateSchema: node.stateSchema ?? parent.stateSchema,
+    parentCtx: parent,
+    node,
   });
   // Propagate the dynamic scheduler down; a nested Workflow overrides it.
   child.scheduler = parent.scheduler;
@@ -321,11 +323,20 @@ async function runChildNode({
     if (options.useAsOutput) {
       parent.output = child.output;
       parent.route = child.route;
+      // `ctx.runNode` claims the delegate before the child runs; this covers
+      // the engine's own direct calls, which do not go through it.
       parent.outputDelegated = true;
     }
 
     return child;
   } catch (err) {
+    // Recorded on the child before the throw travels on, so a node body holding
+    // its own context can report what failed. A failure that started deeper
+    // keeps that node's path rather than adopting this one's.
+    child.error = err instanceof Error ? err : new Error(String(err));
+    child.errorNodePath = isDynamicNodeFailError(err)
+      ? err.errorNodePath
+      : child.nodePath;
     traceNodeExecution({
       nodePath,
       runId,
@@ -435,6 +446,8 @@ function resetState(childNodeContext: NodeContext): void {
   childNodeContext.route = undefined;
   childNodeContext.interruptIds = [];
   childNodeContext.reportedError = undefined;
+  childNodeContext.error = undefined;
+  childNodeContext.errorNodePath = '';
   for (const key of Object.keys(childNodeContext.actions.stateDelta)) {
     delete childNodeContext.actions.stateDelta[key];
   }
@@ -665,6 +678,9 @@ interface EnrichEventParams {
  * them unset, so a node can override them. `path` is different: it is
  * engine-owned and always set to the child's real node path — a node must not be
  * able to misreport where it ran.
+ *
+ * The author defaults to `ctx.eventAuthor` when something set one — an agent
+ * run as a node records its own — and to the node's own name otherwise.
  */
 function enrichEvent({
   event,
@@ -674,7 +690,7 @@ function enrichEvent({
   isolationScope,
 }: EnrichEventParams): void {
   if (!event.author) {
-    event.author = nodeName;
+    event.author = child.eventAuthor || nodeName;
   }
   if (!event.invocationId) {
     event.invocationId = child.invocationId;

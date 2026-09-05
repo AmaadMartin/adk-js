@@ -403,11 +403,12 @@ export abstract class BaseAgent<
    * rather than the raw field, so the agent runs against whatever view of the
    * session the workflow wants it to see.
    *
-   * Unlike adk-python's `_run_impl`, nothing is stamped onto the events here.
-   * Python has to fix up the author and the node path because it authors
-   * in-workflow events as the workflow itself; the TypeScript node runner
-   * already owns both (`enrichEvent` keeps an author the node set, and always
-   * stamps the true node path), so repeating it would be dead code.
+   * The node path is not stamped here, unlike adk-python's `_run_impl`: the
+   * TypeScript node runner always stamps the true one, so repeating it would be
+   * dead code. The author is recorded on the context (`ctx.eventAuthor`) so the
+   * runner attributes a later event this agent leaves unattributed to the agent
+   * rather than to the node — adk-python does the same at
+   * `agents/base_agent.py` `_run_impl`.
    *
    * `nodeInput` is intentionally unused: an agent's input is its conversation,
    * which the workflow supplies through the session. A node that needs to read
@@ -418,7 +419,12 @@ export abstract class BaseAgent<
     ctx: NodeContext,
     _nodeInput: unknown,
   ): AsyncGenerator<Event, void, void> {
-    yield* this.runAsync(ctx.getInvocationContext());
+    for await (const event of this.runAsync(ctx.getInvocationContext())) {
+      if (event.author) {
+        ctx.eventAuthor = event.author;
+      }
+      yield event;
+    }
   }
 
   /**

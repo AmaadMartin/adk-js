@@ -48,6 +48,16 @@ export class ReadonlyContext {
   }
 
   /**
+   * The branch of the current invocation, if it runs on one.
+   *
+   * A dot-separated agent path (`agent_1.agent_2.agent_3`) that scopes which
+   * events an agent sees.
+   */
+  get branch(): string | undefined {
+    return this.invocationContext.branch;
+  }
+
+  /**
    * The name of the agent that is currently running, or `'unknown'` when the
    * invocation drives a bare node and has no agent at this level.
    */
