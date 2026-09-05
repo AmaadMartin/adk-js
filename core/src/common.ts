@@ -148,13 +148,43 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {evalModel, optionalField} from './evaluation/common.js';
+export type {EvalModel, EvalModelOptions} from './evaluation/common.js';
+export {
+  conversationGenerationConfigModel,
+  conversationScenarioModel,
+  conversationScenariosModel,
+} from './evaluation/conversation_scenarios.js';
+export type {
+  ConversationGenerationConfig,
+  ConversationScenario,
+  ConversationScenarios,
+} from './evaluation/conversation_scenarios.js';
+export {
+  PRE_BUILT_BEHAVIORS,
+  getDefaultPersonaRegistry,
+} from './evaluation/simulation/pre_built_personas.js';
+export {
+  UserPersonaRegistry,
+  behaviorInstructionsToString,
+  userBehaviorModel,
+  userPersonaModel,
+  violationRubricsToString,
+} from './evaluation/simulation/user_simulator_personas.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
