@@ -107,6 +107,13 @@ describe('VertexAiSessionService', () => {
   }
   let mockClient: MockSessions;
 
+  /**
+   * The mock as the `Sessions` client a service takes. It implements only the
+   * methods this file drives, so it needs a double cast; this is the file's
+   * one place that does it.
+   */
+  const mockSessions = () => mockClient as unknown as Sessions;
+
   beforeEach(() => {
     mockClient = {
       createInternal: vi.fn().mockResolvedValue({
@@ -144,7 +151,7 @@ describe('VertexAiSessionService', () => {
     };
 
     service = new VertexAiSessionService({
-      sessions: mockClient as unknown as Sessions,
+      sessions: mockSessions(),
     });
   });
 
@@ -198,7 +205,7 @@ describe('VertexAiSessionService', () => {
 
     it('never builds a client when sessions are injected', () => {
       new VertexAiSessionService({
-        sessions: mockClient as unknown as Sessions,
+        sessions: mockSessions(),
       });
 
       expect(clientConstructor).not.toHaveBeenCalled();
@@ -207,7 +214,7 @@ describe('VertexAiSessionService', () => {
 
   it('uses agentEngineId if provided', async () => {
     const serviceWithEngineId = new VertexAiSessionService({
-      sessions: mockClient as unknown as Sessions,
+      sessions: mockSessions(),
       agentEngineId: 'custom-engine-id',
     });
 
@@ -1727,13 +1734,6 @@ describe('VertexAiSessionService', () => {
     });
   });
 
-  /**
-   * The mock as the `Sessions` client a service takes. It implements only the
-   * methods this file drives, which is why the constructor's own injection
-   * point above casts it the same way.
-   */
-  const mockSessions = () => mockClient as unknown as Sessions;
-
   /** A session for the append tests, matching the mock's app name. */
   const appendSession = () =>
     createSession({
@@ -1913,31 +1913,9 @@ describe('VertexAiSessionService', () => {
         Date.parse('2024-12-12T12:12:13.000Z'),
       );
     });
-
-    it('test_create_session_with_custom_config', async () => {
-      const expireTime = '2025-12-12T12:12:12.123456Z';
-
-      await service.createSession({
-        appName: '12345',
-        userId: 'testUser',
-        apiConfig: {expireTime},
-      });
-
-      expect(mockClient.createInternal).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: expect.objectContaining({expireTime}),
-        }),
-      );
-    });
-
-    it('test_api_client_http_options_override_default', () => {
-      const probe = new HttpOptionsProbeService({sessions: mockSessions()});
-
-      expect(probe.readApiClientHttpOptionsOverride()).toBeUndefined();
-    });
   });
 
-  describe('apiClientHttpOptionsOverride', () => {
+  describe('httpOptions', () => {
     let overriding: VertexAiSessionService;
 
     /** The config object the mock recorded for its first call. */
@@ -1945,14 +1923,17 @@ describe('VertexAiSessionService', () => {
       mock.mock.calls[0][0].config;
 
     beforeEach(() => {
-      overriding = new OverridingSessionService({sessions: mockSessions()});
+      overriding = new VertexAiSessionService({
+        sessions: mockSessions(),
+        httpOptions: OVERRIDE_HTTP_OPTIONS,
+      });
     });
 
     afterEach(() => {
       vi.useRealTimers();
     });
 
-    it('sends the override on createInternal', async () => {
+    it('sends them on createInternal', async () => {
       await overriding.createSession({appName: '12345', userId: 'testUser'});
 
       expect(firstConfig(mockClient.createInternal).httpOptions).toEqual(
@@ -1960,7 +1941,7 @@ describe('VertexAiSessionService', () => {
       );
     });
 
-    it('sends the override on the create operation poll', async () => {
+    it('sends them on the create operation poll', async () => {
       mockClient.createInternal.mockResolvedValue({
         name: 'operations/1',
         done: false,
@@ -1978,7 +1959,7 @@ describe('VertexAiSessionService', () => {
       ).toEqual(OVERRIDE_HTTP_OPTIONS);
     });
 
-    it('sends the override on get and events.listInternal', async () => {
+    it('sends them on get and events.listInternal', async () => {
       await overriding.getSession({
         appName: '12345',
         userId: 'testUser',
@@ -1993,7 +1974,7 @@ describe('VertexAiSessionService', () => {
       );
     });
 
-    it('sends the override on listInternal', async () => {
+    it('sends them on listInternal', async () => {
       await overriding.listSessions({appName: '12345', userId: 'testUser'});
 
       expect(firstConfig(mockClient.listInternal).httpOptions).toEqual(
@@ -2001,7 +1982,7 @@ describe('VertexAiSessionService', () => {
       );
     });
 
-    it('sends the override on delete', async () => {
+    it('sends them on delete', async () => {
       await overriding.deleteSession({
         appName: '12345',
         userId: 'testUser',
@@ -2013,7 +1994,7 @@ describe('VertexAiSessionService', () => {
       );
     });
 
-    it('sends the override on events.append', async () => {
+    it('sends them on events.append', async () => {
       const event = createEvent({timestamp: 1620000000000});
 
       await overriding.appendEvent({session: appendSession(), event});
@@ -2023,7 +2004,7 @@ describe('VertexAiSessionService', () => {
       );
     });
 
-    it('sends no httpOptions key at all when nothing overrides them', async () => {
+    it('sends no httpOptions key at all when the service has none', async () => {
       const event = createEvent({timestamp: 1620000000000});
 
       await service.createSession({appName: '12345', userId: 'testUser'});
@@ -2055,36 +2036,6 @@ describe('VertexAiSessionService', () => {
   });
 
   describe('createSession apiConfig passthrough', () => {
-    it('rejects an expireTime smuggled in through apiConfig alongside ttl', async () => {
-      await expect(
-        service.createSession({
-          appName: '12345',
-          userId: 'testUser',
-          ttl: '7200s',
-          apiConfig: {expireTime: '2025-10-01T00:00:00Z'},
-        }),
-      ).rejects.toThrow(
-        "Cannot specify both 'ttl' and 'expireTime' simultaneously.",
-      );
-
-      expect(mockClient.createInternal).not.toHaveBeenCalled();
-    });
-
-    it('lets a named option win over the same key in apiConfig', async () => {
-      await service.createSession({
-        appName: '12345',
-        userId: 'testUser',
-        ttl: '10s',
-        apiConfig: {ttl: '20s'},
-      });
-
-      expect(mockClient.createInternal).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: expect.objectContaining({ttl: '10s'}),
-        }),
-      );
-    });
-
     it('forwards displayName, labels and waitForCompletion to the create config', async () => {
       await service.createSession({
         appName: '12345',
@@ -2171,25 +2122,8 @@ describe('VertexAiSessionService', () => {
   });
 });
 
-/** The override an {@link OverridingSessionService} applies to every request. */
+/** The options the `httpOptions` tests configure their service with. */
 const OVERRIDE_HTTP_OPTIONS: HttpOptions = {
   baseUrl: 'https://example.invalid',
   apiVersion: 'v1beta1',
 };
-
-/** Applies {@link OVERRIDE_HTTP_OPTIONS} to every Agent Engine request. */
-class OverridingSessionService extends VertexAiSessionService {
-  protected override apiClientHttpOptionsOverride(): HttpOptions {
-    return OVERRIDE_HTTP_OPTIONS;
-  }
-}
-
-/**
- * Reads the protected hook through a public method, which is how a subclass
- * would reach it, rather than indexing the private member from a test.
- */
-class HttpOptionsProbeService extends VertexAiSessionService {
-  readApiClientHttpOptionsOverride(): HttpOptions | undefined {
-    return this.apiClientHttpOptionsOverride();
-  }
-}

@@ -31,6 +31,7 @@ import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {delay} from '../utils/time_utils.js';
 import {
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
   getExpressModeApiKey,
@@ -100,6 +101,16 @@ export interface VertexAiSessionServiceOptions {
   agentEngineId?: string;
   expressModeApiKey?: string;
   sessions?: Sessions;
+  /**
+   * HTTP options applied to every Agent Engine request, for a custom endpoint,
+   * API version or extra headers.
+   *
+   * adk-python installs the equivalent override on the client it builds. The
+   * `@google-cloud/vertexai` `Client` takes no HTTP options, so this service
+   * carries them on each request config instead. The observable effect is the
+   * same, and it also reaches requests made through an injected client.
+   */
+  httpOptions?: HttpOptions;
 }
 
 /**
@@ -118,14 +129,14 @@ export interface VertexAiCreateSessionRequest extends CreateSessionRequest {
    * Any other Agent Engine create-session config field, such as `displayName`,
    * `labels` or `waitForCompletion`.
    *
-   * `sessionId` and `sessionState` are excluded: they have named request fields
-   * that are filtered before the RPC, and accepting them here would route
-   * around that. A named field also wins over the same key here, so `ttl` and
-   * `expireTime` set directly on the request take precedence.
+   * `sessionId`, `sessionState`, `ttl`, `expireTime` and `httpOptions` are
+   * excluded: each has a dedicated request or constructor field that is
+   * validated or filtered before the RPC, and accepting them here would route
+   * around that.
    */
   apiConfig?: Omit<
     CreateAgentEngineSessionConfig,
-    'sessionId' | 'sessionState'
+    'sessionId' | 'sessionState' | 'ttl' | 'expireTime' | 'httpOptions'
   >;
 }
 
@@ -139,12 +150,14 @@ export class VertexAiSessionService extends BaseSessionService {
   private expressModeApiKey?: string;
   private projectId?: string;
   private location?: string;
+  private httpOptions?: HttpOptions;
 
   constructor(options: VertexAiSessionServiceOptions) {
     super();
     this.agentEngineId = options.agentEngineId;
     this.projectId = options.projectId;
     this.location = options.location;
+    this.httpOptions = options.httpOptions;
     this.expressModeApiKey = getExpressModeApiKey(
       this.projectId,
       this.location,
@@ -202,30 +215,26 @@ export class VertexAiSessionService extends BaseSessionService {
     expireTime,
     apiConfig,
   }: VertexAiCreateSessionRequest): Promise<Session> {
-    const httpOptions = this.apiClientHttpOptionsOverride();
-    const filteredState = state ? trimTempState(state) : undefined;
-    const requestConfig: CreateAgentEngineSessionConfig = {
-      ...apiConfig,
-      ...(filteredState ? {sessionState: filteredState} : {}),
-      ...(sessionId ? {sessionId} : {}),
-      ...(ttl != null ? {ttl} : {}),
-      ...(expireTime != null ? {expireTime} : {}),
-      ...(httpOptions ? {httpOptions} : {}),
-    };
-
-    // The API rejects both together; fail before the RPC. Checked on the
-    // merged config, so apiConfig cannot smuggle the second field past it.
-    if (requestConfig.ttl != null && requestConfig.expireTime != null) {
+    // The API rejects both together; fail before the RPC.
+    if (ttl != null && expireTime != null) {
       throw new Error(
         "Cannot specify both 'ttl' and 'expireTime' simultaneously.",
       );
     }
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const filteredState = state ? trimTempState(state) : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
-      config: requestConfig,
+      config: {
+        ...apiConfig,
+        ...(filteredState ? {sessionState: filteredState} : {}),
+        ...(sessionId ? {sessionId} : {}),
+        ...(ttl != null ? {ttl} : {}),
+        ...(expireTime != null ? {expireTime} : {}),
+        ...this.httpOptionsConfig().config,
+      },
     });
 
     const operationName = apiResponse.name!;
@@ -235,7 +244,7 @@ export class VertexAiSessionService extends BaseSessionService {
       const [nextResponse] = await Promise.all([
         this.sessions.getSessionOperationInternal({
           operationName: operationName,
-          ...httpOptionsConfig(httpOptions),
+          ...this.httpOptionsConfig(),
         }),
         delay(CREATE_POLL_INTERVAL_MS),
       ]);
@@ -272,7 +281,6 @@ export class VertexAiSessionService extends BaseSessionService {
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
-    const httpOptions = this.apiClientHttpOptionsOverride();
 
     try {
       let getSessionResponse: VertexAiSession | undefined;
@@ -281,11 +289,11 @@ export class VertexAiSessionService extends BaseSessionService {
       if (config && config.numRecentEvents === 0) {
         getSessionResponse = (await this.sessions.get({
           name: sessionResourceName,
-          ...httpOptionsConfig(httpOptions),
+          ...this.httpOptionsConfig(),
         })) as VertexAiSession;
       } else {
         const listConfig: ListAgentEngineSessionEventsConfig = {
-          ...(httpOptions ? {httpOptions} : {}),
+          ...this.httpOptionsConfig().config,
         };
         if (config && config.afterTimestamp) {
           listConfig.filter = `timestamp>="${new Date(
@@ -296,7 +304,7 @@ export class VertexAiSessionService extends BaseSessionService {
         const [sessionRes, eventsRes] = await Promise.all([
           this.sessions.get({
             name: sessionResourceName,
-            ...httpOptionsConfig(httpOptions),
+            ...this.httpOptionsConfig(),
           }),
           this.sessions.events.listInternal({
             name: sessionResourceName,
@@ -365,7 +373,6 @@ export class VertexAiSessionService extends BaseSessionService {
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const httpOptions = this.apiClientHttpOptionsOverride();
     const adkSessions: Session[] = [];
     let pageToken: string | undefined = undefined;
 
@@ -375,7 +382,7 @@ export class VertexAiSessionService extends BaseSessionService {
         config: {
           ...(userId ? {filter: `user_id=${quoteFilterLiteral(userId)}`} : {}),
           ...(pageToken ? {pageToken} : {}),
-          ...(httpOptions ? {httpOptions} : {}),
+          ...this.httpOptionsConfig().config,
         },
       });
 
@@ -470,7 +477,7 @@ export class VertexAiSessionService extends BaseSessionService {
     try {
       await this.sessions.delete({
         name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
-        ...httpOptionsConfig(this.apiClientHttpOptionsOverride()),
+        ...this.httpOptionsConfig(),
       });
     } catch (error: unknown) {
       logger.error(
@@ -535,10 +542,7 @@ export class VertexAiSessionService extends BaseSessionService {
       unknown
     >;
 
-    const httpOptions = this.apiClientHttpOptionsOverride();
-    if (httpOptions) {
-      config.httpOptions = httpOptions;
-    }
+    Object.assign(config, this.httpOptionsConfig().config);
 
     const params: AppendAgentEngineSessionEventRequestParameters = {
       name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
@@ -571,32 +575,16 @@ export class VertexAiSessionService extends BaseSessionService {
   }
 
   /**
-   * HTTP options applied to every Agent Engine request, for a subclass to
-   * override. Returns undefined by default.
+   * This service's HTTP options as a request `config`, or nothing when it has
+   * none, so requests then go out unchanged.
    *
-   * adk-python installs the equivalent override on the client it builds. The
-   * `@google-cloud/vertexai` `Client` takes no HTTP options, so this service
-   * carries them on each request config instead. The observable effect is the
-   * same, and it also reaches requests made through an injected client.
+   * Call sites that build a config of their own spread `.config` into it; the
+   * two that carry no other fields spread the whole result, which omits the
+   * `config` key entirely.
    */
-  protected apiClientHttpOptionsOverride(): HttpOptions | undefined {
-    return undefined;
+  private httpOptionsConfig(): {config?: {httpOptions: HttpOptions}} {
+    return this.httpOptions ? {config: {httpOptions: this.httpOptions}} : {};
   }
-}
-
-/**
- * Wraps an HTTP-options override as a request `config`, or as nothing when
- * there is no override, so the default service sends the request unchanged.
- */
-function httpOptionsConfig(httpOptions: HttpOptions | undefined): {
-  config?: {httpOptions: HttpOptions};
-} {
-  return httpOptions ? {config: {httpOptions}} : {};
-}
-
-/** Resolves after `ms` milliseconds. */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
