@@ -9,5 +9,5 @@ implementation. For the official ADK documentation, visit
 ### Telemetry
 
 - [Agent Engine telemetry](telemetry/agent_engine/index.md) - Joining a run onto
-  the caller's trace on Vertex AI Agent Engine, and exporting metrics from the
-  request path.
+  the caller's trace on Vertex AI Agent Engine, and driving metric export from
+  the request path.

@@ -1,8 +1,9 @@
 # Agent Engine telemetry
 
-Joins an ADK run onto the trace of the caller that started it, and stamps a
-support identifier on the run. Reach for it when you deploy an ADK server on
-Vertex AI Agent Engine and its traces do not show up the way you expect.
+Joins an ADK run onto the trace of the caller that started it, stamps a support
+identifier on the run, and exports metrics from the request path. Reach for it
+when you deploy an ADK server on Vertex AI Agent Engine and its traces or
+metrics do not show up the way you expect.
 
 ## Introduction
 
@@ -16,11 +17,14 @@ boundary.
 
 This module supplies the pieces:
 
-| Symbol                          | What it does                                               |
-| ------------------------------- | ---------------------------------------------------------- |
-| `isAgentEngine()`               | True when `GOOGLE_CLOUD_AGENT_ENGINE_ID` is set.           |
-| `getPropagatedContext(headers)` | Builds the context a request should run under.             |
-| `TopSpanProcessor`              | Records the support identifier on the first span of a run. |
+| Symbol                                            | What it does                                                |
+| ------------------------------------------------- | ----------------------------------------------------------- |
+| `isAgentEngine()`                                 | True when `GOOGLE_CLOUD_AGENT_ENGINE_ID` is set.            |
+| `getPropagatedContext(headers)`                   | Builds the context a request should run under.              |
+| `TopSpanProcessor`                                | Records the support identifier on the first span of a run.  |
+| `maybeInstallRequestMetricsMiddleware(app, opts)` | Drives metric export from the request lifecycle.            |
+| `getAgentEngineMetricsSetup()`                    | Builds the request-driven reader, once per process.         |
+| `telemetryUserAgentHeaders()`                     | The `User-Agent` an exporter should attribute exports with. |
 
 The ADK API server wires all of this up already. Use the pieces directly only
 when you host ADK behind your own Express app.
@@ -88,17 +92,52 @@ Telemetry never breaks the request it rides on. A malformed
 `Google-Agent-Engine-Traceparent` makes the run start a fresh trace, and nothing
 is logged.
 
-## Differences from adk-python
+## Request-driven metric export
 
-adk-python decides whether a span is the top span by comparing its parent span
-id against the `traceparent` in baggage. adk-js asks the OpenTelemetry SDK
-instead, which marks a propagated parent remote. The outcome is the same and the
-SDK cannot mis-parse a caller-supplied value.
+Agent Engine bills by request and throttles CPU the instant a request ends. A
+periodic metric reader gets no CPU between requests, so its export is starved
+and metric points are dropped. On Agent Engine ADK swaps the periodic reader for
+a reader with no timer at all, and collects from the request lifecycle instead.
 
-## Not here yet
+`getGcpExporters({enableMetrics: true})` builds that reader when
+`GOOGLE_CLOUD_AGENT_ENGINE_ID` is set. Install the middleware that drives it on
+your app:
 
-Agent Engine's runtime bills by request and throttles CPU the instant a request
-ends, so a periodic metric reader gets no CPU between requests and its metrics
-are dropped. adk-python drives collection from the request path instead, in
-`telemetry/_agent_engine.py` and `telemetry/_agent_engine_metric_exporter.py`.
-adk-js has neither the reader nor the middleware that drives it.
+```ts
+import {maybeInstallRequestMetricsMiddleware} from '@google/adk';
+import express from 'express';
+
+const app = express();
+
+await maybeInstallRequestMetricsMiddleware(app, {otelToCloud: true});
+```
+
+The call is a no-op off Agent Engine, and a no-op when `otelToCloud` is false.
+The ADK API server makes it for you.
+
+### What the reader guarantees
+
+- **Export only while serving.** Every collect runs while a request is in
+  flight, which is the only time CPU is guaranteed.
+- **Never collect more often than the floor**, 5000 ms by default. Set
+  `GOOGLE_CLOUD_AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS` to change it.
+  Exporting faster than the floor risks points being rejected or throttled.
+- **Never collect too rarely.** One export carries a bounded number of points,
+  so `OTEL_METRIC_EXPORT_INTERVAL` (60000 ms by default) becomes a grid of
+  guideposts. Under sustained load a crossed guidepost forces a collect at the
+  next request start. A very long single request collects on its own
+  `generate_content` spans, once 1.5 grid periods have passed.
+
+### What it loses
+
+A request shorter than the floor, draining right after a collect, and being the
+last request before the process goes idle, loses its points. A collect then is
+muted by the floor, and no later request arrives to carry them. This is the one
+documented loss case.
+
+### Opting out
+
+If your process installs its own `MeterProvider` before ADK runs, ADK's reader
+would not land on the active provider. ADK detects that, logs a warning, and
+leaves your setup alone. Metrics may then be dropped between requests, which is
+what the warning says.
