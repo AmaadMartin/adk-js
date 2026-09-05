@@ -291,6 +291,21 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {
+  MockStrategy,
+  createEnvironmentSimulationConfig,
+  createInjectedError,
+  createInjectionConfig,
+  createToolSimulationConfig,
+} from './tools/environment_simulation/environment_simulation_config.js';
+export type {
+  EnvironmentSimulationConfig,
+  EnvironmentSimulationConfigParams,
+  InjectedError,
+  InjectionConfig,
+  ToolSimulationConfig,
+  ToolSimulationConfigParams,
+} from './tools/environment_simulation/environment_simulation_config.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
