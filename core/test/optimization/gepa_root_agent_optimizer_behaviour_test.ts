@@ -36,6 +36,7 @@ import {
   INITIAL_INSTRUCTION,
   onlySkillToolset,
   RecordingReflectionLm,
+  scriptOutputDir,
 } from './gepa_root_agent_test_utils.js';
 import {
   collectWarnings,
@@ -47,6 +48,7 @@ import {
 
 const TRAIN_IDS = ['train1', 'train2'];
 const VALIDATION_IDS = ['val1', 'val2'];
+const CLONE_OUTPUT_DIR = scriptOutputDir('adk-gepa-clone-output');
 
 /** A model that counts its own construction and never answers. */
 class CountingReflectionLlm extends BaseLlm {
@@ -199,7 +201,7 @@ describe('SkillToolset.cloneWithUpdatedSkills', () => {
       additionalTools: [additionalTool],
       registry: EMPTY_REGISTRY,
       allowInlineScripts: true,
-      scriptOutputDir: '/tmp/adk-clone-output',
+      scriptOutputDir: CLONE_OUTPUT_DIR,
     });
 
     const clone = toolset.cloneWithUpdatedSkills([
@@ -210,7 +212,7 @@ describe('SkillToolset.cloneWithUpdatedSkills', () => {
     expect(clone.codeExecutor).toBe(codeExecutor);
     expect(clone.additionalTools).toEqual([additionalTool]);
     expect(clone.registry).toBe(EMPTY_REGISTRY);
-    expect(await clone.getScriptOutputDir()).toBe('/tmp/adk-clone-output');
+    expect(await clone.getScriptOutputDir()).toBe(CLONE_OUTPUT_DIR);
     expect((await clone.getTools()).map((tool) => tool.name)).toEqual(
       (await toolset.getTools()).map((tool) => tool.name),
     );
