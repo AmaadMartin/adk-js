@@ -11,7 +11,7 @@ import {StateSchemaError} from '../sessions/state.js';
 import {tracer, traceWorkflowInvocation} from '../telemetry/tracing.js';
 import {experimental} from '../utils/experimental.js';
 import {objectSchemaFields, SchemaLike} from '../utils/schema.js';
-import {BaseNode, BaseNodeConfig} from './base_node.js';
+import {BaseNode, BaseNodeConfig, START} from './base_node.js';
 import {commonPrefixOf} from './branch_path.js';
 import {DynamicNodeScheduler} from './dynamic_node_scheduler.js';
 import {isInvocationAbortedError} from './errors.js';
@@ -54,9 +54,6 @@ import {
  * mirroring the `Symbol.for('google.adk.*')` brands used across ADK.
  */
 const WORKFLOW_SIGNATURE_SYMBOL = Symbol.for('google.adk.workflow.workflow');
-
-/** The graph's synthetic entry node. It never executes. */
-const START_NODE_NAME = '__START__';
 
 /**
  * An imperative workflow entry point. Receives the workflow's node context and
@@ -278,11 +275,6 @@ export class Workflow extends BaseNode {
       loop.interruptIds.add(id);
     }
 
-    // A terminal node ran with `useAsOutput`, so its own output event already
-    // names this workflow in `nodeInfo.outputFor`. Recording the delegation
-    // here, rather than trusting what the node runner set while the loop ran,
-    // keeps it false when no terminal node produced anything.
-    ctx.outputDelegated = this.hasTerminalOutput(loop);
     this.finalize(loop, ctx);
 
     if (loop.interruptIds.size === 0) {
@@ -335,15 +327,15 @@ export class Workflow extends BaseNode {
     nodeInput: unknown,
   ): void {
     const startEdges = this.graph!.edges.filter(
-      (e) => e.fromNode.name === START_NODE_NAME,
+      (e) => e.fromNode.name === START.name,
     );
     const useSubBranch = startEdges.length > 1;
     for (const edge of startEdges) {
       if (edge.toNode.requiresAllPredecessors) {
         // A wait-for-all node must still wait for its other predecessors, so
         // record START's contribution and let the barrier decide when it fires.
-        loop.nodeOutputs.set(START_NODE_NAME, nodeInput);
-        loop.nodeBranches.set(START_NODE_NAME, ctx.branch ?? '');
+        loop.nodeOutputs.set(START.name, nodeInput);
+        loop.nodeBranches.set(START.name, ctx.branch ?? '');
         this.bufferBarrierTrigger(loop, edge.toNode.name);
         continue;
       }
@@ -669,8 +661,7 @@ export class Workflow extends BaseNode {
     // START never executes, so it is satisfied as soon as the workflow begins.
     const allCompleted = [...predecessors].every(
       (p) =>
-        p === START_NODE_NAME ||
-        loop.nodes.get(p)?.status === NodeStatus.COMPLETED,
+        p === START.name || loop.nodes.get(p)?.status === NodeStatus.COMPLETED,
     );
     if (!allCompleted) {
       return;
@@ -776,13 +767,6 @@ export class Workflow extends BaseNode {
 
   // --- Utilities ---
 
-  /** Whether any terminal node produced output. */
-  private hasTerminalOutput(loop: LoopState): boolean {
-    return [...this.graph!.terminalNodeNames].some((name) =>
-      loop.nodeOutputs.has(name),
-    );
-  }
-
   private pushTrigger(
     loop: LoopState,
     nodeName: string,
@@ -863,7 +847,7 @@ export function isWorkflow(value: unknown): value is Workflow {
  * `FunctionNodeHandler` signature is fixed at `(ctx, input)` and binds no state
  * parameters, so there is nothing there to check.
  */
-export function validateStateSchema(
+function validateStateSchema(
   workflowName: string,
   graph: Graph | undefined,
   stateSchema: SchemaLike | undefined,
@@ -898,7 +882,7 @@ export function validateStateSchema(
  * mid-task the graph holds, so a peer node does not join a conversation that
  * is still in progress.
  */
-export function hasWaitingTaskAgent(
+function hasWaitingTaskAgent(
   graph: Graph,
   nodes: ReadonlyMap<string, NodeState>,
 ): boolean {

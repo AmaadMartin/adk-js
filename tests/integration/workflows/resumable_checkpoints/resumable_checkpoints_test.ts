@@ -19,6 +19,7 @@ import {
   NodeContext,
   Runner,
   Workflow,
+  WorkflowAgentState,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -27,7 +28,7 @@ function statusSnapshots(events: Event[]): Array<Record<string, number>> {
   return events
     .map((e) => e.actions?.agentState)
     .filter(
-      (state): state is {nodes: Record<string, {status: number}>} =>
+      (state): state is WorkflowAgentState =>
         state !== undefined && 'nodes' in state,
     )
     .map((state) =>
