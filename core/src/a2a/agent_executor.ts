@@ -312,6 +312,8 @@ export class A2AAgentExecutor implements AgentExecutor {
  * `getUnansweredRequestEvent` needs to decide whether a pending
  * human-in-the-loop request is still open. adk-python needs one read because
  * its `Runner` reloads the session itself and its executor never reads events.
+ *
+ * @returns A session carrying its event history, never the probe result.
  */
 async function getAdkSession(
   userId: string,
@@ -319,29 +321,29 @@ async function getAdkSession(
   sessionService: BaseSessionService,
   appName: string,
 ): Promise<Session> {
-  const existingSession = await sessionService.getSession({
+  const exists = await sessionService.getSession({
     appName,
     userId,
     sessionId,
     // Checking existence does not require event history.
     config: {numRecentEvents: 0},
   });
-  if (!existingSession) {
-    return sessionService.createSession({
+
+  const sessionWithEvents = exists
+    ? await sessionService.getSession({appName, userId, sessionId})
+    : undefined;
+
+  // A session deleted between the two reads is created fresh. Returning the
+  // probe result instead would hand the pending-request scan the empty history
+  // that `numRecentEvents: 0` asked for.
+  return (
+    sessionWithEvents ??
+    sessionService.createSession({
       appName,
       userId,
       sessionId,
-    });
-  }
-
-  const sessionWithEvents = await sessionService.getSession({
-    appName,
-    userId,
-    sessionId,
-  });
-
-  // The session can be deleted between the two reads.
-  return sessionWithEvents ?? existingSession;
+    })
+  );
 }
 
 /**

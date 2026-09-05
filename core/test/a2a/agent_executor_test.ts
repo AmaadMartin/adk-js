@@ -403,17 +403,20 @@ describe('A2AAgentExecutor', () => {
       );
     });
 
-    it('keeps the probed session when it is deleted before the second read', async () => {
+    it('creates the session when it is deleted between the two reads', async () => {
+      // The probe returns no events, as Vertex does, so reusing its result
+      // would hand the pending-request scan an empty history.
       mockSessionService.getSession
-        .mockResolvedValueOnce(session([unansweredRequest()]))
+        .mockResolvedValueOnce(session([]))
         .mockResolvedValueOnce(undefined);
+      mockSessionService.createSession.mockResolvedValue(session([]));
 
       await executor().execute(createRequestContext(), mockEventBus);
 
-      expect(mockSessionService.createSession).not.toHaveBeenCalled();
-      const event = mockEventBus.publish.mock
-        .calls[0][0] as TaskStatusUpdateEvent;
-      expect(event.status.state).toBe('input-required');
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(2);
+      expect(mockSessionService.createSession).toHaveBeenCalledWith(
+        FULL_READ_REQUEST,
+      );
     });
   });
 });
