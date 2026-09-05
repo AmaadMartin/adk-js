@@ -10,23 +10,22 @@
 // matched by grep. A case with a plain description pins adk-js behaviour the
 // reference has no counterpart for.
 
+import {Message, TaskStatusUpdateEvent, TextPart} from '@a2a-js/sdk';
 import {
-  Task,
-  TaskArtifactUpdateEvent,
-  TaskStatusUpdateEvent,
-  TextPart,
-} from '@a2a-js/sdk';
-import {ExecutionEventBus, RequestContext} from '@a2a-js/sdk/server';
+  AgentExecutionEvent,
+  DefaultExecutionEventBus,
+  RequestContext,
+} from '@a2a-js/sdk/server';
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
   AgentExecutorConfig,
+  BaseAgent,
   createEvent,
   InMemorySessionService,
-  LlmAgent,
   Runner,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, Mocked, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const APP_NAME = 'test-app';
 const CONTEXT_ID = 'test-context';
@@ -47,6 +46,26 @@ const expectedMetadata = {
   [A2A_EXTENSION_URL]: {adk_agent_executor_v2: true},
 };
 
+/** Stands in for a model turn by yielding a fixed list of ADK events. */
+class FixedEventsAgent extends BaseAgent {
+  runCount = 0;
+
+  constructor(private readonly events: AdkEvent[]) {
+    super({name: 'test_agent'});
+  }
+
+  protected async *runAsyncImpl(): AsyncGenerator<AdkEvent, void, void> {
+    this.runCount++;
+    for (const event of this.events) {
+      yield event;
+    }
+  }
+
+  protected async *runLiveImpl(): AsyncGenerator<AdkEvent, void, void> {
+    yield* this.runAsyncImpl();
+  }
+}
+
 /**
  * Builds an executor around a value the declared type rejects. The resolver
  * guards against JavaScript callers, whom `RunnerOrRunnerConfig` cannot bind,
@@ -58,45 +77,50 @@ function executorWithUnvalidatedRunner(runner: unknown): A2AAgentExecutor {
 
 describe('A2AAgentExecutor parity with adk-python', () => {
   let sessionService: InMemorySessionService;
+  let agent: FixedEventsAgent;
   let runner: Runner;
-  let eventBus: Mocked<ExecutionEventBus>;
+  let eventBus: DefaultExecutionEventBus;
+  let published: AgentExecutionEvent[];
 
   beforeEach(() => {
     sessionService = new InMemorySessionService();
-    runner = new Runner({
-      appName: APP_NAME,
-      agent: new LlmAgent({name: 'test_agent'}),
-      sessionService,
+    agent = new FixedEventsAgent([]);
+    runner = new Runner({appName: APP_NAME, agent, sessionService});
+    published = [];
+    eventBus = new DefaultExecutionEventBus();
+    eventBus.on('event', (event) => {
+      published.push(event);
     });
-    eventBus = {publish: vi.fn()} as unknown as Mocked<ExecutionEventBus>;
   });
 
-  /** Replaces the model call with a fixed event stream. */
-  function stubRun(events: AdkEvent[]) {
-    return vi.spyOn(runner, 'runAsync').mockImplementation(async function* () {
-      for (const event of events) {
-        yield event;
-      }
-    });
+  /** Sets the events the agent yields on its next run. */
+  function willYield(events: AdkEvent[]): void {
+    agent = new FixedEventsAgent(events);
+    runner = new Runner({appName: APP_NAME, agent, sessionService});
   }
 
-  function requestContext(overrides: Partial<RequestContext> = {}) {
-    return {
-      contextId: CONTEXT_ID,
-      taskId: TASK_ID,
-      userMessage: {role: 'user', parts: [{kind: 'text', text: 'hi'}]},
-      ...overrides,
-    } as unknown as RequestContext;
+  const userMessage: Message = {
+    kind: 'message',
+    messageId: 'msg-1',
+    role: 'user',
+    parts: [{kind: 'text', text: 'hi'}],
+  };
+
+  function requestContext(): RequestContext {
+    return new RequestContext(userMessage, TASK_ID, CONTEXT_ID);
   }
 
-  type PublishedEvent = Task | TaskStatusUpdateEvent | TaskArtifactUpdateEvent;
-
-  function published(): PublishedEvent[] {
-    return eventBus.publish.mock.calls.map((call) => call[0] as PublishedEvent);
+  /** The terminal status update, which every execution publishes last. */
+  function terminalEvent(): TaskStatusUpdateEvent {
+    const last = published.at(-1);
+    if (last?.kind !== 'status-update') {
+      return expect.fail(`last published event is ${last?.kind}`);
+    }
+    return last;
   }
 
   it('test_execute_success_new_task', async () => {
-    stubRun([
+    willYield([
       createEvent({
         author: 'test_agent',
         content: {role: 'model', parts: [{text: 'hello'}]},
@@ -105,9 +129,8 @@ describe('A2AAgentExecutor parity with adk-python', () => {
 
     await new A2AAgentExecutor({runner}).execute(requestContext(), eventBus);
 
-    const events = published();
-    expect(events).toHaveLength(4);
-    const [submitted, working, artifact, terminal] = events;
+    expect(published).toHaveLength(4);
+    const [submitted, working, artifact, terminal] = published;
     expect(submitted.kind).toBe('task');
     expect(submitted.metadata).toEqual(expectedMetadata);
     expect(working.metadata).toEqual(expectedMetadata);
@@ -123,13 +146,13 @@ describe('A2AAgentExecutor parity with adk-python', () => {
   });
 
   it('test_handle_request_with_error_message', async () => {
-    stubRun([
+    willYield([
       createEvent({author: 'test_agent', errorMessage: 'Test Error Message'}),
     ]);
 
     await new A2AAgentExecutor({runner}).execute(requestContext(), eventBus);
 
-    const terminal = published().at(-1) as TaskStatusUpdateEvent;
+    const terminal = terminalEvent();
     expect(terminal.status.state).toBe('failed');
     expect((terminal.status.message!.parts[0] as TextPart).text).toBe(
       'Test Error Message',
@@ -140,13 +163,13 @@ describe('A2AAgentExecutor parity with adk-python', () => {
   });
 
   it('reports the default text when the ADK event names only an error code', async () => {
-    stubRun([
+    willYield([
       createEvent({author: 'test_agent', errorCode: 'MALFORMED_FUNCTION_CALL'}),
     ]);
 
     await new A2AAgentExecutor({runner}).execute(requestContext(), eventBus);
 
-    const terminal = published().at(-1) as TaskStatusUpdateEvent;
+    const terminal = terminalEvent();
     expect((terminal.status.message!.parts[0] as TextPart).text).toBe(
       'An error occurred during processing',
     );
@@ -158,7 +181,7 @@ describe('A2AAgentExecutor parity with adk-python', () => {
   it('test_resolve_session_creates_new_session', async () => {
     const getSession = vi.spyOn(sessionService, 'getSession');
     const createSession = vi.spyOn(sessionService, 'createSession');
-    stubRun([]);
+    willYield([]);
 
     await new A2AAgentExecutor({runner}).execute(requestContext(), eventBus);
 
@@ -207,17 +230,17 @@ describe('A2AAgentExecutor parity with adk-python', () => {
         },
       }),
     });
-    const runAsync = stubRun([]);
+    willYield([]);
 
     await new A2AAgentExecutor({runner}).execute(requestContext(), eventBus);
 
-    expect(runAsync).not.toHaveBeenCalled();
-    const terminal = published().at(-1) as TaskStatusUpdateEvent;
+    expect(agent.runCount).toBe(0);
+    const terminal = terminalEvent();
     expect(terminal.status.state).toBe('input-required');
   });
 
   it('test_long_running_functions_final_event', async () => {
-    stubRun([
+    willYield([
       createEvent({
         author: 'test_agent',
         longRunningToolIds: ['call-1'],
@@ -230,7 +253,7 @@ describe('A2AAgentExecutor parity with adk-python', () => {
 
     await new A2AAgentExecutor({runner}).execute(requestContext(), eventBus);
 
-    const terminal = published().at(-1) as TaskStatusUpdateEvent;
+    const terminal = terminalEvent();
     expect(terminal.status.state).toBe('input-required');
     expect(terminal.metadata).toEqual(
       expect.objectContaining(expectedMetadata),
@@ -238,37 +261,37 @@ describe('A2AAgentExecutor parity with adk-python', () => {
   });
 
   it('test_resolve_runner_direct_instance', async () => {
-    const runAsync = stubRun([]);
+    willYield([]);
 
     await new A2AAgentExecutor({runner}).execute(requestContext(), eventBus);
 
-    expect(runAsync).toHaveBeenCalledOnce();
+    expect(agent.runCount).toBe(1);
   });
 
   it('test_resolve_runner_sync_callable', async () => {
-    const runAsync = stubRun([]);
+    willYield([]);
 
     await new A2AAgentExecutor({runner: () => runner}).execute(
       requestContext(),
       eventBus,
     );
 
-    expect(runAsync).toHaveBeenCalledOnce();
+    expect(agent.runCount).toBe(1);
   });
 
   it('test_resolve_runner_async_callable', async () => {
-    const runAsync = stubRun([]);
+    willYield([]);
 
     await new A2AAgentExecutor({runner: async () => runner}).execute(
       requestContext(),
       eventBus,
     );
 
-    expect(runAsync).toHaveBeenCalledOnce();
+    expect(agent.runCount).toBe(1);
   });
 
   it('test_resolve_runner_future', async () => {
-    const runAsync = stubRun([]);
+    willYield([]);
     const pending = Promise.resolve(runner);
 
     await new A2AAgentExecutor({runner: () => pending}).execute(
@@ -276,22 +299,18 @@ describe('A2AAgentExecutor parity with adk-python', () => {
       eventBus,
     );
 
-    expect(runAsync).toHaveBeenCalledOnce();
+    expect(agent.runCount).toBe(1);
   });
 
   it('resolves a runner config into a Runner', async () => {
     const executor = new A2AAgentExecutor({
-      runner: {
-        appName: APP_NAME,
-        agent: new LlmAgent({name: 'test_agent'}),
-        sessionService,
-      },
+      runner: {appName: APP_NAME, agent, sessionService},
     });
 
     await expect(
       executor.execute(requestContext(), eventBus),
     ).resolves.toBeUndefined();
-    expect(published().at(-1)!.kind).toBe('status-update');
+    expect(terminalEvent().status.state).toBe('completed');
   });
 
   it('test_resolve_runner_rejects_invalid_factory_result', async () => {
