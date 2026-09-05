@@ -1,0 +1,5 @@
+{
+  "name": "service-package-main",
+  "version": "1.0.0",
+  "main": "custom_entry.ts"
+}

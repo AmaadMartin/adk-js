@@ -32,12 +32,6 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
- * Entrypoint file names an agent directory can use, in the order the loader
- * tries them.
- */
-const DIRECTORY_ENTRY_FILE_NAMES = ['app', 'agent', 'index'];
-
-/**
  * Supported JS/TS file module types.
  */
 export enum FileModuleType {
@@ -293,6 +287,12 @@ export class AgentFile {
         return (this.agent = jsModule.rootAgent);
       }
 
+      // `export * as agent from './agent.js'` republishes the root agent one
+      // level down, which is how an adk-python package entrypoint exposes it.
+      if (isRunnableRoot(jsModule.agent?.rootAgent)) {
+        return (this.agent = jsModule.agent.rootAgent);
+      }
+
       const defaultAgent = [jsModule.default, jsModule.default?.default].find(
         isRunnableRoot,
       );
@@ -379,10 +379,11 @@ export class AgentFile {
  * - agents_dir/{agentOrAppName}/agent.[js | ts | mjs | cjs]
  * - agents_dir/{agentOrAppName}/app.[js | ts | mjs | cjs]
  * - agents_dir/{agentOrAppName}/index.[js | ts | mjs | cjs]
+ * - agents_dir/{agentOrAppName}/package.json, through its `main` field
  *
  * A directory that holds more than one of these resolves to the first match in
- * the order app, agent, index. A match that exports no agent is a helper
- * module of that name, so the loader tries the next one.
+ * the order app, agent, `main`, index. A match that exports no agent is a
+ * helper module of that name, so the loader tries the next one.
  *
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
@@ -592,17 +593,12 @@ export class AgentLoader {
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
 
-    for (const entryName of DIRECTORY_ENTRY_FILE_NAMES) {
-      const entryFile = subFiles.find(
-        (f) => f.isFile && f.name === entryName && isJsFile(f.ext),
-      );
-
-      if (!entryFile) {
-        continue;
-      }
-
+    for (const entryPath of await resolveDirectoryEntrypoints(
+      dir.path,
+      subFiles,
+    )) {
       try {
-        const agentFile = new AgentFile(entryFile.path, this.options);
+        const agentFile = new AgentFile(entryPath, this.options);
         await agentFile.load();
         this.preloadedAgents[dir.name] = agentFile;
         return;
@@ -615,7 +611,7 @@ export class AgentLoader {
           continue;
         }
 
-        this.recordLoadFailure(dir.name, entryFile.path, e);
+        this.recordLoadFailure(dir.name, entryPath, e);
         return;
       }
     }
@@ -641,6 +637,92 @@ export class AgentLoader {
 
 function isJsFile(fileExt?: string): boolean {
   return !!fileExt && JS_FILES_EXTENSIONS.includes(fileExt);
+}
+
+/**
+ * Entrypoint paths an agent directory offers, most preferred first.
+ *
+ * The `main` field of a `package.json` outranks `index` but not the
+ * conventional `app` and `agent` names. Node resolves a directory the same
+ * way round, and existing agents rely on `app` and `agent` winning.
+ */
+async function resolveDirectoryEntrypoints(
+  dirPath: string,
+  subFiles: FileMetadata[],
+): Promise<string[]> {
+  const candidates = [
+    findEntryFile(subFiles, 'app'),
+    findEntryFile(subFiles, 'agent'),
+    await resolvePackageMain(dirPath, subFiles),
+    findEntryFile(subFiles, 'index'),
+  ];
+
+  return candidates.filter((entryPath) => entryPath !== undefined);
+}
+
+function findEntryFile(
+  subFiles: FileMetadata[],
+  name: string,
+): string | undefined {
+  return subFiles.find((f) => f.isFile && f.name === name && isJsFile(f.ext))
+    ?.path;
+}
+
+/**
+ * The file a directory's `package.json` names in `main`, if it has one.
+ *
+ * An agent folder is not required to be a well-formed npm package, so a
+ * manifest that is absent, unreadable, invalid, or carries an unusable `main`
+ * yields no candidate instead of an error. The containment check is lexical:
+ * it keeps `main` from reaching a sibling agent folder, and it is not a
+ * sandbox, because it does not survive symlinks.
+ */
+async function resolvePackageMain(
+  dirPath: string,
+  subFiles: FileMetadata[],
+): Promise<string | undefined> {
+  const manifest = subFiles.find(
+    (f) => f.isFile && f.name === 'package' && f.ext === '.json',
+  );
+
+  if (!manifest) {
+    return undefined;
+  }
+
+  let main: unknown;
+  try {
+    main = (await loadFileData<{main?: unknown}>(manifest.path))?.main;
+  } catch (e: unknown) {
+    logger.debug(`Ignoring the main field: ${e}`);
+    return undefined;
+  }
+
+  if (typeof main !== 'string') {
+    return undefined;
+  }
+
+  const resolved = path.resolve(dirPath, main);
+  const relative = path.relative(dirPath, resolved);
+
+  if (path.isAbsolute(main) || !relative || relative.startsWith('..')) {
+    return undefined;
+  }
+
+  // A `main` that already carries a supported extension is taken as written;
+  // otherwise it is an extensionless specifier and each extension is probed.
+  const suffixes = isJsFile(path.extname(resolved))
+    ? ['']
+    : JS_FILES_EXTENSIONS;
+
+  for (const suffix of suffixes) {
+    const candidate = `${resolved}${suffix}`;
+
+    if (await isFile(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {
