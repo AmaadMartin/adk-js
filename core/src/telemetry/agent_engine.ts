@@ -14,11 +14,9 @@ import {
   propagation,
 } from '@opentelemetry/api';
 import {W3CTraceContextPropagator} from '@opentelemetry/core';
-import {MeterProvider as SdkMeterProvider} from '@opentelemetry/sdk-metrics';
 import {Span, SpanProcessor} from '@opentelemetry/sdk-trace-base';
 
 import {logger} from '../utils/logger.js';
-import {version} from '../version.js';
 import {
   buildRequestDrivenMetrics,
   MetricsState,
@@ -35,9 +33,10 @@ const TRACEPARENT_HEADER = 'traceparent';
 /**
  * Baggage key holding the accepted Agent Engine trace context.
  *
- * Nothing in this process reads it. It is written for parity with adk-python,
- * which puts the accepted header here so the default W3C baggage propagator
- * carries it to the services the run calls.
+ * {@link isTopSpan} reads it back to tell a parent this module accepted from
+ * any other remote parent, so the write is load-bearing for `supportID`
+ * attribution. The default W3C baggage propagator also carries it to the
+ * services the run calls, which is what adk-python writes it for.
  */
 const TRACEPARENT_BAGGAGE_KEY = 'traceparent';
 
@@ -49,9 +48,6 @@ const SUPPORT_ID_ATTRIBUTE = 'supportID';
 
 /** Environment variable Agent Engine sets on the serving container. */
 const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
-
-/** Environment variable opting the deployment into telemetry attribution. */
-const AGENT_ENGINE_TELEMETRY_ENV = 'GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY';
 
 const TRACE_CONTEXT_PROPAGATOR = new W3CTraceContextPropagator();
 
@@ -243,22 +239,6 @@ export async function drainMetrics(
 }
 
 /**
- * Returns the Agent Engine `User-Agent` header, when telemetry is enabled.
- *
- * adk-python passes this to the OTLP exporters it sends telemetry with. No
- * Google Cloud exporter on this branch accepts a header map, so nothing here
- * consumes it yet; it is the attribution an exporter that does should send.
- */
-export function telemetryUserAgentHeaders():
-  | Record<string, string>
-  | undefined {
-  if (!process.env[AGENT_ENGINE_TELEMETRY_ENV]) {
-    return undefined;
-  }
-  return {'User-Agent': `Vertex-Agent-Engine/${version}`};
-}
-
-/**
  * Returns true when `provider` is an SDK `MeterProvider` rather than the API's
  * no-op one.
  *
@@ -266,11 +246,7 @@ export function telemetryUserAgentHeaders():
  * produce objects that fail an `instanceof` against the other copy's class.
  */
 function isSdkMeterProvider(provider: MeterProvider): boolean {
-  const candidate = provider as Partial<SdkMeterProvider>;
-  return (
-    typeof candidate.forceFlush === 'function' &&
-    typeof candidate.shutdown === 'function'
-  );
+  return 'forceFlush' in provider && 'shutdown' in provider;
 }
 
 let metricsSetup: Promise<MetricsState | undefined> | undefined;
