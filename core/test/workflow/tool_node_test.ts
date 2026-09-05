@@ -192,6 +192,25 @@ describe('ToolNode tools that return nothing', () => {
     expect(output).toEqual({result: 'x'});
   });
 
+  // Known divergence from adk-python, pinned so it cannot change unnoticed.
+  // `_tool_node.py` tests `response is not None` against the tool's raw return,
+  // so the dict `{'result': None}` is a response there and yields
+  // `Event(output={'result': None})`. Here `handleFunctionCallList` wraps a
+  // nullish return as `{result: <nullish>}` before ToolNode sees it, so by then
+  // the two are one payload and both take the no-response path.
+  it('cannot tell {result: null} from no response at all', async () => {
+    const returned = new RecordingTool({name: 'r1', returns: {result: null}});
+    const nothing = new RecordingTool({name: 'r2'});
+
+    const withResult = await driveNode(new ToolNode(returned));
+    const withNothing = await driveNode(new ToolNode(nothing));
+
+    expect(withResult.output).toBeUndefined();
+    expect(withResult.events).toEqual([]);
+    expect(withNothing.output).toBeUndefined();
+    expect(withNothing.events).toEqual([]);
+  });
+
   it('treats a thrown error as a response, not as an empty result', async () => {
     const tool = new RecordingTool({name: 'boom', throws: 'tool exploded'});
     const {events, output} = await driveNode(new ToolNode(tool));

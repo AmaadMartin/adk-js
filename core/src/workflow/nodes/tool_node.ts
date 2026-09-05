@@ -112,6 +112,13 @@ export class ToolNode extends BaseNode {
  * `agents/functions.ts` wraps a nullish tool result as `{result: <nullish>}`
  * and emits an actions-only event (no function-response part) for a
  * long-running tool that defers its response; both mean "no response".
+ *
+ * A tool that returns the object `{result: null}` reads as "no response" too.
+ * adk-python's `_tool_node` tests `response is not None` against the raw return
+ * and so keeps the two apart, but the wrap above erases the difference before
+ * this function runs. Separating them needs a second return channel on
+ * {@link handleFunctionCallList}, which merges N calls into one event and has
+ * no well-defined per-call result to expose.
  */
 function toolResponse(event: Event): Record<string, unknown> | undefined {
   const response = getFunctionResponses(event)[0]?.response;
