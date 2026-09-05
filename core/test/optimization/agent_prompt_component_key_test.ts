@@ -74,24 +74,30 @@ describe('the agent prompt component key', () => {
     });
   });
 
-  it('carries a candidate from one optimizer into the other', async () => {
-    const promptEngine = createEngine();
-    await new GEPARootAgentPromptOptimizer({engine: promptEngine}).optimize({
-      initialAgent: createAgent(),
-      sampler: createSampler(),
-    });
-    const promptCandidate = onlyOptimizeCall(promptEngine).seedCandidate;
+  it('lets one optimizer rebuild an agent from the other candidate', async () => {
+    // The rewrite must differ from the initial instruction: a candidate keyed
+    // under an unknown component falls back to the initial instruction, which
+    // would hide the mismatch.
+    const rewritten = 'Rewritten by the prompt optimizer';
+    const promptEngine = new FakeGepaEngine(
+      runResult([{[AGENT_PROMPT_NAME]: rewritten}], [1]),
+    );
+    const promptResult = await new GEPARootAgentPromptOptimizer({
+      engine: promptEngine,
+    }).optimize({initialAgent: createAgent(), sampler: createSampler()});
+    expect(promptResult.optimizedAgents[0].optimizedAgent.instruction).toBe(
+      rewritten,
+    );
 
-    const rootEngine = new FakeGepaEngine(runResult([promptCandidate], [1]));
-    const result = await new GEPARootAgentOptimizer({
+    const rootEngine = new FakeGepaEngine(
+      runResult([{[AGENT_PROMPT_NAME]: rewritten}], [1]),
+    );
+    const rootResult = await new GEPARootAgentOptimizer({
       engine: rootEngine,
-    }).optimize({
-      initialAgent: createAgent(),
-      sampler: createSampler(),
-    });
+    }).optimize({initialAgent: createAgent(), sampler: createSampler()});
 
-    expect(result.optimizedAgents[0].optimizedAgent.instruction).toBe(
-      INITIAL_INSTRUCTION,
+    expect(rootResult.optimizedAgents[0].optimizedAgent.instruction).toBe(
+      rewritten,
     );
   });
 });
