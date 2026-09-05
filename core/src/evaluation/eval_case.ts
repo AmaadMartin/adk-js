@@ -14,8 +14,6 @@ import {
 
 import {AppDetails} from './app_details.js';
 
-export type {ConversationScenario} from './conversation_scenarios.js';
-
 /**
  * Intermediate data an agent produces on its way to a final answer.
  */
@@ -80,11 +78,9 @@ export interface Invocation {
   appDetails?: AppDetails;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** Returns true when the intermediate data is a list of invocation events. */
-export function isInvocationEvents(value: unknown): value is InvocationEvents {
-  return isRecord(value) && 'invocationEvents' in value;
+export function isInvocationEvents(
+  value: IntermediateDataType,
+): value is InvocationEvents {
+  return 'invocationEvents' in value;
 }

@@ -9,7 +9,7 @@
  * `google/adk/evaluation`). It currently covers the invocation data model, the
  * contract every metric evaluator implements, the multi-turn facade over the
  * Vertex AI Gen AI evaluation service, and the
- * `MultiTurnTaskSuccessV1Evaluator` that stands on it.
+ * `MultiTurnTaskSuccessV1Evaluator` that extends it.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
@@ -27,7 +27,7 @@ export {
   PrebuiltMetrics,
   getMetricThreshold,
 } from './eval_metrics.js';
-export type {BaseCriterion, EvalMetric, Threshold} from './eval_metrics.js';
+export type {BaseCriterion, EvalMetric} from './eval_metrics.js';
 export {
   emptyEvaluationResult,
   getEvalStatus,
@@ -40,10 +40,7 @@ export type {
 } from './evaluator.js';
 export {MultiTurnTaskSuccessV1Evaluator} from './multi_turn_task_success_evaluator.js';
 export type {MultiTurnTaskSuccessV1EvaluatorOptions} from './multi_turn_task_success_evaluator.js';
-export {
-  MultiTurnVertexAiEvalFacade,
-  VertexAiEvalFacade,
-} from './vertex_ai_eval_facade.js';
+export {MultiTurnVertexAiEvalFacade} from './vertex_ai_eval_facade.js';
 export type {
   VertexAgentConfig,
   VertexAgentData,

@@ -116,11 +116,7 @@ function facadeWith(
 
 /** Returns the agent data of the only eval case of the recorded request. */
 function agentDataOf(client: FakeEvalClient) {
-  const evalCases = client.requests[0].dataset.evalCases;
-  if (evalCases === undefined) {
-    expect.fail('the request carried no eval cases');
-  }
-  return evalCases[0].agentData;
+  return client.requests[0].dataset.evalCases[0].agentData;
 }
 
 describe('MultiTurnVertexAiEvalFacade', () => {
