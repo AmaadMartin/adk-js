@@ -761,10 +761,44 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       );
     });
 
-    it('creates new sandbox if the cached one declares no language', async () => {
-      invocationContext.session!.state!['sandbox_name'] =
+    it('reuses the cached sandbox that declares no language', async () => {
+      const cachedName =
         'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      invocationContext.session!.state!['sandbox_name'] = cachedName;
+      // adk-python creates its sandbox with an empty code execution
+      // environment, so the sandbox behind this key declares no language.
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
+        name: cachedName,
+        state: 'STATE_RUNNING',
+        spec: {codeExecutionEnvironment: {}},
+      });
+
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.executeCodeInternal,
+      ).toHaveBeenCalledWith(expect.objectContaining({name: cachedName}));
+      expect(invocationContext.session!.state!['sandbox_name']).toBe(
+        cachedName,
+      );
+    });
+
+    it('reuses the cached sandbox that carries no spec', async () => {
+      const cachedName =
+        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+      invocationContext.session!.state!['sandbox_name'] = cachedName;
+      mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
+        name: cachedName,
         state: 'STATE_RUNNING',
       });
 
@@ -779,7 +813,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
 
       expect(
         mockClient.agentEnginesInternal.sandboxes.createInternal,
-      ).toHaveBeenCalled();
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects a language the sandbox does not support', async () => {
@@ -837,6 +871,52 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(
         mockClient.agentEnginesInternal.createInternal,
       ).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects when the agent engine operation carries no resource name', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: true,
+        error: {code: 8, message: 'quota exceeded'},
+      });
+
+      await expect(
+        executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'print("hello")',
+            language: CodeExecutionLanguage.PYTHON,
+            inputFiles: [],
+          },
+        }),
+      ).rejects.toThrow(
+        'Agent Engine creation operation operations/create-engine-op finished with no resource name. Operation error: {"code":8,"message":"quota exceeded"}',
+      );
+
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the agent engine operation carries an empty response', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: true,
+        response: {},
+      });
+
+      await expect(
+        executor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'print("hello")',
+            language: CodeExecutionLanguage.PYTHON,
+            inputFiles: [],
+          },
+        }),
+      ).rejects.toThrow('finished with no resource name');
+
+      expect(executor.agentEngineResourceName).toBeUndefined();
     });
   });
 });
