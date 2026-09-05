@@ -97,24 +97,24 @@ The decision keys off the schema's declared `type` alone, matching adk-python. A
 schema that lists `properties` but declares no `type` counts as a non-object and
 is wrapped.
 
-## Building the tool for an agent
+## Declaring and validating against different schemas
 
-`FinishTaskTool.forAgent` is the form `LlmAgent` uses. It records the agent name
-and prefers `outputSchemaSource` — the schema as you wrote it — for validation,
-because rendering a Zod schema into the genai dialect drops refinements:
+The constructor takes the schema twice. The first is what the model is shown,
+the second is what its arguments are checked against. `LlmAgent` passes its
+converted `outputSchema` and then `outputSchemaSource` — the schema as you wrote
+it — because rendering a Zod schema into the genai dialect drops refinements:
 
 ```ts
 import {FinishTaskTool} from '@google/adk';
 import {z} from 'zod/v4';
 
-const tool = FinishTaskTool.forAgent({
-  name: 'reporter',
-  outputSchema: z.object({count: z.number().int()}),
-  outputSchemaSource: z
-    .object({count: z.number().int()})
-    .refine((value) => value.count % 2 === 0, 'count must be even'),
-});
+const declared = z.object({count: z.number().int()});
+const tool = new FinishTaskTool(
+  declared,
+  declared.refine((value) => value.count % 2 === 0, 'count must be even'),
+);
 ```
 
-The declaration still comes from `outputSchema`, so the model is shown the same
-parameters either way.
+Passing one schema uses it for both. The declaration always comes from the
+first, so checking against a stricter second does not change what the model
+sees.

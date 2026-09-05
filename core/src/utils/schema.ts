@@ -33,6 +33,20 @@ import {
 export type SchemaLike = z3.ZodType | z4.ZodType | Schema;
 
 /**
+ * Whether the schema is a genai `Schema` rather than one of the two Zod
+ * dialects.
+ *
+ * `isZodSchema` narrows the Zod arms but cannot narrow the remainder: its
+ * predicate names `ZodType<unknown>` while {@link SchemaLike} holds `ZodType`
+ * with its default parameters, so the two are not the same type to exclude.
+ * Stating the complement once gives a caller the genai form typed rather than
+ * asserted.
+ */
+export function isGenaiSchema(schema: SchemaLike): schema is Schema {
+  return !isZodSchema(schema);
+}
+
+/**
  * Compiled validators for genai `Schema` objects, keyed by the schema itself.
  *
  * Compiling a schema means converting it to JSON Schema and building a Zod

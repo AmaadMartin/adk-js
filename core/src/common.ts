@@ -301,7 +301,6 @@ export {
   FinishTaskTool,
   getOutputWrapperKey,
 } from './tools/finish_task_tool.js';
-export type {FinishTaskAgent} from './tools/finish_task_tool.js';
 export {FunctionTool, isFunctionTool} from './tools/function_tool.js';
 export type {
   RequireConfirmation,

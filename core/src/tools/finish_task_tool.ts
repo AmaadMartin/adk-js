@@ -7,14 +7,13 @@
 import {FunctionDeclaration, Schema, Type} from '@google/genai';
 
 import {appendInstructions} from '../models/llm_request.js';
-import {logger} from '../utils/logger.js';
 import {
   describeSchemaIssues,
+  isGenaiSchema,
   parseWithSchema,
   SchemaLike,
   toJsonSchema,
 } from '../utils/schema.js';
-import {isZodSchema} from '../utils/simple_zod_to_json.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -66,22 +65,6 @@ const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
 const ROOT_ONLY_KEYS = ['$defs', '$schema'] as const;
 
 /**
- * The task agent {@link FinishTaskTool.forAgent} reads.
- *
- * Structural rather than an `LlmAgent` import, so the tool does not depend on
- * the agent module — the same reason adk-python declares its `LlmAgent` import
- * under `TYPE_CHECKING`.
- */
-export interface FinishTaskAgent {
-  /** The agent's name, recorded on the tool for diagnostics. */
-  readonly name: string;
-  /** The agent's output schema, as the declaration renders it. */
-  readonly outputSchema?: SchemaLike;
-  /** The agent's output schema as the caller supplied it. */
-  readonly outputSchemaSource?: SchemaLike;
-}
-
-/**
  * The key `finish_task` arguments wrap the task output under, or `undefined`
  * when the schema is object-typed and the output sits at the top level of the
  * arguments.
@@ -109,9 +92,9 @@ export function getOutputWrapperKey(
  * deserialized from JSON carries.
  */
 function schemaDocument(schema: SchemaLike): Record<string, unknown> {
-  return isZodSchema(schema)
-    ? toJsonSchema(schema)
-    : (schema as Record<string, unknown>);
+  return isGenaiSchema(schema)
+    ? (schema as Record<string, unknown>)
+    : toJsonSchema(schema);
 }
 
 /** The schema's declared top-level type, lowercased. */
@@ -177,8 +160,6 @@ export class FinishTaskTool extends BaseTool {
    * `undefined` for object schemas (the value lives at the top level of args).
    */
   readonly wrapperKey?: string;
-  /** The name of the task agent this tool belongs to, when it is known. */
-  readonly taskAgentName?: string;
 
   /** The schema {@link runAsync} checks the model's arguments against. */
   private readonly validationSchema: SchemaLike;
@@ -188,18 +169,12 @@ export class FinishTaskTool extends BaseTool {
   /**
    * @param outputSchema The expected task output, defaulting to a single
    *   `result` string.
-   * @param taskAgentName The name of the task agent this tool belongs to,
-   *   named in the log line a validation failure writes.
    * @param validationSchema The schema arguments are checked against,
    *   defaulting to `outputSchema`. A task agent passes its schema as the
    *   caller supplied it, because the genai form derived from it drops the
    *   refinements and custom messages the caller wrote.
    */
-  constructor(
-    outputSchema?: SchemaLike,
-    taskAgentName?: string,
-    validationSchema?: SchemaLike,
-  ) {
+  constructor(outputSchema?: SchemaLike, validationSchema?: SchemaLike) {
     const schema = outputSchema ?? DEFAULT_TASK_OUTPUT_SCHEMA;
     let description =
       'Signal that this agent has completed its delegated task. Call this' +
@@ -210,38 +185,30 @@ export class FinishTaskTool extends BaseTool {
     super({name: FINISH_TASK_TOOL_NAME, description});
     this.outputSchema = schema;
     this.wrapperKey = getOutputWrapperKey(schema);
-    this.taskAgentName = taskAgentName;
     this.validationSchema = validationSchema ?? schema;
     this.requiredKeys = this.wrapperKey ? [] : requiredKeys(schema);
   }
 
-  /**
-   * Builds the tool for a task agent, reading its output schema and capturing
-   * its name — the form adk-python's constructor takes.
-   *
-   * Arguments are checked against `outputSchemaSource` where the agent has one,
-   * because the genai conversion loses the refinements and custom messages the
-   * caller wrote. The declaration still comes from `outputSchema`, so the
-   * preference leaves it unchanged.
-   */
-  static forAgent(taskAgent: FinishTaskAgent): FinishTaskTool {
-    return new FinishTaskTool(
-      taskAgent.outputSchema,
-      taskAgent.name,
-      taskAgent.outputSchemaSource ?? taskAgent.outputSchema,
-    );
-  }
-
   override _getDeclaration(): FunctionDeclaration {
     const {name, description, outputSchema, wrapperKey} = this;
-    const document = schemaDocument(outputSchema);
+    if (!isGenaiSchema(outputSchema)) {
+      const document = toJsonSchema(outputSchema);
+      return {
+        name,
+        description,
+        parametersJsonSchema: wrapperKey
+          ? wrapWithHoistedRootKeys(wrapperKey, document)
+          : document,
+      };
+    }
     if (!wrapperKey) {
-      return isZodSchema(outputSchema)
-        ? {name, description, parametersJsonSchema: document}
-        : {name, description, parameters: outputSchema as Schema};
+      return {name, description, parameters: outputSchema};
     }
     // Wrapping moves the schema into a property, which would take a `$defs`
-    // block with it and leave every `#/$defs/...` pointer dangling.
+    // block with it and leave every `#/$defs/...` pointer dangling. The genai
+    // dialect has no field for one, but a declaration deserialized from JSON
+    // still carries it.
+    const document = schemaDocument(outputSchema);
     if (hasRootOnlyKeys(document)) {
       return {
         name,
@@ -254,7 +221,7 @@ export class FinishTaskTool extends BaseTool {
       description,
       parameters: {
         type: Type.OBJECT,
-        properties: {[wrapperKey]: outputSchema as Schema},
+        properties: {[wrapperKey]: outputSchema},
         required: [wrapperKey],
       },
     };
@@ -310,10 +277,6 @@ export class FinishTaskTool extends BaseTool {
 
   /** The retry payload the model receives when its arguments do not validate. */
   private validationError(issues: string[]): {error: string} {
-    logger.debug(
-      `${this.name} validation failed for agent` +
-        ` ${this.taskAgentName ?? '<unnamed>'}: ${issues.join('; ')}`,
-    );
     return {
       error:
         `Invoking \`${this.name}()\` failed due to validation errors:\n` +
