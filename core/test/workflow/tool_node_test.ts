@@ -155,6 +155,21 @@ describe('ToolNode long-running tools', () => {
     expect(output).toBeUndefined();
   });
 
+  it('reports the error when a long-running tool throws', async () => {
+    const tool = new RecordingTool({
+      name: 'long_boom',
+      isLongRunning: true,
+      throws: 'long tool exploded',
+    });
+    const {events, output} = await driveNode(new ToolNode(tool));
+
+    expect(events).toHaveLength(1);
+    expect(getFunctionResponses(events[0])[0]?.response).toEqual({
+      error: 'long tool exploded',
+    });
+    expect(output).toEqual({error: 'long tool exploded'});
+  });
+
   it('carries an artifact delta onto the state-delta-only event', async () => {
     const tool = new RecordingTool({
       isLongRunning: true,

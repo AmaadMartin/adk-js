@@ -133,6 +133,9 @@ export class ToolNode extends BaseNode {
  * this function runs. Separating them needs a second return channel on
  * {@link handleFunctionCallList}, which merges N calls into one event and has
  * no well-defined per-call result to expose.
+ *
+ * `NodeTool` is the one in-repo tool that returns `{result: null}`, and it
+ * means "the wrapped node produced no output", so the two readings agree.
  */
 function toolResponse(event: Event): Record<string, unknown> | undefined {
   const response = getFunctionResponses(event)[0]?.response;
