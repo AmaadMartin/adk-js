@@ -127,6 +127,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [PerTurnUserSimulatorQualityV1](evaluation/per_turn_user_simulator_quality_v1/index.md) - Grading the simulated user that drove an eval case: the starting prompt, the conversation plan, and where the conversation should have ended.
 - [ResponseEvaluator](evaluation/response_evaluator/index.md) - Scoring an agent's final answer against a golden answer, or against the Vertex AI coherence metric.
 - [Rubric based evaluator](evaluation/rubric_based_evaluator/index.md) - The base class for a metric that grades an agent against written rubrics, one verdict per rubric.
+- [Rubric based final response quality v1](evaluation/rubric_based_final_response_quality_v1/index.md) - The LLM-as-a-judge metric that scores an agent's final answer against a list of written rubrics.
 - [Rubric based tool use quality v1](evaluation/rubric_based_tool_use_quality_v1/index.md) - The LLM-as-a-judge metric that scores an agent's tool use against a list of written rubrics.
 - [SafetyEvaluatorV1](evaluation/safety_evaluator/index.md) - Scoring how
   harmless an agent's answer is, with the Vertex AI safety metric.

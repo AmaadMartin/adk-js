@@ -18,6 +18,9 @@ import {getTextFromContent} from './evaluator.js';
 /** What the judge is told when the agent took no intermediate step. */
 const NO_TOOL_CALLS_TEXT = 'No intermediate steps were taken.';
 
+/** What the judge is told when no event carried grounding metadata. */
+const NO_GROUNDING_METADATA_TEXT = 'No grounding metadata was provided.';
+
 /** The indent of the JSON a judge model reads, matching adk-python. */
 export const JSON_INDENT = 2;
 
@@ -170,4 +173,35 @@ export function getToolCallsAndResponsesAsJsonStr(
     }),
   );
   return JSON.stringify({tool_calls_and_response: entries}, null, JSON_INDENT);
+}
+
+/**
+ * Returns the grounding metadata the model attached to the invocation's
+ * events as a JSON string, for a judge model to read.
+ *
+ * The step is the index of the event, so it lines up with the agent's own
+ * ordering rather than counting only the events that carry metadata.
+ */
+export function getGroundingMetadataAsJsonStr(
+  intermediateData?: IntermediateDataType,
+): string {
+  if (!isInvocationEvents(intermediateData)) {
+    return NO_GROUNDING_METADATA_TEXT;
+  }
+
+  const entries = intermediateData.invocationEvents.flatMap((event, step) =>
+    event.groundingMetadata === undefined
+      ? []
+      : [
+          {
+            step,
+            author: event.author,
+            grounding_metadata: toSnakeCase(event.groundingMetadata),
+          },
+        ],
+  );
+  if (entries.length === 0) {
+    return NO_GROUNDING_METADATA_TEXT;
+  }
+  return JSON.stringify({grounding_metadata: entries}, null, JSON_INDENT);
 }

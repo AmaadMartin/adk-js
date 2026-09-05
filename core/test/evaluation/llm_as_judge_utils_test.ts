@@ -6,7 +6,7 @@
 
 /**
  * Ported from `google/adk-python`
- * `tests/unittests/evaluation/test_llm_as_judge_utils.py`, covering the five
+ * `tests/unittests/evaluation/test_llm_as_judge_utils.py`, covering the six
  * helpers this change adds. Each ported `it()` keeps the Python test name, so
  * the two suites stay greppable against each other. The `it()` blocks with a
  * prose name cover the paths the Python suite does not reach.
@@ -16,6 +16,7 @@ import {
   AppDetails,
   formatPromptTemplate,
   getAverageRubricScore,
+  getGroundingMetadataAsJsonStr,
   getToolCallsAndResponsesAsJsonStr,
   getToolDeclarationsAsJsonStr,
   IntermediateData,
@@ -26,6 +27,7 @@ import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 const NO_TOOL_CALLS_TEXT = 'No intermediate steps were taken.';
+const NO_GROUNDING_METADATA_TEXT = 'No grounding metadata was provided.';
 
 function createIntermediateData(
   partial: Partial<IntermediateData>,
@@ -271,6 +273,70 @@ describe('getToolCallsAndResponsesAsJsonStr', () => {
         },
       ],
     });
+  });
+});
+
+describe('getGroundingMetadataAsJsonStr', () => {
+  it('test_get_grounding_metadata_as_json_str_with_invocation_events', () => {
+    const intermediateData: InvocationEvents = {
+      invocationEvents: [
+        {
+          author: 'agent',
+          groundingMetadata: {webSearchQueries: ['recent AI news']},
+        },
+      ],
+    };
+
+    const parsed = JSON.parse(
+      getGroundingMetadataAsJsonStr(intermediateData),
+    ) as {
+      grounding_metadata: Array<{
+        step: number;
+        author: string;
+        grounding_metadata: {web_search_queries: string[]};
+      }>;
+    };
+
+    expect(parsed.grounding_metadata[0].step).toBe(0);
+    expect(parsed.grounding_metadata[0].author).toBe('agent');
+    expect(
+      parsed.grounding_metadata[0].grounding_metadata.web_search_queries,
+    ).toEqual(['recent AI news']);
+  });
+
+  it('test_get_grounding_metadata_as_json_str_without_metadata', () => {
+    expect(getGroundingMetadataAsJsonStr({invocationEvents: []})).toBe(
+      NO_GROUNDING_METADATA_TEXT,
+    );
+  });
+
+  it('reports no grounding metadata for a recorded trajectory', () => {
+    expect(getGroundingMetadataAsJsonStr(createIntermediateData({}))).toBe(
+      NO_GROUNDING_METADATA_TEXT,
+    );
+    expect(getGroundingMetadataAsJsonStr(undefined)).toBe(
+      NO_GROUNDING_METADATA_TEXT,
+    );
+  });
+
+  it('numbers a step by its event, not by the metadata it carries', () => {
+    const intermediateData: InvocationEvents = {
+      invocationEvents: [
+        {author: 'agent'},
+        {
+          author: 'searcher',
+          groundingMetadata: {webSearchQueries: ['adk parity']},
+        },
+      ],
+    };
+
+    const parsed = JSON.parse(
+      getGroundingMetadataAsJsonStr(intermediateData),
+    ) as {grounding_metadata: Array<{step: number; author: string}>};
+
+    expect(parsed.grounding_metadata).toHaveLength(1);
+    expect(parsed.grounding_metadata[0].step).toBe(1);
+    expect(parsed.grounding_metadata[0].author).toBe('searcher');
   });
 });
 

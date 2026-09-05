@@ -10,8 +10,9 @@
  * accessors that read a recorded trajectory, the contract every metric
  * evaluator implements, the `ResponseEvaluator`, `LlmAsJudge`,
  * `FinalResponseMatchV2Evaluator`, `HallucinationsV1Evaluator`,
- * `SafetyEvaluatorV1` and `RubricBasedToolUseV1Evaluator` evaluators that
- * stand on it, the metric info providers that describe each prebuilt metric,
+ * `SafetyEvaluatorV1`, `RubricBasedToolUseV1Evaluator` and
+ * `RubricBasedFinalResponseQualityV1Evaluator` evaluators that stand on it,
+ * the metric info providers that describe each prebuilt metric,
  * and the user simulation half under `./simulation`.
  */
 
@@ -116,6 +117,7 @@ export {
   PARTIALLY_VALID_LABELS,
   formatPromptTemplate,
   getAverageRubricScore,
+  getGroundingMetadataAsJsonStr,
   getTextFromInvocation,
   getToolCallsAndResponsesAsJsonStr,
   getToolDeclarationsAsJsonStr,
@@ -151,6 +153,7 @@ export type {
   RubricBasedEvaluatorOptions,
   RubricResponse,
 } from './rubric_based_evaluator.js';
+export {RubricBasedFinalResponseQualityV1Evaluator} from './rubric_based_final_response_quality_v1.js';
 export {RubricBasedToolUseV1Evaluator} from './rubric_based_tool_use_quality_v1.js';
 export {SafetyEvaluatorV1} from './safety_evaluator.js';
 export type {SafetyEvaluatorV1Options} from './safety_evaluator.js';
