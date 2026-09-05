@@ -24,8 +24,8 @@ import {
 } from '../../src/server/adk_api_server.js';
 import {DEFAULT_APP_NAME_ENV_VAR} from '../../src/server/default_app_rewrite.js';
 import {LOGO_CONFIG_ERROR_MESSAGE} from '../../src/server/runtime_config.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {CapturingLogger} from '../capturing_logger.js';
+import {StubAgentLoader} from './stub_agent_loader.js';
 
 const APP_NAME = 'testApp';
 const USER_ID = 'u1';
@@ -50,27 +50,15 @@ class SilentAgent extends LlmAgent {
   }
 }
 
-function agentLoaderFor(...appNames: string[]): AgentLoader {
-  const agent = new SilentAgent({name: 'silent'});
-
-  return {
-    listAgents: () => Promise.resolve(appNames),
-    getAgentFile: () =>
-      Promise.resolve({
-        load: () => Promise.resolve(agent),
-        async [Symbol.asyncDispose](): Promise<void> {
-          return;
-        },
-      }),
-  } as unknown as AgentLoader;
-}
-
 /** Text of the first part of the first event a `/run` response carries. */
 function firstEventText(events: Event[]): string | undefined {
   return events[0]?.content?.parts?.[0]?.text;
 }
 
 describe('AdkApiServer configuration options', () => {
+  // One stub per file: the real loader's constructor adds process exit
+  // handlers that it never removes.
+  const agentLoader = new StubAgentLoader();
   let sessionService: BaseSessionService;
   let server: AdkApiServer | undefined;
   let logger: CapturingLogger;
@@ -80,6 +68,7 @@ describe('AdkApiServer configuration options', () => {
   let originalDefaultApp: string | undefined;
 
   beforeEach(() => {
+    agentLoader.serve(new SilentAgent({name: 'silent'}), APP_NAME);
     sessionService = new InMemorySessionService();
     logger = new CapturingLogger();
     webAssetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-options-ui-'));
@@ -115,7 +104,7 @@ describe('AdkApiServer configuration options', () => {
     logoImageUrl?: string;
   }): AdkApiServer {
     server = new AdkApiServer({
-      agentLoader: agentLoaderFor(APP_NAME),
+      agentLoader,
       sessionService,
       logger,
       webAssetsDir,
@@ -213,11 +202,8 @@ describe('AdkApiServer configuration options', () => {
 
     it('builds one plugin instance and shares it across apps', async () => {
       const secondApp = 'secondApp';
-      server = new AdkApiServer({
-        agentLoader: agentLoaderFor(APP_NAME, secondApp),
-        sessionService,
-        logger,
-        webAssetsDir,
+      agentLoader.serve(new SilentAgent({name: 'silent'}), APP_NAME, secondApp);
+      server = build({
         extraPlugins: ['./example_plugins.ts#CountingPlugin'],
         agentsDir: TESTDATA_DIR,
       });
