@@ -438,6 +438,7 @@ export {
   isRequestInput,
   isRunnableRoot,
   isWorkflow,
+  isWorkflowNode,
   node,
   normalizeRetryExceptions,
   prepareRetryConfig,
@@ -472,6 +473,7 @@ export type {
   ScheduleDynamicNodeOptions,
   ToolNodeConfig,
   WorkflowConfig,
+  WorkflowNodeConfig,
 } from './workflow/index.js';
 
 export {App, isApp, validateAppName} from './apps/app.js';
