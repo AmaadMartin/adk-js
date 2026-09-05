@@ -18,6 +18,37 @@ import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
 
 /**
+ * Marks every {@link BasePlugin} subclass and instance.
+ *
+ * Registered globally so that a plugin built by one copy of `@google/adk` is
+ * still recognised by another copy in the same process, which `instanceof`
+ * would not be.
+ */
+const BASE_PLUGIN_SYMBOL = Symbol.for('google.adk.basePlugin');
+
+/** Returns true when the value is a {@link BasePlugin} instance. */
+export function isBasePlugin(value: unknown): value is BasePlugin {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    BASE_PLUGIN_SYMBOL in value &&
+    value[BASE_PLUGIN_SYMBOL] === true
+  );
+}
+
+/** A {@link BasePlugin} subclass, constructed from a plugin name. */
+export type BasePluginClass = new (name: string) => BasePlugin;
+
+/**
+ * Returns true when the value is a {@link BasePlugin} subclass rather than an
+ * instance of one, so a caller resolving a plugin from configuration can tell
+ * a class it must construct from an object it can use as it stands.
+ */
+export function isBasePluginClass(value: unknown): value is BasePluginClass {
+  return typeof value === 'function' && isBasePlugin(value.prototype);
+}
+
+/**
  * Trigger for context compaction.
  */
 export enum ContextCompactionTrigger {
@@ -110,6 +141,17 @@ export enum ContextCompactionTrigger {
  * ```
  */
 export abstract class BasePlugin {
+  /**
+   * Declared as a prototype getter rather than an instance field so that
+   * {@link isBasePluginClass} can recognise a subclass from its prototype,
+   * without constructing one.
+   *
+   * @internal
+   */
+  get [BASE_PLUGIN_SYMBOL](): true {
+    return true;
+  }
+
   readonly name: string;
 
   /**

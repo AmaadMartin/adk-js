@@ -801,7 +801,13 @@ export {
   type PerItemFailuresCounter,
   type ToolFailureResponse,
 } from './plugins/_reflect_retry_utils.js';
-export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
+export {
+  BasePlugin,
+  ContextCompactionTrigger,
+  isBasePlugin,
+  isBasePluginClass,
+  type BasePluginClass,
+} from './plugins/base_plugin.js';
 export {
   ContextFilterPlugin,
   type ContextFilterPluginOptions,
@@ -1184,6 +1190,7 @@ export {
   isGemini3xFlashLive,
   isGemini3xLive,
 } from './utils/model_name.js';
+export {resolveFullyQualifiedName} from './utils/module_utils.js';
 export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export type {

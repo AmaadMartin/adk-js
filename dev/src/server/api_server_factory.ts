@@ -107,6 +107,20 @@ export interface ApiServerOptions {
   logger?: Logger;
   /** Level the logger reports at. Defaults to `LogLevel.INFO`. */
   logLevel?: LogLevel;
+  /**
+   * Fully-qualified names, `<module specifier>#<export>`, of plugins to
+   * attach to every agent the server serves.
+   */
+  extraPlugins?: string[];
+  /** Text the dev UI draws beside its logo. Needs {@link logoImageUrl}. */
+  logoText?: string;
+  /** Image the dev UI draws as its logo. Needs {@link logoText}. */
+  logoImageUrl?: string;
+  /**
+   * Model the served agents fall back to when they set none of their own.
+   * Held process-wide, as `LlmAgent.setDefaultModel` does.
+   */
+  defaultLlmModel?: string;
 }
 
 /**
@@ -150,6 +164,10 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     reloadAgents: options.reloadAgents ?? false,
     urlPrefix: options.urlPrefix,
     autoCreateSession: options.autoCreateSession,
+    extraPlugins: options.extraPlugins,
+    logoText: options.logoText,
+    logoImageUrl: options.logoImageUrl,
+    defaultLlmModel: options.defaultLlmModel,
     logger,
     logLevel: options.logLevel,
   });

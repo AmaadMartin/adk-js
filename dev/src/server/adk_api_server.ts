@@ -9,8 +9,10 @@ import {
   BaseArtifactService,
   BaseCredentialService,
   BaseMemoryService,
+  BasePlugin,
   BaseSessionService,
   bearerTokenUserBuilder,
+  BigQueryAgentAnalyticsPlugin,
   CompositeSessionKey,
   Event,
   getFunctionCalls,
@@ -20,6 +22,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
+  LlmAgent,
   Logger,
   LogLevel,
   RunConfig,
@@ -40,6 +43,7 @@ import {version} from '../version.js';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
 import {createServerLogger} from '../utils/logger.js';
+import {readTelemetryConsent} from '../utils/telemetry_config.js';
 import {
   ApiServerSpanExporter,
   hrTimeToNanoseconds,
@@ -56,9 +60,20 @@ import {
 } from './app_info.js';
 import {corsOriginOption, parseCorsOrigins} from './cors_origins.js';
 import {
+  DEFAULT_APP_NAME_ENV_VAR,
+  defaultAppRewriteMiddleware,
+} from './default_app_rewrite.js';
+import {
   getAllowedRequestHosts,
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
+import {loadExtraPlugins} from './extra_plugins.js';
+import {readBigQueryAnalyticsConfig} from './plugins_config.js';
+import {
+  resolveLogoConfig,
+  UiLogoConfig,
+  writeRuntimeConfig,
+} from './runtime_config.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -77,6 +92,33 @@ export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 export function normalizeUrlPrefix(prefix?: string): string {
   const trimmed = prefix?.replace(/^\/+|\/+$/g, '') ?? '';
   return trimmed ? `/${trimmed}` : '';
+}
+
+/**
+ * Returns the app a runner serves, carrying `plugins` on top of whatever the
+ * loaded root already declares. adk-python's `_wrap_loaded_agent` does the
+ * same: `App` is the only place a `Runner` reads plugins from.
+ *
+ * A bare agent is wrapped with the app-name check skipped, exactly as
+ * `Runner` itself wraps a `{appName, agent}` pair, so an agent directory whose
+ * name the check rejects keeps serving once a plugin is attached to it.
+ */
+function appWithPlugins(
+  agentOrApp: RunnableRoot | App,
+  appName: string,
+  plugins: BasePlugin[],
+): App {
+  if (!isApp(agentOrApp)) {
+    return new App({name: appName, rootAgent: agentOrApp, plugins}, true);
+  }
+  return new App({
+    name: agentOrApp.name,
+    rootAgent: agentOrApp.rootAgent,
+    plugins: [...agentOrApp.plugins, ...plugins],
+    resumabilityConfig: agentOrApp.resumabilityConfig,
+    eventsCompactionConfig: agentOrApp.eventsCompactionConfig,
+    contextCacheConfig: agentOrApp.contextCacheConfig,
+  });
 }
 
 interface ServerOptions {
@@ -128,6 +170,31 @@ interface ServerOptions {
    * but redirects the server generates are built with it.
    */
   urlPrefix?: string;
+  /**
+   * Fully-qualified names, `<module specifier>#<export>`, of plugins to
+   * attach to every agent this server serves. Each names either a plugin
+   * instance or a plugin class. A name that cannot be loaded is reported and
+   * skipped.
+   */
+  extraPlugins?: string[];
+  /** Text the dev UI draws beside its logo. Needs {@link logoImageUrl}. */
+  logoText?: string;
+  /** Image the dev UI draws as its logo. Needs {@link logoText}. */
+  logoImageUrl?: string;
+  /**
+   * Model the served agents fall back to when they set none of their own.
+   *
+   * It is applied through `LlmAgent.setDefaultModel`, which holds it
+   * process-wide, so it reaches every agent in this process and not only the
+   * ones this server serves.
+   */
+  defaultLlmModel?: string;
+  /**
+   * Directory the dev UI bundle is served from, and the directory whose
+   * `assets/config/runtime-config.json` the server rewrites on startup.
+   * Defaults to the bundle shipped with this package.
+   */
+  webAssetsDir?: string;
 }
 
 export class AdkApiServer {
@@ -177,6 +244,16 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  private readonly agentsDir: string;
+  private readonly extraPlugins: string[];
+  private readonly logo?: UiLogoConfig;
+  private readonly defaultLlmModel?: string;
+  private readonly webAssetsDir: string;
+  /**
+   * Read once, as adk-python reads it in `__init__`, so that exporting the
+   * variable after the server is built cannot change how it routes.
+   */
+  private readonly defaultAppName?: string;
   private initPromise?: Promise<void>;
   private a2aPromise?: Promise<void>;
 
@@ -192,6 +269,15 @@ export class AdkApiServer {
       options.credentialService ?? new InMemoryCredentialService();
     this.autoCreateSession = options.autoCreateSession ?? false;
     this.urlPrefix = normalizeUrlPrefix(options.urlPrefix);
+    // Matches the default `AgentLoader` applies to the same option, so that
+    // `plugins.yaml` is looked for in the directory the agents load from.
+    this.agentsDir = options.agentsDir ?? process.cwd();
+    this.extraPlugins = options.extraPlugins ?? [];
+    this.logo = resolveLogoConfig(options.logoText, options.logoImageUrl);
+    this.defaultLlmModel = options.defaultLlmModel;
+    this.webAssetsDir =
+      options.webAssetsDir ?? path.join(__dirname, '../../browser');
+    this.defaultAppName = process.env[DEFAULT_APP_NAME_ENV_VAR] || undefined;
     this.agentLoader =
       options.agentLoader ??
       new AgentLoader(
@@ -283,6 +369,12 @@ export class AdkApiServer {
     const app = this.app;
     await this.setupTelemetry();
 
+    // Outermost, as in adk-python, so every later middleware and route sees
+    // the rewritten path rather than the app-less one the client sent.
+    if (this.defaultAppName) {
+      app.use(defaultAppRewriteMiddleware(this.defaultAppName));
+    }
+
     // Registered before any route (including /health, /, /version) so the
     // DNS-rebinding guard applies to every endpoint, not just the ones
     // registered after this point. Origin cannot be relied on here: a
@@ -313,12 +405,29 @@ export class AdkApiServer {
     });
 
     if (this.serveDebugUI) {
+      writeRuntimeConfig({
+        webAssetsDir: this.webAssetsDir,
+        backendUrl: this.urlPrefix,
+        telemetry: readTelemetryConsent(),
+        logo: this.logo,
+        logger: this.logger,
+      });
+
+      // The response keys stay snake_case: the dev UI bundle is the same
+      // Angular build both SDKs serve, and it reads these exact names.
+      app.get('/dev-ui/config', (req: Request, res: Response) => {
+        res.json({
+          logo_text: this.logo?.text,
+          logo_image_url: this.logo?.imageUrl,
+        });
+      });
+
       app.get('/', (req: Request, res: Response) => {
         res.redirect(`${this.urlPrefix}/dev-ui`);
       });
       app.use(
         '/dev-ui',
-        express.static(path.join(__dirname, '../../browser'), {
+        express.static(this.webAssetsDir, {
           setHeaders: (res: Response, path: string) => {
             if (path.endsWith('.js')) {
               res.setHeader('Content-Type', 'text/javascript');
@@ -1266,8 +1375,18 @@ export class AdkApiServer {
     appName: string,
   ): Promise<Runner> {
     if (!(appName in this.runnerCache)) {
+      if (this.defaultLlmModel) {
+        LlmAgent.setDefaultModel(this.defaultLlmModel);
+      }
+      const plugins = await this.resolvePlugins(appName);
+      // Only an app carries plugins, so an app is built when there is a
+      // plugin to carry. With none, the runner is built exactly as before.
+      const root = plugins.length
+        ? appWithPlugins(agentOrApp, appName, plugins)
+        : agentOrApp;
+
       this.runnerCache[appName] = new Runner({
-        ...(isApp(agentOrApp) ? {app: agentOrApp} : {agent: agentOrApp}),
+        ...(isApp(root) ? {app: root} : {agent: root}),
         appName,
         memoryService: this.memoryService,
         sessionService: this.sessionService,
@@ -1277,6 +1396,32 @@ export class AdkApiServer {
     }
 
     return this.runnerCache[appName];
+  }
+
+  /**
+   * Builds the plugins this server adds to an app: the ones named on the
+   * command line, plus the BigQuery analytics plugin when the app's
+   * `plugins.yaml` configures one. Called once per app, because the runner
+   * that consumes the result is cached.
+   */
+  private async resolvePlugins(appName: string): Promise<BasePlugin[]> {
+    const plugins = await loadExtraPlugins(this.extraPlugins, this.logger);
+    const analytics = readBigQueryAnalyticsConfig(
+      this.agentsDir,
+      appName,
+      this.logger,
+    );
+    if (analytics) {
+      plugins.push(
+        new BigQueryAgentAnalyticsPlugin({
+          projectId: analytics.projectId,
+          datasetId: analytics.datasetId,
+          tableId: analytics.tableId,
+          location: analytics.datasetLocation,
+        }),
+      );
+    }
+    return plugins;
   }
 
   /**
