@@ -46,5 +46,16 @@
   },
   "dependencies": {
     "@google/adk": "^2.0.0"
+  },
+  "devDependencies": {
+    "@slack/bolt": "^5.1.0"
+  },
+  "peerDependencies": {
+    "@slack/bolt": "^5.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@slack/bolt": {
+      "optional": true
+    }
   }
 }
