@@ -63,6 +63,17 @@ export class RestApiTool extends BaseTool {
     this.credentialKey = credentialKey;
   }
 
+  /**
+   * Returns the JSON schema of the arguments this tool accepts.
+   *
+   * A tool that wraps this one reads the schema through here, so that
+   * `operationParser` stays private.
+   */
+  @experimental
+  public getJsonSchema(): Record<string, unknown> {
+    return this.operationParser.getJsonSchema();
+  }
+
   @experimental
   override _getDeclaration(): FunctionDeclaration {
     const schema = this.operationParser.getJsonSchema();
