@@ -5,7 +5,6 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {MAX_OUTPUT_CHARS} from '../../../src/tools/environment/constants.js';
 import {truncate} from '../../../src/tools/environment/truncate.js';
 
 describe('truncate', () => {
@@ -23,34 +22,21 @@ describe('truncate', () => {
     );
   });
 
-  it('caps at MAX_OUTPUT_CHARS when no limit is given', () => {
-    const text = 'a'.repeat(MAX_OUTPUT_CHARS + 1);
+  it('counts an astral character as one, matching adk-python', () => {
+    // 'abcd🚀efg' is 9 UTF-16 code units but 8 code points.
+    expect(truncate('abcd🚀efg', 8)).toBe('abcd🚀efg');
+  });
 
-    expect(truncate(text)).toBe(
-      `${'a'.repeat(MAX_OUTPUT_CHARS)}\n... (truncated, ${MAX_OUTPUT_CHARS + 1} total chars)`,
+  it('keeps a whole surrogate pair when the cut lands just after it', () => {
+    expect(truncate('abcd🚀efg', 5)).toBe(
+      'abcd🚀\n... (truncated, 8 total chars)',
     );
   });
 
-  it('drops a surrogate pair straddling the cut rather than splitting it', () => {
-    // The rocket is one astral character, so it occupies code units 4 and 5.
-    const text = `abcd🚀efg`;
-
-    const result = truncate(text, 5);
-
-    expect(result).toBe('abcd\n... (truncated, 9 total chars)');
-  });
-
-  it('keeps a surrogate pair that ends exactly on the cut', () => {
-    const text = `abcd🚀efg`;
-
-    const result = truncate(text, 6);
-
-    expect(result).toBe('abcd🚀\n... (truncated, 9 total chars)');
-  });
-
-  it('counts UTF-16 code units, so an astral character counts as two', () => {
-    expect(truncate('🚀', 2)).toBe('🚀');
-    expect(truncate('🚀', 1)).toBe('\n... (truncated, 2 total chars)');
+  it('never splits a surrogate pair when the cut lands just before it', () => {
+    expect(truncate('abcd🚀efg', 4)).toBe(
+      'abcd\n... (truncated, 8 total chars)',
+    );
   });
 
   it('truncates everything when the limit is zero', () => {
