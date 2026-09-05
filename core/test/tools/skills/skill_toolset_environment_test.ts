@@ -199,7 +199,14 @@ describe('SkillToolset against a real LocalEnvironment', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(workspace, {recursive: true, force: true});
+    // A killed command can still hold the directory on Windows, which is why
+    // the removal retries rather than failing the test that just passed.
+    await fs.rm(workspace, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   });
 
   it('brings an environment nobody initialized up before it runs', async () => {
