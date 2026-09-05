@@ -11,7 +11,7 @@ import {
   CodeExecutionLanguage,
   File,
 } from '../../code_executors/code_execution_utils.js';
-import {Script, Skill} from '../../skills/skill.js';
+import {getScript, Skill} from '../../skills/skill.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -102,10 +102,9 @@ export class RunSkillScriptTool extends BaseTool {
     const relScriptPath = scriptPath.startsWith('scripts/')
       ? scriptPath.substring('scripts/'.length)
       : scriptPath;
-    let script = skill.resources?.scripts?.[relScriptPath];
-    if (!script) {
-      script = skill.resources?.scripts?.[scriptPath];
-    }
+    const script =
+      getScript(skill.resources, relScriptPath) ??
+      getScript(skill.resources, scriptPath);
 
     if (!script) {
       return {
@@ -187,46 +186,28 @@ function buildWrapperCode(
 }
 
 export function getSkillResourceFiles(skill: Skill): File[] {
-  const files: File[] = [];
+  const {references = {}, assets = {}, scripts = {}} = skill.resources ?? {};
+  return [
+    ...Object.entries(references).map(([name, content]) =>
+      toResourceFile(`references/${name}`, content),
+    ),
+    ...Object.entries(assets).map(([name, content]) =>
+      toResourceFile(`assets/${name}`, content),
+    ),
+    ...Object.entries(scripts).map(([name, script]) =>
+      toResourceFile(`scripts/${name}`, script.src),
+    ),
+  ];
+}
 
-  for (const resourceType of ['references', 'assets', 'scripts']) {
-    const resources =
-      skill.resources?.[resourceType as keyof Skill['resources']] ?? {};
-
-    for (const resourceName of Object.keys(resources)) {
-      const content =
-        resources[resourceName as keyof typeof resources] ?? undefined;
-
-      if (content === undefined) {
-        continue;
-      }
-
-      let fileContent: string | Buffer | undefined = undefined;
-      if (typeof content === 'string' || Buffer.isBuffer(content)) {
-        fileContent = content;
-      } else if (
-        typeof content === 'object' &&
-        content !== null &&
-        'src' in content &&
-        typeof (content as Script).src === 'string'
-      ) {
-        fileContent = (content as Script).src;
-      }
-
-      if (fileContent === undefined) {
-        continue;
-      }
-
-      const ext = path.extname(resourceName).toLowerCase();
-      const {encoding, mimeType} = getMimeTypeAndEncoding(ext);
-      files.push({
-        name: `${resourceType}/${resourceName}`,
-        content: Buffer.from(fileContent).toString(encoding),
-        contentEncoding: encoding,
-        mimeType,
-      });
-    }
-  }
-
-  return files;
+function toResourceFile(name: string, content: string | Buffer): File {
+  const {encoding, mimeType} = getMimeTypeAndEncoding(
+    path.extname(name).toLowerCase(),
+  );
+  return {
+    name,
+    content: Buffer.from(content).toString(encoding),
+    contentEncoding: encoding,
+    mimeType,
+  };
 }

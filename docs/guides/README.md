@@ -232,6 +232,10 @@ documentation, visit [adk.dev](https://adk.dev/).
   Storing sessions in Vertex AI Agent Engine, its session-id rules, Express
   Mode, and what it does not support.
 
+### Skills
+
+- [Frontmatter, Resources and Skill](skills/skill_model/index.md) - How a SKILL.md directory becomes a Skill, the name rules, and the resource accessors.
+
 ### Telemetry
 
 - [Google Cloud telemetry export](telemetry/google_cloud/index.md) - Sending an

@@ -31,6 +31,7 @@ export enum FeatureName {
   MCP_GRACEFUL_ERROR_HANDLING = 'MCP_GRACEFUL_ERROR_HANDLING',
   /** Configuration surface for the Pub/Sub tools. */
   PUBSUB_TOOL_CONFIG = 'PUBSUB_TOOL_CONFIG',
+  SNAKE_CASE_SKILL_NAME = 'SNAKE_CASE_SKILL_NAME',
   /** Configuration surface for the Spanner tools. */
   SPANNER_TOOL_SETTINGS = 'SPANNER_TOOL_SETTINGS',
 }
@@ -81,6 +82,10 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.PUBSUB_TOOL_CONFIG]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
+  },
+  [FeatureName.SNAKE_CASE_SKILL_NAME]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: false,
   },
   [FeatureName.SPANNER_TOOL_SETTINGS]: {
     stage: FeatureStage.EXPERIMENTAL,
