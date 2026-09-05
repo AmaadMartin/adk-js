@@ -19,32 +19,6 @@ export interface SpannerAccessToken {
   expiresAt?: number;
 }
 
-/** The OAuth client a refresh token is renewed against. */
-interface SpannerOAuthClientCredentials {
-  clientId?: string;
-  clientSecret?: string;
-}
-
-/**
- * Builds an auth client that presents `token` to Spanner.
- *
- * @param token The access token, and the refresh token when there is one.
- * @param oauthClient The OAuth client the refresh token is renewed against.
- * @return The auth client.
- */
-function createTokenAuthClient(
-  token: SpannerAccessToken,
-  oauthClient: SpannerOAuthClientCredentials,
-): OAuth2Client {
-  const client = new OAuth2Client(oauthClient);
-  client.setCredentials({
-    access_token: token.accessToken,
-    refresh_token: token.refreshToken,
-    expiry_date: token.expiresAt,
-  });
-  return client;
-}
-
 /** Key under which a resolved Spanner token is cached in tool context state. */
 export const SPANNER_TOKEN_CACHE_KEY = 'spanner_token_cache';
 
@@ -144,13 +118,6 @@ function isUsable(token: SpannerAccessToken): boolean {
   );
 }
 
-/** Describes the scopes for the OpenAPI security scheme. */
-function scopeDescriptions(scopes: readonly string[]): Record<string, string> {
-  return Object.fromEntries(
-    scopes.map((scope) => [scope, `Access to ${scope}`]),
-  );
-}
-
 /**
  * Resolves the credentials the Spanner tools call the Admin API with.
  *
@@ -240,7 +207,9 @@ export class SpannerCredentialsManager {
         authorizationCode: {
           authorizationUrl: GOOGLE_AUTHORIZATION_URL,
           tokenUrl: GOOGLE_TOKEN_URL,
-          scopes: scopeDescriptions(this.scopes),
+          scopes: Object.fromEntries(
+            this.scopes.map((scope) => [scope, `Access to ${scope}`]),
+          ),
         },
       },
     };
@@ -257,8 +226,15 @@ export class SpannerCredentialsManager {
     };
   }
 
+  /** An auth client presenting `token`, renewable against the OAuth client. */
   private buildClient(token: SpannerAccessToken): SpannerAuthClient {
     const {clientId, clientSecret} = this.config;
-    return createTokenAuthClient(token, {clientId, clientSecret});
+    const client = new OAuth2Client({clientId, clientSecret});
+    client.setCredentials({
+      access_token: token.accessToken,
+      refresh_token: token.refreshToken,
+      expiry_date: token.expiresAt,
+    });
+    return client;
   }
 }

@@ -79,10 +79,6 @@ export interface SpannerAdminToolsetOptions {
  * `tool_filter=['list_instances']` becomes
  * `toolFilter: ['spanner_list_instances']`.
  *
- * An empty array exposes no tools, which follows adk-python and not
- * `BaseToolset.isToolSelected`. The base class reads an empty array as "no
- * filter"; this toolset reads an absent option as "no filter" instead, so both
- * intentions stay expressible.
  */
 @experimental
 export class SpannerAdminToolset extends BaseToolset {
@@ -93,9 +89,6 @@ export class SpannerAdminToolset extends BaseToolset {
    *   than one.
    */
   constructor(options: SpannerAdminToolsetOptions) {
-    // `BaseToolset` requires a filter, so an absent one becomes a predicate
-    // that selects everything. That keeps "no filter" distinct from the empty
-    // array, which adk-python reads as "expose nothing".
     super(options.toolFilter ?? (() => true));
     validateSpannerCredentialsConfig(options.credentialsConfig);
     const credentials = new SpannerCredentialsManager(
@@ -115,11 +108,8 @@ export class SpannerAdminToolset extends BaseToolset {
   }
 
   /**
-   * A name the list carries selects the tool, and an empty list selects none,
-   * as adk-python's `_is_tool_selected` does. The inherited `isToolSelected`
-   * reads an empty list as "no filter" and would expose every tool instead.
-   *
-   * A predicate needs a context, so without one only a name filter applies.
+   * Filters here rather than through the inherited `isToolSelected`, which
+   * reads an empty list as "no filter" and would expose every tool.
    */
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const filter = this.toolFilter;
