@@ -24,12 +24,26 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
- * OpenIdConnectWithConfig.
+ * An OAuth2 scheme that names the issuer its endpoints come from.
+ *
+ * Set `issuerUrl` and leave the endpoints of each flow empty. The endpoints are
+ * then filled in from the issuer's published metadata, per RFC 8414.
+ *
+ * @experimental This scheme may change without a major version bump.
+ */
+export interface ExtendedOAuth2 extends OpenAPIV3.OAuth2SecurityScheme {
+  /** The issuer to discover the OAuth2 endpoints from. */
+  issuerUrl?: string;
+}
+
+/**
+ * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
+ * OpenIdConnectWithConfig, and an OAuth2 scheme that discovers its endpoints.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | ExtendedOAuth2;
 
 /**
  * Represents the OAuth2 flow (or grant type).
