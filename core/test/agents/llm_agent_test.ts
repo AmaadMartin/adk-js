@@ -6,6 +6,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  BaseCodeExecutor,
   BaseLlm,
   BaseLlmConnection,
   BaseLlmRequestProcessor,
@@ -13,12 +14,13 @@ import {
   BasePlugin,
   BaseTool,
   CONTENT_REQUEST_PROCESSOR,
+  CodeExecutionResult,
   Context,
   ContextCompactorRequestProcessor,
-  createEvent,
-  createSession,
   Event,
+  ExecuteCodeParams,
   FunctionTool,
+  InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
@@ -30,6 +32,8 @@ import {
   Runner,
   Session,
   ToolProcessLlmRequest,
+  createEvent,
+  createSession,
 } from '@google/adk';
 import {Content, Schema, Type} from '@google/genai';
 import {
@@ -43,6 +47,7 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -1063,12 +1068,14 @@ describe('LlmAgent outputSchema with tools', () => {
   async function captureRequest(options: {
     model: string;
     withTools: boolean;
+    mode?: 'single_turn' | 'task';
   }): Promise<LlmRequest> {
     const llm = new CapturingLlm({model: options.model});
     const agent = new LlmAgent({
       name: 'test_agent',
       model: llm,
       instruction: 'Base instruction',
+      mode: options.mode,
       outputSchema: OUTPUT_SCHEMA,
       tools: options.withTools
         ? [
@@ -1164,6 +1171,22 @@ describe('LlmAgent outputSchema with tools', () => {
       );
     },
   );
+
+  it('omits the set_model_response instruction and tool in task mode', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const request = await captureRequest({
+      model: 'gemini-2.5-flash',
+      withTools: true,
+      mode: 'task',
+    });
+
+    expect(request.toolsDict).not.toHaveProperty('set_model_response');
+    expect(request.config?.systemInstruction).not.toContain(
+      'set_model_response',
+    );
+    expect(request.toolsDict).toHaveProperty('finish_task');
+  });
 
   it('persists state writes made in processLlmRequest across turns', async () => {
     class StateProbeTool extends BaseTool {
@@ -1427,5 +1450,85 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent default response processors', () => {
+  /** Records the code it was asked to run and reports a fixed result. */
+  class RecordingCodeExecutor extends BaseCodeExecutor {
+    readonly executed: string[] = [];
+
+    async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+      this.executed.push(params.codeExecutionInput.code);
+      return {stdout: 'hello from python', stderr: '', outputFiles: []};
+    }
+  }
+
+  /**
+   * Answers with a code block once, then plainly. The response processor
+   * clears the content of a code-block turn so the agent asks again, so a
+   * model that always returns code never terminates.
+   */
+  class CodeBlockLlm extends BaseLlm {
+    private calls = 0;
+
+    async *generateContentAsync(
+      _request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.calls += 1;
+      yield this.calls === 1
+        ? {
+            content: {
+              role: 'model',
+              parts: [{text: 'Here you go:\n```python\nprint("hi")\n```'}],
+            },
+          }
+        : {content: {role: 'model', parts: [{text: 'All done.'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  it('runs the code executor on a model response carrying a code block', async () => {
+    const codeExecutor = new RecordingCodeExecutor();
+    const agent = new LlmAgent({
+      name: 'code_agent',
+      model: new CodeBlockLlm({model: 'gemini-2.5-flash'}),
+      codeExecutor,
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_code',
+      session: createSession({
+        id: 'sess_code',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+      artifactService: new ScopedArtifactService(
+        new InMemoryArtifactService(),
+        'test-app',
+        'test-user',
+        'sess_code',
+      ),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+
+    // The executor actually ran, which only happens if the default response
+    // pipeline carries the code execution response processor.
+    expect(codeExecutor.executed).toEqual(['print("hi")']);
+
+    const texts = events.flatMap((e) =>
+      (e.content?.parts ?? []).map((part) => part.text ?? ''),
+    );
+    expect(texts.some((text) => text.includes('print("hi")'))).toBe(true);
+    expect(texts.some((text) => text.includes('hello from python'))).toBe(true);
   });
 });
