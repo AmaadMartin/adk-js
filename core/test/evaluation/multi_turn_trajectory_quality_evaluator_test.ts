@@ -7,6 +7,7 @@
 import {
   EvalStatus,
   MultiTurnTrajectoryQualityV1Evaluator,
+  MultiTurnVertexAiEvalFacade,
   PrebuiltMetrics,
   type ConversationScenario,
   type Invocation,
@@ -14,7 +15,7 @@ import {
   type VertexAiEvalRequest,
   type VertexEvaluationResult,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 function invocation(query: string, response: string): Invocation {
   return {
@@ -42,6 +43,10 @@ function scored(meanScore: number): VertexEvaluationResult {
 }
 
 describe('MultiTurnTrajectoryQualityV1Evaluator', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('scores a conversation and requests the multi-turn trajectory metric', async () => {
     const evalClient = new FakeEvalClient([scored(0.9)]);
     const evaluator = new MultiTurnTrajectoryQualityV1Evaluator({
@@ -245,28 +250,37 @@ describe('MultiTurnTrajectoryQualityV1Evaluator', () => {
     expect(evalClient.requests).toHaveLength(0);
   });
 
-  it('forwards a conversation scenario without altering the request', async () => {
+  it('forwards the conversation scenario to the facade', async () => {
     const scenario: ConversationScenario = {
       startingPrompt: 'Book me a flight.',
       conversationPlan: 'Book a one-way flight from SFO to LAX.',
     };
-    const withScenario = new FakeEvalClient([scored(0.9)]);
-    const withoutScenario = new FakeEvalClient([scored(0.9)]);
-    const evalMetric = {
-      metricName: PrebuiltMetrics.MULTI_TURN_TRAJECTORY_QUALITY_V1,
-      threshold: 0.8,
-    };
+    const delegate = vi.spyOn(
+      MultiTurnVertexAiEvalFacade.prototype,
+      'evaluateInvocations',
+    );
+    const evalClient = new FakeEvalClient([scored(0.9)]);
+    const evaluator = new MultiTurnTrajectoryQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TRAJECTORY_QUALITY_V1,
+        threshold: 0.8,
+      },
+      evalClient,
+    });
+    const actual = [invocation('q', 'a')];
+    const expected = [invocation('q', 'golden')];
 
-    const result = await new MultiTurnTrajectoryQualityV1Evaluator({
-      evalMetric,
-      evalClient: withScenario,
-    }).evaluateInvocations([invocation('q', 'a')], undefined, scenario);
-    await new MultiTurnTrajectoryQualityV1Evaluator({
-      evalMetric,
-      evalClient: withoutScenario,
-    }).evaluateInvocations([invocation('q', 'a')]);
+    const result = await evaluator.evaluateInvocations(
+      actual,
+      expected,
+      scenario,
+    );
 
+    expect(delegate).toHaveBeenCalledExactlyOnceWith(
+      actual,
+      expected,
+      scenario,
+    );
     expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
-    expect(withScenario.requests).toEqual(withoutScenario.requests);
   });
 });
