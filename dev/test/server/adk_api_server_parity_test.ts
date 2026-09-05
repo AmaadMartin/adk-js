@@ -18,6 +18,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  RunnableRoot,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -26,7 +27,7 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {BigQueryAnalyticsPluginOptions} from '../../src/server/plugins_config.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
 
 const APP_NAME = 'bq_app';
 
@@ -66,18 +67,33 @@ class SpyAnalyticsPlugin extends BasePlugin {
   }
 }
 
-function stubAgentLoader(appName: string): AgentLoader {
-  const agent = new SilentAgent({name: 'silentAgent'});
-  return {
-    listAgents: () => Promise.resolve([appName]),
-    getAgentFile: () =>
-      Promise.resolve({
-        load: () => Promise.resolve(agent),
-        async [Symbol.asyncDispose](): Promise<void> {
-          return;
-        },
-      }),
-  } as unknown as AgentLoader;
+/** Serves one in-memory agent, so no agent file has to be compiled. */
+class StubAgentFile extends AgentFile {
+  constructor(private readonly root: RunnableRoot) {
+    super('<in-memory>');
+  }
+
+  override load(): Promise<RunnableRoot> {
+    return Promise.resolve(this.root);
+  }
+}
+
+class StubAgentLoader extends AgentLoader {
+  private readonly file = new StubAgentFile(
+    new SilentAgent({name: 'silentAgent'}),
+  );
+
+  constructor(private readonly appName: string) {
+    super();
+  }
+
+  override listAgents(): Promise<string[]> {
+    return Promise.resolve([this.appName]);
+  }
+
+  override getAgentFile(): Promise<AgentFile> {
+    return Promise.resolve(this.file);
+  }
 }
 
 describe('api_server plugins.yaml parity', () => {
@@ -122,7 +138,7 @@ describe('api_server plugins.yaml parity', () => {
     const built: SpyAnalyticsPlugin[] = [];
     server = new AdkApiServer({
       agentsDir,
-      agentLoader: stubAgentLoader(APP_NAME),
+      agentLoader: new StubAgentLoader(APP_NAME),
       sessionService,
       bigQueryAnalyticsPluginFactory: async (options) => {
         const plugin = new SpyAnalyticsPlugin(options);
@@ -149,7 +165,7 @@ describe('api_server plugins.yaml parity', () => {
     let called = false;
     server = new AdkApiServer({
       agentsDir,
-      agentLoader: stubAgentLoader(APP_NAME),
+      agentLoader: new StubAgentLoader(APP_NAME),
       sessionService,
       bigQueryAnalyticsPluginFactory: async () => {
         called = true;
@@ -171,7 +187,7 @@ describe('api_server plugins.yaml parity', () => {
     );
     server = new AdkApiServer({
       agentsDir,
-      agentLoader: stubAgentLoader(APP_NAME),
+      agentLoader: new StubAgentLoader(APP_NAME),
       sessionService,
       bigQueryAnalyticsPluginFactory: async () => undefined,
     });
