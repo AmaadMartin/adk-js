@@ -452,21 +452,19 @@ describe('A2AAgentExecutor', () => {
       });
 
     const session = (events: AdkEvent[]): Session =>
-      ({
+      createSession({
         id: 'test-context',
         userId: 'A2A_USER_test-context',
         appName: 'test-app',
         events,
-        state: {},
-      }) as unknown as Session;
+      });
 
     function executor(): A2AAgentExecutor {
-      return new A2AAgentExecutor({
-        runner: {
-          appName: 'test-app',
-          sessionService: mockSessionService,
-        } as unknown as RunnerConfig,
-      });
+      const runner: RunnerConfig = {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      };
+      return new A2AAgentExecutor({runner});
     }
 
     it('probes without event history, then reads the history it skipped', async () => {
