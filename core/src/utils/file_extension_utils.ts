@@ -71,3 +71,99 @@ export function getScriptLanguageByExtension(
     CodeExecutionLanguage.UNSPECIFIED
   );
 }
+
+/** The MIME type {@link getMimeTypeAndEncoding} returns for an unknown one. */
+const UNKNOWN_MIME_TYPE = 'application/octet-stream';
+
+/** Major MIME types that name a kind of media. */
+const MEDIA_KIND_BY_MAJOR_MIME_TYPE: Record<string, 'image' | 'video'> = {
+  image: 'image',
+  video: 'video',
+};
+
+/** Drops parameters and casing from a MIME type so it can be compared. */
+export function normalizeMimeType(mimeType: string): string {
+  return mimeType.split(';', 1)[0].trim().toLowerCase();
+}
+
+/**
+ * Returns the kind of media a MIME type names, or undefined when it names
+ * something else. Audio is absent: it is not addressable by URL everywhere
+ * image and video are, so callers handle it separately.
+ */
+export function mediaKindFromMimeType(
+  mimeType: string,
+): 'image' | 'video' | undefined {
+  return MEDIA_KIND_BY_MAJOR_MIME_TYPE[
+    normalizeMimeType(mimeType).split('/', 1)[0]
+  ];
+}
+
+/**
+ * Maps an audio MIME type to its common format name, so that `audio/mpeg`
+ * becomes `mp3` and `audio/x-wav` becomes `wav`.
+ */
+export function audioFormatFromMimeType(mimeType: string): string {
+  const normalized = normalizeMimeType(mimeType);
+  let subtype = normalized.slice(normalized.indexOf('/') + 1);
+  if (subtype.startsWith('x-')) {
+    subtype = subtype.slice(2);
+  }
+  if (subtype === 'mpeg') {
+    return 'mp3';
+  }
+  if (subtype === 'wave' || subtype === 'vnd.wave') {
+    return 'wav';
+  }
+  return subtype;
+}
+
+/**
+ * Guesses a MIME type from a file name, returning undefined when the extension
+ * is unknown or absent.
+ */
+export function guessMimeTypeFromFileName(
+  fileName: string,
+): string | undefined {
+  const dot = fileName.lastIndexOf('.');
+  if (dot <= 0) {
+    return undefined;
+  }
+  const {mimeType} = getMimeTypeAndEncoding(fileName.slice(dot));
+  return mimeType === UNKNOWN_MIME_TYPE ? undefined : mimeType;
+}
+
+/**
+ * Returns the path component of a URI, tolerating a string that is not a valid
+ * absolute URL.
+ */
+function uriPath(uri: string): string {
+  try {
+    return new URL(uri).pathname;
+  } catch {
+    return uri.split('?', 1)[0].split('#', 1)[0];
+  }
+}
+
+/**
+ * Infers a MIME type from the file extension in a URI.
+ *
+ * Artifact URIs are versioned (`.../report.pdf/versions/3`), so a trailing
+ * numeric segment and the `versions` segment before it are dropped before the
+ * remaining segment is read as a file name.
+ */
+export function inferMimeTypeFromUri(uri: string): string | undefined {
+  const segments = uriPath(uri).split('/').filter(Boolean);
+  if (segments.length === 0) {
+    return undefined;
+  }
+  if (/^\d+$/.test(segments[segments.length - 1])) {
+    segments.pop();
+    const previous = segments[segments.length - 1]?.toLowerCase();
+    if (previous === 'versions' || previous === 'version') {
+      segments.pop();
+    }
+  }
+  const candidate = segments[segments.length - 1];
+  return candidate ? guessMimeTypeFromFileName(candidate) : undefined;
+}
