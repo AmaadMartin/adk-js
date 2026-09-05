@@ -36,15 +36,43 @@ export function getApiEndpoint(
   defaultTemplate: string,
   mtlsTemplate: string,
 ): string {
-  const setting = mtlsEndpointSetting();
+  const setting = readMtlsEndpointSetting();
   const useMtls =
-    setting === 'always' ||
-    (setting !== 'never' &&
+    setting === MtlsEndpointSetting.ALWAYS ||
+    (setting !== MtlsEndpointSetting.NEVER &&
       (process.env[USE_CLIENT_CERTIFICATE_ENV] ?? '').toLowerCase() === 'true');
   return (useMtls ? mtlsTemplate : defaultTemplate).replace(
     '{location}',
     () => location,
   );
+}
+
+/**
+ * Chooses between two endpoints, given the certificate the caller resolved.
+ *
+ * This is the counterpart of `getApiEndpoint` for a caller that already holds
+ * its certificate. Here `auto` picks the mutual-TLS endpoint only when there
+ * is a certificate to present, instead of trusting
+ * `GOOGLE_API_USE_CLIENT_CERTIFICATE`. The two endpoints are complete URLs, so
+ * nothing is substituted into them.
+ *
+ * @param clientCertSource The resolved client certificate, when there is one.
+ * @param defaultEndpoint The endpoint to call without mutual TLS.
+ * @param mtlsEndpoint The endpoint to call with mutual TLS.
+ */
+export function chooseApiEndpoint(
+  clientCertSource: ClientCertSource | undefined,
+  defaultEndpoint: string,
+  mtlsEndpoint: string,
+): string {
+  const setting = readMtlsEndpointSetting();
+  if (
+    setting === MtlsEndpointSetting.ALWAYS ||
+    (setting === MtlsEndpointSetting.AUTO && clientCertSource)
+  ) {
+    return mtlsEndpoint;
+  }
+  return defaultEndpoint;
 }
 
 /**
@@ -72,7 +100,10 @@ function isNonMtlsGoogleapisEndpoint(url: string): boolean {
  * @return The URL to request instead.
  */
 export function effectiveGoogleapisEndpoint(url: string): string {
-  if (!isNonMtlsGoogleapisEndpoint(url) || mtlsEndpointSetting() === 'never') {
+  if (
+    !isNonMtlsGoogleapisEndpoint(url) ||
+    readMtlsEndpointSetting() === MtlsEndpointSetting.NEVER
+  ) {
     return url;
   }
   const parsed = new URL(url);
@@ -91,9 +122,45 @@ function hostnameOf(url: string): string {
   }
 }
 
-/** Reads `GOOGLE_API_USE_MTLS_ENDPOINT`, lowercased. Unset reads as `auto`. */
-function mtlsEndpointSetting(): string {
-  return (process.env[USE_MTLS_ENDPOINT_ENV] ?? '').toLowerCase();
+/** How `GOOGLE_API_USE_MTLS_ENDPOINT` picks between the two endpoints. */
+enum MtlsEndpointSetting {
+  /** Use the mutual-TLS endpoint when a client certificate is available. */
+  AUTO = 'auto',
+  /** Always use the mutual-TLS endpoint. */
+  ALWAYS = 'always',
+  /** Never use the mutual-TLS endpoint. */
+  NEVER = 'never',
+}
+
+/**
+ * Reads `GOOGLE_API_USE_MTLS_ENDPOINT`, lowercased.
+ *
+ * An unset variable reads as `auto`. An unrecognised one warns and also reads
+ * as `auto`, because a typo that silently sends traffic to the wrong endpoint
+ * is hard to find.
+ */
+function readMtlsEndpointSetting(): MtlsEndpointSetting {
+  const accepted = Object.values(MtlsEndpointSetting);
+  const value = (
+    process.env[USE_MTLS_ENDPOINT_ENV] ?? MtlsEndpointSetting.AUTO
+  ).toLowerCase();
+  const setting = accepted.find((candidate) => candidate === value);
+  if (setting) {
+    return setting;
+  }
+  logger.warn(
+    `Environment variable \`${USE_MTLS_ENDPOINT_ENV}\` must be one of ` +
+      `${accepted.join(', ')}. Defaulting to ${MtlsEndpointSetting.AUTO}.`,
+  );
+  return MtlsEndpointSetting.AUTO;
+}
+
+/** A client certificate and its private key, both PEM encoded. */
+export interface ClientCertSource {
+  /** The client certificate chain. */
+  cert: string;
+  /** The private key that signs the handshake. */
+  key: string;
 }
 
 /**
@@ -102,9 +169,7 @@ function mtlsEndpointSetting(): string {
  * The members are PEM text rather than file paths, so a caller can hand them
  * straight to `https.Agent` without writing a secret to disk.
  */
-export interface MtlsClientCerts {
-  /** The client certificate chain, PEM encoded. */
-  cert: string;
+export interface MtlsClientCerts extends ClientCertSource {
   /** The private key, PEM encoded. It is encrypted when a passphrase is set. */
   key: string;
   /** The passphrase protecting the key, when the provider emits one. */
@@ -126,6 +191,9 @@ const MTLS_GOOGLEAPIS_SUFFIX = '.mtls.googleapis.com';
 /** The flag that makes a SecureConnect provider print the key passphrase. */
 const WITH_PASSPHRASE_FLAG = '--with_passphrase';
 
+/** The metadata key that names the certificate provider command. */
+const CERT_PROVIDER_COMMAND_KEY = 'cert_provider_command';
+
 const CERTIFICATE_PATTERN =
   /-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/;
 const PRIVATE_KEY_PATTERN =
@@ -138,11 +206,21 @@ const PASSPHRASE_PATTERN =
  *
  * adk-python asks google-auth first and reads
  * `GOOGLE_API_USE_CLIENT_CERTIFICATE` only as a fallback. `google-auth-library`
- * for Node exposes no equivalent hook, so the variable is the whole contract
- * here.
+ * for Node exposes no equivalent of Python's `mtls.should_use_client_cert()`,
+ * so the variable is the whole contract here. An unrecognised value warns and
+ * counts as `false`.
  */
 export function useClientCertEffective(): boolean {
-  return process.env[USE_CLIENT_CERTIFICATE_ENV]?.toLowerCase() === 'true';
+  const value = (
+    process.env[USE_CLIENT_CERTIFICATE_ENV] ?? 'false'
+  ).toLowerCase();
+  if (value !== 'true' && value !== 'false') {
+    logger.warn(
+      `Environment variable \`${USE_CLIENT_CERTIFICATE_ENV}\` must be either ` +
+        '`true` or `false`',
+    );
+  }
+  return value === 'true';
 }
 
 /** Returns the default SecureConnect context-aware metadata path. */
@@ -291,6 +369,96 @@ export async function loadDefaultClientCerts(
 
   const passphrase = PASSPHRASE_PATTERN.exec(output)?.[1]?.trim();
   return passphrase ? {cert, key, passphrase} : {cert, key};
+}
+
+/** Reports whether `value` is an array of strings. */
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((entry: unknown) => typeof entry === 'string')
+  );
+}
+
+/**
+ * Returns the certificate provider command gcloud registered, if any.
+ *
+ * A missing metadata file is the normal case off a context-aware managed
+ * device, so it is not reported. A file that exists but names no command is,
+ * because the caller asked for a certificate and will not get one.
+ */
+async function readCertProviderCommand(): Promise<string[] | undefined> {
+  // The path and the `cert_provider_command` key are the contract
+  // google-auth-library-python reads in
+  // `google/auth/transport/_mtls_helper.py`; this is the Node side of it.
+  const metadataPath = defaultMetadataPath();
+  const contents = await readMetadataFile(metadataPath).catch(() => undefined);
+  if (contents === undefined) {
+    return undefined;
+  }
+
+  let command: unknown;
+  try {
+    const metadata: unknown = JSON.parse(contents);
+    if (typeof metadata === 'object' && metadata !== null) {
+      command = Object.getOwnPropertyDescriptor(
+        metadata,
+        CERT_PROVIDER_COMMAND_KEY,
+      )?.value;
+    }
+  } catch (e: unknown) {
+    logger.warn(`Failed to parse ${metadataPath}.`, e);
+    return undefined;
+  }
+
+  if (isStringArray(command) && command.length > 0) {
+    return command;
+  }
+  logger.warn(
+    `${metadataPath} does not name a \`${CERT_PROVIDER_COMMAND_KEY}\`.`,
+  );
+  return undefined;
+}
+
+/**
+ * Returns the context-aware client certificate gcloud provides, if any.
+ *
+ * This is the Node stand-in for Python's
+ * `google.auth.transport.mtls.default_client_cert_source()`. It never throws:
+ * every failure returns `undefined` so the caller can stay on the plain
+ * endpoint instead of losing the connection. `loadDefaultClientCerts` is the
+ * stricter loader: it reads a passphrase too, and it reports a broken setup
+ * by throwing.
+ */
+export async function defaultClientCertSource(): Promise<
+  ClientCertSource | undefined
+> {
+  const command = await readCertProviderCommand();
+  if (!command) {
+    return undefined;
+  }
+
+  const [file, ...args] = command;
+  let stdout: string;
+  try {
+    // `promisify` reads `execFile` here rather than at module load, so that
+    // importing this module costs nothing on a process that never asks for a
+    // client certificate.
+    ({stdout} = await promisify(childProcess.execFile)(file, args));
+  } catch (e: unknown) {
+    logger.warn(`The \`${CERT_PROVIDER_COMMAND_KEY}\` \`${file}\` failed.`, e);
+    return undefined;
+  }
+
+  const cert = CERTIFICATE_PATTERN.exec(stdout)?.[0];
+  const key = PRIVATE_KEY_PATTERN.exec(stdout)?.[0];
+  if (!cert || !key) {
+    logger.warn(
+      `The \`${CERT_PROVIDER_COMMAND_KEY}\` \`${file}\` printed no ` +
+        'certificate and private key pair.',
+    );
+    return undefined;
+  }
+  return {cert, key};
 }
 
 /**

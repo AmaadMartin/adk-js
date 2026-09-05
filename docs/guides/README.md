@@ -227,6 +227,11 @@ documentation, visit [adk.dev](https://adk.dev/).
   Storing sessions in Vertex AI Agent Engine, its session-id rules, Express
   Mode, and what it does not support.
 
+### Telemetry
+
+- [Google Cloud telemetry export](telemetry/google_cloud/index.md) - Sending an
+  agent's traces, metrics and log records to Google Cloud over OTLP.
+
 ### Tools
 
 - [adkToMcpToolType and geminiToJsonSchema](tools/mcp_conversion_utils/index.md) - Convert an ADK tool into an MCP tool descriptor so an MCP server can advertise it.
