@@ -291,6 +291,11 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {
+  ExecuteTool,
+  ExecuteToolErrorCode,
+} from './tools/environment/execute_tool.js';
+export type {ExecuteToolOptions} from './tools/environment/execute_tool.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
@@ -328,6 +333,7 @@ export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
   IntentMismatchError,
+  REQUIRE_CONFIRMATION_MESSAGE,
   ToolConfirmation,
   isIntentMismatchError,
 } from './tools/tool_confirmation.js';

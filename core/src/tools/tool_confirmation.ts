@@ -5,6 +5,14 @@
  */
 
 /**
+ * Message returned while a tool call is paused waiting for the client to
+ * confirm (or reject) it. Mirrors the intermediate message used by the
+ * tool-confirmation flow elsewhere in the codebase (see `SecurityPlugin`).
+ */
+export const REQUIRE_CONFIRMATION_MESSAGE =
+  'This tool call needs external confirmation before completion.';
+
+/**
  * Represents a tool confirmation configuration.
  * @experimental  (Experimental, subject to change)
  */
