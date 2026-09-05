@@ -14,7 +14,6 @@ import {
   buildCreateParams,
   completionToLlmResponse,
   contentToOpenAiMessages,
-  extractCachedTokenCount,
   functionDeclarationToOpenAiTool,
   partToOpenAiContent,
   streamToLlmResponses,
@@ -252,23 +251,6 @@ describe('functionDeclarationToOpenAiTool', () => {
   });
 });
 
-describe('extractCachedTokenCount', () => {
-  it('returns undefined when the host reports no usage', () => {
-    expect(extractCachedTokenCount(undefined)).toBeUndefined();
-  });
-
-  it('returns undefined when the details omit the cached count', () => {
-    expect(
-      extractCachedTokenCount({
-        prompt_tokens: 1,
-        completion_tokens: 1,
-        total_tokens: 2,
-        prompt_tokens_details: {},
-      }),
-    ).toBeUndefined();
-  });
-});
-
 describe('completionToLlmResponse', () => {
   it('turns tool calls into function call parts carrying the call id', () => {
     const response = completionToLlmResponse(
@@ -363,6 +345,31 @@ describe('completionToLlmResponse', () => {
     );
 
     expect(response.content?.parts).toEqual([{text: 'done'}]);
+  });
+
+  it('reports no cached count when the details omit one', () => {
+    const completion = completionWith({
+      role: 'assistant',
+      content: 'hi',
+      refusal: null,
+    });
+
+    const response = completionToLlmResponse({
+      ...completion,
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        total_tokens: 2,
+        prompt_tokens_details: {},
+      },
+    });
+
+    expect(response.usageMetadata).toEqual({
+      promptTokenCount: 1,
+      candidatesTokenCount: 1,
+      totalTokenCount: 2,
+      cachedContentTokenCount: undefined,
+    });
   });
 
   it('reports no usage counts when the completion carries no usage', () => {
