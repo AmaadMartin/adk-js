@@ -16,6 +16,7 @@
 // Only what a caller configuring or reading a `SpannerToolset` names. The
 // validators run from the constructor, and the tool definitions, the name
 // prefix and the credentials manager stay internal to this module.
+export * from './admin_toolset.js';
 export type {SpannerAuthClient} from './client.js';
 export {
   APPROXIMATE_NEAREST_NEIGHBORS,
