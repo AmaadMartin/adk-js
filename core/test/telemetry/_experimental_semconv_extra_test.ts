@@ -777,9 +777,9 @@ describe('parts with nothing set', () => {
 
 describe('a tool call argument that is not a plain object', () => {
   it('wraps what it could normalize under a value key', () => {
-    class OpaqueArgs {
-      [key: string]: unknown;
-    }
+    class OpaqueArgs {}
+    const args: Record<string, unknown> = {city: 'Zurich'};
+    Object.setPrototypeOf(args, OpaqueArgs.prototype);
     const attributes: AnyValueMap = {};
 
     setOperationDetailsAttributesFromRequest(
@@ -788,7 +788,7 @@ describe('a tool call argument that is not a plain object', () => {
         contents: [
           {
             role: 'user',
-            parts: [{functionCall: {name: 'f', args: new OpaqueArgs()}}],
+            parts: [{functionCall: {name: 'f', args}}],
           },
         ],
       }),
