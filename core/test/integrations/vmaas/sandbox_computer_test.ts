@@ -173,6 +173,44 @@ describe('AgentEngineSandboxComputer', () => {
   });
 
   describe('missing transport seams', () => {
+    it('checks the seams before it provisions anything', async () => {
+      const vertexClient = createMockVertexClient();
+      const computer = new AgentEngineSandboxComputer({
+        vertexaiClient: asVertexClient(vertexClient),
+        accessTokenProvider: vi.fn().mockResolvedValue('token'),
+      });
+      await computer.prepare(createTestContext());
+
+      await expect(computer.currentState()).rejects.toThrow('sendCommand');
+
+      expect(
+        vertexClient.agentEnginesInternal.createInternal,
+      ).not.toHaveBeenCalled();
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    // A missing provider is a configuration fault, not a token failure, so it
+    // must not go through the clear-cache-and-retry path.
+    it('does not fetch a sandbox for a missing access token provider', async () => {
+      const vertexClient = createMockVertexClient();
+      const computer = new AgentEngineSandboxComputer({
+        sandboxName: SANDBOX_NAME,
+        vertexaiClient: asVertexClient(vertexClient),
+        sendCommand: createFakeSandbox().sendCommand,
+      });
+      await computer.prepare(createTestContext());
+
+      await expect(computer.currentState()).rejects.toThrow(
+        'generateAccessToken',
+      );
+
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.getInternal,
+      ).not.toHaveBeenCalled();
+    });
+
     it('names the missing access token method', async () => {
       const computer = new AgentEngineSandboxComputer({
         sandboxName: SANDBOX_NAME,
@@ -234,7 +272,24 @@ describe('AgentEngineSandboxComputer', () => {
         .calls[0][0];
     }
 
-    it('asks for a computer use environment when there is no template', async () => {
+    /** The failure raised when the computer would create a sandbox. */
+    async function createFailureFor(options: {
+      sandboxTemplateName?: string;
+      sandboxSnapshotName?: string;
+    }) {
+      const vertexClient = createMockVertexClient();
+      const computer = new AgentEngineSandboxComputer({
+        ...options,
+        vertexaiClient: asVertexClient(vertexClient),
+        accessTokenProvider: vi.fn().mockResolvedValue('token'),
+        sendCommand: createFakeSandbox().sendCommand,
+      });
+      await computer.prepare(createTestContext());
+      const error = await computer.currentState().catch((e: unknown) => e);
+      return {error, vertexClient};
+    }
+
+    it('asks for a computer use environment', async () => {
       const request = await createRequestFor();
 
       expect(request).toEqual({
@@ -243,39 +298,156 @@ describe('AgentEngineSandboxComputer', () => {
         config: {
           displayName: 'adk_computer_use_sandbox',
           ttl: '3600s',
-          waitForCompletion: true,
         },
       });
     });
 
-    it('prefers the template over the snapshot', async () => {
-      const request = await createRequestFor({
+    // The SDK's createAgentEngineSandboxConfigToVertex copies only
+    // displayName, description and ttl, so a template or snapshot never
+    // reaches the backend. Sending the request anyway would build an ordinary
+    // sandbox and report success.
+    it('refuses a template the installed SDK cannot ask for', async () => {
+      const {error, vertexClient} = await createFailureFor({
+        sandboxTemplateName: TEMPLATE_NAME,
+      });
+
+      expect(sandboxErrorCode(error)).toBe(
+        SandboxErrorCode.SANDBOX_SOURCE_UNSUPPORTED,
+      );
+      expect(error).toHaveProperty(
+        'message',
+        expect.stringContaining('sandboxTemplateName'),
+      );
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('refuses a snapshot the installed SDK cannot ask for', async () => {
+      const {error, vertexClient} = await createFailureFor({
+        sandboxSnapshotName: SNAPSHOT_NAME,
+      });
+
+      expect(sandboxErrorCode(error)).toBe(
+        SandboxErrorCode.SANDBOX_SOURCE_UNSUPPORTED,
+      );
+      expect(error).toHaveProperty(
+        'message',
+        expect.stringContaining('sandboxSnapshotName'),
+      );
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.createInternal,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('names the template when both a template and a snapshot are set', async () => {
+      const {error} = await createFailureFor({
         sandboxTemplateName: TEMPLATE_NAME,
         sandboxSnapshotName: SNAPSHOT_NAME,
       });
 
-      expect(request.spec).toBeUndefined();
-      expect(request.config).toMatchObject({
-        sandboxEnvironmentTemplate: TEMPLATE_NAME,
-      });
-      expect(request.config).not.toHaveProperty('sandboxEnvironmentSnapshot');
+      expect(error).toHaveProperty(
+        'message',
+        expect.stringContaining('sandboxTemplateName'),
+      );
     });
 
-    it('starts from the snapshot when there is no template', async () => {
-      const request = await createRequestFor({
-        sandboxSnapshotName: SNAPSHOT_NAME,
+    it('drives a sandbox the caller created from a template', async () => {
+      const vertexClient = createMockVertexClient();
+      const computer = new AgentEngineSandboxComputer({
+        sandboxName: SANDBOX_NAME,
+        sandboxTemplateName: TEMPLATE_NAME,
+        vertexaiClient: asVertexClient(vertexClient),
+        accessTokenProvider: vi.fn().mockResolvedValue('token'),
+        sendCommand: createFakeSandbox().sendCommand,
       });
+      await computer.prepare(createTestContext());
 
-      expect(request.spec).toBeUndefined();
-      expect(request.config).toMatchObject({
-        sandboxEnvironmentSnapshot: SNAPSHOT_NAME,
-      });
+      await computer.currentState();
+
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.getInternal,
+      ).toHaveBeenCalledWith({name: SANDBOX_NAME});
     });
 
     it('sends the configured time to live', async () => {
       const request = await createRequestFor({sandboxTtlSeconds: 60});
 
       expect(request.config).toMatchObject({ttl: '60s'});
+    });
+
+    it('polls a create operation that has not finished', async () => {
+      const vertexClient = createMockVertexClient();
+      vertexClient.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        {name: 'operations/create-sandbox-op'},
+      );
+      const computer = new AgentEngineSandboxComputer({
+        vertexaiClient: asVertexClient(vertexClient),
+        accessTokenProvider: vi.fn().mockResolvedValue('token'),
+        sendCommand: createFakeSandbox().sendCommand,
+      });
+      const context = createTestContext();
+      await computer.prepare(context);
+
+      await computer.currentState();
+
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal,
+      ).toHaveBeenCalledWith({operationName: 'operations/create-sandbox-op'});
+      expect(context.state.get(STATE_KEY_SANDBOX_NAME)).toBe(SANDBOX_NAME);
+    }, 10000);
+
+    it('gives up on a create operation that never finishes', async () => {
+      const vertexClient = createMockVertexClient();
+      const pending = {name: 'operations/create-sandbox-op'};
+      vertexClient.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        pending,
+      );
+      vertexClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal.mockResolvedValue(
+        pending,
+      );
+      const computer = new AgentEngineSandboxComputer({
+        vertexaiClient: asVertexClient(vertexClient),
+        accessTokenProvider: vi.fn().mockResolvedValue('token'),
+        sendCommand: createFakeSandbox().sendCommand,
+      });
+      await computer.prepare(createTestContext());
+
+      vi.useFakeTimers();
+      try {
+        const failure = computer.currentState().catch((e: unknown) => e);
+        await vi.advanceTimersByTimeAsync(180 * 1000);
+        expect(sandboxErrorCode(await failure)).toBe(
+          SandboxErrorCode.SANDBOX_CREATE_TIMED_OUT,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('replaces a cached sandbox that no longer resolves', async () => {
+      const vertexClient = createMockVertexClient();
+      vertexClient.agentEnginesInternal.sandboxes.getInternal
+        .mockRejectedValueOnce(new Error('sandbox not found'))
+        .mockResolvedValue({name: SANDBOX_NAME});
+      const computer = new AgentEngineSandboxComputer({
+        vertexaiClient: asVertexClient(vertexClient),
+        accessTokenProvider: vi.fn().mockResolvedValue('token'),
+        sendCommand: createFakeSandbox().sendCommand,
+      });
+      const context = createTestContext();
+      await computer.prepare(context);
+      context.state.set(
+        STATE_KEY_SANDBOX_NAME,
+        'expired/sandboxEnvironments/1',
+      );
+
+      await computer.currentState();
+
+      expect(
+        vertexClient.agentEnginesInternal.sandboxes.createInternal,
+      ).toHaveBeenCalledTimes(1);
+      expect(context.state.get(STATE_KEY_SANDBOX_NAME)).toBe(SANDBOX_NAME);
     });
 
     it('reports a create operation that carried no sandbox name', async () => {

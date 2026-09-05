@@ -178,23 +178,22 @@ describe('AgentEngineSandboxComputer parity with adk-python', () => {
     expect(computer.agentEngineName).toBeUndefined();
   });
 
+  // adk-python calls `_ensure_agent_engine()` directly and asserts that the
+  // template's engine is reused and that nothing is written to session state.
+  // Here a template is refused before any sandbox is created, because the SDK
+  // drops the field (see `sandbox_computer_test.ts`, "refuses a template the
+  // installed SDK cannot ask for"). The two claims still hold and are what
+  // this test pins.
   it('test_ensure_agent_engine_with_template_name', async () => {
     const {computer, context, vertexClient} = await createHarness({
       sandboxTemplateName: TEMPLATE_NAME,
     });
 
-    await computer.currentState();
-
-    expect(
-      vertexClient.agentEnginesInternal.sandboxes.createInternal,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: AGENT_ENGINE_NAME,
-        config: expect.objectContaining({
-          sandboxEnvironmentTemplate: TEMPLATE_NAME,
-        }),
-      }),
+    expect(computer.agentEngineName).toBe(AGENT_ENGINE_NAME);
+    await expect(computer.currentState()).rejects.toThrow(
+      'sandboxTemplateName',
     );
+
     expect(
       vertexClient.agentEnginesInternal.createInternal,
     ).not.toHaveBeenCalled();

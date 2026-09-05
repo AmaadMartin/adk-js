@@ -302,8 +302,12 @@ function scrollDeltas(
   direction: SandboxScrollDirection,
   magnitude: number,
 ): {deltaX: number; deltaY: number} {
-  const sign = direction === 'left' || direction === 'up' ? -1 : 1;
-  const horizontal = direction === 'left' || direction === 'right';
+  // adk-python lowercases the direction. A caller outside TypeScript, or a
+  // model-supplied argument, can reach here with 'UP', which would otherwise
+  // fall through to the positive sign and scroll the other way.
+  const normalized = direction.toLowerCase();
+  const sign = normalized === 'left' || normalized === 'up' ? -1 : 1;
+  const horizontal = normalized === 'left' || normalized === 'right';
   return {
     deltaX: horizontal ? sign * magnitude : 0,
     deltaY: horizontal ? 0 : sign * magnitude,
@@ -585,9 +589,14 @@ export class SandboxClient {
     if (targetIndex < 0 || targetIndex > entries.length - 1) {
       return false;
     }
-    await this.makeCdpRequest(CDP_COMMAND_PAGE_NAV_TO_HISTORY, {
-      entryId: asRecord(entries[targetIndex])?.['id'],
-    });
+    const entryId = asRecord(entries[targetIndex])?.['id'];
+    if (entryId === undefined) {
+      throw new SandboxError(
+        SandboxErrorCode.HISTORY_ENTRY_ID_MISSING,
+        `Browser history entry ${targetIndex} carries no id.`,
+      );
+    }
+    await this.makeCdpRequest(CDP_COMMAND_PAGE_NAV_TO_HISTORY, {entryId});
     return true;
   }
 

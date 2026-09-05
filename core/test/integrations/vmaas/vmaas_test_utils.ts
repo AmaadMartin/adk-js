@@ -108,31 +108,40 @@ export interface MockVertexClient {
     sandboxes: {
       getInternal: ReturnType<typeof vi.fn>;
       createInternal: ReturnType<typeof vi.fn>;
+      getSandboxOperationInternal: ReturnType<typeof vi.fn>;
     };
   };
 }
 
-/** A Vertex AI client whose sandbox calls resolve to the fixtures above. */
+/**
+ * A Vertex AI client whose sandbox calls resolve to the fixtures above.
+ *
+ * Both create calls return an operation that is already `done`, which the API
+ * is free to do and which keeps the suite fast. The pending case — the one the
+ * real backend returns, and the reason both paths poll — is driven explicitly
+ * in `sandbox_computer_test.ts`.
+ */
 export function createMockVertexClient(): MockVertexClient {
+  const engineOperation = {
+    name: 'operations/create-engine-op',
+    done: true,
+    response: {name: AGENT_ENGINE_NAME},
+  };
+  const sandboxOperation = {
+    name: 'operations/create-sandbox-op',
+    done: true,
+    response: {name: SANDBOX_NAME},
+  };
   return {
     agentEnginesInternal: {
-      createInternal: vi.fn().mockResolvedValue({
-        name: 'operations/create-engine-op',
-        done: true,
-        response: {name: AGENT_ENGINE_NAME},
-      }),
-      getAgentOperationInternal: vi.fn().mockResolvedValue({
-        name: 'operations/create-engine-op',
-        done: true,
-        response: {name: AGENT_ENGINE_NAME},
-      }),
+      createInternal: vi.fn().mockResolvedValue(engineOperation),
+      getAgentOperationInternal: vi.fn().mockResolvedValue(engineOperation),
       sandboxes: {
         getInternal: vi.fn().mockResolvedValue({name: SANDBOX_NAME}),
-        createInternal: vi.fn().mockResolvedValue({
-          name: 'operations/create-sandbox-op',
-          done: true,
-          response: {name: SANDBOX_NAME},
-        }),
+        createInternal: vi.fn().mockResolvedValue(sandboxOperation),
+        getSandboxOperationInternal: vi
+          .fn()
+          .mockResolvedValue(sandboxOperation),
       },
     },
   };

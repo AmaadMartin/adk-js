@@ -15,6 +15,7 @@ import {
   SandboxClient,
   SandboxErrorCode,
   isSandboxError,
+  type SandboxScrollDirection,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -326,6 +327,29 @@ describe('SandboxClient', () => {
       };
       expect(body.params).toMatchObject(expected);
     });
+
+    // adk-python lowercases the direction, so a caller outside TypeScript that
+    // sends 'UP' must scroll up rather than down.
+    it('lowercases the direction before it signs the deltas', async () => {
+      const sendCommand = alwaysRespond({});
+      const client = new SandboxClient({
+        sandbox: SANDBOX,
+        accessToken: ACCESS_TOKEN,
+        sendCommand,
+      });
+
+      await client.scrollAt({
+        x: 1,
+        y: 2,
+        direction: 'UP' as SandboxScrollDirection,
+        magnitude: 300,
+      });
+
+      const body = sendCommand.mock.calls[0][0].requestBody as {
+        params: Record<string, unknown>;
+      };
+      expect(body.params).toMatchObject({deltaX: 0, deltaY: -300});
+    });
   });
 
   describe('goForward', () => {
@@ -349,6 +373,18 @@ describe('SandboxClient', () => {
 
       expect(await client.goForward()).toBe(false);
       expect(await client.goBack()).toBe(false);
+    });
+
+    it('reports a history entry that carries no id', async () => {
+      const client = clientOver(async () => ({
+        body: JSON.stringify({currentIndex: 0, entries: [{id: 1}, {}]}),
+      }));
+
+      const error = await client.goForward().catch((e: unknown) => e);
+
+      expect(isSandboxError(error) && error.code).toBe(
+        SandboxErrorCode.HISTORY_ENTRY_ID_MISSING,
+      );
     });
   });
 

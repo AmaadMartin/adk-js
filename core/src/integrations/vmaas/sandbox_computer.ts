@@ -10,11 +10,7 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {
-  CreateAgentEngineSandboxConfig,
-  SandboxEnvironment,
-  SandboxEnvironmentSpec,
-} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {SandboxEnvironment} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {Context} from '../../agents/context.js';
 import {State} from '../../sessions/state.js';
@@ -61,9 +57,9 @@ const SCROLL_MAGNITUDE = 400;
 /** The screen size the sandbox browser runs at, in pixels. */
 const SCREEN_SIZE: [number, number] = [1280, 720];
 
-/** How long to wait for an agent engine creation operation to finish. */
-const ENGINE_POLL_MAX_ATTEMPTS = 180;
-const ENGINE_POLL_INTERVAL_MS = 1000;
+/** How long to wait for a create operation to finish. */
+const CREATE_POLL_MAX_ATTEMPTS = 180;
+const CREATE_POLL_INTERVAL_MS = 1000;
 
 /**
  * The separator that splits an agent engine resource name from the sandbox
@@ -87,14 +83,11 @@ export type AccessTokenProvider = (params: {
   timeoutSeconds: number;
 }) => Promise<string>;
 
-/**
- * The create-sandbox config fields adk-python sets that
- * `CreateAgentEngineSandboxConfig` does not declare in
- * `@google-cloud/vertexai@1.12.0`. The backend accepts both.
- */
-interface ComputerUseSandboxConfig extends CreateAgentEngineSandboxConfig {
-  sandboxEnvironmentTemplate?: string;
-  sandboxEnvironmentSnapshot?: string;
+/** A long-running create operation, as the sandbox API returns it. */
+interface CreateOperation<T> {
+  name?: string;
+  done?: boolean;
+  response?: T;
 }
 
 /** Options for {@link AgentEngineSandboxComputer}. */
@@ -139,6 +132,32 @@ function sleep(ms: number): Promise<void> {
 /** The current time in seconds, the unit adk-python writes into state. */
 function nowSeconds(): number {
   return Date.now() / 1000;
+}
+
+/**
+ * Polls a create operation until it reports itself done.
+ *
+ * `CreateAgentEngineSandboxConfig.waitForCompletion` exists in the SDK's type
+ * declarations only; no released build reads it, so both create calls return
+ * while the operation is still running and the caller has to poll.
+ *
+ * @returns The last operation read, which is still pending if the budget ran
+ *   out.
+ */
+async function awaitCreateOperation<T>(
+  operation: CreateOperation<T>,
+  poll: (operationName: string) => Promise<CreateOperation<T>>,
+): Promise<CreateOperation<T>> {
+  let current = operation;
+  for (
+    let attempt = 0;
+    !current.done && attempt < CREATE_POLL_MAX_ATTEMPTS;
+    attempt++
+  ) {
+    await sleep(CREATE_POLL_INTERVAL_MS);
+    current = await poll(operation.name!);
+  }
+  return current;
 }
 
 /**
@@ -421,26 +440,19 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   private async createAgentEngine(): Promise<string> {
     logger.debug('Creating a new agent engine.');
     const client = this.getClient();
-    const operation = await client.agentEnginesInternal.createInternal({});
-    let current = operation;
-    for (
-      let attempt = 0;
-      !current.done && attempt < ENGINE_POLL_MAX_ATTEMPTS;
-      attempt++
-    ) {
-      await sleep(ENGINE_POLL_INTERVAL_MS);
-      current = await client.agentEnginesInternal.getAgentOperationInternal({
-        operationName: operation.name!,
-      });
-    }
-    if (!current.done) {
+    const finished = await awaitCreateOperation(
+      await client.agentEnginesInternal.createInternal({}),
+      (operationName) =>
+        client.agentEnginesInternal.getAgentOperationInternal({operationName}),
+    );
+    if (!finished.done) {
       throw new SandboxError(
         SandboxErrorCode.AGENT_ENGINE_CREATE_TIMED_OUT,
-        `Agent engine creation operation ${operation.name} did not finish ` +
-          `after ${ENGINE_POLL_MAX_ATTEMPTS} attempts.`,
+        `Agent engine creation operation ${finished.name} did not finish ` +
+          `after ${CREATE_POLL_MAX_ATTEMPTS} attempts.`,
       );
     }
-    const createdName = current.response?.name;
+    const createdName = finished.response?.name;
     if (!createdName) {
       throw new SandboxError(
         SandboxErrorCode.AGENT_ENGINE_NAME_MISSING,
@@ -461,37 +473,76 @@ export class AgentEngineSandboxComputer extends BaseComputer {
       return [this.sandboxName, sandbox];
     }
     const state = this.requireState();
+    const cachedSandbox = await this.getCachedSandbox(state);
+    if (cachedSandbox) {
+      return cachedSandbox;
+    }
+    return this.createSandbox(state);
+  }
+
+  /**
+   * The sandbox named in session state, or `undefined` when there is none.
+   *
+   * A cached sandbox that has passed its time to live no longer resolves. The
+   * name is dropped so the next step creates a replacement, rather than every
+   * later action in the session failing on the same dead sandbox.
+   */
+  private async getCachedSandbox(
+    state: State,
+  ): Promise<[string, SandboxEnvironment] | undefined> {
     const cachedName = state.get<string>(STATE_KEY_SANDBOX_NAME);
-    if (cachedName) {
-      const sandbox = await client.agentEnginesInternal.sandboxes.getInternal({
-        name: cachedName,
-      });
+    if (!cachedName) {
+      return undefined;
+    }
+    try {
+      const sandbox =
+        await this.getClient().agentEnginesInternal.sandboxes.getInternal({
+          name: cachedName,
+        });
       return [cachedName, sandbox];
+    } catch (e: unknown) {
+      logger.debug(
+        `Sandbox ${cachedName} no longer resolves, creating a replacement: ` +
+          formatError(e),
+      );
+      state.set(STATE_KEY_SANDBOX_NAME, undefined);
+      return undefined;
     }
+  }
 
+  /** Creates a sandbox and waits for the operation to finish. */
+  private async createSandbox(
+    state: State,
+  ): Promise<[string, SandboxEnvironment]> {
+    const client = this.getClient();
+    // Resolve where the sandbox would live before refusing, so that a
+    // template's own engine still wins over creating a fresh one and the
+    // refusal does not depend on which resource name the caller supplied.
     const agentEngineName = await this.ensureAgentEngine();
+    this.requireSupportedSandboxSource();
     logger.debug(`Creating a new sandbox under ${agentEngineName}.`);
-    const config: ComputerUseSandboxConfig = {
-      displayName: DEFAULT_SANDBOX_DISPLAY_NAME,
-      ttl: `${this.sandboxTtlSeconds}s`,
-      waitForCompletion: true,
-    };
-    let spec: SandboxEnvironmentSpec | undefined;
-    if (this.sandboxTemplateName) {
-      config.sandboxEnvironmentTemplate = this.sandboxTemplateName;
-    } else if (this.sandboxSnapshotName) {
-      config.sandboxEnvironmentSnapshot = this.sandboxSnapshotName;
-    } else {
-      spec = {computerUseEnvironment: {}};
-    }
-
-    const operation =
+    const finished = await awaitCreateOperation(
       await client.agentEnginesInternal.sandboxes.createInternal({
         name: agentEngineName,
-        spec,
-        config,
-      });
-    const sandbox = operation.response;
+        spec: {computerUseEnvironment: {}},
+        config: {
+          displayName: DEFAULT_SANDBOX_DISPLAY_NAME,
+          ttl: `${this.sandboxTtlSeconds}s`,
+        },
+      }),
+      (operationName) =>
+        client.agentEnginesInternal.sandboxes.getSandboxOperationInternal({
+          operationName,
+        }),
+    );
+    if (!finished.done) {
+      throw new SandboxError(
+        SandboxErrorCode.SANDBOX_CREATE_TIMED_OUT,
+        `Sandbox creation operation ${finished.name} did not finish after ` +
+          `${CREATE_POLL_MAX_ATTEMPTS} attempts.`,
+      );
+    }
+    const sandbox = finished.response;
     if (!sandbox?.name) {
       throw new SandboxError(
         SandboxErrorCode.SANDBOX_NAME_MISSING,
@@ -503,6 +554,32 @@ export class AgentEngineSandboxComputer extends BaseComputer {
     return [sandbox.name, sandbox];
   }
 
+  /**
+   * Refuses to create a sandbox the installed SDK cannot ask for.
+   *
+   * adk-python sends the template or snapshot in the create config.
+   * `createAgentEngineSandboxConfigToVertex` in `@google-cloud/vertexai@1.12.0`
+   * copies only `displayName`, `description` and `ttl`, so those two fields
+   * never reach the backend. Sending the request anyway would quietly build an
+   * ordinary sandbox instead of the one the caller asked for.
+   */
+  private requireSupportedSandboxSource(): void {
+    const requested = this.sandboxTemplateName
+      ? 'sandboxTemplateName'
+      : this.sandboxSnapshotName
+        ? 'sandboxSnapshotName'
+        : undefined;
+    if (!requested) {
+      return;
+    }
+    throw new SandboxError(
+      SandboxErrorCode.SANDBOX_SOURCE_UNSUPPORTED,
+      `@google-cloud/vertexai drops ${requested} when it serialises the ` +
+        'create request, so the sandbox would not come from it. Create the ' +
+        'sandbox yourself and pass it as sandboxName.',
+    );
+  }
+
   /** The cached access token, or a freshly generated one. */
   private async getAccessToken(sandboxName: string): Promise<string> {
     const state = this.requireState();
@@ -511,15 +588,8 @@ export class AgentEngineSandboxComputer extends BaseComputer {
     if (cachedToken && nowSeconds() < expiry - TOKEN_REFRESH_BUFFER_SECONDS) {
       return cachedToken;
     }
-    if (!this.accessTokenProvider) {
-      throw new SandboxError(
-        SandboxErrorCode.SDK_TRANSPORT_UNAVAILABLE,
-        '@google-cloud/vertexai exposes no sandbox generateAccessToken ' +
-          'method. Pass an accessTokenProvider to AgentEngineSandboxComputer.',
-      );
-    }
     logger.debug(`Generating a new access token for sandbox ${sandboxName}.`);
-    const token = await this.accessTokenProvider({
+    const token = await this.requireSeams().accessTokenProvider({
       sandboxName,
       serviceAccountEmail: this.serviceAccountEmail,
       timeoutSeconds: DEFAULT_TOKEN_TIMEOUT_SECONDS,
@@ -533,6 +603,34 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   }
 
   /**
+   * The two transport seams, or a failure naming the one that is missing.
+   *
+   * Both are checked before any work starts, so a computer that is configured
+   * incompletely says so instead of provisioning a sandbox it cannot drive.
+   */
+  private requireSeams(): {
+    accessTokenProvider: AccessTokenProvider;
+    sendCommand: SandboxCommandSender;
+  } {
+    const {accessTokenProvider, sendCommand} = this;
+    if (!accessTokenProvider) {
+      throw new SandboxError(
+        SandboxErrorCode.SDK_TRANSPORT_UNAVAILABLE,
+        '@google-cloud/vertexai exposes no sandbox generateAccessToken ' +
+          'method. Pass an accessTokenProvider to AgentEngineSandboxComputer.',
+      );
+    }
+    if (!sendCommand) {
+      throw new SandboxError(
+        SandboxErrorCode.SDK_TRANSPORT_UNAVAILABLE,
+        '@google-cloud/vertexai exposes no sandbox sendCommand method. Pass ' +
+          'a sendCommand to AgentEngineSandboxComputer.',
+      );
+    }
+    return {accessTokenProvider, sendCommand};
+  }
+
+  /**
    * A sandbox client for the current sandbox and a valid token.
    *
    * A token failure clears the cached token and is retried once, because a
@@ -540,6 +638,7 @@ export class AgentEngineSandboxComputer extends BaseComputer {
    * second failure propagates.
    */
   private async getSandboxClient(): Promise<SandboxClient> {
+    const {sendCommand} = this.requireSeams();
     const [sandboxName, sandbox] = await this.getSandbox();
     let accessToken: string;
     try {
@@ -553,17 +652,6 @@ export class AgentEngineSandboxComputer extends BaseComputer {
       state.set(STATE_KEY_TOKEN_EXPIRY, 0);
       accessToken = await this.getAccessToken(sandboxName);
     }
-    if (!this.sendCommand) {
-      throw new SandboxError(
-        SandboxErrorCode.SDK_TRANSPORT_UNAVAILABLE,
-        '@google-cloud/vertexai exposes no sandbox sendCommand method. Pass ' +
-          'a sendCommand to AgentEngineSandboxComputer.',
-      );
-    }
-    return new SandboxClient({
-      sandbox,
-      accessToken,
-      sendCommand: this.sendCommand,
-    });
+    return new SandboxClient({sandbox, accessToken, sendCommand});
   }
 }

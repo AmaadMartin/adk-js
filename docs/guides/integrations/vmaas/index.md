@@ -82,36 +82,40 @@ code `SESSION_STATE_NOT_BOUND`.
 ## Choosing the sandbox
 
 Pass nothing and the computer creates an agent engine and a sandbox with a
-computer use environment. Pass one of the three resource names to change that:
+computer use environment. Pass `sandboxName` to drive one you already own:
 
 ```ts
-// Drive a sandbox you already own.
 new AgentEngineSandboxComputer({
   sandboxName:
     'projects/p/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
 });
-
-// Create a sandbox from a template, which starts faster.
-new AgentEngineSandboxComputer({
-  sandboxTemplateName:
-    'projects/p/locations/us-central1/reasoningEngines/123/sandboxEnvironmentTemplates/789',
-});
-
-// Restore a sandbox from a snapshot.
-new AgentEngineSandboxComputer({
-  sandboxSnapshotName:
-    'projects/p/locations/us-central1/reasoningEngines/123/sandboxEnvironmentSnapshots/789',
-});
 ```
 
-The agent engine is read from whichever name you supplied, because the backend
-requires the sandbox to live under the engine that owns its template or
-snapshot. `sandboxName` wins over `sandboxTemplateName`, which wins over
+The agent engine is read from whichever resource name you supplied, because the
+backend requires the sandbox to live under the engine that owns it.
+`sandboxName` wins over `sandboxTemplateName`, which wins over
 `sandboxSnapshotName`.
 
 `sandboxTtlSeconds` sets how long a created sandbox lives; it defaults to one
 hour. `searchEngineUrl` sets the page `search()` navigates to; it defaults to
 `https://www.google.com`.
+
+If the sandbox named in session state stops resolving — a sandbox past its time
+to live no longer does — the computer drops the name and creates a replacement,
+rather than failing every later action in that session.
+
+### Templates and snapshots are refused
+
+`sandboxTemplateName` and `sandboxSnapshotName` are accepted by the constructor,
+and the agent engine is derived from them, but the computer refuses to create a
+sandbox from either. `createAgentEngineSandboxConfigToVertex` in
+`@google-cloud/vertexai@1.12.0` copies only `displayName`, `description` and
+`ttl` out of the create config, so the template and the snapshot never reach the
+backend; sending the request would quietly build an ordinary sandbox instead.
+The attempt throws `SandboxError` with the code `SANDBOX_SOURCE_UNSUPPORTED`.
+
+Create the sandbox from your template or snapshot yourself, then pass it as
+`sandboxName`.
 
 ## What the computer guarantees
 
@@ -126,6 +130,9 @@ hour. `searchEngineUrl` sets the page `search()` navigates to; it defaults to
   at once.
 - **A sandbox without the batch path still works.** Multi-command actions post
   to the batch path first, and fall back to running the commands one at a time.
+- **A create waits for its operation.** Both the agent engine and the sandbox
+  are created through long-running operations, which the computer polls once a
+  second for up to three minutes.
 - **The screen is 1280 by 720 pixels.** `scrollDocument()` scrolls at its
   centre.
 
@@ -133,13 +140,16 @@ hour. `searchEngineUrl` sets the page `search()` navigates to; it defaults to
 
 `SandboxError.code` is one of:
 
-| Code                            | Raised when                                     |
-| ------------------------------- | ----------------------------------------------- |
-| `SDK_TRANSPORT_UNAVAILABLE`     | An action needs a seam the caller did not pass. |
-| `SESSION_STATE_NOT_BOUND`       | An action ran before `prepare()`.               |
-| `AGENT_ENGINE_CREATE_TIMED_OUT` | Engine creation did not finish in time.         |
-| `AGENT_ENGINE_NAME_MISSING`     | Engine creation returned no resource name.      |
-| `SANDBOX_NAME_MISSING`          | Sandbox creation returned no resource name.     |
-| `SCREENSHOT_DATA_MISSING`       | The screenshot response carried no image data.  |
+| Code                            | Raised when                                         |
+| ------------------------------- | --------------------------------------------------- |
+| `SDK_TRANSPORT_UNAVAILABLE`     | An action needs a seam the caller did not pass.     |
+| `SANDBOX_SOURCE_UNSUPPORTED`    | A create was asked for from a template or snapshot. |
+| `SESSION_STATE_NOT_BOUND`       | An action ran before `prepare()`.                   |
+| `AGENT_ENGINE_CREATE_TIMED_OUT` | Engine creation did not finish in time.             |
+| `AGENT_ENGINE_NAME_MISSING`     | Engine creation returned no resource name.          |
+| `SANDBOX_CREATE_TIMED_OUT`      | Sandbox creation did not finish in time.            |
+| `SANDBOX_NAME_MISSING`          | Sandbox creation returned no resource name.         |
+| `SCREENSHOT_DATA_MISSING`       | The screenshot response carried no image data.      |
+| `HISTORY_ENTRY_ID_MISSING`      | A browser history entry carried no id.              |
 
 Use `isSandboxError(e)` to narrow a caught value before reading `code`.
