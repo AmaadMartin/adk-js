@@ -9,15 +9,19 @@
  * and evaluates again, an agent whose instruction changes between rounds, and
  * a sampler that scores the wording. Nothing here is stubbed inside ADK, and
  * it needs no credentials and no network.
+ *
+ * The sampler, the phrase table and the workflow come from
+ * `samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts`, so those
+ * fixtures have one copy and this suite executes the sample.
  */
 
 import {
   AGENT_PROMPT_NAME,
   BaseLlm,
   GEPARootAgentPromptOptimizer,
-  LLMRegistry,
   LlmAgent,
-  Sampler,
+  LLMRegistry,
+  requireStaticInstruction,
   type BaseLlmConnection,
   type GepaEngine,
   type GepaOptimizeParams,
@@ -28,17 +32,22 @@ import {
   type UnstructuredSamplingResult,
 } from '@google/adk';
 import {beforeAll, describe, expect, it} from 'vitest';
+import {
+  EXPECTED_PHRASES,
+  mean,
+  PhraseCoverageSampler,
+  rootAgent,
+  startingAgent,
+} from '../../../samples/optimization/gepa_root_agent_prompt_optimizer/agent.js';
+import {
+  allEvents,
+  finalOutput,
+  runSample,
+} from '../workflows/_harness/sample_harness.js';
 
 const REFLECTION_MODEL = 'integration-gepa-reflector';
 
-const STARTING_INSTRUCTION = 'Help the user with their order.';
-
-/** The phrases each example rewards, so a longer instruction scores higher. */
-const EXPECTED_PHRASES: Record<string, string[]> = {
-  'train-1': ['order'],
-  'train-2': ['order', 'confirm'],
-  'val-1': ['order', 'confirm'],
-};
+const STARTING_INSTRUCTION = requireStaticInstruction(startingAgent);
 
 /** The two rewrites the reflection model proposes, in order. */
 const REWRITES = [
@@ -81,61 +90,21 @@ class ScriptedReflectionLlm extends BaseLlm {
   }
 }
 
-/** Scores an instruction by the phrases the example asks for. */
-class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
-  /** The instruction of every candidate it scored, in order. */
+/** The sample's sampler, recording which candidates it was asked to score. */
+class RecordingPhraseCoverageSampler extends PhraseCoverageSampler {
   readonly scoredInstructions: string[] = [];
 
-  override getTrainExampleIds(): string[] {
-    return ['train-1', 'train-2'];
+  override async sampleAndScore(
+    params: SampleAndScoreParams,
+  ): Promise<UnstructuredSamplingResult> {
+    this.scoredInstructions.push(requireStaticInstruction(params.candidate));
+    return super.sampleAndScore(params);
   }
-
-  override getValidationExampleIds(): string[] {
-    return ['val-1'];
-  }
-
-  override async sampleAndScore({
-    candidate,
-    exampleSet = Sampler.VALIDATION_SET,
-    batch,
-    captureFullEvalData = false,
-  }: SampleAndScoreParams): Promise<UnstructuredSamplingResult> {
-    const ids =
-      batch ??
-      (exampleSet === Sampler.TRAIN_SET
-        ? this.getTrainExampleIds()
-        : this.getValidationExampleIds());
-    const instruction = String(candidate.instruction);
-    this.scoredInstructions.push(instruction);
-
-    const result: UnstructuredSamplingResult = {
-      scores: Object.fromEntries(
-        ids.map((id) => [id, scoreInstruction(instruction, id)]),
-      ),
-    };
-    if (captureFullEvalData) {
-      result.data = Object.fromEntries(
-        ids.map((id) => [id, {instruction, expected: EXPECTED_PHRASES[id]}]),
-      );
-    }
-    return result;
-  }
-}
-
-function scoreInstruction(instruction: string, exampleId: string): number {
-  const phrases = EXPECTED_PHRASES[exampleId];
-  const text = instruction.toLowerCase();
-  const hits = phrases.filter((phrase) => text.includes(phrase)).length;
-  return hits / phrases.length;
-}
-
-function mean(values: number[]): number {
-  return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
 /**
- * A minimal hill-climbing GEPA engine: score the seed, reflect on the worst
- * examples, score the rewrite, and repeat. It keeps every candidate it tried.
+ * A minimal hill-climbing GEPA engine: score the seed, reflect on the results,
+ * score the rewrite, and repeat. It keeps every candidate it tried.
  */
 class HillClimbingEngine implements GepaEngine {
   /** The reflective-dataset records the adapter produced, per round. */
@@ -189,7 +158,7 @@ describe('GEPARootAgentPromptOptimizer end to end', () => {
   });
 
   it('rewrites the root instruction and reports the scored front', async () => {
-    const sampler = new PhraseCoverageSampler();
+    const sampler = new RecordingPhraseCoverageSampler();
     const engine = new HillClimbingEngine(2);
     const initialAgent = new LlmAgent({
       name: 'support_agent',
@@ -205,7 +174,7 @@ describe('GEPARootAgentPromptOptimizer end to end', () => {
 
     expect(
       result.optimizedAgents.map(({optimizedAgent}) =>
-        String(optimizedAgent.instruction),
+        requireStaticInstruction(optimizedAgent),
       ),
     ).toEqual([STARTING_INSTRUCTION, ...REWRITES]);
     expect(
@@ -227,7 +196,7 @@ describe('GEPARootAgentPromptOptimizer end to end', () => {
         score: 1,
         eval_data: {
           instruction: STARTING_INSTRUCTION,
-          expected: ['order'],
+          expected: EXPECTED_PHRASES['case-1'],
         },
       },
       {
@@ -235,9 +204,24 @@ describe('GEPARootAgentPromptOptimizer end to end', () => {
         score: 0.5,
         eval_data: {
           instruction: STARTING_INSTRUCTION,
-          expected: ['order', 'confirm'],
+          expected: EXPECTED_PHRASES['case-2'],
         },
       },
     ]);
+  });
+
+  it('runs the sample workflow without a model', async () => {
+    const perTurn = await runSample({
+      name: 'optimization/gepa_root_agent_prompt_optimizer',
+      rootAgent,
+      turns: ['optimize the instruction'],
+      offline: true,
+    });
+
+    expect(finalOutput(allEvents(perTurn))).toBe(
+      'validation score 0.5: Help the user with their order.\n' +
+        'validation score 1: Help the user with their order. Confirm the ' +
+        'order id before you act.',
+    );
   });
 });

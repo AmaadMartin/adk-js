@@ -37,81 +37,17 @@ into your source is manual.
 
 ## Get started
 
-The instruction has to be a static string. A request-scoped instruction
-provider cannot be resolved without an invocation context, so the optimizer
-rejects one.
+You need two things the optimizer does not supply: a `Sampler` that scores a
+candidate, and an engine that searches. Both live, runnable, in
+[`samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts`](../../../../samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts).
+Import them there, or copy them; the call that drives them is this:
 
 ```ts
+import {GEPARootAgentPromptOptimizer, LlmAgent} from '@google/adk';
 import {
-  AGENT_PROMPT_NAME,
-  GEPARootAgentPromptOptimizer,
-  LlmAgent,
-  Sampler,
-  type GepaEngine,
-  type GepaOptimizeParams,
-  type GepaRunResult,
-  type SampleAndScoreParams,
-  type UnstructuredSamplingResult,
-} from '@google/adk';
-
-const EXPECTED_PHRASES: Record<string, string[]> = {
-  'case-1': ['order'],
-  'holdout-1': ['order', 'confirm'],
-};
-
-class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
-  override getTrainExampleIds(): string[] {
-    return ['case-1'];
-  }
-
-  override getValidationExampleIds(): string[] {
-    return ['holdout-1'];
-  }
-
-  override async sampleAndScore({
-    candidate,
-    exampleSet = Sampler.VALIDATION_SET,
-    batch,
-  }: SampleAndScoreParams): Promise<UnstructuredSamplingResult> {
-    const ids =
-      batch ??
-      (exampleSet === Sampler.TRAIN_SET
-        ? this.getTrainExampleIds()
-        : this.getValidationExampleIds());
-    const text = String(candidate.instruction).toLowerCase();
-    return {
-      scores: Object.fromEntries(
-        ids.map((id) => [
-          id,
-          EXPECTED_PHRASES[id].filter((phrase) => text.includes(phrase))
-            .length / EXPECTED_PHRASES[id].length,
-        ]),
-      ),
-    };
-  }
-}
-
-/** A stand-in engine that scores the seed and one fixed rewrite. */
-class TwoCandidateEngine implements GepaEngine {
-  async optimize(params: GepaOptimizeParams): Promise<GepaRunResult> {
-    const candidates = [
-      params.seedCandidate,
-      {[AGENT_PROMPT_NAME]: 'Confirm the order id, then help with the order.'},
-    ];
-    const valAggregateScores: number[] = [];
-    for (const candidate of candidates) {
-      const {scores} = await params.adapter.evaluate(
-        params.valset,
-        candidate,
-        false,
-      );
-      valAggregateScores.push(
-        scores.reduce((total, score) => total + score, 0) / scores.length,
-      );
-    }
-    return {candidates, valAggregateScores, toDict: () => ({})};
-  }
-}
+  PhraseCoverageSampler,
+  TwoCandidateEngine,
+} from './samples/optimization/gepa_root_agent_prompt_optimizer/agent.js';
 
 const result = await new GEPARootAgentPromptOptimizer({
   engine: new TwoCandidateEngine(),
@@ -127,8 +63,11 @@ const result = await new GEPARootAgentPromptOptimizer({
 // the rewritten instruction.
 ```
 
-`samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts` runs this same
-optimizer in a `Workflow` node and needs no credentials.
+The instruction has to be a static string. A request-scoped instruction
+provider cannot be resolved without an invocation context, so the optimizer
+rejects one. Your sampler gets the same guarantee: call the exported
+`requireStaticInstruction(candidate)` rather than coercing with `String(...)`,
+which would silently score a function's source text.
 
 ## Configuration
 
@@ -164,13 +103,12 @@ record per example, under each requested component name. The record keys are
 model and the engine read them and ADK Python writes them that way.
 
 `params.reflectionLm(prompt)` sends the prompt to `optimizerModel` and returns
-the response text with the model's thoughts removed. A structured prompt is
-serialized to JSON first.
+the response text with the model's thoughts removed.
 
 ## Failure modes
 
-- No `config.engine`: `optimize` throws `MISSING_GEPA_ENGINE_MESSAGE` before it
-  reads anything from the sampler.
+- No `config.engine`: `optimize` throws before it reads anything from the
+  sampler, and the message names `config.engine`.
 - A non-string `instruction`: `optimize` throws, naming the invocation context
   it would need.
 - A batch spanning both example sets, or holding an unknown UID: `evaluate`

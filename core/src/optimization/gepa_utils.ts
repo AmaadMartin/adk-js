@@ -9,7 +9,6 @@ import type {GenerateContentConfig} from '@google/genai';
 import type {LlmAgent} from '../agents/llm_agent.js';
 import type {BaseLlm} from '../models/base_llm.js';
 import type {LlmRequest} from '../models/llm_request.js';
-import type {GepaPrompt} from './gepa_engine.js';
 
 /** Parameters for {@link generateReflectionResponse}. */
 export interface GenerateReflectionResponseParams {
@@ -23,7 +22,7 @@ export interface GenerateReflectionResponseParams {
   config: GenerateContentConfig;
 
   /** The reflection prompt the engine produced. */
-  prompt: GepaPrompt;
+  prompt: string;
 }
 
 /**
@@ -36,7 +35,7 @@ export function requireStaticInstruction(agent: LlmAgent): string {
   const instruction = agent.instruction;
   if (typeof instruction !== 'string') {
     throw new Error(
-      'GEPA optimization requires initial_agent.instruction to be a static' +
+      'GEPA optimization requires initialAgent.instruction to be a static' +
         ' string; request-scoped instruction providers cannot be resolved' +
         ' without an invocation context.',
     );
@@ -59,7 +58,7 @@ export async function generateReflectionResponse({
   const request: LlmRequest = {
     model,
     config,
-    contents: [{role: 'user', parts: [{text: stringifyPrompt(prompt)}]}],
+    contents: [{role: 'user', parts: [{text: prompt}]}],
     toolsDict: {},
     liveConnectConfig: {},
   };
@@ -81,9 +80,4 @@ export async function generateReflectionResponse({
   } finally {
     await responses.return(undefined);
   }
-}
-
-/** Renders a GEPA prompt as the single text part a model request carries. */
-function stringifyPrompt(prompt: GepaPrompt): string {
-  return typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
 }

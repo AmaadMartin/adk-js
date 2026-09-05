@@ -17,6 +17,12 @@
  *
  * Run (offline, no API key):
  *   npm run sample -- samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts
+ *
+ * This file is the one copy of the demo sampler and engine. The guide and
+ * `tests/integration/optimization/gepa_root_agent_prompt_optimizer_test.ts`
+ * both point at it, and that test imports these classes and drives the
+ * workflow below, so the suite executes the sample rather than only
+ * type-checking it.
  */
 
 import {
@@ -25,6 +31,7 @@ import {
   LlmAgent,
   node,
   NodeContext,
+  requireStaticInstruction,
   SampleAndScoreParams,
   Sampler,
   UnstructuredSamplingResult,
@@ -35,11 +42,11 @@ import {
 } from '@google/adk';
 
 /** The instruction the engine tries in place of the starting one. */
-const CANDIDATE_INSTRUCTION =
+export const CANDIDATE_INSTRUCTION =
   'Help the user with their order. Confirm the order id before you act.';
 
 /** The phrases each example rewards. */
-const EXPECTED_PHRASES: Record<string, string[]> = {
+export const EXPECTED_PHRASES: Record<string, string[]> = {
   'case-1': ['order'],
   'case-2': ['order', 'confirm'],
   'holdout-1': ['order', 'confirm'],
@@ -52,12 +59,12 @@ function scoreInstruction(instruction: string, exampleId: string): number {
   return hits / phrases.length;
 }
 
-function mean(values: number[]): number {
+export function mean(values: number[]): number {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
 /** A sampler over three hardcoded examples. A real one runs the agent. */
-class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
+export class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
   override getTrainExampleIds(): string[] {
     return ['case-1', 'case-2'];
   }
@@ -77,7 +84,7 @@ class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
       (exampleSet === Sampler.TRAIN_SET
         ? this.getTrainExampleIds()
         : this.getValidationExampleIds());
-    const instruction = String(candidate.instruction);
+    const instruction = requireStaticInstruction(candidate);
 
     const result: UnstructuredSamplingResult = {
       scores: Object.fromEntries(
@@ -94,7 +101,7 @@ class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
 }
 
 /** A stand-in engine that scores the seed and one fixed rewrite. */
-class TwoCandidateEngine implements GepaEngine {
+export class TwoCandidateEngine implements GepaEngine {
   async optimize(params: GepaOptimizeParams): Promise<GepaRunResult> {
     const candidates = [
       params.seedCandidate,
@@ -120,7 +127,7 @@ class TwoCandidateEngine implements GepaEngine {
 }
 
 /** The agent the optimizer rewrites. Only its instruction is ever read. */
-const startingAgent = new LlmAgent({
+export const startingAgent = new LlmAgent({
   name: 'support_agent',
   instruction: 'Help the user with their order.',
 });

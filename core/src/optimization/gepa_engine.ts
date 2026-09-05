@@ -14,11 +14,11 @@
  * engine that implements these types.
  */
 
-/** GEPA's public LanguageModel input contract. */
-export type GepaPrompt = string | Array<Record<string, unknown>>;
-
-/** One GEPA reflection call. */
-export type ReflectionLm = (prompt: GepaPrompt) => Promise<string>;
+/**
+ * One GEPA reflection call. The prompt is the text the engine wants the
+ * reflection model to answer, and the result is that model's reply.
+ */
+export type ReflectionLm = (prompt: string) => Promise<string>;
 
 /** Per-example results for one candidate over one batch. */
 export interface EvaluationBatch<OutputT, TrajectoryT> {
@@ -108,25 +108,4 @@ export interface GepaRunResult {
 /** A GEPA search engine. */
 export interface GepaEngine {
   optimize(params: GepaOptimizeParams): Promise<GepaRunResult>;
-}
-
-/** Thrown when the optimizer runs without a GEPA engine. */
-export const MISSING_GEPA_ENGINE_MESSAGE =
-  'GEPARootAgentPromptOptimizer requires a GEPA engine, which ADK does not ' +
-  'bundle. GEPA is an external search algorithm, so applications that do ' +
-  'not optimize prompts are not made to carry it. Pass an implementation of ' +
-  'the GepaEngine interface as `config.engine`.';
-
-/**
- * Returns `engine`, or throws when the caller configured none.
- *
- * @param engine The engine the caller configured, if any.
- * @throws If `engine` is undefined, an error naming the feature and the field
- *   that fixes it.
- */
-export function requireGepaEngine(engine?: GepaEngine): GepaEngine {
-  if (!engine) {
-    throw new Error(MISSING_GEPA_ENGINE_MESSAGE);
-  }
-  return engine;
 }

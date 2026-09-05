@@ -59,7 +59,7 @@ class ScriptedLlm extends BaseLlm {
 
 function reflect(
   llm: ScriptedLlm,
-  prompt: string | Array<Record<string, unknown>> = 'Why did this fail?',
+  prompt = 'Why did this fail?',
 ): Promise<string> {
   return generateReflectionResponse({
     llm,
@@ -83,7 +83,7 @@ describe('requireStaticInstruction', () => {
     });
 
     expect(() => requireStaticInstruction(agent)).toThrow(
-      'GEPA optimization requires initial_agent.instruction to be a static' +
+      'GEPA optimization requires initialAgent.instruction to be a static' +
         ' string; request-scoped instruction providers cannot be resolved' +
         ' without an invocation context.',
     );
@@ -105,16 +105,6 @@ describe('generateReflectionResponse', () => {
     expect(llm.requests[0].toolsDict).toEqual({});
     expect(llm.requests[0].liveConnectConfig).toEqual({});
     expect(llm.streamFlags).toEqual([false]);
-  });
-
-  it('serializes a structured prompt as JSON', async () => {
-    const llm = new ScriptedLlm([{content: {role: 'model', parts: [{}]}}]);
-
-    await reflect(llm, [{role: 'user', content: 'rewrite this'}]);
-
-    expect(llm.requests[0].contents[0].parts).toEqual([
-      {text: '[{"role":"user","content":"rewrite this"}]'},
-    ]);
   });
 
   it('joins every non-thought text part', async () => {

@@ -18,8 +18,6 @@ import {
   isSampler,
   LlmAgent,
   LLMRegistry,
-  MISSING_GEPA_ENGINE_MESSAGE,
-  requireGepaEngine,
   type BaseLlmConnection,
   type GepaEngine,
   type GepaOptimizeParams,
@@ -151,22 +149,6 @@ describe('GEPARootAgentPromptOptimizer identity', () => {
   });
 });
 
-describe('requireGepaEngine', () => {
-  it('returns the configured engine', () => {
-    const engine = new FakeGepaEngine(runResult([], []));
-
-    expect(requireGepaEngine(engine)).toBe(engine);
-  });
-
-  it('names the feature and the field that fixes a missing engine', () => {
-    expect(() => requireGepaEngine()).toThrow(MISSING_GEPA_ENGINE_MESSAGE);
-    expect(MISSING_GEPA_ENGINE_MESSAGE).toContain(
-      'GEPARootAgentPromptOptimizer',
-    );
-    expect(MISSING_GEPA_ENGINE_MESSAGE).toContain('config.engine');
-  });
-});
-
 describe('GEPARootAgentPromptOptimizer config', () => {
   it('defaults the optimizer model to gemini-2.5-flash', () => {
     const resolve = vi.spyOn(LLMRegistry, 'resolve');
@@ -227,8 +209,20 @@ describe('GEPARootAgentPromptOptimizer.optimize', () => {
         initialAgent: createAgent(),
         sampler,
       }),
-    ).rejects.toThrow(MISSING_GEPA_ENGINE_MESSAGE);
+    ).rejects.toThrow(
+      'GEPARootAgentPromptOptimizer requires a GEPA engine, which ADK does ' +
+        'not bundle.',
+    );
     expect(sampler.calls).toHaveLength(0);
+  });
+
+  it('names the config field that supplies an engine', async () => {
+    await expect(
+      new GEPARootAgentPromptOptimizer().optimize({
+        initialAgent: createAgent(),
+        sampler: createSampler(),
+      }),
+    ).rejects.toThrow(/`config\.engine`/);
   });
 
   it('warns that it leaves sub-agent instructions alone', async () => {

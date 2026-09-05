@@ -17,12 +17,7 @@ import type {
   OptimizerResult,
   UnstructuredSamplingResult,
 } from './data_types.js';
-import {
-  requireGepaEngine,
-  type EvaluationBatch,
-  type GepaAdapter,
-  type GepaEngine,
-} from './gepa_engine.js';
+import type {EvaluationBatch, GepaAdapter, GepaEngine} from './gepa_engine.js';
 import {
   generateReflectionResponse,
   requireStaticInstruction,
@@ -40,6 +35,13 @@ const MISSING_EXAMPLE_SCORE = 0;
 
 /** The reflection model's thinking budget, in tokens. */
 const DEFAULT_THINKING_BUDGET = 10240;
+
+/** Thrown when an optimization runs without a GEPA engine. */
+const MISSING_ENGINE_MESSAGE =
+  'GEPARootAgentPromptOptimizer requires a GEPA engine, which ADK does not ' +
+  'bundle. GEPA is an external search algorithm, so applications that do ' +
+  'not optimize prompts are not made to carry it. Pass an implementation of ' +
+  'the GepaEngine interface as `config.engine`.';
 
 /** Configuration options for {@link GEPARootAgentPromptOptimizer}. */
 export interface GEPARootAgentPromptOptimizerConfig {
@@ -247,7 +249,10 @@ export class GEPARootAgentPromptOptimizer extends AgentOptimizer<
     initialAgent,
     sampler,
   }: OptimizeParams<UnstructuredSamplingResult>): Promise<GEPARootAgentPromptOptimizerResult> {
-    const engine = requireGepaEngine(this.config.engine);
+    const engine = this.config.engine;
+    if (!engine) {
+      throw new Error(MISSING_ENGINE_MESSAGE);
+    }
 
     if (initialAgent.subAgents.length > 0) {
       logger.warn(
