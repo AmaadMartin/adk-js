@@ -54,8 +54,14 @@ function validateDatabaseId(value: string, paramName: string): void {
   }
 }
 
+/**
+ * The schema of any admin tool: every one names the project whose
+ * administration endpoint it calls.
+ */
+type AdminParams = z.ZodObject<{project_id: z.ZodString}>;
+
 /** What every Spanner admin tool declares, whichever endpoint it calls. */
-interface SpannerAdminToolBase<TParams extends z.ZodObject> {
+interface SpannerAdminToolBase<TParams extends AdminParams> {
   /** Tool name without the `spanner_` prefix. */
   name: string;
   description: string;
@@ -71,15 +77,13 @@ interface SpannerAdminToolBase<TParams extends z.ZodObject> {
    * connection.
    */
   validate?(args: ToolExecuteArgument<TParams>): void;
-  /** The project whose administration endpoint the call is made against. */
-  projectId(args: ToolExecuteArgument<TParams>): string;
 }
 
 /**
  * One Spanner admin tool. `admin` picks the endpoint, so `run` receives the
  * client it actually calls rather than one it has to narrow.
  */
-export type SpannerAdminToolDefinition<TParams extends z.ZodObject> =
+export type SpannerAdminToolDefinition<TParams extends AdminParams> =
   | (SpannerAdminToolBase<TParams> & {
       admin: 'instance';
       run(
@@ -106,7 +110,7 @@ export type SpannerAdminToolDefinition<TParams extends z.ZodObject> =
  * @param definition What the tool declares and which endpoint it calls.
  * @return The tool, named `spanner_<definition.name>`.
  */
-export function createSpannerAdminTool<TParams extends z.ZodObject>(
+export function createSpannerAdminTool<TParams extends AdminParams>(
   credentials: SpannerCredentialsManager,
   definition: SpannerAdminToolDefinition<TParams>,
 ): FunctionTool<TParams> {
@@ -126,7 +130,7 @@ export function createSpannerAdminTool<TParams extends z.ZodObject>(
               ` ${name}. Please complete the authorization flow.`,
           );
         }
-        const target = {projectId: definition.projectId(args), authClient};
+        const target = {projectId: args.project_id, authClient};
         return definition.admin === 'instance'
           ? withInstanceAdminClient(target, (client) =>
               definition.run(client, args),
@@ -197,11 +201,6 @@ const createDatabaseParams = instanceParams.extend({
   database_id: z.string().describe('The Spanner database id to create.'),
 });
 
-/** Reads the project a call names. */
-function projectOf(args: z.infer<typeof projectParams>): string {
-  return args.project_id;
-}
-
 /** The resource id of a Spanner resource name, its last path segment. */
 function resourceId(name: string | null | undefined): string {
   const path = name ?? '';
@@ -238,7 +237,6 @@ export const listInstancesTool: SpannerAdminToolDefinition<
   description: 'List the Spanner instances within a Google Cloud project.',
   parameters: projectParams,
   admin: 'instance',
-  projectId: projectOf,
   async run(client, args) {
     const results = await collectResourceIds(
       client.listInstancesAsync({parent: client.projectPath(args.project_id)}),
@@ -254,7 +252,6 @@ export const getInstanceTool: SpannerAdminToolDefinition<
   description: 'Get the details of one Spanner instance.',
   parameters: instanceParams,
   admin: 'instance',
-  projectId: projectOf,
   async run(client, args) {
     const [instance] = await client.getInstance({
       name: client.instancePath(args.project_id, args.instance_id),
@@ -281,7 +278,6 @@ export const listInstanceConfigsTool: SpannerAdminToolDefinition<
     ' An instance config decides where an instance stores its data.',
   parameters: projectParams,
   admin: 'instance',
-  projectId: projectOf,
   async run(client, args) {
     const results = await collectResourceIds(
       client.listInstanceConfigsAsync({
@@ -301,7 +297,6 @@ export const getInstanceConfigTool: SpannerAdminToolDefinition<
     ' replicas are located.',
   parameters: configParams,
   admin: 'instance',
-  projectId: projectOf,
   async run(client, args) {
     const [config] = await client.getInstanceConfig({
       name: client.instanceConfigPath(args.project_id, args.config_id),
@@ -334,7 +329,6 @@ export const createInstanceTool: SpannerAdminToolDefinition<
   parameters: createInstanceParams,
   admin: 'instance',
   requireConfirmation: true,
-  projectId: projectOf,
   async run(client, args) {
     const [operation] = await client.createInstance({
       parent: client.projectPath(args.project_id),
@@ -357,7 +351,6 @@ export const listDatabasesTool: SpannerAdminToolDefinition<
   description: 'List the Spanner databases within an instance.',
   parameters: instanceParams,
   admin: 'database',
-  projectId: projectOf,
   async run(client, args) {
     const results = await collectResourceIds(
       client.listDatabasesAsync({
@@ -378,7 +371,6 @@ export const createDatabaseTool: SpannerAdminToolDefinition<
   parameters: createDatabaseParams,
   admin: 'database',
   requireConfirmation: true,
-  projectId: projectOf,
   // `database_id` is quoted into the CREATE DATABASE statement below, so a
   // backtick in it would escape the quoting. adk-python does not check this.
   validate(args) {
