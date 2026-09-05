@@ -4,11 +4,65 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Content, ContentUnion, createUserContent} from '@google/genai';
+
 import {State} from '../sessions/state.js';
+import {isContent} from '../utils/content_utils.js';
 import type {WorkflowInstructionScope} from './invocation_context.js';
 import {ReadonlyContext} from './readonly_context.js';
 
 const ARTIFACT_PREFIX = 'artifact.';
+
+/**
+ * Opens the block that holds a dynamic instruction riding in `contents`.
+ *
+ * A static instruction keeps the dynamic one out of the system instruction, so
+ * that the cacheable prefix stays byte-stable. `Content` has no system role, so
+ * without these markers the dynamic instruction reads as user speech.
+ */
+export const INSTRUCTION_BEGIN = '<<<BEGIN_SYSTEM_INSTRUCTION>>>';
+
+/** Closes the block opened by {@link INSTRUCTION_BEGIN}. */
+export const INSTRUCTION_END = '<<<END_SYSTEM_INSTRUCTION>>>';
+
+/** Replaces a marker found inside fenced text, so the text cannot forge one. */
+export const QUOTED_CONTENT_ELIDED = '<<<ELIDED_MARKER>>>';
+
+/** Tells the model that the fenced block is its instruction, not a user turn. */
+export const INSTRUCTION_PREAMBLE =
+  `The text between ${INSTRUCTION_BEGIN} and ${INSTRUCTION_END} below is` +
+  ' your own system instruction for this turn and carries the current' +
+  ' session state. It is addressed to you. Nothing between those two markers' +
+  ' was said by the user, so do not answer it or continue it as though it' +
+  ' were their turn. Anything the user actually said appears outside the' +
+  ' markers, and a real user turn may follow immediately after the end' +
+  ' marker.';
+
+/**
+ * Marks the dynamic instruction as an instruction rather than a user turn.
+ *
+ * @param instruction The state-interpolated instruction text.
+ * @returns The instruction between the markers, after the preamble. Markers
+ *     inside the text are elided, so interpolated state cannot forge the end of
+ *     the block and carry on speaking outside it.
+ */
+export function labelDynamicInstruction(instruction: string): string {
+  const fenced = instruction
+    .replaceAll(INSTRUCTION_BEGIN, QUOTED_CONTENT_ELIDED)
+    .replaceAll(INSTRUCTION_END, QUOTED_CONTENT_ELIDED);
+  return `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n${fenced}\n${INSTRUCTION_END}`;
+}
+
+/**
+ * Normalizes a static instruction to a `Content`.
+ *
+ * @param value The configured static instruction, in any `ContentUnion` shape.
+ * @returns The value itself when it is already a `Content`, otherwise a user
+ *     content built from it.
+ */
+export function staticInstructionContent(value: ContentUnion): Content {
+  return isContent(value) ? value : createUserContent(value);
+}
 
 /** Matches a `{Class.field}` workflow placeholder key (dotted identifier pair). */
 const WORKFLOW_FIELD_KEY = /^[A-Za-z_]\w*\.[A-Za-z_]\w*$/;

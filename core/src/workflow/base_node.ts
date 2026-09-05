@@ -6,6 +6,7 @@
 
 import {Content, createModelContent, PartListUnion} from '@google/genai';
 import {createEvent, Event, isEvent} from '../events/event.js';
+import {isContent as hasContentShape} from '../utils/content_utils.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {NodeSchemaValidationError} from './errors.js';
 import type {NodeContext} from './node_context.js';
@@ -251,14 +252,14 @@ export function isBaseNode(value: unknown): value is BaseNode {
   );
 }
 
-/** Returns whether a value looks like a genai `Content` object. */
+/**
+ * Returns whether a value looks like a genai `Content` object.
+ *
+ * Stricter than the shared shape check: a node renders `parts`, so a value
+ * carrying only a `role` is of no use to it.
+ */
 export function isContent(value: unknown): value is Content {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'parts' in value &&
-    Array.isArray((value as {parts?: unknown}).parts)
-  );
+  return hasContentShape(value) && Array.isArray(value.parts);
 }
 
 /**
