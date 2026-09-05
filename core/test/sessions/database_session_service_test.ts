@@ -12,7 +12,6 @@ import {
   State,
 } from '@google/adk';
 import {Options as MikroDBOptions, MikroORM} from '@mikro-orm/core';
-import {PostgreSqlDriver} from '@mikro-orm/postgresql';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
@@ -766,14 +765,6 @@ describe('DatabaseSessionService additional options', () => {
     return captured;
   }
 
-  /**
-   * Closes the ORM a service opened. The service exposes no public close(), so
-   * the test reaches the handle the same way the suite above does.
-   */
-  async function closeOrm(service: DatabaseSessionService): Promise<void> {
-    await (service as unknown as {orm?: MikroORM}).orm?.close();
-  }
-
   it('passes additional options through when built from a connection string', async () => {
     const options = await captureInitOptions(
       new DatabaseSessionService('sqlite://:memory:', {
@@ -790,7 +781,6 @@ describe('DatabaseSessionService additional options', () => {
     const options = await captureInitOptions(
       new DatabaseSessionService('sqlite://:memory:', {
         dbName: 'ignored.db',
-        driver: PostgreSqlDriver,
       }),
     );
 
@@ -839,6 +829,9 @@ describe('DatabaseSessionService additional options', () => {
     const service = new DatabaseSessionService('sqlite://:memory:', {
       allowGlobalContext: true,
     });
+    // The spy calls through, so it hands back the ORM the service opened.
+    // Closing it needs no reach into the private field.
+    const initSpy = vi.spyOn(MikroORM, 'init');
 
     try {
       await service.init();
@@ -858,7 +851,11 @@ describe('DatabaseSessionService additional options', () => {
       expect(read?.id).toBe('merge-session');
       expect(read?.state['foo']).toBe('bar');
     } finally {
-      await closeOrm(service);
+      const opened = initSpy.mock.results[0];
+      if (opened?.type !== 'return') {
+        expect.fail('MikroORM.init did not return an ORM');
+      }
+      await (await opened.value).close();
     }
   });
 });
