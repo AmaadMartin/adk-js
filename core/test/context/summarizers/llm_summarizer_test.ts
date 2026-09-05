@@ -279,6 +279,27 @@ describe('LlmSummarizer', () => {
     expect(compactedEvent.usageMetadata).toEqual(usageMetadata);
   });
 
+  it('should read every text part of a chunk', async () => {
+    const mockLlm = new MockLlm([
+      {
+        content: {
+          role: 'model',
+          parts: [{text: 'First half. '}, {text: 'Second half.'}],
+        },
+      },
+    ]);
+    const summarizer = new LlmSummarizer({llm: mockLlm});
+
+    const compactedEvent = await summarizer.summarize([
+      textEvent(1000, 'Hello', 'user'),
+    ]);
+    if (!compactedEvent) {
+      expect.fail('summarize() declined to summarize the events');
+    }
+
+    expect(compactedEvent.compactedContent).toBe('First half. Second half.');
+  });
+
   /**
    * Ports `tests/unittests/apps/test_llm_event_summarizer.py` from
    * `google/adk-python` (`main`). The `it()` names are the Python test names,

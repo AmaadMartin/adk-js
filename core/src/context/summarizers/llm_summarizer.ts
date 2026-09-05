@@ -176,13 +176,14 @@ export class LlmSummarizer implements BaseSummarizer {
       false,
     )) {
       // A streaming aggregator reports usage on its final chunk, which often
-      // carries no text, so read it before the text guard.
+      // carries no text, so read it for every chunk.
       usageMetadata = response.usageMetadata ?? usageMetadata;
-      const text = response.content?.parts?.[0]?.text;
-      if (!text) {
-        continue;
+      // A chunk can split the summary over several parts, so read them all.
+      for (const part of response.content?.parts ?? []) {
+        if (part.text) {
+          compactedContent += part.text;
+        }
       }
-      compactedContent += text;
     }
 
     if (!compactedContent) {
