@@ -13,6 +13,7 @@ import {
   makeAgentsDir,
   STUB_AGENT_LOADER,
   TEST_APP_NAME,
+  TEST_WRAPPED_APP_NAME,
   TestHttpClient,
   testsDirOf,
   writeTestFile,
@@ -249,6 +250,19 @@ describe('DevServer', () => {
       });
       await expect(fs.readdir(agentsDir)).resolves.toEqual([]);
     });
+
+    it('answers 400 when the request body is not an object', async () => {
+      const response = await client.put(
+        `/dev/apps/${TEST_APP_NAME}/tests/bad.json`,
+        ['session_data'],
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        error: 'Field "session_data" must be an object',
+      });
+      await expect(fs.readdir(agentsDir)).resolves.toEqual([]);
+    });
   });
 
   describe('GET /dev/apps/:appName/tests/:testName', () => {
@@ -279,6 +293,24 @@ describe('DevServer', () => {
 
       expect(response.body).toEqual({a: 1});
     });
+
+    it('answers 500 when the test path cannot be read', async () => {
+      // A directory in place of the file fails with EISDIR, which is not the
+      // "no such file" case that answers 404.
+      await fs.mkdir(
+        path.join(testsDirOf(agentsDir, TEST_APP_NAME), 'dir.json'),
+        {recursive: true},
+      );
+
+      const response = await client.get(
+        `/dev/apps/${TEST_APP_NAME}/tests/dir.json`,
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.body).toMatchObject({
+        error: expect.stringContaining('Failed to get test content'),
+      });
+    });
   });
 
   describe('DELETE /dev/apps/:appName/tests/:testName', () => {
@@ -296,6 +328,31 @@ describe('DevServer', () => {
 
       expect(response.status).toBe(200);
       await expect(fs.access(filePath)).rejects.toThrow();
+    });
+
+    it('answers 404 for a test that does not exist', async () => {
+      const response = await client.delete(
+        `/dev/apps/${TEST_APP_NAME}/tests/missing.json`,
+      );
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({error: 'Test file not found'});
+    });
+
+    it('answers 500 when the test path cannot be deleted', async () => {
+      await fs.mkdir(
+        path.join(testsDirOf(agentsDir, TEST_APP_NAME), 'dir.json'),
+        {recursive: true},
+      );
+
+      const response = await client.delete(
+        `/dev/apps/${TEST_APP_NAME}/tests/dir.json`,
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.body).toMatchObject({
+        error: expect.stringContaining('Failed to delete test'),
+      });
     });
   });
 
@@ -319,6 +376,17 @@ describe('DevServer', () => {
 
       expect(response.body).toMatchObject({
         dotSrc: expect.stringContaining('#333537'),
+      });
+    });
+
+    it('draws the root agent of an App-wrapped app', async () => {
+      const response = await client.get(
+        `/dev/apps/${TEST_WRAPPED_APP_NAME}/graph`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({
+        dotSrc: expect.stringContaining(`digraph "${TEST_WRAPPED_APP_NAME}"`),
       });
     });
 
@@ -375,6 +443,26 @@ describe('DevServer', () => {
       await expect(
         fs.readFile(path.join(homeDir, '.adk', 'config.json'), 'utf-8'),
       ).resolves.toBe('{\n  "other": "kept",\n  "telemetry": false\n}\n');
+    });
+
+    it('replaces a config file that cannot be parsed', async () => {
+      await fs.mkdir(path.join(homeDir, '.adk'));
+      await fs.writeFile(
+        path.join(homeDir, '.adk', 'config.json'),
+        '{not json',
+        'utf-8',
+      );
+
+      const response = await client.post(
+        '/config/telemetry',
+        {telemetry: true},
+        {'x-adk-telemetry-request': 'true'},
+      );
+
+      expect(response.body).toEqual({telemetry: true});
+      await expect(
+        fs.readFile(path.join(homeDir, '.adk', 'config.json'), 'utf-8'),
+      ).resolves.toBe('{\n  "telemetry": true\n}\n');
     });
 
     it('answers 400 when the header is present but not "true"', async () => {
