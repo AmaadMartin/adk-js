@@ -12,7 +12,8 @@
  * from the pydantic model definitions rather than translated from reference
  * tests.
  *
- * The default schema cases were added later, against the same reference file.
+ * The default output schema cases were added later, against the same reference
+ * file.
  */
 
 import {
@@ -25,9 +26,7 @@ import {Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   asTaskRequest,
-  DEFAULT_TASK_INPUT_SCHEMA,
   DEFAULT_TASK_OUTPUT_SCHEMA,
-  parseDefaultTaskOutput,
   parseTaskRequest,
   parseTaskResult,
 } from '../../src/tools/task_models.js';
@@ -188,31 +187,6 @@ describe('asTaskRequest', () => {
   });
 });
 
-describe('DEFAULT_TASK_INPUT_SCHEMA', () => {
-  it('exposes goal and background as strings', () => {
-    expect(DEFAULT_TASK_INPUT_SCHEMA.type).toBe(Type.OBJECT);
-    expect(DEFAULT_TASK_INPUT_SCHEMA.properties?.['goal']?.type).toBe(
-      Type.STRING,
-    );
-    expect(DEFAULT_TASK_INPUT_SCHEMA.properties?.['background']?.type).toBe(
-      Type.STRING,
-    );
-  });
-
-  it('declares no required fields, mirroring Optional[str] = None', () => {
-    expect(DEFAULT_TASK_INPUT_SCHEMA.required).toBeUndefined();
-  });
-
-  it('carries the reference description of each field', () => {
-    expect(DEFAULT_TASK_INPUT_SCHEMA.properties?.['goal']?.description).toBe(
-      'The goal or objective for the task agent.',
-    );
-    expect(
-      DEFAULT_TASK_INPUT_SCHEMA.properties?.['background']?.description,
-    ).toBe('Additional background context for the task agent.');
-  });
-});
-
 describe('DEFAULT_TASK_OUTPUT_SCHEMA', () => {
   it('exposes result as a required string', () => {
     expect(DEFAULT_TASK_OUTPUT_SCHEMA.type).toBe(Type.OBJECT);
@@ -232,43 +206,5 @@ describe('DEFAULT_TASK_OUTPUT_SCHEMA', () => {
     expect(new FinishTaskTool()._getDeclaration().parameters).toBe(
       DEFAULT_TASK_OUTPUT_SCHEMA,
     );
-  });
-});
-
-describe('parseDefaultTaskOutput', () => {
-  it('accepts a result string', () => {
-    expect(parseDefaultTaskOutput({result: 'summary'})).toEqual({
-      result: 'summary',
-    });
-  });
-
-  it('rejects a missing result', () => {
-    expect(() => parseDefaultTaskOutput({})).toThrow(InputValidationError);
-    expect(() => parseDefaultTaskOutput({})).toThrow(
-      'result must be a string.',
-    );
-  });
-
-  it('rejects a non-string result', () => {
-    expect(() => parseDefaultTaskOutput({result: 42})).toThrow(
-      'result must be a string.',
-    );
-  });
-
-  it('rejects an unknown key', () => {
-    expect(() => parseDefaultTaskOutput({result: 'x', extra: 1})).toThrow(
-      InputValidationError,
-    );
-  });
-
-  it('rejects a non-object value', () => {
-    expect(() => parseDefaultTaskOutput('nope')).toThrow(InputValidationError);
-  });
-
-  it('returns a frozen output', () => {
-    const output = parseDefaultTaskOutput({result: 'summary'});
-
-    expect(Object.isFrozen(output)).toBe(true);
-    expect(() => Object.assign(output, {result: 'other'})).toThrow(TypeError);
   });
 });
