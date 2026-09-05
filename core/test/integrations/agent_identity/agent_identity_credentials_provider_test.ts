@@ -5,9 +5,10 @@
  */
 
 /**
- * Ported from adk-python@main, `tests/unittests/integrations/agent_identity/
- * test_agent_identity_credentials_provider.py`. The `it()` names keep the
- * Python test names.
+ * The `it()` names of the first describe are the adk-python test names, ported
+ * from `tests/unittests/integrations/agent_identity/
+ * test_agent_identity_credentials_provider.py` at adk-python@main. The
+ * describes after it cover paths the reference tests do not reach.
  */
 
 import {
@@ -394,5 +395,158 @@ describe('AgentIdentityCredentialsProvider', () => {
     await expect(
       provider.getAuthCredential(authScheme, context),
     ).rejects.toThrow('Failed to retrieve consent based credential.');
+  });
+});
+
+describe('the retrieve request', () => {
+  it('carries the scheme scopes and continue URI', async () => {
+    const client = new FakeCredentialsClient(() => bearerSuccess());
+    const provider = new AgentIdentityCredentialsProvider({client});
+
+    await provider.getAuthCredential(
+      createAuthScheme({
+        scopes: ['scope-a', 'scope-b'],
+        continueUri: 'https://agent.example.com/oauth/continue',
+      }),
+      createContext(),
+    );
+
+    expect(client.authProviders).toEqual([AUTH_PROVIDER_NAME]);
+    expect(client.requests[0]).toStrictEqual({
+      userId: 'user',
+      scopes: ['scope-a', 'scope-b'],
+      continueUri: 'https://agent.example.com/oauth/continue',
+    });
+  });
+
+  it('omits the scopes and continue URI the scheme does not set', async () => {
+    const client = new FakeCredentialsClient(() => bearerSuccess());
+    const provider = new AgentIdentityCredentialsProvider({client});
+
+    await provider.getAuthCredential(
+      createAuthScheme({scopes: undefined, continueUri: undefined}),
+      createContext(),
+    );
+
+    expect(client.requests[0]).toStrictEqual({userId: 'user'});
+  });
+});
+
+describe('the credential the service header selects', () => {
+  it.each([
+    ['Authorization: Bearer', 'the reference casing'],
+    ['authorization:bearer', 'no space and lower case'],
+    ['  AUTHORIZATION :  BEARER abc', 'padding and upper case'],
+  ])('reads %s as a bearer token (%s)', async (header) => {
+    const provider = new AgentIdentityCredentialsProvider({
+      client: new FakeCredentialsClient(() => ({
+        success: {header, token: 'test-token'},
+      })),
+    });
+
+    const credential = await provider.getAuthCredential(
+      createAuthScheme(),
+      createContext(),
+    );
+
+    expect(credential.http).toEqual({
+      scheme: 'Bearer',
+      credentials: {token: 'test-token'},
+    });
+  });
+
+  it.each([
+    ['x-api-key', 'a header name with no colon'],
+    ['Authorization: Basic', 'an Authorization header of another scheme'],
+    ['x-token: Bearer', 'a bearer value under another header name'],
+  ])('reads %s as a custom header (%s)', async (header) => {
+    const provider = new AgentIdentityCredentialsProvider({
+      client: new FakeCredentialsClient(() => ({
+        success: {header, token: 'test-token'},
+      })),
+    });
+
+    const credential = await provider.getAuthCredential(
+      createAuthScheme(),
+      createContext(),
+    );
+
+    expect(credential.http).toEqual({
+      scheme: '',
+      credentials: {},
+      additionalHeaders: {
+        [header]: 'test-token',
+        'X-GOOG-API-KEY': 'test-token',
+      },
+    });
+  });
+});
+
+describe('polling', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('stops at the first success instead of running to the timeout', async () => {
+    const client = new FakeCredentialsClient((callIndex) =>
+      callIndex < 2 ? {pending: {}} : bearerSuccess(),
+    );
+    const provider = new AgentIdentityCredentialsProvider({client});
+    vi.useFakeTimers();
+
+    const pending = provider.getAuthCredential(
+      createAuthScheme(),
+      createContext(),
+    );
+    await vi.advanceTimersByTimeAsync(11000);
+    const credential = await pending;
+
+    expect(credential.http?.credentials.token).toBe('test-token');
+    expect(client.requests).toHaveLength(3);
+  });
+
+  it('rejects when the user refuses consent while polling', async () => {
+    const client = new FakeCredentialsClient((callIndex) =>
+      callIndex === 0 ? {pending: {}} : {consentRejected: {}},
+    );
+    const provider = new AgentIdentityCredentialsProvider({client});
+    vi.useFakeTimers();
+
+    const pending = provider
+      .getAuthCredential(createAuthScheme(), createContext())
+      .catch((reason: unknown) => reason);
+    await vi.advanceTimersByTimeAsync(11000);
+
+    expect(await pending).toEqual(
+      new Error('Operation failed: User consent rejected.'),
+    );
+  });
+
+  it('asks for consent when polling ends in uriConsentRequired', async () => {
+    const client = new FakeCredentialsClient((callIndex) =>
+      callIndex === 0
+        ? {pending: {}}
+        : {
+            uriConsentRequired: {
+              authorizationUri: 'https://example.com/auth',
+              consentNonce: 'nonce-1',
+            },
+          },
+    );
+    const provider = new AgentIdentityCredentialsProvider({client});
+    vi.useFakeTimers();
+
+    const pending = provider.getAuthCredential(
+      createAuthScheme(),
+      createContext(),
+    );
+    await vi.advanceTimersByTimeAsync(11000);
+    const credential = await pending;
+
+    expect(credential.authType).toBe(AuthCredentialTypes.OAUTH2);
+    expect(credential.oauth2).toEqual({
+      authUri: 'https://example.com/auth',
+      nonce: 'nonce-1',
+    });
   });
 });
