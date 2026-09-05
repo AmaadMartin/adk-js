@@ -11,11 +11,7 @@
  * Engine and must stay untouched.
  */
 
-import {
-  clearAgentEngineMetricsSetupCache,
-  getGcpExporters,
-  RequestDrivenMetricReader,
-} from '@google/adk';
+import {clearAgentEngineMetricsSetupCache, getGcpExporters} from '@google/adk';
 import {metrics} from '@opentelemetry/api';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
 import {
@@ -24,6 +20,8 @@ import {
   ResourceMetrics,
 } from '@opentelemetry/sdk-metrics';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+
+import {RequestDrivenMetricReader} from '../../src/telemetry/agent_engine_metric_exporter.js';
 
 const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 const PROJECT_ID = 'test-project';
@@ -53,9 +51,13 @@ vi.mock('google-auth-library', () => ({
   },
 }));
 
-vi.mock('../../src/telemetry/gcp_metric_exporter.js', () => ({
-  createGcpMetricExporter: () => Promise.resolve(new StubExporter()),
-}));
+vi.mock(
+  '../../src/telemetry/gcp_metric_exporter.js',
+  async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    createGcpMetricExporter: () => Promise.resolve(new StubExporter()),
+  }),
+);
 
 afterEach(() => {
   clearAgentEngineMetricsSetupCache();

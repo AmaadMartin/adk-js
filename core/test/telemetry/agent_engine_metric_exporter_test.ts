@@ -11,10 +11,6 @@
  * A collect is observed through the exporter it drains into.
  */
 
-import {
-  buildRequestDrivenMetrics,
-  RequestDrivenMetricReader,
-} from '@google/adk';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
 import {emptyResource} from '@opentelemetry/resources';
 import {
@@ -28,6 +24,10 @@ import {
 import {BasicTracerProvider} from '@opentelemetry/sdk-trace-base';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {
+  buildRequestDrivenMetrics,
+  RequestDrivenMetricReader,
+} from '../../src/telemetry/agent_engine_metric_exporter.js';
 import {logger} from '../../src/utils/logger.js';
 
 const PERIOD_MS = 60000;

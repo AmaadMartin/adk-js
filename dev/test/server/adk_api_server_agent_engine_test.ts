@@ -38,23 +38,27 @@ vi.mock('google-auth-library', () => ({
 }));
 
 /** Records every batch the reader exports, so a test can count collects. */
-vi.mock('../../../core/src/telemetry/gcp_metric_exporter.js', async () => {
-  const {ExportResultCode} = await import('@opentelemetry/core');
-  return {
-    createGcpMetricExporter: () =>
-      Promise.resolve({
-        export(
-          resourceMetrics: ResourceMetrics,
-          resultCallback: (result: ExportResult) => void,
-        ): void {
-          batches.push(resourceMetrics);
-          resultCallback({code: ExportResultCode.SUCCESS});
-        },
-        forceFlush: () => Promise.resolve(),
-        shutdown: () => Promise.resolve(),
-      } satisfies PushMetricExporter),
-  };
-});
+vi.mock(
+  '../../../core/src/telemetry/gcp_metric_exporter.js',
+  async (importOriginal) => {
+    const {ExportResultCode} = await import('@opentelemetry/core');
+    return {
+      ...(await importOriginal<object>()),
+      createGcpMetricExporter: () =>
+        Promise.resolve({
+          export(
+            resourceMetrics: ResourceMetrics,
+            resultCallback: (result: ExportResult) => void,
+          ): void {
+            batches.push(resourceMetrics);
+            resultCallback({code: ExportResultCode.SUCCESS});
+          },
+          forceFlush: () => Promise.resolve(),
+          shutdown: () => Promise.resolve(),
+        } satisfies PushMetricExporter),
+    };
+  },
+);
 
 vi.mock('@google-cloud/opentelemetry-cloud-trace-exporter', async () => {
   const {ExportResultCode} = await import('@opentelemetry/core');

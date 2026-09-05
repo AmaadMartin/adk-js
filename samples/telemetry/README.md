@@ -1,8 +1,9 @@
 # Agent Engine telemetry sample
 
 A minimal agent for exercising the Vertex AI Agent Engine telemetry paths by
-hand. The behaviour it demonstrates is described in
-[the Agent Engine telemetry guide](../../docs/guides/telemetry/agent_engine/index.md).
+hand. The
+[Agent Engine telemetry guide](../../docs/guides/telemetry/agent_engine/index.md)
+explains what the paths do and what the metric reader guarantees.
 
 Every Agent Engine path is inert unless `GOOGLE_CLOUD_AGENT_ENGINE_ID` is set.
 Off Agent Engine this sample is an ordinary agent, which is the point: nothing

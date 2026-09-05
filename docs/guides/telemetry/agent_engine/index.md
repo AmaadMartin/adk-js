@@ -17,14 +17,12 @@ boundary.
 
 This module supplies the pieces:
 
-| Symbol                                            | What it does                                                |
-| ------------------------------------------------- | ----------------------------------------------------------- |
-| `isAgentEngine()`                                 | True when `GOOGLE_CLOUD_AGENT_ENGINE_ID` is set.            |
-| `getPropagatedContext(headers)`                   | Builds the context a request should run under.              |
-| `TopSpanProcessor`                                | Records the support identifier on the first span of a run.  |
-| `maybeInstallRequestMetricsMiddleware(app, opts)` | Drives metric export from the request lifecycle.            |
-| `getAgentEngineMetricsSetup()`                    | Builds the request-driven reader, once per process.         |
-| `telemetryUserAgentHeaders()`                     | The `User-Agent` an exporter should attribute exports with. |
+| Symbol                                            | What it does                                               |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| `isAgentEngine()`                                 | True when `GOOGLE_CLOUD_AGENT_ENGINE_ID` is set.           |
+| `getPropagatedContext(headers)`                   | Builds the context a request should run under.             |
+| `TopSpanProcessor`                                | Records the support identifier on the first span of a run. |
+| `maybeInstallRequestMetricsMiddleware(app, opts)` | Drives metric export from the request lifecycle.           |
 
 The ADK API server wires all of this up already. Use the pieces directly only
 when you host ADK behind your own Express app.

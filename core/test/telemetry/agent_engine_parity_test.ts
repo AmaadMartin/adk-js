@@ -15,13 +15,10 @@
 
 import {
   clearAgentEngineMetricsSetupCache,
-  getAgentEngineMetricsSetup,
   getPropagatedContext,
   maybeInstallRequestMetricsMiddleware,
   MetricsFlushingMiddleware,
   MiddlewareCapableApp,
-  RequestDrivenMetricReader,
-  RequestDrivenMetricReaderHooks,
   TopSpanProcessor,
 } from '@google/adk';
 import {Context, context, metrics, propagation} from '@opentelemetry/api';
@@ -52,16 +49,25 @@ import {
 
 import {
   drainMetrics,
+  getAgentEngineMetricsSetup,
   metricsFlushingMiddleware,
 } from '../../src/telemetry/agent_engine.js';
+import {
+  RequestDrivenMetricReader,
+  RequestDrivenMetricReaderHooks,
+} from '../../src/telemetry/agent_engine_metric_exporter.js';
 import {logger} from '../../src/utils/logger.js';
 
 const {createGcpMetricExporter} = vi.hoisted(() => ({
   createGcpMetricExporter: vi.fn<() => Promise<PushMetricExporter>>(),
 }));
-vi.mock('../../src/telemetry/gcp_metric_exporter.js', () => ({
-  createGcpMetricExporter,
-}));
+vi.mock(
+  '../../src/telemetry/gcp_metric_exporter.js',
+  async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    createGcpMetricExporter,
+  }),
+);
 
 const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 const AE_TRACEPARENT_HEADER = 'google-agent-engine-traceparent';
