@@ -108,9 +108,11 @@ describe('VertexAiLoadProfilesTool ported from adk-python', () => {
     });
 
     expect(llmRequest.config?.systemInstruction).toBeUndefined();
-    expect(llmRequest.config?.tools?.[0].functionDeclarations?.[0].name).toBe(
-      'load_profiles',
-    );
+    const [declaredTool] = llmRequest.config?.tools ?? [];
+    if (!declaredTool || !('functionDeclarations' in declaredTool)) {
+      expect.fail('expected a tool carrying function declarations');
+    }
+    expect(declaredTool.functionDeclarations?.[0].name).toBe('load_profiles');
     expect(llmRequest.toolsDict['load_profiles']).toBe(tool);
   });
 });
