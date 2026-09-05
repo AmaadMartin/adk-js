@@ -47,7 +47,6 @@ credential:
 import {
   AuthCredential,
   AuthProviderRegistry,
-  AuthScheme,
   Context,
   GcpAuthProvider,
   GcpAuthProviderScheme,
@@ -62,15 +61,14 @@ async function fetchCredential(
 ): Promise<AuthCredential> {
   const provider = new GcpAuthProvider();
   return provider.getAuthCredential(
-    {authScheme: scheme as unknown as AuthScheme, credentialKey: 'jira'},
+    {authScheme: scheme, credentialKey: 'jira'},
     context,
   );
 }
 ```
 
-The cast is needed because the `AuthScheme` union describes OpenAPI security
-schemes and does not yet admit a custom scheme. `AgentRegistry` performs the
-same conversion when it builds a scheme.
+A `GcpAuthProviderScheme` goes straight into an `AuthConfig`, because
+`AuthScheme` admits any scheme extending `CustomAuthScheme`.
 
 ADK does not resolve a `gcpAuthProviderScheme` on its own yet: nothing in the
 framework reads `AuthProviderRegistry`. Your application asks the provider for
@@ -125,24 +123,25 @@ Set `AGENT_IDENTITY_CREDENTIALS_TARGET_HOST` to send requests somewhere other
 than `agentidentitycredentials.googleapis.com`. The provider reads it when it
 builds its client.
 
-You can inject your own client, which is how the unit tests drive the provider
+You can replace the whole backend, which is how the unit tests drive the router
 without a network:
 
 ```ts
 import {
-  AgentIdentityCredentialsClient,
-  AgentIdentityCredentialsProvider,
+  AuthCredentialTypes,
+  CredentialsProvider,
   GcpAuthProvider,
 } from '@google/adk';
 
-const client: AgentIdentityCredentialsClient = {
-  async retrieveCredentials() {
-    return {success: {header: 'Authorization: Bearer', token: 'test-token'}};
+const agentIdentityProvider: CredentialsProvider = {
+  async getAuthCredential() {
+    return {
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'Bearer', credentials: {token: 'test-token'}},
+    };
   },
 };
-const provider = new GcpAuthProvider({
-  agentIdentityProvider: new AgentIdentityCredentialsProvider({client}),
-});
+const provider = new GcpAuthProvider({agentIdentityProvider});
 ```
 
 ## Failure modes

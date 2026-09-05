@@ -11,15 +11,17 @@
  */
 
 import {
-  AgentIdentityCredentialsProvider,
   AuthCredentialTypes,
   Event,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-  RestAgentIdentityCredentialsClient,
   createEvent,
-  isConsentCompleted,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {RestAgentIdentityCredentialsClient} from '../../../src/integrations/agent_identity/agent_identity_credentials_client.js';
+import {
+  AgentIdentityCredentialsProvider,
+  isConsentCompleted,
+} from '../../../src/integrations/agent_identity/agent_identity_credentials_provider.js';
 import {
   AUTH_PROVIDER_NAME,
   FakeCredentialsClient,

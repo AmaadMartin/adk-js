@@ -30,12 +30,6 @@ export interface RetrieveCredentialsRequest {
 
   /** Where the auth provider sends the user once consent completes. */
   continueUri?: string;
-
-  /**
-   * A previously returned token that expired or was rejected. Setting it makes
-   * the service refresh the token or start a new consent flow.
-   */
-  forceRefreshToken?: string;
 }
 
 /** The credentials the service returned. */

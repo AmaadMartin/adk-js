@@ -46,11 +46,8 @@ export interface CredentialsProvider {
 
 /** Options for {@link AgentIdentityCredentialsProvider}. */
 export interface AgentIdentityCredentialsProviderOptions {
-  /** A ready client to use, instead of building one. */
+  /** A ready client to use, instead of the default REST client. */
   client?: AgentIdentityCredentialsClient;
-
-  /** Builds the client on first use. Defaults to the REST client. */
-  createClient?: () => AgentIdentityCredentialsClient;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -180,12 +177,9 @@ export function isConsentCompleted(context: Context): boolean {
 @experimental
 export class AgentIdentityCredentialsProvider implements CredentialsProvider {
   private client?: AgentIdentityCredentialsClient;
-  private readonly createClient: () => AgentIdentityCredentialsClient;
 
   constructor(options?: AgentIdentityCredentialsProviderOptions) {
     this.client = options?.client;
-    this.createClient =
-      options?.createClient ?? (() => new RestAgentIdentityCredentialsClient());
   }
 
   /**
@@ -213,6 +207,9 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
     let response: RetrieveCredentialsResponse;
     try {
       response = await this.retrieveCredentials(userId, authScheme);
+      if (response.pending) {
+        response = await this.pollCredentials(userId, authScheme);
+      }
     } catch (error: unknown) {
       throw retrievalFailure(userId, authScheme.name, error);
     }
@@ -222,23 +219,8 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
     }
 
     if (response.success) {
-      logger.debug('Auth credential obtained immediately.');
+      logger.debug('Auth credential obtained.');
       return constructAuthCredential(response.success);
-    }
-
-    if (response.pending) {
-      try {
-        response = await this.pollCredentials(userId, authScheme);
-      } catch (error: unknown) {
-        throw retrievalFailure(userId, authScheme.name, error);
-      }
-      if (response.consentRejected) {
-        throw new Error('Operation failed: User consent rejected.');
-      }
-      if (response.success) {
-        logger.debug('Auth credential obtained after polling.');
-        return constructAuthCredential(response.success);
-      }
     }
 
     if (response.uriConsentRequired) {
@@ -260,7 +242,8 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
   }
 
   private getClient(): AgentIdentityCredentialsClient {
-    this.client ??= this.createClient();
+    // Built lazily, so constructing the provider does not resolve credentials.
+    this.client ??= new RestAgentIdentityCredentialsClient();
     return this.client;
   }
 

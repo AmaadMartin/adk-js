@@ -11,14 +11,15 @@
  */
 
 import {
-  AgentIdentityCredentialsProvider,
   AuthCredentialTypes,
   Event,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
-  RestAgentIdentityCredentialsClient,
   createEvent,
 } from '@google/adk';
+import {GoogleAuth} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {RestAgentIdentityCredentialsClient} from '../../../src/integrations/agent_identity/agent_identity_credentials_client.js';
+import {AgentIdentityCredentialsProvider} from '../../../src/integrations/agent_identity/agent_identity_credentials_provider.js';
 import {
   AUTH_PROVIDER_NAME,
   FailingCredentialsClient,
@@ -83,6 +84,7 @@ describe('AgentIdentityCredentialsProvider', () => {
   let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -117,16 +119,22 @@ describe('AgentIdentityCredentialsProvider', () => {
   });
 
   it('test_get_auth_credential_reuses_client_on_same_thread', async () => {
-    const createClient = vi.fn(
-      () => new FakeCredentialsClient(() => bearerSuccess()),
+    // A Response body reads once, so each call needs its own.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(bearerSuccess()), {status: 200}),
+      ),
     );
-    const provider = new AgentIdentityCredentialsProvider({createClient});
+    const provider = new AgentIdentityCredentialsProvider();
     const context = createContext();
 
     await provider.getAuthCredential(authScheme, context);
     await provider.getAuthCredential(authScheme, context);
 
-    expect(createClient).toHaveBeenCalledTimes(1);
+    // Two requests, but only one client: the second call reuses the first
+    // client rather than resolving credentials again.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(GoogleAuth)).toHaveBeenCalledTimes(1);
   });
 
   it('test_get_client_with_env_var', async () => {

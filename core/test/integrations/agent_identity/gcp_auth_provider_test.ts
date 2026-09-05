@@ -18,9 +18,9 @@ import {
   CredentialsProvider,
   GcpAuthProvider,
   GcpAuthProviderScheme,
-  isGcpAuthProviderScheme,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {isGcpAuthProviderScheme} from '../../../src/integrations/agent_identity/gcp_auth_provider.js';
 import {
   createAuthConfig,
   createAuthScheme,
@@ -134,18 +134,10 @@ describe('isGcpAuthProviderScheme', () => {
     expect(isGcpAuthProviderScheme(createAuthScheme())).toBe(true);
   });
 
-  it.each([
-    ['null', null],
-    ['a string', 'gcpAuthProviderScheme'],
-    ['another scheme type', {type: 'apiKey', name: 'x-api-key'}],
+  it.each<[string, AuthScheme]>([
+    ['an OpenAPI scheme', {type: 'apiKey', name: 'x-api-key', in: 'header'}],
+    ['another custom scheme', {type: 'myProviderScheme'}],
     ['a scheme with no name', {type: 'gcpAuthProviderScheme'}],
-    [
-      'a scheme whose name is not a string',
-      {
-        type: 'gcpAuthProviderScheme',
-        name: 42,
-      },
-    ],
   ])('rejects %s', (_label, candidate) => {
     expect(isGcpAuthProviderScheme(candidate)).toBe(false);
   });

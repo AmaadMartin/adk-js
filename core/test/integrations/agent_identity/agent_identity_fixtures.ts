@@ -5,18 +5,19 @@
  */
 
 import {
-  AgentIdentityCredentialsClient,
   AuthConfig,
-  AuthScheme,
   Context,
   Event,
   GcpAuthProviderScheme,
   InvocationContext,
   PluginManager,
-  RetrieveCredentialsRequest,
-  RetrieveCredentialsResponse,
   createSession,
 } from '@google/adk';
+import {
+  AgentIdentityCredentialsClient,
+  RetrieveCredentialsRequest,
+  RetrieveCredentialsResponse,
+} from '../../../src/integrations/agent_identity/agent_identity_credentials_client.js';
 
 /** The auth provider resource name the ported tests use. */
 export const AUTH_PROVIDER_NAME =
@@ -35,20 +36,11 @@ export function createAuthScheme(
   };
 }
 
-/**
- * Wraps a scheme in an `AuthConfig`.
- *
- * The `AuthScheme` union is the OpenAPI security-scheme set and does not admit
- * a custom scheme, so the scheme needs the same conversion
- * `AgentRegistry.getMcpToolset` performs when it builds one.
- */
+/** Wraps a scheme in an `AuthConfig`. */
 export function createAuthConfig(
   authScheme: GcpAuthProviderScheme,
 ): AuthConfig {
-  return {
-    authScheme: authScheme as unknown as AuthScheme,
-    credentialKey: 'gcp-auth-provider',
-  };
+  return {authScheme, credentialKey: 'gcp-auth-provider'};
 }
 
 /** Builds a real `Context` over a real session. */
