@@ -1,0 +1,148 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {Event as AdkEvent} from '../events/event.js';
+import {randomUUID} from '../utils/env_aware_utils.js';
+import {A2AEvent, createTaskArtifactUpdateEvent} from './a2a_event.js';
+import {
+  A2APartToGenAIPartConverter,
+  GenAIPartToA2APartConverter,
+  toA2APart,
+  toGenAIPart,
+} from './part_converter_utils.js';
+
+/**
+ * Converts one ADK event into the A2A events that represent it.
+ *
+ * Mirrors `AdkEventToA2AEventsConverter` in
+ * `google/adk/a2a/converters/from_adk_event.py`, which
+ * `a2a/executor/config.py` imports under the alias
+ * `AdkEventToA2AEventsConverterImpl`.
+ *
+ * `agentsArtifacts` maps an event author to the artifact id it streams into,
+ * so the chunks of one response append to one artifact. The converter mutates
+ * it, and it belongs to a single execution.
+ */
+export type AdkEventToA2AEventsConverterImpl = (
+  adkEvent: AdkEvent,
+  agentsArtifacts: Map<string, string>,
+  taskId: string,
+  contextId: string,
+  genAiPartConverter: GenAIPartToA2APartConverter,
+) => A2AEvent[];
+
+/**
+ * Converts one ADK event into a single artifact update carrying its parts.
+ *
+ * An event with no convertible parts produces no A2A event. A partial event
+ * reuses the artifact id its author is already streaming into, and the final
+ * chunk releases that id.
+ *
+ * The executor stamps ADK metadata onto every converted event, so this
+ * converter sets none.
+ */
+export function toA2AArtifactUpdateEventsFromArtifactMap(
+  adkEvent: AdkEvent,
+  agentsArtifacts: Map<string, string>,
+  taskId: string,
+  contextId: string,
+  genAiPartConverter: GenAIPartToA2APartConverter = toA2APart,
+): A2AEvent[] {
+  const parts = (adkEvent.content?.parts ?? []).map((part) =>
+    genAiPartConverter(part, adkEvent.longRunningToolIds ?? []),
+  );
+  if (parts.length === 0) {
+    return [];
+  }
+
+  const author = adkEvent.author ?? '';
+  const artifactId = agentsArtifacts.get(author) || randomUUID();
+  const a2aEvent = createTaskArtifactUpdateEvent({
+    taskId,
+    contextId,
+    artifactId,
+    parts,
+    append: adkEvent.partial,
+    lastChunk: !adkEvent.partial,
+  });
+
+  if (adkEvent.partial) {
+    agentsArtifacts.set(author, artifactId);
+  } else {
+    agentsArtifacts.delete(author);
+  }
+
+  return [a2aEvent];
+}
+
+/**
+ * The converters an embedder can plug into the A2A executor.
+ *
+ * Every field is optional, and an unset field takes the default named on it.
+ */
+export interface A2aAgentExecutorConverterConfig {
+  /** Converts one inbound A2A part. Defaults to `toGenAIPart`. */
+  a2aPartConverter?: A2APartToGenAIPartConverter;
+
+  /** Converts one outbound GenAI part. Defaults to `toA2APart`. */
+  genAiPartConverter?: GenAIPartToA2APartConverter;
+
+  /**
+   * Converts one ADK event. Defaults to
+   * `toA2AArtifactUpdateEventsFromArtifactMap`.
+   */
+  adkEventConverter?: AdkEventToA2AEventsConverterImpl;
+}
+
+/**
+ * A converter config with every slot filled.
+ */
+export interface ResolvedA2aAgentExecutorConfig {
+  a2aPartConverter: A2APartToGenAIPartConverter;
+  genAiPartConverter: GenAIPartToA2APartConverter;
+  adkEventConverter: AdkEventToA2AEventsConverterImpl;
+}
+
+/** The config fields the resolver validates, in the order it reports them. */
+const CONVERTER_FIELDS = [
+  'a2aPartConverter',
+  'genAiPartConverter',
+  'adkEventConverter',
+] as const;
+
+/**
+ * Fills every unset converter slot with the default the config declares.
+ *
+ * adk-python declares the same defaults on a pydantic model
+ * (`A2aAgentExecutorConfig` in `google/adk/a2a/executor/config.py`), which
+ * also rejects a non-callable field when the model is constructed. This is
+ * that check.
+ *
+ * @param config - The converters the embedder supplied. Not mutated.
+ * @throws {Error} If a field is present and is not a function. `undefined`
+ *   selects the default; `null` is a supplied value of the wrong type and is
+ *   rejected.
+ */
+export function resolveA2aAgentExecutorConfig(
+  config: A2aAgentExecutorConverterConfig,
+): ResolvedA2aAgentExecutorConfig {
+  for (const field of CONVERTER_FIELDS) {
+    const value = config[field];
+    if (value !== undefined && typeof value !== 'function') {
+      throw new Error(
+        `A2A executor config field "${field}" must be a function, received ` +
+          `${value === null ? 'null' : typeof value}`,
+      );
+    }
+  }
+
+  return {
+    a2aPartConverter: config.a2aPartConverter ?? toGenAIPart,
+    genAiPartConverter: config.genAiPartConverter ?? toA2APart,
+    adkEventConverter:
+      config.adkEventConverter ?? toA2AArtifactUpdateEventsFromArtifactMap,
+  };
+}
