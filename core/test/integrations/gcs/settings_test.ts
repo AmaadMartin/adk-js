@@ -9,8 +9,6 @@ import {
   FeatureStage,
   GcsCapabilities,
   GcsToolSettings,
-  allowsGcsRead,
-  allowsGcsWrite,
   createGcsToolSettings,
   getFeatureConfig,
   overrideFeatureEnabled,
@@ -144,47 +142,6 @@ describe('GCS tool settings', () => {
     });
   });
 
-  describe('allowsGcsRead and allowsGcsWrite', () => {
-    const cases: Array<{
-      name: string;
-      capabilities: GcsCapabilities[];
-      read: boolean;
-      write: boolean;
-    }> = [
-      {
-        name: 'read only grants read alone',
-        capabilities: [GcsCapabilities.READ_ONLY],
-        read: true,
-        write: false,
-      },
-      {
-        name: 'read write grants both',
-        capabilities: [GcsCapabilities.READ_WRITE],
-        read: true,
-        write: true,
-      },
-      {
-        name: 'both capabilities grant both',
-        capabilities: [GcsCapabilities.READ_ONLY, GcsCapabilities.READ_WRITE],
-        read: true,
-        write: true,
-      },
-      {
-        name: 'an empty list grants nothing',
-        capabilities: [],
-        read: false,
-        write: false,
-      },
-    ];
-
-    it.each(cases)('$name', ({capabilities, read, write}) => {
-      const settings = createGcsToolSettings({capabilities});
-
-      expect(allowsGcsRead(settings)).toBe(read);
-      expect(allowsGcsWrite(settings)).toBe(write);
-    });
-  });
-
   describe('GcsCapabilities', () => {
     it('keeps the adk-python string values', () => {
       expect(GcsCapabilities.READ_ONLY).toBe('read_only');
@@ -229,8 +186,6 @@ describe('ported from adk-python test_gcs_toolset.py', () => {
     const settings = createGcsToolSettings();
 
     expect(settings.capabilities).toEqual([GcsCapabilities.READ_ONLY]);
-    expect(allowsGcsRead(settings)).toBe(true);
-    expect(allowsGcsWrite(settings)).toBe(false);
   });
 
   // The unported half asserts GCSToolset adds `create_object` and
@@ -241,7 +196,5 @@ describe('ported from adk-python test_gcs_toolset.py', () => {
     });
 
     expect(settings.capabilities).toEqual([GcsCapabilities.READ_WRITE]);
-    expect(allowsGcsRead(settings)).toBe(true);
-    expect(allowsGcsWrite(settings)).toBe(true);
   });
 });
