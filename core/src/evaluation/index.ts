@@ -12,6 +12,7 @@
  * `FinalResponseMatchV2Evaluator`, `HallucinationsV1Evaluator`,
  * `SafetyEvaluatorV1`, `RubricBasedToolUseV1Evaluator`,
  * `RubricBasedFinalResponseQualityV1Evaluator`,
+ * `RubricBasedMultiTurnTrajectoryEvaluator`,
  * `MultiTurnTaskSuccessV1Evaluator`,
  * `MultiTurnToolUseQualityV1Evaluator` and
  * `MultiTurnTrajectoryQualityV1Evaluator` evaluators that stand on it,
@@ -163,6 +164,7 @@ export type {
   RubricResponse,
 } from './rubric_based_evaluator.js';
 export {RubricBasedFinalResponseQualityV1Evaluator} from './rubric_based_final_response_quality_v1.js';
+export {RubricBasedMultiTurnTrajectoryEvaluator} from './rubric_based_multi_turn_trajectory_evaluator.js';
 export {RubricBasedToolUseV1Evaluator} from './rubric_based_tool_use_quality_v1.js';
 export {SafetyEvaluatorV1} from './safety_evaluator.js';
 export type {SafetyEvaluatorV1Options} from './safety_evaluator.js';
