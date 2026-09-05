@@ -30,6 +30,7 @@ export class OpenAPIToolset extends BaseToolset {
       authCredential?: AuthCredential;
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+      timeoutMs?: number;
     } = {},
   ) {
     super(options.toolFilter || [], options.prefix);
@@ -73,6 +74,7 @@ export class OpenAPIToolset extends BaseToolset {
           preservePropertyNames: options.preservePropertyNames,
           headerProvider: options.headerProvider,
           credentialKey: options.credentialKey,
+          timeoutMs: options.timeoutMs,
         },
       );
 

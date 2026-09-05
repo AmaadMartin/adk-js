@@ -6,14 +6,22 @@
 
 import {
   AuthCredentialTypes,
+  Context,
+  createSession,
+  InvocationContext,
   OpenApiSpecParser,
   OpenAPIToolset,
+  PluginManager,
   ReadonlyContext,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 describe('OpenAPIToolset', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   const mockSpec: OpenAPIV3.Document = {
     openapi: '3.0.0',
     info: {
@@ -88,6 +96,31 @@ describe('OpenAPIToolset', () => {
     expect(tools.length).toBe(2);
     expect(tools[0].name).toBe('get_users');
     expect(tools[1].name).toBe('create_user');
+  });
+
+  it('should give every tool it builds the timeout it was configured with', async () => {
+    const deadlineSpy = vi.spyOn(AbortSignal, 'timeout');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('[]', {
+        status: 200,
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+    const toolset = new OpenAPIToolset({specDict: mockSpec, timeoutMs: 5_000});
+
+    const [getUsers] = await toolset.getTools();
+    await getUsers.runAsync({
+      args: {},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'inv-toolset-timeout',
+          session: createSession({id: 'session-1', appName: 'test-app'}),
+          pluginManager: new PluginManager([]),
+        }),
+      }),
+    });
+
+    expect(deadlineSpy).toHaveBeenCalledWith(5_000);
   });
 
   it('should filter tools', async () => {
