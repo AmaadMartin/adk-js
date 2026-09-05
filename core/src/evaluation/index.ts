@@ -6,9 +6,9 @@
 
 /**
  * The ADK evaluation module (a parity port of `google/adk-python`'s
- * `google/adk/evaluation`). It currently covers `MultiTurnTaskSuccessV1Evaluator`,
- * the two facades over the Vertex AI Gen AI evaluation service, and the data
- * types they name.
+ * `google/adk/evaluation`). It currently covers
+ * `MultiTurnTaskSuccessV1Evaluator`, the multi-turn facade over the Vertex AI
+ * Gen AI evaluation service, and the data types they name.
  */
 
 export type {AgentDetails, AppDetails} from './app_details.js';
@@ -36,8 +36,6 @@ export {MultiTurnTaskSuccessV1Evaluator} from './multi_turn_task_success_evaluat
 export type {MultiTurnTaskSuccessV1EvaluatorOptions} from './multi_turn_task_success_evaluator.js';
 export {
   MultiTurnVertexAiEvalFacade,
-  SingleTurnVertexAiEvalFacade,
-  VertexAiEvalFacade,
   resolveVertexAiEvalClientConfig,
 } from './vertex_ai_eval_facade.js';
 export type {
@@ -51,7 +49,6 @@ export type {
   VertexAiEvalRequest,
   VertexConversationTurn,
   VertexEvalCase,
-  VertexEvalCaseRow,
   VertexEvalMetricSpec,
   VertexEvaluationDataset,
   VertexEvaluationResult,
