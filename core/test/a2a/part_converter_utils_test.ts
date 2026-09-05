@@ -291,6 +291,41 @@ describe('part_converter_utils', () => {
         expected,
       );
     });
+
+    it('drops a part the supplied converter returns undefined for', () => {
+      const genAiParts: GenAIPart[] = [{text: 'secret'}, {text: 'public'}];
+
+      expect(
+        toA2AParts(genAiParts, [], (part) =>
+          part.text === 'secret'
+            ? undefined
+            : {kind: 'text', text: part.text ?? ''},
+        ),
+      ).toEqual([{kind: 'text', text: 'public'}]);
+    });
+
+    it('expands a part the supplied converter returns an array for', () => {
+      expect(
+        toA2AParts([{text: 'split'}], [], (part) => [
+          {kind: 'text', text: part.text ?? ''},
+          {kind: 'text', text: 'extra'},
+        ]),
+      ).toEqual([
+        {kind: 'text', text: 'split'},
+        {kind: 'text', text: 'extra'},
+      ]);
+    });
+
+    it('passes the long-running tool ids to the supplied converter', () => {
+      const seen: string[][] = [];
+
+      toA2AParts([{text: 'hi'}], ['call-1'], (part, longRunningToolIDs) => {
+        seen.push(longRunningToolIDs ?? []);
+        return {kind: 'text', text: part.text ?? ''};
+      });
+
+      expect(seen).toEqual([['call-1']]);
+    });
   });
 
   // Now the backward conversions
@@ -490,6 +525,30 @@ describe('part_converter_utils', () => {
         {functionCall: {name: 'foo', args: {}}},
       ];
       expect(toGenAIParts(a2aParts)).toEqual(expected);
+    });
+
+    it('drops a part the supplied converter returns undefined for', () => {
+      const a2aParts: A2APart[] = [
+        {kind: 'text', text: 'secret'},
+        {kind: 'text', text: 'public'},
+      ];
+
+      expect(
+        toGenAIParts(a2aParts, (a2aPart) =>
+          a2aPart.kind === 'text' && a2aPart.text === 'secret'
+            ? undefined
+            : toGenAIPart(a2aPart),
+        ),
+      ).toEqual([{text: 'public', thought: false}]);
+    });
+
+    it('expands a part the supplied converter returns an array for', () => {
+      expect(
+        toGenAIParts([{kind: 'text', text: 'split'}], () => [
+          {text: 'one'},
+          {text: 'two'},
+        ]),
+      ).toEqual([{text: 'one'}, {text: 'two'}]);
     });
   });
 

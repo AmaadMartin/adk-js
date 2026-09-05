@@ -116,8 +116,8 @@ const executor = new A2AAgentExecutor({
           kind: 'message',
           messageId: adkEvent.id,
           role: 'agent',
-          parts: (adkEvent.content?.parts ?? []).map((part) =>
-            genAiPartConverter(part),
+          parts: (adkEvent.content?.parts ?? []).flatMap(
+            (part) => genAiPartConverter(part) ?? [],
           ),
         },
       },
@@ -129,6 +129,27 @@ const executor = new A2AAgentExecutor({
 It has no default, and the executor prefers it over `adkEventConverter` when
 you set both. adk-python splits these two slots across two executor classes;
 adk-js has one executor, so the precedence rule stands in for that split.
+
+## Dropping and expanding parts
+
+A part converter returns one part, an array of parts, or `undefined`.
+`undefined` drops the part, and an array expands it into several. Use
+`undefined` to redact:
+
+```ts
+import {A2AAgentExecutor, toA2APart} from '@google/adk';
+
+const executor = new A2AAgentExecutor({
+  runner: myRunner,
+  genAiPartConverter: (part, longRunningToolIDs) =>
+    part.text?.includes('SSN')
+      ? undefined
+      : toA2APart(part, longRunningToolIDs),
+});
+```
+
+The built-in `adkEventConverter` drops those parts from the artifact. An ADK
+event whose parts are all dropped publishes nothing at all.
 
 ## The artifact map
 
