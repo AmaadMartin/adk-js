@@ -4,9 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {OAuth2Client} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
-import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
+import {
+  createExpressModeApiClient,
+  createVertexApiClient,
+  getExpressModeApiKey,
+} from '../../src/utils/vertex_ai_utils.js';
 
 describe('vertex_ai_utils', () => {
   describe('getExpressModeApiKey', () => {
@@ -95,6 +100,60 @@ describe('vertex_ai_utils', () => {
       process.env['GOOGLE_API_KEY'] = 'env-api-key';
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('createExpressModeApiClient', () => {
+    it('targets Vertex AI with the key and without a project', () => {
+      const apiClient = createExpressModeApiClient('my-api-key');
+
+      expect(apiClient.clientOptions).toMatchObject({
+        apiKey: 'my-api-key',
+        vertexai: true,
+      });
+      expect(apiClient.clientOptions.project).toBeUndefined();
+      expect(apiClient.clientOptions.location).toBeUndefined();
+    });
+
+    it('signs a request with the key header and no bearer token', async () => {
+      const headers = new Headers();
+
+      await createExpressModeApiClient(
+        'my-api-key',
+      ).clientOptions.auth.addAuthHeaders(headers);
+
+      expect(headers.get('x-goog-api-key')).toBe('my-api-key');
+      expect(headers.get('Authorization')).toBeNull();
+    });
+  });
+
+  describe('createVertexApiClient', () => {
+    it('carries the project and the location, and sends no key', () => {
+      const apiClient = createVertexApiClient({
+        project: 'my-project',
+        location: 'us-central1',
+      });
+
+      expect(apiClient.clientOptions).toMatchObject({
+        project: 'my-project',
+        location: 'us-central1',
+        vertexai: true,
+      });
+      expect(apiClient.clientOptions.apiKey).toBeUndefined();
+    });
+
+    it('signs a request with the caller-supplied credentials', async () => {
+      const authClient = new OAuth2Client();
+      authClient.credentials = {access_token: 'token-from-caller'};
+      const headers = new Headers();
+
+      await createVertexApiClient({
+        project: 'my-project',
+        location: 'us-central1',
+        googleAuthOptions: {authClient},
+      }).clientOptions.auth.addAuthHeaders(headers);
+
+      expect(headers.get('Authorization')).toBe('Bearer token-from-caller');
     });
   });
 });

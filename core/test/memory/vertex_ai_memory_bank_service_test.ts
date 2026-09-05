@@ -15,9 +15,14 @@ import {
   VertexAiMemoryBankServiceOptions,
 } from '@google/adk';
 import {Content, Part} from '@google/genai';
+import {ApiClientInitOptions} from '@google/genai/vertex_internal';
+import {OAuth2Client} from 'google-auth-library';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 const clientConstructor = vi.hoisted(() => vi.fn());
+const apiClientOptions = vi.hoisted(() =>
+  vi.fn<(options: ApiClientInitOptions) => void>(),
+);
 
 // The service imports Client from the package root, so the mock must target it.
 vi.mock('@google-cloud/vertexai', () => ({
@@ -30,9 +35,26 @@ vi.mock('@google-cloud/vertexai', () => ({
   },
 }));
 
+// Records how the service configures an ApiClient, which is the only place the
+// Express Mode key and the caller's credentials are observable.
+vi.mock('@google/genai/vertex_internal', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@google/genai/vertex_internal')>();
+  return {
+    ...actual,
+    ApiClient: class extends actual.ApiClient {
+      constructor(options: ApiClientInitOptions) {
+        super(options);
+        apiClientOptions(options);
+      }
+    },
+  };
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
   clientConstructor.mockClear();
+  apiClientOptions.mockClear();
 });
 
 describe('VertexAiMemoryBankService', () => {
@@ -114,19 +136,41 @@ describe('VertexAiMemoryBankService', () => {
     });
 
     it.each([
-      ['an expressModeApiKey option', {expressModeApiKey: 'test-api-key'}],
-      ['an API key from the environment', {}],
-      ['an API key and only a project', {projectId: 'test-project'}],
-    ])('throws for %s instead of dropping the key', (_, options) => {
-      expect(
-        () =>
-          new VertexAiMemoryBankService({
-            agentEngineId: 'test-engine-id',
-            ...options,
-          }),
-      ).toThrow('Vertex AI Express Mode');
+      [
+        'an expressModeApiKey option',
+        {expressModeApiKey: 'test-api-key'},
+        'test-api-key',
+      ],
+      ['an API key from the environment', {}, 'env-api-key'],
+    ])('authenticates with %s', (_, options, expectedKey) => {
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        ...options,
+      });
+
+      expect(apiClientOptions).toHaveBeenCalledWith(
+        expect.objectContaining({apiKey: expectedKey, vertexai: true}),
+      );
       expect(clientConstructor).not.toHaveBeenCalled();
     });
+
+    it.each<[string, {projectId?: string; location?: string}]>([
+      ['a project', {projectId: 'test-project'}],
+      ['a location', {location: 'us-central1'}],
+    ])(
+      'throws for an API key and only %s, rather than addressing the key owner project',
+      (_, options) => {
+        expect(
+          () =>
+            new VertexAiMemoryBankService({
+              agentEngineId: 'test-engine-id',
+              ...options,
+            }),
+        ).toThrow('cannot be combined with a partial project configuration');
+        expect(apiClientOptions).not.toHaveBeenCalled();
+        expect(clientConstructor).not.toHaveBeenCalled();
+      },
+    );
 
     it('keeps using project and location when an API key is also in the environment', () => {
       new VertexAiMemoryBankService({
@@ -139,6 +183,7 @@ describe('VertexAiMemoryBankService', () => {
         project: 'test-project',
         location: 'us-central1',
       });
+      expect(apiClientOptions).not.toHaveBeenCalled();
     });
 
     it('never builds a client when one is injected', () => {
@@ -149,6 +194,81 @@ describe('VertexAiMemoryBankService', () => {
         } as unknown as Client,
       });
 
+      expect(clientConstructor).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('credentials', () => {
+    it('authenticates the Memory Bank API with the given credentials', () => {
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        projectId: 'test-project',
+        location: 'us-central1',
+        credentials: {authClient: new OAuth2Client()},
+      });
+
+      expect(apiClientOptions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project: 'test-project',
+          location: 'us-central1',
+          vertexai: true,
+        }),
+      );
+      expect(clientConstructor).not.toHaveBeenCalled();
+    });
+
+    it('signs a request with the given credentials', async () => {
+      const authClient = new OAuth2Client();
+      authClient.credentials = {access_token: 'token-from-caller'};
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        projectId: 'test-project',
+        location: 'us-central1',
+        credentials: {authClient},
+      });
+      const headers = new Headers();
+
+      const options = apiClientOptions.mock.calls[0][0];
+      await options.auth.addAuthHeaders(headers);
+
+      expect(headers.get('Authorization')).toBe('Bearer token-from-caller');
+    });
+
+    it('uses Application Default Credentials when none are given', () => {
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(clientConstructor).toHaveBeenCalledWith({
+        project: 'test-project',
+        location: 'us-central1',
+      });
+      expect(apiClientOptions).not.toHaveBeenCalled();
+    });
+
+    it('honours credentials given with only a project', () => {
+      new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        projectId: 'test-project',
+        credentials: {authClient: new OAuth2Client()},
+      });
+
+      expect(apiClientOptions).toHaveBeenCalledWith(
+        expect.objectContaining({project: 'test-project', vertexai: true}),
+      );
+      expect(clientConstructor).not.toHaveBeenCalled();
+    });
+
+    it('reports the missing project instead of falling back to the host identity', () => {
+      expect(
+        () =>
+          new VertexAiMemoryBankService({
+            agentEngineId: 'test-engine-id',
+            credentials: {authClient: new OAuth2Client()},
+          }),
+      ).toThrow('Authentication is not set up');
       expect(clientConstructor).not.toHaveBeenCalled();
     });
   });
