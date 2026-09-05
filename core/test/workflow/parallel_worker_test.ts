@@ -19,7 +19,12 @@ import {RequestInput} from '../../src/workflow/request_input.js';
 import {hasRequestInputFunctionCall} from '../../src/workflow/utils/hitl_utils.js';
 import {buildNode} from '../../src/workflow/utils/workflow_graph_utils.js';
 import {Workflow} from '../../src/workflow/workflow.js';
-import {createIc, driveNode, replyAgent} from './test_helpers.js';
+import {
+  createIc,
+  driveNode,
+  driveWorkflow,
+  replyAgent,
+} from './test_helpers.js';
 
 describe('ParallelWorker', () => {
   it('maps a list input through the inner node, preserving order', async () => {
@@ -446,6 +451,60 @@ describe('ParallelWorker parity with adk-python', () => {
     ).rejects.toThrow('item-1 failed');
     expect(itemTwoCancelled).toBe(true);
     expect(tracker).toEqual([0, 2]);
+  });
+
+  it('does not let an interrupted item mask a sibling failure', async () => {
+    // Under a scheduler an interrupted child unwinds its caller by throwing,
+    // which is a pause. Recorded as a failure it would win on index and hide
+    // the sibling's real error.
+    const gates = [deferred(), deferred()];
+    const started = [deferred(), deferred()];
+    const inner = new FunctionNode(
+      'mixed',
+      async (_c, n: number) => {
+        started[n].resolve();
+        await gates[n].promise;
+        if (n === 0) {
+          return new RequestInput({interruptId: 'ask-0', message: 'confirm?'});
+        }
+        throw new Error('item-1 failed');
+      },
+      {rerunOnResume: true},
+    );
+
+    const wf = new Workflow({
+      name: 'pw_interrupt_wf',
+      dynamicEntry: async (ctx) => {
+        const result = await ctx.runNode(new ParallelWorker(inner), [0, 1]);
+        return result.output;
+      },
+    });
+
+    const run = driveWorkflow(wf);
+    await Promise.all([started[0].promise, started[1].promise]);
+    gates[0].resolve();
+    gates[1].resolve();
+
+    await expect(run).rejects.toThrow('item-1 failed');
+  });
+
+  it('does not surface a cancelled item over the failure that cancelled it', async () => {
+    const inner = new FunctionNode(
+      'mixed',
+      async (ctx: NodeContext, n: number) => {
+        if (n === 1) {
+          throw new Error('item-1 failed');
+        }
+        await untilAborted(ctx.abortSignal, 5000);
+        // A lower index, so it wins the comparison unless it is excluded for
+        // being fallout of the cancellation item 1 triggered.
+        throw new Error('item-0 cancelled');
+      },
+    );
+
+    await expect(driveNode(new ParallelWorker(inner), [0, 1])).rejects.toThrow(
+      'item-1 failed',
+    );
   });
 
   it('test_parallel_worker_preserves_input_order_regardless_of_completion_order', async () => {
