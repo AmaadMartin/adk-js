@@ -289,6 +289,24 @@ describe('AutoTracingPlugin — generator sampling', () => {
     expect(rendered).toContain(`+ ${totalYields - cap} more`);
   });
 
+  it('samples DEFAULT_MAX_RECORDED_YIELDS items when no cap is given', async () => {
+    const totalYields = DEFAULT_MAX_RECORDED_YIELDS + 4;
+    const bag = {
+      *unconfigured(): Generator<number> {
+        for (let i = 0; i < totalYields; i++) {
+          yield i;
+        }
+      },
+    };
+    await instrument([bag]);
+
+    expect([...bag.unconfigured()]).toHaveLength(totalYields);
+
+    const rendered = String(attributesOf('unconfigured')['adk.fn.return']);
+    expect(rendered).toContain(`first ${DEFAULT_MAX_RECORDED_YIELDS}:`);
+    expect(rendered).toContain('+ 4 more');
+  });
+
   it('test_sync_gen_caps_buffered_items', async () => {
     const cap = 2;
     const totalYields = 50;
