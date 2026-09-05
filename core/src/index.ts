@@ -24,6 +24,8 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {E2BEnvironment} from './integrations/e2b/e2b_environment.js';
+export type {E2BEnvironmentOptions} from './integrations/e2b/e2b_environment.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
