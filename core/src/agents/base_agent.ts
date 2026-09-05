@@ -14,6 +14,8 @@ import {
   traceAgentInvocation,
   tracer,
 } from '../telemetry/tracing.js';
+import {formatError} from '../utils/error_utils.js';
+import {logger} from '../utils/logger.js';
 import {BaseNode, BaseNodeConfig} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
 import {Context} from './context.js';
@@ -186,6 +188,7 @@ export abstract class BaseAgent<
     );
     this.afterAgentCallback = getCannonicalCallback(config.afterAgentCallback);
 
+    warnOnDuplicateSubAgentNames(this.subAgents);
     this.setParentAgentForSubAgents();
   }
 
@@ -200,7 +203,8 @@ export abstract class BaseAgent<
    * original's. See google/adk-js#534.
    *
    * @param overrides Config fields to override on the clone. Overriding
-   *     `parentAgent` is rejected, matching adk-python.
+   *     `parentAgent` is rejected, and an override key this agent cannot place
+   *     is rejected, both matching adk-python.
    * @returns A new detached agent instance of the same concrete class.
    */
   clone(overrides?: Partial<TConfig>): this {
@@ -210,6 +214,8 @@ export abstract class BaseAgent<
           'only when the parent agent is instantiated with the sub-agents.',
       );
     }
+
+    this.validateOverrideKeys(overrides);
 
     const merged: TConfig = {...this.config, ...overrides};
 
@@ -243,6 +249,55 @@ export abstract class BaseAgent<
   }
 
   /**
+   * Config fields this agent declares but never assigns to the instance.
+   *
+   * {@link clone} reads the fields it accepts off the instance, so a subclass
+   * that keeps its whole config and reads `this.config.x` on demand must name
+   * `x` here. Without it, `clone({x})` rejects a field the subclass declares
+   * and TypeScript accepts. A subclass that assigns every config field it
+   * takes needs no override.
+   *
+   * @returns The declared config keys no constructor assigns.
+   */
+  protected get unassignedConfigKeys(): readonly string[] {
+    return [];
+  }
+
+  /**
+   * Rejects override keys this agent cannot place, so a typo fails loudly
+   * instead of returning an unchanged clone.
+   *
+   * TypeScript erases a subclass's config interface, so the allowed keys come
+   * from the instance: every config field an agent accepts is assigned in a
+   * constructor, the config it was built with covers the rest, and
+   * {@link unassignedConfigKeys} names the fields a subclass only reads back
+   * out of that config. The check is therefore permissive — an internal
+   * instance field is accepted too. A false rejection would break working
+   * code, while a false acceptance only fails to catch a typo.
+   *
+   * @param overrides The overrides passed to {@link clone}.
+   * @throws If an override names a field this agent does not have.
+   */
+  private validateOverrideKeys(overrides?: Partial<TConfig>): void {
+    if (!overrides) {
+      return;
+    }
+
+    const allowed = new Set<string>([
+      ...Object.keys(this.config),
+      ...Object.keys(this),
+      ...this.unassignedConfigKeys,
+    ]);
+    const invalid = Object.keys(overrides).filter((key) => !allowed.has(key));
+    if (invalid.length > 0) {
+      throw new Error(
+        `Cannot update nonexistent fields in ${this.constructor.name}: ` +
+          invalid.sort().join(', '),
+      );
+    }
+  }
+
+  /**
    * Entry method to run an agent via text-based conversation.
    *
    * @param parentContext The invocation context of the parent agent.
@@ -259,31 +314,38 @@ export abstract class BaseAgent<
         ctx,
         this,
         async function* () {
+          // Built outside the try: without a context there is nothing to hand
+          // the error callback.
           const context = this.createInvocationContext(parentContext);
 
-          const beforeAgentCallbackEvent =
-            await this.handleBeforeAgentCallback(context);
-          if (beforeAgentCallbackEvent) {
-            yield beforeAgentCallbackEvent;
-          }
+          try {
+            const beforeAgentCallbackEvent =
+              await this.handleBeforeAgentCallback(context);
+            if (beforeAgentCallbackEvent) {
+              yield beforeAgentCallbackEvent;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          traceAgentInvocation({agent: this, invocationContext: context});
-          for await (const event of this.runAsyncImpl(context)) {
-            yield event;
-          }
+            traceAgentInvocation({agent: this, invocationContext: context});
+            for await (const event of this.runAsyncImpl(context)) {
+              yield event;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          const afterAgentCallbackEvent =
-            await this.handleAfterAgentCallback(context);
-          if (afterAgentCallbackEvent) {
-            yield afterAgentCallbackEvent;
+            const afterAgentCallbackEvent =
+              await this.handleAfterAgentCallback(context);
+            if (afterAgentCallbackEvent) {
+              yield afterAgentCallbackEvent;
+            }
+          } catch (error: unknown) {
+            await this.handleAgentErrorCallback(context, error);
+            throw error;
           }
         },
       );
@@ -338,30 +400,36 @@ export abstract class BaseAgent<
         ctx,
         this,
         async function* () {
+          // Built outside the try, as in runAsync.
           const context = this.createInvocationContext(parentContext);
 
-          const beforeAgentCallbackEvent =
-            await this.handleBeforeAgentCallback(context);
-          if (beforeAgentCallbackEvent) {
-            yield beforeAgentCallbackEvent;
-          }
+          try {
+            const beforeAgentCallbackEvent =
+              await this.handleBeforeAgentCallback(context);
+            if (beforeAgentCallbackEvent) {
+              yield beforeAgentCallbackEvent;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          for await (const event of this.runLiveImpl(context)) {
-            yield event;
-          }
+            for await (const event of this.runLiveImpl(context)) {
+              yield event;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          const afterAgentCallbackEvent =
-            await this.handleAfterAgentCallback(context);
-          if (afterAgentCallbackEvent) {
-            yield afterAgentCallbackEvent;
+            const afterAgentCallbackEvent =
+              await this.handleAfterAgentCallback(context);
+            if (afterAgentCallbackEvent) {
+              yield afterAgentCallbackEvent;
+            }
+          } catch (error: unknown) {
+            await this.handleAgentErrorCallback(context, error);
+            throw error;
           }
         },
       );
@@ -439,7 +507,35 @@ export abstract class BaseAgent<
   }
 
   /**
-   * Runs the before agent callback if it exists.
+   * Builds the event a lifecycle callback produces, from its content or from
+   * the state delta it wrote.
+   *
+   * @param invocationContext The invocation context of the agent.
+   * @param callbackContext The context the callbacks ran against.
+   * @param content The content a callback returned, if any.
+   * @return The event to yield.
+   */
+  private callbackEvent(
+    invocationContext: InvocationContext,
+    callbackContext: Context,
+    content?: Content,
+  ): Event {
+    return createEvent({
+      invocationId: invocationContext.invocationId,
+      author: this.name,
+      branch: invocationContext.branch,
+      content,
+      actions: callbackContext.eventActions,
+    });
+  }
+
+  /**
+   * Runs the registered plugins' before-agent callbacks, then this agent's own.
+   *
+   * A plugin takes precedence: content from a plugin skips this agent's own
+   * callbacks entirely, as in adk-python. With neither a plugin nor an own
+   * callback there is nothing to observe the callback context, so it is not
+   * built.
    *
    * @param invocationContext The invocation context of the agent.
    * @return The event to return to the user, or undefined if no event is
@@ -448,11 +544,32 @@ export abstract class BaseAgent<
   protected async handleBeforeAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.beforeAgentCallback.length === 0) {
+    if (
+      !invocationContext.pluginManager.hasPlugins &&
+      this.beforeAgentCallback.length === 0
+    ) {
       return undefined;
     }
 
     const callbackContext = new Context({invocationContext});
+
+    // Plugins run first and take precedence: content from a plugin skips this
+    // agent's own callbacks and its body, matching adk-python.
+    const pluginContent =
+      await invocationContext.pluginManager.runBeforeAgentCallback({
+        agent: this,
+        callbackContext,
+      });
+    if (pluginContent) {
+      invocationContext.endInvocation = true;
+
+      return this.callbackEvent(
+        invocationContext,
+        callbackContext,
+        pluginContent,
+      );
+    }
+
     for (const callback of this.beforeAgentCallback) {
       const content = await callback(callbackContext);
 
@@ -463,30 +580,22 @@ export abstract class BaseAgent<
       if (content) {
         invocationContext.endInvocation = true;
 
-        return createEvent({
-          invocationId: invocationContext.invocationId,
-          author: this.name,
-          branch: invocationContext.branch,
-          content,
-          actions: callbackContext.eventActions,
-        });
+        return this.callbackEvent(invocationContext, callbackContext, content);
       }
     }
 
     if (callbackContext.state.hasDelta()) {
-      return createEvent({
-        invocationId: invocationContext.invocationId,
-        author: this.name,
-        branch: invocationContext.branch,
-        actions: callbackContext.eventActions,
-      });
+      return this.callbackEvent(invocationContext, callbackContext);
     }
 
     return undefined;
   }
 
   /**
-   * Runs the after agent callback if it exists.
+   * Runs the registered plugins' after-agent callbacks, then this agent's own.
+   *
+   * Same precedence and same fast path as {@link handleBeforeAgentCallback},
+   * except that content here does not end the invocation.
    *
    * @param invocationContext The invocation context of the agent.
    * @return The event to return to the user, or undefined if no event is
@@ -495,11 +604,29 @@ export abstract class BaseAgent<
   protected async handleAfterAgentCallback(
     invocationContext: InvocationContext,
   ): Promise<Event | undefined> {
-    if (this.afterAgentCallback.length === 0) {
+    if (
+      !invocationContext.pluginManager.hasPlugins &&
+      this.afterAgentCallback.length === 0
+    ) {
       return undefined;
     }
 
     const callbackContext = new Context({invocationContext});
+
+    // Plugins run first and take precedence, as in handleBeforeAgentCallback.
+    const pluginContent =
+      await invocationContext.pluginManager.runAfterAgentCallback({
+        agent: this,
+        callbackContext,
+      });
+    if (pluginContent) {
+      return this.callbackEvent(
+        invocationContext,
+        callbackContext,
+        pluginContent,
+      );
+    }
+
     for (const callback of this.afterAgentCallback) {
       const content = await callback(callbackContext);
 
@@ -508,26 +635,50 @@ export abstract class BaseAgent<
       }
 
       if (content) {
-        return createEvent({
-          invocationId: invocationContext.invocationId,
-          author: this.name,
-          branch: invocationContext.branch,
-          content,
-          actions: callbackContext.eventActions,
-        });
+        return this.callbackEvent(invocationContext, callbackContext, content);
       }
     }
 
     if (callbackContext.state.hasDelta()) {
-      return createEvent({
-        invocationId: invocationContext.invocationId,
-        author: this.name,
-        branch: invocationContext.branch,
-        actions: callbackContext.eventActions,
-      });
+      return this.callbackEvent(invocationContext, callbackContext);
     }
 
     return undefined;
+  }
+
+  /**
+   * Notifies every plugin that an error escaped this agent's execution.
+   *
+   * Notification only, and best-effort: the caller always re-throws the
+   * original error, and a plugin that fails here is logged so it can never
+   * mask that error. Mirrors adk-python `_handle_agent_error_callback`.
+   *
+   * @param invocationContext The invocation context of the agent.
+   * @param error The error that escaped agent execution.
+   */
+  protected async handleAgentErrorCallback(
+    invocationContext: InvocationContext,
+    error: unknown,
+  ): Promise<void> {
+    // A cancelled invocation is not an agent error. Python gets this for free:
+    // `asyncio.CancelledError` is a BaseException, so `except Exception` never
+    // sees it.
+    if (invocationContext.abortSignal?.aborted) {
+      return;
+    }
+
+    try {
+      await invocationContext.pluginManager.runOnAgentErrorCallback({
+        agent: this,
+        callbackContext: new Context({invocationContext}),
+        error: error instanceof Error ? error : new Error(formatError(error)),
+      });
+    } catch (callbackError: unknown) {
+      logger.error(
+        'onAgentErrorCallback raised; suppressing so the original agent ' +
+          `error propagates: ${formatError(callbackError)}`,
+      );
+    }
   }
 
   private setParentAgentForSubAgents(): void {
@@ -579,6 +730,40 @@ function validateAgentName(name: string): string {
  */
 function isIdentifier(str: string): boolean {
   return /^[\p{ID_Start}$_][\p{ID_Continue}$_-]*$/u.test(str);
+}
+
+/**
+ * Warns when two sub-agents share a name.
+ *
+ * A duplicate name makes {@link BaseAgent.findSubAgent} return whichever agent
+ * comes first, which is almost never what the author meant. Mirrors adk-python
+ * `validate_sub_agents_unique_names`: it warns and lets construction proceed,
+ * so an existing tree keeps working.
+ *
+ * @param subAgents The sub-agents to check.
+ */
+function warnOnDuplicateSubAgentNames(subAgents: readonly BaseAgent[]): void {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const subAgent of subAgents) {
+    if (seen.has(subAgent.name)) {
+      duplicates.add(subAgent.name);
+    } else {
+      seen.add(subAgent.name);
+    }
+  }
+
+  if (duplicates.size === 0) {
+    return;
+  }
+
+  const names = [...duplicates]
+    .sort()
+    .map((name) => `\`${name}\``)
+    .join(', ');
+  logger.warn(
+    `Found duplicate sub-agent names: ${names}. All sub-agents must have unique names.`,
+  );
 }
 
 /**

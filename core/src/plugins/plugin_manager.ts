@@ -13,6 +13,7 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import type {BaseNode} from '../workflow/base_node.js';
 import type {NodeContext} from '../workflow/node_context.js';
@@ -436,5 +437,33 @@ export class PluginManager {
         plugin.onToolErrorCallback({tool, toolArgs, toolContext, error}),
       'onToolErrorCallback',
     )) as Record<string, unknown> | undefined;
+  }
+
+  /**
+   * Runs the `onAgentErrorCallback` for all plugins.
+   *
+   * Unlike the other callbacks this one never exits early and never re-throws:
+   * a plugin that fails is logged and the next one still runs. The
+   * notification reports an error that already happened, so a failure here
+   * must not replace the error the caller is about to propagate.
+   */
+  async runOnAgentErrorCallback({
+    agent,
+    callbackContext,
+    error,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
+    for (const plugin of this.plugins) {
+      try {
+        await plugin.onAgentErrorCallback({agent, callbackContext, error});
+      } catch (e: unknown) {
+        logger.error(
+          `Error in plugin '${plugin.name}' during 'onAgentErrorCallback' callback: ${formatError(e)}`,
+        );
+      }
+    }
   }
 }

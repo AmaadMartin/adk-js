@@ -20,6 +20,7 @@ import {
   Event as AdkEvent,
   createEvent,
   InvocationContext,
+  PluginManager,
   RemoteA2AAgent,
   RemoteA2AAgentConfig,
   Session,
@@ -87,6 +88,7 @@ describe('A2ARemoteAgent', () => {
         ],
         state: {},
       } as unknown as Session,
+      pluginManager: new PluginManager(),
       ...overrides,
     } as unknown as InvocationContext;
   };
@@ -763,5 +765,73 @@ describe('A2ARemoteAgent', () => {
 
     const dumped = JSON.stringify(capturedParts);
     expect(dumped).not.toContain('SUPER_SECRET_DO_NOT_LEAK');
+  });
+
+  describe('clone', () => {
+    const nonStreamingCard = (): AgentCard => ({
+      name: 'Remote',
+      description: 'test',
+      protocolVersion: '1.0',
+      defaultInputModes: [],
+      defaultOutputModes: [],
+      capabilities: {streaming: false},
+      skills: [],
+      url: 'https://example.com',
+      version: '1.0',
+    });
+
+    it('applies a metadata override the original was built without', async () => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: nonStreamingCard(),
+        clientFactory: mockClientFactory,
+      });
+      vi.mocked(mockClient.sendMessage).mockResolvedValue({
+        kind: 'message',
+        messageId: 'test-message-id',
+        role: 'agent',
+        parts: [{kind: 'text', text: 'static response'}],
+      });
+
+      const clone = agent.clone({metadata: {tenant: 'acme'}});
+      for await (const _ of clone.runAsync(createMockContext())) {
+        // Drain the run so the request reaches the client.
+      }
+
+      expect(mockClient.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({metadata: {tenant: 'acme'}}),
+      );
+    });
+
+    it('accepts every declared config field on an agent built without them', () => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: nonStreamingCard(),
+      });
+
+      const clone = agent.clone({
+        agentCard: 'https://example.com/card.json',
+        client: mockClient,
+        clientFactory: mockClientFactory,
+        messageSendConfig: {acceptedOutputModes: ['text']},
+        beforeRequestCallbacks: [() => {}],
+        afterRequestCallbacks: [() => {}],
+        metadata: {tenant: 'acme'},
+      });
+
+      expect(clone).toBeInstanceOf(RemoteA2AAgent);
+      expect(clone).not.toBe(agent);
+    });
+
+    it('still rejects an override key the config does not declare', () => {
+      const agent = new RemoteA2AAgent({
+        name: 'test-agent',
+        agentCard: nonStreamingCard(),
+      });
+
+      expect(() =>
+        agent.clone({metadta: {}} as Partial<RemoteA2AAgentConfig>),
+      ).toThrow(/nonexistent fields in RemoteA2AAgent: metadta/);
+    });
   });
 });

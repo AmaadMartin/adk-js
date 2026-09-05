@@ -240,6 +240,25 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Callback executed when an error escapes an agent's execution.
+   *
+   * This callback only notifies. The agent re-throws the error once every
+   * registered plugin is notified, so a plugin cannot suppress it.
+   *
+   * @param params.agent The agent that raised the error.
+   * @param params.callbackContext The context for the agent invocation.
+   * @param params.error The error raised during agent execution.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async onAgentErrorCallback(params: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
+    return;
+  }
+
+  /**
    * Callback executed before a workflow node runs.
    *
    * @param params.node The node that is about to run.

@@ -332,4 +332,81 @@ describe('PluginManager', () => {
     ];
     expect(plugin1.callLog.sort()).toEqual(expectedCallbacks.sort());
   });
+
+  describe('runOnAgentErrorCallback', () => {
+    class RecordingPlugin extends BasePlugin {
+      readonly seen: Array<{agentName: string; error: Error}> = [];
+
+      constructor(
+        name: string,
+        private readonly failWith?: Error,
+      ) {
+        super(name);
+      }
+
+      override async onAgentErrorCallback({
+        agent,
+        error,
+      }: {
+        agent: BaseAgent;
+        callbackContext: Context;
+        error: Error;
+      }): Promise<void> {
+        this.seen.push({agentName: agent.name, error});
+        if (this.failWith) {
+          throw this.failWith;
+        }
+      }
+    }
+
+    const agent = {name: 'test_agent'} as BaseAgent;
+
+    it('dispatches the agent, context and error to every plugin', async () => {
+      const first = new RecordingPlugin('first');
+      const second = new RecordingPlugin('second');
+      service.registerPlugin(first);
+      service.registerPlugin(second);
+
+      await service.runOnAgentErrorCallback({
+        agent,
+        callbackContext: mockCallbackContext,
+        error: mockError,
+      });
+
+      expect(first.seen).toEqual([{agentName: 'test_agent', error: mockError}]);
+      expect(second.seen).toEqual([
+        {agentName: 'test_agent', error: mockError},
+      ]);
+    });
+
+    it('is a no-op for a plugin that does not implement the hook', async () => {
+      service.registerPlugin(plugin1);
+
+      await expect(
+        service.runOnAgentErrorCallback({
+          agent,
+          callbackContext: mockCallbackContext,
+          error: mockError,
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('keeps notifying after a plugin throws, and never re-throws', async () => {
+      const failing = new RecordingPlugin('failing', new Error('plugin boom'));
+      const later = new RecordingPlugin('later');
+      service.registerPlugin(failing);
+      service.registerPlugin(later);
+
+      await expect(
+        service.runOnAgentErrorCallback({
+          agent,
+          callbackContext: mockCallbackContext,
+          error: mockError,
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(failing.seen).toHaveLength(1);
+      expect(later.seen).toHaveLength(1);
+    });
+  });
 });

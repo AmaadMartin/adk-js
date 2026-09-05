@@ -9,15 +9,36 @@ import {
   BaseTool,
   Context,
   createEvent,
+  createSession,
   Event,
   InvocationContext,
   LlmRequest,
   LlmResponse,
+  PluginManager,
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {LoggingPlugin} from '../../src/plugins/logging_plugin.js';
 import {resetLogger, setLogger} from '../../src/utils/logger.js';
+
+/** A minimal agent that yields one event, so a real run can be observed. */
+class EchoAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'echo'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield* this.runAsyncImpl(context);
+  }
+}
 
 function makeMockLogger() {
   const infoCalls: string[] = [];
@@ -531,5 +552,23 @@ describe('LoggingPlugin', () => {
     });
 
     expect(infoCalls.some((m) => m.includes('...'))).toBe(true);
+  });
+
+  it('logs the agent lines during a real agent run', async () => {
+    const agent = new EchoAgent({name: 'logged_agent'});
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv-real',
+      agent,
+      session: createSession({id: 'session-real', appName: 'test-app'}),
+      pluginManager: new PluginManager([new LoggingPlugin()]),
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so both agent hooks fire.
+    }
+
+    expect(infoCalls.some((m) => m.includes('AGENT STARTING'))).toBe(true);
+    expect(infoCalls.some((m) => m.includes('AGENT COMPLETED'))).toBe(true);
+    expect(infoCalls.some((m) => m.includes('logged_agent'))).toBe(true);
   });
 });
