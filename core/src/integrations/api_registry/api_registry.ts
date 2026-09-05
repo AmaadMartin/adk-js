@@ -5,17 +5,22 @@
  */
 
 import {GoogleAuth} from 'google-auth-library';
+import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {ToolPredicate} from '../../tools/base_toolset.js';
-import {MCPToolset} from '../../tools/mcp/mcp_toolset.js';
 import {logger} from '../../utils/logger.js';
 import {
   clientCertsToPresent,
   getWithClientCert,
   MtlsClientCerts,
 } from '../../utils/mtls_utils.js';
+import {AgentRegistrySingleMCPToolset} from '../agent_registry/agent_registry_mcp_toolset.js';
+import {isGoogleApi} from '../agent_registry/helpers.js';
 
-const API_REGISTRY_URL = 'https://cloudapiregistry.googleapis.com';
-const API_REGISTRY_MTLS_URL = 'https://cloudapiregistry.mtls.googleapis.com';
+/** The default Cloud API Registry host. */
+export const API_REGISTRY_URL = 'https://cloudapiregistry.googleapis.com';
+/** The mutual-TLS Cloud API Registry host. */
+export const API_REGISTRY_MTLS_URL =
+  'https://cloudapiregistry.mtls.googleapis.com';
 const API_REGISTRY_API_VERSION = 'v1beta';
 /** API Registry no longer supports enabling APIs, so disabled ones are listed too. */
 const LIST_MCP_SERVERS_FILTER = 'enabled=false';
@@ -52,6 +57,15 @@ export interface ApiRegistryOptions {
   projectId: string;
   /** API Registry location. Defaults to 'global'. */
   location?: string;
+  /**
+   * Supplies extra headers for the MCP server calls. It is called before each
+   * connection, so a header it returns may carry a value that expires.
+   *
+   * These headers are not sent on the registry listing request.
+   */
+  headerProvider?: (
+    context?: ReadonlyContext,
+  ) => Promise<Record<string, string>> | Record<string, string>;
 }
 
 /** Options accepted by {@link ApiRegistry.getToolset}. */
@@ -67,6 +81,17 @@ function toAbsoluteUrl(url: string): string {
   return url.startsWith('http://') || url.startsWith('https://')
     ? url
     : `https://${url}`;
+}
+
+/**
+ * Reports whether `url` is a Google API host reached over TLS.
+ *
+ * Credentials are attached only to such a URL. {@link isGoogleApi} on its own
+ * accepts `http://…googleapis.com`, which would put a cloud-platform bearer
+ * token on the wire in cleartext.
+ */
+function isHttpsGoogleApi(url: string): boolean {
+  return url.startsWith('https://') && isGoogleApi(url);
 }
 
 /**
@@ -138,6 +163,7 @@ export class ApiRegistry {
   readonly projectId: string;
   readonly location: string;
   private readonly auth: GoogleAuth;
+  private readonly headerProvider?: ApiRegistryOptions['headerProvider'];
   private serversPromise?: Promise<Map<string, ApiRegistryMcpServer>>;
 
   constructor(options: ApiRegistryOptions) {
@@ -147,6 +173,7 @@ export class ApiRegistry {
     logger.warn(DEPRECATION_MESSAGE);
     this.projectId = options.projectId;
     this.location = options.location ?? 'global';
+    this.headerProvider = options.headerProvider;
     this.auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
   }
 
@@ -154,6 +181,10 @@ export class ApiRegistry {
    * Returns a toolset for the named MCP server, resolving its URL from the API
    * Registry and authorizing the connection with Application Default
    * Credentials.
+   *
+   * The credentials are resolved before each connection rather than baked into
+   * the toolset, so a long-lived agent keeps working after the first access
+   * token expires.
    *
    * @param mcpServerName Name of the MCP server as registered in API Registry.
    * @param options Optional tool filtering and name prefixing.
@@ -164,7 +195,7 @@ export class ApiRegistry {
   async getToolset(
     mcpServerName: string,
     options?: ApiRegistryToolsetOptions,
-  ): Promise<MCPToolset> {
+  ): Promise<AgentRegistrySingleMCPToolset> {
     const servers = await this.loadMcpServers();
     const server = servers.get(mcpServerName);
     if (!server) {
@@ -174,17 +205,39 @@ export class ApiRegistry {
     if (!url) {
       throw new Error(`MCP server ${mcpServerName} has no URLs.`);
     }
+    const serverUrl = toAbsoluteUrl(url);
 
-    const headers = await this.getAuthHeaders();
-    return new MCPToolset(
-      {
+    return new AgentRegistrySingleMCPToolset({
+      connectionParams: {
         type: 'StreamableHTTPConnectionParams',
-        url: toAbsoluteUrl(url),
-        transportOptions: {requestInit: {headers}},
+        url: serverUrl,
       },
-      options?.toolFilter,
-      options?.toolNamePrefix,
-    );
+      toolFilter: options?.toolFilter,
+      prefix: options?.toolNamePrefix,
+      headerProvider: (context?: ReadonlyContext) =>
+        this.mcpHeaders(serverUrl, context),
+    });
+  }
+
+  /**
+   * Builds the headers for one MCP connection.
+   *
+   * Application Default Credentials are attached only to a Google API host
+   * reached over TLS. Anything the caller's own `headerProvider` returns is
+   * merged on top.
+   */
+  private async mcpHeaders(
+    serverUrl: string,
+    context?: ReadonlyContext,
+  ): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {};
+    if (isHttpsGoogleApi(serverUrl)) {
+      Object.assign(headers, await this.getAuthHeaders());
+    }
+    if (this.headerProvider) {
+      Object.assign(headers, await this.headerProvider(context));
+    }
+    return headers;
   }
 
   /**
@@ -232,7 +285,9 @@ export class ApiRegistry {
       } while (pageToken);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Error fetching MCP servers from API Registry: ${msg}`);
+      throw new Error(`Error fetching MCP servers from API Registry: ${msg}`, {
+        cause: err,
+      });
     }
     return servers;
   }
@@ -259,6 +314,8 @@ export class ApiRegistry {
       );
     }
     const headers: Record<string, string> = {Authorization: `Bearer ${token}`};
+    // GoogleAuth exposes no quota project of its own; getClient() copies the
+    // one from Application Default Credentials onto the client.
     if (client.quotaProjectId) {
       headers['x-goog-user-project'] = client.quotaProjectId;
     }

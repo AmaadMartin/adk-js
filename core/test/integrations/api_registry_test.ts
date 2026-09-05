@@ -68,6 +68,24 @@ const MOCK_MCP_SERVERS_LIST = {
   ],
 };
 
+/**
+ * Servers on Google API hosts. The adk-python fixture registers none, so the
+ * credential guard needs its own.
+ */
+const GOOGLE_HOST_SERVERS = {
+  mcpServers: [
+    {
+      name: 'test-mcp-server-google',
+      urls: ['https://mcp.us-central1.googleapis.com'],
+    },
+    {
+      name: 'test-mcp-server-google-http',
+      urls: ['http://mcp.us-central1.googleapis.com'],
+    },
+    {name: 'test-mcp-server-google-no-scheme', urls: ['mcp.googleapis.com']},
+  ],
+};
+
 const PROJECT_ID = 'test-project';
 const LIST_URL =
   'https://cloudapiregistry.googleapis.com/v1beta/projects/test-project' +
@@ -339,19 +357,21 @@ describe('ApiRegistry', () => {
 
   describe('getToolset', () => {
     it('connects to the resolved URL with only the Authorization header', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
       const {url, headers} = await connectToolset(
         newRegistry(),
-        'test-mcp-server-1',
+        'test-mcp-server-google',
       );
-      expect(url.toString()).toBe('https://mcp.server1.com/');
+      expect(url.toString()).toBe('https://mcp.us-central1.googleapis.com/');
       expect(headers).toEqual({Authorization: 'Bearer mock_token'});
     });
 
     it('adds x-goog-user-project to the MCP headers when ADC has a quota project', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
       mockQuotaProjectId = 'quota-project';
       const {headers} = await connectToolset(
         newRegistry(),
-        'test-mcp-server-1',
+        'test-mcp-server-google',
       );
       expect(headers).toEqual({
         'Authorization': 'Bearer mock_token',
@@ -431,6 +451,120 @@ describe('ApiRegistry', () => {
       await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
         'Failed to obtain Google Cloud access token for API Registry.',
       );
+    });
+  });
+
+  describe('credential scoping', () => {
+    /** Server name to whether the MCP connection should carry credentials. */
+    const CREDENTIAL_MATRIX: ReadonlyArray<[string, boolean]> = [
+      ['test-mcp-server-google', true],
+      ['test-mcp-server-google-no-scheme', true],
+      ['test-mcp-server-google-http', false],
+    ];
+
+    it.each(CREDENTIAL_MATRIX)(
+      'attaches credentials to %s: %s',
+      async (serverName, expectsCredentials) => {
+        fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+        const {headers} = await connectToolset(newRegistry(), serverName);
+        expect(headers).toEqual(
+          expectsCredentials ? {Authorization: 'Bearer mock_token'} : {},
+        );
+      },
+    );
+
+    it('sends no credentials to a non-Google host', async () => {
+      const {headers} = await connectToolset(
+        newRegistry(),
+        'test-mcp-server-1',
+      );
+      expect(headers).toEqual({});
+    });
+
+    it('sends no credentials to a host that merely ends in a lookalike domain', async () => {
+      fetchMock.mockResolvedValue(
+        okResponse({
+          mcpServers: [
+            {name: 'lookalike', urls: ['https://evilgoogleapis.com']},
+          ],
+        }),
+      );
+      const {headers} = await connectToolset(newRegistry(), 'lookalike');
+      expect(headers).toEqual({});
+    });
+
+    it('resolves the token again for every connection', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+      const toolset = await newRegistry().getToolset('test-mcp-server-google');
+
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        Authorization: 'Bearer mock_token',
+      });
+
+      mockToken = 'refreshed_token';
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        Authorization: 'Bearer refreshed_token',
+      });
+    });
+  });
+
+  describe('headerProvider', () => {
+    it('merges the caller headers into a Google host connection', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+      const registry = new ApiRegistry({
+        projectId: PROJECT_ID,
+        headerProvider: () => ({'x-tenant': 'acme'}),
+      });
+      const toolset = await registry.getToolset('test-mcp-server-google');
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        'Authorization': 'Bearer mock_token',
+        'x-tenant': 'acme',
+      });
+    });
+
+    it('supplies headers for a non-Google host that gets no credentials', async () => {
+      const registry = new ApiRegistry({
+        projectId: PROJECT_ID,
+        headerProvider: async () => ({'x-tenant': 'acme'}),
+      });
+      const toolset = await registry.getToolset('test-mcp-server-1');
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({'x-tenant': 'acme'});
+    });
+
+    it('lets the caller override the Authorization header', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+      const registry = new ApiRegistry({
+        projectId: PROJECT_ID,
+        headerProvider: () => ({Authorization: 'Bearer caller_token'}),
+      });
+      const toolset = await registry.getToolset('test-mcp-server-google');
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        Authorization: 'Bearer caller_token',
+      });
+    });
+
+    it('is called again for every connection', async () => {
+      const headerProvider = vi.fn().mockReturnValue({'x-tenant': 'acme'});
+      const registry = new ApiRegistry({projectId: PROJECT_ID, headerProvider});
+      const toolset = await registry.getToolset('test-mcp-server-1');
+
+      await toolset.getTools();
+      await toolset.getTools();
+
+      expect(headerProvider).toHaveBeenCalledTimes(2);
+    });
+
+    it('sends no extra headers when the caller supplies no provider', async () => {
+      const {headers} = await connectToolset(
+        newRegistry(),
+        'test-mcp-server-1',
+      );
+      expect(headers).toEqual({});
     });
   });
 
