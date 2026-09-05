@@ -144,9 +144,8 @@ const tagger = node(() => ({tags: new Set(['ts', 'workflow'])}), {
 
 A `Set` becomes an array, a `Map` becomes a plain object, a value with a
 `toJSON()` method is dumped through it, and any other class instance becomes a
-plain object of its own properties. A value that is already plain is passed
-through as it is, not copied, so an event holds the same object the node
-yielded.
+plain object of its own properties. The result is a new value, so do not rely
+on the event holding the object the node yielded.
 
 A node with no `outputSchema` is untouched: its output reaches the event
 exactly as yielded, whatever its type. Genai `Content` is untouched too, with
