@@ -256,6 +256,15 @@ export type {
   GepaRunResult,
   ReflectionLm,
 } from './optimization/gepa_engine.js';
+export {
+  GEPARootAgentOptimizer,
+  RootAgentGepaAdapter,
+} from './optimization/gepa_root_agent_optimizer.js';
+export type {
+  GEPARootAgentOptimizerConfig,
+  GEPARootAgentOptimizerResult,
+  RootAgentGepaAdapterParams,
+} from './optimization/gepa_root_agent_optimizer.js';
 export {requireStaticInstruction} from './optimization/gepa_utils.js';
 export {
   AGENT_PROMPT_NAME,
