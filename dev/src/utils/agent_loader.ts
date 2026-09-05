@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, isApp, isRunnableRoot, RunnableRoot} from '@google/adk';
+import {
+  App,
+  isApp,
+  isBaseAgent,
+  isRunnableRoot,
+  RunnableRoot,
+} from '@google/adk';
 import esbuild from 'esbuild';
 import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
@@ -571,7 +577,8 @@ export class AgentLoader {
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
       const agentFile = new AgentFile(file.path, this.options);
-      await agentFile.load();
+      const loaded = await agentFile.load();
+      recordAgentOrigin(loaded, file.name, path.dirname(file.path));
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(file.name, file.path, e);
@@ -590,7 +597,8 @@ export class AgentLoader {
 
     try {
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-      await agentFile.load();
+      const loaded = await agentFile.load();
+      recordAgentOrigin(loaded, dir.name, dir.path);
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
@@ -617,6 +625,28 @@ export class AgentLoader {
 
 function isJsFile(fileExt?: string): boolean {
   return !!fileExt && JS_FILES_EXTENSIONS.includes(fileExt);
+}
+
+/**
+ * Records where a loaded root agent came from, so `Runner` can report an app
+ * name that disagrees with it.
+ *
+ * A name starting with `__` marks a built-in agent, which implies no app name.
+ * Mirrors `google/adk-python`
+ * `cli/utils/agent_loader.py::AgentLoader._record_origin_metadata`.
+ */
+function recordAgentOrigin(
+  loaded: RunnableRoot | App,
+  appName: string,
+  originPath: string,
+): void {
+  if (appName.startsWith('__')) {
+    return;
+  }
+  const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
+  if (isBaseAgent(rootAgent)) {
+    rootAgent.adkOrigin = {appName, path: originPath};
+  }
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {
