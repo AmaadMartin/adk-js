@@ -57,7 +57,7 @@ describe('ParallelWorker', () => {
     expect(peak).toBe(2);
   });
 
-  it('bounds concurrency by the default when maxParallelWorkers is unset', async () => {
+  it('does not bound concurrency when maxParallelWorkers is unset', async () => {
     let active = 0;
     let peak = 0;
     const inner = new FunctionNode('track', async (_c, n: number) => {
@@ -67,13 +67,32 @@ describe('ParallelWorker', () => {
       active--;
       return n;
     });
-    // 20 items with no explicit limit must not fan out to 20 concurrent runs.
+    // Matches adk-python, where `max_parallel_workers=None` starts every item
+    // of the list at once.
     const {output} = await driveNode(
       new ParallelWorker(inner),
       Array.from({length: 20}, (_v, i) => i),
     );
     expect(output).toHaveLength(20);
-    expect(peak).toBe(8); // DEFAULT_MAX_PARALLEL_WORKERS
+    expect(peak).toBe(20);
+  });
+
+  it('treats Infinity as unbounded, as the earlier default advertised', async () => {
+    let active = 0;
+    let peak = 0;
+    const inner = new FunctionNode('track', async (_c, n: number) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      return n;
+    });
+    const {output} = await driveNode(
+      new ParallelWorker(inner, {maxParallelWorkers: Infinity}),
+      Array.from({length: 12}, (_v, i) => i),
+    );
+    expect(output).toHaveLength(12);
+    expect(peak).toBe(12);
   });
 
   it('rejects maxParallelWorkers < 1', () => {
