@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Environment
+
+- [E2BEnvironment](environment/e2b_environment/index.md) - A remote sandbox workspace for file CRUD, shell execution, and on-demand software installs.
+
 ### Tools
 
 #### Retrieval
