@@ -6,15 +6,15 @@
 
 /** Fixtures shared by the vmaas sandbox tests. */
 
-import {Client} from '@google-cloud/vertexai';
 import {
   Context,
   InvocationContext,
   LlmAgent,
   PluginManager,
   createSession,
+  type VertexSandboxApi,
 } from '@google/adk';
-import {vi} from 'vitest';
+import {vi, type Mock} from 'vitest';
 
 /** The PNG bytes the fake sandbox returns for a screenshot. */
 export const SCREENSHOT_BYTES = new Uint8Array([
@@ -100,15 +100,21 @@ export function createFakeSandbox(options: FakeSandboxOptions = {}) {
   return {sendCommand, calls};
 }
 
-/** The `agentEnginesInternal` surface the computer calls. */
-export interface MockVertexClient {
+/**
+ * The `agentEnginesInternal` surface the computer calls, with every call a spy.
+ *
+ * `VertexSandboxApi` is the option type the computer declares, so this shape is
+ * checked against it — a mock that drifts from the real surface fails to
+ * compile instead of being cast into place.
+ */
+export interface MockVertexClient extends VertexSandboxApi {
   agentEnginesInternal: {
-    createInternal: ReturnType<typeof vi.fn>;
-    getAgentOperationInternal: ReturnType<typeof vi.fn>;
+    createInternal: Mock;
+    getAgentOperationInternal: Mock;
     sandboxes: {
-      getInternal: ReturnType<typeof vi.fn>;
-      createInternal: ReturnType<typeof vi.fn>;
-      getSandboxOperationInternal: ReturnType<typeof vi.fn>;
+      getInternal: Mock;
+      createInternal: Mock;
+      getSandboxOperationInternal: Mock;
     };
   };
 }
@@ -145,16 +151,6 @@ export function createMockVertexClient(): MockVertexClient {
       },
     },
   };
-}
-
-/**
- * Presents a mock as the Vertex AI client.
- *
- * `Client` is a third-party class with a large surface the computer never
- * touches, so the cast lives here once instead of at every call site.
- */
-export function asVertexClient(mock: MockVertexClient): Client {
-  return mock as unknown as Client;
 }
 
 /** A tool context whose state the computer can bind with `prepare()`. */

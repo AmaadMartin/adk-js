@@ -14,7 +14,9 @@
 
 import {SandboxEnvironment} from '@google-cloud/vertexai/build/src/genai/types.js';
 
-import {formatError} from '../../utils/error_utils.js';
+import {ScrollDirection} from '../../tools/computer_use/base_computer.js';
+import {sleep} from '../../utils/async_utils.js';
+import {asRecord, formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {SandboxError, SandboxErrorCode} from './sandbox_errors.js';
@@ -101,9 +103,6 @@ const MODIFIER_MAP: Readonly<Record<string, number>> = {
   SUPER: 4,
 };
 
-/** The direction of a scroll, as the sandbox client accepts it. */
-export type SandboxScrollDirection = 'up' | 'down' | 'left' | 'right';
-
 /** A JSON object decoded from a sandbox response. */
 export type CdpResponse = Record<string, unknown>;
 
@@ -111,13 +110,6 @@ export type CdpResponse = Record<string, unknown>;
 export interface CdpCommand {
   command: string;
   params: CdpResponse;
-}
-
-/** What the sandbox reports for one command of a batch. */
-export interface CdpBatchResult {
-  status?: string;
-  result?: CdpResponse;
-  error?: string;
 }
 
 /**
@@ -144,13 +136,6 @@ export interface SandboxClientOptions {
   sendCommand: SandboxCommandSender;
 }
 
-/** Narrows a value to a JSON object, or `undefined` when it is not one. */
-function asRecord(value: unknown): CdpResponse | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as CdpResponse)
-    : undefined;
-}
-
 /**
  * Decodes a sandbox response body as JSON.
  *
@@ -162,25 +147,12 @@ function parseResponseBody(response: {body?: string} | undefined): CdpResponse {
     return {};
   }
   try {
-    return asRecord(JSON.parse(response.body)) ?? {};
+    const parsed: unknown = JSON.parse(response.body);
+    // A JSON array is not a CDP response object.
+    return Array.isArray(parsed) ? {} : (asRecord(parsed) ?? {});
   } catch {
     return {};
   }
-}
-
-/** Normalises one entry of a batch response into a {@link CdpBatchResult}. */
-function toBatchResult(value: unknown): CdpBatchResult {
-  const record = asRecord(value) ?? {};
-  return {
-    status: typeof record['status'] === 'string' ? record['status'] : undefined,
-    result: asRecord(record['result']),
-    error: typeof record['error'] === 'string' ? record['error'] : undefined,
-  };
-}
-
-/** Resolves after `ms` milliseconds. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Whether an error message names a failure a navigating page raises. */
@@ -266,22 +238,6 @@ function clearFieldCommands(): CdpCommand[] {
   ];
 }
 
-/** The commands that press and release Enter. */
-function pressEnterCommands(): CdpCommand[] {
-  return [
-    keyEvent({
-      type: 'keyDown',
-      windowsVirtualKeyCode: VIRTUAL_KEY_CODE_ENTER,
-      key: 'Enter',
-    }),
-    keyEvent({
-      type: 'keyUp',
-      windowsVirtualKeyCode: VIRTUAL_KEY_CODE_ENTER,
-      key: 'Enter',
-    }),
-  ];
-}
-
 /** The commands that press and release one key of a key combination. */
 function keyCombinationCommands(key: string): CdpCommand[] {
   const upperKey = key.toUpperCase();
@@ -299,15 +255,11 @@ function keyCombinationCommands(key: string): CdpCommand[] {
 
 /** The pixel deltas of a scroll in the given direction. */
 function scrollDeltas(
-  direction: SandboxScrollDirection,
+  direction: ScrollDirection,
   magnitude: number,
 ): {deltaX: number; deltaY: number} {
-  // adk-python lowercases the direction. A caller outside TypeScript, or a
-  // model-supplied argument, can reach here with 'UP', which would otherwise
-  // fall through to the positive sign and scroll the other way.
-  const normalized = direction.toLowerCase();
-  const sign = normalized === 'left' || normalized === 'up' ? -1 : 1;
-  const horizontal = normalized === 'left' || normalized === 'right';
+  const sign = direction === 'left' || direction === 'up' ? -1 : 1;
+  const horizontal = direction === 'left' || direction === 'right';
   return {
     deltaX: horizontal ? sign * magnitude : 0,
     deltaY: horizontal ? 0 : sign * magnitude,
@@ -325,17 +277,12 @@ function scrollDeltas(
 export class SandboxClient {
   private readonly sandbox: SandboxEnvironment;
   private readonly sendCommand: SandboxCommandSender;
-  private accessToken: string;
+  private readonly accessToken: string;
 
   constructor(options: SandboxClientOptions) {
     this.sandbox = options.sandbox;
     this.accessToken = options.accessToken;
     this.sendCommand = options.sendCommand;
-  }
-
-  /** Replaces the access token used by later requests. */
-  updateAccessToken(accessToken: string): void {
-    this.accessToken = accessToken;
   }
 
   /** Sends one request to the sandbox and decodes its JSON body. */
@@ -375,7 +322,7 @@ export class SandboxClient {
   async makeCdpBatchRequest(
     commands: CdpCommand[],
     stopOnError = true,
-  ): Promise<CdpBatchResult[]> {
+  ): Promise<unknown[]> {
     try {
       const parsed = await this.send({
         httpMethod: 'POST',
@@ -384,7 +331,7 @@ export class SandboxClient {
         requestBody: {commands, stop_on_error: stopOnError},
       });
       const results = parsed['results'];
-      return Array.isArray(results) ? results.map(toBatchResult) : [];
+      return Array.isArray(results) ? results : [];
     } catch (e: unknown) {
       const message = formatError(e);
       if (
@@ -405,8 +352,8 @@ export class SandboxClient {
   private async runCommandsSequentially(
     commands: CdpCommand[],
     stopOnError: boolean,
-  ): Promise<CdpBatchResult[]> {
-    const results: CdpBatchResult[] = [];
+  ): Promise<unknown[]> {
+    const results: unknown[] = [];
     for (const command of commands) {
       try {
         const result = await this.makeCdpRequest(
@@ -515,7 +462,7 @@ export class SandboxClient {
       });
     }
     if (pressEnter) {
-      commands.push(...pressEnterCommands());
+      commands.push(...keyPress('Enter'));
     }
     if (commands.length > 0) {
       await this.makeCdpBatchRequest(commands);
@@ -542,7 +489,7 @@ export class SandboxClient {
   async scrollAt(params: {
     x: number;
     y: number;
-    direction: SandboxScrollDirection;
+    direction: ScrollDirection;
     magnitude: number;
   }): Promise<void> {
     const {deltaX, deltaY} = scrollDeltas(params.direction, params.magnitude);
@@ -648,16 +595,5 @@ export class SandboxClient {
         clickCount: 1,
       }),
     ]);
-  }
-
-  /** Whether the sandbox reports itself healthy. */
-  async healthCheck(): Promise<boolean> {
-    try {
-      const parsed = await this.send({httpMethod: 'GET', path: ''});
-      return parsed['status'] === 'healthy';
-    } catch (e: unknown) {
-      logger.warn(`Sandbox health check failed: ${formatError(e)}`);
-      return false;
-    }
   }
 }

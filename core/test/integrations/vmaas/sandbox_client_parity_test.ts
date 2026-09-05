@@ -12,6 +12,13 @@
  * Source: adk-python `main`,
  * `tests/unittests/integrations/vmaas/test_sandbox_client.py`.
  *
+ * Four of the 21 reference tests are not ported. `test_update_access_token`
+ * and the three `test_health_check_*` tests cover `update_access_token` and
+ * `health_check`, which no caller reaches in either SDK: adk-python's
+ * `sandbox_computer.py` calls neither, and this port builds a fresh client per
+ * action, so a token can never be replaced on a live one. Both methods were
+ * dropped rather than shipped as public surface nothing calls.
+ *
  * adk-python patches `asyncio.to_thread` and reads the keyword arguments it
  * received. adk-js has no `to_thread`, so the tests read the requests the
  * injected `sendCommand` transport received instead.
@@ -60,16 +67,6 @@ describe('SandboxClient parity with adk-python', () => {
 
     expect(sendCommand).toHaveBeenCalledWith(
       expect.objectContaining({accessToken: ACCESS_TOKEN, sandbox: SANDBOX}),
-    );
-  });
-
-  it('test_update_access_token', async () => {
-    client.updateAccessToken('new_token_67890');
-
-    await client.makeCdpRequest('Page.reload');
-
-    expect(sendCommand).toHaveBeenCalledWith(
-      expect.objectContaining({accessToken: 'new_token_67890'}),
     );
   });
 
@@ -297,31 +294,5 @@ describe('SandboxClient parity with adk-python', () => {
     });
 
     expect(batchCommandsOf(sendCommand.mock.calls[0][0])).toHaveLength(4);
-  });
-
-  it('test_health_check_healthy', async () => {
-    client = clientRespondingWith({status: 'healthy'});
-
-    expect(await client.healthCheck()).toBe(true);
-    expect(sendCommand.mock.calls[0][0]).toMatchObject({
-      httpMethod: 'GET',
-      path: '',
-    });
-  });
-
-  it('test_health_check_unhealthy', async () => {
-    client = clientRespondingWith({status: 'unhealthy'});
-
-    expect(await client.healthCheck()).toBe(false);
-  });
-
-  it('test_health_check_exception', async () => {
-    client = new SandboxClient({
-      sandbox: SANDBOX,
-      accessToken: ACCESS_TOKEN,
-      sendCommand: vi.fn().mockRejectedValue(new Error('Connection failed')),
-    });
-
-    expect(await client.healthCheck()).toBe(false);
   });
 });

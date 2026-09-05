@@ -10,7 +10,16 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {SandboxEnvironment} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {
+  AgentEngineOperation,
+  AgentEngineSandboxOperation,
+  CreateAgentEngineRequestParameters,
+  CreateAgentEngineSandboxRequestParameters,
+  GetAgentEngineOperationParameters,
+  GetAgentEngineSandboxOperationParameters,
+  GetAgentEngineSandboxRequestParameters,
+  SandboxEnvironment,
+} from '@google-cloud/vertexai/build/src/genai/types.js';
 
 import {Context} from '../../agents/context.js';
 import {State} from '../../sessions/state.js';
@@ -20,6 +29,7 @@ import {
   ComputerState,
   ScrollDirection,
 } from '../../tools/computer_use/base_computer.js';
+import {sleep} from '../../utils/async_utils.js';
 import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
@@ -90,6 +100,37 @@ interface CreateOperation<T> {
   response?: T;
 }
 
+/**
+ * The part of the Vertex AI client this computer calls.
+ *
+ * A real `Client` satisfies it, and so does a test double, so neither
+ * has to be cast. Declaring the whole `Client` instead would force a double
+ * cast in every test, because its modules carry private fields no double can
+ * supply — and that cast is what would stop a drifting mock from failing to
+ * compile.
+ */
+export interface VertexSandboxApi {
+  agentEnginesInternal: {
+    createInternal(
+      params: CreateAgentEngineRequestParameters,
+    ): Promise<AgentEngineOperation>;
+    getAgentOperationInternal(
+      params: GetAgentEngineOperationParameters,
+    ): Promise<AgentEngineOperation>;
+    sandboxes: {
+      getInternal(
+        params: GetAgentEngineSandboxRequestParameters,
+      ): Promise<SandboxEnvironment>;
+      createInternal(
+        params: CreateAgentEngineSandboxRequestParameters,
+      ): Promise<AgentEngineSandboxOperation>;
+      getSandboxOperationInternal(
+        params: GetAgentEngineSandboxOperationParameters,
+      ): Promise<AgentEngineSandboxOperation>;
+    };
+  };
+}
+
 /** Options for {@link AgentEngineSandboxComputer}. */
 export interface AgentEngineSandboxComputerOptions {
   /** The Google Cloud project the sandbox lives in. */
@@ -117,16 +158,11 @@ export interface AgentEngineSandboxComputerOptions {
   /** The page {@link AgentEngineSandboxComputer.search} navigates to. */
   searchEngineUrl?: string;
   /** A Vertex AI client to reuse instead of creating one. */
-  vertexaiClient?: Client;
+  vertexaiClient?: VertexSandboxApi;
   /** Issues the sandbox access token. */
   accessTokenProvider?: AccessTokenProvider;
   /** Carries a request to the sandbox. */
   sendCommand?: SandboxCommandSender;
-}
-
-/** Resolves after `ms` milliseconds. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** The current time in seconds, the unit adk-python writes into state. */
@@ -148,6 +184,12 @@ async function awaitCreateOperation<T>(
   operation: CreateOperation<T>,
   poll: (operationName: string) => Promise<CreateOperation<T>>,
 ): Promise<CreateOperation<T>> {
+  const operationName = operation.name;
+  if (operationName === undefined) {
+    // Nothing to poll by. The caller reports it as an operation that never
+    // finished, which is what an unnamed pending operation is.
+    return operation;
+  }
   let current = operation;
   for (
     let attempt = 0;
@@ -155,7 +197,7 @@ async function awaitCreateOperation<T>(
     attempt++
   ) {
     await sleep(CREATE_POLL_INTERVAL_MS);
-    current = await poll(operation.name!);
+    current = await poll(operationName);
   }
   return current;
 }
@@ -200,6 +242,11 @@ function deriveAgentEngineName(
  * and {@link AgentEngineSandboxComputerOptions.sendCommand} carry those two
  * requests.
  *
+ * Provisioning happens on the first action, so `initialize()` has nothing to
+ * do. `close()` deliberately leaves the sandbox running: the sandbox service
+ * deletes it when its TTL expires, and keeping it alive lets an agent that
+ * restarts inside that window resume the same browser.
+ *
  * @example
  * ```ts
  * const computer = new AgentEngineSandboxComputer({
@@ -228,7 +275,7 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   private readonly searchEngineUrl: string;
   private readonly accessTokenProvider?: AccessTokenProvider;
   private readonly sendCommand?: SandboxCommandSender;
-  private client?: Client;
+  private client?: VertexSandboxApi;
   private state?: State;
 
   constructor(options: AgentEngineSandboxComputerOptions = {}) {
@@ -256,22 +303,6 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   override async prepare(context: Context): Promise<void> {
     this.state = context.state;
   }
-
-  /**
-   * Initializes the computer.
-   *
-   * Provisioning happens on the first action, so there is nothing to do here.
-   */
-  override async initialize(): Promise<void> {}
-
-  /**
-   * Releases the resources held by the computer.
-   *
-   * The sandbox is deliberately left running: the sandbox service deletes it
-   * when its TTL expires, and keeping it alive lets an agent that restarts
-   * within that window resume the same browser.
-   */
-  override async close(): Promise<void> {}
 
   async screenSize(): Promise<[number, number]> {
     return SCREEN_SIZE;
@@ -408,7 +439,7 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   }
 
   /** The Vertex AI client, created on first use. */
-  private getClient(): Client {
+  private getClient(): VertexSandboxApi {
     this.client ??= new Client({
       project: this.projectId,
       location: this.location,
@@ -419,13 +450,13 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   /**
    * The agent engine to create sandboxes under, creating one if there is none.
    *
-   * An engine that came from the constructor or from session state is returned
-   * unchanged, so only a newly created engine is written back to state.
+   * An engine that came from session state is returned unchanged, so only a
+   * newly created engine is written back. {@link agentEngineName} is not
+   * consulted here: it is only ever derived from a sandbox, template or
+   * snapshot name, and each of those either returns before a sandbox is
+   * created or is refused.
    */
   private async ensureAgentEngine(): Promise<string> {
-    if (this.agentEngineName) {
-      return this.agentEngineName;
-    }
     const state = this.requireState();
     const cachedName = state.get<string>(STATE_KEY_AGENT_ENGINE_NAME);
     if (cachedName) {
@@ -514,12 +545,9 @@ export class AgentEngineSandboxComputer extends BaseComputer {
   private async createSandbox(
     state: State,
   ): Promise<[string, SandboxEnvironment]> {
-    const client = this.getClient();
-    // Resolve where the sandbox would live before refusing, so that a
-    // template's own engine still wins over creating a fresh one and the
-    // refusal does not depend on which resource name the caller supplied.
-    const agentEngineName = await this.ensureAgentEngine();
     this.requireSupportedSandboxSource();
+    const client = this.getClient();
+    const agentEngineName = await this.ensureAgentEngine();
     logger.debug(`Creating a new sandbox under ${agentEngineName}.`);
     const finished = await awaitCreateOperation(
       await client.agentEnginesInternal.sandboxes.createInternal({
