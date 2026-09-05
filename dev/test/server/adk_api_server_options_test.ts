@@ -25,6 +25,7 @@ import {
 import {DEFAULT_APP_NAME_ENV_VAR} from '../../src/server/default_app_rewrite.js';
 import {LOGO_CONFIG_ERROR_MESSAGE} from '../../src/server/runtime_config.js';
 import {CapturingLogger} from '../capturing_logger.js';
+import {TempHome} from '../temp_home.js';
 import {StubAgentLoader} from './stub_agent_loader.js';
 
 const APP_NAME = 'testApp';
@@ -62,9 +63,8 @@ describe('AdkApiServer configuration options', () => {
   let sessionService: BaseSessionService;
   let server: AdkApiServer | undefined;
   let logger: CapturingLogger;
+  const tempHome = new TempHome();
   let webAssetsDir: string;
-  let home: string;
-  let originalHome: string | undefined;
   let originalDefaultApp: string | undefined;
 
   beforeEach(() => {
@@ -72,9 +72,7 @@ describe('AdkApiServer configuration options', () => {
     sessionService = new InMemorySessionService();
     logger = new CapturingLogger();
     webAssetsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-options-ui-'));
-    home = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-options-home-'));
-    originalHome = process.env['HOME'];
-    process.env['HOME'] = home;
+    tempHome.create();
     originalDefaultApp = process.env[DEFAULT_APP_NAME_ENV_VAR];
     delete process.env[DEFAULT_APP_NAME_ENV_VAR];
   });
@@ -82,18 +80,13 @@ describe('AdkApiServer configuration options', () => {
   afterEach(async () => {
     await server?.stop();
     server = undefined;
-    if (originalHome === undefined) {
-      delete process.env['HOME'];
-    } else {
-      process.env['HOME'] = originalHome;
-    }
+    tempHome.remove();
     if (originalDefaultApp === undefined) {
       delete process.env[DEFAULT_APP_NAME_ENV_VAR];
     } else {
       process.env[DEFAULT_APP_NAME_ENV_VAR] = originalDefaultApp;
     }
     fs.rmSync(webAssetsDir, {recursive: true, force: true});
-    fs.rmSync(home, {recursive: true, force: true});
   });
 
   function build(options: {
