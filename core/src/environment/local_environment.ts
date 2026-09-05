@@ -43,11 +43,11 @@ export interface LocalEnvironmentOptions {
   envVars?: Record<string, string>;
 }
 
+/** The name of a signal that can terminate a command, e.g. `'SIGKILL'`. */
+type SignalName = keyof typeof os.constants.signals;
+
 /** Maps Node's `(code, signal)` pair to Python's negative-signal convention. */
-function toExitCode(
-  code: number | null,
-  signal: NodeJS.Signals | null,
-): number {
+function toExitCode(code: number | null, signal: SignalName | null): number {
   return signal === null ? (code ?? 0) : -os.constants.signals[signal];
 }
 
