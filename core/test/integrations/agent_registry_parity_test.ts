@@ -553,6 +553,18 @@ describe('TestAgentRegistry', () => {
     expect(requestedPaths()).not.toContain('bindings');
   });
 
+  it('getRemoteA2AAgent skips the binding lookup for a non-string agent id', async () => {
+    routeFetch({
+      ...AGENT_WITH_BINDING,
+      'test-agent': {...A2A_AGENT_INFO, agentId: 42},
+    });
+
+    const agent = await registry.getRemoteA2AAgent('test-agent');
+
+    expect(agent.authScheme).toBeUndefined();
+    expect(requestedPaths()).not.toContain('bindings');
+  });
+
   it('test_make_request_raises_http_status_error', async () => {
     fetchMock.mockResolvedValue(
       new Response('Internal Server Error', {status: 500}),
