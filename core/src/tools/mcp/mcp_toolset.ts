@@ -38,13 +38,12 @@ import {MCPTool} from './mcp_tool.js';
  * before sending the request to the underlying MCP server.
  *
  * Usage:
- *   import { MCPToolset } from '@google/adk';
- *   import { StreamableHTTPConnectionParamsSchema } from '@google/adk';
+ *   import { MCPToolset, StreamableHTTPConnectionParams } from '@google/adk';
  *
- *   const connectionParams = StreamableHTTPConnectionParamsSchema.parse({
- *     type: "StreamableHTTPConnectionParams",
- *     url: "http://localhost:8788/mcp"
- *   });
+ *   const connectionParams: StreamableHTTPConnectionParams = {
+ *     type: 'StreamableHTTPConnectionParams',
+ *     url: 'http://localhost:8788/mcp',
+ *   };
  *
  *   const mcpToolset = new MCPToolset(connectionParams);
  *   const tools = await mcpToolset.getTools();
