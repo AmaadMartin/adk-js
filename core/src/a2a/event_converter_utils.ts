@@ -121,7 +121,7 @@ export interface A2AEventConverters {
   artifactUpdate?: A2AArtifactUpdateToEventConverter;
   /**
    * Converts an individual A2A part. Handed to whichever converter above runs,
-   * including the built-in ones. Defaults to {@link toGenAIPart}.
+   * including the built-in ones. Defaults to `toGenAIPart`.
    */
   part?: A2APartToGenAIPartConverter;
 }
