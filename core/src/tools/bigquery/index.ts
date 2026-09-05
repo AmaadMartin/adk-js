@@ -61,6 +61,8 @@ export {
   detectAnomalies,
   executeSql,
   forecast,
+  runQuery,
+  validateSubquery,
   type BigQueryDryRunResult,
   type BigQueryRow,
   type BigQueryRowsResult,

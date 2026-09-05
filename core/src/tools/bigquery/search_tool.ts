@@ -114,9 +114,10 @@ export function constructSearchQuery(
       : [input.project_id];
   parts.push(constructSearchQueryClause('projectid', '=', projects));
 
-  if (input.dataset_ids_filter && input.dataset_ids_filter.length > 0) {
+  const datasetIds = input.dataset_ids_filter;
+  if (datasetIds && datasetIds.length > 0) {
     const datasetFilters = projects.flatMap((projectId) =>
-      (input.dataset_ids_filter ?? []).map(
+      datasetIds.map(
         (datasetId) =>
           `linked_resource:"//bigquery.googleapis.com/projects/${projectId}` +
           `/datasets/${datasetId}/*"`,
