@@ -383,6 +383,9 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   'output',
   'route',
   'actions.agentState',
+  // The model's structured answer follows the agent's output schema, whose
+  // property names the caller chooses.
+  'actions.setModelResponse',
 ];
 
 /**
@@ -407,6 +410,7 @@ const PRESERVE_KEYS_SNAKE_CASE = [
   'output',
   'route',
   'actions.agent_state',
+  'actions.set_model_response',
 ];
 
 /**
