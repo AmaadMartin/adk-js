@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export {
+// The interfaces are erased at build time, so they must leave through
+// `export type`. A value re-export of an erased name makes the built ESM
+// module fail to load.
+export {RestAgentIdentityCredentialsClient} from './agent_identity_credentials_client.js';
+export type {
   AgentIdentityCredentialsClient,
-  RestAgentIdentityCredentialsClient,
   RetrieveCredentialsRequest,
   RetrieveCredentialsResponse,
   RetrieveCredentialsSuccess,
@@ -14,14 +17,16 @@ export {
 } from './agent_identity_credentials_client.js';
 export {
   AgentIdentityCredentialsProvider,
-  AgentIdentityCredentialsProviderOptions,
-  CredentialsProvider,
   constructAuthCredential,
   isConsentCompleted,
+} from './agent_identity_credentials_provider.js';
+export type {
+  AgentIdentityCredentialsProviderOptions,
+  CredentialsProvider,
 } from './agent_identity_credentials_provider.js';
 export {
   GCP_AUTH_PROVIDER_SCHEME_TYPE,
   GcpAuthProvider,
-  GcpAuthProviderOptions,
   isGcpAuthProviderScheme,
 } from './gcp_auth_provider.js';
+export type {GcpAuthProviderOptions} from './gcp_auth_provider.js';
