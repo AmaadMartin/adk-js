@@ -1204,7 +1204,14 @@ export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
+export {SkillErrorCode} from './tools/skill/skill_error_codes.js';
+export {
+  DEFAULT_SKILL_SYSTEM_INSTRUCTION,
+  buildSkillSystemInstruction,
+} from './tools/skill/skill_system_instruction.js';
+export type {SkillSystemInstructionOptions} from './tools/skill/skill_system_instruction.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
+export type {SkillToolsetOptions} from './tools/skill/skill_toolset.js';
 export {
   SPANNER_DEFAULT_SCOPE,
   SPANNER_TOKEN_CACHE_KEY,
