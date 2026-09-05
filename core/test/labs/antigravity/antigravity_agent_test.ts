@@ -1000,7 +1000,9 @@ describe('AntigravityAgent failure paths', () => {
 
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/Could not resume conversation/);
-    expect(deltas(events)).toEqual([{[STATE_KEY]: undefined}]);
+    // `null`, matching Python's `None`, so the clearing entry survives being
+    // serialized with the event rather than being dropped by JSON.stringify.
+    expect(deltas(events)).toEqual([{[STATE_KEY]: null}]);
     // The turn is abandoned, not half-run.
     expect(sdkAgent.conversation.sendCount).toBe(0);
     expect(sdkAgent.closeCount).toBe(1);
@@ -1586,23 +1588,30 @@ describe('AntigravityAgent under a real Runner', () => {
       userId: 'test_user',
       state: {[STATE_KEY]: CID},
     });
+    const seenConversationIds: Array<string | undefined> = [];
     const agent = new AntigravityAgent({
       name: 'agy',
       antigravityConfig: makeConfig({saveDir: '/var/lib/app/antigravity'}),
       // No history, so the resume was silently dropped.
-      agentFactory: () => new FakeSdkAgent(stepsOnce, CID),
+      agentFactory: (config) => {
+        seenConversationIds.push(config.conversationId);
+        return new FakeSdkAgent(stepsOnce, CID);
+      },
     });
 
     await expect(runTurn(agent, sessionService, session.id)).rejects.toThrow(
       /no longer available/,
     );
+    // The next turn starts a new conversation instead of failing the same way
+    // forever, which is the point of clearing the id.
+    await runTurn(agent, sessionService, session.id);
 
     const after = await sessionService.getSession({
       appName: 'test_app',
       userId: 'test_user',
       sessionId: session.id,
     });
-    // Cleared, so the next turn starts a new conversation instead of looping.
-    expect(after?.state[STATE_KEY]).toBeUndefined();
+    expect(seenConversationIds).toEqual([CID, undefined]);
+    expect(after?.state[STATE_KEY]).toBe(CID);
   });
 });
