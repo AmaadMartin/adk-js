@@ -8,6 +8,7 @@ import {
   App,
   BaseArtifactService,
   BaseMemoryService,
+  BasePlugin,
   BaseSessionService,
   bearerTokenUserBuilder,
   Event,
@@ -34,7 +35,12 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 import {version} from '../version.js';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {
+  AgentFile,
+  AgentFileOptions,
+  AgentLoader,
+} from '../utils/agent_loader.js';
+import {isFolderExists} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -50,10 +56,13 @@ import {
   serializeAgent,
   serializeAppInfo,
 } from './app_info.js';
+import {defaultAppRewriteMiddleware} from './default_app_rewrite.js';
 import {
   getAllowedRequestHosts,
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
+import {loadExtraPlugins} from './extra_plugins.js';
+import {validateLogoOptions, writeRuntimeConfig} from './runtime_config.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 
 /**
@@ -63,14 +72,44 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
-interface ServerOptions {
+/** The part of an agent file the server uses: load it, then dispose it. */
+export type ServerAgentFile = Pick<AgentFile, 'load'> & AsyncDisposable;
+
+/**
+ * The part of {@link AgentLoader} the server uses. Narrowed to the two methods
+ * it calls, so a caller can supply its own loader without the file cache,
+ * watcher and disposal machinery a full `AgentLoader` owns.
+ */
+export interface ServerAgentLoader {
+  listAgents(): Promise<string[]>;
+  getAgentFile(agentName: string): Promise<ServerAgentFile>;
+}
+
+/**
+ * Environment variable naming the app that `/users/...`, `/app-info`,
+ * `/trigger/...`, `/run` and `/run_sse` resolve to when the request does not
+ * name one. adk-python reads the default app name from the environment and
+ * nowhere else, so this server does the same.
+ */
+export const DEFAULT_APP_NAME_ENV_VAR = 'ADK_DEFAULT_APP_NAME';
+
+/**
+ * Rejection message for a `/run` or `/run_sse` request that names no app and
+ * reaches a server with no default app. It keeps the reference's snake_case
+ * `app_name`, because clients see it.
+ */
+export const MISSING_APP_NAME_MESSAGE =
+  'app_name is required when ADK_DEFAULT_APP_NAME is not set';
+
+/** Everything an {@link AdkApiServer} can be configured with. */
+export interface ServerOptions {
   agentsDir?: string;
   host?: string;
   port?: number;
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
-  agentLoader?: AgentLoader;
+  agentLoader?: ServerAgentLoader;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -95,6 +134,23 @@ interface ServerOptions {
   a2aAuthToken?: string;
   reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
+  /** Text shown in the dev UI's logo. Must be set together with logoImageUrl. */
+  logoText?: string;
+  /** Image shown in the dev UI's logo. Must be set together with logoText. */
+  logoImageUrl?: string;
+  /**
+   * Plugins to add to every runner, each named as `<module>.<export>` — a
+   * plugin class or an already-constructed plugin instance.
+   */
+  extraPlugins?: string[];
+  /**
+   * Path the server is reached under behind a reverse proxy, e.g. `/adk`.
+   * Routes stay at the root; it is written to runtime-config.json as
+   * `backendUrl`.
+   */
+  urlPrefix?: string;
+  /** Directory the dev UI is served from. Defaults to the bundled assets. */
+  webAssetsDir?: string;
 }
 
 export class AdkApiServer {
@@ -112,7 +168,7 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  private readonly agentLoader: ServerAgentLoader;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
@@ -141,6 +197,19 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  private readonly defaultAppName?: string;
+  private readonly logoText?: string;
+  private readonly logoImageUrl?: string;
+  private readonly extraPluginNames: string[];
+  private readonly urlPrefix?: string;
+  private readonly webAssetsDir: string;
+  /**
+   * The extra plugins, loaded once in `init()` and shared by every runner.
+   * adk-python re-instantiates them per runner; sharing keeps one instance of
+   * a plugin the operator declared once, whether it was named as a class or
+   * as an instance.
+   */
+  private extraPlugins: BasePlugin[] = [];
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -179,6 +248,13 @@ export class AdkApiServer {
     // to the authenticator, which rejects a token that is not usable.
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
+    this.defaultAppName = process.env[DEFAULT_APP_NAME_ENV_VAR] || undefined;
+    this.logoText = options.logoText;
+    this.logoImageUrl = options.logoImageUrl;
+    this.extraPluginNames = options.extraPlugins ?? [];
+    this.urlPrefix = options.urlPrefix;
+    this.webAssetsDir =
+      options.webAssetsDir ?? path.join(__dirname, '../../browser');
     this.app = express();
   }
 
@@ -194,6 +270,31 @@ export class AdkApiServer {
       const tracerProvider = trace.getTracerProvider();
       this.registerProcessors(tracerProvider);
     }
+  }
+
+  /**
+   * Writes the dev UI's runtime config, when the dev UI is actually there.
+   *
+   * The web assets are fetched at build time and are absent from a source
+   * checkout. Writing into a directory that holds no UI would only create a
+   * directory nobody asked for, so it is skipped — but a half-configured logo
+   * is still rejected, so a bad flag pair fails at start-up either way.
+   */
+  private async setupRuntimeConfig(): Promise<void> {
+    const options = {
+      urlPrefix: this.urlPrefix,
+      logoText: this.logoText,
+      logoImageUrl: this.logoImageUrl,
+    };
+    validateLogoOptions(options);
+
+    if (!(await isFolderExists(this.webAssetsDir))) {
+      this.logger.info(
+        `Web assets directory not found: ${this.webAssetsDir}. Skipping runtime config.`,
+      );
+      return;
+    }
+    await writeRuntimeConfig(this.webAssetsDir, options, this.logger);
   }
 
   private async initA2A() {
@@ -262,13 +363,32 @@ export class AdkApiServer {
       next();
     });
 
+    // Registered before every route so an unqualified path is already
+    // rewritten by the time Express matches it against `/apps/:appName/...`.
+    app.use(defaultAppRewriteMiddleware(this.defaultAppName));
+
+    this.extraPlugins = await loadExtraPlugins(
+      this.extraPluginNames,
+      this.logger,
+    );
+
     if (this.serveDebugUI) {
+      await this.setupRuntimeConfig();
+
+      // Before the static mount, which would otherwise answer this path with
+      // a 404 from the file system.
+      app.get('/dev-ui/config', (req: Request, res: Response) => {
+        res.json({
+          logo_text: this.logoText ?? null,
+          logo_image_url: this.logoImageUrl ?? null,
+        });
+      });
       app.get('/', (req: Request, res: Response) => {
         res.redirect('/dev-ui');
       });
       app.use(
         '/dev-ui',
-        express.static(path.join(__dirname, '../../browser'), {
+        express.static(this.webAssetsDir, {
           setHeaders: (res: Response, path: string) => {
             if (path.endsWith('.js')) {
               res.setHeader('Content-Type', 'text/javascript');
@@ -925,7 +1045,13 @@ export class AdkApiServer {
 
     // -------------------------- Run related endpoints ------------------------
     app.post('/run', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, stateDelta} = req.body;
+      const {userId, sessionId, newMessage, stateDelta} = req.body;
+      const appName = req.body.appName || this.defaultAppName;
+      if (!appName) {
+        res.status(400).json({error: MISSING_APP_NAME_MESSAGE});
+        return;
+      }
+
       const session = await this.sessionService.getSession({
         appName,
         userId,
@@ -1049,8 +1175,12 @@ export class AdkApiServer {
     });
 
     app.post('/run_sse', async (req: Request, res: Response) => {
-      const {appName, userId, sessionId, newMessage, streaming, stateDelta} =
-        req.body;
+      const {userId, sessionId, newMessage, streaming, stateDelta} = req.body;
+      const appName = req.body.appName || this.defaultAppName;
+      if (!appName) {
+        res.status(400).json({error: MISSING_APP_NAME_MESSAGE});
+        return;
+      }
 
       const session = await this.sessionService.getSession({
         appName,
@@ -1211,6 +1341,8 @@ export class AdkApiServer {
         app: isAppInstance ? agentOrApp : undefined,
         appName,
         agent,
+        // The Runner appends these to the app's own plugins.
+        plugins: this.extraPlugins,
         memoryService: this.memoryService,
         sessionService: this.sessionService,
         artifactService: this.artifactService,

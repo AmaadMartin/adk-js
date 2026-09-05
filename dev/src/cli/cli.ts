@@ -93,6 +93,21 @@ function getBoolean(option?: string | boolean): boolean {
 }
 
 /**
+ * Reads the repeatable --extra_plugins values. Commander gives a variadic
+ * option an array, while the shared options record is typed for the scalar
+ * flags, so the value arrives here untyped.
+ */
+function getExtraPlugins(option: unknown): string[] | undefined {
+  if (!Array.isArray(option)) {
+    return undefined;
+  }
+  const names = option.filter(
+    (name): name is string => typeof name === 'string' && name.length > 0,
+  );
+  return names.length > 0 ? names : undefined;
+}
+
+/**
  * Splits the comma-separated --allowed_hosts value into a list, dropping
  * empty/whitespace-only entries. An unset or empty option yields undefined
  * rather than [], so it composes with ServerOptions.allowedHosts?: string[]
@@ -179,6 +194,22 @@ const RELOAD_AGENTS_OPTION = new Option(
 ).default(false);
 const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
 AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
+const LOGO_TEXT_OPTION = new Option(
+  '--logo_text <string>',
+  'Optional. Text shown in the dev UI logo. Must be given together with --logo_image_url.',
+);
+const LOGO_IMAGE_URL_OPTION = new Option(
+  '--logo_image_url <string>',
+  'Optional. Image shown in the dev UI logo. Must be given together with --logo_text.',
+);
+const EXTRA_PLUGINS_OPTION = new Option(
+  '--extra_plugins <names...>',
+  'Optional. Plugins to add to every runner, each named as <module>.<export>. Repeatable.',
+);
+const URL_PREFIX_OPTION = new Option(
+  '--url_prefix <string>',
+  'Optional. Path the server is reached under behind a reverse proxy, e.g. /adk. Written to the dev UI runtime config as backendUrl.',
+);
 
 // Reusable deployment CLI option constants
 export const PROJECT_DEPLOY_OPTION = new Option(
@@ -251,6 +282,10 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(LOGO_TEXT_OPTION)
+    .addOption(LOGO_IMAGE_URL_OPTION)
+    .addOption(EXTRA_PLUGINS_OPTION)
+    .addOption(URL_PREFIX_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
@@ -271,6 +306,10 @@ export function createProgram(): Command {
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
           reloadAgents: getBoolean(options['reload_agents']),
+          logoText: options['logo_text'],
+          logoImageUrl: options['logo_image_url'],
+          extraPlugins: getExtraPlugins(options['extra_plugins']),
+          urlPrefix: options['url_prefix'],
         });
 
         await server.start();
@@ -299,6 +338,10 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(LOGO_TEXT_OPTION)
+    .addOption(LOGO_IMAGE_URL_OPTION)
+    .addOption(EXTRA_PLUGINS_OPTION)
+    .addOption(URL_PREFIX_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
@@ -319,6 +362,10 @@ export function createProgram(): Command {
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
           reloadAgents: getBoolean(options['reload_agents']),
+          logoText: options['logo_text'],
+          logoImageUrl: options['logo_image_url'],
+          extraPlugins: getExtraPlugins(options['extra_plugins']),
+          urlPrefix: options['url_prefix'],
         });
         await server.start();
       } catch (error) {
