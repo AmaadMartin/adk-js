@@ -166,6 +166,18 @@ describe('auto tracing helpers', () => {
     ]);
   });
 
+  it('drops a secret-named argument instead of rendering it', () => {
+    // `recordIoOnSpan` filters again, so only this assertion tells the two
+    // guards apart: the pair must never be rendered in the first place.
+    const pairs = nameValuePairs({
+      paramNames: ['user', 'token'],
+      args: ['alice', SENTINEL_TOKEN],
+      caps: CAPS,
+    });
+
+    expect(pairs).toEqual([{name: 'user', value: "'alice'"}]);
+  });
+
   it('test_name_value_pairs_caps_long_reprs', () => {
     const caps = createCaps({maxReprLen: 5});
 
