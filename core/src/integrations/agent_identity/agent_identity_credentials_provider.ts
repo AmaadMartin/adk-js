@@ -144,14 +144,9 @@ export function isConsentCompleted(context: Context): boolean {
   if (!context.functionCallId) {
     return false;
   }
-  const session = context.invocationContext.session;
-  if (!session) {
-    return false;
-  }
-
   const requestedFunctionCallIds = new Map<string, unknown>();
   const answeredCallIds = new Set<string>();
-  for (const event of session.events) {
+  for (const event of context.invocationContext.session.events) {
     for (const call of getFunctionCalls(event)) {
       if (call.name === REQUEST_CREDENTIAL_FUNCTION_CALL_NAME && call.id) {
         requestedFunctionCallIds.set(
