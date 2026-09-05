@@ -129,9 +129,17 @@ export class ReplaySequenceBarrier {
       this.gates.get(next)!.open();
     }
   }
-}
 
-/** The barrier key identifying one run of one node. */
-export function sequenceKey(nodeName: string, runId: string): string {
-  return `${nodeName}@${runId}`;
+  /**
+   * Releases every waiter, for a run shutting down.
+   *
+   * A replay divergence rejects one waiter and tears the workflow down, but
+   * the others are still parked on gates nothing will open now. Opening them
+   * lets their timeouts clear and lets the shutdown await them.
+   */
+  dispose(): void {
+    for (const gate of this.gates.values()) {
+      gate.open();
+    }
+  }
 }
