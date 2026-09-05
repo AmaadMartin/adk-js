@@ -19,9 +19,11 @@ the session service and the artifact service, because you build the `Runner`
 yourself. You also keep control of the Slack app, so any other Bolt listener,
 middleware or receiver you register still works.
 
-`@slack/bolt` is an optional peer dependency. `SlackRunner` imports it for its
-types only, so it adds nothing to your bundle until you install Bolt and pass
-an app.
+`SlackRunner` ships in `@google/adk-integrations` rather than `@google/adk`,
+because `@slack/bolt` requires the Express v5 typings while the core package
+pins v4. `@slack/bolt` is an optional peer dependency of that package, and
+`SlackRunner` imports it for its types only, so it adds nothing to your bundle
+until you install Bolt and pass an app.
 
 ## Get started
 

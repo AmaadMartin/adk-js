@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Receiver, ReceiverEvent} from '@slack/bolt';
-import {App} from '@slack/bolt';
+import type {Logger, Receiver, ReceiverEvent} from '@slack/bolt';
+import {App, LogLevel} from '@slack/bolt';
 import {createServer, IncomingMessage, Server, ServerResponse} from 'node:http';
 import {AddressInfo} from 'node:net';
 
@@ -18,6 +18,29 @@ export interface SlackApiCall {
   method: string;
   /** The arguments the client sent. */
   args: Record<string, unknown>;
+}
+
+/** A Bolt logger that writes nothing, so a tested failure path stays quiet. */
+class QuietLogger implements Logger {
+  private level: LogLevel = LogLevel.ERROR;
+
+  debug(): void {}
+
+  info(): void {}
+
+  warn(): void {}
+
+  error(): void {}
+
+  setLevel(level: LogLevel): void {
+    this.level = level;
+  }
+
+  getLevel(): LogLevel {
+    return this.level;
+  }
+
+  setName(): void {}
 }
 
 /** A Bolt receiver that never opens a socket. Tests deliver events directly. */
@@ -64,6 +87,8 @@ function parseArgs(contentType: string, body: string): Record<string, unknown> {
 export class FakeSlack {
   /** Every Web API call the workspace received, in order. */
   readonly calls: SlackApiCall[] = [];
+  /** Methods that must answer `{ok: false}` with the mapped error string. */
+  readonly failures = new Map<string, string>();
   private readonly receiver = new DirectReceiver();
   private readonly server: Server;
   private app?: App;
@@ -97,6 +122,7 @@ export class FakeSlack {
         botUserId: 'U00000000',
         tokenVerificationEnabled: false,
         receiver: this.receiver,
+        logger: new QuietLogger(),
         clientOptions: {
           slackApiUrl: `http://127.0.0.1:${port}/`,
           retryConfig: {retries: 0},
@@ -158,7 +184,14 @@ export class FakeSlack {
       method,
       args: parseArgs(request.headers['content-type'] ?? '', body),
     });
+    const failure = this.failures.get(method);
     response.writeHead(200, {'content-type': 'application/json'});
-    response.end(JSON.stringify({ok: true, channel: 'C67890', ts: POSTED_TS}));
+    response.end(
+      JSON.stringify(
+        failure
+          ? {ok: false, error: failure}
+          : {ok: true, channel: 'C67890', ts: POSTED_TS},
+      ),
+    );
   }
 }
