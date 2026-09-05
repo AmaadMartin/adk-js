@@ -14,9 +14,20 @@
  * it stays separate from the other Spanner tests.
  */
 
+import {SpannerAdminToolset} from '@google/adk/tools/spanner';
 import {describe, expect, it, vi} from 'vitest';
-import {withSpannerDatabase} from '../../../src/tools/spanner/client.js';
-import {testAuthClient} from './spanner_test_utils.js';
+import {
+  withDatabaseAdminClient,
+  withInstanceAdminClient,
+  withSpannerDatabase,
+} from '../../../src/tools/spanner/client.js';
+import {logger} from '../../../src/utils/logger.js';
+import {
+  errorOf,
+  runTool,
+  testAuthClient,
+  testCredentialsConfig,
+} from './spanner_test_utils.js';
 
 vi.mock('../../../src/utils/optional_peer.js', async (importOriginal) => {
   const actual =
@@ -32,6 +43,8 @@ vi.mock('../../../src/utils/optional_peer.js', async (importOriginal) => {
   return {...actual, loadOptionalPeer};
 });
 
+const ADMIN_TARGET = {projectId: 'p', authClient: testAuthClient()};
+
 describe('the Spanner client module without its peer dependency', () => {
   it('names @google-cloud/spanner and the install command', async () => {
     const promise = withSpannerDatabase(
@@ -46,5 +59,36 @@ describe('the Spanner client module without its peer dependency', () => {
 
     await expect(promise).rejects.toThrow(/SpannerToolset requires/);
     await expect(promise).rejects.toThrow(/npm install @google-cloud\/spanner/);
+  });
+
+  it('names the install command for the instance admin endpoint too', async () => {
+    const promise = withInstanceAdminClient(
+      ADMIN_TARGET,
+      async () => undefined,
+    );
+
+    await expect(promise).rejects.toThrow(/npm install @google-cloud\/spanner/);
+  });
+
+  it('names the install command for the database admin endpoint too', async () => {
+    const promise = withDatabaseAdminClient(
+      ADMIN_TARGET,
+      async () => undefined,
+    );
+
+    await expect(promise).rejects.toThrow(/npm install @google-cloud\/spanner/);
+  });
+
+  it('reports the missing peer to the model as an error result', async () => {
+    vi.spyOn(logger, 'error').mockImplementation(() => {});
+    const toolset = new SpannerAdminToolset({
+      credentialsConfig: testCredentialsConfig(),
+    });
+
+    const result = await runTool(toolset, 'spanner_list_instances', {
+      project_id: 'p',
+    });
+
+    expect(errorOf(result)).toContain('npm install @google-cloud/spanner');
   });
 });

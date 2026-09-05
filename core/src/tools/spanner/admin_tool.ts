@@ -8,7 +8,7 @@ import type {protos} from '@google-cloud/spanner';
 import {z} from 'zod';
 import {waitForOperation} from './client.js';
 import {SpannerAdminToolDefinition} from './spanner_tool.js';
-import {validateIdentifier} from './sql_validation.js';
+import {validateDatabaseId} from './sql_validation.js';
 
 /** A replica type as the wire carries it: its number, or its name. */
 type ReplicaTypeField =
@@ -75,7 +75,8 @@ function projectOf(args: z.infer<typeof projectParams>): string {
 
 /** The resource id of a Spanner resource name, its last path segment. */
 function resourceId(name: string | null | undefined): string {
-  return (name ?? '').split('/').pop() ?? '';
+  const path = name ?? '';
+  return path.slice(path.lastIndexOf('/') + 1);
 }
 
 /** Collects the resource ids of every resource a listing call pages through. */
@@ -250,7 +251,7 @@ export const createDatabaseTool: SpannerAdminToolDefinition<
   // `database_id` is quoted into the CREATE DATABASE statement below, so a
   // backtick in it would escape the quoting. adk-python does not check this.
   validate(args) {
-    validateIdentifier(args.database_id, 'database_id');
+    validateDatabaseId(args.database_id, 'database_id');
   },
   async run(client, args) {
     const [operation] = await client.createDatabase({
