@@ -172,7 +172,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
   }
 
-  private async init(context?: InvocationContext) {
+  private async init(context: InvocationContext) {
     if (this.isInitialized) {
       return;
     }
@@ -200,7 +200,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
    */
   private async resolveCard(
     source: AgentCard | string,
-    context?: InvocationContext,
+    context: InvocationContext,
   ): Promise<AgentCard> {
     const headers =
       typeof source === 'string' && isRemoteCardSource(source)
@@ -350,9 +350,12 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       if (intercepted.params.requestMetadata) {
         params.metadata = intercepted.params.requestMetadata;
       }
-      const options: RequestOptions | undefined = intercepted.params.headers
-        ? {serviceParameters: intercepted.params.headers}
-        : undefined;
+      // Spread rather than passed positionally: with no interceptor headers
+      // the send keeps its single-argument shape, so nothing downstream sees a
+      // trailing `undefined` it did not see before.
+      const sendOptions: [RequestOptions] | [] = intercepted.params.headers
+        ? [{serviceParameters: intercepted.params.headers}]
+        : [];
 
       const converters: A2AEventConverters = {
         message: this.a2aConfig.a2aMessageConverter,
@@ -364,7 +367,10 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
 
       const useStreaming = card ? card.capabilities?.streaming !== false : true;
       if (useStreaming) {
-        for await (const chunk of client.sendMessageStream(params, options)) {
+        for await (const chunk of client.sendMessageStream(
+          params,
+          ...sendOptions,
+        )) {
           if (this.a2aConfig.afterRequestCallbacks) {
             for (const callback of this.a2aConfig.afterRequestCallbacks) {
               await callback(context, chunk);
@@ -392,7 +398,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           }
         }
       } else {
-        const result = await client.sendMessage(params, options);
+        const result = await client.sendMessage(params, ...sendOptions);
         if (this.a2aConfig.afterRequestCallbacks) {
           for (const callback of this.a2aConfig.afterRequestCallbacks) {
             await callback(context, result);
