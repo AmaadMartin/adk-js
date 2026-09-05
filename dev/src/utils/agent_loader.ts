@@ -224,6 +224,11 @@ export class AgentFile {
                 'lightningcss',
                 'jiti',
                 'jiti/package.json',
+                // BigtableToolset's optional peer. It resolves its protos with
+                // `require.resolve`, which does not survive bundling, and
+                // inlining a gRPC client costs every agent that never touches
+                // Bigtable.
+                '@google-cloud/bigtable',
               ],
             }
           : {}),
