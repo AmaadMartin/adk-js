@@ -142,7 +142,9 @@ describe('ToolSpecMockStrategy', () => {
 
   it('test_existing_state_entries_are_kept_when_a_new_one_is_added', async () => {
     const strategy = makeStrategy('{"ticket_id": "T-7"}');
-    const stateStore = {ticket_id: {'T-6': {ticket_id: 'T-6'}}};
+    const stateStore: Record<string, Record<string, unknown>> = {
+      ticket_id: {'T-6': {ticket_id: 'T-6'}},
+    };
 
     const result = await mock(
       strategy,
