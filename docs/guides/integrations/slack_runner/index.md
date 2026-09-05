@@ -31,24 +31,33 @@ Install the optional peer dependency:
 npm install @google/adk-integrations @slack/bolt
 ```
 
-Create the session, then start the runner:
+Build the runner, create a session for the conversation, and open the connection:
 
 ```typescript
+import {InMemorySessionService, LlmAgent, Runner} from '@google/adk';
+import {SlackRunner} from '@google/adk-integrations';
 import {App} from '@slack/bolt';
-import {
-  InMemorySessionService,
-  LlmAgent,
-  Runner,
-  SlackRunner,
-} from '@google/adk';
 
 const agent = new LlmAgent({name: 'slack_agent', model: 'gemini-2.5-flash'});
 const sessionService = new InMemorySessionService();
-
 const runner = new Runner({appName: 'slack_agent', agent, sessionService});
-const slackApp = new App({token: process.env.SLACK_BOT_TOKEN});
-const slackRunner = new SlackRunner({runner, slackApp});
 
+// Bolt builds its default HTTP receiver during construction and rejects a
+// missing signing secret, even though Socket Mode never uses one.
+const slackApp = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+});
+
+// SlackRunner does not create sessions, so create one for each conversation
+// you want answered, keyed the way the runner keys it.
+await sessionService.getOrCreateSession({
+  appName: 'slack_agent',
+  userId: 'U01234567',
+  sessionId: 'C01234567-1700000000.123456',
+});
+
+const slackRunner = new SlackRunner({runner, slackApp});
 await slackRunner.start(process.env.SLACK_APP_TOKEN!);
 ```
 
