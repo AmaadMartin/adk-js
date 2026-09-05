@@ -20,6 +20,7 @@ import {
 } from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 import {
+  chooseApiEndpoint,
   clientCertDispatcher,
   clientCertsToPresent,
   defaultClientCertSource,
@@ -219,6 +220,65 @@ function providerFails(error: unknown): void {
   );
 }
 
+const DEFAULT_ENDPOINT = 'https://cloudapiregistry.googleapis.com';
+const MTLS_ENDPOINT = 'https://cloudapiregistry.mtls.googleapis.com';
+
+describe('chooseApiEndpoint', () => {
+  const certs = {cert: CERT_PEM, key: KEY_PEM};
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('selects the mTLS endpoint under always, with no certificate', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'ALWAYS');
+    expect(chooseApiEndpoint(undefined, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      MTLS_ENDPOINT,
+    );
+  });
+
+  it('selects the default endpoint under never, even with a certificate', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'never');
+    expect(chooseApiEndpoint(certs, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      DEFAULT_ENDPOINT,
+    );
+  });
+
+  it('selects the mTLS endpoint under auto when a certificate is available', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
+    expect(chooseApiEndpoint(certs, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      MTLS_ENDPOINT,
+    );
+  });
+
+  it('selects the default endpoint under auto with no certificate', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
+    expect(chooseApiEndpoint(undefined, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      DEFAULT_ENDPOINT,
+    );
+  });
+
+  it('reads an unset setting as auto', () => {
+    expect(chooseApiEndpoint(certs, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      MTLS_ENDPOINT,
+    );
+    expect(chooseApiEndpoint(undefined, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      DEFAULT_ENDPOINT,
+    );
+  });
+
+  it('reads an unrecognised setting as auto', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'nonsense');
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    expect(chooseApiEndpoint(certs, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      MTLS_ENDPOINT,
+    );
+    expect(chooseApiEndpoint(undefined, DEFAULT_ENDPOINT, MTLS_ENDPOINT)).toBe(
+      DEFAULT_ENDPOINT,
+    );
+  });
+});
+
 describe('useClientCertEffective', () => {
   const original = process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'];
 
@@ -404,7 +464,7 @@ describe('loadDefaultClientCerts', () => {
     expect(execFileMock).toHaveBeenCalledWith(
       '/opt/secure-connect/cert_provider',
       ['--json', '--with_passphrase'],
-      {encoding: 'utf-8'},
+      {encoding: 'utf-8', timeout: 30_000},
       expect.any(Function),
     );
   });
@@ -421,7 +481,7 @@ describe('loadDefaultClientCerts', () => {
     expect(execFileMock).toHaveBeenCalledWith(
       '/opt/secure-connect/cert_provider',
       ['--json', '--with_passphrase'],
-      {encoding: 'utf-8'},
+      {encoding: 'utf-8', timeout: 30_000},
       expect.any(Function),
     );
   });

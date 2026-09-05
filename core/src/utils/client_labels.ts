@@ -93,6 +93,9 @@ export function getClientLabels(): string[] {
 /**
  * Returns the headers that identify this client to Google APIs, built from
  * {@link getClientLabels}.
+ *
+ * Mirrors adk-python `utils/_google_client_headers.py`, so server-side usage
+ * data can separate ADK calls from any other caller of the same API.
  */
 export function getTrackingHeaders(): Record<string, string> {
   const headerValue = getClientLabels().join(' ');

@@ -187,6 +187,7 @@ export type {
 } from './tools/toolbox_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+export * from './integrations/api_registry/api_registry.js';
 // Exported here rather than from `common.ts`, which also feeds the web build:
 // the Firestore client is Node-only.
 export * from './integrations/firestore/firestore_session_service.js';

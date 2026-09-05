@@ -214,6 +214,9 @@ const MTLS_GOOGLEAPIS_SUFFIX = '.mtls.googleapis.com';
 /** The flag that makes a SecureConnect provider print the key passphrase. */
 const WITH_PASSPHRASE_FLAG = '--with_passphrase';
 
+/** How long the SecureConnect certificate provider may run. */
+const CERT_PROVIDER_TIMEOUT_MS = 30_000;
+
 /** The metadata key that names the certificate provider command. */
 const CERT_PROVIDER_COMMAND_KEY = 'cert_provider_command';
 
@@ -339,6 +342,7 @@ async function runCertProvider(
   try {
     const {stdout} = await execFileAsync(executable, args, {
       encoding: 'utf-8',
+      timeout: CERT_PROVIDER_TIMEOUT_MS,
     });
     return stdout;
   } catch (error: unknown) {
