@@ -512,11 +512,19 @@ function genericToolDefinitions(tool: Tool): GenericToolDefinition[] {
         value !== undefined,
     )
     .map(([key]) => [key, true] as const);
-  const snakeCased = toSnakeCase(Object.fromEntries(presentKeys));
-  if (!isRecord(snakeCased)) {
-    return [];
-  }
-  return Object.keys(snakeCased).map((name) => ({name, type: name}));
+  return snakeCaseKeys(Object.fromEntries(presentKeys)).map((name) => ({
+    name,
+    type: name,
+  }));
+}
+
+/**
+ * The own keys of `value`, converted to `snake_case`. `toSnakeCase` converts
+ * an object's keys and is typed to return `unknown`; `Object.assign` recovers
+ * an object type from it without a cast.
+ */
+function snakeCaseKeys(value: object): string[] {
+  return Object.keys(Object.assign({}, toSnakeCase(value)));
 }
 
 /** Whether `value` carries at least one field of a `@google/genai` `Tool`. */
