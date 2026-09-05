@@ -19,8 +19,6 @@ import {LlmRequest} from '../models/llm_request.js';
 export interface GenerateJsonTextParams {
   /** The model to send the prompt to. */
   llm: BaseLlm;
-  /** The model name recorded on the request. */
-  model: string;
   /** The generation config to send, merged with a JSON response mime type. */
   config: GenerateContentConfig;
   /** The single user prompt to send. */
@@ -37,17 +35,16 @@ const TRAILING_CODE_FENCE = /\n```\n?$/;
  * Sends `prompt` as a single user turn asking for JSON, and concatenates the
  * text of every part of every streamed response.
  *
- * @param params The model, model name, generation config and prompt.
+ * @param params The model, generation config and prompt.
  * @returns The concatenated response text.
  */
 export async function generateJsonText({
   llm,
-  model,
   config,
   prompt,
 }: GenerateJsonTextParams): Promise<string> {
   const request: LlmRequest = {
-    model,
+    model: llm.model,
     contents: [{role: 'user', parts: [{text: prompt}]}],
     config: {...config, responseMimeType: 'application/json'},
     liveConnectConfig: {},

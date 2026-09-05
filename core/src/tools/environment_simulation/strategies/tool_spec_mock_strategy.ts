@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig} from '@google/genai';
+import {FunctionDeclaration, GenerateContentConfig} from '@google/genai';
 
 import {BaseLlm} from '../../../models/base_llm.js';
 import {LLMRegistry} from '../../../models/registry.js';
@@ -18,44 +18,39 @@ import {
 import {BaseMockStrategy, MockRequest} from './base.js';
 import {updateStateStore} from './state_store.js';
 
-/** Substitutions for {@link buildToolSpecMockPrompt}. */
-interface ToolSpecMockPromptParams {
-  /** Environment data to ground the mock in, when the caller has some. */
-  environmentData?: string;
-  /** A prior run's trace to keep the mock consistent with. */
-  tracing?: string;
-  /** The connection map as JSON, or `"''"` when there is none. */
-  toolConnectionMapJson: string;
-  /** The store of simulated entities, as JSON. */
-  stateStoreJson: string;
-  /** The name of the tool being simulated. */
-  toolName: string;
-  /** The description of the tool being simulated. */
-  toolDescription: string;
-  /** The tool's function declaration, as JSON. */
-  toolSchemaJson: string;
-  /** The arguments the tool was called with, as JSON. */
-  toolArgumentsJson: string;
-}
-
-function environmentDataSnippet(environmentData?: string): string {
-  if (!environmentData) {
-    return '';
-  }
+/**
+ * Builds the prompt asking a model to invent a realistic JSON response for one
+ * tool call, consistent with the simulation state it is given.
+ *
+ * @param request The tool, its arguments, and the simulation state.
+ * @param declaration The declaration of the tool being simulated.
+ */
+function buildToolSpecMockPrompt(
+  request: MockRequest,
+  declaration: FunctionDeclaration,
+): string {
+  const {tool, args, toolConnectionMap, stateStore, environmentData, tracing} =
+    request;
   return `
+  You are a stateful tool simulator. Your task is to generate a
+  realistic JSON response for a tool call, maintaining consistency based
+  on a shared state.
+
+  ${
+    environmentData
+      ? `
         Here is relevant environment data (e.g., database snippet, context information):
         <environment_data>
         ${environmentData}
         </environment_data>
         Use this information to generate more realistic responses.
-      `;
-}
-
-function tracingSnippet(tracing?: string): string {
-  if (!tracing) {
-    return '';
+      `
+      : ''
   }
-  return `
+
+  ${
+    tracing
+      ? `
         Here is a tracing history from a prior agent run (e.g., recorded tool
         calls and responses):
         <tracing>
@@ -63,43 +58,21 @@ function tracingSnippet(tracing?: string): string {
         </tracing>
         Use this history to make your mock responses consistent with observed
         tool behavior patterns.
-      `;
-}
-
-/**
- * Builds the prompt asking a model to invent a realistic JSON response for one
- * tool call, consistent with the simulation state it is given.
- */
-function buildToolSpecMockPrompt({
-  environmentData,
-  tracing,
-  toolConnectionMapJson,
-  stateStoreJson,
-  toolName,
-  toolDescription,
-  toolSchemaJson,
-  toolArgumentsJson,
-}: ToolSpecMockPromptParams): string {
-  return `
-  You are a stateful tool simulator. Your task is to generate a
-  realistic JSON response for a tool call, maintaining consistency based
-  on a shared state.
-
-  ${environmentDataSnippet(environmentData)}
-
-  ${tracingSnippet(tracing)}
+      `
+      : ''
+  }
 
   Here is the map of how tools connect via stateful parameters:
-  ${toolConnectionMapJson}
+  ${toolConnectionMap ? JSON.stringify(toolConnectionMap, null, 2) : "''"}
 
   Here is the current state of all stateful parameters:
-  ${stateStoreJson}
+  ${JSON.stringify(stateStore, null, 2)}
 
   You are now simulating the following tool call:
-  Tool Name: ${toolName}
-  Tool Description: ${toolDescription}
-  Tool Schema: ${toolSchemaJson}
-  Tool Arguments: ${toolArgumentsJson}
+  Tool Name: ${tool.name}
+  Tool Description: ${tool.description}
+  Tool Schema: ${JSON.stringify(declaration, null, 2)}
+  Tool Arguments: ${JSON.stringify(args, null, 2)}
 
   Your instructions:
   1.  Analyze the tool call. Is it a "creating" or "consuming" tool
@@ -162,7 +135,7 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
    *     JSON object.
    */
   async mock(request: MockRequest): Promise<Record<string, unknown>> {
-    const {tool, args, toolConnectionMap, stateStore} = request;
+    const {tool, toolConnectionMap, stateStore} = request;
     const declaration = tool._getDeclaration();
     if (!declaration) {
       return {
@@ -171,24 +144,10 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
       };
     }
 
-    const prompt = buildToolSpecMockPrompt({
-      environmentData: request.environmentData,
-      tracing: request.tracing,
-      toolConnectionMapJson: toolConnectionMap
-        ? JSON.stringify(toolConnectionMap, null, 2)
-        : "''",
-      stateStoreJson: JSON.stringify(stateStore, null, 2),
-      toolName: tool.name,
-      toolDescription: tool.description,
-      toolSchemaJson: JSON.stringify(declaration, null, 2),
-      toolArgumentsJson: JSON.stringify(args, null, 2),
-    });
-
     const responseText = await generateJsonText({
       llm: (this.llm ??= LLMRegistry.newLlm(this.llmName)),
-      model: this.llmName,
       config: this.llmConfig,
-      prompt,
+      prompt: buildToolSpecMockPrompt(request, declaration),
     });
 
     const parsed = parseFencedJson(responseText);
@@ -207,12 +166,7 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
       };
     }
 
-    updateStateStore({
-      toolName: tool.name,
-      mockResponse: parsed,
-      stateStore,
-      toolConnectionMap,
-    });
+    updateStateStore(tool.name, parsed, stateStore, toolConnectionMap);
     return parsed;
   }
 }

@@ -11,7 +11,12 @@
  * `tool_spec_mock_strategy_test.ts`.
  */
 
-import {BaseTool, ToolConnectionMap, ToolSpecMockStrategy} from '@google/adk';
+import {
+  BaseTool,
+  LLMRegistry,
+  ToolConnectionMap,
+  ToolSpecMockStrategy,
+} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -311,7 +316,17 @@ describe('ToolSpecMockStrategy own behaviour', () => {
   });
 
   describe('the request it sends', () => {
-    it('asks the configured model for JSON, keeping the caller config', async () => {
+    it('resolves the configured model name through the registry', async () => {
+      const llm: RecordingLlm = stubRegistryWithText(['{}']);
+      const strategy = new ToolSpecMockStrategy('fake-model', {});
+
+      await mock(strategy);
+
+      expect(LLMRegistry.newLlm).toHaveBeenCalledWith('fake-model');
+      expect(llm.requests[0].model).toBe(llm.model);
+    });
+
+    it('asks for JSON, keeping the caller config', async () => {
       const llm: RecordingLlm = stubRegistryWithText(['{}']);
       const strategy = new ToolSpecMockStrategy('fake-model', {
         temperature: 0.5,
@@ -319,11 +334,20 @@ describe('ToolSpecMockStrategy own behaviour', () => {
 
       await mock(strategy);
 
-      expect(llm.requests[0].model).toBe('fake-model');
       expect(llm.requests[0].config).toEqual({
         temperature: 0.5,
         responseMimeType: 'application/json',
       });
+    });
+
+    it('resolves the model once, however many calls it mocks', async () => {
+      stubRegistryWithText(['{}'], ['{}']);
+      const strategy = new ToolSpecMockStrategy('fake-model', {});
+
+      await mock(strategy);
+      await mock(strategy);
+
+      expect(LLMRegistry.newLlm).toHaveBeenCalledTimes(1);
     });
   });
 

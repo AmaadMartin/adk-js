@@ -7,18 +7,6 @@
 import {isJsonObject} from '../../../utils/llm_utils.js';
 import {ToolConnectionMap} from '../tool_connection_map.js';
 
-/** Parameters for {@link updateStateStore}. */
-export interface UpdateStateStoreParams {
-  /** The name of the tool whose response was simulated. */
-  toolName: string;
-  /** The simulated response. */
-  mockResponse: Record<string, unknown>;
-  /** The store of simulated entities, mutated in place. */
-  stateStore: Record<string, Record<string, unknown>>;
-  /** The stateful connections between the agent's tools, when analyzed. */
-  toolConnectionMap?: ToolConnectionMap;
-}
-
 /**
  * Defines an own data property on `target`.
  *
@@ -80,13 +68,18 @@ function findValueByKey(data: unknown, targetKey: string): unknown {
  * The entry is keyed by the parameter's value found anywhere in the response.
  * A parameter the tool does not create, or one the response does not carry, is
  * left alone.
+ *
+ * @param toolName The name of the tool whose response was simulated.
+ * @param mockResponse The simulated response.
+ * @param stateStore The store of simulated entities, mutated in place.
+ * @param toolConnectionMap The stateful connections between the tools.
  */
-export function updateStateStore({
-  toolName,
-  mockResponse,
-  stateStore,
-  toolConnectionMap,
-}: UpdateStateStoreParams): void {
+export function updateStateStore(
+  toolName: string,
+  mockResponse: Record<string, unknown>,
+  stateStore: Record<string, Record<string, unknown>>,
+  toolConnectionMap?: ToolConnectionMap,
+): void {
   for (const parameter of toolConnectionMap?.statefulParameters ?? []) {
     if (!parameter.creatingTools.includes(toolName)) {
       continue;

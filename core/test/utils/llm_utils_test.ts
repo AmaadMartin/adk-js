@@ -42,7 +42,6 @@ describe('generateJsonText', () => {
 
     const text = await generateJsonText({
       llm,
-      model: 'fake-model',
       config: {},
       prompt: 'give me json',
     });
@@ -58,7 +57,6 @@ describe('generateJsonText', () => {
 
     const text = await generateJsonText({
       llm,
-      model: 'fake-model',
       config: {},
       prompt: 'give me json',
     });
@@ -81,7 +79,6 @@ describe('generateJsonText', () => {
 
     const text = await generateJsonText({
       llm,
-      model: 'fake-model',
       config: {},
       prompt: 'give me json',
     });
@@ -89,17 +86,16 @@ describe('generateJsonText', () => {
     expect(text).toBe('{}');
   });
 
-  it('sends one user turn, the model name and a JSON response type', async () => {
+  it("sends one user turn, the model's own name and a JSON response type", async () => {
     const llm = new ReplayLlm([]);
 
     await generateJsonText({
       llm,
-      model: 'fake-model',
       config: {temperature: 0.2},
       prompt: 'give me json',
     });
 
-    expect(llm.request?.model).toBe('fake-model');
+    expect(llm.request?.model).toBe('replay-llm');
     expect(llm.request?.contents).toEqual([
       {role: 'user', parts: [{text: 'give me json'}]},
     ]);

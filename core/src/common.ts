@@ -297,10 +297,6 @@ export {
 } from './tools/environment_simulation/strategies/base.js';
 export type {MockRequest} from './tools/environment_simulation/strategies/base.js';
 export {ToolSpecMockStrategy} from './tools/environment_simulation/strategies/tool_spec_mock_strategy.js';
-export {
-  StatefulParameterSchema,
-  ToolConnectionMapSchema,
-} from './tools/environment_simulation/tool_connection_map.js';
 export type {
   StatefulParameter,
   ToolConnectionMap,
