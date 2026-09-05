@@ -11,6 +11,7 @@ import {SequentialAgent} from '../../src/agents/sequential_agent.js';
 import {
   deprecated,
   resetDeprecationWarnings,
+  warnDeprecatedOnce,
 } from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -57,6 +58,47 @@ describe('deprecated', () => {
     }
 
     expect(new Adder(2, 3).total).toBe(5);
+  });
+});
+
+describe('warnDeprecatedOnce', () => {
+  beforeEach(() => {
+    resetDeprecationWarnings();
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetDeprecationWarnings();
+  });
+
+  it('warns once per key, however often the caller reports it', () => {
+    warnDeprecatedOnce('someFunction', 'someFunction is deprecated.');
+    warnDeprecatedOnce('someFunction', 'someFunction is deprecated.');
+    warnDeprecatedOnce('otherFunction', 'otherFunction is deprecated.');
+
+    expect(vi.mocked(logger.warn).mock.calls).toEqual([
+      ['someFunction is deprecated.'],
+      ['otherFunction is deprecated.'],
+    ]);
+  });
+
+  it('warns again once the registry is reset', () => {
+    warnDeprecatedOnce('someFunction', 'someFunction is deprecated.');
+    resetDeprecationWarnings();
+    warnDeprecatedOnce('someFunction', 'someFunction is deprecated.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares its registry with the class decorator', () => {
+    @deprecated('Shared is deprecated.')
+    class Shared {}
+
+    new Shared();
+    warnDeprecatedOnce('Shared', 'Shared is deprecated.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 });
 

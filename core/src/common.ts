@@ -47,6 +47,11 @@ export type {
 } from './agents/llm_agent.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig} from './agents/loop_agent.js';
+export {
+  loopAgentYamlConfigSchema,
+  parseLoopAgentYamlConfig,
+} from './agents/loop_agent_config.js';
+export type {LoopAgentYamlConfig} from './agents/loop_agent_config.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
 export {AgentTransferLlmRequestProcessor} from './agents/processors/agent_transfer_llm_request_processor.js';
 export {

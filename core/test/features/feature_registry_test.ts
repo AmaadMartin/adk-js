@@ -39,6 +39,13 @@ describe('FeatureRegistry', () => {
     expect(config?.defaultOn).toBe(false);
   });
 
+  it('should get correct config for AGENT_CONFIG', () => {
+    const config = getFeatureConfig(FeatureName.AGENT_CONFIG);
+    expect(config).toBeDefined();
+    expect(config?.stage).toBe(FeatureStage.EXPERIMENTAL);
+    expect(config?.defaultOn).toBe(true);
+  });
+
   it('should return defaultOn value when no overrides or env vars', () => {
     delete process.env.ADK_ENABLE_PROGRESSIVE_SSE_STREAMING;
     delete process.env.ADK_DISABLE_PROGRESSIVE_SSE_STREAMING;
