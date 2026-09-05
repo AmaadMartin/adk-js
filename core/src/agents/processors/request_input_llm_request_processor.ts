@@ -114,6 +114,10 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
       resumeInputsDict[id] = resumeInputs;
     }
 
+    // A live run installs its own queue on this context for the whole run, so
+    // the one substituted for these re-runs is put back rather than cleared:
+    // clearing it would leave every later tool in that run without a queue.
+    const outerEventQueue = invocationContext.eventQueue;
     const eventQueue = new AsyncQueue<Event>();
     invocationContext.eventQueue = eventQueue;
     const task = (async (): Promise<Event | null> => {
@@ -135,7 +139,7 @@ export class RequestInputLlmRequestProcessor extends BaseLlmRequestProcessor {
       yield queuedEvent;
     }
     const functionResponseEvent = await task;
-    invocationContext.eventQueue = undefined;
+    invocationContext.eventQueue = outerEventQueue;
     if (functionResponseEvent) {
       yield functionResponseEvent;
     }
