@@ -19,7 +19,7 @@ import {LLMRegistry} from '../../models/registry.js';
 export class SimulationModel {
   private readonly model: string;
   private readonly modelConfig: GenerateContentConfig;
-  private readonly llm: BaseLlm;
+  private llm?: BaseLlm;
 
   /**
    * @param model The model to call.
@@ -28,7 +28,22 @@ export class SimulationModel {
   constructor(model: string, modelConfig: GenerateContentConfig) {
     this.model = model;
     this.modelConfig = modelConfig;
-    this.llm = LLMRegistry.newLlm(model);
+  }
+
+  /**
+   * Resolves the model on first use, and reuses it after that.
+   *
+   * Resolution is deferred because `Gemini` demands an API key in its
+   * constructor. A simulation that only injects canned responses never calls a
+   * model, and must not need a credential to be built.
+   *
+   * @returns The resolved model.
+   */
+  private resolveLlm(): BaseLlm {
+    if (!this.llm) {
+      this.llm = LLMRegistry.newLlm(this.model);
+    }
+    return this.llm;
   }
 
   /**
@@ -51,7 +66,9 @@ export class SimulationModel {
     };
 
     let text = '';
-    for await (const response of this.llm.generateContentAsync(request)) {
+    for await (const response of this.resolveLlm().generateContentAsync(
+      request,
+    )) {
       for (const part of response.content?.parts ?? []) {
         if (part.text) {
           text += part.text;

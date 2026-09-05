@@ -33,19 +33,33 @@ import {FunctionDeclaration} from '@google/genai';
 /** The model name the tests point `simulationModel` at. */
 export const FAKE_SIMULATION_MODEL = 'env-sim-fake-model';
 
-let scriptedChunks: string[] = [];
+let scriptedCalls: string[][] = [];
+let callIndex = 0;
 
-/** Every request the fake model has been sent since the last `scriptModel`. */
+/** Every request the fake model has been sent since the last script call. */
 export const capturedRequests: LlmRequest[] = [];
 
 /**
- * Scripts what the fake model streams back on its next calls, and forgets the
+ * Scripts what the fake model streams back on every call, and forgets the
  * requests captured so far.
  *
- * @param chunks The text of each streamed response, in order.
+ * @param chunks The text of each streamed chunk of one response, in order.
  */
 export function scriptModel(...chunks: string[]): void {
-  scriptedChunks = chunks;
+  scriptModelCalls(chunks);
+}
+
+/**
+ * Scripts one response per model call, for a test that drives several.
+ *
+ * The last entry answers every further call, so a test only lists the calls it
+ * cares about.
+ *
+ * @param calls The chunks of each call's response, in call order.
+ */
+export function scriptModelCalls(...calls: string[][]): void {
+  scriptedCalls = calls;
+  callIndex = 0;
   capturedRequests.length = 0;
 }
 
@@ -56,7 +70,10 @@ class FakeSimulationLlm extends BaseLlm {
     llmRequest: LlmRequest,
   ): AsyncGenerator<LlmResponse, void> {
     capturedRequests.push(llmRequest);
-    for (const chunk of scriptedChunks) {
+    const chunks =
+      scriptedCalls[Math.min(callIndex, scriptedCalls.length - 1)] ?? [];
+    callIndex++;
+    for (const chunk of chunks) {
       yield {content: {role: 'model', parts: [{text: chunk}]}};
     }
   }
@@ -67,6 +84,25 @@ class FakeSimulationLlm extends BaseLlm {
 }
 
 LLMRegistry.register(FakeSimulationLlm);
+
+/** The model name for a model that answers without any content. */
+export const CONTENTLESS_MODEL = 'env-sim-contentless-model';
+
+/** A model whose responses carry no content, as a blocked candidate does. */
+class ContentlessLlm extends BaseLlm {
+  static override readonly supportedModels = [CONTENTLESS_MODEL];
+
+  async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {
+    yield {};
+    yield {content: {role: 'model'}};
+  }
+
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('The contentless model has no live connection.');
+  }
+}
+
+LLMRegistry.register(ContentlessLlm);
 
 /** A tool that fails the test if the framework ever actually runs it. */
 export class UncallableTool extends BaseTool {
