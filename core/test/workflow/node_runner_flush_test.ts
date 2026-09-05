@@ -76,6 +76,35 @@ describe('node runner — messageAsOutput', () => {
     expect(child.outputDelegated).toBe(true);
     expect(events.filter((e) => e.output !== undefined)).toHaveLength(1);
   });
+
+  it('still announces the output of the attempt after a delegated one', async () => {
+    let attempts = 0;
+    const flaky = new GenNode(
+      'flaky',
+      async function* () {
+        attempts++;
+        if (attempts === 1) {
+          yield createEvent({
+            output: 'attempt-1',
+            nodeInfo: {messageAsOutput: true},
+          });
+          throw new Error('transient');
+        }
+        yield 'attempt-2';
+      },
+      {retryConfig: {maxAttempts: 2, initialDelay: 0, jitter: 0}},
+    );
+
+    const {child, events} = await runChildNode(flaky);
+
+    // The delegation the failed attempt claimed must not silence the attempt
+    // that succeeded: its output has to reach an event, or a resumed run
+    // cannot tell the node ever produced one.
+    expect(child.output).toBe('attempt-2');
+    expect(child.outputDelegated).toBe(false);
+    expect(events.filter((e) => e.output !== undefined).map((e) => e.output)) //
+      .toEqual(['attempt-1', 'attempt-2']);
+  });
 });
 
 describe('node runner — decisions from native events only', () => {

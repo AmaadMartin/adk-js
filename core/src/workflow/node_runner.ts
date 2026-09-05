@@ -447,13 +447,19 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
 
 /**
  * Reset per-attempt state so a retry starts clean. This covers everything a
- * failed attempt can leave behind on the child context: its output/route (and
- * whether either reached an event), interrupt ids, AND its state and artifact
- * writes. A node that calls `ctx.state.set(...)`
+ * failed attempt can leave behind on the child context: its output/route, who
+ * has already reported them, interrupt ids, AND its state and artifact writes.
+ * A node that calls `ctx.state.set(...)`
  * and then throws would otherwise leave the failed attempt's writes in the
  * delta, to be committed alongside the successful attempt's. `NodeContext`
  * builds its `State` over this exact `stateDelta` object once (in its
  * constructor), so we clear the keys in place rather than reassigning it.
+ *
+ * The reporting flags matter as much as the values. Every one of them is raised
+ * during an attempt — by an event this node emitted, or by a child it ran with
+ * `useAsOutput` — so a flag left standing describes work the failed attempt
+ * did, and would suppress the successful attempt's own output event. adk-python
+ * has no such flag to clear because it builds a fresh context per attempt.
  *
  * Note: events already pushed through the channel on a failed attempt are
  * downstream and cannot be retracted, so a node that emits N events and
@@ -468,6 +474,7 @@ function resetState(childNodeContext: NodeContext): void {
   childNodeContext.reportedError = undefined;
   childNodeContext.outputEmitted = false;
   childNodeContext.routeEmitted = false;
+  childNodeContext.outputDelegated = false;
   clearInPlace(childNodeContext.actions.stateDelta);
   clearInPlace(childNodeContext.actions.artifactDelta);
 }
