@@ -62,8 +62,7 @@ const TIMEOUT_ERROR_CODES: ReadonlySet<string> = new Set([
 /**
  * Narrows `value` to an indexable record, or returns `undefined` when `value`
  * is null or not a non-null object. Used to safely inspect duck-typed error
- * shapes without
- * resorting to `any`.
+ * shapes, and parsed JSON, without resorting to `any`.
  */
 export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'

@@ -854,6 +854,18 @@ export type {
 } from './tools/computer_use/computer_use_toolset.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
+  DiscoveryEngineSearchTool,
+  SearchResultMode,
+} from './tools/discovery_engine_search_tool.js';
+export type {
+  BaseDiscoveryEngineSearchToolParams,
+  DiscoveryEngineDataStoreParams,
+  DiscoveryEngineSearchEngineParams,
+  DiscoveryEngineSearchResponse,
+  DiscoveryEngineSearchResult,
+  DiscoveryEngineSearchToolParams,
+} from './tools/discovery_engine_search_tool.js';
+export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
   isEnterpriseWebSearchTool,

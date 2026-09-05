@@ -116,6 +116,27 @@ describe('getApiEndpoint', () => {
       getApiEndpoint('europe-west1', DEFAULT_TEMPLATE, MTLS_TEMPLATE),
     ).toBe('europe-west1-integrations.googleapis.com');
   });
+
+  it('substitutes a location containing replacement patterns verbatim', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
+
+    expect(getApiEndpoint("$&$`$'", DEFAULT_TEMPLATE, MTLS_TEMPLATE)).toBe(
+      "$&$`$'-integrations.googleapis.com",
+    );
+  });
+
+  it('leaves a template with no placeholder unchanged', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+
+    expect(
+      getApiEndpoint(
+        'global',
+        'integrations.googleapis.com',
+        'integrations.mtls.googleapis.com',
+      ),
+    ).toBe('integrations.mtls.googleapis.com');
+  });
 });
 
 const CERT_PEM =
