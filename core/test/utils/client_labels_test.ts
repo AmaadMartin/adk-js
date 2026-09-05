@@ -106,6 +106,15 @@ describe('client_labels', () => {
     });
   });
 
+  describe('getTrackingHeaders', () => {
+    it('should send the joined labels as both tracking headers', () => {
+      const headers = getTrackingHeaders();
+      const expected = getClientLabels().join(' ');
+      expect(headers['x-goog-api-client']).toBe(expected);
+      expect(headers['user-agent']).toBe(expected);
+    });
+  });
+
   describe('runWithClientLabel', () => {
     it('should append custom label in context', () => {
       const customLabel = 'my-custom-label';
