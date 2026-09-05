@@ -183,6 +183,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Plugins
 
 - [BigQueryAgentAnalyticsPlugin](plugins/bigquery_agent_analytics_plugin/index.md) - Streaming agent lifecycle events into a BigQuery table so behaviour, cost and failures can be queried in SQL.
+- [Context filtering](plugins/context_filter/index.md) - Trimming the history one model call sees: the invocation window, the hysteresis that stops it re-truncating every turn, and the function-call pairing it preserves.
 - [DebugLoggingPlugin](plugins/debug_logging/index.md) - Recording a complete on-disk trace of every invocation, with credentials redacted.
 - [Plugin agent callbacks](plugins/agent_callbacks/index.md) - The agent lifecycle hooks a plugin gets, their precedence over an agent's own callbacks, and the agent error notification.
 - [Plugin close lifecycle](plugins/plugin_close_lifecycle/index.md) - Releasing
