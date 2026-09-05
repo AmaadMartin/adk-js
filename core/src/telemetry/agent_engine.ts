@@ -12,6 +12,7 @@ import {
 } from '@opentelemetry/api';
 import {W3CTraceContextPropagator} from '@opentelemetry/core';
 import {Span, SpanProcessor} from '@opentelemetry/sdk-trace-base';
+import type {IncomingHttpHeaders} from 'node:http';
 
 /** Header carrying the trace context an Agent Engine caller wants joined. */
 const AGENT_ENGINE_TRACEPARENT_HEADER = 'google-agent-engine-traceparent';
@@ -39,9 +40,6 @@ const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 
 const TRACE_CONTEXT_PROPAGATOR = new W3CTraceContextPropagator();
 
-/** Inbound HTTP headers, shaped like Node's `IncomingHttpHeaders`. */
-export type TraceContextHeaders = Record<string, string | string[] | undefined>;
-
 /** Returns true when the process runs on Vertex AI Agent Engine. */
 export function isAgentEngine(): boolean {
   return Boolean(process.env[AGENT_ENGINE_ID_ENV_VAR]);
@@ -55,7 +53,7 @@ export function isAgentEngine(): boolean {
  * value is used.
  */
 function getHeader(
-  headers: TraceContextHeaders,
+  headers: IncomingHttpHeaders,
   name: string,
 ): string | undefined {
   const value = headers[name];
@@ -78,7 +76,7 @@ function setBaggageEntry(ctx: Context, key: string, value: string): Context {
  *
  * @param headers inbound request headers, e.g. Express's `req.headers`.
  */
-export function getPropagatedContext(headers: TraceContextHeaders): Context {
+export function getPropagatedContext(headers: IncomingHttpHeaders): Context {
   let ctx = context.active();
 
   const supportId = getHeader(headers, TRACEPARENT_HEADER);
