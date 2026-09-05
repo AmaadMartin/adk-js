@@ -110,16 +110,15 @@ export class GcsToolset extends BaseToolset {
   /** The tools the configured capabilities allow, before filtering. */
   private buildTools(): BaseTool[] {
     const getClient = () => this.getClient();
-    const prefix = this.prefix ?? '';
     const tools: BaseTool[] = [];
     if (
       this.capabilities.includes(GcsCapability.READ_ONLY) ||
       this.capabilities.includes(GcsCapability.READ_WRITE)
     ) {
-      tools.push(...createGcsReadTools(getClient, prefix));
+      tools.push(...createGcsReadTools(getClient, this.prefix));
     }
     if (this.capabilities.includes(GcsCapability.READ_WRITE)) {
-      tools.push(...createGcsWriteTools(getClient, prefix));
+      tools.push(...createGcsWriteTools(getClient, this.prefix));
     }
     return tools;
   }

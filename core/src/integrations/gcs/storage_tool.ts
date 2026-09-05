@@ -356,8 +356,27 @@ export async function deleteObjects(
   }
 }
 
+/**
+ * Runs one tool against a freshly resolved client, so that a client that
+ * cannot be built is reported as an error record like any other failure
+ * rather than thrown at the model.
+ */
+async function withClient<A, R>(
+  getClient: GcsClientProvider,
+  args: A,
+  run: (client: Storage, args: A) => Promise<R>,
+): Promise<R | GcsErrorResult> {
+  let client: Storage;
+  try {
+    client = await getClient();
+  } catch (err) {
+    return errorResult(err);
+  }
+  return run(client, args);
+}
+
 /** Joins the toolset prefix to a tool name, or leaves the name bare. */
-function prefixed(prefix: string, name: string): string {
+function prefixed(prefix: string | undefined, name: string): string {
   return prefix ? `${prefix}_${name}` : name;
 }
 
@@ -365,32 +384,33 @@ function prefixed(prefix: string, name: string): string {
  * Builds the tools that only read from Cloud Storage.
  *
  * @param getClient Supplies the client each call runs against.
- * @param prefix Prepended to each tool name; pass '' for unprefixed names.
+ * @param prefix Prepended to each tool name; pass '' or omit it for
+ *   unprefixed names.
  * @return The `get_object_data`, `get_object_metadata` and `list_objects`
  *   tools, in that order.
  */
 export function createGcsReadTools(
   getClient: GcsClientProvider,
-  prefix: string,
+  prefix?: string,
 ): BaseTool[] {
   return [
     new FunctionTool({
       name: prefixed(prefix, 'get_object_data'),
       description: 'Get the content/data of a GCS object (blob).',
       parameters: getObjectDataParameters,
-      execute: async (input) => getObjectData(await getClient(), input),
+      execute: (input) => withClient(getClient, input, getObjectData),
     }),
     new FunctionTool({
       name: prefixed(prefix, 'get_object_metadata'),
       description: 'Get metadata information about a GCS object (blob).',
       parameters: getObjectMetadataParameters,
-      execute: async (input) => getObjectMetadata(await getClient(), input),
+      execute: (input) => withClient(getClient, input, getObjectMetadata),
     }),
     new FunctionTool({
       name: prefixed(prefix, 'list_objects'),
       description: 'List object names in a GCS bucket.',
       parameters: listObjectsParameters,
-      execute: async (input) => listObjects(await getClient(), input),
+      execute: (input) => withClient(getClient, input, listObjects),
     }),
   ];
 }
@@ -399,12 +419,13 @@ export function createGcsReadTools(
  * Builds the tools that modify Cloud Storage.
  *
  * @param getClient Supplies the client each call runs against.
- * @param prefix Prepended to each tool name; pass '' for unprefixed names.
+ * @param prefix Prepended to each tool name; pass '' or omit it for
+ *   unprefixed names.
  * @return The `create_object` and `delete_objects` tools, in that order.
  */
 export function createGcsWriteTools(
   getClient: GcsClientProvider,
-  prefix: string,
+  prefix?: string,
 ): BaseTool[] {
   return [
     new FunctionTool({
@@ -412,7 +433,7 @@ export function createGcsWriteTools(
       description:
         'Create a new object (blob) in a GCS bucket from provided data or a local file.',
       parameters: createObjectParameters,
-      execute: async (input) => createObject(await getClient(), input),
+      execute: (input) => withClient(getClient, input, createObject),
     }),
     new FunctionTool({
       name: prefixed(prefix, 'delete_objects'),
@@ -421,7 +442,7 @@ export function createGcsWriteTools(
         'bucket must be empty before it can be deleted. Use this tool to ' +
         'delete all objects if you intend to delete the bucket.',
       parameters: deleteObjectsParameters,
-      execute: async (input) => deleteObjects(await getClient(), input),
+      execute: (input) => withClient(getClient, input, deleteObjects),
     }),
   ];
 }
