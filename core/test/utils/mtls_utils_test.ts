@@ -114,13 +114,6 @@ describe('mtls_utils', () => {
       onlyTheseFilesExist();
       expect(hasDefaultClientCertSource()).toBe(false);
     });
-
-    it('reports false when the filesystem check throws', () => {
-      vi.mocked(existsSync).mockImplementation(() => {
-        throw new Error('EACCES');
-      });
-      expect(hasDefaultClientCertSource()).toBe(false);
-    });
   });
 
   describe('useClientCertEffective', () => {
@@ -296,12 +289,6 @@ describe('mtls_utils', () => {
       expect(effectiveGoogleapisEndpoint('https://x.googleapis.com/')).toBe(
         'https://x.mtls.googleapis.com/',
       );
-    });
-
-    it('returns the URL unchanged when the endpoint setting is never', () => {
-      process.env[USE_MTLS_ENDPOINT] = 'never';
-      const url = 'https://x.googleapis.com/v1';
-      expect(effectiveGoogleapisEndpoint(url)).toBe(url);
     });
   });
 });

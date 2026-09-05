@@ -109,7 +109,7 @@ export {AuthProviderRegistry} from './auth/auth_provider_registry.js';
 export {OAuthGrantType} from './auth/auth_schemes.js';
 export type {
   AuthScheme,
-  CustomAuthScheme,
+  GcpAuthProviderScheme,
   OpenIdConnectWithConfig,
 } from './auth/auth_schemes.js';
 export type {AuthConfig} from './auth/auth_tool.js';

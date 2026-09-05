@@ -15,7 +15,7 @@ import {GoogleAuth} from 'google-auth-library';
 import {RemoteA2AAgent} from '../../a2a/a2a_remote_agent.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
-import {AuthScheme} from '../../auth/auth_schemes.js';
+import {AuthScheme, GcpAuthProviderScheme} from '../../auth/auth_schemes.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
 import {mergeTrackingHeaders} from '../../utils/client_labels.js';
 import {logger} from '../../utils/logger.js';
@@ -35,7 +35,6 @@ import {
   ConnectionUriFilter,
   ConnectionUriResult,
   Endpoint,
-  GcpAuthProviderScheme,
   ListAgentsResponse,
   ListBindingsResponse,
   ListEndpointsResponse,
@@ -232,17 +231,10 @@ export class AgentRegistry {
     resourceType: string,
     options: SearchOptions,
   ): Promise<T> {
-    const {
-      searchString,
-      searchType,
-      filterStr: filter,
-      orderBy,
-      pageSize,
-      pageToken,
-    } = options;
+    const {filterStr: filter, ...rest} = options;
     return this.makeRequest<T>(`${resourceType}:search`, undefined, {
       method: 'POST',
-      body: {searchString, searchType, filter, orderBy, pageSize, pageToken},
+      body: {...rest, filter},
     });
   }
 
@@ -303,20 +295,18 @@ export class AgentRegistry {
    * Resolves the auth scheme a registered resource is bound to.
    *
    * @param resourceId Stable identifier of the resource, for example an
-   *     `agentId` or an `mcpServerId`, matched against the binding targets. It
-   *     arrives from the wire, so a value that is not a string names no
-   *     resource and resolves no scheme.
+   *     `agentId` or an `mcpServerId`, matched against the binding targets.
    * @param resourceName Resource name, only used for logging.
    * @param continueUri Continue URI that overrides the auth provider's own.
    * @return The scheme for the bound auth provider, or `undefined` when the
    *     resource is bound to none or the bindings could not be read.
    */
   private async resolveAuthProviderScheme(
-    resourceId: unknown,
+    resourceId: string | undefined,
     resourceName: string,
     continueUri?: string,
   ): Promise<GcpAuthProviderScheme | undefined> {
-    if (typeof resourceId !== 'string' || !resourceId) {
+    if (!resourceId) {
       return undefined;
     }
     try {
@@ -517,9 +507,9 @@ export class AgentRegistry {
    * Creates a {@link RemoteA2AAgent} for a registered A2A Agent.
    *
    * When `authScheme` is omitted, it is resolved from the agent's auth provider
-   * binding. The returned agent carries the scheme and the credential; a caller
-   * reads them off the agent, because the outbound A2A request does not apply
-   * them yet.
+   * binding. The returned agent presents `authCredential` on every request it
+   * makes. An auth provider binding names a provider and carries no credential
+   * of its own, so pass one to authenticate those calls.
    *
    * @param agentName Resource name of the A2A Agent.
    * @param options.authScheme Scheme to use as is, skipping the binding lookup.

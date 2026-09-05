@@ -24,32 +24,30 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * A flexible base for custom authentication schemes.
+ * A Google Cloud auth provider, named by its resource name.
  *
- * Extend it to declare a scheme outside the OpenAPI 3.0 set. The extending
- * interface fixes `type` to its own literal, which is what lets a consumer tell
- * one custom scheme from another:
- *
- * ```ts
- * interface MyProviderScheme extends CustomAuthScheme {
- *   type: 'myProviderScheme';
- *   name: string;
- * }
- * ```
+ * A registered Google Cloud resource is bound to an auth provider through an
+ * IAM binding, and the provider runs the authorization flow on the caller's
+ * behalf. OpenAPI 3.0 has no scheme for this, so it is its own member of
+ * {@link AuthScheme}.
  */
-export interface CustomAuthScheme {
-  /** The scheme type, outside the OpenAPI 3.0 set. */
-  type: string;
+export interface GcpAuthProviderScheme {
+  type: 'gcpAuthProviderScheme';
+  /** Resource name of the auth provider. */
+  name: string;
+  scopes?: string[];
+  /** Redirect target that overrides the one the provider declares. */
+  continueUri?: string;
 }
 
 /**
  * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
- * OpenIdConnectWithConfig, and any {@link CustomAuthScheme}.
+ * OpenIdConnectWithConfig, and {@link GcpAuthProviderScheme}.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
   | OpenIdConnectWithConfig
-  | CustomAuthScheme;
+  | GcpAuthProviderScheme;
 
 /**
  * Represents the OAuth2 flow (or grant type).

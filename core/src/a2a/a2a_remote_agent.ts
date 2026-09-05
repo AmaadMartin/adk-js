@@ -15,10 +15,11 @@ import {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from '@a2a-js/sdk';
-import {Client, ClientFactory} from '@a2a-js/sdk/client';
+import {Client, ClientFactory, RequestOptions} from '@a2a-js/sdk/client';
 import {BaseAgent, BaseAgentConfig} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {AuthCredential} from '../auth/auth_credential.js';
+import {buildAuthHeaders} from '../auth/auth_header_utils.js';
 import {AuthScheme} from '../auth/auth_schemes.js';
 import {Event as AdkEvent, createEvent} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
@@ -114,14 +115,14 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
    */
   metadata?: Record<string, unknown>;
   /**
-   * Auth scheme the remote agent authenticates its callers with.
-   *
-   * A caller reads it back off {@link RemoteA2AAgent.authScheme} and builds the
-   * credential itself. The outbound A2A request does not apply the scheme.
+   * Auth scheme the remote agent authenticates its callers with. It names the
+   * header an API key goes in.
    */
   authScheme?: AuthScheme;
   /**
-   * Credential for {@link RemoteA2AAgentConfig.authScheme}.
+   * Credential for {@link RemoteA2AAgentConfig.authScheme}, presented on every
+   * outgoing request. A credential that still needs an exchange to become a
+   * token is not presented; see `buildAuthHeaders`.
    */
   authCredential?: AuthCredential;
 }
@@ -150,6 +151,18 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
     }
     this.authScheme = a2aConfig.authScheme;
     this.authCredential = a2aConfig.authCredential;
+  }
+
+  /**
+   * The trailing client-call argument that presents {@link authCredential},
+   * and nothing at all when no credential applies. The transports send
+   * `serviceParameters` as HTTP headers.
+   */
+  private authCallArgs(): [RequestOptions] | [] {
+    const headers = buildAuthHeaders(this.authScheme, this.authCredential);
+    return Object.keys(headers).length > 0
+      ? [{serviceParameters: headers}]
+      : [];
   }
 
   private async init() {
@@ -248,8 +261,12 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       const useStreaming = this.card
         ? this.card.capabilities?.streaming !== false
         : true;
+      const authArgs = this.authCallArgs();
       if (useStreaming) {
-        for await (const chunk of this.client!.sendMessageStream(params)) {
+        for await (const chunk of this.client!.sendMessageStream(
+          params,
+          ...authArgs,
+        )) {
           if (this.a2aConfig.afterRequestCallbacks) {
             for (const callback of this.a2aConfig.afterRequestCallbacks) {
               await callback(context, chunk);
@@ -278,7 +295,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           }
         }
       } else {
-        const result = await this.client!.sendMessage(params);
+        const result = await this.client!.sendMessage(params, ...authArgs);
         if (this.a2aConfig.afterRequestCallbacks) {
           for (const callback of this.a2aConfig.afterRequestCallbacks) {
             await callback(context, result);
