@@ -202,8 +202,8 @@ export abstract class WorkflowNode<
 /**
  * Type guard for {@link WorkflowNode}.
  *
- * Matches on the {@link WORKFLOW_NODE_SIGNATURE_SYMBOL} brand rather than
- * `instanceof` so it stays correct across package copies (see the brand's doc).
+ * Matches on this module's brand symbol rather than `instanceof`, so it stays
+ * correct across package copies (see the brand's doc).
  */
 export function isWorkflowNode(value: unknown): value is WorkflowNode {
   return (
