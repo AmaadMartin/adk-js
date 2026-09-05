@@ -91,6 +91,17 @@ export class ReadonlyContext {
   }
 
   /**
+   * The isolation scope of the current invocation, if it runs under one.
+   *
+   * See `Event.isolationScope` for the format. Read-only here: the scope
+   * belongs to the invocation, which every sibling context of the run shares.
+   * The workflow half owns the writable one, on `NodeContext`.
+   */
+  get isolationScope(): string | undefined {
+    return this.invocationContext.isolationScope;
+  }
+
+  /**
    * A read-only view of the metadata that tools and services accumulated
    * during this invocation.
    */
