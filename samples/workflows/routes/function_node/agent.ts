@@ -22,6 +22,9 @@
  * recognising now, because most routers later on look "skipped" for the same
  * reason.
  *
+ * The third node declares its `parameters`, so the framework reads them out of
+ * the upstream node's output and hands the handler a checked arguments object.
+ *
  * Run (offline, no API key):
  *   npm run sample -- samples/workflows/routes/function_node/agent.ts
  */
@@ -33,6 +36,7 @@ import {
   Workflow,
   type FunctionNodeHandler,
 } from '@google/adk';
+import {z} from 'zod';
 
 /** A bare return value: boxed into an event's `output` for you. */
 const myFunctionNode: FunctionNodeHandler<string, string> = (
@@ -45,7 +49,23 @@ const myFunctionNode: FunctionNodeHandler<string, string> = (
 
 /** The explicit form — identical behaviour, useful when you also set `route`. */
 const myExplicitEventNode = (_ctx: NodeContext, nodeInput: string) =>
-  createEvent({output: `${nodeInput} IS AWESOME!`});
+  createEvent({output: {shout: `${nodeInput} IS AWESOME!`}});
+
+/** The parameters `announce` consumes, and the defaults it accepts. */
+const announceParameters = z.object({
+  shout: z.string(),
+  times: z.number().default(2),
+});
+
+/**
+ * Declared parameters: the framework reads `shout` and `times` off the upstream
+ * output, applies the default for `times`, and checks both before the handler
+ * runs.
+ */
+const announce = (
+  _ctx: NodeContext,
+  {shout, times}: z.infer<typeof announceParameters>,
+) => Array(times).fill(shout).join(' ');
 
 export const rootAgent = new Workflow({
   name: 'function_node_pipeline',
@@ -54,6 +74,11 @@ export const rootAgent = new Workflow({
       'START',
       node(myFunctionNode, {name: 'my_function_node'}),
       node(myExplicitEventNode, {name: 'add_suffix'}),
+      node(announce, {
+        name: 'announce',
+        parameters: announceParameters,
+        parameterBinding: 'nodeInput',
+      }),
     ],
   ],
 });
