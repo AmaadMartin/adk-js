@@ -45,6 +45,18 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@google/adk": "^2.0.0"
+    "@google/adk": "^2.0.0",
+    "@google/genai": "^2.9.0"
+  },
+  "devDependencies": {
+    "@slack/bolt": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@slack/bolt": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@slack/bolt": {
+      "optional": true
+    }
   }
 }
