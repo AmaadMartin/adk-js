@@ -28,6 +28,7 @@ import {
   INITIAL_INSTRUCTION,
   onlySkillToolset,
   RecordingReflectionLm,
+  scriptOutputDir,
 } from './gepa_root_agent_test_utils.js';
 import {
   collectWarnings,
@@ -42,6 +43,7 @@ const VALIDATION_IDS = ['val1', 'val2'];
 const SKILL_NAME = 'my_skill';
 const SKILL_KEY = skillComponentKey(SKILL_NAME);
 const OLD_SKILL_INSTRUCTIONS = 'Old skill inst';
+const SKILL_OUTPUT_DIR = scriptOutputDir('adk-gepa-skill-output');
 const NEW_SKILL_INSTRUCTIONS = 'New skill inst';
 
 /** A sampler that scores every example, so `evaluate` never warns. */
@@ -87,7 +89,7 @@ describe('candidate reconstruction', () => {
   it('test_update_skill_toolset', async () => {
     const toolset = new SkillToolset(
       [createSkill(SKILL_NAME, OLD_SKILL_INSTRUCTIONS)],
-      {scriptOutputDir: '/tmp/adk-skill-output'},
+      {scriptOutputDir: SKILL_OUTPUT_DIR},
     );
     const initialAgent = createAgent([toolset]);
     const sampler = createSampler();
@@ -98,7 +100,7 @@ describe('candidate reconstruction', () => {
     const cloned = onlySkillToolset(sampler.calls[0].candidate);
     expect(cloned).not.toBe(toolset);
     expect(cloned.skills[SKILL_NAME].instructions).toBe(NEW_SKILL_INSTRUCTIONS);
-    expect(await cloned.getScriptOutputDir()).toBe('/tmp/adk-skill-output');
+    expect(await cloned.getScriptOutputDir()).toBe(SKILL_OUTPUT_DIR);
     expect(toolset.skills[SKILL_NAME].instructions).toBe(
       OLD_SKILL_INSTRUCTIONS,
     );

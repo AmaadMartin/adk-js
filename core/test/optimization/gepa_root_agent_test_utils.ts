@@ -11,6 +11,8 @@ import {
   type ReflectionLm,
   type Skill,
 } from '@google/adk';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {expect} from 'vitest';
 
 /** The starting instruction of every agent these suites build. */
@@ -69,6 +71,18 @@ export class RecordingReflectionLm {
     expect(this.index).toBeLessThan(this.replies.length);
     return this.replies[this.index++];
   };
+}
+
+/**
+ * Returns an absolute script-output directory valid on every platform.
+ *
+ * `SkillToolset.getScriptOutputDir` resolves the configured directory, so a
+ * POSIX literal such as `/tmp/output` comes back as `C:\tmp\output` on Windows.
+ *
+ * @param name The directory name under the OS temp directory.
+ */
+export function scriptOutputDir(name: string): string {
+  return path.join(os.tmpdir(), name);
 }
 
 /** Wraps `text` in a fenced block, the shape both templates ask for. */
