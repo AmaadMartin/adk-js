@@ -114,15 +114,6 @@ export async function saveToFile<T>(filePath: string, data: T): Promise<void> {
 }
 
 /**
- * Narrows a value to an indexable object, so a caller can read or edit its
- * keys without an unchecked cast. Arrays, `null` and primitives are rejected,
- * which keeps a JSON array from being treated as a key/value map.
- */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
  * Atomically creates a private temporary directory and returns its path.
  *
  * The directory is created by a single `mkdtemp` call directly under the system

@@ -8,7 +8,6 @@ import {
   App,
   BaseArtifactService,
   BaseMemoryService,
-  BasePlugin,
   BaseSessionService,
   bearerTokenUserBuilder,
   Event,
@@ -184,12 +183,6 @@ export class AdkApiServer {
    * mid-process. adk-python reads it in `__init__` for the same reason.
    */
   private readonly defaultAppName?: string;
-  /**
-   * Memoised plugin instances. adk-python re-instantiates the extra plugins
-   * for every app; loading them once means N apps share one instance instead
-   * of re-importing the same module N times.
-   */
-  private extraPluginsPromise?: Promise<BasePlugin[]>;
 
   constructor(options: ServerOptions) {
     this.host = options.host ?? 'localhost';
@@ -1289,20 +1282,6 @@ export class AdkApiServer {
     return isApp(loaded) ? loaded.rootAgent : loaded;
   }
 
-  /**
-   * Loads the configured extra plugins, at most once per server. The promise
-   * itself is cached, so concurrent first requests share one load.
-   */
-  private loadExtraPluginsOnce(): Promise<BasePlugin[]> {
-    this.extraPluginsPromise ??= loadExtraPlugins(
-      this.extraPlugins,
-      this.agentsDir,
-      this.logger,
-    );
-
-    return this.extraPluginsPromise;
-  }
-
   private async getRunner(
     agentOrApp: RunnableRoot | App,
     appName: string,
@@ -1318,8 +1297,13 @@ export class AdkApiServer {
         sessionService: this.sessionService,
         artifactService: this.artifactService,
         // The Runner merges these with the app's own plugins, so attaching
-        // them here leaves the App untouched.
-        plugins: await this.loadExtraPluginsOnce(),
+        // them here leaves the App untouched. Built per app, as adk-python
+        // does, so a plugin holding per-app state stays per-app.
+        plugins: await loadExtraPlugins(
+          this.extraPlugins,
+          this.agentsDir,
+          this.logger,
+        ),
       });
     }
 

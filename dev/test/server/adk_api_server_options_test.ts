@@ -193,7 +193,7 @@ describe('AdkApiServer configuration options', () => {
       );
     });
 
-    it('builds one plugin instance and shares it across apps', async () => {
+    it('builds a plugin instance per app, as adk-python does', async () => {
       const secondApp = 'secondApp';
       agentLoader.serve(new SilentAgent({name: 'silent'}), APP_NAME, secondApp);
       server = build({
@@ -213,11 +213,10 @@ describe('AdkApiServer configuration options', () => {
       const first = await run(server, RUN_BODY);
       const second = await run(server, {...RUN_BODY, appName: secondApp});
 
-      // Each app gets its own Runner. A per-app plugin instance would restart
-      // the count, so the second app seeing "run 2" is what proves one shared
-      // instance serves both.
+      // Each app gets its own Runner and its own plugin instance, so the
+      // second app starts its count again rather than continuing the first's.
       expect(firstEventText(first.json as Event[])).toBe('run 1');
-      expect(firstEventText(second.json as Event[])).toBe('run 2');
+      expect(firstEventText(second.json as Event[])).toBe('run 1');
     });
   });
 

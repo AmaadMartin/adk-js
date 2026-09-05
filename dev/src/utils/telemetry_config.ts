@@ -8,7 +8,7 @@ import {Logger} from '@google/adk';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {isRecord} from './file_utils.js';
+import {isRecord} from './type_utils.js';
 
 /** Key the consent flag is recorded under in the ADK global config file. */
 const TELEMETRY_KEY = 'telemetry';
