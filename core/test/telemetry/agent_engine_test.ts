@@ -165,3 +165,48 @@ describe('TopSpanProcessor', () => {
     expect(processor.onEnd()).toBeUndefined();
   });
 });
+
+/** Records a span parented onto {@link REMOTE_SPAN_ID}, with `baggage` set. */
+function recordParentedSpan(traceparentInBaggage: string): ReadableSpan {
+  let ctx = trace.setSpanContext(context.active(), {
+    traceId: TRACE_ID,
+    spanId: REMOTE_SPAN_ID,
+    traceFlags: TraceFlags.SAMPLED,
+    isRemote: true,
+  });
+  const entries = {
+    [TRACEPARENT_HEADER]: {value: traceparentInBaggage},
+    'google_traceparent': {value: SUPPORT_ID_VALUE},
+  };
+  ctx = propagation.setBaggage(ctx, propagation.createBaggage(entries));
+  return recordTopSpan(ctx);
+}
+
+describe('the top span check', () => {
+  it('rejects a baggage traceparent with fewer than three parts', () => {
+    const span = recordParentedSpan(`00-${TRACE_ID}`);
+
+    expect(span.parentSpanContext?.spanId).toBe(REMOTE_SPAN_ID);
+    expect(span.attributes).not.toHaveProperty(SUPPORT_ID_ATTRIBUTE);
+  });
+
+  it('rejects a baggage traceparent whose span id is not hex', () => {
+    const span = recordParentedSpan(`00-${TRACE_ID}-zzzzzzzzzzzzzzzz-01`);
+
+    expect(span.attributes).not.toHaveProperty(SUPPORT_ID_ATTRIBUTE);
+  });
+
+  it('rejects a baggage traceparent naming a different parent span', () => {
+    const span = recordParentedSpan(`00-${TRACE_ID}-${CALLER_SPAN_ID}-01`);
+
+    expect(span.attributes).not.toHaveProperty(SUPPORT_ID_ATTRIBUTE);
+  });
+
+  it('accepts the parent span id whatever its case', () => {
+    const span = recordParentedSpan(
+      `00-${TRACE_ID}-${REMOTE_SPAN_ID.toUpperCase()}-01`,
+    );
+
+    expect(span.attributes[SUPPORT_ID_ATTRIBUTE]).toBe(SUPPORT_ID_VALUE);
+  });
+});

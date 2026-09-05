@@ -21,6 +21,7 @@ import {
   isApp,
   Logger,
   LogLevel,
+  maybeInstallRequestMetricsMiddleware,
   RunConfig,
   RunnableRoot,
   Runner,
@@ -242,6 +243,9 @@ export class AdkApiServer {
         context.with(getPropagatedContext(req.headers), next);
       });
     }
+    await maybeInstallRequestMetricsMiddleware(app, {
+      otelToCloud: this.otelToCloud,
+    });
 
     // Registered before any route (including /health, /, /version) so the
     // DNS-rebinding guard applies to every endpoint, not just the ones
