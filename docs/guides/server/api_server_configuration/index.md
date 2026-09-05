@@ -13,16 +13,9 @@ it from the request body. That is right for a machine hosting several agents.
 It is noise for a deployment that hosts one, where every client repeats the same
 constant in every URL.
 
-The options in this guide remove that repetition and adapt the surface to an
-operator's environment. They are independent of each other and every one is
-optional: a server started without them behaves as it does today.
-
-| Option                      | Where it comes from                                | What it changes                                    |
-| --------------------------- | -------------------------------------------------- | -------------------------------------------------- |
-| default app name            | `ADK_DEFAULT_APP_NAME`                             | Resolves unqualified paths and an absent `appName` |
-| `logoText` / `logoImageUrl` | server options, `--logo_text` / `--logo_image_url` | Brands the dev UI                                  |
-| `urlPrefix`                 | server option, `--url_prefix`                      | Tells the dev UI where the backend is              |
-| `extraPlugins`              | server option, `--extra_plugins`                   | Adds plugins to every runner                       |
+The options here remove that repetition and adapt the surface to an operator's
+environment. They are independent of each other and every one is optional: a
+server started without them behaves as it did before they existed.
 
 The logo and the URL prefix reach the dev UI two ways: through
 `GET /dev-ui/config`, and through `assets/config/runtime-config.json`, which the
@@ -66,29 +59,18 @@ Set `ADK_DEFAULT_APP_NAME` in the server's environment. There is no constructor
 option and no flag: the server reads the variable when it is built.
 
 Three request paths then resolve against that app, and nothing else does:
-
-- `/users/...` becomes `/apps/<default>/users/...`
-- `/app-info` becomes `/apps/<default>/app-info`
-- `/trigger/...` becomes `/apps/<default>/trigger/...`
-
-`/app-info` is matched whole, so `/app-info/extra` is left alone. The access log
-still records the path the client sent.
+`/users/...`, `/app-info` and `/trigger/...` each become `/apps/<default>/...`.
+`/app-info` is matched whole, so `/app-info/extra` is left alone, and the access
+log still records the path the client sent.
 
 `POST /run` and `POST /run_sse` fall back to the default when the body names no
-`appName`. Without a default they answer `400`:
-
-```json
-{"error": "app_name is required when ADK_DEFAULT_APP_NAME is not set"}
-```
+`appName`. Without a default they answer `400` with
+`app_name is required when ADK_DEFAULT_APP_NAME is not set`.
 
 ## Dev UI logo
 
 `logoText` and `logoImageUrl` go together. Setting one alone makes `start()`
-reject, so a half-configured logo fails at start-up rather than later:
-
-```
-Both --logo-text and --logo-image-url must be defined when using logo config.
-```
+reject, so a half-configured logo fails at start-up rather than later.
 
 The dev UI reads the pair from `GET /dev-ui/config`, which always answers with
 both keys and uses `null` for one that is unset:
@@ -118,8 +100,8 @@ the consent recorded in `~/.adk/config.json`, and is `null` when the user has
 answered neither way.
 
 Keys the file already holds are preserved. `logo` is the exception: it is
-removed when no logo is configured, which is how you turn one off. Nothing
-happens when the web assets are absent, and a write that fails is logged and
+removed when no logo is configured, which is how you turn one off. Nothing is
+written when the web assets are absent, and a write that fails is logged and
 does not stop the server.
 
 ## Extra plugins

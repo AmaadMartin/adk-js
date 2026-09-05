@@ -35,7 +35,11 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 import {version} from '../version.js';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {
+  AgentFile,
+  AgentFileOptions,
+  AgentLoader,
+} from '../utils/agent_loader.js';
 import {isFolderExists} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
@@ -68,6 +72,19 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
+/** The part of an agent file the server uses: load it, then dispose it. */
+export type ServerAgentFile = Pick<AgentFile, 'load'> & AsyncDisposable;
+
+/**
+ * The part of {@link AgentLoader} the server uses. Narrowed to the two methods
+ * it calls, so a caller can supply its own loader without the file cache,
+ * watcher and disposal machinery a full `AgentLoader` owns.
+ */
+export interface ServerAgentLoader {
+  listAgents(): Promise<string[]>;
+  getAgentFile(agentName: string): Promise<ServerAgentFile>;
+}
+
 /**
  * Environment variable naming the app that `/users/...`, `/app-info`,
  * `/trigger/...`, `/run` and `/run_sse` resolve to when the request does not
@@ -92,7 +109,7 @@ export interface ServerOptions {
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
-  agentLoader?: AgentLoader;
+  agentLoader?: ServerAgentLoader;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -151,7 +168,7 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  private readonly agentLoader: ServerAgentLoader;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
