@@ -288,10 +288,19 @@ describe('MetricEvaluatorRegistry.getRegisteredMetrics', () => {
     expect(registry.getRegisteredMetrics()).toContain(metricInfo);
   });
 
-  it('carries the descriptions into a fork', () => {
-    const forked = new MetricEvaluatorRegistry().fork();
+  it('carries a registered description into a fork', () => {
+    const registry = new MetricEvaluatorRegistry();
+    const metricInfo = {
+      metricName: 'forked_metric',
+      metricValueInfo: {interval: {minValue: 0, maxValue: 1}},
+    };
+    registry.registerEvaluator(
+      'forked_metric',
+      (evalMetric) => new MarkerEvaluator(evalMetric),
+      {getMetricInfo: () => metricInfo},
+    );
 
-    expect(forked.getRegisteredMetrics()).toHaveLength(3);
+    expect(registry.fork().getRegisteredMetrics()).toContain(metricInfo);
   });
 
   it('describes the same metrics on the default registry', () => {
