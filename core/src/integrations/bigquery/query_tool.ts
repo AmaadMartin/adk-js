@@ -242,7 +242,7 @@ async function runQuery(
       : undefined,
     maxResults: settings.maxQueryResultRows,
   });
-  const rawRows: unknown[] = response[0] ?? [];
+  const rawRows: unknown[] = response[0];
   const rows = rawRows.map(safeRow);
   const result: QuerySuccessResponse = {
     status: GoogleToolStatus.SUCCESS,
@@ -528,18 +528,16 @@ async function runModelQueries(
  * @throws {Error} If the toolset blocks writes, since the analysis has to
  *     create a temporary model.
  */
-export function analyzeContribution(
+export async function analyzeContribution(
   client: BigQuery,
   options: AnalyzeContributionOptions,
   settings: BigQueryToolSettings,
   toolContext?: Context,
 ): Promise<QueryResponse> {
-  const pruningMethod = (options.pruningMethod ?? PRUNING_METHODS[1]) as string;
+  const pruningMethod = options.pruningMethod ?? PRUNING_METHODS[1];
   const upperPruning = pruningMethod.toUpperCase();
   if (!PRUNING_METHODS.includes(upperPruning as PruningMethod)) {
-    return Promise.resolve(
-      errorResponse(`Invalid pruning_method: ${pruningMethod}`),
-    );
+    return errorResponse(`Invalid pruning_method: ${pruningMethod}`);
   }
 
   const modelName = temporaryModelName('contribution_analysis_model');
@@ -604,7 +602,7 @@ export interface DetectAnomaliesOptions {
  * @throws {Error} If the toolset blocks writes, since the detection has to
  *     create a temporary model.
  */
-export function detectAnomalies(
+export async function detectAnomalies(
   client: BigQuery,
   options: DetectAnomaliesOptions,
   settings: BigQueryToolSettings,
