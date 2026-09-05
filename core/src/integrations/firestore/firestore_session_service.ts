@@ -117,8 +117,8 @@ interface SessionDocument {
 }
 
 /** Reads the data of a snapshot as a plain record, or `{}` when it has none. */
-function snapshotData(snapshot?: DocumentSnapshot): Record<string, unknown> {
-  return snapshot?.exists ? (snapshot.data() ?? {}) : {};
+function snapshotData(snapshot: DocumentSnapshot): Record<string, unknown> {
+  return snapshot.data() ?? {};
 }
 
 /**
@@ -464,9 +464,7 @@ export class FirestoreSessionService extends BaseSessionService {
 
     const documents = snapshot.docs
       .map((doc) => doc.data())
-      .filter(
-        (data): data is DocumentData => Object.keys(data ?? {}).length > 0,
-      );
+      .filter((data) => Object.keys(data).length > 0);
 
     const userStates = await this.readUserStates(
       client,
@@ -643,7 +641,7 @@ export class FirestoreSessionService extends BaseSessionService {
       if (!snapshot.exists) {
         throw new SessionNotFoundError(`Session ${session.id} not found.`);
       }
-      const data = snapshot.data() ?? {};
+      const data = snapshotData(snapshot);
       if (data['status'] === DELETING_STATUS) {
         throw new Error(`Session ${session.id} is currently being deleted.`);
       }
