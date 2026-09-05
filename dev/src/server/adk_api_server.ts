@@ -84,7 +84,8 @@ export const DEFAULT_APP_NAME_ENV_VAR = 'ADK_DEFAULT_APP_NAME';
 export const MISSING_APP_NAME_MESSAGE =
   'app_name is required when ADK_DEFAULT_APP_NAME is not set';
 
-interface ServerOptions {
+/** Everything an {@link AdkApiServer} can be configured with. */
+export interface ServerOptions {
   agentsDir?: string;
   host?: string;
   port?: number;
