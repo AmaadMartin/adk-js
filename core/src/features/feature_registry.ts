@@ -12,8 +12,6 @@ import {logger} from '../utils/logger.js';
  */
 export enum FeatureName {
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
-  /** Configuration surface for the Spanner tools. */
-  SPANNER_TOOL_SETTINGS = 'SPANNER_TOOL_SETTINGS',
 }
 
 /**
@@ -38,10 +36,6 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
-  },
-  [FeatureName.SPANNER_TOOL_SETTINGS]: {
-    stage: FeatureStage.EXPERIMENTAL,
-    defaultOn: true,
   },
 };
 

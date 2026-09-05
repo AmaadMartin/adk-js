@@ -33,13 +33,3 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
-
-#### Spanner
-
-- [Spanner tool settings](tools/spanner_tool_settings/index.md) - Configuring what the Spanner tools may do, how they shape query results, and the vector store they search.
-- [SpannerAdminToolset](tools/spanner_admin_toolset/index.md) - Listing and
-  creating Spanner instances and databases from an agent, and limiting it to
-  the read-only tools.
-- [SpannerToolset](tools/spanner_toolset/index.md) - Reading Spanner tables,
-  schemas and vector columns from an agent, with read-only access and
-  per-user credentials.

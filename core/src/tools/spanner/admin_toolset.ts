@@ -11,21 +11,19 @@ import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {
   createDatabaseTool,
   createInstanceTool,
+  createSpannerAdminTool,
   getInstanceConfigTool,
   getInstanceTool,
   listDatabasesTool,
   listInstanceConfigsTool,
   listInstancesTool,
+  SPANNER_TOOL_NAME_PREFIX,
 } from './admin_tool.js';
 import {
   SpannerCredentialsManager,
   SpannerToolsetCredentialsConfig,
   validateSpannerCredentialsConfig,
 } from './spanner_credentials.js';
-import {
-  createSpannerAdminTool,
-  SPANNER_TOOL_NAME_PREFIX,
-} from './spanner_tool.js';
 
 /** Options for {@link SpannerAdminToolset}. */
 export interface SpannerAdminToolsetOptions {

@@ -25,50 +25,12 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  ToolConfirmation,
   createSession,
 } from '@google/adk';
 import {SpannerCredentialsConfig} from '@google/adk/tools/spanner';
 import {OAuth2Client} from 'google-auth-library';
-import {Readable} from 'node:stream';
 import {expect} from 'vitest';
-
-/** One row of a result set, as the tools see it. */
-export type FakeRow = Array<{name: string; value: unknown}> | FakeJsonRow;
-
-/** One row of a result set the request asked for as `json`. */
-export type FakeJsonRow = Record<string, unknown>;
-
-/** A statement the tools ran. */
-export interface RecordedQuery {
-  sql: string;
-  params?: Record<string, unknown>;
-  types?: Record<string, string>;
-  json?: boolean;
-  /** Whether the tool streamed the rows instead of buffering them. */
-  streamed: boolean;
-}
-
-/** A database handle the tools opened. */
-export interface RecordedDatabase {
-  instanceId: string;
-  databaseId: string;
-  databaseRole?: string;
-}
-
-/** Rows the fake answers a matching statement with. */
-export interface QueryResponse {
-  match: string | RegExp;
-  rows: FakeRow[];
-}
-
-/** Failures a test asks the fake to raise. */
-export interface FakeFailures {
-  getDatabaseDialect?: Error;
-  getSnapshot?: Error;
-  run?: Error;
-  closeDatabase?: Error;
-  closeClient?: Error;
-}
 
 /** A call the tools made against an administration endpoint. */
 export interface RecordedAdminCall {
@@ -120,8 +82,8 @@ export interface FakeAdminResponses {
   instanceConfig: FakeInstanceConfigResponse;
 }
 
-/** Failures a test asks an administration endpoint to raise. */
-export interface FakeAdminFailures {
+/** Failures a test asks the fake to raise. */
+export interface FakeFailures {
   listInstances?: Error;
   getInstance?: Error;
   listInstanceConfigs?: Error;
@@ -131,6 +93,10 @@ export interface FakeAdminFailures {
   createDatabase?: Error;
   /** Raised by the long-running operation a create call returned. */
   operation?: Error;
+  /** Raised when the tools close the client. */
+  closeClient?: Error;
+  /** Raised when the tools cancel a timed-out operation. */
+  cancelOperation?: Error;
 }
 
 /**
@@ -154,38 +120,25 @@ function emptyAdminResponses(): FakeAdminResponses {
 
 /** What the tools did, and how the fake answers them. */
 export class FakeSpannerState {
-  dialect: string | undefined = 'GOOGLE_STANDARD_SQL';
-  responses: QueryResponse[] = [];
   failures: FakeFailures = {};
-
-  adminFailures: FakeAdminFailures = {};
-  adminResponses: FakeAdminResponses = emptyAdminResponses();
+  responses: FakeAdminResponses = emptyAdminResponses();
   operationOutcome: FakeOperationOutcome = 'resolve';
 
   readonly clientOptions: Array<Record<string, unknown>> = [];
-  readonly databases: RecordedDatabase[] = [];
-  readonly queries: RecordedQuery[] = [];
   readonly adminCalls: RecordedAdminCall[] = [];
   readonly pathCalls: RecordedPathCall[] = [];
   closedClients = 0;
-  closedDatabases = 0;
-  endedSnapshots = 0;
+  cancelledOperations = 0;
 
   reset(): void {
-    this.dialect = 'GOOGLE_STANDARD_SQL';
-    this.responses = [];
     this.failures = {};
-    this.adminFailures = {};
-    this.adminResponses = emptyAdminResponses();
+    this.responses = emptyAdminResponses();
     this.operationOutcome = 'resolve';
     this.clientOptions.length = 0;
-    this.databases.length = 0;
-    this.queries.length = 0;
     this.adminCalls.length = 0;
     this.pathCalls.length = 0;
     this.closedClients = 0;
-    this.closedDatabases = 0;
-    this.endedSnapshots = 0;
+    this.cancelledOperations = 0;
   }
 
   /** The arguments one path helper was called with, in call order. */
@@ -201,106 +154,12 @@ export class FakeSpannerState {
       .filter((call) => call.method === method)
       .map((call) => call.request);
   }
-
-  /** The rows configured for a statement, or none. */
-  rowsFor(sql: string): FakeRow[] {
-    const response = this.responses.find(({match}) =>
-      typeof match === 'string' ? sql.includes(match) : match.test(sql),
-    );
-    return response ? response.rows : [];
-  }
-
-  /** The last statement the tools ran. */
-  lastQuery(): RecordedQuery {
-    const query = this.queries.at(-1);
-    if (!query) {
-      throw new Error('No statement was run.');
-    }
-    return query;
-  }
 }
 
 /** The fake every mocked `Spanner` in a test file drives. */
 export const spannerFake = new FakeSpannerState();
 
-/** A statement, as `Snapshot.run` and `Snapshot.runStream` receive it. */
-interface FakeQuery {
-  sql: string;
-  params?: Record<string, unknown>;
-  types?: Record<string, string>;
-  json?: boolean;
-}
-
-class FakeSnapshot {
-  async run(query: FakeQuery): Promise<[FakeRow[], object, object]> {
-    spannerFake.queries.push({...query, streamed: false});
-    if (spannerFake.failures.run) {
-      throw spannerFake.failures.run;
-    }
-    return [spannerFake.rowsFor(query.sql), {}, {}];
-  }
-
-  runStream(query: FakeQuery): Readable {
-    spannerFake.queries.push({...query, streamed: true});
-    const {run} = spannerFake.failures;
-    const rows = spannerFake.rowsFor(query.sql);
-    return Readable.from(
-      (async function* () {
-        if (run) {
-          throw run;
-        }
-        yield* rows;
-      })(),
-    );
-  }
-
-  end(): void {
-    spannerFake.endedSnapshots += 1;
-  }
-}
-
-class FakeDatabase {
-  async getDatabaseDialect(): Promise<string | undefined> {
-    if (spannerFake.failures.getDatabaseDialect) {
-      throw spannerFake.failures.getDatabaseDialect;
-    }
-    return spannerFake.dialect;
-  }
-
-  async getSnapshot(): Promise<[FakeSnapshot]> {
-    if (spannerFake.failures.getSnapshot) {
-      throw spannerFake.failures.getSnapshot;
-    }
-    return [new FakeSnapshot()];
-  }
-
-  async close(): Promise<void> {
-    spannerFake.closedDatabases += 1;
-    if (spannerFake.failures.closeDatabase) {
-      throw spannerFake.failures.closeDatabase;
-    }
-  }
-}
-
-class FakeInstance {
-  constructor(private readonly instanceId: string) {}
-
-  database(
-    databaseId: string,
-    poolOptions?: unknown,
-    queryOptions?: unknown,
-    databaseRole?: string,
-  ): FakeDatabase {
-    spannerFake.databases.push({
-      instanceId: this.instanceId,
-      databaseId,
-      databaseRole,
-    });
-    return new FakeDatabase();
-  }
-}
-
-/** Records one administration call and returns its request unchanged. */
+/** Records one administration call. */
 function recordAdminCall(
   method: string,
   request: Record<string, unknown>,
@@ -308,7 +167,7 @@ function recordAdminCall(
   spannerFake.adminCalls.push({method, request});
 }
 
-/** Records one resource-name helper call and renders the name it returns. */
+/** Records one resource-name helper call. */
 function recordPath(helper: string, ...args: string[]): void {
   spannerFake.pathCalls.push({helper, args});
 }
@@ -342,14 +201,19 @@ class FakeOperation {
     switch (spannerFake.operationOutcome) {
       case 'reject':
         return Promise.reject(
-          spannerFake.adminFailures.operation ??
-            new Error('the operation failed'),
+          spannerFake.failures.operation ?? new Error('the operation failed'),
         );
       case 'pending':
         return new Promise(() => {});
       default:
         return Promise.resolve({});
     }
+  }
+
+  async cancel(): Promise<unknown> {
+    spannerFake.cancelledOperations += 1;
+    raiseIfConfigured(spannerFake.failures.cancelOperation);
+    return {};
   }
 }
 
@@ -374,8 +238,8 @@ class FakeInstanceAdminClient {
   ): AsyncIterable<FakeNamedResource> {
     recordAdminCall('listInstancesAsync', request);
     return pageThrough(
-      spannerFake.adminFailures.listInstances,
-      spannerFake.adminResponses.instances,
+      spannerFake.failures.listInstances,
+      spannerFake.responses.instances,
     );
   }
 
@@ -383,8 +247,8 @@ class FakeInstanceAdminClient {
     request: Record<string, unknown>,
   ): Promise<[FakeInstanceResponse]> {
     recordAdminCall('getInstance', request);
-    raiseIfConfigured(spannerFake.adminFailures.getInstance);
-    return [spannerFake.adminResponses.instance];
+    raiseIfConfigured(spannerFake.failures.getInstance);
+    return [spannerFake.responses.instance];
   }
 
   listInstanceConfigsAsync(
@@ -392,8 +256,8 @@ class FakeInstanceAdminClient {
   ): AsyncIterable<FakeNamedResource> {
     recordAdminCall('listInstanceConfigsAsync', request);
     return pageThrough(
-      spannerFake.adminFailures.listInstanceConfigs,
-      spannerFake.adminResponses.instanceConfigs,
+      spannerFake.failures.listInstanceConfigs,
+      spannerFake.responses.instanceConfigs,
     );
   }
 
@@ -401,15 +265,15 @@ class FakeInstanceAdminClient {
     request: Record<string, unknown>,
   ): Promise<[FakeInstanceConfigResponse]> {
     recordAdminCall('getInstanceConfig', request);
-    raiseIfConfigured(spannerFake.adminFailures.getInstanceConfig);
-    return [spannerFake.adminResponses.instanceConfig];
+    raiseIfConfigured(spannerFake.failures.getInstanceConfig);
+    return [spannerFake.responses.instanceConfig];
   }
 
   async createInstance(
     request: Record<string, unknown>,
   ): Promise<[FakeOperation]> {
     recordAdminCall('createInstance', request);
-    raiseIfConfigured(spannerFake.adminFailures.createInstance);
+    raiseIfConfigured(spannerFake.failures.createInstance);
     return [new FakeOperation()];
   }
 }
@@ -425,8 +289,8 @@ class FakeDatabaseAdminClient {
   ): AsyncIterable<FakeNamedResource> {
     recordAdminCall('listDatabasesAsync', request);
     return pageThrough(
-      spannerFake.adminFailures.listDatabases,
-      spannerFake.adminResponses.databases,
+      spannerFake.failures.listDatabases,
+      spannerFake.responses.databases,
     );
   }
 
@@ -434,7 +298,7 @@ class FakeDatabaseAdminClient {
     request: Record<string, unknown>,
   ): Promise<[FakeOperation]> {
     recordAdminCall('createDatabase', request);
-    raiseIfConfigured(spannerFake.adminFailures.createDatabase);
+    raiseIfConfigured(spannerFake.failures.createDatabase);
     return [new FakeOperation()];
   }
 }
@@ -442,10 +306,6 @@ class FakeDatabaseAdminClient {
 class FakeSpanner {
   constructor(options: Record<string, unknown>) {
     spannerFake.clientOptions.push(options);
-  }
-
-  instance(instanceId: string): FakeInstance {
-    return new FakeInstance(instanceId);
   }
 
   getInstanceAdminClient(): FakeInstanceAdminClient {
@@ -458,28 +318,12 @@ class FakeSpanner {
 
   async close(): Promise<void> {
     spannerFake.closedClients += 1;
-    if (spannerFake.failures.closeClient) {
-      throw spannerFake.failures.closeClient;
-    }
+    raiseIfConfigured(spannerFake.failures.closeClient);
   }
 }
 
 /** The module shape `vi.mock('@google-cloud/spanner', ...)` returns. */
 export const fakeSpannerModule = {Spanner: FakeSpanner};
-
-/**
- * Builds one row from its column names and values, as the Spanner client
- * yields it. Prefer this over {@link valueRow} whenever the tool reads a
- * column by name, so the fixture carries the same labels the client does.
- */
-export function namedRow(fields: Record<string, unknown>): FakeRow {
-  return Object.entries(fields).map(([name, value]) => ({name, value}));
-}
-
-/** Builds one row out of positional values, as a non-`json` request sees it. */
-export function valueRow(...values: unknown[]): FakeRow {
-  return values.map((value, index) => ({name: `col${index}`, value}));
-}
 
 /** Id of the function call every tool context below answers for. */
 export const FUNCTION_CALL_ID = 'fc-1';
@@ -493,6 +337,24 @@ export function makeToolContext(): Context {
     pluginManager: new PluginManager([]),
   });
   return new Context({invocationContext, functionCallId: FUNCTION_CALL_ID});
+}
+
+/**
+ * A tool context carrying the user's answer to a confirmation request, which
+ * is what a gated tool needs before it runs its body.
+ */
+export function confirmedToolContext(confirmed = true): Context {
+  const invocationContext = new InvocationContext({
+    invocationId: 'inv-1',
+    agent: new LlmAgent({name: 'a', model: 'gemini-2.5-flash'}),
+    session: createSession({id: 's1', appName: 'app', userId: 'u1'}),
+    pluginManager: new PluginManager([]),
+  });
+  return new Context({
+    invocationContext,
+    functionCallId: FUNCTION_CALL_ID,
+    toolConfirmation: new ToolConfirmation({confirmed}),
+  });
 }
 
 /** An auth client the Spanner client accepts. */
