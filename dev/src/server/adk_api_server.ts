@@ -7,13 +7,16 @@
 import {
   App,
   BaseArtifactService,
+  BaseCredentialService,
   BaseMemoryService,
   BaseSessionService,
   bearerTokenUserBuilder,
+  CompositeSessionKey,
   Event,
   getFunctionCalls,
   getFunctionResponses,
   InMemoryArtifactService,
+  InMemoryCredentialService,
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
@@ -22,6 +25,7 @@ import {
   RunConfig,
   RunnableRoot,
   Runner,
+  Session,
   StreamingMode,
   toA2a,
 } from '@google/adk';
@@ -63,6 +67,17 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
+/**
+ * Reduces a `urlPrefix` option to the form the server builds redirects with:
+ * the empty string when there is no prefix, otherwise exactly one leading `/`
+ * and no trailing `/`. A prefix written without its leading slash (`adk`) is
+ * accepted, matching adk-python, which does not validate the value either.
+ */
+export function normalizeUrlPrefix(prefix?: string): string {
+  const trimmed = prefix?.replace(/^\/+|\/+$/g, '') ?? '';
+  return trimmed ? `/${trimmed}` : '';
+}
+
 interface ServerOptions {
   agentsDir?: string;
   host?: string;
@@ -95,6 +110,22 @@ interface ServerOptions {
   a2aAuthToken?: string;
   reloadAgents?: boolean;
   registerProcessors?: (tracerProvider: TracerProvider) => void;
+  /**
+   * Credential service the runners store tool credentials in, so an auth
+   * exchange survives across requests. Defaults to an in-memory one.
+   */
+  credentialService?: BaseCredentialService;
+  /**
+   * Create the session named by a `/run` or `/run_sse` request when it does
+   * not exist, instead of answering 404. Defaults to false.
+   */
+  autoCreateSession?: boolean;
+  /**
+   * Path the server is reached under when it sits behind a reverse proxy,
+   * e.g. `/adk`. Routes stay at the root -- the proxy strips the prefix --
+   * but redirects the server generates are built with it.
+   */
+  urlPrefix?: string;
 }
 
 export class AdkApiServer {
@@ -125,6 +156,9 @@ export class AdkApiServer {
   private readonly sessionService: BaseSessionService;
   private readonly memoryService: BaseMemoryService;
   private readonly artifactService: BaseArtifactService;
+  private readonly credentialService: BaseCredentialService;
+  private readonly autoCreateSession: boolean;
+  private readonly urlPrefix: string;
   private readonly serveDebugUI: boolean;
   private readonly allowOrigins?: string;
   private readonly allowedHosts?: string[];
@@ -150,6 +184,10 @@ export class AdkApiServer {
     this.memoryService = options.memoryService ?? new InMemoryMemoryService();
     this.artifactService =
       options.artifactService ?? new InMemoryArtifactService();
+    this.credentialService =
+      options.credentialService ?? new InMemoryCredentialService();
+    this.autoCreateSession = options.autoCreateSession ?? false;
+    this.urlPrefix = normalizeUrlPrefix(options.urlPrefix);
     this.agentLoader =
       options.agentLoader ??
       new AgentLoader(
@@ -264,7 +302,7 @@ export class AdkApiServer {
 
     if (this.serveDebugUI) {
       app.get('/', (req: Request, res: Response) => {
-        res.redirect('/dev-ui');
+        res.redirect(`${this.urlPrefix}/dev-ui`);
       });
       app.use(
         '/dev-ui',
@@ -926,11 +964,7 @@ export class AdkApiServer {
     // -------------------------- Run related endpoints ------------------------
     app.post('/run', async (req: Request, res: Response) => {
       const {appName, userId, sessionId, newMessage, stateDelta} = req.body;
-      const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
-      });
+      const session = await this.resolveSession({appName, userId, sessionId});
 
       if (!session) {
         res.status(404).json({error: `Session not found: ${sessionId}`});
@@ -1052,11 +1086,7 @@ export class AdkApiServer {
       const {appName, userId, sessionId, newMessage, streaming, stateDelta} =
         req.body;
 
-      const session = await this.sessionService.getSession({
-        appName,
-        userId,
-        sessionId,
-      });
+      const session = await this.resolveSession({appName, userId, sessionId});
 
       if (!session) {
         const error = `Session not found: ${sessionId}`;
@@ -1214,10 +1244,26 @@ export class AdkApiServer {
         memoryService: this.memoryService,
         sessionService: this.sessionService,
         artifactService: this.artifactService,
+        credentialService: this.credentialService,
       });
     }
 
     return this.runnerCache[appName];
+  }
+
+  /**
+   * Looks up the session a `/run` or `/run_sse` request names, creating it
+   * when `autoCreateSession` is on. Returns undefined only when the session
+   * is absent and auto-creation is off, which is what the endpoints answer
+   * 404 for.
+   */
+  private resolveSession(
+    key: CompositeSessionKey,
+  ): Promise<Session | undefined> {
+    if (this.autoCreateSession) {
+      return this.sessionService.getOrCreateSession(key);
+    }
+    return this.sessionService.getSession(key);
   }
 
   private async *executeAgentRun(options: {
