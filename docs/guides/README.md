@@ -70,6 +70,9 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
   advertise it.
 - [APIHubToolset](tools/apihub_toolset/index.md) - Building agent tools from an
   API Hub specification, and controlling when it is fetched.
+- [BigQuery tool config](tools/bigquery_tool_config/index.md) - Configuring what
+  the BigQuery tools may write, how much a query may cost, and the labels their
+  jobs carry.
 - [LlamaIndexRetrievalTool](tools/llama_index_retrieval/index.md) - Grounding an
   agent in a LlamaIndex.TS index you already built, without adding the
   dependency to ADK.

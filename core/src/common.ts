@@ -353,6 +353,12 @@ export {
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
 export * from './integrations/agent_registry/types.js';
+export {
+  WriteMode,
+  createBigQueryToolConfig,
+  type BigQueryToolConfig,
+  type ResolvedBigQueryToolConfig,
+} from './integrations/bigquery/config.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
