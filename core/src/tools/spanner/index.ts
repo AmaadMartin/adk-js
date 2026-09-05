@@ -19,8 +19,5 @@
 export * from './admin_toolset.js';
 export type {SpannerAuthClient} from './client.js';
 export {SPANNER_DEFAULT_SCOPES} from './spanner_credentials.js';
-// Published under the name adk-python uses. The declaration carries a longer
-// one so that the data toolset's port of the same type, which lands on the
-// integration branch, can sit beside it without a collision.
-export type {SpannerToolsetCredentialsConfig as SpannerCredentialsConfig} from './spanner_credentials.js';
+export type {SpannerCredentialsConfig} from './spanner_credentials.js';
 export type {SpannerToolResult} from './tool_result.js';

@@ -17,11 +17,10 @@ import {
   listDatabasesTool,
   listInstanceConfigsTool,
   listInstancesTool,
-  SPANNER_TOOL_NAME_PREFIX,
 } from './admin_tool.js';
 import {
+  SpannerCredentialsConfig,
   SpannerCredentialsManager,
-  SpannerToolsetCredentialsConfig,
   validateSpannerCredentialsConfig,
 } from './spanner_credentials.js';
 
@@ -31,7 +30,7 @@ export interface SpannerAdminToolsetOptions {
    * How the tools authenticate. Required: Spanner rejects an unauthenticated
    * call, so there is no working default.
    */
-  credentialsConfig: SpannerToolsetCredentialsConfig;
+  credentialsConfig: SpannerCredentialsConfig;
   /**
    * Names of the tools to expose, or a predicate over them. Both see the tool
    * under its prefixed name. An empty array exposes nothing; omit the option
@@ -56,8 +55,8 @@ export interface SpannerAdminToolsetOptions {
  * Cloud Spanner resources. Pass a `toolFilter` naming only the five read-only
  * tools for an agent that inspects a project but cannot change it.
  *
- * Reading data is a different concern and is not part of this toolset. Use
- * `SpannerToolset` for tables, schemas and queries.
+ * Reading data is a different concern and is not part of this toolset: no
+ * tool here reads a table, a schema or a query result.
  *
  * Every tool answers with a `SpannerToolResult` and never throws.
  *
@@ -75,9 +74,10 @@ export interface SpannerAdminToolsetOptions {
  * ```
  *
  * A `toolFilter` given as a string array matches the prefixed name, as it does
- * for `SpannerToolset`. adk-python filters on the bare name, so a filter
- * ported from Python needs the prefix added: `tool_filter=['list_instances']`
- * becomes `toolFilter: ['spanner_list_instances']`.
+ * for `MCPToolset` and `OpenAPIToolset`. adk-python filters on the bare name,
+ * so a filter ported from Python needs the prefix added:
+ * `tool_filter=['list_instances']` becomes
+ * `toolFilter: ['spanner_list_instances']`.
  *
  * An empty array exposes no tools, which follows adk-python and not
  * `BaseToolset.isToolSelected`. The base class reads an empty array as "no
@@ -96,7 +96,7 @@ export class SpannerAdminToolset extends BaseToolset {
     // `BaseToolset` requires a filter, so an absent one becomes a predicate
     // that selects everything. That keeps "no filter" distinct from the empty
     // array, which adk-python reads as "expose nothing".
-    super(options.toolFilter ?? (() => true), SPANNER_TOOL_NAME_PREFIX);
+    super(options.toolFilter ?? (() => true));
     validateSpannerCredentialsConfig(options.credentialsConfig);
     const credentials = new SpannerCredentialsManager(
       options.credentialsConfig,
@@ -115,30 +115,19 @@ export class SpannerAdminToolset extends BaseToolset {
   }
 
   /**
-   * Selects a tool the way adk-python's
-   * `SpannerAdminToolset._is_tool_selected` does: a name the list carries
-   * selects the tool, and an empty list selects none. The inherited version
+   * A name the list carries selects the tool, and an empty list selects none,
+   * as adk-python's `_is_tool_selected` does. The inherited `isToolSelected`
    * reads an empty list as "no filter" and would expose every tool instead.
+   *
+   * A predicate needs a context, so without one only a name filter applies.
    */
-  protected override isToolSelected(
-    tool: BaseTool,
-    context: ReadonlyContext,
-  ): boolean {
-    const filter = this.toolFilter;
-    return Array.isArray(filter)
-      ? filter.includes(tool.name)
-      : filter(tool, context);
-  }
-
   override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
-    if (context) {
-      return this.tools.filter((tool) => this.isToolSelected(tool, context));
-    }
-    // A predicate needs a context, so without one only a name filter applies.
-    // `SpannerToolset` returns every tool in the same situation.
     const filter = this.toolFilter;
-    return Array.isArray(filter)
-      ? this.tools.filter((tool) => filter.includes(tool.name))
+    if (Array.isArray(filter)) {
+      return this.tools.filter((tool) => filter.includes(tool.name));
+    }
+    return context
+      ? this.tools.filter((tool) => filter(tool, context))
       : this.tools;
   }
 
