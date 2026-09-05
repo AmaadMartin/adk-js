@@ -152,8 +152,7 @@ class ContainerNode extends BaseNode {
     super({name});
   }
 
-  // eslint-disable-next-line require-yield
-  protected async *runImpl(): AsyncGenerator<never, void, void> {
+  protected runImpl(): AsyncGenerator<never, void, void> {
     throw new Error('not executed');
   }
 }
