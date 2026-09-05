@@ -1079,6 +1079,19 @@ describe('AgentLoader', () => {
         await loader.disposeAll();
       });
 
+      it('still ignores a directory whose only file is named something else', async () => {
+        await writeDirFile(
+          'helpers_only',
+          'tools.js',
+          namedAgentJsContent('helper_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listAgents()).not.toContain('helpers_only');
+        expect(await loader.listLoadFailures()).toEqual([]);
+        await loader.disposeAll();
+      });
+
       it('ignores index inside node_modules and dot directories', async () => {
         await writeDirFile(
           'node_modules',
