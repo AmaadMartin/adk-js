@@ -186,21 +186,20 @@ const OVERRIDABLE_KEYS = [
  * {@link BuildNodeOptions} keys that no `BaseNode` declares but a concrete node
  * class does, applied only to a node that declares the property.
  *
- * `authConfig` and `parameterBinding` qualify: the function builder forwards
- * both to `FunctionNode`, which reads them on every run, while the tool and
- * agent builders ignore them. Guarding on the property keeps this path
- * consistent with a fresh build — the option reaches the node that consumes it
- * and no other.
+ * `authConfig` is the only one: the function builder forwards it to
+ * `FunctionNode`, which reads `this.authConfig` on every run to gate on
+ * credentials, while the tool and agent builders ignore it. Guarding on the
+ * property keeps this path consistent with a fresh build — the option reaches
+ * the node that consumes it and no other.
  *
- * `parameters` is deliberately absent. `FunctionNode` compiles it into
- * parameter descriptors in its constructor, and assigning the raw schema over
- * those descriptors would leave the node unable to bind anything. Declare it
- * where the node is built from its function.
+ * `parameters` and `parameterBinding` are deliberately absent, because neither
+ * survives a shallow copy on its own. `FunctionNode` compiles `parameters` into
+ * parameter descriptors and derives its `inputSchema` from both keys in its
+ * constructor, so overriding either here would leave the clone binding one way
+ * and validating the other. Declare them where the node is built from its
+ * function.
  */
-const NODE_DECLARED_KEYS = [
-  'authConfig',
-  'parameterBinding',
-] as const satisfies ReadonlyArray<
+const NODE_DECLARED_KEYS = ['authConfig'] as const satisfies ReadonlyArray<
   Exclude<keyof BuildNodeOptions, keyof BaseNode>
 >;
 

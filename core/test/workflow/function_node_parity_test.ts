@@ -686,9 +686,7 @@ describe('TestParameterBindingNodeInput', () => {
 
     expect(copied.name).toBe('add_copy');
     expect(copied.parameterBinding).toBe('nodeInput');
-    expect(copied.inputSchema).toBe(
-      addParameters.constructor && add.inputSchema,
-    );
+    expect(copied.inputSchema).toBe(add.inputSchema);
 
     // The compiled descriptors survive the copy, so the clone still binds.
     const produce = new FunctionNode('produce', () => ({x: 1}));
