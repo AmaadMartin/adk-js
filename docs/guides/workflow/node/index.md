@@ -87,39 +87,9 @@ is `tests/integration/workflows/workflow_node_parallel/agent.ts`.
 
 `maxParallelWorkers` caps how many items run at once. Leave it unset and
 `ParallelWorker`'s own default of 8 applies; pass `Infinity` for unbounded
-concurrency.
+concurrency. Setting it without `parallelWorker`, or below 1, throws where you
+set it rather than where the node runs.
 
-## What fanning out changes
-
-- `rerunOnResume` becomes `true`, because the fan-out re-runs from the top when
-  a paused item is answered. An explicit `rerunOnResume: false` is overridden.
-- The wrapper is built on the node's first run, not in its constructor. A base
-  constructor runs before a subclass assigns its own fields, so a wrapper built
-  in the constructor would carry a copy with those fields still `undefined`.
-- A copy of the node fans out over the copy. `node(existingNode, {name: 'x'})`
-  returns a copy, and that copy builds its own wrapper on first use.
-
-## Copying a node
-
-`WorkflowNode#clone()` copies the node, keeping its class and its own fields.
-Only the parallel-worker options are overridable:
-
-```ts
-const single = fanningNode.clone({parallelWorker: false});
-```
-
-A property derived from another at construction — `preparedRetryConfig` from
-`retryConfig` — is not re-derived by `clone()`.
-
-## Errors
-
-Both forms reject an option pair that cannot produce a worker, and they reject
-it eagerly, so the call that got it wrong is the one that throws:
-
-| Condition                                         | Message                                                           |
-| ------------------------------------------------- | ----------------------------------------------------------------- |
-| `maxParallelWorkers` set without `parallelWorker` | `maxParallelWorkers can only be set when parallelWorker is true.` |
-| `maxParallelWorkers` below 1                      | `maxParallelWorkers must be greater than or equal to 1.`          |
-
-`node({parallelWorker: true})('START')` is also rejected: the `'START'` sentinel
-marks a graph entry point and has nothing to fan out.
+Fanning out also forces `rerunOnResume` to `true`, overriding an explicit
+`false`: the fan-out re-runs from the top when a paused item is answered, and
+items that already completed are fast-forwarded rather than run again.
