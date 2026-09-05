@@ -7,7 +7,6 @@
 import {GenerateContentConfig} from '@google/genai';
 
 import {Context} from '../../../agents/context.js';
-import {NotImplementedError} from '../../../errors/not_implemented_error.js';
 import {
   FeatureName,
   isFeatureEnabled,
@@ -42,36 +41,30 @@ export interface MockRequest {
   tracing?: string;
 }
 
-function assertEnvironmentSimulationEnabled(): void {
-  if (!isFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION)) {
-    throw new Error(
-      `Feature ${FeatureName.ENVIRONMENT_SIMULATION} is not enabled.`,
-    );
-  }
-}
-
 /**
  * Base class for mock strategies.
  *
  * A mock strategy answers a tool call with a simulated response, so an agent
- * can be exercised without the tool's real backend. Subclass it and override
+ * can be exercised without the tool's real backend. Subclass it and implement
  * {@link BaseMockStrategy.mock}.
  */
 @experimental
-export class BaseMockStrategy {
+export abstract class BaseMockStrategy {
   constructor() {
-    assertEnvironmentSimulationEnabled();
+    if (!isFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION)) {
+      throw new Error(
+        `Feature ${FeatureName.ENVIRONMENT_SIMULATION} is not enabled.`,
+      );
+    }
   }
 
   /**
    * Generates a mock response for a tool call.
    *
-   * @param _request The tool call to answer.
+   * @param request The tool call to answer.
    * @return The simulated tool response.
    */
-  async mock(_request: MockRequest): Promise<Record<string, unknown>> {
-    throw new NotImplementedError('MockStrategy.mock is not implemented.');
-  }
+  abstract mock(request: MockRequest): Promise<Record<string, unknown>>;
 }
 
 /**

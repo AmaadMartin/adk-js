@@ -19,7 +19,6 @@ import {
   InvocationContext,
   LlmAgent,
   MockRequest,
-  NotImplementedError,
   PluginManager,
   ToolConnectionMap,
   TracingMockStrategy,
@@ -107,33 +106,19 @@ function withEnvironmentSimulation<T>(callback: () => Promise<T> | T) {
 }
 
 describe('BaseMockStrategy', () => {
-  it('refuses to construct while ENVIRONMENT_SIMULATION is disabled', async () => {
+  it('refuses to construct a subclass while ENVIRONMENT_SIMULATION is disabled', async () => {
     await withTemporaryFeatureOverride(
       FeatureName.ENVIRONMENT_SIMULATION,
       false,
       () => {
-        expect(() => new BaseMockStrategy()).toThrowError(
+        expect(() => new EchoStrategy()).toThrowError(
           'Feature ENVIRONMENT_SIMULATION is not enabled.',
         );
       },
     );
   });
 
-  it('rejects with NotImplementedError when mock() is not overridden', async () => {
-    await withEnvironmentSimulation(async () => {
-      const strategy = new BaseMockStrategy();
-
-      await expect(strategy.mock(makeRequest())).rejects.toThrowError(
-        NotImplementedError,
-      );
-      await expect(strategy.mock(makeRequest())).rejects.toSatisfy(
-        (error: unknown) =>
-          error instanceof Error && error.name === 'NotImplementedError',
-      );
-    });
-  });
-
-  it('calls a subclass override instead of throwing', async () => {
+  it('calls the subclass implementation of mock()', async () => {
     await withEnvironmentSimulation(async () => {
       const result = await new EchoStrategy().mock(
         makeRequest({args: {city: 'Oslo'}}),

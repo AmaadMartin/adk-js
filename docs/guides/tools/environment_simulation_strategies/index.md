@@ -18,15 +18,16 @@ there, so a later consuming call stays consistent with it. The object is
 mutated in place. `toolConnectionMap`, `environmentData` and `tracing` are
 optional, and describe the wider environment the call happens in.
 
-Two classes ship here. `BaseMockStrategy.mock()` throws `NotImplementedError`,
-so a subclass that forgets to override it fails loudly instead of returning
-`undefined`. `TracingMockStrategy` is a placeholder: it carries the model name
-and generation config a real implementation would use, and always returns
-`{status: 'error', errorMessage: 'Not implemented'}`. adk-python ships the same
-placeholder.
+Two classes ship here. `BaseMockStrategy` is `abstract` and declares `mock()`
+abstract, so a subclass that forgets to implement it fails to compile rather
+than at the first tool call. `TracingMockStrategy` is a placeholder: it carries
+the model name and generation config a real implementation would use, and
+always returns `{status: 'error', errorMessage: 'Not implemented'}`. adk-python
+ships the same placeholder, and its simulation engine builds it for the
+`MOCK_STRATEGY_TRACING` config value.
 
 Construction requires the `ENVIRONMENT_SIMULATION` feature. The feature is off
-by default, and a constructor call with it off throws
+by default, and constructing a strategy with it off throws
 `Error('Feature ENVIRONMENT_SIMULATION is not enabled.')`.
 
 ## Get started
