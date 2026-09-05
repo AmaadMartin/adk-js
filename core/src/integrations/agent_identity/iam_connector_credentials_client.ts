@@ -5,7 +5,12 @@
  */
 
 import {GoogleAuth} from 'google-auth-library';
-import {HeaderCredentials} from './credentials_utils.js';
+import {
+  BaseRetrieveRequest,
+  CredentialsServiceName,
+  HeaderCredentials,
+  postRetrieveCredentials,
+} from './credentials_utils.js';
 
 /** Default host of the IAM Connector Credentials v1alpha API. */
 const DEFAULT_TARGET_HOST = 'iamconnectorcredentials.googleapis.com';
@@ -17,16 +22,7 @@ const TARGET_HOST_ENV_VAR = 'IAM_CONNECTOR_CREDENTIALS_TARGET_HOST';
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
 /** Request body of `POST v1alpha/{connector}/credentials:retrieve`. */
-export interface RetrieveConnectorCredentialsRequest {
-  /** The identity of the end user. */
-  userId: string;
-
-  /** The OAuth scopes the caller needs. */
-  scopes?: string[];
-
-  /** Where the connector sends the user once consent completes. */
-  continueUri?: string;
-
+export interface RetrieveConnectorCredentialsRequest extends BaseRetrieveRequest {
   /**
    * Makes the service mint a new token instead of returning a cached one. The
    * provider always sends `false`, matching adk-python.
@@ -35,13 +31,7 @@ export interface RetrieveConnectorCredentialsRequest {
 }
 
 /** The credentials a completed operation carries. */
-export type RetrieveCredentialsResult = HeaderCredentials & {
-  /** When the token expires, if the service knows. */
-  expireTime?: string;
-
-  /** The scopes the token actually carries, which may be fewer than asked. */
-  scopes?: string[];
-};
+export type RetrieveCredentialsResult = HeaderCredentials;
 
 /** The consent the end user must give before a token exists. */
 export interface ConnectorUriConsentRequired {
@@ -75,14 +65,11 @@ export interface RetrieveCredentialsMetadata {
 
 /** A `google.longrunning.Operation` as the service renders it over REST. */
 export interface RetrieveCredentialsOperation {
-  /** The operation resource name. */
-  name?: string;
-
   /** True once the operation finished, successfully or not. */
   done?: boolean;
 
   /** Why the operation failed, when it did. */
-  error?: {code?: number; message?: string};
+  error?: {message?: string};
 
   /** The credentials, set when `done` is true and the operation succeeded. */
   response?: RetrieveCredentialsResult;
@@ -122,26 +109,19 @@ export class RestIamConnectorCredentialsClient implements IamConnectorCredential
     this.auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
   }
 
-  async retrieveCredentials(
+  retrieveCredentials(
     connector: string,
     request: RetrieveConnectorCredentialsRequest,
   ): Promise<RetrieveCredentialsOperation> {
-    const url = `https://${this.host}/v1alpha/${connector}/credentials:retrieve`;
-    const client = await this.auth.getClient();
-    const headers = await client.getRequestHeaders(url);
-    headers.set('Content-Type', 'application/json');
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(request),
-    });
-    if (!response.ok) {
-      throw new Error(
-        `IAM Connector Credentials request failed with status ` +
-          `${response.status}: ${await response.text()}`,
-      );
-    }
-    return (await response.json()) as RetrieveCredentialsOperation;
+    return postRetrieveCredentials(
+      this.auth,
+      {
+        host: this.host,
+        apiVersion: 'v1alpha',
+        resource: connector,
+        service: CredentialsServiceName.IAM_CONNECTOR,
+      },
+      request,
+    );
   }
 }

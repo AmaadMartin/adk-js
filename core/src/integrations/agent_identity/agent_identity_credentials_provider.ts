@@ -15,18 +15,16 @@ import {GcpAuthProviderScheme} from '../agent_registry/types.js';
 import {
   AgentIdentityCredentialsClient,
   RestAgentIdentityCredentialsClient,
-  RetrieveCredentialsRequest,
   RetrieveCredentialsResponse,
 } from './agent_identity_credentials_client.js';
 import {
   CredentialsResourceNoun,
   CredentialsServiceName,
-  NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS,
-  NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS,
+  baseRetrieveRequest,
   constructAuthCredential,
   isConsentCompleted,
+  pollUntil,
   retrievalFailure,
-  sleep,
 } from './credentials_utils.js';
 
 /**
@@ -44,11 +42,8 @@ export interface CredentialsProvider {
 
 /** Options for {@link AgentIdentityCredentialsProvider}. */
 export interface AgentIdentityCredentialsProviderOptions {
-  /** A ready client to use, instead of building one. */
+  /** A ready client to use, instead of the REST one built on first use. */
   client?: AgentIdentityCredentialsClient;
-
-  /** Builds the client on first use. Defaults to the REST client. */
-  createClient?: () => AgentIdentityCredentialsClient;
 }
 
 /** True once the service has told us which of the four states applies. */
@@ -58,20 +53,6 @@ function isTerminalResponse(response: RetrieveCredentialsResponse): boolean {
   );
 }
 
-function buildRetrieveRequest(
-  userId: string,
-  authScheme: GcpAuthProviderScheme,
-): RetrieveCredentialsRequest {
-  const request: RetrieveCredentialsRequest = {userId};
-  if (authScheme.scopes) {
-    request.scopes = authScheme.scopes;
-  }
-  if (authScheme.continueUri) {
-    request.continueUri = authScheme.continueUri;
-  }
-  return request;
-}
-
 /**
  * Fetches end-user credentials from the Google Cloud Agent Identity
  * Credentials service.
@@ -79,12 +60,9 @@ function buildRetrieveRequest(
 @experimental
 export class AgentIdentityCredentialsProvider implements CredentialsProvider {
   private client?: AgentIdentityCredentialsClient;
-  private readonly createClient: () => AgentIdentityCredentialsClient;
 
   constructor(options?: AgentIdentityCredentialsProviderOptions) {
     this.client = options?.client;
-    this.createClient =
-      options?.createClient ?? (() => new RestAgentIdentityCredentialsClient());
   }
 
   /**
@@ -135,7 +113,10 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
 
     if (response.pending) {
       try {
-        response = await this.pollCredentials(userId, authScheme);
+        response = await pollUntil(
+          () => this.retrieveCredentials(userId, authScheme),
+          isTerminalResponse,
+        );
       } catch (error: unknown) {
         throw retrievalFailure(
           userId,
@@ -175,33 +156,14 @@ export class AgentIdentityCredentialsProvider implements CredentialsProvider {
     );
   }
 
-  private getClient(): AgentIdentityCredentialsClient {
-    this.client ??= this.createClient();
-    return this.client;
-  }
-
   private retrieveCredentials(
     userId: string,
     authScheme: GcpAuthProviderScheme,
   ): Promise<RetrieveCredentialsResponse> {
-    return this.getClient().retrieveCredentials(
+    this.client ??= new RestAgentIdentityCredentialsClient();
+    return this.client.retrieveCredentials(
       authScheme.name,
-      buildRetrieveRequest(userId, authScheme),
+      baseRetrieveRequest(userId, authScheme),
     );
-  }
-
-  private async pollCredentials(
-    userId: string,
-    authScheme: GcpAuthProviderScheme,
-  ): Promise<RetrieveCredentialsResponse> {
-    const endTime = Date.now() + NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS;
-    while (Date.now() < endTime) {
-      const response = await this.retrieveCredentials(userId, authScheme);
-      if (isTerminalResponse(response)) {
-        return response;
-      }
-      await sleep(NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS);
-    }
-    throw new Error('Timeout waiting for credentials.');
   }
 }

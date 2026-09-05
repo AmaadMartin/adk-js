@@ -20,12 +20,10 @@ export type {
   AgentIdentityCredentialsProviderOptions,
   CredentialsProvider,
 } from './agent_identity_credentials_provider.js';
-export {
-  CredentialsResourceNoun,
-  CredentialsServiceName,
-  constructAuthCredential,
-  isConsentCompleted,
-} from './credentials_utils.js';
+export {isConsentCompleted} from './credentials_utils.js';
+// HeaderCredentials is public because RetrieveCredentialsSuccess and
+// RetrieveCredentialsResult alias it; the docs check rejects a referenced type
+// that is not documented.
 export type {HeaderCredentials} from './credentials_utils.js';
 export {
   GCP_AUTH_PROVIDER_SCHEME_TYPE,
