@@ -17,6 +17,7 @@ import {
   vi,
 } from 'vitest';
 import {createAgent} from '../../src/cli/cli_create.js';
+import {AgentType} from '../../src/cli/create_options.js';
 import {
   createFolder,
   isFolderExists,
@@ -92,6 +93,40 @@ describe('createAgent', () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  describe('agent type', () => {
+    it('says CONFIG is not ready and generates the code agent instead', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        agentType: AgentType.CONFIG,
+      });
+
+      expect(log).toHaveBeenCalledWith(
+        "Agent type 'CONFIG' is not ready for use, so 'CODE' is used instead.",
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('agent.ts'),
+        expect.stringContaining('rootAgent'),
+      );
+    });
+
+    it('says nothing when the agent type is CODE', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        agentType: AgentType.CODE,
+      });
+
+      expect(log).not.toHaveBeenCalledWith(
+        expect.stringContaining('is not ready for use'),
+      );
+    });
   });
 
   describe('Non-interactive Mode (forceYes: true)', () => {

@@ -16,6 +16,7 @@ import {
   removeFolder,
   saveToFile,
 } from '../utils/file_utils.js';
+import {AgentType} from './create_options.js';
 
 const execPromise = promisify(exec);
 
@@ -98,6 +99,8 @@ interface AgentCreationOptions {
   project: string;
   region: string;
   language: string;
+  /** Defaults to `AgentType.CODE`, as adk-python's `--type` does. */
+  agentType?: AgentType;
 }
 
 async function getGcpProject(): Promise<string> {
@@ -200,6 +203,13 @@ async function generateFiles(options: AgentCreationOptions) {
 }
 
 export async function createAgent(options: AgentCreationOptions) {
+  if (options.agentType === AgentType.CONFIG) {
+    console.log(
+      `Agent type '${AgentType.CONFIG}' is not ready for use, so ` +
+        `'${AgentType.CODE}' is used instead.`,
+    );
+  }
+
   const agentDir = getAbsolutePath(options.agentName);
   await generateAgentFolder(agentDir, options.forceYes);
 
