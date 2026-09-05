@@ -333,33 +333,13 @@ function isTerminalEvent(event: Event): boolean {
  * child, for `ReplaySequenceBarrier`.
  *
  * Ported from `google/adk-python` `workflow/utils/_replay_manager.py`
- * `_scan_sequence`, reduced to what a static graph needs.
+ * `_scan_sequence`, reduced to what a static graph needs. Only terminal events
+ * count: a node that emitted nothing but state updates recorded no completion.
  *
- * Only terminal events count. A node that emitted nothing but state updates
- * recorded no completion, so nothing about it needs ordering.
- *
- * A node that completed more than once keeps its FIRST position. Two
- * divergences from the reference meet here, and both come from the same cause.
- *
- * The reference keys each run of a node separately, because its node paths
- * carry a run id. TypeScript static-graph paths carry none, so a key can only
- * name the node. Per-event numbering is not an option: a node writes more
- * terminal events across a multi-turn pause than the resuming turn gives it
- * activations — a gate records an interrupt in one turn and its output in the
- * next, but activates once when the graph replays — so a numbered key would
- * sit in the sequence unreachable, and every key behind it would starve.
- *
- * Given one key per node, the reference's "remove, then append" rule inverts
- * into a deadlock. A node the graph loops back to completes again after its own
- * successors, so keeping its last position orders it behind the nodes it feeds,
- * and its first replayed activation waits for a node that cannot run until that
- * activation finishes. First-completion order cannot do this: a node first
- * completes after the nodes it depends on, and a replay activates them in that
- * same order.
- *
- * A workflow's echo of a recovered output needs no guard here, unlike in
- * {@link reconstructNodeRuns}: the node it echoes has already contributed its
- * key, so keeping first positions drops the echo anyway.
+ * A node that completed more than once keeps its FIRST position, where the
+ * reference removes and re-appends. A node the graph loops back to completes
+ * again after the nodes it feeds, so keeping its last position would order it
+ * behind them and deadlock its own first replayed activation.
  */
 export function replaySequence(events: Event[], parentPath?: string): string[] {
   const keyFor = keyFn(parentPath);
@@ -374,17 +354,6 @@ export function replaySequence(events: Event[], parentPath?: string): string[] {
     sequence.push(name);
   }
   return sequence;
-}
-
-/**
- * Whether a workflow emitted `event` to echo a node's already recorded output,
- * rather than the node emitting it by running.
- *
- * The echo carries the node's own path and output, so a scan reads it as one
- * more run of that node unless it is skipped here.
- */
-function isReplayEcho(event: Event): boolean {
-  return event.nodeInfo?.replayed === true;
 }
 
 /** Shared scan that groups node events by the key returned by `keyFor`. */
@@ -460,7 +429,7 @@ function reconstructRuns(
     // 2. Node events. A workflow's echo of an already recovered output is not
     //    the node running, so it opens no run of its own.
     const key = keyFor(event);
-    if (!key || isReplayEcho(event)) {
+    if (!key || event.nodeInfo?.replayed) {
       continue;
     }
     const node = currentRun(key);

@@ -16,8 +16,11 @@
  * the last case here is its adk-js equivalent.
  */
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent, Event} from '../../src/events/event.js';
+import {AsyncQueue} from '../../src/utils/async_queue.js';
+import {NodeContext} from '../../src/workflow/node_context.js';
 import {
   eventsForCurrentRun,
   reconstructNodeRuns,
@@ -184,5 +187,97 @@ describe('Workflow replay ordering', () => {
     await runWithHistory([], seen);
 
     expect(seen).toEqual(['a', 'b']);
+  });
+});
+
+/**
+ * Collects the events a run streams even when it fails, which `driveWorkflow`
+ * cannot: it fails the channel, so the events are lost with the rejection.
+ */
+async function runCollecting(
+  wf: Workflow,
+  ic: InvocationContext,
+): Promise<{events: Event[]; error: unknown}> {
+  const channel = new AsyncQueue<Event>();
+  const root = new NodeContext({
+    invocationContext: ic,
+    channel,
+    nodePath: '',
+    runId: 'root',
+  });
+  const events: Event[] = [];
+  let error: unknown;
+  const settle = root.runNode(wf, 'go', {useAsOutput: true}).then(
+    () => channel.close(),
+    (err) => {
+      error = err;
+      channel.close();
+    },
+  );
+  for await (const event of channel) {
+    events.push(event);
+  }
+  await settle;
+  return {events, error};
+}
+
+/** History naming a node the graph no longer has, completing before `A`. */
+function divergentHistory(): Event[] {
+  return [
+    nodeEvent('wf.ghost', {output: 'g'}),
+    nodeEvent('wf.A', {output: 'a'}),
+  ];
+}
+
+describe('Workflow replay divergence', () => {
+  it('reports the diverged node as failing, like any other node failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const wf = new Workflow({
+        name: 'wf',
+        edges: [['START', new FnNode('A', () => 'a')]],
+      });
+      const ic = createIc();
+      ic.session.events.push(...divergentHistory());
+
+      const run = runCollecting(wf, ic);
+      await vi.advanceTimersByTimeAsync(15_000);
+      const {events, error} = await run;
+
+      expect((error as Error).message).toMatch(/Replay divergence detected/);
+      const reported = events.filter((e) => e.errorCode !== undefined);
+      expect(reported.map((e) => e.author)).toEqual(['A']);
+      expect(reported[0].errorMessage).toMatch(/Replay divergence detected/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces a sibling failure at once rather than behind a parked replay', async () => {
+    vi.useFakeTimers();
+    try {
+      const wf = new Workflow({
+        name: 'wf',
+        edges: [
+          ['START', new FnNode('A', () => 'a')],
+          [
+            'START',
+            new FnNode('B', () => {
+              throw new Error('B exploded');
+            }),
+          ],
+        ],
+      });
+      const ic = createIc();
+      ic.session.events.push(...divergentHistory());
+
+      // `A` is parked on a key nothing advances. Shutting down has to release
+      // it, or `B`'s failure waits out the replay timeout before surfacing.
+      const {error} = await runCollecting(wf, ic);
+
+      expect((error as Error).message).toBe('B exploded');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

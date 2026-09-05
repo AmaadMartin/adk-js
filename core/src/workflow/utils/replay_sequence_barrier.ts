@@ -49,7 +49,7 @@ function createGate(): Gate {
  * A key the sequence does not name is not replayed, so it never waits.
  */
 export class ReplaySequenceBarrier {
-  /** The recorded completion order, as `<nodeName>@<runId>` keys. */
+  /** The recorded completion order, one key per node. */
   readonly sequence: readonly string[];
 
   private readonly timeoutMs: number;
