@@ -43,6 +43,12 @@
       "require": "./dist/cjs/artifacts/gcs_artifact_service.js",
       "default": "./dist/esm/artifacts/gcs_artifact_service.js"
     },
+    "./integrations/firestore": {
+      "types": "./dist/types/integrations/firestore/firestore_session_service.d.ts",
+      "import": "./dist/esm/integrations/firestore/firestore_session_service.js",
+      "require": "./dist/cjs/integrations/firestore/firestore_session_service.js",
+      "default": "./dist/esm/integrations/firestore/firestore_session_service.js"
+    },
     "./plugins/bigquery": {
       "types": "./dist/types/plugins/bigquery_agent_analytics_plugin.d.ts",
       "import": "./dist/esm/plugins/bigquery_agent_analytics_plugin.js",
@@ -151,6 +157,7 @@
     "@anthropic-ai/vertex-sdk": "^0.19.6",
     "@google-cloud/bigquery": "^9.0.3",
     "@google-cloud/bigtable": "^7.2.0",
+    "@google-cloud/firestore": "^9.0.1",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/spanner": "^8.11.0",
@@ -177,6 +184,7 @@
     "@anthropic-ai/vertex-sdk": "^0.19.6",
     "@google-cloud/bigquery": "^9.0.3",
     "@google-cloud/bigtable": "^7.2.0",
+    "@google-cloud/firestore": "^9.0.1",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/spanner": "^8.11.0",
@@ -205,6 +213,9 @@
       "optional": true
     },
     "@google-cloud/bigtable": {
+      "optional": true
+    },
+    "@google-cloud/firestore": {
       "optional": true
     },
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": {
