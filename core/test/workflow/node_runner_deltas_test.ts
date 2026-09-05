@@ -152,6 +152,23 @@ describe('node_runner — deltas reach the stream (ported from adk-python)', () 
     expect(events[0].actions.artifactDelta['file.txt']).toBe(1);
   });
 
+  it('keeps the resume checkpoint on an interrupt event that also carries a delta', async () => {
+    class Node extends BaseNode {
+      protected async *runImpl(ctx: NodeContext): AsyncGenerator<Event> {
+        ctx.state.set('pending', 'write');
+        yield createEvent({longRunningToolIds: ['ask-1'], content: undefined});
+      }
+    }
+
+    const {events} = await runNode(new Node({name: 'asker'}), 'the-input');
+
+    const interrupt = events.find((e) => e.longRunningToolIds?.length);
+    expect(interrupt).toBeDefined();
+    expect(interrupt?.actions.stateDelta['pending']).toBe('write');
+    // The delta merge must not drop the input a resumed node re-runs with.
+    expect(interrupt?.actions.agentState).toEqual({input: 'the-input'});
+  });
+
   it('test_events_enqueued_in_yield_order', async () => {
     class Node extends BaseNode {
       protected async *runImpl(): AsyncGenerator<string> {
