@@ -32,6 +32,14 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
+ * Accepted entrypoint basenames for an agent directory, in resolution order.
+ *
+ * `index` comes last so a barrel `index.ts` beside an `agent.ts` keeps
+ * resolving to `agent.ts`.
+ */
+const DIR_ENTRYPOINT_BASENAMES = ['app', 'agent', 'index'];
+
+/**
  * Supported JS/TS file module types.
  */
 export enum FileModuleType {
@@ -372,6 +380,10 @@ export class AgentFile {
  * - agents_dir/{agentOrAppName}.[js | ts | mjs | cjs]
  * - agents_dir/{agentOrAppName}/agent.[js | ts | mjs | cjs]
  * - agents_dir/{agentOrAppName}/app.[js | ts | mjs | cjs]
+ * - agents_dir/{agentOrAppName}/index.[js | ts | mjs | cjs]
+ *
+ * A directory that holds more than one of these resolves to the first match in
+ * the order app, agent, index.
  *
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
@@ -580,9 +592,7 @@ export class AgentLoader {
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
-    const possibleEntryFile =
-      subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
+    const possibleEntryFile = findDirEntryFile(subFiles);
 
     if (!possibleEntryFile) {
       return;
@@ -617,6 +627,18 @@ export class AgentLoader {
 
 function isJsFile(fileExt?: string): boolean {
   return !!fileExt && JS_FILES_EXTENSIONS.includes(fileExt);
+}
+
+function findDirEntryFile(subFiles: FileMetadata[]): FileMetadata | undefined {
+  for (const basename of DIR_ENTRYPOINT_BASENAMES) {
+    const entryFile = subFiles.find(
+      (f) => f.isFile && f.name === basename && isJsFile(f.ext),
+    );
+    if (entryFile) {
+      return entryFile;
+    }
+  }
+  return undefined;
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {
