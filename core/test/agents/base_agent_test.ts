@@ -15,6 +15,7 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -297,5 +298,129 @@ describe('BaseAgent', () => {
       expect(clone.name).toBe('mock');
       expect(clone.description).toBe('a mock');
     });
+  });
+});
+
+/**
+ * The parsed shape {@link AgentStateProbe} reads its checkpoint into.
+ */
+type ProbeState = {step: number};
+
+/**
+ * Exercises the protected agent-state helpers through the public `runAsync`,
+ * so the test never widens their visibility. Each run yields the checkpoint
+ * event, then an event whose text reports what `loadAgentState` returned.
+ */
+class AgentStateProbe extends BaseAgent {
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const loaded = this.loadAgentState(context, (raw) => ({
+      step: Number(raw['step']),
+    }));
+    yield this.createAgentStateEvent(context);
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {
+        role: 'model',
+        parts: [{text: describeProbeState(loaded)}],
+      },
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
+}
+
+function describeProbeState(state: ProbeState | undefined): string {
+  return state === undefined ? 'undefined' : `step=${state.step}`;
+}
+
+async function collectEvents(
+  agent: BaseAgent,
+  context: InvocationContext,
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of agent.runAsync(context)) {
+    events.push(event);
+  }
+  return events;
+}
+
+describe('BaseAgent agent state helpers', () => {
+  function makeProbeContext(agent: BaseAgent): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'inv-state',
+      branch: 'root.probe',
+      agent,
+      session: createSession({id: 's', appName: 'app', userId: 'u'}),
+      pluginManager: new PluginManager(),
+    });
+  }
+
+  it('loadAgentState returns undefined when this agent has no checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[1].content?.parts?.[0].text).toBe('undefined');
+  });
+
+  it('loadAgentState parses the recorded checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 3}});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[1].content?.parts?.[0].text).toBe('step=3');
+  });
+
+  it('loadAgentState ignores another agent\u2019s checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('other', {agentState: {step: 9}});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[1].content?.parts?.[0].text).toBe('undefined');
+  });
+
+  it('createAgentStateEvent carries the author, branch and invocation id', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 1}});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[0].author).toBe('probe');
+    expect(events[0].branch).toBe('root.probe');
+    expect(events[0].invocationId).toBe('inv-state');
+    expect(events[0].actions.agentState).toEqual({step: 1});
+    expect(events[0].actions.endOfAgent).toBeUndefined();
+  });
+
+  it('createAgentStateEvent marks the end of the agent', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {endOfAgent: true});
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[0].actions.endOfAgent).toBe(true);
+    expect(events[0].actions.agentState).toBeUndefined();
+  });
+
+  it('createAgentStateEvent carries neither field when nothing is recorded', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+
+    const events = await collectEvents(agent, context);
+
+    expect(events[0].actions.agentState).toBeUndefined();
+    expect(events[0].actions.endOfAgent).toBeUndefined();
   });
 });

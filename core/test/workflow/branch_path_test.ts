@@ -106,3 +106,25 @@ describe('commonPrefixOf', () => {
     expect(commonPrefixOf([])).toBe('');
   });
 });
+
+describe('BranchPath.getRunIds', () => {
+  it('collects the run id of every segment that carries one', () => {
+    const ids = branchPathFromString('parent@1.child@2.node').getRunIds();
+    expect([...ids].sort()).toEqual(['1', '2']);
+  });
+
+  it('excludes a segment whose run id is empty', () => {
+    expect([...branchPathFromString('parent@.child@2').getRunIds()]).toEqual([
+      '2',
+    ]);
+  });
+
+  it('takes the text after the last @ when a segment has several', () => {
+    expect([...branchPathFromString('tool@a@b').getRunIds()]).toEqual(['b']);
+  });
+
+  it('returns an empty set for a path with no run ids', () => {
+    expect(branchPathFromString('a.b.c').getRunIds().size).toBe(0);
+    expect(new BranchPath([]).getRunIds().size).toBe(0);
+  });
+});

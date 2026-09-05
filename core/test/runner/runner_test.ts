@@ -1515,3 +1515,122 @@ describe('Runner reserved function call rejection', () => {
     expect(error).toBeUndefined();
   });
 });
+
+/** Records the invocation context its run was given. */
+class ContextCapturingAgent extends BaseAgent {
+  capturedContext?: InvocationContext;
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.capturedContext = context;
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'ok'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {}
+}
+
+describe('Runner resumability wiring', () => {
+  const RESUMED_INVOCATION_ID = 'e-resumed';
+
+  async function runAndCapture(
+    resumabilityConfig?: ReturnType<typeof createResumabilityConfig>,
+    seedEvents: Event[] = [],
+    invocationId?: string,
+  ): Promise<InvocationContext> {
+    const agent = new ContextCapturingAgent({name: 'capture'});
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+    for (const event of seedEvents) {
+      await sessionService.appendEvent({session, event});
+    }
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      resumabilityConfig,
+    });
+
+    for await (const _event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      invocationId,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the stream so the run completes.
+    }
+
+    const captured = agent.capturedContext;
+    if (!captured) {
+      expect.fail('the agent did not run');
+    }
+    return captured;
+  }
+
+  it('gives the invocation context a resumable flag', async () => {
+    const context = await runAndCapture(
+      createResumabilityConfig({isResumable: true}),
+    );
+
+    expect(context.isResumable).toBe(true);
+  });
+
+  it('leaves the invocation context non-resumable without a config', async () => {
+    const context = await runAndCapture();
+
+    expect(context.isResumable).toBe(false);
+  });
+
+  it('starts with empty agent states for a brand-new invocation', async () => {
+    const context = await runAndCapture(
+      createResumabilityConfig({isResumable: true}),
+    );
+
+    expect(context.agentStates).toEqual({});
+  });
+
+  it('rebuilds the agent states of a resumed invocation from its history', async () => {
+    const context = await runAndCapture(
+      createResumabilityConfig({isResumable: true}),
+      [
+        createEvent({
+          invocationId: RESUMED_INVOCATION_ID,
+          author: 'capture',
+          actions: {agentState: {current_sub_agent: 'second'}},
+        }),
+      ],
+      RESUMED_INVOCATION_ID,
+    );
+
+    expect(context.invocationId).toBe(RESUMED_INVOCATION_ID);
+    expect(context.agentStates['capture']).toEqual({
+      current_sub_agent: 'second',
+    });
+  });
+
+  it('ignores the recorded checkpoints when the runner is not resumable', async () => {
+    const context = await runAndCapture(
+      undefined,
+      [
+        createEvent({
+          invocationId: RESUMED_INVOCATION_ID,
+          author: 'capture',
+          actions: {agentState: {current_sub_agent: 'second'}},
+        }),
+      ],
+      RESUMED_INVOCATION_ID,
+    );
+
+    expect(context.agentStates).toEqual({});
+  });
+});

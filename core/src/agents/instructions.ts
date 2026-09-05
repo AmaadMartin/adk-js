@@ -6,6 +6,7 @@
 
 import {State} from '../sessions/state.js';
 import type {WorkflowInstructionScope} from './invocation_context.js';
+import type {InstructionProvider} from './llm_agent.js';
 import {ReadonlyContext} from './readonly_context.js';
 
 const ARTIFACT_PREFIX = 'artifact.';
@@ -293,4 +294,28 @@ function isValidStateName(variableName: string): boolean {
     return isIdentifier(parts[1]);
   }
   return false;
+}
+
+/**
+ * Appends `suffix` to an instruction, keeping a provider callable.
+ *
+ * String concatenation on an {@link InstructionProvider} stringifies the
+ * function, so a callable is wrapped in a new provider instead.
+ *
+ * Mirrors adk-python `sequential_agent._append_instruction`.
+ *
+ * @param instruction The instruction to append to.
+ * @param suffix The text to append.
+ * @returns A string when `instruction` is a string, otherwise a provider that
+ *     resolves the original instruction and appends `suffix` to the result.
+ */
+export function appendInstruction(
+  instruction: string | InstructionProvider,
+  suffix: string,
+): string | InstructionProvider {
+  if (typeof instruction === 'string') {
+    return instruction + suffix;
+  }
+  return async (context: ReadonlyContext) =>
+    (await instruction(context)) + suffix;
 }

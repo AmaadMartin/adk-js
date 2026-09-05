@@ -6,18 +6,20 @@
 
 import {Content} from '@google/genai';
 
+import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
-import {Event} from '../events/event.js';
+import {Event, getFunctionCalls} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {branchPathFromString} from '../workflow/branch_path.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
-import {BaseAgent} from './base_agent.js';
+import {BaseAgent, BaseAgentState} from './base_agent.js';
 import {LiveRequestQueue} from './live_request_queue.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
@@ -64,6 +66,9 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  agentStates?: Record<string, BaseAgentState>;
+  endOfAgents?: Record<string, boolean>;
+  resumabilityConfig?: ResumabilityConfig;
 }
 
 /**
@@ -268,6 +273,27 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * The resumption checkpoint of each agent in this invocation, keyed by agent
+   * name.
+   *
+   * Shared by reference with child contexts (see the constructor), so a
+   * sub-agent's checkpoint is visible to its parent. `readonly` guards the
+   * reference, not the contents.
+   */
+  readonly agentStates: Record<string, BaseAgentState>;
+
+  /**
+   * Whether each agent in this invocation has finished, keyed by agent name.
+   * Shared by reference with child contexts, like {@link agentStates}.
+   */
+  readonly endOfAgents: Record<string, boolean>;
+
+  /**
+   * The resumability config that applies to every agent under this invocation.
+   */
+  readonly resumabilityConfig?: ResumabilityConfig;
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -301,6 +327,23 @@ export class InvocationContext {
         .invocationCostManager ?? new InvocationCostManager();
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    // Read back from params for the same reason as the cost manager above: a
+    // child context must share the parent's maps so a sub-agent's checkpoint is
+    // recorded once for the whole invocation.
+    this.agentStates = params.agentStates ?? {};
+    this.endOfAgents = params.endOfAgents ?? {};
+    this.resumabilityConfig = params.resumabilityConfig;
+  }
+
+  /**
+   * Whether this invocation can be paused and resumed later.
+   *
+   * Recomputed on a child context from the `resumabilityConfig` the
+   * `{...parentContext}` spread carries over, rather than stored as an own
+   * field the spread would have to copy.
+   */
+  get isResumable(): boolean {
+    return this.resumabilityConfig?.isResumable ?? false;
   }
 
   /**
@@ -324,6 +367,116 @@ export class InvocationContext {
    */
   incrementLlmCallCount() {
     this.invocationCostManager.incrementAndEnforceLlmCallsLimit(this.runConfig);
+  }
+
+  /**
+   * Records the state of an agent in this invocation.
+   *
+   * * If `options.endOfAgent` is true, sets the end-of-agent flag and clears
+   *   any recorded state. `options.agentState` is ignored in that case.
+   * * Otherwise, if `options.agentState` is given, records it and resets the
+   *   end-of-agent flag to false.
+   * * Otherwise, clears both, so the agent can run again.
+   *
+   * @param agentName The name of the agent.
+   * @param options The checkpoint to record, and whether the agent finished.
+   */
+  setAgentState(
+    agentName: string,
+    options: {agentState?: BaseAgentState; endOfAgent?: boolean} = {},
+  ): void {
+    const {agentState, endOfAgent = false} = options;
+    if (endOfAgent) {
+      this.endOfAgents[agentName] = true;
+      delete this.agentStates[agentName];
+    } else if (agentState !== undefined) {
+      this.agentStates[agentName] = agentState;
+      this.endOfAgents[agentName] = false;
+    } else {
+      delete this.endOfAgents[agentName];
+      delete this.agentStates[agentName];
+    }
+  }
+
+  /**
+   * Rebuilds the agent states of this invocation from its own history, when the
+   * invocation is resumable.
+   *
+   * A history event that carries state information sets the state and the
+   * end-of-agent flag of the agent that authored it. An agent that already
+   * produced content without recording a state is seeded with an empty state,
+   * so it is known to have started.
+   */
+  populateInvocationAgentStates(): void {
+    if (!this.isResumable) {
+      return;
+    }
+    for (const event of this.session.events) {
+      if (event.invocationId !== this.invocationId) {
+        continue;
+      }
+      const key = event.nodeInfo?.path ?? event.author;
+      if (!key) {
+        continue;
+      }
+      // Truthiness, not `!== undefined`: an event written by adk-python and
+      // read back carries an explicit `null` here, which means "not recorded".
+      if (event.actions.endOfAgent) {
+        this.setAgentState(key, {endOfAgent: true});
+      } else if (event.actions.agentState) {
+        this.setAgentState(key, {agentState: event.actions.agentState});
+      } else if (
+        event.author !== 'user' &&
+        event.content &&
+        this.agentStates[key] === undefined
+      ) {
+        this.setAgentState(key, {agentState: {}});
+      }
+    }
+  }
+
+  /**
+   * Whether the invocation must pause right after this event.
+   *
+   * A paused invocation can be resumed later; an ended invocation cannot.
+   * Pausing an agent also pauses everything that depends on it — the agents
+   * after it in a workflow, and its ancestors. Parallel siblings keep running,
+   * and their common ancestor pauses once they finish.
+   *
+   * An invocation pauses on a long-running function call that nothing has
+   * answered yet. A later `user` event whose branch carries the call id as a
+   * run id means the call is already being answered in a sub-branch, so it does
+   * not pause the invocation.
+   *
+   * @param event The event just emitted.
+   * @return Whether to pause the invocation right after this event.
+   */
+  shouldPauseInvocation(event: Event): boolean {
+    const functionCalls = getFunctionCalls(event);
+    if (!event.longRunningToolIds?.length || functionCalls.length === 0) {
+      return false;
+    }
+
+    const events = this.session.events;
+    const eventIndex = events.findIndex((e) => e.id === event.id);
+    const laterEvents = eventIndex === -1 ? [] : events.slice(eventIndex + 1);
+
+    for (const functionCall of functionCalls) {
+      const callId = functionCall.id;
+      if (!callId || !event.longRunningToolIds.includes(callId)) {
+        continue;
+      }
+      const isResolvingSubBranch = laterEvents.some(
+        (e) =>
+          e.author === 'user' &&
+          e.branch &&
+          branchPathFromString(e.branch).getRunIds().has(callId),
+      );
+      if (!isResolvingSubBranch) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
