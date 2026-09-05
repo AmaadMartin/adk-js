@@ -16,7 +16,6 @@ import {
   getWithClientCert,
   MtlsClientCerts,
   TextResponse,
-  useClientCertEffective,
 } from './mtls.js';
 import {
   ApiRegistryMcpServer,
@@ -168,9 +167,7 @@ export class ApiRegistry {
 
   /** Reads every page of the MCP server listing into {@link mcpServers}. */
   private async listMcpServers(): Promise<void> {
-    const certs = useClientCertEffective()
-      ? await clientCertsToPresent()
-      : undefined;
+    const certs = await clientCertsToPresent();
     const baseUrl = chooseApiEndpoint(
       certs,
       API_REGISTRY_URL,

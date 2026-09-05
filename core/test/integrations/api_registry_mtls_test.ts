@@ -149,6 +149,7 @@ describe('clientCertsToPresent', () => {
     home = await mkdtemp(join(tmpdir(), 'adk-api-registry-mtls-'));
     vi.stubEnv('HOME', home);
     vi.stubEnv('USERPROFILE', home);
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
     vi.spyOn(logger, 'warn').mockImplementation(() => {});
   });
 
@@ -178,6 +179,18 @@ describe('clientCertsToPresent', () => {
   function warnings(): string {
     return vi.mocked(logger.warn).mock.calls.flat().join('\n');
   }
+
+  it('reads nothing when no client certificate was asked for', async () => {
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'false');
+    await writeMetadata(
+      JSON.stringify({
+        cert_provider_command: printingCommand(`${CERT_PEM}\n${KEY_PEM}\n`),
+      }),
+    );
+
+    await expect(clientCertsToPresent()).resolves.toBeUndefined();
+    expect(warnings()).toBe('');
+  });
 
   it('returns undefined when there is no metadata file', async () => {
     await expect(clientCertsToPresent()).resolves.toBeUndefined();

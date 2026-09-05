@@ -168,12 +168,17 @@ function parseCertProviderOutput(output: string): MtlsClientCerts | undefined {
 /**
  * The client certificate to present, or `undefined` when there is none.
  *
- * Every failure yields `undefined` and a warning, so a caller that asked for a
- * certificate it does not have still reaches the non-mTLS endpoint.
+ * Nothing is read unless {@link useClientCertEffective} asked for a
+ * certificate. After that, every failure yields `undefined` and a warning, so a
+ * caller that asked for a certificate it does not have still reaches the
+ * non-mTLS endpoint.
  */
 export async function clientCertsToPresent(): Promise<
   MtlsClientCerts | undefined
 > {
+  if (!useClientCertEffective()) {
+    return undefined;
+  }
   const command = await readCertProviderCommand();
   if (!command) {
     return undefined;
