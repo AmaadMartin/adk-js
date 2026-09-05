@@ -10,7 +10,9 @@ import {
   EventActions as ApiEventActions,
   AppendAgentEngineSessionEventConfig,
   AppendAgentEngineSessionEventRequestParameters,
+  CreateAgentEngineSessionConfig,
   EventMetadata,
+  ListAgentEngineSessionEventsConfig,
   Session as VertexAiSession,
   SessionEvent as VertexAiSessionEvent,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -18,6 +20,7 @@ import {
   Content,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
+  HttpOptions,
 } from '@google/genai';
 import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
@@ -26,6 +29,7 @@ import {AuthConfig} from '../auth/auth_tool.js';
 import {Event, NodeInfo, Route} from '../events/event.js';
 import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   EXPRESS_MODE_UNSUPPORTED_MESSAGE,
@@ -49,6 +53,13 @@ const DEFAULT_MAX_ATTEMPTS = 30;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
+const HTTP_TOO_MANY_REQUESTS = 429;
+
+/** Backoff before the single append retry, matching adk-python's 1.0 s sleep. */
+const APPEND_RETRY_DELAY_MS = 1000;
+
+/** Interval between polls of the pending create-session operation. */
+const CREATE_POLL_INTERVAL_MS = 1000;
 
 /**
  * `eventMetadata.customMetadata` key carrying the workflow fields of an
@@ -103,6 +114,19 @@ export interface VertexAiCreateSessionRequest extends CreateSessionRequest {
   ttl?: string;
   /** Absolute RFC 3339 UTC expiration, e.g. `'2025-10-01T00:00:00Z'`. */
   expireTime?: string;
+  /**
+   * Any other Agent Engine create-session config field, such as `displayName`,
+   * `labels` or `waitForCompletion`.
+   *
+   * `sessionId` and `sessionState` are excluded: they have named request fields
+   * that are filtered before the RPC, and accepting them here would route
+   * around that. A named field also wins over the same key here, so `ttl` and
+   * `expireTime` set directly on the request take precedence.
+   */
+  apiConfig?: Omit<
+    CreateAgentEngineSessionConfig,
+    'sessionId' | 'sessionState'
+  >;
 }
 
 /**
@@ -176,25 +200,32 @@ export class VertexAiSessionService extends BaseSessionService {
     sessionId,
     ttl,
     expireTime,
+    apiConfig,
   }: VertexAiCreateSessionRequest): Promise<Session> {
-    // The API rejects both together; fail before the RPC.
-    if (ttl != null && expireTime != null) {
+    const httpOptions = this.apiClientHttpOptionsOverride();
+    const filteredState = state ? trimTempState(state) : undefined;
+    const requestConfig: CreateAgentEngineSessionConfig = {
+      ...apiConfig,
+      ...(filteredState ? {sessionState: filteredState} : {}),
+      ...(sessionId ? {sessionId} : {}),
+      ...(ttl != null ? {ttl} : {}),
+      ...(expireTime != null ? {expireTime} : {}),
+      ...(httpOptions ? {httpOptions} : {}),
+    };
+
+    // The API rejects both together; fail before the RPC. Checked on the
+    // merged config, so apiConfig cannot smuggle the second field past it.
+    if (requestConfig.ttl != null && requestConfig.expireTime != null) {
       throw new Error(
         "Cannot specify both 'ttl' and 'expireTime' simultaneously.",
       );
     }
 
     const reasoningEngineId = this.getReasoningEngineId(appName);
-    const filteredState = state ? trimTempState(state) : undefined;
     let apiResponse = await this.sessions.createInternal({
       name: `reasoningEngines/${reasoningEngineId}`,
       userId: userId,
-      config: {
-        ...(filteredState ? {sessionState: filteredState} : {}),
-        ...(sessionId ? {sessionId} : {}),
-        ...(ttl != null ? {ttl} : {}),
-        ...(expireTime != null ? {expireTime} : {}),
-      },
+      config: requestConfig,
     });
 
     const operationName = apiResponse.name!;
@@ -204,8 +235,9 @@ export class VertexAiSessionService extends BaseSessionService {
       const [nextResponse] = await Promise.all([
         this.sessions.getSessionOperationInternal({
           operationName: operationName,
+          ...httpOptionsConfig(httpOptions),
         }),
-        new Promise((resolve) => setTimeout(resolve, 1000)),
+        delay(CREATE_POLL_INTERVAL_MS),
       ]);
       apiResponse = nextResponse;
       attempts++;
@@ -240,6 +272,7 @@ export class VertexAiSessionService extends BaseSessionService {
   }: GetSessionRequest): Promise<Session | undefined> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
     const sessionResourceName = `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`;
+    const httpOptions = this.apiClientHttpOptionsOverride();
 
     try {
       let getSessionResponse: VertexAiSession | undefined;
@@ -248,9 +281,12 @@ export class VertexAiSessionService extends BaseSessionService {
       if (config && config.numRecentEvents === 0) {
         getSessionResponse = (await this.sessions.get({
           name: sessionResourceName,
+          ...httpOptionsConfig(httpOptions),
         })) as VertexAiSession;
       } else {
-        const listConfig: Record<string, string> = {};
+        const listConfig: ListAgentEngineSessionEventsConfig = {
+          ...(httpOptions ? {httpOptions} : {}),
+        };
         if (config && config.afterTimestamp) {
           listConfig.filter = `timestamp>="${new Date(
             config.afterTimestamp,
@@ -258,7 +294,10 @@ export class VertexAiSessionService extends BaseSessionService {
         }
 
         const [sessionRes, eventsRes] = await Promise.all([
-          this.sessions.get({name: sessionResourceName}),
+          this.sessions.get({
+            name: sessionResourceName,
+            ...httpOptionsConfig(httpOptions),
+          }),
           this.sessions.events.listInternal({
             name: sessionResourceName,
             config: listConfig,
@@ -326,6 +365,7 @@ export class VertexAiSessionService extends BaseSessionService {
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
     const reasoningEngineId = this.getReasoningEngineId(appName);
+    const httpOptions = this.apiClientHttpOptionsOverride();
     const adkSessions: Session[] = [];
     let pageToken: string | undefined = undefined;
 
@@ -335,6 +375,7 @@ export class VertexAiSessionService extends BaseSessionService {
         config: {
           ...(userId ? {filter: `user_id=${quoteFilterLiteral(userId)}`} : {}),
           ...(pageToken ? {pageToken} : {}),
+          ...(httpOptions ? {httpOptions} : {}),
         },
       });
 
@@ -426,9 +467,17 @@ export class VertexAiSessionService extends BaseSessionService {
       return;
     }
 
-    await this.sessions.delete({
-      name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
-    });
+    try {
+      await this.sessions.delete({
+        name: `reasoningEngines/${reasoningEngineId}/sessions/${sessionId}`,
+        ...httpOptionsConfig(this.apiClientHttpOptionsOverride()),
+      });
+    } catch (error: unknown) {
+      logger.error(
+        `Error deleting session ${sessionId}: ${formatError(error)}`,
+      );
+      throw error;
+    }
   }
 
   override async appendEvent({
@@ -486,6 +535,11 @@ export class VertexAiSessionService extends BaseSessionService {
       unknown
     >;
 
+    const httpOptions = this.apiClientHttpOptionsOverride();
+    if (httpOptions) {
+      config.httpOptions = httpOptions;
+    }
+
     const params: AppendAgentEngineSessionEventRequestParameters = {
       name: `reasoningEngines/${reasoningEngineId}/sessions/${session.id}`,
       author: event.author || 'user',
@@ -495,7 +549,7 @@ export class VertexAiSessionService extends BaseSessionService {
     };
 
     try {
-      await this.sessions.events.append(params);
+      await appendWithRateLimitRetry(this.sessions, params);
     } catch (error) {
       // Only a rejected payload (400) is safe to retry without `rawEvent`. Any
       // other failure may already have persisted the event, so re-appending
@@ -510,10 +564,76 @@ export class VertexAiSessionService extends BaseSessionService {
         error,
       );
       delete config.rawEvent;
-      await this.sessions.events.append(params);
+      await appendWithRateLimitRetry(this.sessions, params);
     }
 
     return event;
+  }
+
+  /**
+   * HTTP options applied to every Agent Engine request, for a subclass to
+   * override. Returns undefined by default.
+   *
+   * adk-python installs the equivalent override on the client it builds. The
+   * `@google-cloud/vertexai` `Client` takes no HTTP options, so this service
+   * carries them on each request config instead. The observable effect is the
+   * same, and it also reaches requests made through an injected client.
+   */
+  protected apiClientHttpOptionsOverride(): HttpOptions | undefined {
+    return undefined;
+  }
+}
+
+/**
+ * Wraps an HTTP-options override as a request `config`, or as nothing when
+ * there is no override, so the default service sends the request unchanged.
+ */
+function httpOptionsConfig(httpOptions: HttpOptions | undefined): {
+  config?: {httpOptions: HttpOptions};
+} {
+  return httpOptions ? {config: {httpOptions}} : {};
+}
+
+/** Resolves after `ms` milliseconds. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * True when the service rejected the request for exceeding its quota, which is
+ * transient and safe to retry.
+ *
+ * Matched structurally on `status` and `code`, for the reason given in
+ * getSession's catch.
+ */
+function isRateLimitError(error: unknown): boolean {
+  const err = error as {code?: number; status?: number} | null;
+  return (
+    err?.status === HTTP_TOO_MANY_REQUESTS ||
+    err?.code === HTTP_TOO_MANY_REQUESTS
+  );
+}
+
+/**
+ * Appends an event, retrying once after {@link APPEND_RETRY_DELAY_MS} when the
+ * service answers 429.
+ *
+ * Only a quota rejection is retried: any other failure may already have
+ * persisted the event, so re-appending would store it twice. The delay runs on
+ * the failure path only, so a successful append is never slowed down.
+ */
+async function appendWithRateLimitRetry(
+  sessions: Sessions,
+  params: AppendAgentEngineSessionEventRequestParameters,
+): Promise<void> {
+  try {
+    await sessions.events.append(params);
+  } catch (error: unknown) {
+    if (!isRateLimitError(error)) {
+      throw error;
+    }
+    await delay(APPEND_RETRY_DELAY_MS);
+    await sessions.events.append(params);
   }
 }
 
@@ -648,7 +768,12 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
   const rawEvent = apiEventObj.rawEvent;
   if (rawEvent) {
     const event = JSON.parse(JSON.stringify(rawEvent)) as Event;
-    event.id = apiEventObj.name?.split('/').pop() || '';
+    // Callers correlate a streamed event with its reloaded form by id, so keep
+    // the id the event was created with. The server-assigned resource id is
+    // only a fallback for a stored payload that lacks one.
+    if (!event.id) {
+      event.id = apiEventObj.name?.split('/').pop() || '';
+    }
     event.invocationId = apiEventObj.invocationId || '';
     event.author = apiEventObj.author;
     if (apiEventObj.timestamp) {
