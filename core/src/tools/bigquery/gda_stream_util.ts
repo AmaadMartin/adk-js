@@ -107,9 +107,11 @@ async function* readLines(
         break;
       }
       buffer += decoder.decode(value, {stream: true});
+      // `split` always yields at least one element, and the last one is the
+      // partial line that the next chunk completes.
       const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
+      buffer = lines[lines.length - 1];
+      for (const line of lines.slice(0, -1)) {
         yield line;
       }
     }
@@ -128,25 +130,29 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/** The rows a system message carried, with the schema describing them. */
+interface GdaDataResult {
+  rows: unknown[];
+  schema: unknown;
+}
+
 /**
  * Finds the retrieved rows buried in a system message, or `undefined` when
  * the message reports something else.
  */
 function extractDataResult(
   message: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+): GdaDataResult | undefined {
   const result = asRecord(
     asRecord(asRecord(message['systemMessage'])?.['data'])?.['result'],
   );
-  return result && Array.isArray(result['data']) ? result : undefined;
+  const rows = result?.['data'];
+  return Array.isArray(rows) ? {rows, schema: result?.['schema']} : undefined;
 }
 
 /** Reads the column names out of a result, falling back to the first row. */
-function resultHeaders(
-  result: Record<string, unknown>,
-  rows: unknown[],
-): string[] {
-  const fields = asRecord(result['schema'])?.['fields'];
+function resultHeaders(data: GdaDataResult): string[] {
+  const fields = asRecord(data.schema)?.['fields'];
   if (Array.isArray(fields)) {
     const headers = fields
       .map((field) => asRecord(field)?.['name'])
@@ -155,20 +161,19 @@ function resultHeaders(
       return headers;
     }
   }
-  const firstRow = rows.length > 0 ? asRecord(rows[0]) : undefined;
+  const firstRow = data.rows.length > 0 ? asRecord(data.rows[0]) : undefined;
   return firstRow ? Object.keys(firstRow) : [];
 }
 
 /** Turns a raw result into the compact table the model reads. */
 function formatDataRetrieved(
-  result: Record<string, unknown>,
+  data: GdaDataResult,
   maxRows: number,
 ): GdaDataRetrieved {
-  const rawRows = Array.isArray(result['data']) ? result['data'] : [];
-  const headers = resultHeaders(result, rawRows);
-  const shown = Math.min(rawRows.length, maxRows);
+  const headers = resultHeaders(data);
+  const shown = Math.min(data.rows.length, maxRows);
 
-  const rows = rawRows
+  const rows = data.rows
     .slice(0, shown)
     .flatMap((row) =>
       asRecord(row) ? [headers.map((header) => asRecord(row)?.[header])] : [],
@@ -179,9 +184,9 @@ function formatDataRetrieved(
       headers,
       rows,
       summary:
-        rawRows.length > maxRows
-          ? `Showing the first ${shown} of ${rawRows.length} total rows.`
-          : `Showing all ${rawRows.length} rows.`,
+        data.rows.length > maxRows
+          ? `Showing the first ${shown} of ${data.rows.length} total rows.`
+          : `Showing all ${data.rows.length} rows.`,
     },
   };
 }

@@ -580,6 +580,7 @@ async function runModelQueries(
  * @param source The `history_data`, `input_data` or `target_data` argument.
  * @param renderTable How to render the argument when it names a table.
  * @param deps The clients and settings of the owning toolset.
+ * @param projectId The project the dry run runs in.
  * @param callerId The calling tool, for the dry run's job labels.
  * @return The source expression, or the failure envelope.
  */
@@ -587,6 +588,7 @@ async function resolveDataSource(
   source: string,
   renderTable: (tableId: string) => string,
   deps: BigQueryToolDeps,
+  projectId: string,
   callerId: string,
 ): Promise<string | BigQueryToolError> {
   if (!isSubquery(source)) {
@@ -594,7 +596,7 @@ async function resolveDataSource(
       ? renderTable(source)
       : bigQueryToolError(invalidIdentifierMessage(source));
   }
-  const error = await validateSubquery(source, deps, callerId);
+  const error = await validateSubquery(source, deps, projectId, callerId);
   return error ?? `(${source})`;
 }
 
@@ -611,16 +613,18 @@ function errorStatusCode(err: unknown): number | undefined {
  *
  * @param subquery The query the caller passed as a data source.
  * @param deps The clients and settings of the owning toolset.
+ * @param projectId The project the dry run runs in.
  * @param callerId The calling tool, for the job labels.
  * @return The failure envelope, or `undefined` when the subquery is a read.
  */
 export async function validateSubquery(
   subquery: string,
   deps: BigQueryToolDeps,
+  projectId: string,
   callerId: string,
 ): Promise<BigQueryToolError | undefined> {
   try {
-    const client = await getToolClient(deps, '', callerId);
+    const client = await getToolClient(deps, projectId, callerId);
     const labels = buildJobLabels(deps.settings, callerId);
     const resource = await dryRunQuery(client, subquery, labels, []);
     if (statementType(resource) !== 'SELECT') {
@@ -665,6 +669,17 @@ export async function forecast(
   const horizon = Math.trunc(input.horizon ?? DEFAULT_FORECAST_HORIZON);
   const idCols = input.id_cols ?? [];
 
+  const source = await resolveDataSource(
+    input.history_data,
+    (tableId) => `TABLE \`${tableId}\``,
+    deps,
+    input.project_id,
+    'forecast',
+  );
+  if (typeof source !== 'string') {
+    return source;
+  }
+
   const columnError = checkColumnIdentifiers([
     input.data_col,
     input.timestamp_col,
@@ -676,16 +691,6 @@ export async function forecast(
     return bigQueryToolError(
       'All elements in id_cols must be valid identifiers.',
     );
-  }
-
-  const source = await resolveDataSource(
-    input.history_data,
-    (tableId) => `TABLE \`${tableId}\``,
-    deps,
-    'forecast',
-  );
-  if (typeof source !== 'string') {
-    return source;
   }
 
   const idColsOption =
@@ -749,6 +754,7 @@ export async function analyzeContribution(
     input.input_data,
     (tableId) => `SELECT * FROM \`${tableId}\``,
     deps,
+    input.project_id,
     'analyze_contribution',
   );
   if (typeof source !== 'string') {
@@ -810,20 +816,21 @@ export async function detectAnomalies(
   if (columnError) {
     return columnError;
   }
-  if (idCols.length > 0 && !idCols.every(isValidColumnIdentifier)) {
-    return bigQueryToolError(
-      'All elements in times_series_id_cols must be valid identifiers.',
-    );
-  }
-
   const source = await resolveDataSource(
     input.history_data,
     (tableId) => `SELECT * FROM \`${tableId}\``,
     deps,
+    input.project_id,
     'detect_anomalies',
   );
   if (typeof source !== 'string') {
     return source;
+  }
+
+  if (idCols.length > 0 && !idCols.every(isValidColumnIdentifier)) {
+    return bigQueryToolError(
+      'All elements in times_series_id_cols must be valid identifiers.',
+    );
   }
 
   const target = await resolveTargetData(input.target_data);
