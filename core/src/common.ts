@@ -655,6 +655,7 @@ export type {
 } from './tools/environment_simulation/tool_connection_map.js';
 
 export * from './artifacts/base_artifact_service.js';
+export * from './evaluation/index.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';

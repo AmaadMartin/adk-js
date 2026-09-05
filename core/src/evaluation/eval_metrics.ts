@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import type {Invocation} from './eval_case.js';
 import type {RubricScore} from './eval_rubrics.js';
 
@@ -21,6 +22,17 @@ export enum EvalStatus {
   PASSED = 1,
   FAILED = 2,
   NOT_EVALUATED = 3,
+}
+
+/**
+ * Metrics that ADK ships with.
+ *
+ * The string values are written into eval config files and eval results, so
+ * they match adk-python exactly. `adk-python` names more prebuilt metrics.
+ * Each one arrives here with the evaluator that implements it.
+ */
+export enum PrebuiltMetrics {
+  MULTI_TURN_TASK_SUCCESS_V1 = 'multi_turn_task_success_v1',
 }
 
 /**
@@ -99,4 +111,25 @@ export interface EvalMetricResultPerInvocation {
 
   /** The result of each applicable metric. Defaults to an empty list. */
   evalMetricResults?: EvalMetricResult[];
+}
+
+/**
+ * Returns the threshold configured for a metric.
+ *
+ * The criterion threshold wins over the metric-level one.
+ *
+ * @throws {InputValidationError} When the metric carries neither a criterion
+ *   nor a threshold.
+ */
+export function getMetricThreshold(evalMetric: EvalMetric): number {
+  if (evalMetric.criterion !== undefined) {
+    return evalMetric.criterion.threshold;
+  }
+  if (evalMetric.threshold !== undefined) {
+    return evalMetric.threshold;
+  }
+
+  throw new InputValidationError(
+    `Evaluation metric '${evalMetric.metricName}' requires a threshold.`,
+  );
 }

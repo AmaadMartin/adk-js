@@ -26,6 +26,8 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 
 - [BaseEvalService](evaluation/eval_service/index.md) - The two-phase eval
   contract: run the agent over an eval set, then score the results.
+- [Multi-turn task success evaluator](evaluation/multi_turn_task_success_evaluator/index.md) -
+  Scoring whether an agent achieved the goal of a whole conversation.
 - [Session to eval format](evaluation/session_to_eval_format/index.md) - Turning
   a recorded session into eval-set turn records.
 - [TrajectoryEvaluator](evaluation/trajectory_evaluator/index.md) - Scoring an
