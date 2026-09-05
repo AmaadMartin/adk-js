@@ -62,6 +62,9 @@ export type {
   CriterionParser,
   EvalMetric,
   EvalMetricCriterion,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
   HallucinationsCriterion,
   Interval,
   JudgeModelOptions,
@@ -78,6 +81,7 @@ export type {
   Threshold,
   ToolTrajectoryCriterion,
 } from './eval_metrics.js';
+export {parseEvalCaseResult, parseEvalSetResult} from './eval_result.js';
 export type {EvalCaseResult, EvalSetResult} from './eval_result.js';
 export type {Rubric, RubricContent, RubricScore} from './eval_rubrics.js';
 export type {
