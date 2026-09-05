@@ -67,41 +67,18 @@ const CREDENTIAL_TYPE_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Parameter and field names that conventionally carry secret material,
- * lowercased before comparison.
+ * Endings that mark a parameter or field name as secret-bearing, lowercased
+ * before comparison.
  *
- * The reference lists only snake_case spellings. adk-js names these
- * parameters `apiKey`, `authConfig`, `authCredential` and `privateKey`, so the
- * camelCase spellings are added here; without them this module would leak in
- * adk-js exactly the secrets it masks in adk-python.
- */
-const CREDENTIAL_ARG_NAMES: ReadonlySet<string> = new Set([
-  'api_key',
-  'apikey',
-  'auth_config',
-  'authconfig',
-  'auth_credential',
-  'authcredential',
-  'authorization',
-  'cookie',
-  'cookies',
-  'credential',
-  'credentials',
-  'password',
-  'private_key',
-  'privatekey',
-  'secret',
-  'token',
-]);
-
-/**
- * Suffixes that mark a compound name as secret-bearing, lowercased before
- * comparison.
+ * The reference keeps two lists, exact names and `_`-prefixed suffixes. One
+ * list of suffixes covers both, because a name ends with itself.
  *
- * Both spellings of a two-word term are listed: lowercasing `serviceApiKey`
- * gives `serviceapikey`, which the snake_case `_api_key` suffix does not
- * match, and lowercasing `service_api_key` gives `service_api_key`, which the
- * camelCase `apikey` suffix does not match.
+ * Both spellings of a two-word term are listed. The reference has only the
+ * snake_case ones; adk-js names these parameters `apiKey`, `authConfig`,
+ * `authCredential` and `privateKey`, and lowercasing `serviceApiKey` gives
+ * `serviceapikey`, which `api_key` does not match. Without the camelCase
+ * spellings this module would leak in adk-js exactly the secrets it masks in
+ * adk-python.
  */
 const CREDENTIAL_ARG_SUFFIXES: readonly string[] = [
   'api_key',
@@ -267,10 +244,7 @@ function isCredentialType(value: object): boolean {
  */
 export function isCredentialArgName(name: string): boolean {
   const lowered = name.toLowerCase();
-  return (
-    CREDENTIAL_ARG_NAMES.has(lowered) ||
-    CREDENTIAL_ARG_SUFFIXES.some((suffix) => lowered.endsWith(suffix))
-  );
+  return CREDENTIAL_ARG_SUFFIXES.some((suffix) => lowered.endsWith(suffix));
 }
 
 /**
