@@ -348,7 +348,7 @@ export type {
   InferenceRequest,
   InferenceResult,
 } from './evaluation/base_eval_service.js';
-export {evalModel} from './evaluation/common.js';
+export {evalModel, optionalField} from './evaluation/common.js';
 export type {
   EvalDumpOptions,
   EvalModel,
@@ -359,6 +359,15 @@ export {
   DEFAULT_LIVE_TIMEOUT_SECONDS,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
 } from './evaluation/constants.js';
+export {
+  conversationGenerationConfigModel,
+  conversationScenarioModel,
+  conversationScenariosModel,
+} from './evaluation/conversation_scenarios.js';
+export type {
+  ConversationGenerationConfig,
+  ConversationScenarios,
+} from './evaluation/conversation_scenarios.js';
 export {CustomMetricEvaluator} from './evaluation/custom_metric_evaluator.js';
 export type {CustomMetricFunction} from './evaluation/custom_metric_evaluator.js';
 export {
@@ -568,6 +577,8 @@ export {
   UserPersonaRegistry,
   getBehaviorInstructionsStr,
   getViolationRubricsStr,
+  userBehaviorModel,
+  userPersonaModel,
 } from './evaluation/simulation/user_simulator_personas.js';
 export type {
   UserBehavior,

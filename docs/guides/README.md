@@ -107,6 +107,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [AppDetails](evaluation/app_details/index.md) - The eval system's projection
   of a running app: its agents, their instructions, and the tools each
   declared.
+- [Conversation scenarios](evaluation/conversation_scenarios/index.md) - Describing a conversation for a simulated user to have with the agent under test, and the personas it can adopt.
 - [EvalCase](evaluation/eval_case/index.md) - The gradable unit of an
   evaluation: a recorded conversation or a scenario, and the accessors that
   read a turn's tool trajectory.

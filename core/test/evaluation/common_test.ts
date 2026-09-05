@@ -608,13 +608,9 @@ describe('evalModel', () => {
   });
 });
 
-/**
- * `optionalField` builds a one-way transform, which `schema.encode` cannot
- * reverse, so the dump fixture uses plain optionality instead.
- */
 const turnModel: EvalModel<{startingPrompt: string; maxTurns?: number}> =
   evalModel(
-    {startingPrompt: z.string(), maxTurns: z.number().optional()},
+    {startingPrompt: z.string(), maxTurns: optionalField(z.number())},
     {name: 'Turn'},
   );
 
@@ -630,5 +626,11 @@ describe('EvalModel.dump', () => {
     expect(
       turnModel.dump({startingPrompt: 'hi', maxTurns: 2}, {byAlias: true}),
     ).toEqual({starting_prompt: 'hi', max_turns: 2});
+  });
+
+  it('emits an optional field that is absent as no key at all', () => {
+    expect(turnModel.dump({startingPrompt: 'hi'}, {byAlias: true})).toEqual({
+      starting_prompt: 'hi',
+    });
   });
 });

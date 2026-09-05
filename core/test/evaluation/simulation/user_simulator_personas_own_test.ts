@@ -53,6 +53,10 @@ describe('render helpers', () => {
 });
 
 describe('UserPersonaRegistry lookup keys', () => {
+  it('holds nothing before anything is registered', () => {
+    expect(new UserPersonaRegistry().getRegisteredPersonas()).toEqual([]);
+  });
+
   it('registers a persona under a lookup id that differs from its own id', () => {
     const registry = new UserPersonaRegistry();
     const persona = makePersona('EXPERT');
@@ -87,6 +91,19 @@ describe('UserPersonaRegistry lookup keys', () => {
     registry.registerPersona('same', second);
 
     expect(registry.getRegisteredPersonas()).toEqual([second]);
+  });
+
+  it('keeps registration order when an id is replaced', () => {
+    const registry = new UserPersonaRegistry();
+    registry.registerPersona('first', makePersona('first'));
+    registry.registerPersona('second', makePersona('second'));
+
+    registry.registerPersona('first', makePersona('replacement'));
+
+    expect(registry.getRegisteredPersonas().map((entry) => entry.id)).toEqual([
+      'replacement',
+      'second',
+    ]);
   });
 
   it('does not change the registry when the returned array is mutated', () => {

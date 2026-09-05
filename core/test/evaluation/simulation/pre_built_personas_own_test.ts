@@ -15,6 +15,16 @@ import {describe, expect, it} from 'vitest';
 const EXPECTED_PERSONA_IDS = ['EXPERT', 'NOVICE', 'EVALUATOR'];
 const BEHAVIOR_ENTRIES: Array<[string, UserBehavior]> =
   Object.entries(PRE_BUILT_BEHAVIORS);
+const BEHAVIOR_KEY_BY_BEHAVIOR = new Map<UserBehavior, string>(
+  BEHAVIOR_ENTRIES.map(([key, behavior]) => [behavior, key]),
+);
+
+/** Names the behaviors a shipped persona is composed from, in order. */
+function behaviorKeysOf(personaId: string): Array<string | undefined> {
+  return getDefaultPersonaRegistry()
+    .getPersona(personaId)
+    .behaviors.map((behavior) => BEHAVIOR_KEY_BY_BEHAVIOR.get(behavior));
+}
 
 describe('getDefaultPersonaRegistry', () => {
   it('returns a distinct registry on every call', () => {
@@ -53,6 +63,31 @@ describe('getDefaultPersonaRegistry', () => {
       getDefaultPersonaRegistry().getPersona('MISSING'),
     ).toThrowError(new NotFoundError('MISSING not found in registry.'));
   });
+
+  it('composes each default persona from the adk-python behavior list', () => {
+    expect(behaviorKeysOf('EXPERT')).toEqual([
+      'ADVANCE_DETAIL_ORIENTED',
+      'ANSWER_RELEVANT_ONLY',
+      'CORRECT_AGENT',
+      'TROUBLESHOOT_ONCE',
+      'END_LIMITED_TROUBLESHOOTING',
+      'TONE_PROFESSIONAL',
+    ]);
+    expect(behaviorKeysOf('NOVICE')).toEqual([
+      'ADVANCE_GOAL_ORIENTED',
+      'DO_NOT_CORRECT_AGENT',
+      'ANSWER_ALL',
+      'END_NO_TROUBLESHOOTING',
+      'TONE_CONVERSATIONAL',
+    ]);
+    expect(behaviorKeysOf('EVALUATOR')).toEqual([
+      'ADVANCE_DETAIL_ORIENTED',
+      'ANSWER_RELEVANT_ONLY',
+      'END_NO_TROUBLESHOOTING',
+      'DO_NOT_CORRECT_AGENT',
+      'TONE_CONVERSATIONAL',
+    ]);
+  });
 });
 
 describe('PRE_BUILT_BEHAVIORS', () => {
@@ -75,6 +110,10 @@ describe('PRE_BUILT_BEHAVIORS', () => {
   it.each(BEHAVIOR_ENTRIES)('names and describes %s', (_key, behavior) => {
     expect(behavior.name.trim()).not.toBe('');
     expect(behavior.description.trim()).not.toBe('');
+  });
+
+  it('is frozen', () => {
+    expect(Object.isFrozen(PRE_BUILT_BEHAVIORS)).toBe(true);
   });
 
   it('gives the two ending behaviors the same name on purpose', () => {

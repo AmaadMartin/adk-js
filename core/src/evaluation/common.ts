@@ -68,11 +68,20 @@ export interface EvalModel<T extends object> {
  *
  * adk-python declares these fields `Optional[...]`, so it writes `null` where
  * the value is absent. Both spellings read back as `undefined`.
+ *
+ * A codec states both directions. A one-way `transform` would read the field
+ * correctly but make {@link EvalModel.dump} throw under `byAlias`, because zod
+ * cannot encode through it. The decoded side is `z.custom` because `schema`
+ * has already accepted the value by the time the codec runs, and rejecting it
+ * a second time would only replace the first side's message with a vaguer one.
  */
 export function optionalField<T extends NonNullable<unknown>>(
   schema: z.ZodType<T>,
 ): z.ZodType<T | undefined> {
-  return schema.nullish().transform((value) => value ?? undefined);
+  return z.codec(schema.nullish(), z.custom<T | undefined>(), {
+    decode: (value) => value ?? undefined,
+    encode: (value) => value,
+  });
 }
 
 /**
