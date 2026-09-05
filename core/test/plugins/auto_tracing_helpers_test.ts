@@ -606,11 +606,12 @@ describe('positionalParamNames source parsing', () => {
     expect(Object.assign({}, wrapped)).toMatchObject({schema: 'sum'});
   });
 
-  it('keeps its place through a default holding an escaped quote', () => {
-    // If the scanner loses the string it is inside, the token list splits in
-    // the wrong place and the parameter after it loses its name — which is
-    // the name the credential rule keys off.
-    function greet(greeting = "it\\'s", token: string): string {
+  it('keeps its place through a default string holding a comma and a quote', () => {
+    // The default carries a comma, so a scanner that does not track string
+    // literals splits the token list inside it; the escaped quote then keeps
+    // it lost. Either way the next parameter loses the name the credential
+    // rule keys off, so this pins both halves of the scan.
+    function greet(greeting = 'say "hi", it\'s me', token: string): string {
       void token;
       return greeting;
     }
