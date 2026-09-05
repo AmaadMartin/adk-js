@@ -361,14 +361,12 @@ describe('FirestoreSessionService (ported from adk-python)', () => {
       (write) => write.data['event_data'] !== undefined,
     );
     expect(eventWrites).toHaveLength(1);
-    const eventData = eventWrites[0].data['event_data'] as Record<
-      string,
-      Record<string, Record<string, unknown>>
-    >;
-    expect(eventData['actions']['state_delta']).not.toHaveProperty('temp:k1');
-    expect(eventData['actions']['state_delta']['session_key']).toBe(
-      'session_val',
-    );
+    const eventData = eventWrites[0].data['event_data'];
+    // The persisted event is snake_case, as adk-python writes it.
+    expect(eventData).toMatchObject({
+      actions: {state_delta: {session_key: 'session_val'}},
+    });
+    expect(JSON.stringify(eventData)).not.toContain('temp:k1');
 
     const persisted = String(onlyWriteTo(sessionPath()).data['state']);
     expect(persisted).not.toContain('temp:k1');
