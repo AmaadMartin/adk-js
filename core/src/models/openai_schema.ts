@@ -18,35 +18,26 @@ export type JsonSchemaObject = Record<string, unknown>;
 /** Keywords whose value maps names to subschemas. */
 const SCHEMA_MAP_KEYWORDS = [
   '$defs',
-  'defs',
   'dependentSchemas',
   'patternProperties',
   'properties',
 ] as const;
 
-/** Keywords whose value is a single subschema, or a list of them. */
+/** Keywords whose value is a subschema, or a list of them. */
 const SCHEMA_OR_LIST_KEYWORDS = [
   'additionalProperties',
-  'additional_properties',
+  'allOf',
+  'anyOf',
   'contains',
   'else',
   'if',
   'items',
   'not',
+  'oneOf',
+  'prefixItems',
   'propertyNames',
   'then',
   'unevaluatedProperties',
-] as const;
-
-/** Keywords whose value is a list of subschemas. */
-const SCHEMA_LIST_KEYWORDS = [
-  'allOf',
-  'all_of',
-  'anyOf',
-  'any_of',
-  'oneOf',
-  'one_of',
-  'prefixItems',
 ] as const;
 
 /** Keywords that combine subschemas, recursed into by the strict transform. */
@@ -92,12 +83,6 @@ export function lowercaseSchemaTypes(value: unknown): void {
   }
   for (const keyword of SCHEMA_OR_LIST_KEYWORDS) {
     lowercaseSchemaTypes(value[keyword]);
-  }
-  for (const keyword of SCHEMA_LIST_KEYWORDS) {
-    const child = value[keyword];
-    if (Array.isArray(child)) {
-      lowercaseSchemaTypes(child);
-    }
   }
 }
 

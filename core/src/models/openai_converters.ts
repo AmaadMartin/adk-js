@@ -250,20 +250,6 @@ function declaredParametersToJsonSchema(
 }
 
 /**
- * Reads OpenAI's `usage.prompt_tokens_details.cached_tokens`.
- *
- * @param usage The usage block of a completion, if the response carried one.
- * @return The cached token count, or `undefined` when the host does not report
- *   one.
- */
-export function extractCachedTokenCount(
-  usage: OpenAI.CompletionUsage | undefined,
-): number | undefined {
-  const cached = usage?.prompt_tokens_details?.cached_tokens;
-  return typeof cached === 'number' ? cached : undefined;
-}
-
-/**
  * Converts a non-streamed completion into an `LlmResponse`.
  *
  * @param completion The completion returned by the API.
@@ -302,7 +288,7 @@ export function completionToLlmResponse(
       promptTokenCount: usage?.prompt_tokens,
       candidatesTokenCount: usage?.completion_tokens,
       totalTokenCount: usage?.total_tokens,
-      cachedContentTokenCount: extractCachedTokenCount(usage),
+      cachedContentTokenCount: usage?.prompt_tokens_details?.cached_tokens,
     },
   };
 }
@@ -353,8 +339,7 @@ export async function* streamToLlmResponses(
   if (text) {
     parts.push({text});
   }
-  for (const index of [...toolCalls.keys()].sort((a, b) => a - b)) {
-    const accumulated = toolCalls.get(index)!;
+  for (const [, accumulated] of [...toolCalls].sort(([a], [b]) => a - b)) {
     parts.push({
       functionCall: {
         id: accumulated.id,

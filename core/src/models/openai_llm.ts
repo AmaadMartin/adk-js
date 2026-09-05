@@ -12,7 +12,7 @@
 
 import type {OpenAI} from 'openai';
 
-import {loadOptionalPeer, OptionalPeer} from '../utils/optional_peer.js';
+import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
@@ -29,17 +29,6 @@ const DEFAULT_OPENAI_MODEL = 'gpt-4o';
 
 /** The generated-token ceiling used when the request sets none. */
 const DEFAULT_MAX_TOKENS = 4096;
-
-/**
- * The OpenAI SDK, loaded on first use.
- *
- * Exported so that a test can pin the message a caller sees when the package
- * is not installed, which is the only signal that the load failed.
- */
-export const OPENAI_SDK: OptionalPeer = {
-  packageName: 'openai',
-  feature: 'OpenAILlm (GPT models via the OpenAI API)',
-};
 
 /**
  * The Chat Completions surface {@link OpenAILlm} calls.
@@ -97,13 +86,12 @@ export class OpenAILlm extends BaseLlm {
   ];
 
   private readonly maxTokens: number;
-  private readonly injectedClient?: OpenAIClient;
   private clientPromise?: Promise<OpenAIClient>;
 
   constructor(params: OpenAILlmParams = {}) {
     super({model: params.model ?? DEFAULT_OPENAI_MODEL});
     this.maxTokens = params.maxTokens ?? DEFAULT_MAX_TOKENS;
-    this.injectedClient = params.client;
+    this.clientPromise = params.client && Promise.resolve(params.client);
   }
 
   override async *generateContentAsync(
@@ -138,14 +126,18 @@ export class OpenAILlm extends BaseLlm {
    * resolution.
    */
   private resolveClient(): Promise<OpenAIClient> {
-    return (this.clientPromise ??= this.injectedClient
-      ? Promise.resolve(this.injectedClient)
-      : createDefaultClient());
+    return (this.clientPromise ??= createDefaultClient());
   }
 }
 
 /** Loads the SDK and builds a client from the environment. */
 async function createDefaultClient(): Promise<OpenAIClient> {
-  const {OpenAI} = await loadOptionalPeer(OPENAI_SDK, () => import('openai'));
+  const {OpenAI} = await loadOptionalPeer(
+    {
+      packageName: 'openai',
+      feature: 'OpenAILlm (GPT models via the OpenAI API)',
+    },
+    () => import('openai'),
+  );
   return new OpenAI();
 }

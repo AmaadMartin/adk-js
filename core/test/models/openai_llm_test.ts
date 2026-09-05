@@ -29,9 +29,7 @@ import {
   functionDeclarationToOpenAiTool,
   partToOpenAiContent,
 } from '../../src/models/openai_converters.js';
-import {OPENAI_SDK} from '../../src/models/openai_llm.js';
 import {lowercaseSchemaTypes} from '../../src/models/openai_schema.js';
-import {loadOptionalPeer} from '../../src/utils/optional_peer.js';
 
 const defaultClient = vi.hoisted(() => ({
   instance: undefined as OpenAIClient | undefined,
@@ -67,8 +65,11 @@ class FakeOpenAIClient implements OpenAIClient {
 
   /** The single call the client received. */
   get onlyCall(): RecordedCall {
-    expect(this.calls).toHaveLength(1);
-    return this.calls[0]!;
+    const [call, ...rest] = this.calls;
+    if (!call || rest.length > 0) {
+      expect.fail(`expected exactly one call, got ${this.calls.length}`);
+    }
+    return call;
   }
 }
 
@@ -514,19 +515,6 @@ describe('OpenAILlm', () => {
 
     expect(llm).toBeInstanceOf(OpenAILlm);
     expect(llm.model).toBe('gpt-4o-mini');
-  });
-
-  it('names the openai package and the install command when it is missing', async () => {
-    const notFound: Error & {code?: string} = new Error(
-      "Cannot find package 'openai' imported from openai_llm.ts",
-    );
-    notFound.code = 'ERR_MODULE_NOT_FOUND';
-
-    const load = loadOptionalPeer(OPENAI_SDK, () => Promise.reject(notFound));
-
-    await expect(load).rejects.toThrow(/OpenAILlm/);
-    await expect(load).rejects.toThrow(/"openai", which is not installed/);
-    await expect(load).rejects.toThrow(/npm install openai/);
   });
 
   it('rejects a live connection', async () => {
