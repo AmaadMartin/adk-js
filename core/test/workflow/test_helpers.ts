@@ -234,3 +234,16 @@ export class FnNode extends BaseNode {
     yield await this.fn(ctx, input);
   }
 }
+
+/**
+ * Closes a channel and returns everything buffered in it, for a test that ran a
+ * node against a channel it did not drain while the node was running.
+ */
+export async function drain(channel: AsyncQueue<Event>): Promise<Event[]> {
+  channel.close();
+  const events: Event[] = [];
+  for await (const event of channel) {
+    events.push(event);
+  }
+  return events;
+}
