@@ -86,14 +86,13 @@ function findValueByKey(data: unknown, targetKey: string): unknown {
     }
     return undefined;
   }
-  if (typeof data !== 'object' || data === null) {
+  if (!isJsonObject(data)) {
     return undefined;
   }
-  const record = data as Record<string, unknown>;
-  if (targetKey in record && record[targetKey] !== null) {
-    return record[targetKey];
+  if (targetKey in data && data[targetKey] !== null) {
+    return data[targetKey];
   }
-  for (const value of Object.values(record)) {
+  for (const value of Object.values(data)) {
     const result = findValueByKey(value, targetKey);
     if (result !== undefined) {
       return result;
