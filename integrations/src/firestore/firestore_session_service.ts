@@ -36,7 +36,6 @@ import {
   Session,
   SessionNotFoundError,
   StaleSessionError,
-  State,
   toJsonSerializable,
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
@@ -251,44 +250,8 @@ function toSessionLockKey({
   return JSON.stringify([appName, userId, sessionId]);
 }
 
-function ignore(): void {}
-
-/**
- * Runs `work` after every item already queued under `key`.
- *
- * Work under the same key runs one item at a time, in submission order. The
- * map holds one entry per key with work in flight, and drops the entry once
- * the last item settles, so it does not grow for the life of the process.
- * This is the promise-chain equivalent of adk-python's per-session
- * `asyncio.Lock` and its reference count.
- *
- * @param queue The queue state, one `Map` per group of related work.
- * @param key Items sharing a key run one at a time.
- * @param work The work to run. Its result, including a rejection, is returned
- *   to the caller and never leaks into the next item.
- * @return What `work` resolves to.
- */
-function runSerialized<T>(
-  queue: Map<string, Promise<unknown>>,
-  key: string,
-  work: () => Promise<T>,
-): Promise<T> {
-  const queued = queue.get(key);
-  const result = queued ? queued.then(work) : work();
-
-  // The queued promise must never reject, or one failure would fail every
-  // item waiting behind it.
-  const settled = result.then(ignore, ignore);
-  queue.set(key, settled);
-  void settled.then(() => {
-    // Drop the entry only when nothing queued behind this item, so the queue
-    // does not keep one entry per key forever.
-    if (queue.get(key) === settled) {
-      queue.delete(key);
-    }
-  });
-  return result;
-}
+/** Swallows a settled append's outcome; the caller already has it. */
+function ignoreSettlement(): void {}
 
 /** Reads a state document inside a transaction, defaulting to an empty map. */
 async function readStateDocument(
@@ -596,8 +559,7 @@ export class FirestoreSessionService extends BaseSessionService {
     // Two appends racing on one session would both read the same revision and
     // one would lose its write. Firestore's transaction retry cannot help: the
     // loser is stale by then and must be rejected, not retried.
-    const revision = await runSerialized(
-      this.sessionLocks,
+    const revision = await this.withSessionLock(
       toSessionLockKey({
         appName: session.appName,
         userId: session.userId,
@@ -648,7 +610,7 @@ export class FirestoreSessionService extends BaseSessionService {
           // and reaches this write from an earlier event. Coerce the whole
           // merged map, not just this event's delta.
           const merged = Object.assign(
-            sessionOnlyState(session.state),
+            extractStateDelta(session.state).session,
             scoped.session,
           );
           const newRevision = currentRevision + 1;
@@ -672,6 +634,32 @@ export class FirestoreSessionService extends BaseSessionService {
     session.storageUpdateMarker = String(revision);
     session.lastUpdateTime = event.timestamp;
     return super.appendEvent({session, event});
+  }
+
+  /**
+   * Runs `work` after every append already queued for the same session.
+   *
+   * Appends to one session run one at a time, in submission order, so two
+   * turns of one conversation cannot both read the same revision. This is the
+   * promise-chain equivalent of adk-python's per-session `asyncio.Lock`. The
+   * map drops its entry once the last append settles, including a failed one,
+   * so it does not grow for the life of the process.
+   */
+  private withSessionLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const queued = this.sessionLocks.get(key);
+    const result = queued ? queued.then(work) : work();
+
+    // The queued promise must never reject, or one failure would fail every
+    // append waiting behind it.
+    const settled = result.then(ignoreSettlement, ignoreSettlement);
+    this.sessionLocks.set(key, settled);
+    void settled.then(() => {
+      // Drop the entry only when nothing queued behind this append.
+      if (this.sessionLocks.get(key) === settled) {
+        this.sessionLocks.delete(key);
+      }
+    });
+    return result;
   }
 
   private getSessionsRef(
@@ -750,26 +738,4 @@ export class FirestoreSessionService extends BaseSessionService {
     }
     return states;
   }
-}
-
-/**
- * Keeps only the session-scoped keys of a state map.
- *
- * `app:` and `user:` entries live in their own documents, and `temp:` entries
- * are never persisted, so the session document stores neither.
- */
-function sessionOnlyState(
-  state: Record<string, unknown>,
-): Record<string, unknown> {
-  const sessionOnly: Record<string, unknown> = Object.create(null);
-  for (const [key, value] of Object.entries(state)) {
-    if (
-      !key.startsWith(State.APP_PREFIX) &&
-      !key.startsWith(State.USER_PREFIX) &&
-      !key.startsWith(State.TEMP_PREFIX)
-    ) {
-      sessionOnly[key] = value;
-    }
-  }
-  return sessionOnly;
 }

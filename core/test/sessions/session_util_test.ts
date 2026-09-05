@@ -7,10 +7,7 @@
 import {State} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {extractStateDelta} from '../../src/sessions/base_session_service.js';
-import {
-  extractJsonSafeStateDelta,
-  makeJsonSafeState,
-} from '../../src/sessions/session_util.js';
+import {makeJsonSafeState} from '../../src/sessions/session_util.js';
 import {logger} from '../../src/utils/logger.js';
 
 afterEach(() => {
@@ -88,32 +85,5 @@ describe('makeJsonSafeState', () => {
 
   it('returns a null-prototype map', () => {
     expect(Object.getPrototypeOf(makeJsonSafeState({}))).toBeNull();
-  });
-});
-
-describe('extractJsonSafeStateDelta', () => {
-  it('coerces and splits in one pass', () => {
-    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-
-    const delta = extractJsonSafeStateDelta({
-      [`${State.APP_PREFIX}build`]: 12n,
-      [`${State.USER_PREFIX}seen`]: new Date('2026-01-02T03:04:05.000Z'),
-      [`${State.TEMP_PREFIX}scratch`]: 'x',
-      'turns': 2,
-    });
-
-    expect(delta.app).toEqual({build: '12'});
-    expect(delta.user).toEqual({seen: '2026-01-02T03:04:05.000Z'});
-    expect(delta.session).toEqual({turns: 2});
-    expect(warn).toHaveBeenCalledTimes(1);
-  });
-
-  it('leaves the caller state untouched', () => {
-    const state = {counts: [1, 2]};
-
-    const delta = extractJsonSafeStateDelta(state);
-    (delta.session['counts'] as number[]).push(3);
-
-    expect(state.counts).toEqual([1, 2]);
   });
 });
