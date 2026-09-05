@@ -96,7 +96,7 @@ export function readString(
 const CIRCULAR_STAND_IN = '[Circular]';
 
 /** Notified once for each value that was replaced. */
-type ReplaceListener = () => void;
+export type ReplaceListener = () => void;
 
 /**
  * Converts a value into a form `JSON.stringify` can represent.
