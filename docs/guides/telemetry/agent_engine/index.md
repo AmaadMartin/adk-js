@@ -1,38 +1,26 @@
 # Agent Engine telemetry
 
-Joins an ADK run onto the trace of the caller that started it, stamps a support
-identifier on the run, and drives metric export from the request path. Reach for
-it when you deploy an ADK server on Vertex AI Agent Engine and its traces or
-metrics do not show up the way you expect.
+Joins an ADK run onto the trace of the caller that started it, and stamps a
+support identifier on the run. Reach for it when you deploy an ADK server on
+Vertex AI Agent Engine and its traces do not show up the way you expect.
 
 ## Introduction
 
-Agent Engine puts two constraints on telemetry that an ordinary server does not.
+Agent Engine terminates the caller's request and starts a new one against your
+container, so the W3C `traceparent` of the original request does not reach your
+server on the usual header. Agent Engine forwards it on
+`Google-Agent-Engine-Traceparent` instead, and sends the caller's own request
+identifier on `traceparent`. Without a middleware that reads the first header,
+every run begins a new trace, and the caller's trace stops at the Agent Engine
+boundary.
 
-The first is trace continuity. Agent Engine terminates the caller's request and
-starts a new one against your container, so the W3C `traceparent` of the
-original request does not reach your server on the usual header. Agent Engine
-forwards it on `Google-Agent-Engine-Traceparent` instead, and sends the caller's
-own request identifier on `traceparent`. Without a middleware that reads the
-first header, every run begins a new trace, and the caller's trace stops at the
-Agent Engine boundary.
+This module supplies the pieces:
 
-The second is CPU. The Agent Engine runtime bills by request and throttles CPU
-the instant a request ends. A periodic metric reader exports on a timer, and
-that timer gets no CPU between requests, so metrics accumulate and are dropped.
-Collection has to be driven from the request lifecycle instead.
-
-This module supplies the pieces for both:
-
-| Symbol                                               | What it does                                               |
-| ---------------------------------------------------- | ---------------------------------------------------------- |
-| `isAgentEngine()`                                    | True when `GOOGLE_CLOUD_AGENT_ENGINE_ID` is set.           |
-| `getPropagatedContext(headers)`                      | Builds the context a request should run under.             |
-| `TopSpanProcessor`                                   | Records the support identifier on the first span of a run. |
-| `createMetricsFlushingMiddleware(reader)`            | Drives a reader from the request lifecycle.                |
-| `getAgentEngineMetricsSetup(build)`                  | Builds that reader once per process.                       |
-| `maybeInstallRequestMetricsMiddleware(app, options)` | Installs the middleware when it applies.                   |
-| `telemetryUserAgentHeaders()`                        | The `User-Agent` header for Agent Engine exporters.        |
+| Symbol                          | What it does                                               |
+| ------------------------------- | ---------------------------------------------------------- |
+| `isAgentEngine()`               | True when `GOOGLE_CLOUD_AGENT_ENGINE_ID` is set.           |
+| `getPropagatedContext(headers)` | Builds the context a request should run under.             |
+| `TopSpanProcessor`              | Records the support identifier on the first span of a run. |
 
 The ADK API server wires all of this up already. Use the pieces directly only
 when you host ADK behind your own Express app.
@@ -94,60 +82,11 @@ children, so the attribute identifies the run rather than each of its spans. A
 span is the top span when it has no parent, or when its parent came in over the
 wire from the propagator.
 
-## Request-driven metrics
-
-`createMetricsFlushingMiddleware` drives a reader that satisfies
-`RequestDrivenMetricReader`:
-
-```ts
-export interface RequestDrivenMetricReader {
-  noteRequestStart(): boolean;
-  noteRequestEnd(): boolean;
-  submitCollect(): Promise<void> | undefined;
-}
-```
-
-The middleware calls `noteRequestStart` when the request arrives and starts a
-collect without waiting for it. It then replaces `res.end` so that the final
-chunk is written first, the drain runs next, and the response is finalized last.
-The client therefore has every byte before the export begins, and the export
-runs while the request still holds CPU. A `close` listener drains an aborted
-connection, where `res.end` is never reached.
-
-Install it through `maybeInstallRequestMetricsMiddleware`, which returns without
-doing anything off Agent Engine, and when telemetry is not exported to Google
-Cloud:
-
-```ts
-import {maybeInstallRequestMetricsMiddleware} from '@google/adk';
-
-maybeInstallRequestMetricsMiddleware(app, {
-  otelToCloud: true,
-  buildMetrics: () => ({reader, spanProcessor}),
-});
-```
-
-`buildMetrics` is called at most once per process. `getAgentEngineMetricsSetup`
-memoizes its result and ignores the builder after the first call, so the check
-for an already-installed `MeterProvider` runs before ADK installs its own, and
-every call site drives the same reader.
-
-adk-js does not ship a `RequestDrivenMetricReader` implementation yet, so the
-ADK API server supplies no builder and the middleware is not installed. Pass
-your own builder to use the middleware today.
-
 ## Failure modes
 
-Telemetry never breaks the request it rides on.
-
-| What fails                                              | What happens                                                                                       |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| A malformed `Google-Agent-Engine-Traceparent`           | The run starts a fresh trace. Nothing is logged.                                                   |
-| `noteRequestStart` or the entry collect throws          | `Metrics request-start hook failed` is logged. The request proceeds.                               |
-| `noteRequestEnd` or the drain collect throws or rejects | `Failed to flush metrics on request end` is logged. The response completes.                        |
-| The downstream handler throws                           | The drain runs, then the error propagates, so the reader stays balanced.                           |
-| A `MeterProvider` is already installed                  | A warning is logged and no reader is built. ADK defers to that setup.                              |
-| `buildMetrics` throws                                   | `Failed to set up request-driven metric export on Agent Engine.` is logged and no reader is built. |
+Telemetry never breaks the request it rides on. A malformed
+`Google-Agent-Engine-Traceparent` makes the run start a fresh trace, and nothing
+is logged.
 
 ## Differences from adk-python
 
@@ -156,11 +95,10 @@ id against the `traceparent` in baggage. adk-js asks the OpenTelemetry SDK
 instead, which marks a propagated parent remote. The outcome is the same and the
 SDK cannot mis-parse a caller-supplied value.
 
-`telemetryUserAgentHeaders()` reports `Vertex-Agent-Engine/<adk version>`.
-adk-python reports the `google-cloud-aiplatform` version and appends the OTLP
-exporter version; neither is readable from adk-js without loading a
-dependency's `package.json` at runtime.
+## Not here yet
 
-adk-python drains inside a Starlette streaming response body iterator. Express
-has no such hook, so adk-js wraps `res.end`. The ordering and the guarantee are
-the same.
+Agent Engine's runtime bills by request and throttles CPU the instant a request
+ends, so a periodic metric reader gets no CPU between requests and its metrics
+are dropped. adk-python drives collection from the request path instead, in
+`telemetry/_agent_engine.py` and `telemetry/_agent_engine_metric_exporter.py`.
+adk-js has neither the reader nor the middleware that drives it.
