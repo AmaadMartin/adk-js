@@ -57,12 +57,11 @@
                 "functionCall": {
                   "name": "finish_task",
                   "args": {
-                    "phone_number": "555-1234",
-                    "name": "Jane Doe"
+                    "name": "Jane Doe",
+                    "phone_number": "555-1234"
                   },
-                  "id": "adk-42fc0dfa-89f1-42a9-b0d8-548657c8780c"
-                },
-                "thoughtSignature": "Cr8CAY89a1/FHiRwBH8w6ZzLFTcm0U1obAa9ao3JZyVGkzEh88JGzeHwFkajd925qRXqwEQKTxEpszZBkqw6kiLhWEVwz+wnqvdKFq1/UGoDCdu0dji7xPd9+rRAcosFESJlAD+twOO3pfUdA7M4Kc1YpQQvbnz4ngLh6xWO0s1j7mSdos6fjJ38xqT14n1lj86TtarxeICj4jgNcasPi3Vt8mM43IJptrP0jVoSCpIKQiUc7Prr5rmni/bFO/rBZRi6zsXcuUX0FrTysRkW2ugSqIpX5JBlhMvQZQQpeEYuA2dShNKY0g/BajTjFGztABy6VcbR+mCwqawZNcsIAOzCAV3II3RlLXrh0ToGxoWE1p0/GeyIRA3+Zi0ZovEDOnQWNYKvVwYGfyQEulwfoGD3YznpyMx7DuHwR07xjAbswQ=="
+                  "id": "adk-9432115f-c234-4f73-b8a6-c5cd32016b8f"
+                }
               }
             ]
           },
@@ -72,7 +71,7 @@
       "usageMetadata": {
         "promptTokenCount": 188,
         "candidatesTokenCount": 17,
-        "totalTokenCount": 274,
+        "totalTokenCount": 257,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -86,7 +85,7 @@
             "tokenCount": 17
           }
         ],
-        "thoughtsTokenCount": 69
+        "thoughtsTokenCount": 52
       }
     }
   },
@@ -138,9 +137,8 @@
                 "functionCall": {
                   "name": "find_orders",
                   "args": {},
-                  "id": "adk-5f4058d7-a7b0-4797-aed9-f7d39dcd1484"
-                },
-                "thoughtSignature": "CrQCAY89a18fe458CYBWIfl0HIWVMMRQAgtlo5h8re/sXbT9z7QIqJgCWEjgjvUGjjsOTEUrCnwIhxWqSnqdcmkru/6gTuC+FmF/USdP1SxBlNikWk/2Uhyu1eD7+aDhcENkVX/b2dGemS28pjYrc90B2SBUfB+8C+t/QP2XTAyR/8G0iODYdsYHtoHpRqIW/OEzPif2dF84yimIAGAXRsfjYSB1KbWa18EKLO6OJx06dIyzWcXMh0VAbdnYZ9TKxbFXZSy540q5fIiYYRVtTTKVIeJkrhdvzpIICHJdfv8HEhUb9AakijN1r4g1BXYKIHaGyncSUy/zDWUKVqJgcW3JOD8L8bBTA+WwnOj2YEBY5whO563uOaXRL0FOChSkRTK/g1yQ1LQ+DhDP/zfiKj19MfqOeTg="
+                  "id": "adk-15baef5c-d662-4080-bf08-83206a58ab88"
+                }
               }
             ]
           },
@@ -150,7 +148,7 @@
       "usageMetadata": {
         "promptTokenCount": 83,
         "candidatesTokenCount": 3,
-        "totalTokenCount": 142,
+        "totalTokenCount": 118,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -164,7 +162,7 @@
             "tokenCount": 3
           }
         ],
-        "thoughtsTokenCount": 56
+        "thoughtsTokenCount": 32
       }
     }
   },
@@ -223,8 +221,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "Hello! I'm your medical lab intake assistant. To start, could you please provide me with your full name?",
-                "thoughtSignature": "CtUBAY89a18HUGHO+RiKRLwTmZOKGrL+srBt5MyUmxWO6TVh7H+9J4aoxDYhyedTDvBQDjmUZbUBT0Mbv2+vVF1hy/ZkQV4SFTCwDX8jEsUKdQQDJfsAvDOh9r4GBw5ZOOIjAq+DzzmPY25cYcOG2tHYgsS+4XiIEdO2sJBXk8fjntEHKIm4cpdBKsdhlNuzClRr+wJrBGC6R+Gh8/6edj8JC5O/UF6qafdvWPkfy524hQ4JR1tdq8lHijNGK4QjIf/712M3vilutxOwOCxnEBlICifypvBy"
+                "text": "Hello! I'm your medical lab intake assistant. To get started, could I please have your full name?"
               }
             ]
           },
@@ -233,8 +230,8 @@
       ],
       "usageMetadata": {
         "promptTokenCount": 171,
-        "candidatesTokenCount": 24,
-        "totalTokenCount": 239,
+        "candidatesTokenCount": 23,
+        "totalTokenCount": 256,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -245,16 +242,16 @@
         "candidatesTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 24
+            "tokenCount": 23
           }
         ],
-        "thoughtsTokenCount": 44
+        "thoughtsTokenCount": 62
       }
     }
   },
   {
-    "key": "d0f0471a16f5af97",
-    "instructionAgnosticKey": "bf7ac832aed42e0e",
+    "key": "88648d2b30bda6ea",
+    "instructionAgnosticKey": "727aa693fca8284b",
     "request": {
       "contents": [
         {
@@ -269,8 +266,7 @@
           "role": "model",
           "parts": [
             {
-              "text": "Hello! I'm your medical lab intake assistant. To start, could you please provide me with your full name?",
-              "thoughtSignature": "CtUBAY89a18HUGHO+RiKRLwTmZOKGrL+srBt5MyUmxWO6TVh7H+9J4aoxDYhyedTDvBQDjmUZbUBT0Mbv2+vVF1hy/ZkQV4SFTCwDX8jEsUKdQQDJfsAvDOh9r4GBw5ZOOIjAq+DzzmPY25cYcOG2tHYgsS+4XiIEdO2sJBXk8fjntEHKIm4cpdBKsdhlNuzClRr+wJrBGC6R+Gh8/6edj8JC5O/UF6qafdvWPkfy524hQ4JR1tdq8lHijNGK4QjIf/712M3vilutxOwOCxnEBlICifypvBy"
+              "text": "Hello! I'm your medical lab intake assistant. To get started, could I please have your full name?"
             }
           ]
         },
@@ -324,8 +320,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "Thank you, Jane Doe. Now, could you please provide me with your phone number?",
-                "thoughtSignature": "CpIBAY89a1/lapbla0j9NU1coIkwIYbkwEeUjp7mHpBYQDFYkSBAmryuxazeuEmQDf20EfhYYpKI+uc1fTTdPA/1Y8wslnFQXySPtPpmBMu1Sm/tKZde5CHdqu73f5HTAUyNjLsvi8tczwebjaXbK98djXhQe5wsMngUFq3SJspYGr6xxk4mMOXFq3rBcvK9dTO6mpQ="
+                "text": "Thank you, Jane Doe. Could I also please get your phone number?"
               }
             ]
           },
@@ -333,29 +328,29 @@
         }
       ],
       "usageMetadata": {
-        "promptTokenCount": 241,
-        "candidatesTokenCount": 18,
-        "totalTokenCount": 292,
+        "promptTokenCount": 196,
+        "candidatesTokenCount": 15,
+        "totalTokenCount": 228,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 241
+            "tokenCount": 196
           }
         ],
         "candidatesTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 18
+            "tokenCount": 15
           }
         ],
-        "thoughtsTokenCount": 33
+        "thoughtsTokenCount": 17
       }
     }
   },
   {
-    "key": "b70e142286e26b3e",
-    "instructionAgnosticKey": "0129207bd9829fd6",
+    "key": "90d84b7ec2b03cc9",
+    "instructionAgnosticKey": "4932b888add26a45",
     "request": {
       "contents": [
         {
@@ -370,8 +365,7 @@
           "role": "model",
           "parts": [
             {
-              "text": "Hello! I'm your medical lab intake assistant. To start, could you please provide me with your full name?",
-              "thoughtSignature": "CtUBAY89a18HUGHO+RiKRLwTmZOKGrL+srBt5MyUmxWO6TVh7H+9J4aoxDYhyedTDvBQDjmUZbUBT0Mbv2+vVF1hy/ZkQV4SFTCwDX8jEsUKdQQDJfsAvDOh9r4GBw5ZOOIjAq+DzzmPY25cYcOG2tHYgsS+4XiIEdO2sJBXk8fjntEHKIm4cpdBKsdhlNuzClRr+wJrBGC6R+Gh8/6edj8JC5O/UF6qafdvWPkfy524hQ4JR1tdq8lHijNGK4QjIf/712M3vilutxOwOCxnEBlICifypvBy"
+              "text": "Hello! I'm your medical lab intake assistant. To get started, could I please have your full name?"
             }
           ]
         },
@@ -387,8 +381,7 @@
           "role": "model",
           "parts": [
             {
-              "text": "Thank you, Jane Doe. Now, could you please provide me with your phone number?",
-              "thoughtSignature": "CpIBAY89a1/lapbla0j9NU1coIkwIYbkwEeUjp7mHpBYQDFYkSBAmryuxazeuEmQDf20EfhYYpKI+uc1fTTdPA/1Y8wslnFQXySPtPpmBMu1Sm/tKZde5CHdqu73f5HTAUyNjLsvi8tczwebjaXbK98djXhQe5wsMngUFq3SJspYGr6xxk4mMOXFq3rBcvK9dTO6mpQ="
+              "text": "Thank you, Jane Doe. Could I also please get your phone number?"
             }
           ]
         },
@@ -448,9 +441,8 @@
                     "phone_number": "555-1234",
                     "name": "Jane Doe"
                   },
-                  "id": "adk-9b3d5d78-2db4-42f5-8eea-19c594d6fc27"
-                },
-                "thoughtSignature": "CusBAY89a1+4grhnLQaLr8+3uGmSml9VN8erTEtnapZk3KEI9nb4EpjUVHMCkVJkCeP2eGKWqzXqO5mIUaDRGzIlxBJg+/p9uJh89ifNyfQOQ4cs81AD2JxLFwBvf0IH5aVwOagFfb2XaDUICtodo5k1xoGANh0ejlJV3N3/YAimqPbrxQa9tAnoPYOm9JB1uPM5l0M0jUHgKAZ7UTMJ24CCr36Lyjx/Y8wL9epCnnxajPUTCtrCmo0PnKwU1O1SRiZB+/duEV0nWI0RDKo4doRbK3wMlBoDg0vghieGNezUt5pKiH9OJGq5k7QZ7g=="
+                  "id": "adk-525f6f4f-a8dd-4558-b9b0-cd1646c515b8"
+                }
               }
             ]
           },
@@ -458,14 +450,14 @@
         }
       ],
       "usageMetadata": {
-        "promptTokenCount": 300,
+        "promptTokenCount": 219,
         "candidatesTokenCount": 17,
-        "totalTokenCount": 374,
+        "totalTokenCount": 292,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 300
+            "tokenCount": 219
           }
         ],
         "candidatesTokensDetails": [
@@ -474,7 +466,7 @@
             "tokenCount": 17
           }
         ],
-        "thoughtsTokenCount": 57
+        "thoughtsTokenCount": 56
       }
     }
   },
@@ -526,9 +518,8 @@
                 "functionCall": {
                   "name": "find_orders",
                   "args": {},
-                  "id": "adk-f0c06e66-40a6-4c25-bacf-f8c5d8cb6892"
-                },
-                "thoughtSignature": "CrgBAY89a1/bRPCSZ4guzKhFaHPpWzxanBRLVnXT+Zh9NGvLhW+UUlksuTcYtzidlgJMxCTnJxtrqNdLo9lNkjDsrkOGNVFOoCzn/IGijuTIEQD3/p2Dk8uAdWvHc2fFWrSaSgtXip6NpTjYl/02LAmeazQ08oW99iuI/K61GBLgGdK9dcxBrqNaytPLLqyfHxZTGg/5SfDvqbA0gtO5cAI3+aZBp0AeRwrBRSakaAMiMrfd4L4zY2wmzQ=="
+                  "id": "adk-2ed49ab6-1c6d-43f6-8faf-b29a038f62ed"
+                }
               }
             ]
           },
@@ -538,7 +529,7 @@
       "usageMetadata": {
         "promptTokenCount": 83,
         "candidatesTokenCount": 3,
-        "totalTokenCount": 119,
+        "totalTokenCount": 120,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -552,7 +543,7 @@
             "tokenCount": 3
           }
         ],
-        "thoughtsTokenCount": 33
+        "thoughtsTokenCount": 34
       }
     }
   },
@@ -611,8 +602,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "What is your phone number?",
-                "thoughtSignature": "CnIBjz1rXyKDZy02pRHKNy+FUBebqumjIJjWSY78lQ+eVOvGSENgYNLI0sSHZ08g1mJt/A/5JBGqdo3Jzz3gUTzfcQ7Nx/1IUcIja/V/eMarRsOWeSJ7pnNDLo9GnnGLclfW+mh48Mx7jgaQd9KrV0j9vHQ="
+                "text": "Thanks, John Doe. What is your phone number?"
               }
             ]
           },
@@ -621,8 +611,8 @@
       ],
       "usageMetadata": {
         "promptTokenCount": 175,
-        "candidatesTokenCount": 6,
-        "totalTokenCount": 199,
+        "candidatesTokenCount": 11,
+        "totalTokenCount": 206,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -633,16 +623,16 @@
         "candidatesTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 6
+            "tokenCount": 11
           }
         ],
-        "thoughtsTokenCount": 18
+        "thoughtsTokenCount": 20
       }
     }
   },
   {
-    "key": "e2b179f9217433ca",
-    "instructionAgnosticKey": "6b4de2906e30d878",
+    "key": "1e1c036a08077c1e",
+    "instructionAgnosticKey": "a2066f03f06d597c",
     "request": {
       "contents": [
         {
@@ -657,8 +647,7 @@
           "role": "model",
           "parts": [
             {
-              "text": "What is your phone number?",
-              "thoughtSignature": "CnIBjz1rXyKDZy02pRHKNy+FUBebqumjIJjWSY78lQ+eVOvGSENgYNLI0sSHZ08g1mJt/A/5JBGqdo3Jzz3gUTzfcQ7Nx/1IUcIja/V/eMarRsOWeSJ7pnNDLo9GnnGLclfW+mh48Mx7jgaQd9KrV0j9vHQ="
+              "text": "Thanks, John Doe. What is your phone number?"
             }
           ]
         },
@@ -715,12 +704,11 @@
                 "functionCall": {
                   "name": "finish_task",
                   "args": {
-                    "phone_number": "555-1234",
-                    "name": "John Doe"
+                    "name": "John Doe",
+                    "phone_number": "555-1234"
                   },
-                  "id": "adk-9663476b-d24e-4099-b59c-eb98d356f0b2"
-                },
-                "thoughtSignature": "CuUBAY89a190Lz0SQSjnE6uyrsiPqApsv0kurk74ifsjdYZkbeqpCpdau21kE3FySTpa/KrQt3P/wweyUgRUf8rORm9VsBSbdjL5PbMtVJbAOXqArxae5cAlFlrNFbwmXl96pELVnm8mnaoyCJtf1Tfk5S7ff9xkytWUKqJ1r/L6RGBbXl8gyP/If1BeEc55dbNRrKmqWwDOZtXVYHdts2HCFJ0XiISdojWvMU3G0x1sNb6CDSCPizv09q1+K2bQh14wSiF4IS64ryONloiK4vOCgbGxSH7I7Cu+ETXGWI3no0Sw2Lvjfg=="
+                  "id": "adk-0a688dc8-5b25-42b6-991f-3e40e6832ec9"
+                }
               }
             ]
           },
@@ -728,14 +716,14 @@
         }
       ],
       "usageMetadata": {
-        "promptTokenCount": 207,
+        "promptTokenCount": 194,
         "candidatesTokenCount": 17,
-        "totalTokenCount": 269,
+        "totalTokenCount": 268,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 207
+            "tokenCount": 194
           }
         ],
         "candidatesTokensDetails": [
@@ -744,13 +732,13 @@
             "tokenCount": 17
           }
         ],
-        "thoughtsTokenCount": 45
+        "thoughtsTokenCount": 57
       }
     }
   },
   {
-    "key": "6d6b11257ba74326",
-    "instructionAgnosticKey": "4c562f1ff224b3c0",
+    "key": "7c2efea7b01a5c42",
+    "instructionAgnosticKey": "dfdb03b36f51c881",
     "request": {
       "contents": [
         {
@@ -762,10 +750,45 @@
           ]
         },
         {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Thanks, John Doe. What is your phone number?"
+            }
+          ]
+        },
+        {
           "role": "user",
           "parts": [
             {
               "text": "555-1234"
+            }
+          ]
+        },
+        {
+          "role": "model",
+          "parts": [
+            {
+              "functionCall": {
+                "name": "finish_task",
+                "args": {
+                  "name": "John Doe",
+                  "phone_number": "555-1234"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "parts": [
+            {
+              "functionResponse": {
+                "name": "finish_task",
+                "response": {
+                  "result": "Task completed."
+                }
+              }
             }
           ]
         },
@@ -822,8 +845,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "It seems we couldn't find a match for \"John Doe.\" Can you please provide another name?",
-                "thoughtSignature": "Cv4CAY89a1/7vbmiY0sn7AXMYD50JA2GSolpLzT14Ivjq/pLsw0Pr/j+UtkMkpaqgiudb5COVpzshmftXEy3v/4wVpqKr8InoNSgebNmSgO372xw3AtW24gBwL2opuaYQAPgqpY6E4rjUh86JM7LVfyT4tzi62fcgT/BrqGsg7SlirB+/ggfOsgM6EUdAICmKkge8F7ie1maCzi0xCbVF39r0JwzvDlUTH+/l9OWAMpnPXFCG/ovsL1mLeaZ+8JE9XJTxTt7jxnFPeBNKgDpFUDBq1KwShD8mzPVc4pNbyLVGk/ytCaIgjEIHJWceTTCV8KxETiP9CBfwQT8qIen0XhY/0KNVyi/70mwfuRBP6QzR68LqjukiMMcRKlQ7eCmYI3BdlJoOyO8A9ccPmeGl/0l4w7l60kHxr1mALDW0BAkyzxB5rIc1/rcI4xos9E2OhfKtVIX/a5SJK4d1OZycxu7vFvokQwerWnaU0IW9OjeELg0oK3/cwek7+vy1eeuaA=="
+                "text": "It looks like \"John Doe\" didn't match our records. Could you please provide another name?"
               }
             ]
           },
@@ -831,14 +853,14 @@
         }
       ],
       "usageMetadata": {
-        "promptTokenCount": 208,
+        "promptTokenCount": 243,
         "candidatesTokenCount": 21,
-        "totalTokenCount": 308,
+        "totalTokenCount": 300,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 208
+            "tokenCount": 243
           }
         ],
         "candidatesTokensDetails": [
@@ -847,13 +869,13 @@
             "tokenCount": 21
           }
         ],
-        "thoughtsTokenCount": 79
+        "thoughtsTokenCount": 36
       }
     }
   },
   {
-    "key": "7e17e79c7555a95d",
-    "instructionAgnosticKey": "3ac2a8d4635e91e6",
+    "key": "aa3b4aa17b8b3c82",
+    "instructionAgnosticKey": "461a1e7aea806753",
     "request": {
       "contents": [
         {
@@ -868,8 +890,7 @@
           "role": "model",
           "parts": [
             {
-              "text": "What is your phone number?",
-              "thoughtSignature": "CnIBjz1rXyKDZy02pRHKNy+FUBebqumjIJjWSY78lQ+eVOvGSENgYNLI0sSHZ08g1mJt/A/5JBGqdo3Jzz3gUTzfcQ7Nx/1IUcIja/V/eMarRsOWeSJ7pnNDLo9GnnGLclfW+mh48Mx7jgaQd9KrV0j9vHQ="
+              "text": "Thanks, John Doe. What is your phone number?"
             }
           ]
         },
@@ -888,11 +909,10 @@
               "functionCall": {
                 "name": "finish_task",
                 "args": {
-                  "phone_number": "555-1234",
-                  "name": "John Doe"
+                  "name": "John Doe",
+                  "phone_number": "555-1234"
                 }
-              },
-              "thoughtSignature": "CuUBAY89a190Lz0SQSjnE6uyrsiPqApsv0kurk74ifsjdYZkbeqpCpdau21kE3FySTpa/KrQt3P/wweyUgRUf8rORm9VsBSbdjL5PbMtVJbAOXqArxae5cAlFlrNFbwmXl96pELVnm8mnaoyCJtf1Tfk5S7ff9xkytWUKqJ1r/L6RGBbXl8gyP/If1BeEc55dbNRrKmqWwDOZtXVYHdts2HCFJ0XiISdojWvMU3G0x1sNb6CDSCPizv09q1+K2bQh14wSiF4IS64ryONloiK4vOCgbGxSH7I7Cu+ETXGWI3no0Sw2Lvjfg=="
+              }
             }
           ]
         },
@@ -917,6 +937,14 @@
             },
             {
               "text": "[check_identity] said: Could not find matching records for John Doe. Let's try again."
+            }
+          ]
+        },
+        {
+          "role": "model",
+          "parts": [
+            {
+              "text": "It looks like \"John Doe\" didn't match our records. Could you please provide another name?"
             }
           ]
         },
@@ -976,9 +1004,8 @@
                     "phone_number": "555-1234",
                     "name": "Jane Doe"
                   },
-                  "id": "adk-612283e6-39df-479d-a75a-2a1acea1f290"
-                },
-                "thoughtSignature": "CpQCAY89a18m63EUlc6deBouMJMvmoQU0O3PQKQ0iRFsgBIJ6zCgnSrOf4FzPhMqH/5VMCYuH7WoZca+5k3oWyDBy4Wcd+WlOdjxtEdd/waieUDZXtnDska68OpgQzuWIvo/bERhuu9xH2eRLgqkM9sR4U+XC1i/+5i0Xiv7Dc2ugCr0NYVAAzrERl9vpd2C9dH5l/84Et58E5X5pKZV7LGc4l6ObpEjkcCXH9fC03JtR96psqroBl/BpniOCldwD8sqTw4aTbD6baLj5P/UdB6TrdNuvruKqHV2OnekQh3itZr0Ca7gY6V34J5bTr3B0zRGJTaRnGudLqMKuWGyvkbxvvrGJFzIW/Yuw8G4h/33mYu18pAq"
+                  "id": "adk-41e907e6-0ee8-469e-a377-b5672d712d7b"
+                }
               }
             ]
           },
@@ -986,14 +1013,14 @@
         }
       ],
       "usageMetadata": {
-        "promptTokenCount": 313,
+        "promptTokenCount": 276,
         "candidatesTokenCount": 17,
-        "totalTokenCount": 392,
+        "totalTokenCount": 368,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 313
+            "tokenCount": 276
           }
         ],
         "candidatesTokensDetails": [
@@ -1002,7 +1029,7 @@
             "tokenCount": 17
           }
         ],
-        "thoughtsTokenCount": 62
+        "thoughtsTokenCount": 75
       }
     }
   },
@@ -1054,9 +1081,8 @@
                 "functionCall": {
                   "name": "find_orders",
                   "args": {},
-                  "id": "adk-98d1b810-c751-489f-9576-fa0ab6cce8da"
-                },
-                "thoughtSignature": "CrICAY89a18jlFAvKk+Y3tFHKzj42d2QtZLlQ1PzIr7uZTYEn1KJ47GIeKg7qMBrV/Q0uxOKOEJtt1tsAp0tGDh8m4oyDUJW/g9hOmwaBVJVUJ+w0m97OIzP2E7Cu9p9fC1iHvR1vXHxT6E4qLyBvXQXG0Dv/9Dhz/Ds0tUSTOT7lxKdYXA6/rurQRxaX5JhnFrvoNsqy/YveDI314RB3nh7R+Htdavt31NUPxifBkn6msW4GuOriu88ZldPnb2oU/tCCQSpDUqNHpfAYM0ka+27w/0nJojKQa+BEi61ubFpAUQtWIALvWLeoYQFg2r2FwZM5Sx+p7nyw608ufyxF9ZhjdI+C79VxaTVbPwKzjMyYFaw1nQpVbIJ9mv3UJCpz1S4fR8jfsXGFjOAwdgph/xL3zdD"
+                  "id": "adk-1a4298e3-dd85-4405-8e60-cba73ea91b53"
+                }
               }
             ]
           },
@@ -1066,7 +1092,7 @@
       "usageMetadata": {
         "promptTokenCount": 83,
         "candidatesTokenCount": 3,
-        "totalTokenCount": 146,
+        "totalTokenCount": 127,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -1080,7 +1106,7 @@
             "tokenCount": 3
           }
         ],
-        "thoughtsTokenCount": 60
+        "thoughtsTokenCount": 41
       }
     }
   },
@@ -1145,9 +1171,8 @@
                     "phone_number": "555-1234",
                     "name": "Jane Doe"
                   },
-                  "id": "adk-06db33f0-c09a-4ebe-a96a-98f5a605aebb"
-                },
-                "thoughtSignature": "CuYDAY89a19lmrY5gIlR7p/lUNbVYJhdeJqFtsfyhd0SNb0DmL4I9A/mcCp9e9UAWY9ghROoJd5zhLN2KRQXtyvvyD1z+29OzYV48vnpzmJ3CmxwX0CiXRwse/J7SdxNTjThOei5NkPqk/fafFo7yAychZgJx5K9YHUiM5nfT6LXnubNdwJFgB2U0KS1/xMhOL+MYjCqNxrMJBrTJVJLSrvGI9TGuCNnbLSRZGHf+KkGxcvI3bVY0spyE7bI5gnOx50qYX2lCTWEDKuds4lCIn1BZhG6EGR+T+x0VPrDIJHkMdtPgqgbhP7THPhiGerui0I0uvJtvjPjxUTeSXkKPhE4a1/kBjXAWHl4cnCiDTnV+8MVu4VuYuklPl1a4nH0evsblEaZogVraKj6kjIlwuGsiNmCupu1OELqAM1DdN9Emm+sueMG3rhAdthumoa5cgS+AGAdlpavGQYdoBCOXxJF8ajbhPl7Ge229nnKCunJvFni7vHhhOkpPFZ0Fx3LrFOqnP8F/lAADuZOeRczcqLxKxIlq3XIay3FZ3ct7dpplSnL3Xc8jwPH2JPYPSlytOneX2MgOOLO44XYlfV+7ib1MvvWG57aEC0nmXa//n5JSjb1NFFgaDe7BKF6kcrRbndeUuP3y68H"
+                  "id": "adk-c165d838-4415-4106-a970-0c92226b74fd"
+                }
               }
             ]
           },
@@ -1223,9 +1248,8 @@
                 "functionCall": {
                   "name": "find_orders",
                   "args": {},
-                  "id": "adk-fe61dae0-b12d-47cd-b75e-1b101041b403"
-                },
-                "thoughtSignature": "Cu4BAY89a1+7IaFGYnlBBUWAHNxq9gr9bvRF529VFZAP5I/MBxdt4J0yUV1P3lIAERsyoEB1GVHfyGB1wDpw4GiuKN05NO8ybLJfK5whZEa9sw0ApJ+0/5T7H2wPTDddIJsYZODDbUJ/0FMMWnnXNNJ66aCOpOyoM4vQLX2qL9Y0mljfhZp9CyB5QgkiRjg1XcFjct7VZbQ8wCg08F7kz/ox4Voi/EnSRiFioC8eKBDB8cTIyAdDq1T1S+P6Siqxo5IeJfY01xs50UMo7xZTIC5jS72HjXYfcmKKXVP9RlbisMrkSdwp+Rw77OiFlDJI+g=="
+                  "id": "adk-2409e37d-09f0-48a9-adc6-675904a1d337"
+                }
               }
             ]
           },
@@ -1235,7 +1259,7 @@
       "usageMetadata": {
         "promptTokenCount": 83,
         "candidatesTokenCount": 3,
-        "totalTokenCount": 128,
+        "totalTokenCount": 127,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -1249,13 +1273,13 @@
             "tokenCount": 3
           }
         ],
-        "thoughtsTokenCount": 42
+        "thoughtsTokenCount": 41
       }
     }
   },
   {
-    "key": "9a33d77d77271c74",
-    "instructionAgnosticKey": "6b7ffb313c25dd4f",
+    "key": "363bbcfe5fead81b",
+    "instructionAgnosticKey": "0c6282ade1f44048",
     "request": {
       "contents": [
         {
@@ -1265,8 +1289,7 @@
               "functionCall": {
                 "name": "find_orders",
                 "args": {}
-              },
-              "thoughtSignature": "Cu4BAY89a1+7IaFGYnlBBUWAHNxq9gr9bvRF529VFZAP5I/MBxdt4J0yUV1P3lIAERsyoEB1GVHfyGB1wDpw4GiuKN05NO8ybLJfK5whZEa9sw0ApJ+0/5T7H2wPTDddIJsYZODDbUJ/0FMMWnnXNNJ66aCOpOyoM4vQLX2qL9Y0mljfhZp9CyB5QgkiRjg1XcFjct7VZbQ8wCg08F7kz/ox4Voi/EnSRiFioC8eKBDB8cTIyAdDq1T1S+P6Siqxo5IeJfY01xs50UMo7xZTIC5jS72HjXYfcmKKXVP9RlbisMrkSdwp+Rw77OiFlDJI+g=="
+              }
             }
           ]
         },
@@ -1315,7 +1338,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "The patient has the following orders:\n* CBC (Complete Blood Count)\n* Lipid Panel\n\nTo prepare, please fast for 10-12 hours prior to your appointment for the Lipid Panel. For the CBC, no special preparation is needed."
+                "text": "The patient has the following orders:\n* CBC (Complete Blood Count)\n* Lipid Panel\n\nPlease instruct the patient to fast for 8-12 hours prior to their appointment for accurate test results. They may drink water."
               }
             ]
           },
@@ -1323,22 +1346,23 @@
         }
       ],
       "usageMetadata": {
-        "promptTokenCount": 120,
-        "candidatesTokenCount": 52,
-        "totalTokenCount": 172,
+        "promptTokenCount": 78,
+        "candidatesTokenCount": 47,
+        "totalTokenCount": 203,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 120
+            "tokenCount": 78
           }
         ],
         "candidatesTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 52
+            "tokenCount": 47
           }
-        ]
+        ],
+        "thoughtsTokenCount": 78
       }
     }
   },
@@ -1403,9 +1427,8 @@
                     "name": "Jane Doe",
                     "phone_number": "555-1234"
                   },
-                  "id": "adk-cd868de7-b4f5-4453-98fb-74a9c3b7f7f5"
-                },
-                "thoughtSignature": "CtsDAY89a1+pANKO4ZV5wbYyLxfAxAdchHyCjZTpxk0xMRJeFZc9FUdRM+EPuYZIKE/4WyuV6FmWbPKZ+chwg0x1wjFhkUxoPOwtKShuI9RjdyMScuey5JbNwmPz6hSBdd77C/Q1OoI5MnngZQSgiad6qKNQf4T5Io+zNJJ0AIUZwcdGNsaNu2V5C+KjukjdBHrru+AXysQwDSivMrQ3rMO89aq7ykQO6Hk+5a1dGBH+nZ+66DGaVmlR6qYNO8LxTJyISGxb6FLzCGMOs+Nynv+Onw513/iaurDVEEEQFARz4i9cG5QUbmuhDuw9Qa4VdVoXhxmYH8pS1r8rL9tgmJrZnS0KHSQATX4eEP+Q0IWdDsdqFCOQvssWB5QIi5gI6Mn1SWnvVyUuI8ONlUClJ4/SgMy6AvGk7f9ppoZjZg+R/coFQANlz7ucx+5upRFbiVxlxtXuDOmFbn8tcm3jJgv0XZFE/mndcQ8moMLnRBonCApPXAByIO+sZCntz6Sy1s+Gc37x5q0c1rJf7zxwM0Dj10Yzza9z+QRfP3GOKI8swE75dVezLtW2b6vT4abbAbn8N44zyK9+knGfbyghvjpQCXbWr4c+DtVQQtnL0YNFEoG49gxpRNFMLv7/7Q=="
+                  "id": "adk-54b39661-1db8-4d67-a844-5e4fe0ac50fe"
+                }
               }
             ]
           },
@@ -1415,7 +1438,7 @@
       "usageMetadata": {
         "promptTokenCount": 188,
         "candidatesTokenCount": 17,
-        "totalTokenCount": 316,
+        "totalTokenCount": 263,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -1429,7 +1452,7 @@
             "tokenCount": 17
           }
         ],
-        "thoughtsTokenCount": 111
+        "thoughtsTokenCount": 58
       }
     }
   },
@@ -1481,9 +1504,8 @@
                 "functionCall": {
                   "name": "find_orders",
                   "args": {},
-                  "id": "adk-5a9da152-7605-4003-81f9-59e540aac120"
-                },
-                "thoughtSignature": "Co8CAY89a197GWuORsI1gGaSthNmN1q8xUW+exKX9Pt0orSx5d9T0bP9DqA/+my4aqIWMRxrp+VnpeCtc2Pdqgl9gO6cWQ/M1p/tNCq2NJag2J0Qp0DmKeHDuThlrx9EbFmFcIv2BKvuby6+ZlrvrFf3sm7YOhf4g51s3MwNfCfb+JovuGavEv24hLM9beFn4M+0MnKn5SYPNEn1MKq7QpKNkoOeiKmdJtk2hU7UOY1r2OdtkEdLTn6cuOiRxRqX46sqbi0K1sBKGOK5Dxt5oSEDvuor6EtNZ7pTyEMJRGFmUZoAup5i5CXZguNsFnfZzFvapBFB7XEpY5Me7wX8NEFnxPp7oEFWRAiFS4KuX3PJyA=="
+                  "id": "adk-136f6412-fb3c-40de-9fbe-a0364b556791"
+                }
               }
             ]
           },
@@ -1493,7 +1515,7 @@
       "usageMetadata": {
         "promptTokenCount": 83,
         "candidatesTokenCount": 3,
-        "totalTokenCount": 141,
+        "totalTokenCount": 127,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
@@ -1507,13 +1529,13 @@
             "tokenCount": 3
           }
         ],
-        "thoughtsTokenCount": 55
+        "thoughtsTokenCount": 41
       }
     }
   },
   {
-    "key": "2ab37783909776a8",
-    "instructionAgnosticKey": "02fcb3103d18b59d",
+    "key": "aa20c20a93b6509b",
+    "instructionAgnosticKey": "d760e5c79bb67ec2",
     "request": {
       "contents": [
         {
@@ -1523,8 +1545,7 @@
               "functionCall": {
                 "name": "find_orders",
                 "args": {}
-              },
-              "thoughtSignature": "Co8CAY89a197GWuORsI1gGaSthNmN1q8xUW+exKX9Pt0orSx5d9T0bP9DqA/+my4aqIWMRxrp+VnpeCtc2Pdqgl9gO6cWQ/M1p/tNCq2NJag2J0Qp0DmKeHDuThlrx9EbFmFcIv2BKvuby6+ZlrvrFf3sm7YOhf4g51s3MwNfCfb+JovuGavEv24hLM9beFn4M+0MnKn5SYPNEn1MKq7QpKNkoOeiKmdJtk2hU7UOY1r2OdtkEdLTn6cuOiRxRqX46sqbi0K1sBKGOK5Dxt5oSEDvuor6EtNZ7pTyEMJRGFmUZoAup5i5CXZguNsFnfZzFvapBFB7XEpY5Me7wX8NEFnxPp7oEFWRAiFS4KuX3PJyA=="
+              }
             }
           ]
         },
@@ -1570,8 +1591,7 @@
             "role": "model",
             "parts": [
               {
-                "text": "I'm sorry, I was unable to retrieve the patient's orders at this time. The tool call was rejected.",
-                "thoughtSignature": "CpICAY89a18iXVAtIKfqb4McB3B4xFwXWOxJt7M2aP3EYz5saL8+0obYkIXBkiv4LMC+ci1ni6CgjsVVvbvPp0G1mgwtAPpeY4pjg2gaFmC65dDP1tJt166NoO3kMSxNbg0GXibPbWjQzynjUnZGWWnG2dHdkeqRPtVZwNGuADRK3C8+Jqj8sCuWH7nH1UJitPakPfOzJIX4Y1qHXyM0N5Mu/I7C4xv73IMYOCE9ukCAIXx6902HxF4LqKAW83hVn0mDBko6htqMPIYlhxhTnts2JX/Qm+jEPmGA7gE1oMDcowHzjGuzjU4grOa3buJ28UG0Tak5khu/99806ZbwECBUlDm41jCXnd3vfiR9tN9APer5og=="
+                "text": "I am sorry, I cannot find the orders at this time. The tool call was rejected."
               }
             ]
           },
@@ -1579,23 +1599,23 @@
         }
       ],
       "usageMetadata": {
-        "promptTokenCount": 130,
-        "candidatesTokenCount": 25,
-        "totalTokenCount": 204,
+        "promptTokenCount": 75,
+        "candidatesTokenCount": 19,
+        "totalTokenCount": 136,
         "trafficType": "ON_DEMAND",
         "promptTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 130
+            "tokenCount": 75
           }
         ],
         "candidatesTokensDetails": [
           {
             "modality": "TEXT",
-            "tokenCount": 25
+            "tokenCount": 19
           }
         ],
-        "thoughtsTokenCount": 49
+        "thoughtsTokenCount": 42
       }
     }
   }
