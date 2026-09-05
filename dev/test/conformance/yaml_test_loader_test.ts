@@ -21,6 +21,7 @@ vi.mock('fast-glob', () => ({
 
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(),
+  stat: vi.fn(),
 }));
 
 const SPEC_YAML = `
@@ -86,9 +87,24 @@ recordings:
         name: roll_die
 `;
 
+// A tool argument name is recorded data, not a schema field, so the loader
+// must not rename it.
+const SNAKE_CASE_ARG_RECORDINGS_YAML = `
+recordings:
+  - user_message_index: 0
+    agent_name: test-agent
+    tool_recording:
+      tool_call:
+        name: greet
+        args:
+          user_name: ada
+`;
+
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The recordings loader checks the file exists before reading it.
+    (fs.stat as Mock).mockResolvedValue({isFile: () => true});
     // Silence console.log during tests
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -200,6 +216,28 @@ describe('batchLoadYamlTestDefs', () => {
     await expect(batchLoadYamlTestDefs(rootDir)).rejects.toThrow(
       'toolRecordings',
     );
+  });
+
+  it('should keep a snake_case tool argument name unchanged', async () => {
+    const rootDir = '/root/tests';
+    (fg.stream as unknown as Mock).mockReturnValue([
+      '/root/tests/t1/spec.yaml',
+    ]);
+
+    (fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+      if (filePath.endsWith('spec.yaml')) return SPEC_YAML;
+      if (filePath.endsWith('generated-session.yaml')) return SESSION_YAML;
+      if (filePath.endsWith('generated-recordings.yaml'))
+        return SNAKE_CASE_ARG_RECORDINGS_YAML;
+      throw new Error(`File not found: ${filePath}`);
+    });
+
+    const tests = await batchLoadYamlTestDefs(rootDir);
+
+    const recording = tests.get('t1')?.recordings.recordings[0];
+    expect(recording?.toolRecording?.toolCall?.args).toEqual({
+      user_name: 'ada',
+    });
   });
 
   it('should throw an error if a required file is missing', async () => {

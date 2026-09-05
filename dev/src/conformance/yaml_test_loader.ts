@@ -9,9 +9,9 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {RecordingsSchema} from '../integration/recordings_schema.js';
 import {TestCaseSpec, TestInfo, TestSpec} from '../integration/test_types.js';
 import {generatedFilePaths} from './generated_file_utils.js';
+import {loadRecordings} from './recordings_loader.js';
 import {toCamelKeys} from './yaml_writer.js';
 
 /**
@@ -63,18 +63,14 @@ export async function loadTestInfo(
   testCase: TestCaseSpec,
   streamingMode: StreamingMode,
 ): Promise<TestInfo> {
-  const {sessionFile, recordingsFile} = generatedFilePaths(
-    testCase.dir,
-    streamingMode,
-  );
+  const {sessionFile} = generatedFilePaths(testCase.dir, streamingMode);
   return {
     ...testCase,
     session: await loadYamlMapping<Session>(sessionFile, 'Session'),
-    // The file is validated, not cast: a misspelled key is a broken fixture,
-    // and replay would fail on it far from the cause.
-    recordings: RecordingsSchema.parse(
-      await loadYamlMapping<unknown>(recordingsFile, 'Recording'),
-    ),
+    // One parser reads a recordings file, so this loader and ReplayPlugin
+    // validate it the same way. The file is validated, not cast: a misspelled
+    // key is a broken fixture, and replay would fail on it far from the cause.
+    recordings: await loadRecordings(testCase.dir, streamingMode),
   };
 }
 

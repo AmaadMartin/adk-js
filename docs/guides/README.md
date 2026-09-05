@@ -96,6 +96,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ContainerCodeExecutor](code_executors/container_code_executor/index.md) - Running model-generated code in a hardened Docker container under a wall-clock bound.
 - [UnsafeLocalCodeExecutor](code_executors/unsafe_local_code_executor/index.md) - Running model-written code on the local host, and what its result reports.
 
+### Conformance
+
+- [Conformance recordings schema](conformance/recordings_schema/index.md) - The Zod schemas that declare the format of a `generated-recordings.yaml` file.
+
 ### Context
 
 - [BaseSummarizer](context/summarizer/index.md) - The strategy a context compactor uses to summarize a window of events, and how a summarizer declines to compact.
@@ -211,6 +215,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Plugin agent callbacks](plugins/agent_callbacks/index.md) - The agent lifecycle hooks a plugin gets, their precedence over an agent's own callbacks, and the agent error notification.
 - [Plugin close lifecycle](plugins/plugin_close_lifecycle/index.md) - Releasing
   the resources a plugin holds, and the timeout that bounds each shutdown.
+- [ReplayPlugin](plugins/replay_plugin/index.md) - Replaying a recorded conformance run, and failing it when the agent drifts from the recording.
 - [Run error notifications](plugins/run_error_notifications/index.md) - Telling
   every plugin that an error escaped a run, without letting a plugin replace
   it.
