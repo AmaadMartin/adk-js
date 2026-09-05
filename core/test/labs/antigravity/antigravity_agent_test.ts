@@ -1593,9 +1593,9 @@ describe('AntigravityAgent under a real Runner', () => {
       agentFactory: () => new FakeSdkAgent(stepsOnce, CID),
     });
 
-    await expect(
-      runTurn(agent, sessionService, session.id),
-    ).rejects.toThrow(/no longer available/);
+    await expect(runTurn(agent, sessionService, session.id)).rejects.toThrow(
+      /no longer available/,
+    );
 
     const after = await sessionService.getSession({
       appName: 'test_app',

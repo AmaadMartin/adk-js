@@ -27,3 +27,9 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Labs
+
+Experimental integrations that live under `core/src/labs/`.
+
+- [AntigravityAgent](labs/antigravity/index.md) - Run a Google Antigravity agent as an ADK agent node.
