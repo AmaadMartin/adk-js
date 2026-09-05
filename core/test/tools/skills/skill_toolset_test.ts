@@ -7,12 +7,16 @@
 import {
   BaseTool,
   BaseToolset,
+  BuiltInCodeExecutor,
   Context,
+  Frontmatter,
+  FunctionTool,
   InvocationContext,
   LlmRequest,
   ReadonlyContext,
   Skill,
   SkillToolset,
+  SkillToolsetOptions,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -315,6 +319,64 @@ describe('skill_toolset', () => {
       const tools2 = await toolset.getTools(context);
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('cloneWithUpdatedSkills option forwarding', () => {
+    /**
+     * `Required` makes this fail to compile when SkillToolsetOptions grows an
+     * option, which is the point: the clone forwards whatever this object
+     * holds, so a new option must be given a value and an assertion here
+     * rather than being silently dropped.
+     */
+    const everyOption: Required<SkillToolsetOptions> = {
+      codeExecutor: new BuiltInCodeExecutor(),
+      additionalTools: [
+        new FunctionTool({
+          name: 'ping',
+          description: 'A tool.',
+          execute: async () => 'pong',
+        }),
+      ],
+      registry: {
+        getSkill: (name: string): Promise<Skill> =>
+          expect.unreachable(`getSkill(${name}) is not expected.`),
+        searchSkills: (): Promise<Frontmatter[]> => Promise.resolve([]),
+      },
+      allowInlineScripts: true,
+      scriptOutputDir: path.join(os.tmpdir(), 'skill_toolset_clone_test'),
+    };
+
+    it('hands the clone every option the constructor was given', async () => {
+      const clone = new SkillToolset(
+        [mockSkill],
+        everyOption,
+      ).cloneWithUpdatedSkills([{...mockSkill, instructions: 'Rewritten'}]);
+
+      expect(clone.codeExecutor).toBe(everyOption.codeExecutor);
+      expect(clone.additionalTools).toBe(everyOption.additionalTools);
+      expect(clone.registry).toBe(everyOption.registry);
+      expect(await clone.getScriptOutputDir()).toBe(
+        everyOption.scriptOutputDir,
+      );
+      expect((await clone.getTools()).map((tool) => tool.name)).toContain(
+        'run_skill_inline_script',
+      );
+    });
+
+    it('keeps forwarding them through a chain of clones', async () => {
+      // Each clone re-passes the options it received, so an option cannot
+      // decay after the first generation.
+      const clone = new SkillToolset([mockSkill], everyOption)
+        .cloneWithUpdatedSkills([{...mockSkill, instructions: 'First'}])
+        .cloneWithUpdatedSkills([{...mockSkill, instructions: 'Second'}]);
+
+      expect(clone.codeExecutor).toBe(everyOption.codeExecutor);
+      expect(clone.registry).toBe(everyOption.registry);
+      expect(await clone.getScriptOutputDir()).toBe(
+        everyOption.scriptOutputDir,
+      );
+      expect(clone.skills['test-skill'].instructions).toBe('Second');
     });
   });
 

@@ -62,53 +62,57 @@ export function isSkillToolset(obj: unknown): obj is SkillToolset {
   );
 }
 
+/** Options for {@link SkillToolset}. */
+export interface SkillToolsetOptions {
+  codeExecutor?: BaseCodeExecutor;
+  additionalTools?: Array<BaseTool | BaseToolset>;
+  registry?: SkillRegistry;
+  /**
+   * Whether to expose the `run_skill_inline_script` tool, which executes
+   * model-provided script content in the configured code executor. This is
+   * disabled by default because arbitrary inline-script execution is a
+   * sensitive capability; opt in explicitly by setting this to `true`.
+   * Execution additionally remains gated behind a human-in-the-loop
+   * confirmation.
+   */
+  allowInlineScripts?: boolean;
+  /**
+   * Directory that files produced by `run_skill_script` /
+   * `run_skill_inline_script` are written into. Output file names come from
+   * the executed script, so this must be a directory dedicated to
+   * throwaway script output — never the application's working directory or
+   * a source tree.
+   *
+   * Defaults to a private, randomly named directory created under the OS
+   * temp dir on first use. Nothing removes that directory: `close()` runs
+   * once per invocation on a toolset instance that concurrent invocations
+   * share (see `Runner`), so it cannot tell whose output is still in use.
+   * Set this to own the location and the lifetime of the output.
+   */
+  scriptOutputDir?: string;
+}
+
 @experimental
 export class SkillToolset extends BaseToolset {
   readonly [SKILL_TOOLSET_SIGNATURE_SYMBOL] = true;
 
+  private readonly constructorOptions: SkillToolsetOptions;
   public skills: Record<string, Skill>;
   private tools: BaseTool[];
   public additionalTools: Array<BaseTool | BaseToolset>;
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
   private readonly scriptOutputDir?: string;
-  private readonly allowInlineScripts?: boolean;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
   private tempOutputDir?: Promise<string>;
 
   constructor(
     skills: Record<string, Skill> | Skill[],
-    options: {
-      codeExecutor?: BaseCodeExecutor;
-      additionalTools?: Array<BaseTool | BaseToolset>;
-      registry?: SkillRegistry;
-      /**
-       * Whether to expose the `run_skill_inline_script` tool, which executes
-       * model-provided script content in the configured code executor. This is
-       * disabled by default because arbitrary inline-script execution is a
-       * sensitive capability; opt in explicitly by setting this to `true`.
-       * Execution additionally remains gated behind a human-in-the-loop
-       * confirmation.
-       */
-      allowInlineScripts?: boolean;
-      /**
-       * Directory that files produced by `run_skill_script` /
-       * `run_skill_inline_script` are written into. Output file names come from
-       * the executed script, so this must be a directory dedicated to
-       * throwaway script output — never the application's working directory or
-       * a source tree.
-       *
-       * Defaults to a private, randomly named directory created under the OS
-       * temp dir on first use. Nothing removes that directory: `close()` runs
-       * once per invocation on a toolset instance that concurrent invocations
-       * share (see `Runner`), so it cannot tell whose output is still in use.
-       * Set this to own the location and the lifetime of the output.
-       */
-      scriptOutputDir?: string;
-    } = {},
+    options: SkillToolsetOptions = {},
   ) {
     super([], 'adk_skill_toolset');
+    this.constructorOptions = options;
     this.skills = Array.isArray(skills)
       ? Object.fromEntries(skills.map((s) => [s.frontmatter.name, s]))
       : skills;
@@ -116,7 +120,6 @@ export class SkillToolset extends BaseToolset {
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
     this.scriptOutputDir = options.scriptOutputDir;
-    this.allowInlineScripts = options.allowInlineScripts;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -127,7 +130,7 @@ export class SkillToolset extends BaseToolset {
 
     // Inline-script execution is opt-in: only expose the tool when explicitly
     // enabled, so agents are secure-by-default.
-    if (this.allowInlineScripts) {
+    if (options.allowInlineScripts) {
       this.tools.push(new RunSkillInlineScriptTool(this));
     }
 
@@ -155,19 +158,16 @@ export class SkillToolset extends BaseToolset {
    *
    * A fresh instance is required rather than a shallow copy: the toolset owns
    * the skill tools it built around itself, plus per-invocation caches, so a
-   * copy would keep serving the original's skills. Every constructor option is
-   * forwarded here, and a new option must be added to this list too.
+   * copy would keep serving the original's skills.
+   *
+   * The options the caller passed are forwarded whole rather than listed field
+   * by field, so an option added to {@link SkillToolsetOptions} survives the
+   * clone without anyone remembering to extend this method.
    *
    * @param skills The skills the new toolset exposes.
    */
   cloneWithUpdatedSkills(skills: Skill[]): SkillToolset {
-    return new SkillToolset(skills, {
-      codeExecutor: this.codeExecutor,
-      additionalTools: this.additionalTools,
-      registry: this.registry,
-      allowInlineScripts: this.allowInlineScripts,
-      scriptOutputDir: this.scriptOutputDir,
-    });
+    return new SkillToolset(skills, this.constructorOptions);
   }
 
   /**
