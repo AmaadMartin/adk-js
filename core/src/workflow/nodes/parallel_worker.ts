@@ -90,8 +90,8 @@ export interface ParallelWorkerConfig {
  * - **Cancellation reaches the items in flight.** On a failure, an interrupt,
  *   an abort or a fired timeout the loop stops claiming new items and each
  *   running item sees its `ctx.abortSignal` fire. Cancellation is cooperative,
- *   so an item that ignores the signal keeps running; the worker waits
- *   {@link CANCELLED_ITEM_DRAIN_TIMEOUT_MS} for it, then warns and abandons it.
+ *   so an item that ignores the signal keeps running; the worker waits five
+ *   seconds for it, then warns and abandons it.
  */
 export class ParallelWorker extends BaseNode {
   readonly maxParallelWorkers?: number;
