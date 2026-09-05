@@ -535,13 +535,28 @@ describe('ParallelWorker cancellation', () => {
   it('does not cap a slow fan-out at the drain timeout', async () => {
     vi.useFakeTimers({shouldAdvanceTime: true});
     try {
+      let releaseItems!: () => void;
+      const released = new Promise<void>((resolve) => {
+        releaseItems = resolve;
+      });
       const inner = new FunctionNode('slow', async (_c, n: number) => {
-        await new Promise((resolve) => setTimeout(resolve, 8000));
+        await released;
         return n * 2;
       });
-      const run = driveNode(new ParallelWorker(inner), [1, 2]);
-      await vi.advanceTimersByTimeAsync(8000);
+      let settled = false;
+      const run = driveNode(new ParallelWorker(inner), [1, 2]).then(
+        (result) => {
+          settled = true;
+          return result;
+        },
+      );
 
+      // Three times the drain timeout. Nothing cancelled these items, so the
+      // fan-out must still be waiting for them.
+      await vi.advanceTimersByTimeAsync(3 * 5000);
+      expect(settled).toBe(false);
+
+      releaseItems();
       expect((await run).output).toEqual([2, 4]);
     } finally {
       vi.useRealTimers();
