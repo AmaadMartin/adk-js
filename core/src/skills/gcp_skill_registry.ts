@@ -10,6 +10,7 @@ import * as https from 'node:https';
 import {getTrackingHeaders} from '../utils/client_labels.js';
 import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
+import {readString} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 import {clientCertsToPresent, getApiEndpoint} from '../utils/mtls_utils.js';
 import {loadSkillFromZipBuffer} from './loader.js';
@@ -55,13 +56,6 @@ export interface GCPSkillRegistryOptions {
   client?: Client;
 }
 
-/** Reads one own property of a value that may not be an object at all. */
-function readOwn(value: unknown, key: string): unknown {
-  return value === null || typeof value !== 'object'
-    ? undefined
-    : Object.getOwnPropertyDescriptor(value, key)?.value;
-}
-
 /**
  * Reads one search hit as a {@link Frontmatter}, or returns `undefined` when
  * the client cannot represent it.
@@ -73,13 +67,9 @@ function readOwn(value: unknown, key: string): unknown {
  * becomes the empty name and takes the same skip path.
  */
 function readSearchHit(entry: unknown): Frontmatter | undefined {
-  const rawName = readOwn(entry, 'name');
-  const name =
-    typeof rawName === 'string'
-      ? rawName.slice(rawName.lastIndexOf('/') + 1)
-      : '';
-  const rawDescription = readOwn(entry, 'description');
-  const description = typeof rawDescription === 'string' ? rawDescription : '';
+  const rawName = readString(entry, 'name') ?? '';
+  const name = rawName.slice(rawName.lastIndexOf('/') + 1);
+  const description = readString(entry, 'description') ?? '';
 
   const parsed = FrontmatterSchema.safeParse({name, description});
   if (parsed.success) {

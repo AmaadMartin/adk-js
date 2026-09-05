@@ -82,4 +82,34 @@ describe('VertexSkillRegistry', () => {
       httpOptions: {apiVersion: 'v1beta1'},
     });
   });
+
+  it.each([[7], [null], [['a']], [{}]])(
+    'names a hit the empty string when the catalogue reports %s',
+    async (name) => {
+      const {registry} = createTransport({
+        retrievedSkills: [{skillName: name, description: 4}],
+      });
+
+      expect(await registry.searchSkills('anything')).toEqual([
+        {name: '', description: ''},
+      ]);
+    },
+  );
+
+  it('rejects a hit whose zipped filesystem is not a string', async () => {
+    const {registry} = createTransport({zippedFilesystem: 7});
+
+    await expect(registry.getSkill('my-skill')).rejects.toThrow(
+      "Skill 'my-skill' does not contain zipped filesystem.",
+    );
+  });
+
+  it('reads no field off a response that is not an object', async () => {
+    const {registry} = createTransport('not an object');
+
+    await expect(registry.getSkill('my-skill')).rejects.toThrow(
+      "Skill 'my-skill' does not contain zipped filesystem.",
+    );
+    expect(await registry.searchSkills('anything')).toEqual([]);
+  });
 });

@@ -5,6 +5,7 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
+import {readOwn, readString} from '../utils/json_utils.js';
 import {loadSkillFromZipBuffer} from './loader.js';
 import {Frontmatter, Skill} from './skill.js';
 import {SkillRegistry} from './skill_registry.js';
@@ -47,16 +48,15 @@ export function vertexApiTransport(client: Client): VertexApiTransport {
  * all, so an entry the client cannot name becomes the empty name rather than
  * dropping out of the results.
  */
-function readSearchHit(entry: Record<string, unknown>): Frontmatter {
+function readSearchHit(entry: unknown): Frontmatter {
   const rawName =
-    (entry['skillName'] as string | undefined) ||
-    (entry['skill_name'] as string | undefined) ||
-    (entry['name'] as string | undefined) ||
+    readString(entry, 'skillName') ||
+    readString(entry, 'skill_name') ||
+    readString(entry, 'name') ||
     '';
-  const parts = rawName.split('/');
   return {
-    name: rawName ? parts[parts.length - 1] : '',
-    description: (entry['description'] as string | undefined) || '',
+    name: rawName.slice(rawName.lastIndexOf('/') + 1),
+    description: readString(entry, 'description') || '',
   };
 }
 
@@ -74,8 +74,8 @@ export class VertexSkillRegistry implements SkillRegistry {
   async getSkill(name: string): Promise<Skill> {
     const response = await this.request(`skills/${name}`);
     const zippedFilesystem =
-      (response['zippedFilesystem'] as string | undefined) ||
-      (response['zipped_filesystem'] as string | undefined);
+      readString(response, 'zippedFilesystem') ||
+      readString(response, 'zipped_filesystem');
     if (!zippedFilesystem) {
       throw new Error(`Skill '${name}' does not contain zipped filesystem.`);
     }
@@ -92,17 +92,18 @@ export class VertexSkillRegistry implements SkillRegistry {
     );
 
     const hits = isSearch
-      ? response['retrievedSkills'] || response['retrieved_skills']
-      : response['skills'];
+      ? readOwn(response, 'retrievedSkills') ||
+        readOwn(response, 'retrieved_skills')
+      : readOwn(response, 'skills');
     return Array.isArray(hits) ? hits.map(readSearchHit) : [];
   }
 
-  private async request(path: string): Promise<Record<string, unknown>> {
+  private async request(path: string): Promise<unknown> {
     const response = await this.transport.request({
       path,
       httpMethod: 'GET',
       httpOptions: {apiVersion: API_VERSION},
     });
-    return (await response.json()) as Record<string, unknown>;
+    return response.json();
   }
 }
