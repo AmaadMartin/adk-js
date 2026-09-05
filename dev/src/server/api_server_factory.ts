@@ -135,6 +135,15 @@ export interface ApiServerOptions {
   logger?: Logger;
   /** Level the logger reports at. Defaults to `LogLevel.INFO`. */
   logLevel?: LogLevel;
+  /**
+   * Fully-qualified names, `<module specifier>#<export>`, of plugins to
+   * attach to every agent the server serves.
+   */
+  extraPlugins?: string[];
+  /** Text the dev UI draws beside its logo. Needs {@link logoImageUrl}. */
+  logoText?: string;
+  /** Image the dev UI draws as its logo. Needs {@link logoText}. */
+  logoImageUrl?: string;
 }
 
 /**
@@ -188,6 +197,9 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     triggerOidcAudience: options.triggerOidcAudience,
     triggerOidcServiceAccounts: options.triggerOidcServiceAccounts,
     triggerAuthVerifier: options.triggerAuthVerifier,
+    extraPlugins: options.extraPlugins,
+    logoText: options.logoText,
+    logoImageUrl: options.logoImageUrl,
     defaultLlmModel: options.defaultLlmModel,
     logger,
     logLevel: options.logLevel,
