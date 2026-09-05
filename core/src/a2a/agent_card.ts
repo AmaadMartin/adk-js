@@ -23,19 +23,58 @@ import {logger} from '../utils/logger.js';
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
 
+/** Whether an agent card source names a location fetched over the network. */
+export function isRemoteCardSource(source: string): boolean {
+  return source.startsWith('http://') || source.startsWith('https://');
+}
+
+/** Per-request options for {@link resolveAgentCard}. */
+export interface ResolveAgentCardOptions {
+  /** Extra HTTP headers to send with the card fetch. */
+  headers?: Record<string, string>;
+}
+
+/**
+ * Wraps `fetch` so the card request carries the caller's headers. Returns
+ * `undefined` when there is nothing to add, so the resolver keeps its own
+ * implementation.
+ */
+function buildCardFetch(
+  options: ResolveAgentCardOptions,
+): typeof fetch | undefined {
+  const {headers} = options;
+  if (!headers) {
+    return undefined;
+  }
+  return (input, init = {}) => {
+    const merged = new Headers(init.headers);
+    for (const [name, value] of Object.entries(headers)) {
+      merged.set(name, value);
+    }
+    return fetch(input, {...init, headers: merged});
+  };
+}
+
 /**
  * Resolves the AgentCard from the provided source.
+ *
+ * @param agentCard - A card object, a URL to fetch it from, or a file path.
+ * @param options - Extra headers for a URL source. Ignored otherwise.
+ * @returns The resolved card.
  */
 export async function resolveAgentCard(
   agentCard: AgentCard | string,
+  options: ResolveAgentCardOptions = {},
 ): Promise<AgentCard> {
   if (typeof agentCard === 'object') {
     return agentCard;
   }
 
   const source = agentCard as string;
-  if (source.startsWith('http://') || source.startsWith('https://')) {
-    const resolver = new DefaultAgentCardResolver();
+  if (isRemoteCardSource(source)) {
+    const resolver = new DefaultAgentCardResolver({
+      fetchImpl: buildCardFetch(options),
+    });
     return await resolver.resolve(source);
   }
 
