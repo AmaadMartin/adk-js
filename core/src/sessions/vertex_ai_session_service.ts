@@ -23,7 +23,7 @@ import {isCompactedEvent} from '../events/compacted_event.js';
 import {experimental} from '../utils/experimental.js';
 
 import {AuthConfig} from '../auth/auth_tool.js';
-import {Event, NodeInfo, Route} from '../events/event.js';
+import {Event, isDefaultNodeInfo, NodeInfo, Route} from '../events/event.js';
 import {EventActions} from '../events/event_actions.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 import {logger} from '../utils/logger.js';
@@ -534,7 +534,9 @@ function toWorkflowMetadata(event: Event): WorkflowEventMetadata | undefined {
   if (event.route !== undefined) {
     metadata.route = event.route;
   }
-  if (event.nodeInfo !== undefined) {
+  // `createEvent` defaults `nodeInfo` on every event, so persist it only when
+  // it carries real workflow provenance.
+  if (event.nodeInfo && !isDefaultNodeInfo(event.nodeInfo)) {
     metadata.nodeInfo = event.nodeInfo;
   }
   if (event.isolationScope !== undefined) {
