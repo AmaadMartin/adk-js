@@ -221,4 +221,28 @@ describe('warnDeprecatedOnce', () => {
 
     expect(logger.warn).toHaveBeenCalledTimes(3);
   });
+
+  // Carried over from PR #1800, which added the same helper.
+  it('warns once for a moved module, however often it is called', () => {
+    warnDeprecatedOnce('moved-module', 'moved-module has moved.');
+    warnDeprecatedOnce('moved-module', 'moved-module has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('moved-module has moved.');
+  });
+
+  it('warns separately for each moved module', () => {
+    warnDeprecatedOnce('first', 'first has moved.');
+    warnDeprecatedOnce('second', 'second has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-arms a moved-module key once the registry is reset', () => {
+    warnDeprecatedOnce('shared-key', 'shared-key has moved.');
+    resetDeprecationWarnings();
+    warnDeprecatedOnce('shared-key', 'shared-key has moved.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
 });

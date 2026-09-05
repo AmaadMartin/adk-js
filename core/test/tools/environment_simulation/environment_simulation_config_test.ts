@@ -150,3 +150,17 @@ describe('EnvironmentSimulationConfig', () => {
     );
   });
 });
+
+// Carried over from PR #1800, which ported the same reference file. Its other
+// cases are already covered, here or in
+// `environment_simulation_config_own_test.ts`.
+describe('injected latency has an upper bound and no lower bound', () => {
+  it.each([0, 120, -1])('accepts %d seconds', (injectedLatencySeconds) => {
+    const config = createInjectionConfig({
+      injectedResponse: {status: 'ok'},
+      injectedLatencySeconds,
+    });
+
+    expect(config.injectedLatencySeconds).toBe(injectedLatencySeconds);
+  });
+});

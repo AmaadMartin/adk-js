@@ -954,6 +954,7 @@ export type {
   EnvironmentSimulationConfigParams,
   InjectedError,
   InjectionConfig,
+  InjectionConfigParams,
   ToolSimulationConfig,
   ToolSimulationConfigParams,
 } from './tools/environment_simulation/environment_simulation_config.js';

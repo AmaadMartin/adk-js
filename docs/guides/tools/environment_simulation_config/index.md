@@ -137,6 +137,25 @@ createEnvironmentSimulationConfig({
 
 Distinct names keep the order you gave them.
 
+## Feeding a prior run to the mocks
+
+`tracing` takes a prior agent run trace as a JSON string, and
+`environmentData` takes environment-specific data such as a small database
+dump. Both reach the mock strategies, which use them for context.
+
+```ts
+const contextual = createEnvironmentSimulationConfig({
+  toolSimulationConfigs: [
+    createToolSimulationConfig({
+      toolName: 'get_weather',
+      mockStrategyType: MockStrategy.MOCK_STRATEGY_TOOL_SPEC,
+    }),
+  ],
+  tracing: priorRunTraceJson,
+  environmentData: databaseDumpJson,
+});
+```
+
 ## Defaults and bounds
 
 | Field                          | Default                                                             |

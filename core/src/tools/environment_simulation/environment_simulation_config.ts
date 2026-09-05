@@ -78,6 +78,34 @@ export interface InjectionConfig {
 }
 
 /**
+ * The fields {@link createInjectionConfig} accepts: every
+ * {@link InjectionConfig} field, each one optional, because the factory fills
+ * the defaults in.
+ *
+ * WARNING: This feature is **experimental** and its API or behavior may change
+ * in future releases.
+ */
+export interface InjectionConfigParams {
+  /** How often the rule fires. Defaults to 1. */
+  injectionProbability?: number;
+
+  /** Restricts the rule to calls whose arguments contain these entries. */
+  matchArgs?: Record<string, unknown>;
+
+  /** Added latency in seconds. Defaults to 0 and may not exceed 120. */
+  injectedLatencySeconds?: number;
+
+  /** Seeds the generator that draws against `injectionProbability`. */
+  randomSeed?: number;
+
+  /** The error to return instead of calling the tool. */
+  injectedError?: InjectedError;
+
+  /** The response body to return instead of calling the tool. */
+  injectedResponse?: Record<string, unknown>;
+}
+
+/**
  * How a tool response is mocked once no injection rule has fired.
  *
  * adk-python numbers these members; adk-js gives them string values, which is
@@ -131,7 +159,7 @@ export interface ToolSimulationConfigParams {
   toolName: string;
 
   /** Injection rules for the tool. */
-  injectionConfigs?: Array<Partial<InjectionConfig>>;
+  injectionConfigs?: InjectionConfigParams[];
 
   /** Mocks the response when no injection rule fires. */
   mockStrategyType?: MockStrategy;
@@ -362,7 +390,7 @@ export function createInjectedError(params: InjectedError): InjectedError {
  *     or when `params` carries an unknown key.
  */
 export function createInjectionConfig(
-  params: Partial<InjectionConfig> = {},
+  params: InjectionConfigParams = {},
 ): InjectionConfig {
   assertFeatureEnabled();
   return parseOrThrow(injectionConfigSchema, 'InjectionConfig', params);

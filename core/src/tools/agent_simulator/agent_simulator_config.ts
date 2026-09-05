@@ -4,6 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @deprecated Import from
+ * `tools/environment_simulation/environment_simulation_config.js` instead.
+ * This module forwards to it and will be removed.
+ *
+ * @module
+ */
+
 import {warnDeprecatedOnce} from '../../utils/deprecated.js';
 import {
   EnvironmentSimulationConfig,

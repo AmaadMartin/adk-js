@@ -22,7 +22,7 @@ import {MockStrategy, ToolSimulationConfigParams} from '@google/adk';
 import {createAgentSimulatorConfig} from '@google/adk/tools/agent_simulator/agent_simulator_config.js';
 import {resetDeprecationWarnings} from '@google/adk/utils/deprecated.js';
 import {logger} from '@google/adk/utils/logger.js';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 function spyOnLoggerWarn() {
   return vi.spyOn(logger, 'warn').mockImplementation(() => {});
@@ -93,5 +93,46 @@ describe('AgentSimulatorConfig', () => {
 
     expect(config.tracing).toBe('explicit_trace');
     expect(warnedAboutTracingPath(warnSpy)).toBe(false);
+  });
+});
+
+// Carried over from PR #1800, which ported the same reference file. Its other
+// cases are already covered, here or in `agent_simulator_config_own_test.ts`.
+describe('the shim warns once, and only to a deliberate importer', () => {
+  beforeEach(() => {
+    resetDeprecationWarnings();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('warns once for tracingPath, not once per call', () => {
+    const warnSpy = spyOnLoggerWarn();
+
+    for (let i = 0; i < 3; i++) {
+      createAgentSimulatorConfig({
+        toolSimulationConfigs: toolConfigs(),
+        tracingPath: 'prior_run_trace',
+      });
+    }
+
+    const tracingPathWarnings = warnSpy.mock.calls.filter(([message]) =>
+      String(message).includes('tracingPath'),
+    );
+    expect(tracingPathWarnings).toHaveLength(1);
+  });
+
+  it('stays out of the package barrel, so `@google/adk` does not warn', async () => {
+    vi.resetModules();
+    const {logger: freshLogger} = await import('@google/adk/utils/logger.js');
+    const warnSpy = vi.spyOn(freshLogger, 'warn').mockImplementation(() => {});
+
+    await import('@google/adk');
+
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('agent_simulator_config'),
+    );
   });
 });

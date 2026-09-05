@@ -63,6 +63,8 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },
+  // Matches adk-python, whose features/_feature_registry.py registers
+  // ENVIRONMENT_SIMULATION as FeatureConfig(EXPERIMENTAL, default_on=True).
   [FeatureName.ENVIRONMENT_SIMULATION]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
