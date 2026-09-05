@@ -173,6 +173,16 @@ A rebuild calls the model, so it needs credentials. A replay does not.
 
 ## Limits
 
+- **A workflow that fans out is not pinned to one worker at a time.** The
+  recorded responses are served in the order the agent asks for them, and a
+  parallel group is served in worker index order. adk-python pins
+  `max_concurrency` to 1 before a replay, so its workers ask one at a time.
+  adk-js declares `Workflow.maxConcurrency` and
+  `ParallelWorker.maxParallelWorkers` `readonly`, and the port does not cast
+  them away, so up to `DEFAULT_MAX_PARALLEL_WORKERS` children can ask at once.
+  A fixture whose agent fans out can then pair a recorded response with the
+  wrong worker, and the difference it reports is not reproducible. Record such
+  a conversation with a workflow that runs one worker at a time.
 - **A replay needs the agent's model to be constructible.** An agent that names
   a Gemini model resolves that name through `LLMRegistry` before any callback
   runs, and the Gemini constructor rejects a missing API key. Set any
