@@ -23,7 +23,6 @@
  */
 
 export {
-  BIGQUERY_DEFAULT_SCOPE,
   BIGQUERY_SCOPES,
   BIGQUERY_TOKEN_CACHE_KEY,
   BigQueryCredentialsConfig,

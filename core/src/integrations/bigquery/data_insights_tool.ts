@@ -6,18 +6,18 @@
 
 import type {AuthClient} from 'google-auth-library';
 
-import {
-  GDA_CLIENT_ID,
-  createGdaSession,
-  gdaHeaders,
-  streamChat,
-} from '../../tools/data_agent/gda_client.js';
 import {GoogleToolStatus} from '../../tools/google_tool.js';
 
-import {BigQueryToolSettings} from './config.js';
+import {
+  GDA_CLIENT_ID,
+  GLOBAL_LOCATION,
+  createGdaStream,
+  gdaHeaders,
+  resolveGdaEndpoint,
+  streamChat,
+} from './gda_stream.js';
 
-/** The Conversational Analytics location the BigQuery tool asks. */
-const DATA_INSIGHTS_LOCATION = 'global';
+import {BigQueryToolSettings} from './config.js';
 
 /** How the answering agent is told to reply. */
 const DATA_INSIGHTS_INSTRUCTIONS = `**INSTRUCTIONS - FOLLOW THESE RULES:**
@@ -69,10 +69,8 @@ export async function askDataInsights(
   settings: BigQueryToolSettings,
   credentials?: AuthClient,
 ): Promise<AskDataInsightsResponse> {
-  const {session, endpoint} = await createGdaSession(credentials, {
-    location: DATA_INSIGHTS_LOCATION,
-  });
-  const url = `${endpoint}/v1/projects/${options.projectId}/locations/${DATA_INSIGHTS_LOCATION}:chat`;
+  const endpoint = resolveGdaEndpoint(GLOBAL_LOCATION);
+  const url = `${endpoint}/v1/projects/${options.projectId}/locations/${GLOBAL_LOCATION}:chat`;
   const payload = {
     messages: [{userMessage: {text: options.userQueryWithContext}}],
     inlineContext: {
@@ -82,7 +80,7 @@ export async function askDataInsights(
     clientIdEnum: GDA_CLIENT_ID,
   };
   const response = await streamChat(
-    session,
+    createGdaStream(credentials),
     url,
     payload,
     gdaHeaders(),

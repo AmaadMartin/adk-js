@@ -323,13 +323,11 @@ export type {
   GoogleToolExecuteFunction,
   GoogleToolOptions,
 } from './tools/google_tool.js';
-// The names below are prefixed because the parity branch carries a second
-// port of this module that already holds the plain ones.
 export {
-  BaseGoogleCredentialsConfig as GoogleToolCredentialsConfig,
-  GoogleCredentialsManager as GoogleToolCredentialsManager,
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
 } from './tools/google_tool_credentials.js';
-export type {GoogleCredentialsConfigOptions as GoogleToolCredentialsConfigOptions} from './tools/google_tool_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/google_tool_credentials.js';
 export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,

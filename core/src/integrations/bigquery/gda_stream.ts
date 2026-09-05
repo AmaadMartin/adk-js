@@ -4,107 +4,46 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthClient} from 'google-auth-library';
-import {isRecord} from '../../utils/object_utils.js';
+/**
+ * The Conversational Analytics chat stream `ask_data_insights` reads.
+ *
+ * It is the part of adk-python's `tools/_gda_stream_util.py` that the
+ * BigQuery tool uses: the host for a location, the accumulator that turns the
+ * streamed JSON array back into messages, and a `fetch`-backed session. The
+ * request/response half of that module belongs to the data agent tools, which
+ * adk-js does not have yet, so it is left out.
+ */
+
+import type {AuthClient} from 'google-auth-library';
+
+import {isRecord} from '../../utils/record_utils.js';
 
 /** The client identifier the Conversational Analytics API is told to record. */
 export const GDA_CLIENT_ID = 'GOOGLE_ADK';
 
-/** Budget for a single request to the Conversational Analytics API. */
-export const GDA_REQUEST_TIMEOUT_SECONDS = 30;
-
-/** Poll statuses that are worth another attempt inside the same deadline. */
-export const RETRYABLE_STATUS_CODES: readonly number[] = [
-  429, 500, 502, 503, 504,
-];
-
-/** The result key holding the rows a data agent read. */
+/** The result key holding the rows the answering agent read. */
 export const DATA_RETRIEVED_KEY = 'Data Retrieved';
 
 /** What an earlier data message is replaced with once a later one arrives. */
 export const INTERMEDIATE_RESULT_OMITTED = 'Intermediate result omitted';
 
+/** The host serving every location that has no regional host of its own. */
 const GDA_DEFAULT_ENDPOINT = 'https://geminidataanalytics.googleapis.com';
 
-/** Locations served by a Regional Endpoint Product host rather than a regional one. */
+/** Locations served by a Regional Endpoint Product host. */
 const REP_LOCATIONS: readonly string[] = ['eu', 'us'];
 
 /** The location that means "not regional". */
 export const GLOBAL_LOCATION = 'global';
 
-/** Which Conversational Analytics host a call goes to. */
-export interface GdaEndpointOptions {
-  /**
-   * The Google Cloud location of the data agent, for example `eu`, `us` or
-   * `global`. Selects a regional host.
-   */
-  location?: string;
-  /** A host that replaces the location-derived one entirely. */
-  apiEndpoint?: string;
-}
-
-/** One HTTP exchange with the Conversational Analytics API. */
-export interface GdaRequest {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
-  url: string;
-  headers: Record<string, string>;
-  /** Request budget in seconds. */
-  timeoutSeconds: number;
-  /** Query parameters appended to `url`. */
-  params?: Record<string, string>;
-  /** The JSON request body, when the method carries one. */
-  body?: unknown;
-}
-
-/** What the API answered. Parse `text` with `JSON.parse` to read the body. */
-export interface GdaResponse {
-  ok: boolean;
-  status: number;
-  text: string;
-}
-
-/**
- * The transport the data agent tools speak to the API through.
- *
- * Narrow on purpose: a test supplies its own implementation and asserts the
- * exact URL, headers, timeout and payload each tool builds.
- */
-export interface GdaSession {
-  request(request: GdaRequest): Promise<GdaResponse>;
-  /**
-   * Streams a chat response one line at a time.
-   *
-   * @throws Error if the API answers with a non-2xx status.
-   */
-  streamLines(
-    url: string,
-    payload: unknown,
-    headers: Record<string, string>,
-  ): AsyncIterable<string>;
-}
-
-/** An authorized session and the host it was opened against. */
-export interface GdaSessionHandle {
-  session: GdaSession;
-  endpoint: string;
-}
-
-/** Opens an authorized session against the host `options` selects. */
-export type GdaSessionFactory = (
-  options: GdaEndpointOptions,
-) => Promise<GdaSessionHandle>;
-
 /**
  * Returns the Conversational Analytics host for a location.
  *
- * @param options The location, or an endpoint that overrides it.
- * @return The host, always with a scheme.
+ * @param location The Google Cloud location, for example `eu`, `us` or
+ *     `global`. Anything else selects a regional host.
+ * @return The host, with its scheme.
  */
-export function resolveGdaEndpoint(options: GdaEndpointOptions = {}): string {
-  const {location, apiEndpoint} = options;
-  if (apiEndpoint) {
-    return apiEndpoint.includes('://') ? apiEndpoint : `https://${apiEndpoint}`;
-  }
+export function resolveGdaEndpoint(location?: string): string {
   const normalized = (location ?? '').toLowerCase().trim();
   if (!normalized || normalized === GLOBAL_LOCATION) {
     return GDA_DEFAULT_ENDPOINT;
@@ -122,6 +61,18 @@ export function gdaHeaders(): Record<string, string> {
     'X-Goog-API-Client': GDA_CLIENT_ID,
   };
 }
+
+/**
+ * Posts a chat request and yields the reply one line at a time.
+ *
+ * Narrow on purpose: a test supplies its own implementation and asserts the
+ * exact URL, headers and payload the tool built.
+ */
+export type GdaStream = (
+  url: string,
+  payload: unknown,
+  headers: Record<string, string>,
+) => AsyncIterable<string>;
 
 /**
  * Finds the query result buried in a streamed system message.
@@ -199,7 +150,7 @@ export function formatDataRetrieved(
  * accumulated until they parse. Only the newest query result keeps its rows;
  * an earlier one is replaced, because the model only needs the latest table.
  *
- * @param session The authorized session to stream through.
+ * @param stream The transport to post through.
  * @param url The chat endpoint.
  * @param payload The chat request body.
  * @param headers Headers to send with the request.
@@ -207,7 +158,7 @@ export function formatDataRetrieved(
  * @return The decoded messages, in the order the API sent them.
  */
 export async function streamChat(
-  session: GdaSession,
+  stream: GdaStream,
   url: string,
   payload: unknown,
   headers: Record<string, string>,
@@ -217,7 +168,7 @@ export async function streamChat(
   let accumulator = '';
   let dataMessageIndex = -1;
 
-  for await (const line of session.streamLines(url, payload, headers)) {
+  for await (const line of stream(url, payload, headers)) {
     if (!line) {
       continue;
     }
@@ -262,18 +213,6 @@ export async function streamChat(
   return messages;
 }
 
-/** Appends query parameters to a URL. */
-function withParams(url: string, params?: Record<string, string>): string {
-  if (!params) {
-    return url;
-  }
-  const target = new URL(url);
-  for (const [name, value] of Object.entries(params)) {
-    target.searchParams.set(name, value);
-  }
-  return target.toString();
-}
-
 /** Splits a byte stream into lines, dropping the line terminators. */
 async function* readLines(
   body: ReadableStream<Uint8Array>,
@@ -307,39 +246,27 @@ async function* readLines(
 }
 
 /**
- * A session backed by `fetch`, authorized by a google-auth-library client.
+ * Returns a stream authorized by a google-auth-library client.
  *
  * The client is held for the length of one tool call: it mints the
- * `Authorization` header for every request the call makes, so the tools do
- * not re-resolve the credential per request.
+ * `Authorization` header for the request, so the tool does not re-resolve the
+ * credential.
+ *
+ * @param authClient The credential to authorize with, or `undefined` to send
+ *     the request unauthenticated.
+ * @return The transport {@link streamChat} posts through.
  */
-class FetchGdaSession implements GdaSession {
-  constructor(private readonly authClient?: AuthClient) {}
-
-  async request(request: GdaRequest): Promise<GdaResponse> {
-    const url = withParams(request.url, request.params);
-    const response = await fetch(url, {
-      method: request.method,
-      headers: await this.headers(url, request.headers),
-      body:
-        request.body === undefined ? undefined : JSON.stringify(request.body),
-      signal: AbortSignal.timeout(request.timeoutSeconds * 1000),
-    });
-    return {
-      ok: response.ok,
-      status: response.status,
-      text: await response.text(),
-    };
-  }
-
-  async *streamLines(
-    url: string,
-    payload: unknown,
-    headers: Record<string, string>,
-  ): AsyncGenerator<string> {
+export function createGdaStream(authClient?: AuthClient): GdaStream {
+  return async function* stream(url, payload, headers) {
+    const merged = authClient
+      ? await authClient.getRequestHeaders(url)
+      : new Headers();
+    for (const [name, value] of Object.entries(headers)) {
+      merged.set(name, value);
+    }
     const response = await fetch(url, {
       method: 'POST',
-      headers: await this.headers(url, headers),
+      headers: merged,
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
@@ -350,37 +277,5 @@ class FetchGdaSession implements GdaSession {
     if (response.body) {
       yield* readLines(response.body);
     }
-  }
-
-  /** Merges the caller's headers over the credential's own. */
-  private async headers(
-    url: string,
-    headers: Record<string, string>,
-  ): Promise<Headers> {
-    const merged = this.authClient
-      ? await this.authClient.getRequestHeaders(url)
-      : new Headers();
-    for (const [name, value] of Object.entries(headers)) {
-      merged.set(name, value);
-    }
-    return merged;
-  }
-}
-
-/**
- * Opens an authorized session against the Conversational Analytics API.
- *
- * @param authClient The credential to authorize with, or `undefined` to send
- *   the requests unauthenticated.
- * @param options Which host to talk to.
- * @return The session and the host it targets.
- */
-export async function createGdaSession(
-  authClient: AuthClient | undefined,
-  options: GdaEndpointOptions = {},
-): Promise<GdaSessionHandle> {
-  return {
-    session: new FetchGdaSession(authClient),
-    endpoint: resolveGdaEndpoint(options),
   };
 }

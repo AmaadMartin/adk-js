@@ -49,6 +49,46 @@ export function composeUserAgent(
     .trim();
 }
 
+/** What `CatalogServiceClient`'s constructor accepts. */
+type DataplexClientConstructorOptions = NonNullable<
+  ConstructorParameters<typeof CatalogServiceClient>[0]
+>;
+
+/** The option objects the two SDK clients are built from. */
+type SdkClientOptions = BigQueryOptions | DataplexClientConstructorOptions;
+
+/**
+ * Hands a resolved credential to a Google Cloud client.
+ *
+ * Both SDKs declare `authClient` through google-auth-library's
+ * `GoogleAuthOptions`. `@google-cloud/bigquery` reaches that package through
+ * `@google-cloud/common` and `@google-cloud/dataplex` through `google-gax`;
+ * both nest version 11, which they declare as `^11.0.0`, while adk resolves
+ * version 10. The two `AuthClient` declarations are therefore nominally
+ * distinct, although this is the object the SDKs call `getRequestHeaders()`
+ * on, and the assignment type-checks within one copy. An npm override pinning
+ * the nested copies to version 10 would break the range both packages
+ * declare, so the mismatch is absorbed at this one point instead.
+ *
+ * The suppression covers the value alone. `options` keeps its SDK type and is
+ * returned unwidened, so renaming or dropping `authClient` still fails the
+ * build.
+ *
+ * @param options The client options being assembled.
+ * @param credentials The credential to authenticate with, if there is one.
+ * @return `options`, with the credential set when one was supplied.
+ */
+function withAuthClient<TOptions extends SdkClientOptions>(
+  options: TOptions,
+  credentials?: AuthClient,
+): TOptions {
+  if (credentials) {
+    // @ts-expect-error two nominally distinct google-auth-library copies
+    options.authClient = credentials;
+  }
+  return options;
+}
+
 /** What {@link getBigQueryClient} needs to open a client. */
 export interface BigQueryClientOptions {
   /** The Google Cloud project the calls are billed to. */
@@ -84,18 +124,7 @@ export async function getBigQueryClient(
     location: options.location,
     userAgent: composeUserAgent(BIGQUERY_USER_AGENT, options.userAgent),
   };
-  if (options.credentials) {
-    // The suppression covers the value alone. `@google-cloud/bigquery@9`
-    // types `authClient` through the google-auth-library that
-    // `@google-cloud/common` nests, which is version 11, while adk resolves
-    // version 10; within one copy `AuthClient` is assignable. The assignment
-    // below stays type-checked, so renaming or dropping the option still
-    // fails the build.
-    // @ts-expect-error two nominally distinct google-auth-library copies
-    const authClient: BigQueryOptions['authClient'] = options.credentials;
-    clientOptions.authClient = authClient;
-  }
-  return new BigQueryClient(clientOptions);
+  return new BigQueryClient(withAuthClient(clientOptions, options.credentials));
 }
 
 /** What {@link getDataplexCatalogClient} needs to open a client. */
@@ -103,11 +132,6 @@ export interface DataplexClientOptions {
   /** The credentials to authenticate with, or application default. */
   credentials?: AuthClient;
 }
-
-/** What `CatalogServiceClient`'s constructor accepts. */
-type DataplexClientConstructorOptions = NonNullable<
-  ConstructorParameters<typeof CatalogServiceClient>[0]
->;
 
 /**
  * Opens a Dataplex catalog client, loading the SDK on first use.
@@ -129,15 +153,5 @@ export async function getDataplexCatalogClient(
     libName: DATAPLEX_LIB_NAME,
     libVersion: version,
   };
-  if (options.credentials) {
-    // Same cause as in `getBigQueryClient`, through a different dependency:
-    // `@google-cloud/dataplex@6` types `authClient` through the
-    // google-auth-library that `google-gax` nests, which is version 11, while
-    // adk resolves version 10.
-    // @ts-expect-error two nominally distinct google-auth-library copies
-    const authClient: DataplexClientConstructorOptions['authClient'] =
-      options.credentials;
-    clientOptions.authClient = authClient;
-  }
-  return new DataplexClient(clientOptions);
+  return new DataplexClient(withAuthClient(clientOptions, options.credentials));
 }

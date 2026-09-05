@@ -20,10 +20,12 @@ import {
   ReadonlyContext,
   createSession,
 } from '@google/adk';
+import {toolCall} from '@google/adk/integrations/bigquery/bigquery_toolset.js';
 import {
   BigQueryCredentialsConfig,
   BigQueryToolset,
   WriteMode,
+  createBigQueryToolSettings,
 } from '@google/adk/integrations/bigquery/index.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -232,6 +234,29 @@ describe('BigQueryToolset execute_sql description', () => {
   });
 });
 
+describe('toolCall', () => {
+  it('falls back to the toolset settings when the tool carries none', () => {
+    // `GoogleTool` types the injected settings optional because a tool may be
+    // built without any. This toolset always supplies them, so the fallback
+    // is a type narrowing; it is pinned here so it stays one.
+    const fallback = createBigQueryToolSettings({maxQueryResultRows: 7});
+
+    expect(toolCall('execute_sql', undefined, fallback).settings).toBe(
+      fallback,
+    );
+    expect(toolCall('execute_sql', {}, fallback).settings).toBe(fallback);
+  });
+
+  it('prefers the settings the tool was built with', () => {
+    const injected = createBigQueryToolSettings({maxQueryResultRows: 3});
+    const fallback = createBigQueryToolSettings({maxQueryResultRows: 7});
+
+    expect(
+      toolCall('execute_sql', {settings: injected}, fallback).settings,
+    ).toBe(injected);
+  });
+});
+
 describe('BigQueryToolset settings binding', () => {
   it('test_get_tools_binds_distinct_settings_per_toolset', async () => {
     resetFakes({plannedJobs: [plannedJob('SELECT')], rows: []});
@@ -317,6 +342,16 @@ describe('BigQueryToolset tool calls', () => {
       status: GoogleToolStatus.SUCCESS,
       rows: [{a: 1}],
     });
+  });
+
+  it('labels the job with the name of the tool that started it', async () => {
+    await runTool('execute_sql');
+
+    const labels = fakeState.bigquery.calls.queries[0].labels as Record<
+      string,
+      string
+    >;
+    expect(labels['adk-bigquery-tool']).toBe('execute_sql');
   });
 
   it('names the application in the user agent of every call', async () => {

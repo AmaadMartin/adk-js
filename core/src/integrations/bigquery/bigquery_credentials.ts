@@ -20,11 +20,6 @@ export const BIGQUERY_SCOPES = [
   'https://www.googleapis.com/auth/dataplex.read-write',
 ];
 
-/** BigQuery alone, without the catalog access `search_catalog` needs. */
-export const BIGQUERY_DEFAULT_SCOPE = [
-  'https://www.googleapis.com/auth/bigquery',
-];
-
 /**
  * Options accepted by {@link BigQueryCredentialsConfig}.
  *

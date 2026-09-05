@@ -33,10 +33,10 @@ import {
 } from '@google/adk/integrations/bigquery/config.js';
 import {
   BIGQUERY_SESSION_INFO_KEY,
+  EXECUTE_SQL_DESCRIPTIONS,
   WriteModeRefusal,
   analyzeContribution,
   detectAnomalies,
-  executeSqlDescription,
   executeSqlQuery,
   forecast,
 } from '@google/adk/integrations/bigquery/query_tool.js';
@@ -651,11 +651,11 @@ describe('executeSqlQuery settings isolation', () => {
   });
 });
 
-describe('executeSqlDescription', () => {
+describe('EXECUTE_SQL_DESCRIPTIONS', () => {
   it('tells the model what each write mode accepts', () => {
-    const blocked = executeSqlDescription(WriteMode.BLOCKED);
-    const protectedMode = executeSqlDescription(WriteMode.PROTECTED);
-    const allowed = executeSqlDescription(WriteMode.ALLOWED);
+    const blocked = EXECUTE_SQL_DESCRIPTIONS[WriteMode.BLOCKED];
+    const protectedMode = EXECUTE_SQL_DESCRIPTIONS[WriteMode.PROTECTED];
+    const allowed = EXECUTE_SQL_DESCRIPTIONS[WriteMode.ALLOWED];
 
     expect(new Set([blocked, protectedMode, allowed]).size).toBe(3);
     expect(blocked).toContain('Only SELECT statements are accepted');
