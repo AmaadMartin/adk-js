@@ -19,11 +19,11 @@ import {
 import {
   A2AAgentExecutor,
   Event as AdkEvent,
-  AgentExecutorConfig,
   BaseAgent,
   createEvent,
   InMemorySessionService,
   Runner,
+  RunnerOrRunnerConfig,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -72,7 +72,7 @@ class FixedEventsAgent extends BaseAgent {
  * so a test of that guard has to cross the type boundary exactly once.
  */
 function executorWithUnvalidatedRunner(runner: unknown): A2AAgentExecutor {
-  return new A2AAgentExecutor({runner} as unknown as AgentExecutorConfig);
+  return new A2AAgentExecutor({runner: runner as RunnerOrRunnerConfig});
 }
 
 describe('A2AAgentExecutor parity with adk-python', () => {
