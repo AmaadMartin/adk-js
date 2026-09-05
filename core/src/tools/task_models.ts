@@ -54,11 +54,13 @@ export interface TaskResult {
   readonly output: unknown;
 }
 
-/** The default input shape for a task agent that declares no input schema. */
+/**
+ * The default input shape for a task agent that declares no input schema.
+ *
+ * {@link DEFAULT_TASK_INPUT_SCHEMA} describes each field to the model.
+ */
 export interface DefaultTaskInput {
-  /** The goal or objective for the task agent. */
   readonly goal?: string;
-  /** Additional background context for the task agent. */
   readonly background?: string;
 }
 
@@ -86,9 +88,12 @@ export const DEFAULT_TASK_INPUT_SCHEMA: Schema = {
   },
 };
 
-/** The default output shape for a task agent that declares no output schema. */
+/**
+ * The default output shape for a task agent that declares no output schema.
+ *
+ * {@link DEFAULT_TASK_OUTPUT_SCHEMA} describes the field to the model.
+ */
 export interface DefaultTaskOutput {
-  /** A brief summary of what the agent accomplished. */
   readonly result: string;
 }
 
