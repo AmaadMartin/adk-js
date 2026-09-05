@@ -54,6 +54,11 @@ const SECRET_QUERY_PARAMS = new Set([
  *
  * If the input cannot be parsed as a URL, only its scheme prefix is returned so
  * that a credential embedded in an otherwise-unparseable string is not leaked.
+ *
+ * This is the pass for a URI going into a log line or an error message, so it
+ * keeps the location readable and masks a known set of credential names. For a
+ * URI that is being stored, where an unrecognized credential must not survive,
+ * use `sanitizeExternalUri` in `uri_sanitize_utils.ts` instead.
  */
 export function redactUriPassword(uri: string): string {
   try {
