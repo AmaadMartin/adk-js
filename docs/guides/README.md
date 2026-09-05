@@ -10,7 +10,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### A2A
 
-- [A2AAgentExecutor](a2a/agent_executor/index.md) - Serving an ADK agent over Agent2Agent: request conversion, interceptors, task result aggregation and cancellation.
+- [A2AAgentExecutor](a2a/agent_executor/index.md) - Serving an ADK agent over Agent2Agent: request conversion, the converter slots and their declared defaults, interceptors, task result aggregation and cancellation.
 
 ### Agents
 

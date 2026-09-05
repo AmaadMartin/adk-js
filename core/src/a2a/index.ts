@@ -55,6 +55,15 @@ export {
 } from './agent_to_a2a.js';
 export type {A2aUserBuilder, ToA2aOptions} from './agent_to_a2a.js';
 export {bearerTokenUserBuilder} from './auth.js';
+export {
+  resolveA2aAgentExecutorConfig,
+  toA2AArtifactUpdateEventsFromArtifactMap,
+} from './executor_config.js';
+export type {
+  A2aAgentExecutorConverterConfig,
+  AdkEventToA2AEventsConverterImpl,
+  ResolvedA2aAgentExecutorConfig,
+} from './executor_config.js';
 export type {ExecutorContext} from './executor_context.js';
 export type {ExecuteInterceptor} from './executor_utils.js';
 export {toGenAIContent, toGenAIPart} from './part_converter_utils.js';

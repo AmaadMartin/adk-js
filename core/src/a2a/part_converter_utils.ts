@@ -37,6 +37,9 @@ enum DataPartType {
 /**
  * Converts one inbound A2A part into GenAI parts.
  *
+ * Mirrors `A2APartToGenAIPartConverter` in
+ * `google/adk/a2a/converters/part_converter.py`.
+ *
  * Returning `undefined` drops the part, and returning an array expands it into
  * several.
  */
@@ -46,6 +49,9 @@ export type A2APartToGenAIPartConverter = (
 
 /**
  * Converts one outbound GenAI part into the A2A parts that carry it.
+ *
+ * Mirrors `GenAIPartToA2APartConverter` in
+ * `google/adk/a2a/converters/part_converter.py`.
  *
  * Returning `undefined` drops the part, and returning an array expands it into
  * several.

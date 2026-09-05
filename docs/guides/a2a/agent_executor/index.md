@@ -20,8 +20,9 @@ Construct the executor yourself when they do not. Four seams are open:
   principal on the call context, or from the context id when the request is
   anonymous.
 - **Part converters** decide how one A2A part becomes GenAI parts, and back.
-- An **event converter** decides which A2A events one ADK event produces. The
-  default produces a single artifact update carrying the event's parts.
+- **Event converters** decide which A2A events one ADK event produces. Two
+  slots hold one, and the default produces a single artifact update carrying
+  the event's parts.
 - **Interceptors** decide what actually reaches the event bus. Unlike the
   executor's callbacks, an interceptor can replace the request context, expand
   one event into several, drop an event, and rewrite the terminal event.
@@ -128,6 +129,88 @@ The session id the converter returns is the session the executor gets or
 creates. When the executor has to create it, the service can assign an id of its
 own, and the run addresses the session that now exists rather than the one that
 was asked for.
+
+## Converter slots and their defaults
+
+Every executor holds a converter for each direction of the boundary:
+
+| Field                | Converts                               | Default                                    |
+| -------------------- | -------------------------------------- | ------------------------------------------ |
+| `a2aPartConverter`   | one inbound A2A part into GenAI parts  | `toGenAIPart`                              |
+| `genAiPartConverter` | one outbound GenAI part into A2A parts | `toA2APart`                                |
+| `adkEventConverter`  | one ADK event into A2A events          | `toA2AArtifactUpdateEventsFromArtifactMap` |
+
+`resolveA2aAgentExecutorConfig` applies those defaults, and the executor calls
+it in its constructor. It resolves the whole set once, so a config the
+executor accepts cannot fail later in the middle of a live stream.
+
+`adkEventConverter` is the counterpart of `adk_event_converter` on
+adk-python's `A2aAgentExecutorConfig`: it takes the ADK event, the artifact map
+of the execution in progress, the task id, the context id and the part
+converter. The `eventConverter` slot takes the whole executor context instead,
+and takes precedence over `adkEventConverter` when both are set.
+
+The executor stamps ADK metadata — the app, user and session ids, the
+invocation id, the author, the branch — onto every event a converter returns. A
+converter does not have to reproduce it.
+
+```ts
+import {
+  A2AAgentExecutor,
+  toA2AArtifactUpdateEventsFromArtifactMap,
+} from '@google/adk';
+
+const executor = new A2AAgentExecutor({
+  runner: myRunner,
+  adkEventConverter: (
+    adkEvent,
+    agentsArtifacts,
+    taskId,
+    contextId,
+    genAiPartConverter,
+  ) => {
+    if (adkEvent.author === 'internal_auditor') {
+      return [];
+    }
+    return toA2AArtifactUpdateEventsFromArtifactMap(
+      adkEvent,
+      agentsArtifacts,
+      taskId,
+      contextId,
+      genAiPartConverter,
+    );
+  },
+});
+```
+
+Returning an empty array publishes nothing for that ADK event.
+
+### The artifact map
+
+`adkEventConverter` receives a `Map` from an event author to the artifact id
+that author is streaming into. The built-in converter reads it to give every
+chunk of one response the same artifact id, and deletes the entry when the
+final chunk arrives. A converter may mutate the map.
+
+The executor creates one map per `execute` call, so two concurrent requests on
+one executor never write into each other's artifact.
+
+### Validation errors
+
+A slot that is present and is not a function is rejected where the executor is
+constructed:
+
+```ts
+// TypeScript rejects this literal at compile time. A value that reaches the
+// config from untyped JavaScript is rejected here instead:
+new A2AAgentExecutor({runner, genAiPartConverter: 'nope'});
+// Error: A2A executor config field "genAiPartConverter" must be a function,
+//        received string
+```
+
+`undefined` selects the default. `null` is a supplied value of the wrong type
+and is rejected. The message names the field, and with several wrong fields it
+names the first one in the order listed above.
 
 ## Rewrite what the server publishes
 

@@ -15,7 +15,6 @@ import {Event as AdkEvent} from '../events/event.js';
 import {isRunner, Runner, RunnerConfig} from '../runner/runner.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
-import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {
   A2AEvent,
@@ -31,6 +30,11 @@ import {
   getFinalTaskStatusUpdate,
   getUnansweredRequestEvent,
 } from './event_processor_utils.js';
+import {
+  A2aAgentExecutorConverterConfig,
+  resolveA2aAgentExecutorConfig,
+  ResolvedA2aAgentExecutorConfig,
+} from './executor_config.js';
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
 import {
   enqueueSubmittedSignal,
@@ -45,13 +49,7 @@ import {
   getA2AEventMetadata,
   getA2ASessionMetadata,
 } from './metadata_converter_utils.js';
-import {
-  A2APartToGenAIPartConverter,
-  GenAIPartToA2APartConverter,
-  toA2APart,
-  toA2AParts,
-  toGenAIPart,
-} from './part_converter_utils.js';
+import {GenAIPartToA2APartConverter} from './part_converter_utils.js';
 import {
   A2ARequestToAgentRunRequestConverter,
   AgentRunRequest,
@@ -109,18 +107,12 @@ export type AdkEventToA2AEventsConverter = (
 /**
  * Configuration for the Executor.
  */
-export interface AgentExecutorConfig {
+export interface AgentExecutorConfig extends A2aAgentExecutorConverterConfig {
   runner: RunnerOrRunnerConfig;
   runConfig?: RunConfig;
   beforeExecuteCallback?: BeforeExecuteCallback;
   afterEventCallback?: AfterEventCallback;
   afterExecuteCallback?: AfterExecuteCallback;
-
-  /** Converts one inbound A2A part. Defaults to `toGenAIPart`. */
-  a2aPartConverter?: A2APartToGenAIPartConverter;
-
-  /** Converts one outbound GenAI part. Defaults to `toA2APart`. */
-  genAiPartConverter?: GenAIPartToA2APartConverter;
 
   /**
    * Derives the runner arguments from the request. Defaults to
@@ -129,8 +121,9 @@ export interface AgentExecutorConfig {
   requestConverter?: A2ARequestToAgentRunRequestConverter;
 
   /**
-   * Converts each ADK event into A2A events. Defaults to a single artifact
-   * update carrying the event's parts.
+   * Converts each ADK event into A2A events, with the whole executor context
+   * in hand. Takes precedence over the inherited `adkEventConverter`, which
+   * receives the task and context ids instead.
    */
   eventConverter?: AdkEventToA2AEventsConverter;
 
@@ -157,7 +150,12 @@ export class A2AAgentExecutor implements AgentExecutor {
    */
   private readonly inFlightExecutions = new Map<string, InFlightExecution>();
 
-  constructor(private readonly config: AgentExecutorConfig) {}
+  /** Every converter slot, with the unset ones filled by their default. */
+  private readonly converters: ResolvedA2aAgentExecutorConfig;
+
+  constructor(private readonly config: AgentExecutorConfig) {
+    this.converters = resolveA2aAgentExecutorConfig(config);
+  }
 
   async execute(
     ctx: RequestContext,
@@ -187,7 +185,7 @@ export class A2AAgentExecutor implements AgentExecutor {
       const runner = await getAdkRunner(this.config.runner);
       let runRequest = (
         this.config.requestConverter ?? convertA2aRequestToAgentRunRequest
-      )(reqCtx, this.config.a2aPartConverter ?? toGenAIPart);
+      )(reqCtx, this.converters.a2aPartConverter);
       const {session, created} = await getAdkSession(
         runRequest.userId,
         runRequest.sessionId,
@@ -319,7 +317,7 @@ export class A2AAgentExecutor implements AgentExecutor {
     const adkEvents: AdkEvent[] = [];
     // Held per execution: two concurrent requests to one executor must not
     // append their streamed parts to each other's artifact.
-    const partialArtifactIds = new Map<string | undefined, string>();
+    const partialArtifactIds = new Map<string, string>();
     let lastAdkEvent: AdkEvent | undefined;
 
     for await (const adkEvent of runner.runAsync({
@@ -448,23 +446,34 @@ export class A2AAgentExecutor implements AgentExecutor {
   private convertAdkEvent(
     adkEvent: AdkEvent,
     executorContext: ExecutorContext,
-    partialArtifactIds: Map<string | undefined, string>,
+    partialArtifactIds: Map<string, string>,
   ): A2AEvent[] {
-    const genAiPartConverter = this.config.genAiPartConverter ?? toA2APart;
-    if (this.config.eventConverter) {
-      return this.config.eventConverter(
-        adkEvent,
-        executorContext,
-        genAiPartConverter,
-      );
+    const {taskId, contextId} = executorContext.requestContext;
+    const {adkEventConverter, genAiPartConverter} = this.converters;
+    const a2aEvents = this.config.eventConverter
+      ? this.config.eventConverter(
+          adkEvent,
+          executorContext,
+          genAiPartConverter,
+        )
+      : adkEventConverter(
+          adkEvent,
+          partialArtifactIds,
+          taskId,
+          contextId,
+          genAiPartConverter,
+        );
+
+    // A converter reports the run, not the ADK bookkeeping around it, so the
+    // executor stamps that onto everything a converter returns.
+    for (const a2aEvent of a2aEvents) {
+      a2aEvent.metadata = {
+        ...a2aEvent.metadata,
+        ...getA2AEventMetadata(adkEvent, executorContext),
+      };
     }
 
-    return convertAdkEventToArtifactUpdate(
-      adkEvent,
-      executorContext,
-      genAiPartConverter,
-      partialArtifactIds,
-    );
+    return a2aEvents;
   }
 
   /**
@@ -491,50 +500,6 @@ export class A2AAgentExecutor implements AgentExecutor {
 
     eventBus.publish(event);
   }
-}
-
-/**
- * Converts one ADK event into the streaming artifact update that carries its
- * parts, or into nothing when it carries none.
- *
- * `partialArtifactIds` holds the artifact each author is still streaming into,
- * so the chunks of one response append to one artifact. It belongs to a single
- * execution.
- */
-function convertAdkEventToArtifactUpdate(
-  adkEvent: AdkEvent,
-  executorContext: ExecutorContext,
-  genAiPartConverter: GenAIPartToA2APartConverter,
-  partialArtifactIds: Map<string | undefined, string>,
-): A2AEvent[] {
-  const a2aParts = toA2AParts(
-    adkEvent.content?.parts,
-    adkEvent.longRunningToolIds,
-    genAiPartConverter,
-  );
-  if (a2aParts.length === 0) {
-    return [];
-  }
-
-  const artifactId = partialArtifactIds.get(adkEvent.author) ?? randomUUID();
-
-  const a2aEvent = createTaskArtifactUpdateEvent({
-    taskId: executorContext.requestContext.taskId,
-    contextId: executorContext.requestContext.contextId,
-    artifactId,
-    parts: a2aParts,
-    metadata: getA2AEventMetadata(adkEvent, executorContext),
-    append: adkEvent.partial,
-    lastChunk: !adkEvent.partial,
-  });
-
-  if (adkEvent.partial) {
-    partialArtifactIds.set(adkEvent.author, artifactId);
-  } else {
-    partialArtifactIds.delete(adkEvent.author);
-  }
-
-  return [a2aEvent];
 }
 
 /**
