@@ -317,6 +317,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [SpannerToolset](tools/spanner_toolset/index.md) - Reading Spanner tables,
   schemas and vector columns from an agent, with read-only access and
   per-user credentials.
+- [Tool connection map](tools/tool_connection_map/index.md) - Describing which parameters a set of tools shares, and which tool creates or consumes each one.
 - [ToolboxToolset](tools/toolbox_toolset/index.md) - Loading tools from an MCP
   Toolbox for Databases server, with named toolsets, bound parameters and
   authentication.

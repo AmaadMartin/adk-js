@@ -1054,6 +1054,15 @@ export type {
   ToolSimulationConfig,
   ToolSimulationConfigParams,
 } from './tools/environment_simulation/environment_simulation_config.js';
+export {
+  createStatefulParameter,
+  createToolConnectionMap,
+  parseToolConnectionMap,
+} from './tools/environment_simulation/tool_connection_map.js';
+export type {
+  StatefulParameter,
+  ToolConnectionMap,
+} from './tools/environment_simulation/tool_connection_map.js';
 export {ExampleTool} from './tools/example_tool.js';
 export type {ExampleToolConfig} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
