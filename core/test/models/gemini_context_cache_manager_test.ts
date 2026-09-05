@@ -18,6 +18,7 @@
 import {
   CachedContent,
   Content,
+  CreateCachedContentConfig,
   CreateCachedContentParameters,
   DeleteCachedContentParameters,
   DeleteCachedContentResponse,
@@ -36,8 +37,12 @@ import {
 import {
   GeminiContextCacheManager,
   QualifiedCacheScope,
+  applyCacheToRequest,
+  estimateCacheablePrefixTokens,
+  estimateRequestTokens,
   findCountOfContentsToCache,
   generateCacheFingerprint,
+  minimumCacheTokens,
   validActiveCache,
 } from '../../src/models/gemini_context_cache_manager.js';
 import {LlmRequest} from '../../src/models/llm_request.js';
@@ -51,6 +56,8 @@ const CACHE_CONFIG: ContextCacheConfig = {
 };
 
 const GEMINI_SCOPE: QualifiedCacheScope = {backend: 'gemini'};
+
+const VERTEX_SCOPE: QualifiedCacheScope = {backend: 'vertex'};
 
 const EXISTING_CACHE_NAME =
   'projects/test/locations/us-central1/cachedContents/test123';
@@ -162,6 +169,39 @@ function createCacheMetadata(
     contentsCount: options.contentsCount ?? 3,
     createdAt: now - 600,
   };
+}
+
+/**
+ * Replaces the metadata's fingerprint with the one the manager computes over
+ * its own `contentsCount`, so the reuse and refresh paths run on a real
+ * fingerprint rather than a pinned string.
+ */
+async function withRealFingerprint<T extends CacheMetadata>(
+  metadata: T,
+  llmRequest: LlmRequest,
+  scope: QualifiedCacheScope = GEMINI_SCOPE,
+): Promise<T> {
+  return {
+    ...metadata,
+    fingerprint: await generateCacheFingerprint(
+      llmRequest,
+      metadata.contentsCount,
+      scope,
+    ),
+  };
+}
+
+/** Returns the `config` the fake client last received on `caches.create`. */
+function lastCreateConfig(fake: FakeClient): CreateCachedContentConfig {
+  const call = fake.create.mock.calls.at(-1);
+  if (!call) {
+    expect.fail('caches.create was never called.');
+  }
+  const config = call[0].config;
+  if (!config) {
+    expect.fail('caches.create was called without a config.');
+  }
+  return config;
 }
 
 describe('GeminiContextCacheManager', () => {
@@ -737,6 +777,17 @@ describe('GeminiContextCacheManager', () => {
     expect(llmResponse.cacheMetadata?.cacheName).toBe(cacheMetadata.cacheName);
   });
 
+  it('test_parameter_types_enforcement', () => {
+    const llmResponse: LlmResponse = {
+      usageMetadata: {cachedContentTokenCount: 500, promptTokenCount: 1000},
+    };
+    const cacheMetadata = createCacheMetadata({invocationsUsed: 3});
+
+    manager.populateCacheMetadataInResponse(llmResponse, cacheMetadata);
+
+    expect(llmResponse.cacheMetadata?.invocationsUsed).toBe(3);
+  });
+
   it('test_create_new_cache_with_proper_ttl', async () => {
     const llmRequest = createLlmRequest();
     llmRequest.cacheableContentsTokenCount = 30000;
@@ -1156,5 +1207,396 @@ describe('GeminiContextCacheManager', () => {
     await manager.handleContextCaching(llmRequest);
 
     expect(fake.create.mock.calls[0][0].config?.httpOptions).toBeUndefined();
+  });
+});
+
+/**
+ * Paths the adk-python reference suite does not reach. They cover the branches
+ * that only exist in this port, plus the boundary values the reference asserts
+ * from one side only.
+ */
+describe('GeminiContextCacheManager paths the reference does not reach', () => {
+  let fake: FakeClient;
+  let manager: GeminiContextCacheManager;
+
+  beforeEach(() => {
+    fake = createFakeClient();
+    manager = new GeminiContextCacheManager(fake.client);
+  });
+
+  it('applies a cache to a request that carries no config', () => {
+    const llmRequest: LlmRequest = {
+      model: 'gemini-2.5-flash',
+      contents: [userContent('one'), userContent('two')],
+      liveConnectConfig: {},
+      toolsDict: {},
+    };
+
+    applyCacheToRequest(llmRequest, 'cachedContents/abc', 1);
+
+    expect(llmRequest.config?.cachedContent).toBe('cachedContents/abc');
+    expect(llmRequest.contents).toEqual([userContent('two')]);
+  });
+
+  it('clears the cached fields when a cache applies', () => {
+    const llmRequest = createLlmRequest({contentsCount: 2});
+
+    applyCacheToRequest(llmRequest, 'cachedContents/abc', 1);
+
+    expect(llmRequest.config.systemInstruction).toBeUndefined();
+    expect(llmRequest.config.tools).toBeUndefined();
+    expect(llmRequest.config.toolConfig).toBeUndefined();
+  });
+
+  it('returns the measured count when the request holds no text', () => {
+    const llmRequest: LlmRequest = {
+      model: 'gemini-2.5-flash',
+      contents: [{role: 'user', parts: [{inlineData: {data: 'AAAA'}}]}],
+      liveConnectConfig: {},
+      toolsDict: {},
+      cacheConfig: CACHE_CONFIG,
+      cacheableContentsTokenCount: 5000,
+    };
+
+    expect(estimateCacheablePrefixTokens(llmRequest, 1)).toBe(5000);
+  });
+
+  it('returns zero when no previous prompt was measured', () => {
+    const llmRequest = createLlmRequest({contentsCount: 2});
+
+    expect(estimateCacheablePrefixTokens(llmRequest, 1)).toBe(0);
+  });
+
+  it('counts a system instruction given as parts', () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config = {systemInstruction: ['abcd', {text: 'ef'}]};
+
+    // 'abcd' is 4 characters and {"text":"ef"} is 13, so 17 / 4 truncates to 4.
+    expect(estimateRequestTokens(llmRequest)).toBe(4);
+  });
+
+  it('counts a system instruction given as a content', () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config = {
+      systemInstruction: {role: 'user', parts: [{text: 'x'}]},
+    };
+
+    expect(estimateRequestTokens(llmRequest)).toBe(
+      Math.floor(
+        JSON.stringify(llmRequest.config.systemInstruction).length / 4,
+      ),
+    );
+  });
+
+  it('counts a content that carries no parts as no characters', () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config = {};
+    llmRequest.contents = [{role: 'user'}];
+
+    expect(estimateRequestTokens(llmRequest)).toBe(0);
+  });
+
+  it('degrades to fingerprint-only metadata when the cache service fails', async () => {
+    fake.create.mockRejectedValue(new Error('boom'));
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config.systemInstruction = 'x'.repeat(12_000);
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    const fingerprint = await generateCacheFingerprint(
+      llmRequest,
+      0,
+      GEMINI_SCOPE,
+    );
+    llmRequest.cacheMetadata = {fingerprint, contentsCount: 0};
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.cacheName).toBeUndefined();
+    expect(result.fingerprint).toBe(fingerprint);
+    expect(llmRequest.config.cachedContent).toBeUndefined();
+  });
+
+  it('degrades to fingerprint-only metadata when the service returns no name', async () => {
+    fake.create.mockResolvedValue({});
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config.systemInstruction = 'x'.repeat(12_000);
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    llmRequest.cacheMetadata = {
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.cacheName).toBeUndefined();
+  });
+
+  it('falls back to the requested ttl when the server reports no expiry', async () => {
+    fake.create.mockResolvedValue({name: 'cachedContents/no-expiry'});
+    const before = nowInSeconds();
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config.systemInstruction = 'x'.repeat(12_000);
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    llmRequest.cacheMetadata = {
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.expireTime).toBeGreaterThanOrEqual(before + 1800);
+  });
+
+  it('falls back to the requested ttl when the server expiry does not parse', async () => {
+    fake.create.mockResolvedValue({
+      name: 'cachedContents/bad-expiry',
+      expireTime: 'not a timestamp',
+    });
+    const before = nowInSeconds();
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config.systemInstruction = 'x'.repeat(12_000);
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    llmRequest.cacheMetadata = {
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.expireTime).toBeGreaterThanOrEqual(before + 1800);
+  });
+
+  it('does not throw when deleting a cache fails', async () => {
+    fake.remove.mockRejectedValue(new Error('gone'));
+
+    await expect(
+      manager.cleanupCache('cachedContents/missing'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('caches nothing for an empty content list', () => {
+    expect(findCountOfContentsToCache([])).toBe(0);
+  });
+
+  it('keeps a cache that has served exactly its interval budget', async () => {
+    const llmRequest = createLlmRequest();
+    llmRequest.cacheMetadata = await withRealFingerprint(
+      createCacheMetadata({invocationsUsed: CACHE_CONFIG.cacheIntervals}),
+      llmRequest,
+    );
+
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeDefined();
+  });
+
+  it('drops a cache one invocation past its interval budget', async () => {
+    const llmRequest = createLlmRequest();
+    llmRequest.cacheMetadata = await withRealFingerprint(
+      createCacheMetadata({invocationsUsed: CACHE_CONFIG.cacheIntervals + 1}),
+      llmRequest,
+    );
+
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
+  });
+
+  it('keeps a cache that expires in the future', async () => {
+    const llmRequest = createLlmRequest();
+    llmRequest.cacheMetadata = await withRealFingerprint(
+      {
+        ...createCacheMetadata({invocationsUsed: 1}),
+        expireTime: nowInSeconds() + 1,
+      },
+      llmRequest,
+    );
+
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeDefined();
+  });
+
+  it('reports no valid cache when the request carries no metadata', async () => {
+    const llmRequest = createLlmRequest({contentsCount: 2});
+
+    expect(await validActiveCache(llmRequest, GEMINI_SCOPE)).toBeUndefined();
+  });
+
+  it('treats a measured zero as a measurement, not as a missing count', async () => {
+    // A model with no known floor, so only the measured count decides.
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.model = 'projects/test/locations/us-central1/endpoints/tuned';
+    llmRequest.cacheableContentsTokenCount = 0;
+    llmRequest.cacheMetadata = {
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+    fake.create.mockResolvedValue({name: 'cachedContents/measured'});
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.cacheName).toBe('cachedContents/measured');
+  });
+
+  it('skips cache creation below the configured minimum token count', async () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config.systemInstruction = 'x'.repeat(12_000);
+    llmRequest.cacheConfig = {
+      cacheIntervals: 10,
+      ttlSeconds: 1800,
+      minTokens: 4_000,
+    };
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    const fingerprint = await generateCacheFingerprint(
+      llmRequest,
+      0,
+      GEMINI_SCOPE,
+    );
+    llmRequest.cacheMetadata = {fingerprint, contentsCount: 0};
+
+    const result = await manager.handleContextCaching(llmRequest);
+
+    expect(result.cacheName).toBeUndefined();
+    expect(result.fingerprint).toBe(fingerprint);
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
+  it('fingerprints a tool that declares no functions', async () => {
+    const withSearch = createLlmRequest({contentsCount: 0});
+    withSearch.config.tools = [{googleSearch: {}}];
+    const withoutSearch = createLlmRequest({contentsCount: 0});
+    withoutSearch.config.tools = [{urlContext: {}}];
+
+    expect(
+      await generateCacheFingerprint(withSearch, 0, GEMINI_SCOPE),
+    ).not.toBe(await generateCacheFingerprint(withoutSearch, 0, GEMINI_SCOPE));
+  });
+
+  it('sorts a declaration that carries no name before a named one', async () => {
+    const nameFirst = createLlmRequest({contentsCount: 0});
+    nameFirst.config.tools = [
+      {functionDeclarations: [{description: 'a'}, {name: 'b'}]},
+    ];
+    const nameLast = createLlmRequest({contentsCount: 0});
+    nameLast.config.tools = [
+      {functionDeclarations: [{name: 'b'}, {description: 'a'}]},
+    ];
+
+    expect(await generateCacheFingerprint(nameFirst, 0, GEMINI_SCOPE)).toBe(
+      await generateCacheFingerprint(nameLast, 0, GEMINI_SCOPE),
+    );
+  });
+
+  it('orders two identically named declarations without reordering them', async () => {
+    const twice = createLlmRequest({contentsCount: 0});
+    twice.config.tools = [
+      {functionDeclarations: [{name: 'same'}, {name: 'same'}]},
+    ];
+    const once = createLlmRequest({contentsCount: 0});
+    once.config.tools = [{functionDeclarations: [{name: 'same'}]}];
+
+    expect(await generateCacheFingerprint(twice, 0, GEMINI_SCOPE)).not.toBe(
+      await generateCacheFingerprint(once, 0, GEMINI_SCOPE),
+    );
+  });
+
+  it('keeps the caller tool order untouched while fingerprinting', async () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config.tools = [
+      {functionDeclarations: [{name: 'zeta'}, {name: 'alpha'}]},
+    ];
+    const before = structuredClone(llmRequest.config.tools);
+
+    await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE);
+
+    expect(llmRequest.config.tools).toEqual(before);
+  });
+
+  it('reports no token floor for a model that is not named', () => {
+    expect(minimumCacheTokens(undefined)).toBeUndefined();
+    expect(minimumCacheTokens('claude-3-opus')).toBeUndefined();
+    expect(minimumCacheTokens('gemini-2.5-flash')).toBe(2048);
+    expect(minimumCacheTokens('gemini-3-pro')).toBe(4096);
+    expect(minimumCacheTokens('publishers/google/models/gemini-2.5-pro')).toBe(
+      2048,
+    );
+  });
+
+  it('excludes a callable tool from the fingerprint and the cache', async () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config.systemInstruction = 'x'.repeat(12_000);
+    llmRequest.config.tools = [
+      testTool(),
+      {
+        tool: async () => ({}),
+        callTool: async () => [],
+      },
+    ];
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    llmRequest.cacheMetadata = {
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+    fake.create.mockResolvedValue({name: 'cachedContents/declared'});
+
+    await manager.handleContextCaching(llmRequest);
+
+    expect(lastCreateConfig(fake).tools).toEqual([testTool()]);
+  });
+
+  it('omits the tools from the cache when the request declares none', async () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    llmRequest.config = {systemInstruction: 'x'.repeat(12_000)};
+    llmRequest.cacheableContentsTokenCount = 3_000;
+    llmRequest.cacheMetadata = {
+      fingerprint: await generateCacheFingerprint(llmRequest, 0, GEMINI_SCOPE),
+      contentsCount: 0,
+    };
+    fake.create.mockResolvedValue({name: 'cachedContents/no-tools'});
+
+    await manager.handleContextCaching(llmRequest);
+
+    expect(lastCreateConfig(fake).tools).toBeUndefined();
+    expect(lastCreateConfig(fake).toolConfig).toBeUndefined();
+  });
+
+  it('separates the vertex and the gemini cache scopes by project', async () => {
+    const llmRequest = createLlmRequest({contentsCount: 0});
+    const scopeA: QualifiedCacheScope = {...VERTEX_SCOPE, project: 'alpha'};
+    const scopeB: QualifiedCacheScope = {...VERTEX_SCOPE, project: 'beta'};
+
+    expect(await generateCacheFingerprint(llmRequest, 0, scopeA)).not.toBe(
+      await generateCacheFingerprint(llmRequest, 0, scopeB),
+    );
+  });
+
+  it('names the vertex project and location only on a vertex client', async () => {
+    const scope = {
+      project: 'p',
+      location: 'l',
+      baseUrl: 'https://example.test',
+    };
+    const geminiRequest = createLlmRequest({contentsCount: 0});
+    const vertexRequest = createLlmRequest({contentsCount: 0});
+    const geminiManager = new GeminiContextCacheManager(
+      createFakeClient(false).client,
+      scope,
+    );
+    const vertexManager = new GeminiContextCacheManager(
+      createFakeClient(true).client,
+      scope,
+    );
+
+    const geminiMetadata =
+      await geminiManager.handleContextCaching(geminiRequest);
+    const vertexMetadata =
+      await vertexManager.handleContextCaching(vertexRequest);
+
+    expect(geminiMetadata.fingerprint).toBe(
+      await generateCacheFingerprint(geminiRequest, 0, {
+        backend: 'gemini',
+        baseUrl: scope.baseUrl,
+      }),
+    );
+    expect(vertexMetadata.fingerprint).toBe(
+      await generateCacheFingerprint(vertexRequest, 0, {
+        backend: 'vertex',
+        ...scope,
+      }),
+    );
   });
 });
