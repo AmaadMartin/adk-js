@@ -43,6 +43,7 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from '../../src/agents/processors/agent_transfer_llm_request_processor.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -650,6 +651,65 @@ describe('LlmAgent Configuration with contextCompactors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(contentIndex).toBe(processorIndex + 1);
+  });
+});
+
+describe('LlmAgent flow selection', () => {
+  it('omits agent transfer when a leaf agent forbids every direction', () => {
+    const agent = new LlmAgent({
+      name: 'leaf_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors).not.toContain(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+  });
+
+  it('adds agent transfer last when transfer stays allowed', () => {
+    const agent = new LlmAgent({name: 'default_agent'});
+
+    expect(agent.requestProcessors[agent.requestProcessors.length - 1]).toBe(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+  });
+
+  it('adds agent transfer when an agent has sub-agents despite the flags', () => {
+    const agent = new LlmAgent({
+      name: 'parent_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+      subAgents: [new LlmAgent({name: 'child_agent'})],
+    });
+
+    expect(agent.requestProcessors).toContain(
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    );
+  });
+
+  it('appends agent transfer to a caller-supplied pipeline', () => {
+    const agent = new LlmAgent({
+      name: 'custom_agent',
+      requestProcessors: [CONTENT_REQUEST_PROCESSOR],
+    });
+
+    expect(agent.requestProcessors).toEqual([
+      CONTENT_REQUEST_PROCESSOR,
+      AGENT_TRANSFER_LLM_REQUEST_PROCESSOR,
+    ]);
+  });
+
+  it('gives every agent its own processor arrays', () => {
+    const first = new LlmAgent({name: 'first_agent'});
+    const second = new LlmAgent({name: 'second_agent'});
+
+    first.requestProcessors.push(CONTENT_REQUEST_PROCESSOR);
+
+    expect(first.requestProcessors).toHaveLength(
+      second.requestProcessors.length + 1,
+    );
+    expect(first.responseProcessors).not.toBe(second.responseProcessors);
   });
 });
 

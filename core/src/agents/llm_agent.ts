@@ -65,21 +65,12 @@ import {
   handleFunctionCallsAsync,
 } from './functions.js';
 
-import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
-import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
-import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
-import {CONTENT_REQUEST_PROCESSOR} from './processors/content_request_processor.js';
-import {ContextCompactorRequestProcessor} from './processors/context_compactor_request_processor.js';
-import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
-import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from './processors/instructions_llm_request_processor.js';
-import {INTERACTIONS_REQUEST_PROCESSOR} from './processors/interactions_request_processor.js';
-import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_confirmation_llm_request_processor.js';
-import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_llm_request_processor.js';
-import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
+import {AutoFlow} from './processors/auto_flow.js';
+import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
 
@@ -537,51 +528,20 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
 
-    // TODO - b/425992518: Define these processor arrays.
-    // Orders matter, don't change. Append new processors to the end
-    this.requestProcessors = config.requestProcessors ?? [
-      BASIC_LLM_REQUEST_PROCESSOR,
-      AUTH_PREPROCESSOR,
-      IDENTITY_LLM_REQUEST_PROCESSOR,
-      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
-      REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
-      REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
-      CONTENT_REQUEST_PROCESSOR,
-      INTERACTIONS_REQUEST_PROCESSOR,
-      CODE_EXECUTION_REQUEST_PROCESSOR,
-      TOOL_FILTER_REQUEST_PROCESSOR,
-    ];
-
-    if (
-      !config.requestProcessors &&
-      config.contextCompactors &&
-      config.contextCompactors.length > 0
-    ) {
-      // Find where CONTENT_REQUEST_PROCESSOR is to place compaction immediately before it.
-      const contentIndex = this.requestProcessors.indexOf(
-        CONTENT_REQUEST_PROCESSOR,
-      );
-      if (contentIndex !== -1) {
-        this.requestProcessors.splice(
-          contentIndex,
-          0,
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
-      } else {
-        this.requestProcessors.push(
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
-      }
-    }
-
-    this.responseProcessors = config.responseProcessors ?? [];
-
-    // Preserve the agent transfer behavior.
     const agentTransferDisabled =
       this.disallowTransferToParent &&
       this.disallowTransferToPeers &&
       !this.subAgents?.length;
-    if (!agentTransferDisabled) {
+
+    const Flow = agentTransferDisabled ? SingleFlow : AutoFlow;
+    const flow = new Flow(config.contextCompactors);
+
+    this.requestProcessors = config.requestProcessors ?? flow.requestProcessors;
+    this.responseProcessors =
+      config.responseProcessors ?? flow.responseProcessors;
+
+    // A caller-supplied pipeline still gets agent transfer appended.
+    if (config.requestProcessors && !agentTransferDisabled) {
       this.requestProcessors.push(AGENT_TRANSFER_LLM_REQUEST_PROCESSOR);
     }
 
