@@ -100,11 +100,10 @@ Function declarations, through `normalizeToolConfig`:
 - `transfer_to_agent` gets a pinned description, so rewording the built-in
   transfer tool does not invalidate every recording that covers a transfer.
 - Every other description is trimmed.
-- `parameters`, `parameters_json_schema` and `parametersJsonSchema` all become
-  `parametersJsonSchema`. Both spellings are accepted because the recorded side
-  is adk-python's snake_case dump, and whether it arrives camelCased depends on
-  the loader that read it.
-- `response`, `response_json_schema` and `responseJsonSchema` are dropped.
+- `parameters` becomes `parametersJsonSchema`, and an existing
+  `parametersJsonSchema` is normalized in place. `parameters` wins when a
+  declaration carries both.
+- `response` and `responseJsonSchema` are dropped.
 
 Schemas, through `normalizeSchema`:
 
