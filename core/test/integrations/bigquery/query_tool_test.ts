@@ -385,6 +385,26 @@ describe('executeSqlQuery result shaping', () => {
     expect(result).not.toHaveProperty('result_is_likely_truncated');
   });
 
+  it('stringifies a value that refers back to itself', async () => {
+    const circular: Record<string, unknown> = {name: 'row'};
+    circular['self'] = circular;
+    resetFakes({plannedJobs: [plannedJob('SELECT')], rows: [{a: circular}]});
+
+    const result = await executeSqlQuery({
+      client: await client(),
+      projectId: PROJECT,
+      query: 'SELECT 1',
+      settings: createBigQueryToolSettings(),
+      toolContext: makeContext(),
+      callerId: 'execute_sql',
+    });
+
+    expect(result).toEqual({
+      status: GoogleToolStatus.SUCCESS,
+      rows: [{a: '[object Object]'}],
+    });
+  });
+
   it('stringifies a value JSON cannot carry', async () => {
     resetFakes({
       plannedJobs: [plannedJob('SELECT')],
@@ -547,6 +567,87 @@ describe('executeSqlQuery result shaping', () => {
     });
 
     expect(result).toEqual({status: GoogleToolStatus.SUCCESS, rows: []});
+  });
+});
+
+describe('executeSqlQuery settings isolation', () => {
+  beforeEach(() => {
+    resetFakes({
+      plannedJobs: [
+        plannedJob('SELECT', {
+          sessionId: 'session-1',
+          destinationDatasetId: '_anon',
+        }),
+        plannedJob('CREATE_MODEL', {destinationDatasetId: '_anon'}),
+        plannedJob('SELECT', {destinationDatasetId: '_anon'}),
+      ],
+      rows: [],
+    });
+  });
+
+  it('test_tool_call_doesnt_change_global_settings', async () => {
+    const settings = createBigQueryToolSettings({
+      writeMode: WriteMode.ALLOWED,
+    });
+
+    const result = await detectAnomalies(
+      await client(),
+      {
+        projectId: PROJECT,
+        historyData: 'd.t',
+        timesSeriesTimestampCol: 'ts',
+        timesSeriesDataCol: 'v',
+      },
+      settings,
+      makeContext(),
+    );
+
+    expect(result.status).toBe(GoogleToolStatus.SUCCESS);
+    // The analysis narrows the mode to open a session; the caller's own
+    // settings must not follow it.
+    expect(settings.writeMode).toBe(WriteMode.ALLOWED);
+  });
+
+  it('test_tool_call_doesnt_mutate_job_labels', async () => {
+    const settings = createBigQueryToolSettings({
+      writeMode: WriteMode.ALLOWED,
+      jobLabels: {environment: 'test', team: 'data'},
+    });
+
+    await executeSqlQuery({
+      client: await client(),
+      projectId: PROJECT,
+      query: 'SELECT 1',
+      settings,
+      toolContext: makeContext(),
+      callerId: 'execute_sql',
+    });
+
+    expect(settings.jobLabels).toEqual({environment: 'test', team: 'data'});
+  });
+
+  it('labels a machine-learning job with the tool that started it', async () => {
+    await detectAnomalies(
+      await client(),
+      {
+        projectId: PROJECT,
+        historyData: 'd.t',
+        timesSeriesTimestampCol: 'ts',
+        timesSeriesDataCol: 'v',
+      },
+      createBigQueryToolSettings({
+        writeMode: WriteMode.ALLOWED,
+        applicationName: 'my-agent',
+      }),
+      makeContext(),
+    );
+
+    for (const request of fakeState.bigquery.calls.queries) {
+      expect(request.labels).toEqual({
+        'adk-bigquery-tool': 'detect_anomalies',
+        'adk-bigquery-application-name': 'my-agent',
+      });
+    }
   });
 });
 
