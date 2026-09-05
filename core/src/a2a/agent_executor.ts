@@ -242,8 +242,8 @@ export class A2AAgentExecutor implements AgentExecutor {
     executorContext: ExecutorContext,
     agentsArtifacts: Map<string, string>,
   ): A2AEvent[] {
-    if (this.config.eventConverter) {
-      return this.config.eventConverter(
+    if (this.converters.eventConverter) {
+      return this.converters.eventConverter(
         adkEvent,
         executorContext,
         this.converters.genAiPartConverter,
