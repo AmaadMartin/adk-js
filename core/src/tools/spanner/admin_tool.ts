@@ -66,16 +66,9 @@ interface SpannerAdminToolBase<TParams extends AdminParams> {
   name: string;
   description: string;
   parameters: TParams;
-  /**
-   * Whether the model must confirm the call before it runs. Set on the tools
-   * that create billable resources.
-   */
+  /** Set on the tools that create billable resources. */
   requireConfirmation?: boolean;
-  /**
-   * Rejects arguments that must not reach Spanner, before any client is
-   * built, so a value that would break out of generated DDL never opens a
-   * connection.
-   */
+  /** Rejects an argument before any client is built. */
   validate?(args: ToolExecuteArgument<TParams>): void;
 }
 
@@ -201,19 +194,17 @@ const createDatabaseParams = instanceParams.extend({
   database_id: z.string().describe('The Spanner database id to create.'),
 });
 
-/** The resource id of a Spanner resource name, its last path segment. */
-function resourceId(name: string | null | undefined): string {
-  const path = name ?? '';
-  return path.slice(path.lastIndexOf('/') + 1);
-}
-
-/** Collects the resource ids of every resource a listing call pages through. */
+/**
+ * The resource id of every resource a listing call pages through: the last
+ * path segment of each resource name.
+ */
 async function collectResourceIds(
   resources: AsyncIterable<{name?: string | null}>,
 ): Promise<string[]> {
   const ids: string[] = [];
   for await (const resource of resources) {
-    ids.push(resourceId(resource.name));
+    const path = resource.name ?? '';
+    ids.push(path.slice(path.lastIndexOf('/') + 1));
   }
   return ids;
 }
