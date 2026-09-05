@@ -352,16 +352,20 @@ async function getAdkSession(
 /**
  * Resolves the runner from the provided runner or runner config.
  *
+ * Takes `unknown` because the value arrives unvalidated: a JavaScript caller,
+ * or a factory whose declared return type does not match what it returns, can
+ * hand over anything.
+ *
  * @param runnerOrConfig The runner, runner config, or factory for either.
  * @param fromFactory Whether this value came out of a factory, which decides
  *   which of the two error messages a bad value gets.
  * @throws {TypeError} If the value is neither a Runner nor a runner config.
  */
-async function getAdkRunner(
-  runnerOrConfig: RunnerOrRunnerConfig,
+export async function getAdkRunner(
+  runnerOrConfig: unknown,
   fromFactory = false,
 ): Promise<Runner> {
-  if (typeof runnerOrConfig === 'function') {
+  if (isRunnerFactory(runnerOrConfig)) {
     return getAdkRunner(await runnerOrConfig(), true);
   }
 
@@ -378,6 +382,14 @@ async function getAdkRunner(
   }
 
   return new Runner(runnerOrConfig);
+}
+
+/**
+ * Type guard for a value that can be called to produce a runner. Any function
+ * qualifies; whatever it returns is validated by the recursive call.
+ */
+function isRunnerFactory(value: unknown): value is () => unknown {
+  return typeof value === 'function';
 }
 
 /**
