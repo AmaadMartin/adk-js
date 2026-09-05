@@ -9,62 +9,53 @@
  * `tests/unittests/integrations/bigquery/test_bigquery_data_insights_tool.py`.
  *
  * Python patches `_gda_stream_util.get_gda_session`; here the equivalent seam
- * is `createGdaSession`, so the real accumulator in `streamChat` still runs
- * over the lines the fake session emits.
+ * is `createGdaStream`, so the real accumulator in `streamChat` still runs
+ * over the lines the fake transport emits.
  */
 
 import {GoogleToolStatus} from '@google/adk';
 import {createBigQueryToolSettings} from '@google/adk/integrations/bigquery/config.js';
 import {askDataInsights} from '@google/adk/integrations/bigquery/data_insights_tool.js';
 import {
-  GdaRequest,
-  GdaResponse,
-  GdaSession,
-  createGdaSession,
-  resolveGdaEndpoint,
-} from '@google/adk/tools/data_agent/gda_client.js';
+  GdaStream,
+  createGdaStream,
+} from '@google/adk/integrations/bigquery/gda_stream.js';
 import {OAuth2Client} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 vi.mock(
-  '@google/adk/tools/data_agent/gda_client.js',
+  '@google/adk/integrations/bigquery/gda_stream.js',
   async (importOriginal) => {
     const original =
       await importOriginal<
-        typeof import('@google/adk/tools/data_agent/gda_client.js')
+        typeof import('@google/adk/integrations/bigquery/gda_stream.js')
       >();
-    return {...original, createGdaSession: vi.fn()};
+    return {...original, createGdaStream: vi.fn()};
   },
 );
 
-/** A session that replays `lines` and records what it was asked to post. */
-class FakeGdaSession implements GdaSession {
-  readonly posts: Array<{url: string; payload: unknown; headers: unknown}> = [];
-
-  constructor(private readonly lines: string[]) {}
-
-  async request(_request: GdaRequest): Promise<GdaResponse> {
-    return {ok: true, status: 200, text: ''};
-  }
-
-  async *streamLines(
-    url: string,
-    payload: unknown,
-    headers: Record<string, string>,
-  ): AsyncGenerator<string> {
-    this.posts.push({url, payload, headers});
-    for (const line of this.lines) {
-      yield line;
-    }
-  }
+/** What one recorded post carried. */
+interface RecordedPost {
+  url: string;
+  payload: unknown;
+  headers: unknown;
 }
 
-/** Installs `session` as the session `askDataInsights` will open. */
-function withSession(
-  session: GdaSession,
-  endpoint = 'https://gda.example',
-): void {
-  vi.mocked(createGdaSession).mockResolvedValue({session, endpoint});
+/** A transport that replays `lines` and records what it was asked to post. */
+function fakeStream(lines: string[], posts: RecordedPost[]): GdaStream {
+  return async function* stream(url, payload, headers) {
+    posts.push({url, payload, headers});
+    for (const line of lines) {
+      yield line;
+    }
+  };
+}
+
+/** Installs a transport replaying `lines`, and returns what it was posted. */
+function withStream(lines: string[] = []): RecordedPost[] {
+  const posts: RecordedPost[] = [];
+  vi.mocked(createGdaStream).mockReturnValue(fakeStream(lines, posts));
+  return posts;
 }
 
 /** The wire form of one streamed system message. */
@@ -78,11 +69,11 @@ const TABLE_REFERENCES = [
 
 describe('askDataInsights', () => {
   beforeEach(() => {
-    vi.mocked(createGdaSession).mockReset();
+    vi.mocked(createGdaStream).mockReset();
   });
 
   it('returns the steps the answering agent took', async () => {
-    const session = new FakeGdaSession([
+    withStream([
       line({systemMessage: {text: {parts: ['SELECT 1']}}}),
       line({
         systemMessage: {
@@ -95,7 +86,6 @@ describe('askDataInsights', () => {
         },
       }),
     ]);
-    withSession(session);
 
     const result = await askDataInsights(
       {
@@ -122,8 +112,7 @@ describe('askDataInsights', () => {
   });
 
   it('posts the question and the tables to the chat endpoint', async () => {
-    const session = new FakeGdaSession([]);
-    withSession(session);
+    const posts = withStream();
 
     await askDataInsights(
       {
@@ -134,9 +123,9 @@ describe('askDataInsights', () => {
       createBigQueryToolSettings(),
     );
 
-    const [post] = session.posts;
+    const [post] = posts;
     expect(post.url).toBe(
-      'https://gda.example/v1/projects/some-project-id/locations/global:chat',
+      'https://geminidataanalytics.googleapis.com/v1/projects/some-project-id/locations/global:chat',
     );
     expect(post.headers).toEqual({
       'Content-Type': 'application/json',
@@ -152,8 +141,7 @@ describe('askDataInsights', () => {
   });
 
   it('forbids the answering agent from drawing charts', async () => {
-    const session = new FakeGdaSession([]);
-    withSession(session);
+    const posts = withStream();
 
     await askDataInsights(
       {
@@ -164,7 +152,7 @@ describe('askDataInsights', () => {
       createBigQueryToolSettings(),
     );
 
-    const payload = session.posts[0].payload as {
+    const payload = posts[0].payload as {
       inlineContext: {systemInstruction: string};
     };
     expect(payload.inlineContext.systemInstruction).toContain('NO CHARTS');
@@ -172,7 +160,7 @@ describe('askDataInsights', () => {
   });
 
   it('caps the rows a data message carries at the configured limit', async () => {
-    const session = new FakeGdaSession([
+    withStream([
       line({
         systemMessage: {
           data: {
@@ -184,7 +172,6 @@ describe('askDataInsights', () => {
         },
       }),
     ]);
-    withSession(session);
 
     const result = await askDataInsights(
       {
@@ -207,9 +194,9 @@ describe('askDataInsights', () => {
   });
 
   it('lets a transport failure out, for GoogleTool to shape', async () => {
-    vi.mocked(createGdaSession).mockRejectedValue(
-      new Error('API returned 503'),
-    );
+    vi.mocked(createGdaStream).mockReturnValue(() => {
+      throw new Error('API returned 503');
+    });
 
     await expect(
       askDataInsights(
@@ -223,9 +210,8 @@ describe('askDataInsights', () => {
     ).rejects.toThrow('API returned 503');
   });
 
-  it('authorizes the session with the credential the tool resolved', async () => {
-    const session = new FakeGdaSession([]);
-    withSession(session);
+  it('authorizes the stream with the credential the tool resolved', async () => {
+    withStream();
     const credentials = new OAuth2Client();
 
     await askDataInsights(
@@ -238,15 +224,23 @@ describe('askDataInsights', () => {
       credentials,
     );
 
-    expect(vi.mocked(createGdaSession)).toHaveBeenCalledWith(credentials, {
-      location: 'global',
-    });
+    expect(vi.mocked(createGdaStream)).toHaveBeenCalledWith(credentials);
   });
 
-  it('asks the global Conversational Analytics host', () => {
-    // The tool always passes `global`, so this is the host it reaches.
-    expect(resolveGdaEndpoint({location: 'global'})).toBe(
-      'https://geminidataanalytics.googleapis.com',
+  it('asks the global Conversational Analytics host', async () => {
+    const posts = withStream();
+
+    await askDataInsights(
+      {
+        projectId: 'p',
+        userQueryWithContext: 'q',
+        tableReferences: TABLE_REFERENCES,
+      },
+      createBigQueryToolSettings(),
+    );
+
+    expect(posts[0].url).toBe(
+      'https://geminidataanalytics.googleapis.com/v1/projects/p/locations/global:chat',
     );
   });
 });

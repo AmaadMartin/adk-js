@@ -5,48 +5,41 @@
  */
 
 /**
- * Covers the Conversational Analytics client the BigQuery `ask_data_insights`
- * tool streams through: the host it picks, the accumulator that turns a
- * streamed JSON array back into messages, and the `fetch` session.
+ * Covers the Conversational Analytics chat stream `ask_data_insights` reads:
+ * the host it picks, the accumulator that turns a streamed JSON array back
+ * into messages, and the `fetch`-backed transport.
  *
- * The module is carried over from the parity branch, which has its own test
- * for it. That test drives the client through the data agent fixtures, which
- * this branch does not carry, so this file exercises the same module from the
- * BigQuery side.
+ * Ported from the part of adk-python@main
+ * `tests/unittests/tools/test__gda_stream_util.py` that covers `get_stream`
+ * and `get_gda_endpoint`. The `get_gda_session` mTLS cases are not ported:
+ * they assert `configure_mtls_channel()` on a `requests` session, and this
+ * port has no mTLS branch.
  */
 
 import {
-  GdaRequest,
-  GdaResponse,
-  GdaSession,
-  createGdaSession,
+  GdaStream,
+  createGdaStream,
   extractDataResult,
   formatDataRetrieved,
   gdaHeaders,
   resolveGdaEndpoint,
   streamChat,
-} from '@google/adk/tools/data_agent/gda_client.js';
+} from '@google/adk/integrations/bigquery/gda_stream.js';
 import {OAuth2Client} from 'google-auth-library';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
-/** A session that replays `lines`, so the real accumulator runs over them. */
-class ReplaySession implements GdaSession {
-  constructor(private readonly lines: string[]) {}
-
-  async request(_request: GdaRequest): Promise<GdaResponse> {
-    return {ok: true, status: 200, text: ''};
-  }
-
-  async *streamLines(): AsyncGenerator<string> {
-    for (const line of this.lines) {
+/** A transport that replays `lines`, so the real accumulator runs over them. */
+function replay(lines: string[]): GdaStream {
+  return async function* stream() {
+    for (const line of lines) {
       yield line;
     }
-  }
+  };
 }
 
 /** Streams `lines` through the real accumulator. */
 function chatOver(lines: string[], maxRows = 10): Promise<unknown[]> {
-  return streamChat(new ReplaySession(lines), 'url', {}, {}, maxRows);
+  return streamChat(replay(lines), 'url', {}, {}, maxRows);
 }
 
 /** A `fetch` answer whose body streams `chunks`. */
@@ -63,7 +56,7 @@ function streamingResponse(chunks: string[], status = 200): Response {
   return new Response(body, {status});
 }
 
-/** Reads a session's stream to the end. */
+/** Reads a transport's stream to the end. */
 async function collect(stream: AsyncIterable<string>): Promise<string[]> {
   const lines: string[] = [];
   for await (const line of stream) {
@@ -77,32 +70,23 @@ describe('resolveGdaEndpoint', () => {
     expect(resolveGdaEndpoint()).toBe(
       'https://geminidataanalytics.googleapis.com',
     );
-    expect(resolveGdaEndpoint({location: '  GLOBAL '})).toBe(
+    expect(resolveGdaEndpoint('  GLOBAL ')).toBe(
       'https://geminidataanalytics.googleapis.com',
     );
   });
 
   it('uses a regional endpoint product host for eu and us', () => {
-    expect(resolveGdaEndpoint({location: 'EU'})).toBe(
+    expect(resolveGdaEndpoint('EU')).toBe(
       'https://geminidataanalytics.eu.rep.googleapis.com',
     );
-    expect(resolveGdaEndpoint({location: 'us'})).toBe(
+    expect(resolveGdaEndpoint('us')).toBe(
       'https://geminidataanalytics.us.rep.googleapis.com',
     );
   });
 
   it('uses a regional host for any other location', () => {
-    expect(resolveGdaEndpoint({location: 'europe-west1'})).toBe(
+    expect(resolveGdaEndpoint('europe-west1')).toBe(
       'https://geminidataanalytics-europe-west1.googleapis.com',
-    );
-  });
-
-  it('prefers an explicit endpoint, adding a scheme when it lacks one', () => {
-    expect(resolveGdaEndpoint({apiEndpoint: 'gda.example'})).toBe(
-      'https://gda.example',
-    );
-    expect(resolveGdaEndpoint({apiEndpoint: 'http://gda.example'})).toBe(
-      'http://gda.example',
     );
   });
 });
@@ -185,8 +169,7 @@ describe('formatDataRetrieved', () => {
   });
 
   it('says how many rows it kept when it trimmed the result', () => {
-    const result = formatDataRetrieved({data: [{a: 1}, {a: 2}, {a: 3}]}, 2);
-    expect(result).toEqual({
+    expect(formatDataRetrieved({data: [{a: 1}, {a: 2}, {a: 3}]}, 2)).toEqual({
       'Data Retrieved': {
         headers: ['a'],
         rows: [[1], [2]],
@@ -219,9 +202,7 @@ describe('streamChat', () => {
 
   it('keeps only the newest result, dropping the rows of the older one', async () => {
     const data = (value: number) =>
-      JSON.stringify({
-        systemMessage: {data: {result: {data: [{a: value}]}}},
-      });
+      JSON.stringify({systemMessage: {data: {result: {data: [{a: value}]}}}});
 
     expect(await chatOver([data(1), data(2)])).toEqual([
       {'Data Retrieved': 'Intermediate result omitted'},
@@ -236,69 +217,57 @@ describe('streamChat', () => {
   });
 });
 
-describe('createGdaSession', () => {
+describe('createGdaStream', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('opens a session against the host the location picks', async () => {
-    const {endpoint} = await createGdaSession(undefined, {location: 'eu'});
-
-    expect(endpoint).toBe('https://geminidataanalytics.eu.rep.googleapis.com');
-  });
-
-  it('sends a request with the credential headers and the caller headers', async () => {
+  it('posts with the credential headers and the caller headers', async () => {
     const credentials = new OAuth2Client();
     vi.spyOn(credentials, 'getRequestHeaders').mockResolvedValue(
       new Headers({authorization: 'Bearer token'}),
     );
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response('{"ok":true}', {status: 200}));
-    const {session} = await createGdaSession(credentials);
+      .mockResolvedValue(streamingResponse(['{"a":1}']));
 
-    const response = await session.request({
-      method: 'POST',
-      url: 'https://gda.example/v1/chat',
-      headers: {'X-Goog-API-Client': 'GOOGLE_ADK'},
-      timeoutSeconds: 5,
-      params: {alt: 'json'},
-      body: {a: 1},
-    });
+    const lines = await collect(
+      createGdaStream(credentials)(
+        'https://gda.example/v1/chat',
+        {a: 1},
+        {
+          'X-Goog-API-Client': 'GOOGLE_ADK',
+        },
+      ),
+    );
 
-    expect(response).toEqual({ok: true, status: 200, text: '{"ok":true}'});
+    expect(lines).toEqual(['{"a":1}']);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://gda.example/v1/chat?alt=json');
+    expect(url).toBe('https://gda.example/v1/chat');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe('{"a":1}');
     const headers = init?.headers as Headers;
     expect(headers.get('authorization')).toBe('Bearer token');
     expect(headers.get('X-Goog-API-Client')).toBe('GOOGLE_ADK');
-    expect(init?.body).toBe('{"a":1}');
   });
 
-  it('sends an unauthenticated request with no body when there is none', async () => {
+  it('posts unauthenticated when there is no credential', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response('', {status: 404}));
-    const {session} = await createGdaSession(undefined);
+      .mockResolvedValue(streamingResponse([]));
 
-    const response = await session.request({
-      method: 'GET',
-      url: 'https://gda.example/v1/agents',
-      headers: {},
-      timeoutSeconds: 5,
-    });
+    await collect(createGdaStream()('url', {}, {}));
 
-    expect(response).toEqual({ok: false, status: 404, text: ''});
-    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('authorization')).toBeNull();
   });
 
   it('splits a streamed body into lines, dropping the terminators', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       streamingResponse(['[{\r\n"a":', '1}]\n{"b":2}']),
     );
-    const {session} = await createGdaSession(undefined);
 
-    expect(await collect(session.streamLines('url', {}, {}))).toEqual([
+    expect(await collect(createGdaStream()('url', {}, {}))).toEqual([
       '[{',
       '"a":1}]',
       '{"b":2}',
@@ -309,9 +278,8 @@ describe('createGdaSession', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('quota exceeded', {status: 429}),
     );
-    const {session} = await createGdaSession(undefined);
 
-    await expect(collect(session.streamLines('url', {}, {}))).rejects.toThrow(
+    await expect(collect(createGdaStream()('url', {}, {}))).rejects.toThrow(
       'API returned error status: 429 quota exceeded',
     );
   });
@@ -320,8 +288,7 @@ describe('createGdaSession', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(null, {status: 204}),
     );
-    const {session} = await createGdaSession(undefined);
 
-    expect(await collect(session.streamLines('url', {}, {}))).toEqual([]);
+    expect(await collect(createGdaStream()('url', {}, {}))).toEqual([]);
   });
 });

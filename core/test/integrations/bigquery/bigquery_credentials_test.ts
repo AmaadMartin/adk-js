@@ -13,13 +13,19 @@
  * unknown constructor option at compile time, so there is no runtime guard to
  * exercise. `test_empty_configuration_raises_error` passes `{}` because the
  * options object is required here.
+ *
+ * adk-python also exports `BIGQUERY_DEFAULT_SCOPE`, a BigQuery-only scope
+ * list that no code path there reads. This port leaves it out rather than
+ * ship a constant named "default" that is not the default, so the case
+ * asserting its value is gone with it. The default the constructor does apply
+ * is `BIGQUERY_SCOPES`, pinned by
+ * `test_valid_client_id_secret_pair_default_scope` below.
  */
 
 import {Compute, OAuth2Client} from 'google-auth-library';
 import {describe, expect, it} from 'vitest';
 
 import {
-  BIGQUERY_DEFAULT_SCOPE,
   BIGQUERY_SCOPES,
   BIGQUERY_TOKEN_CACHE_KEY,
   BigQueryCredentialsConfig,
@@ -165,14 +171,6 @@ describe('BigQueryCredentialsConfig token cache and slot', () => {
       credentialKey: 'my_slot',
     });
     expect(config.credentialKey).toBe('my_slot');
-  });
-
-  it('exports the BigQuery-only scope alongside the full set', () => {
-    // adk-python exports both. They differ, so neither is dropped.
-    expect(BIGQUERY_DEFAULT_SCOPE).toEqual([
-      'https://www.googleapis.com/auth/bigquery',
-    ]);
-    expect(BIGQUERY_SCOPES).not.toEqual(BIGQUERY_DEFAULT_SCOPE);
   });
 
   it('reads a token from session state when asked to', () => {

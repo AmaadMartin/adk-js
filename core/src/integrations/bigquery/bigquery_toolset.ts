@@ -8,12 +8,17 @@ import type {BigQuery} from '@google-cloud/bigquery';
 import type {AuthClient} from 'google-auth-library';
 import {z} from 'zod';
 
+import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
-import {ToolInputParameters} from '../../tools/function_tool.js';
+import {
+  ToolExecuteArgument,
+  ToolInputParameters,
+} from '../../tools/function_tool.js';
 import {
   GoogleTool,
+  GoogleToolExecuteContext,
   GoogleToolExecuteFunction,
 } from '../../tools/google_tool.js';
 import {experimental} from '../../utils/experimental.js';
@@ -34,16 +39,16 @@ import {
   listTableIds,
 } from './metadata_tool.js';
 import {
+  analyzeContribution,
   DEFAULT_ANOMALY_HORIZON,
   DEFAULT_ANOMALY_PROB_THRESHOLD,
   DEFAULT_FORECAST_HORIZON,
   DEFAULT_TOP_K_INSIGHTS,
-  PRUNING_METHODS,
-  analyzeContribution,
   detectAnomalies,
-  executeSqlDescription,
+  EXECUTE_SQL_DESCRIPTIONS,
   executeSqlQuery,
   forecast,
+  PRUNING_METHODS,
 } from './query_tool.js';
 import {DEFAULT_SEARCH_PAGE_SIZE, searchCatalog} from './search_tool.js';
 
@@ -174,13 +179,7 @@ const AskDataInsightsSchema = z.object({
         ' resolve it on its own.',
     ),
   tableReferences: z
-    .array(
-      z.object({
-        projectId,
-        datasetId,
-        tableId: z.string().describe('The BigQuery table id.'),
-      }),
-    )
+    .array(TableSchema)
     .describe('The tables the question may be answered from.'),
 });
 const SearchCatalogSchema = z.object({
@@ -208,6 +207,61 @@ const SearchCatalogSchema = z.object({
     .optional()
     .describe('The Dataplex entry types to match.'),
 });
+
+/** What one BigQuery tool call is handed besides the model's arguments. */
+export interface BigQueryToolCall {
+  /** The tool making the call, reported to BigQuery as a job label. */
+  toolName: string;
+  /** The settings the owning toolset was configured with. */
+  settings: BigQueryToolSettings;
+  /** The credential the call resolved, or application default. */
+  credentials?: AuthClient;
+  /**
+   * Opens a BigQuery client that identifies itself as the calling tool.
+   *
+   * @param projectId The project the calls are billed to.
+   */
+  openClient(projectId: string): Promise<BigQuery>;
+}
+
+/** The body of one BigQuery tool. */
+export type BigQueryToolBody<TParameters extends ToolInputParameters> = (
+  input: ToolExecuteArgument<TParameters>,
+  call: BigQueryToolCall,
+  toolContext?: Context,
+) => Promise<unknown>;
+
+/**
+ * Binds one tool call to the tool that is making it.
+ *
+ * `GoogleTool` injects the settings it was built with, and types them
+ * optional because a tool may be built without any. This toolset always
+ * supplies them, so `fallback` is a type narrowing rather than a behaviour.
+ *
+ * @param toolName The tool the call belongs to, reported to BigQuery.
+ * @param google What `GoogleTool` injected: the credential and the settings.
+ * @param fallback The settings to use if the tool carries none.
+ * @return The context the tool body reads.
+ */
+export function toolCall(
+  toolName: string,
+  google: GoogleToolExecuteContext<BigQueryToolSettings> | undefined,
+  fallback: BigQueryToolSettings,
+): BigQueryToolCall {
+  const settings = google?.settings ?? fallback;
+  return {
+    toolName,
+    settings,
+    credentials: google?.credentials,
+    openClient: (projectId) =>
+      getBigQueryClient({
+        project: projectId,
+        credentials: google?.credentials,
+        location: settings.location,
+        userAgent: [settings.applicationName, toolName],
+      }),
+  };
+}
 
 /** Options accepted by {@link BigQueryToolset}. */
 export interface BigQueryToolsetOptions {
@@ -305,37 +359,33 @@ export class BigQueryToolset extends BaseToolset {
     return this.toolFilter.includes(tool.name);
   }
 
-  /** Builds the tool for one BigQuery operation. */
+  /**
+   * Builds the tool for one BigQuery operation.
+   *
+   * The body is handed a {@link BigQueryToolCall} rather than `GoogleTool`'s
+   * raw context, so a tool never restates its own name to open a client: the
+   * opener is bound to the name declared here, which is what reaches the job
+   * label and the user agent.
+   */
   private buildTool<TParameters extends ToolInputParameters>(
     name: string,
     description: string,
     parameters: TParameters,
-    execute: GoogleToolExecuteFunction<TParameters, never>,
+    body: BigQueryToolBody<TParameters>,
   ): BaseTool {
-    // `GoogleTool` can carry the settings and inject them as a third
-    // argument, as adk-python's does. Here every tool body is a closure over
-    // `this.toolSettings`, so the injection would only restate what the
-    // closure already holds.
+    const execute: GoogleToolExecuteFunction<
+      TParameters,
+      BigQueryToolSettings
+    > = (input, toolContext, google) =>
+      body(input, toolCall(name, google, this.toolSettings), toolContext);
+
     return new GoogleTool({
       name,
       description,
       parameters,
       execute,
       credentialsConfig: this.credentialsConfig,
-    });
-  }
-
-  /** Opens a BigQuery client identifying itself as `toolName`. */
-  private client(
-    project: string,
-    credentials: AuthClient | undefined,
-    toolName: string,
-  ): Promise<BigQuery> {
-    return getBigQueryClient({
-      project,
-      credentials,
-      location: this.toolSettings.location,
-      userAgent: [this.toolSettings.applicationName, toolName],
+      toolSettings: this.toolSettings,
     });
   }
 
@@ -346,13 +396,9 @@ export class BigQueryToolset extends BaseToolset {
         'get_dataset_info',
         'Get the metadata of a BigQuery dataset.',
         DatasetSchema,
-        async (input, _toolContext, google) =>
+        async (input, call) =>
           getDatasetInfo(
-            await this.client(
-              input.projectId,
-              google?.credentials,
-              'get_dataset_info',
-            ),
+            await call.openClient(input.projectId),
             input.projectId,
             input.datasetId,
           ),
@@ -361,13 +407,9 @@ export class BigQueryToolset extends BaseToolset {
         'get_table_info',
         'Get the metadata of a BigQuery table, including its schema.',
         TableSchema,
-        async (input, _toolContext, google) =>
+        async (input, call) =>
           getTableInfo(
-            await this.client(
-              input.projectId,
-              google?.credentials,
-              'get_table_info',
-            ),
+            await call.openClient(input.projectId),
             input.projectId,
             input.datasetId,
             input.tableId,
@@ -377,13 +419,9 @@ export class BigQueryToolset extends BaseToolset {
         'list_dataset_ids',
         'List the BigQuery dataset ids in a Google Cloud project.',
         ProjectSchema,
-        async (input, _toolContext, google) =>
+        async (input, call) =>
           listDatasetIds(
-            await this.client(
-              input.projectId,
-              google?.credentials,
-              'list_dataset_ids',
-            ),
+            await call.openClient(input.projectId),
             input.projectId,
           ),
       ),
@@ -391,13 +429,9 @@ export class BigQueryToolset extends BaseToolset {
         'list_table_ids',
         'List the table ids in a BigQuery dataset.',
         DatasetSchema,
-        async (input, _toolContext, google) =>
+        async (input, call) =>
           listTableIds(
-            await this.client(
-              input.projectId,
-              google?.credentials,
-              'list_table_ids',
-            ),
+            await call.openClient(input.projectId),
             input.projectId,
             input.datasetId,
           ),
@@ -407,44 +441,33 @@ export class BigQueryToolset extends BaseToolset {
         'Get the metadata of a BigQuery job: its configuration, statistics,' +
           ' status, slot usage and original query.',
         JobSchema,
-        async (input, _toolContext, google) =>
-          getJobInfo(
-            await this.client(
-              input.projectId,
-              google?.credentials,
-              'get_job_info',
-            ),
-            input.jobId,
-          ),
+        async (input, call) =>
+          getJobInfo(await call.openClient(input.projectId), input.jobId),
       ),
       this.buildTool(
         'execute_sql',
-        executeSqlDescription(this.toolSettings.writeMode),
+        EXECUTE_SQL_DESCRIPTIONS[this.toolSettings.writeMode],
         ExecuteSqlSchema,
-        async (input, toolContext, google) =>
+        async (input, call, toolContext) =>
           executeSqlQuery({
-            client: await this.client(
-              input.projectId,
-              google?.credentials,
-              'execute_sql',
-            ),
+            client: await call.openClient(input.projectId),
             projectId: input.projectId,
             query: input.query,
-            settings: this.toolSettings,
+            settings: call.settings,
             toolContext,
             dryRun: input.dryRun,
-            callerId: 'execute_sql',
+            callerId: call.toolName,
           }),
       ),
       this.buildTool(
         'forecast',
         'Forecast a time series held in BigQuery with AI.FORECAST.',
         ForecastSchema,
-        async (input, toolContext, google) =>
+        async (input, call, toolContext) =>
           forecast(
-            await this.client(input.projectId, google?.credentials, 'forecast'),
+            await call.openClient(input.projectId),
             input,
-            this.toolSettings,
+            call.settings,
             toolContext,
           ),
       ),
@@ -454,15 +477,11 @@ export class BigQueryToolset extends BaseToolset {
           ' analysis. It creates a temporary model, so the toolset must allow' +
           ' writes.',
         AnalyzeContributionSchema,
-        async (input, toolContext, google) =>
+        async (input, call, toolContext) =>
           analyzeContribution(
-            await this.client(
-              input.projectId,
-              google?.credentials,
-              'analyze_contribution',
-            ),
+            await call.openClient(input.projectId),
             input,
-            this.toolSettings,
+            call.settings,
             toolContext,
           ),
       ),
@@ -471,15 +490,11 @@ export class BigQueryToolset extends BaseToolset {
         'Find anomalies in a time series with a BigQuery ML ARIMA_PLUS model.' +
           ' It creates a temporary model, so the toolset must allow writes.',
         DetectAnomaliesSchema,
-        async (input, toolContext, google) =>
+        async (input, call, toolContext) =>
           detectAnomalies(
-            await this.client(
-              input.projectId,
-              google?.credentials,
-              'detect_anomalies',
-            ),
+            await call.openClient(input.projectId),
             input,
-            this.toolSettings,
+            call.settings,
             toolContext,
           ),
       ),
@@ -489,17 +504,17 @@ export class BigQueryToolset extends BaseToolset {
           ' returns the whole log of the work: the statements that ran, the' +
           ' rows they read, and the answer.',
         AskDataInsightsSchema,
-        (input, _toolContext, google) =>
-          askDataInsights(input, this.toolSettings, google?.credentials),
+        (input, call) =>
+          askDataInsights(input, call.settings, call.credentials),
       ),
       this.buildTool(
         'search_catalog',
         'Find BigQuery datasets and tables by meaning rather than by name.' +
           ' Use it when the exact ids are unknown.',
         SearchCatalogSchema,
-        async (input, _toolContext, google) =>
-          this.withCatalogClient(google?.credentials, (client) =>
-            searchCatalog(client, input, this.toolSettings),
+        async (input, call) =>
+          this.withCatalogClient(call.credentials, (client) =>
+            searchCatalog(client, input, call.settings),
           ),
       ),
     ];

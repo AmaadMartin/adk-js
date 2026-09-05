@@ -307,15 +307,20 @@ export async function executeSqlQuery(
   }
 }
 
-/** The part of `AI.FORECAST`'s description that never changes. */
+/** The part of `execute_sql`'s description that every write mode shares. */
 const EXECUTE_SQL_SUMMARY =
   'Run a BigQuery or BigQuery ML SQL query in the project and return the' +
   ' result. Set dryRun to validate and cost a query without running it. A' +
   ' result carrying result_is_likely_truncated may have further matching' +
   ' rows that were not returned.';
 
-/** What `execute_sql` tells the model it may do, per write mode. */
-const EXECUTE_SQL_DESCRIPTIONS: Readonly<Record<WriteMode, string>> = {
+/**
+ * What `execute_sql` tells the model it may do, per write mode.
+ *
+ * adk-python swaps the tool's docstring for the same reason: the model has to
+ * know which statements the runtime guard will accept.
+ */
+export const EXECUTE_SQL_DESCRIPTIONS: Readonly<Record<WriteMode, string>> = {
   [WriteMode.BLOCKED]: `${EXECUTE_SQL_SUMMARY} Only SELECT statements are accepted; any write is refused.`,
   [WriteMode.PROTECTED]:
     `${EXECUTE_SQL_SUMMARY} Besides SELECT, only writes inside the anonymous` +
@@ -330,19 +335,6 @@ const EXECUTE_SQL_DESCRIPTIONS: Readonly<Record<WriteMode, string>> = {
     ' MODEL. To replace an existing object, use CREATE OR REPLACE, or DROP it' +
     ' first.',
 };
-
-/**
- * Returns the description `execute_sql` shows the model under a write mode.
- *
- * adk-python swaps the tool's docstring for the same reason: the model has to
- * know which statements the runtime guard will accept.
- *
- * @param writeMode The write mode the toolset was configured with.
- * @return The description for that mode.
- */
-export function executeSqlDescription(writeMode: WriteMode): string {
-  return EXECUTE_SQL_DESCRIPTIONS[writeMode];
-}
 
 /**
  * Escapes a value that is interpolated into a single-quoted SQL literal.
