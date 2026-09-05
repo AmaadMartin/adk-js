@@ -142,10 +142,21 @@ const LIVE_KEYS = [
   'outputAudioTranscription',
   'inputAudioTranscription',
   'realtimeInputConfig',
+  'explicitVadSignal',
+  'translationConfig',
+  'avatarConfig',
   'contextWindowCompression',
   'proactivity',
   'enableAffectiveDialog',
 ] as const;
+
+/**
+ * Live keys whose value is copied rather than aliased. The live flow stamps
+ * each server-issued resumption handle onto `sessionResumption`, and seeds
+ * `historyConfig` when it replays history on a fresh connection. Aliasing the
+ * caller's run config would carry those writes into a later run.
+ */
+const LIVE_COPY_KEYS = ['sessionResumption', 'historyConfig'] as const;
 
 function applyLiveRunConfig(
   runConfig: InvocationContext['runConfig'],
@@ -156,6 +167,12 @@ function applyLiveRunConfig(
   for (const k of LIVE_KEYS) {
     if (runConfig[k] !== undefined) {
       (liveConfig as Record<string, unknown>)[k] = runConfig[k];
+    }
+  }
+  for (const k of LIVE_COPY_KEYS) {
+    const value = runConfig[k];
+    if (value !== undefined) {
+      (liveConfig as Record<string, unknown>)[k] = {...value};
     }
   }
 }

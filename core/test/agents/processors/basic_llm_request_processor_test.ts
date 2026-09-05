@@ -11,6 +11,7 @@ import {
   createSession,
   FunctionTool,
   InvocationContext,
+  LiveConnectConfigWithHistory,
   LlmAgent,
   LLMRegistry,
   LlmRequest,
@@ -21,6 +22,7 @@ import {
 import {
   Content,
   Blob as GenaiBlob,
+  HttpOptions,
   Modality,
   Schema,
   Type,
@@ -324,5 +326,270 @@ describe('BasicLlmRequestProcessor', () => {
     }
 
     expect(events).toHaveLength(0);
+  });
+});
+
+describe('BasicLlmRequestProcessor run config labels', () => {
+  it('merges run config labels over the agent labels', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+      generateContentConfig: {labels: {team: 'agent-team', tier: 'gold'}},
+    });
+    const invocationContext = createMockInvocationContext(agent, {
+      labels: {team: 'search', cost_center: 'abc-123'},
+    });
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.labels).toEqual({
+      team: 'search',
+      tier: 'gold',
+      cost_center: 'abc-123',
+    });
+  });
+
+  it('does not write run config labels into an empty agent labels object', async () => {
+    const agentLabels: Record<string, string> = {};
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+      generateContentConfig: {labels: agentLabels},
+    });
+    const invocationContext = createMockInvocationContext(agent, {
+      labels: {team: 'search'},
+    });
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(agentLabels).toEqual({});
+    expect(llmRequest.config?.labels).toEqual({team: 'search'});
+  });
+
+  it('leaves labels unset when the run config has none', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const invocationContext = createMockInvocationContext(agent, {});
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.labels).toBeUndefined();
+  });
+});
+
+describe('BasicLlmRequestProcessor run config httpOptions', () => {
+  it('copies the run config httpOptions when the agent set none', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const runConfigHttpOptions: HttpOptions = {
+      timeout: 30_000,
+      headers: {'x-request-id': 'req-1'},
+    };
+    const invocationContext = createMockInvocationContext(agent, {
+      httpOptions: runConfigHttpOptions,
+    });
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.httpOptions).toEqual(runConfigHttpOptions);
+
+    llmRequest.config!.httpOptions!.headers!['x-request-id'] = 'mutated';
+    expect(runConfigHttpOptions.headers).toEqual({'x-request-id': 'req-1'});
+  });
+
+  it('copies the run config httpOptions when it carries no headers', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const runConfigHttpOptions: HttpOptions = {timeout: 15_000};
+    const invocationContext = createMockInvocationContext(agent, {
+      httpOptions: runConfigHttpOptions,
+    });
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.httpOptions).toEqual({timeout: 15_000});
+    expect(llmRequest.config?.httpOptions).not.toBe(runConfigHttpOptions);
+  });
+
+  it('merges over the agent httpOptions with the run config winning', async () => {
+    const agentHttpOptions: HttpOptions = {
+      baseUrl: 'https://agent.example',
+      apiVersion: 'v1',
+      timeout: 1_000,
+      headers: {'x-agent': 'yes', 'x-request-id': 'agent-id'},
+    };
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+      generateContentConfig: {httpOptions: agentHttpOptions},
+    });
+    const invocationContext = createMockInvocationContext(agent, {
+      httpOptions: {
+        baseUrl: 'https://runconfig.example',
+        apiVersion: 'v1beta',
+        timeout: 30_000,
+        retryOptions: {attempts: 3},
+        extraBody: {trace: true},
+        headers: {'x-request-id': 'req-1'},
+      },
+    });
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.httpOptions).toEqual({
+      baseUrl: 'https://agent.example',
+      apiVersion: 'v1',
+      timeout: 30_000,
+      retryOptions: {attempts: 3},
+      extraBody: {trace: true},
+      headers: {'x-agent': 'yes', 'x-request-id': 'req-1'},
+    });
+    expect(agentHttpOptions).toEqual({
+      baseUrl: 'https://agent.example',
+      apiVersion: 'v1',
+      timeout: 1_000,
+      headers: {'x-agent': 'yes', 'x-request-id': 'agent-id'},
+    });
+  });
+
+  it('keeps the agent httpOptions intact across two invocations', async () => {
+    const agentHttpOptions: HttpOptions = {headers: {'x-agent': 'yes'}};
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+      generateContentConfig: {httpOptions: agentHttpOptions},
+    });
+    const runConfig: RunConfig = {
+      httpOptions: {headers: {'x-request-id': 'req-1'}},
+    };
+
+    const firstRequest = makeLlmRequest();
+    await runProcessor(
+      createMockInvocationContext(agent, runConfig),
+      firstRequest,
+    );
+    const secondRequest = makeLlmRequest();
+    await runProcessor(
+      createMockInvocationContext(agent, runConfig),
+      secondRequest,
+    );
+
+    expect(agentHttpOptions.headers).toEqual({'x-agent': 'yes'});
+    expect(secondRequest.config?.httpOptions?.headers).toEqual({
+      'x-agent': 'yes',
+      'x-request-id': 'req-1',
+    });
+  });
+
+  it('keeps the agent httpOptions when the run config sets none', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+      generateContentConfig: {httpOptions: {timeout: 1_000}},
+    });
+    const invocationContext = createMockInvocationContext(agent, {});
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.config?.httpOptions).toEqual({timeout: 1_000});
+  });
+});
+
+describe('BasicLlmRequestProcessor run config live fields', () => {
+  it('forwards the live-connect fields from the run config', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const invocationContext = createMockInvocationContext(agent, {
+      explicitVadSignal: true,
+      translationConfig: {targetLanguageCode: 'es-ES'},
+      avatarConfig: {avatarName: 'ada'},
+    });
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.liveConnectConfig.explicitVadSignal).toBe(true);
+    expect(llmRequest.liveConnectConfig.translationConfig).toEqual({
+      targetLanguageCode: 'es-ES',
+    });
+    expect(llmRequest.liveConnectConfig.avatarConfig).toEqual({
+      avatarName: 'ada',
+    });
+  });
+
+  it('leaves the live-connect fields unset when the run config omits them', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const invocationContext = createMockInvocationContext(agent, {});
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    const liveConfig: LiveConnectConfigWithHistory =
+      llmRequest.liveConnectConfig;
+    expect(liveConfig.explicitVadSignal).toBeUndefined();
+    expect(liveConfig.translationConfig).toBeUndefined();
+    expect(liveConfig.avatarConfig).toBeUndefined();
+    expect(liveConfig.sessionResumption).toBeUndefined();
+    expect(liveConfig.historyConfig).toBeUndefined();
+  });
+
+  it('copies sessionResumption so a later write cannot reach the run config', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const runConfig: RunConfig = {sessionResumption: {transparent: true}};
+    const invocationContext = createMockInvocationContext(agent, runConfig);
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    expect(llmRequest.liveConnectConfig.sessionResumption).toEqual({
+      transparent: true,
+    });
+    llmRequest.liveConnectConfig.sessionResumption!.handle = 'server-handle';
+    expect(runConfig.sessionResumption).toEqual({transparent: true});
+  });
+
+  it('copies historyConfig so a later write cannot reach the run config', async () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: 'test-basic-processor-model',
+    });
+    const runConfig: RunConfig = {
+      historyConfig: {initialHistoryInClientContent: true},
+    };
+    const invocationContext = createMockInvocationContext(agent, runConfig);
+    const llmRequest = makeLlmRequest();
+
+    await runProcessor(invocationContext, llmRequest);
+
+    const liveConfig: LiveConnectConfigWithHistory =
+      llmRequest.liveConnectConfig;
+    expect(liveConfig.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    });
+    liveConfig.historyConfig!.initialHistoryInClientContent = false;
+    expect(runConfig.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    });
   });
 });
