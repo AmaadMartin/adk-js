@@ -36,6 +36,8 @@ import {
   scriptModel,
 } from './simulation_test_support.js';
 
+import {SeededRandomGenerator} from '../../../src/utils/random_utils.js';
+
 let previousLogger: Logger;
 
 beforeEach(() => {
@@ -149,6 +151,32 @@ describe('EnvironmentSimulationEngine injection probability', () => {
       });
       expect(result).toBeUndefined();
     }
+  });
+
+  it('does not fire a rule whose probability equals the draw', async () => {
+    // The draw has to clear the probability, not merely match it. A random
+    // draw never lands on the boundary, so the test reproduces the draw the
+    // seed produces and uses it as the probability.
+    const seed = 42;
+    const drawForSeed = new SeededRandomGenerator(seed).next();
+    const engine = engineFor({
+      toolName: 'test_tool',
+      injectionConfigs: [
+        createInjectionConfig({
+          injectionProbability: drawForSeed,
+          randomSeed: seed,
+          injectedResponse: {injected: true},
+        }),
+      ],
+    });
+
+    const result = await engine.simulate({
+      tool: new UncallableTool('test_tool'),
+      args: {},
+      context: createToolContext(),
+    });
+
+    expect(result).toBeUndefined();
   });
 
   it('always fires a rule whose probability is 1', async () => {
