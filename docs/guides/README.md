@@ -17,3 +17,8 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 - [BaseRetrievalTool](tools/retrieval/base_retrieval_tool/index.md) - The abstract base, and how client-side retrieval differs from `VertexRagRetrievalTool`.
 - [LlamaIndexRetrieval](tools/retrieval/llama_index_retrieval/index.md) - Answers from a LlamaIndex retriever, or anything with a `retrieve` method.
 - [FilesRetrieval](tools/retrieval/files_retrieval/index.md) - Builds the retriever for you from a directory of documents.
+
+### Workflows
+
+- [ParallelWorker](workflow/parallel_worker/index.md) - Processing lists of
+  items concurrently in workflows.
