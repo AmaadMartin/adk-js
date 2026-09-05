@@ -28,6 +28,7 @@ import {
   PluginManager,
   SdkAgent,
   SdkConversation,
+  StreamingMode,
 } from '@google/adk';
 import {logger} from '@google/adk/utils/logger.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -627,6 +628,37 @@ describe('AntigravityAgent turn lifecycle', () => {
     await runOnce(agent, runCtx());
 
     expect(sdkAgent.conversation.lastPrompt).toBe('');
+  });
+
+  it('streams partial deltas only when the run config asks for SSE', async () => {
+    async function* deltaSteps(): AsyncGenerator<AntigravityStep> {
+      yield {
+        stepIndex: 0,
+        source: 'MODEL',
+        type: 'TEXT_RESPONSE',
+        thinkingDelta: 'thinking...',
+        contentDelta: 'done',
+      };
+      yield textStep(1, 'done');
+    }
+    const agent = new AntigravityAgent({
+      name: 'agy',
+      antigravityConfig: makeConfig(),
+      agentFactory: () => new FakeSdkAgent(deltaSteps),
+      mode: 'single_turn',
+    });
+
+    const ctx = runCtx();
+    ctx.runConfig = {streamingMode: StreamingMode.SSE};
+    const streamed = await runOnce(agent, ctx);
+    const plain = await runOnce(agent, runCtx());
+
+    expect(streamed.map((e) => e.partial ?? false)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(plain.map((e) => e.partial ?? false)).toEqual([false]);
   });
 
   it('refuses a live run', async () => {

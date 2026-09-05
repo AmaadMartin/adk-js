@@ -401,6 +401,16 @@ describe('convertStepToEvents', () => {
     expect(buffer.take(new Set([BUILTIN_HOOK_CALL_ID]))).toHaveLength(1);
   });
 
+  it('answers a built-in call once even if its terminal step repeats', () => {
+    // A duplicate function_response is as broken as a missing one.
+    const turn = new Turn();
+
+    turn.step(builtinToolStep('ACTIVE'));
+    turn.step(builtinToolStep('DONE', 'file contents'));
+
+    expect(turn.step(builtinToolStep('DONE', 'file contents'))).toEqual([]);
+  });
+
   it('test_a_stripped_step_with_nothing_buffered_yields_nothing', () => {
     // The banner text is the translator's, not the tool's, so it is no answer.
     const buffer = new ToolResultBuffer();
@@ -486,6 +496,16 @@ describe('convertStepToEvents', () => {
     });
 
     expect(events[0].content?.parts?.[0].functionCall?.id).toBe('7-view_file');
+  });
+
+  it('reads a missing step index as zero when it synthesizes a call id', () => {
+    const events = convert({
+      type: 'TOOL_CALL',
+      source: 'MODEL',
+      toolCalls: [{name: 'view_file'}],
+    });
+
+    expect(events[0].content?.parts?.[0].functionCall?.id).toBe('0-view_file');
   });
 
   it('test_incomplete_text_step_produces_no_final_event', () => {
@@ -622,6 +642,15 @@ describe('finalModelText', () => {
     ['wrong_author', event('some_other_agent', false, [TEXT_PART]), undefined],
     ['empty_parts', event('agy', false, []), undefined],
     ['no_content', event('agy', false, undefined), undefined],
+    [
+      'content_without_parts',
+      createEvent({
+        invocationId: 'inv_1',
+        author: 'agy',
+        content: {role: 'model'},
+      }),
+      undefined,
+    ],
   ])('test_final_model_text_filters [%s]', (_id, given, expected) => {
     // Only this agent's own, complete, user-visible text counts.
     expect(finalModelText(given, 'agy')).toBe(expected);

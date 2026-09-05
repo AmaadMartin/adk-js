@@ -158,6 +158,15 @@ describe('ToolResultBuffer', () => {
     expect(buffer.take(new Set(['c1']))).toEqual([['c1', final]]);
   });
 
+  it('drops a failure that is not an object at all', async () => {
+    const buffer = new ToolResultBuffer();
+    const capture = createToolErrorCapture(buffer);
+
+    await capture.run('the harness rejected the call');
+
+    expect(buffer.size).toBe(0);
+  });
+
   it('drops a failure that carries no tool name to correlate it with', async () => {
     // The hook signature is as broad as the SDK declares it, so a plain error
     // with no tool metadata can arrive; there is no call to pair it with.

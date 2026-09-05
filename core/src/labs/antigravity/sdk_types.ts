@@ -196,13 +196,13 @@ export interface AntigravityToolExecutionError {
 export function isAntigravityToolExecutionError(
   error: unknown,
 ): error is AntigravityToolExecutionError {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const candidate = error as Partial<AntigravityToolExecutionError>;
   return (
-    typeof candidate.toolName === 'string' &&
-    typeof candidate.message === 'string'
+    typeof error === 'object' &&
+    error !== null &&
+    'toolName' in error &&
+    typeof error.toolName === 'string' &&
+    'message' in error &&
+    typeof error.message === 'string'
   );
 }
 
