@@ -14,7 +14,7 @@
  * gates private and answers the same question through `isOpen(key)`.
  */
 
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   ReplaySequenceBarrier,
   sequenceKey,
@@ -94,16 +94,20 @@ describe('ReplaySequenceBarrier — adk-js specifics', () => {
     expect(barrier.isOpen('NodeA@1')).toBe(false);
   });
 
-  it('leaves no pending timer once a key is released', async () => {
-    const barrier = new ReplaySequenceBarrier(['NodeA@1', 'NodeB@1'], 20);
-    const waitingForB = barrier.wait('NodeB@1');
-    barrier.checkAndAdvance('NodeA@1');
-    await waitingForB;
+  it('clears its timeout once a key is released', async () => {
+    vi.useFakeTimers();
+    try {
+      const barrier = new ReplaySequenceBarrier(['NodeA@1', 'NodeB@1'], 20);
+      const waitingForB = barrier.wait('NodeB@1');
+      expect(vi.getTimerCount()).toBe(1);
 
-    // A timer left running would reject after its 20ms deadline, which this
-    // wait outlives.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await expect(waitingForB).resolves.toBeUndefined();
+      barrier.checkAndAdvance('NodeA@1');
+      await waitingForB;
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('builds a barrier key from a node name and a run id', () => {
