@@ -183,6 +183,39 @@ describe('node runner — output delegation', () => {
   });
 });
 
+describe('node runner — interrupt ids', () => {
+  it('test_output_and_interrupt_coexist', async () => {
+    const node = new GenNode('n', async function* () {
+      yield 'result';
+      yield createEvent({
+        content: {
+          parts: [{functionCall: {name: 'tool', args: {}, id: 'fc-1'}}],
+        },
+        longRunningToolIds: ['fc-1'],
+      });
+    });
+
+    const {child, events} = await driveNodeRunner(node);
+
+    expect(child.output).toBe('result');
+    expect(child.interruptIds).toEqual(['fc-1']);
+    // A node that stopped to ask the user gets no end-of-node flush, so the
+    // output it already emitted is not repeated.
+    expect(events.filter((e) => e.output !== undefined)).toHaveLength(1);
+  });
+
+  it('test_duplicate_interrupt_ids_deduplicated', async () => {
+    const node = new GenNode('n', async function* () {
+      yield createEvent({longRunningToolIds: ['fc-1', 'fc-2']});
+      yield createEvent({longRunningToolIds: ['fc-2', 'fc-3']});
+    });
+
+    const {child} = await driveNodeRunner(node);
+
+    expect([...child.interruptIds].sort()).toEqual(['fc-1', 'fc-2', 'fc-3']);
+  });
+});
+
 describe('node runner — resume state carried forward', () => {
   it('test_prior_output_carried_forward', async () => {
     const node = new FnNode('n', () => undefined);
