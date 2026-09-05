@@ -244,6 +244,30 @@ describe('environment materialization path guard', () => {
     ]);
   });
 
+  it('refuses a resource name that climbs out with backslashes', async () => {
+    const env = new FakeEnvironment({workingDir: '/workspace'});
+
+    const result = (await runWithSkill(
+      skillWithResourceNamed('..\\..\\..\\Windows\\System32\\evil.dll'),
+      env,
+    )) as ErrorResponse;
+
+    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error).toContain('Path traversal detected');
+    expect(env.writeCalls).toEqual([]);
+  });
+
+  it('keeps a drive-letter working directory out of the host cwd', async () => {
+    const env = new FakeEnvironment({workingDir: 'C:\\workspace'});
+
+    await runWithSkill(skillWithResourceNamed('ref1.md'), env);
+
+    expect(env.writeCalls.map((w) => w.filePath)).toEqual([
+      'C:/workspace/skills/skill1/references/ref1.md',
+      'C:/workspace/skills/skill1/scripts/run.sh',
+    ]);
+  });
+
   it('refuses a script name that climbs out of the skill directory', async () => {
     const env = new FakeEnvironment({workingDir: '/workspace'});
     const skill: Skill = {
