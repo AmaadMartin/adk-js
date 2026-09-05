@@ -176,9 +176,9 @@ function getAgentData(invocations: Invocation[]): VertexAgentData {
  * given, and the caller owns how that client is built and authenticated.
  */
 export class MultiTurnVertexAiEvalFacade implements Evaluator {
-  protected readonly threshold: number;
-  protected readonly metricName: string;
-  protected readonly client: VertexAiEvalClient;
+  private readonly threshold: number;
+  private readonly metricName: string;
+  private readonly client: VertexAiEvalClient;
 
   constructor(options: VertexAiEvalFacadeOptions) {
     this.threshold = options.threshold;
@@ -207,7 +207,6 @@ export class MultiTurnVertexAiEvalFacade implements Evaluator {
       .map((actual, index) => ({
         actualInvocation: actual,
         expectedInvocation: expectedInvocations?.[index],
-        score: undefined,
         evalStatus: EvalStatus.NOT_EVALUATED,
       }));
 
@@ -216,24 +215,25 @@ export class MultiTurnVertexAiEvalFacade implements Evaluator {
       metrics: [{name: this.metricName}],
     });
 
-    const lastTurn = actualInvocations.length - 1;
     const score = getScore(result);
+    if (score === undefined) {
+      // Parity with adk-python: an unscored conversation reports nothing at
+      // all, so the leading turns collected above are discarded too.
+      return emptyEvaluationResult();
+    }
+
+    const evalStatus = getEvalStatus(score, this.threshold);
+    const lastTurn = actualInvocations.length - 1;
     perInvocationResults.push({
       actualInvocation: actualInvocations[lastTurn],
       expectedInvocation: expectedInvocations?.[lastTurn],
       score,
-      evalStatus: getEvalStatus(score, this.threshold),
+      evalStatus,
     });
-
-    if (score === undefined) {
-      // Parity with adk-python: an unscored conversation reports nothing at
-      // all, and the per-invocation results accumulated above are discarded.
-      return emptyEvaluationResult();
-    }
 
     return {
       overallScore: score,
-      overallEvalStatus: getEvalStatus(score, this.threshold),
+      overallEvalStatus: evalStatus,
       perInvocationResults,
     };
   }

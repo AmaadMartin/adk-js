@@ -17,17 +17,8 @@ export type {
   InvocationEvent,
   InvocationEvents,
 } from './eval_case.js';
-export {
-  EvalStatus,
-  PrebuiltMetrics,
-  getMetricThreshold,
-} from './eval_metrics.js';
+export {EvalStatus, PrebuiltMetrics} from './eval_metrics.js';
 export type {BaseCriterion, EvalMetric} from './eval_metrics.js';
-export {
-  emptyEvaluationResult,
-  getEvalStatus,
-  validateInvocationLengths,
-} from './evaluator.js';
 export type {
   EvaluationResult,
   Evaluator,

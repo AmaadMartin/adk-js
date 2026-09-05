@@ -55,7 +55,7 @@ export interface Evaluator {
     actualInvocations: Invocation[],
     expectedInvocations?: Invocation[],
     conversationScenario?: ConversationScenario,
-  ): EvaluationResult | Promise<EvaluationResult>;
+  ): Promise<EvaluationResult>;
 }
 
 /** The result returned when nothing could be evaluated. */
@@ -87,13 +87,7 @@ export function validateInvocationLengths(
   }
 }
 
-/** Returns the status of a score, which is absent when nothing was scored. */
-export function getEvalStatus(
-  score: number | undefined,
-  threshold: number,
-): EvalStatus {
-  if (score === undefined) {
-    return EvalStatus.NOT_EVALUATED;
-  }
+/** Returns the status of a score: a score at the threshold passes. */
+export function getEvalStatus(score: number, threshold: number): EvalStatus {
   return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
 }
