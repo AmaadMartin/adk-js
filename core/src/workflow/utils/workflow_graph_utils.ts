@@ -65,7 +65,9 @@ export type ParallelWorkerFactory = (
  * Returns whether a value is a plain object literal (a `RoutingMap`) rather than
  * a class instance such as a node/tool/agent.
  */
-export function isPlainObject(value: unknown): boolean {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
