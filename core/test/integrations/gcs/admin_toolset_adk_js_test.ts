@@ -9,8 +9,12 @@
  * the capability gate at its edges, the tool filter, and `close`.
  */
 
-import {GcsCapabilities} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {
+  FeatureName,
+  GcsCapabilities,
+  overrideFeatureEnabled,
+} from '@google/adk';
+import {afterEach, describe, expect, it} from 'vitest';
 import {createReadonlyContext, createToolset} from './gcs_test_utils.js';
 
 /** The names a toolset exposes, in the order it builds them. */
@@ -120,5 +124,19 @@ describe('GcsAdminToolset tool filter', () => {
 describe('GcsAdminToolset lifecycle', () => {
   it('closes without holding a resource', async () => {
     await expect(createToolset().close()).resolves.toBeUndefined();
+  });
+});
+
+describe('the GCS_TOOL_SETTINGS feature', () => {
+  afterEach(() => {
+    overrideFeatureEnabled(FeatureName.GCS_TOOL_SETTINGS, undefined);
+  });
+
+  it('refuses to build a toolset while it is disabled', () => {
+    overrideFeatureEnabled(FeatureName.GCS_TOOL_SETTINGS, false);
+
+    expect(() => createToolset()).toThrow(
+      'Feature GCS_TOOL_SETTINGS is not enabled.',
+    );
   });
 });
