@@ -61,20 +61,22 @@ const toolset = await registry.getToolset('my-mcp-server', {
 
 `headerProvider` supplies extra headers for the MCP server connection. It runs
 on every tool listing, and its headers win over the ones the credentials
-produced. It is not called for the registry listing request.
+produced. It is not called for the registry listing request. It is the way to
+authenticate a server that is not a Google API host, because those never
+receive your Google Cloud credentials.
 
 ## Credentials
 
 `ApiRegistry` resolves Application Default Credentials with the
-`https://www.googleapis.com/auth/cloud-platform` scope. It sends an
-`Authorization` header to the registry, and to **every** MCP server it hands
-out, whichever host that server is registered under. A quota project on the
+`https://www.googleapis.com/auth/cloud-platform` scope. It always sends an
+`Authorization` header to the registry itself. A quota project on the
 credentials is sent as `x-goog-user-project`.
 
-This matches adk-python. It also means a third-party MCP server registered in
-your project receives a Google Cloud access token. `AgentRegistry` attaches
-credentials only to `*.googleapis.com` hosts, which is one more reason to
-migrate.
+A registered MCP server receives those credentials only when its URL is an
+`https` URL on a `googleapis.com` host. A registry entry can name any host, so
+any other server gets no access token; it receives only the headers your
+`headerProvider` returns. An `http` URL never receives the token, even on a
+`googleapis.com` host, because the token would cross the network in plaintext.
 
 Credentials are resolved per connection rather than once, so a long-lived agent
 does not hold a stale token.

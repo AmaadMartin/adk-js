@@ -17,6 +17,7 @@ import {
   clientCertsToPresent,
   getWithClientCert,
 } from '../../src/integrations/api_registry/mtls.js';
+import {mergeTrackingHeaders} from '../../src/utils/client_labels.js';
 import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -73,6 +74,11 @@ const MOCK_MCP_SERVERS_LIST = {
     {name: 'test-mcp-server-no-url'},
     {name: 'test-mcp-server-http', urls: ['http://mcp.server_http.com']},
     {name: 'test-mcp-server-https', urls: ['https://mcp.server_https.com']},
+    {name: 'test-mcp-server-google', urls: ['mcp.us-central1.googleapis.com']},
+    {
+      name: 'test-mcp-server-google-http',
+      urls: ['http://mcp.us-central1.googleapis.com'],
+    },
   ],
 };
 
@@ -149,24 +155,24 @@ describe('ApiRegistry', () => {
         `${LIST_URL}?filter=enabled%3Dfalse`,
         {
           method: 'GET',
-          headers: {
+          headers: mergeTrackingHeaders({
             'Content-Type': 'application/json',
             'Authorization': 'Bearer mock_token',
-          },
+          }),
         },
       );
 
-      // Every listed server is indexed: the four with a URL resolve, and the
-      // fifth is reached far enough to report that it has none.
-      await expect(
-        registry.getToolset('test-mcp-server-2'),
-      ).resolves.toBeDefined();
-      await expect(
-        registry.getToolset('test-mcp-server-http'),
-      ).resolves.toBeDefined();
-      await expect(
-        registry.getToolset('test-mcp-server-https'),
-      ).resolves.toBeDefined();
+      // All seven listed servers are indexed: the six with a URL resolve, and
+      // the seventh is reached far enough to report that it has none.
+      for (const name of [
+        'test-mcp-server-2',
+        'test-mcp-server-http',
+        'test-mcp-server-https',
+        'test-mcp-server-google',
+        'test-mcp-server-google-http',
+      ]) {
+        await expect(registry.getToolset(name)).resolves.toBeDefined();
+      }
       await expect(
         registry.getToolset('test-mcp-server-no-url'),
       ).rejects.toThrow('has no URLs');
@@ -183,13 +189,29 @@ describe('ApiRegistry', () => {
         `${LIST_URL}?filter=enabled%3Dfalse`,
         {
           method: 'GET',
-          headers: {
+          headers: mergeTrackingHeaders({
             'Content-Type': 'application/json',
             'Authorization': 'Bearer mock_token',
             'x-goog-user-project': 'quota-project',
-          },
+          }),
         },
       );
+    });
+
+    it('test_registry_request_identifies_adk', async () => {
+      const registry = newRegistry();
+      await registry.getToolset('test-mcp-server-1');
+
+      const init = fetchMock.mock.calls[0][1];
+      if (!init) {
+        expect.fail('the listing request carried no init object');
+      }
+      const headers = init.headers;
+      if (!headers || headers instanceof Headers || Array.isArray(headers)) {
+        expect.fail('the listing headers are not a plain record');
+      }
+      expect(headers['x-goog-api-client']).toContain('google-adk/');
+      expect(headers['user-agent']).toContain('google-adk/');
     });
 
     it('test_init_with_pagination_success', async () => {
@@ -272,9 +294,8 @@ describe('ApiRegistry', () => {
         type: 'StreamableHTTPConnectionParams',
         url: 'https://mcp.server1.com',
       });
-      expect(await resolvedHeaders(toolset)).toEqual({
-        Authorization: 'Bearer mock_token',
-      });
+      // mcp.server1.com is not a Google API host, so it gets no credentials.
+      expect(await resolvedHeaders(toolset)).toEqual({});
       expect(toolset.toolFilter).toEqual([]);
       expect(toolset.prefix).toBeUndefined();
     });
@@ -283,8 +304,11 @@ describe('ApiRegistry', () => {
       authState.quotaProjectId = 'quota-project';
       const registry = newRegistry();
 
-      const toolset = await registry.getToolset('test-mcp-server-1');
+      const toolset = await registry.getToolset('test-mcp-server-google');
 
+      expect(toolset.connectionParams.url).toBe(
+        'https://mcp.us-central1.googleapis.com',
+      );
       expect(await resolvedHeaders(toolset)).toEqual({
         'Authorization': 'Bearer mock_token',
         'x-goog-user-project': 'quota-project',
@@ -302,6 +326,7 @@ describe('ApiRegistry', () => {
       expect(toolset.toolFilter).toEqual(['tool1']);
       expect(toolset.prefix).toBe('prefix_');
       expect(toolset.connectionParams.url).toBe('https://mcp.server1.com');
+      expect(await resolvedHeaders(toolset)).toEqual({});
     });
 
     it('test_get_toolset_url_scheme', async () => {
@@ -314,6 +339,23 @@ describe('ApiRegistry', () => {
       for (const [serverName, expectedUrl] of cases) {
         const toolset = await registry.getToolset(serverName);
         expect(toolset.connectionParams.url).toBe(expectedUrl);
+        expect(await resolvedHeaders(toolset)).toEqual({});
+      }
+    });
+
+    it('test_get_toolset_credentials_only_for_google_api_url', async () => {
+      const registry = newRegistry();
+
+      const cases: Array<[string, Record<string, string>]> = [
+        ['test-mcp-server-1', {}],
+        ['test-mcp-server-http', {}],
+        ['test-mcp-server-https', {}],
+        ['test-mcp-server-google-http', {}],
+        ['test-mcp-server-google', {Authorization: 'Bearer mock_token'}],
+      ];
+      for (const [serverName, expected] of cases) {
+        const toolset = await registry.getToolset(serverName);
+        expect(await resolvedHeaders(toolset)).toEqual(expected);
       }
     });
 
@@ -436,12 +478,23 @@ describe('ApiRegistry', () => {
         }),
       });
 
-      const toolset = await registry.getToolset('test-mcp-server-1');
+      // A Google API host, so credentials are resolved and then overridden.
+      const toolset = await registry.getToolset('test-mcp-server-google');
 
       expect(await resolvedHeaders(toolset)).toEqual({
         'Authorization': 'Bearer caller',
         'X-Caller': 'yes',
       });
+    });
+
+    it('supplies the caller headerProvider to a server that gets no credentials', async () => {
+      const registry = newRegistry({
+        headerProvider: () => ({'X-Caller': 'yes'}),
+      });
+
+      const toolset = await registry.getToolset('test-mcp-server-1');
+
+      expect(await resolvedHeaders(toolset)).toEqual({'X-Caller': 'yes'});
     });
 
     it('reports a credential failure unwrapped', async () => {
@@ -568,7 +621,9 @@ describe('ApiRegistry', () => {
       authState.token = undefined;
       const registry = newRegistry();
 
-      const toolset = await registry.getToolset('test-mcp-server-1');
+      // A Google API host, so the gate lets credentials through and the empty
+      // result is the missing token rather than the gate.
+      const toolset = await registry.getToolset('test-mcp-server-google');
 
       expect(await resolvedHeaders(toolset)).toEqual({});
     });
