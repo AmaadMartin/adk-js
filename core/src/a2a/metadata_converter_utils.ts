@@ -13,6 +13,20 @@ const ADK_METADATA_KEY_PREFIX = 'adk_';
 const A2A_METADATA_KEY_PREFIX = 'a2a:';
 
 /**
+ * The A2A extension that identifies the ADK integration. A client declares it
+ * in the extension header, and every event the ADK agent executor publishes
+ * echoes it back.
+ */
+export const NEW_A2A_ADK_INTEGRATION_EXTENSION =
+  'https://google.github.io/adk-docs/a2a/a2a-extension/';
+
+/**
+ * The flag the extension carries. Spelled as the wire key, because a Python
+ * peer reads it under this exact name.
+ */
+const ADK_AGENT_EXECUTOR_V2_KEY = 'adk_agent_executor_v2';
+
+/**
  * Keys for metadata that will be stored in A2A message metadata and related to ADK events.
  */
 export enum A2AMetadataKeys {
@@ -120,6 +134,24 @@ export function getA2ASessionMetadata({
     [A2AMetadataKeys.APP_NAME]: appName,
     [A2AMetadataKeys.USER_ID]: userId,
     [A2AMetadataKeys.SESSION_ID]: sessionId,
+  };
+}
+
+/**
+ * Creates the metadata every event of one invocation carries: which app, user
+ * and session produced it, and which executor generation served it.
+ *
+ * @param context - The app name, user ID and session ID of the invocation.
+ * @returns The session metadata plus the ADK integration extension flag.
+ */
+export function getInvocationMetadata(context: {
+  appName: string;
+  userId: string;
+  sessionId: string;
+}): Record<string, unknown> {
+  return {
+    ...getA2ASessionMetadata(context),
+    [NEW_A2A_ADK_INTEGRATION_EXTENSION]: {[ADK_AGENT_EXECUTOR_V2_KEY]: true},
   };
 }
 

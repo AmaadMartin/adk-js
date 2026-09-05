@@ -143,6 +143,28 @@ export function isRunner(obj: unknown): obj is Runner {
 }
 
 /**
+ * Type guard to check if a value has the shape of a {@link RunnerConfig}.
+ *
+ * Checks `sessionService`, the one property {@link RunnerConfig} declares as
+ * required. A config that names no agent is still a config, and the
+ * {@link Runner} constructor reports that omission precisely; this guard tells
+ * a config apart from an unrelated value rather than re-validating it.
+ *
+ * @param obj The value to check.
+ * @returns True if the value has the shape of a RunnerConfig.
+ */
+export function isRunnerConfig(obj: unknown): obj is RunnerConfig {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    !Array.isArray(obj) &&
+    'sessionService' in obj &&
+    typeof obj.sessionService === 'object' &&
+    obj.sessionService !== null
+  );
+}
+
+/**
  * Orchestrates agent execution for a given application.
  *
  * The Runner manages the full lifecycle of an agent invocation: it loads the
