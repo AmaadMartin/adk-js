@@ -139,6 +139,12 @@ describe('parseDefaultTaskInput', () => {
     expect(parseDefaultTaskInput({})).toEqual({});
   });
 
+  it('leaves an absent field absent rather than setting it to undefined', () => {
+    const parsed = parseDefaultTaskInput({goal: 'g'});
+
+    expect('background' in parsed).toBe(false);
+  });
+
   it('accepts both fields', () => {
     expect(parseDefaultTaskInput({goal: 'g', background: 'b'})).toEqual({
       goal: 'g',
