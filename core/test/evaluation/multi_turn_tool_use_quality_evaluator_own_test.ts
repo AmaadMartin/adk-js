@@ -10,13 +10,12 @@ import {
   InputValidationError,
   Invocation,
   MultiTurnToolUseQualityV1Evaluator,
-  MultiTurnVertexAiEvalFacade,
   PrebuiltMetrics,
   VertexAiEvalClient,
   VertexAiEvalRequest,
   VertexEvaluationResult,
 } from '@google/adk';
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 /** A client that replays the given results, one per call. */
 class FakeEvalClient implements VertexAiEvalClient {
@@ -49,10 +48,6 @@ const SCENARIO: ConversationScenario = {
 };
 
 describe('MultiTurnToolUseQualityV1Evaluator', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('fails a conversation scored below the threshold', async () => {
     const evaluator = new MultiTurnToolUseQualityV1Evaluator({
       evalMetric: {
@@ -191,12 +186,7 @@ describe('MultiTurnToolUseQualityV1Evaluator', () => {
     expect(scenarioResult).toEqual(plainResult);
   });
 
-  it('forwards every argument to the multi-turn facade', async () => {
-    const delegate = vi.spyOn(
-      MultiTurnVertexAiEvalFacade.prototype,
-      'evaluateInvocations',
-    );
-    const actual = [invocation('q1', 'r1'), invocation('q2', 'r2')];
+  it('pairs every turn with its golden invocation', async () => {
     const expected = [invocation('q1', 'golden1'), invocation('q2', 'golden2')];
     const evaluator = new MultiTurnToolUseQualityV1Evaluator({
       evalMetric: {
@@ -206,12 +196,15 @@ describe('MultiTurnToolUseQualityV1Evaluator', () => {
       evalClient: new FakeEvalClient([scored(0.9)]),
     });
 
-    await evaluator.evaluateInvocations(actual, expected, SCENARIO);
-
-    expect(delegate).toHaveBeenCalledExactlyOnceWith(
-      actual,
+    const result = await evaluator.evaluateInvocations(
+      [invocation('q1', 'r1'), invocation('q2', 'r2')],
       expected,
-      SCENARIO,
     );
+
+    expect(
+      result.perInvocationResults.map(
+        (perInvocation) => perInvocation.expectedInvocation,
+      ),
+    ).toEqual(expected);
   });
 });

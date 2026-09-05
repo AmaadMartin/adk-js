@@ -4,32 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Content,
-  FunctionCall,
-  FunctionResponse,
-  GroundingMetadata,
-  Part,
-} from '@google/genai';
+import {Content, GroundingMetadata} from '@google/genai';
 
 import {AppDetails} from './app_details.js';
-
-/**
- * Intermediate data an agent produces on its way to a final answer.
- */
-export interface IntermediateData {
-  /** Tool use trajectory in chronological order. */
-  toolUses: FunctionCall[];
-
-  /** Tool response trajectory in chronological order. */
-  toolResponses: FunctionResponse[];
-
-  /**
-   * Responses that sub-agents emit to convey progress, as `[author, parts]`
-   * pairs. These are distinct from the invocation's final response.
-   */
-  intermediateResponses: Array<[string, Part[]]>;
-}
 
 /**
  * A single point in an agent's invocation: a reply, a tool call, or a tool
@@ -50,13 +27,6 @@ export interface InvocationEvents {
   invocationEvents: InvocationEvent[];
 }
 
-/**
- * The two shapes an invocation's intermediate steps can take. Recorded eval
- * data uses {@link IntermediateData}; a run replayed from events uses
- * {@link InvocationEvents}.
- */
-export type IntermediateDataType = IntermediateData | InvocationEvents;
-
 /** One turn of a conversation, from the user's message to the agent's reply. */
 export interface Invocation {
   /** Unique identifier for the invocation. Defaults to an empty string. */
@@ -67,7 +37,7 @@ export interface Invocation {
   finalResponse?: Content;
 
   /** The route the agent took to reach {@link finalResponse}. */
-  intermediateData?: IntermediateDataType;
+  intermediateData?: InvocationEvents;
 
   /**
    * Creation time in seconds since the epoch, for debugging. Defaults to 0.
@@ -76,11 +46,4 @@ export interface Invocation {
 
   /** Details about the app that served this invocation. */
   appDetails?: AppDetails;
-}
-
-/** Returns true when the intermediate data is a list of invocation events. */
-export function isInvocationEvents(
-  intermediateData: IntermediateDataType,
-): intermediateData is InvocationEvents {
-  return 'invocationEvents' in intermediateData;
 }

@@ -4,21 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {Content} from '@google/genai';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import type {ConversationScenario} from './conversation_scenarios.js';
 import type {Invocation} from './eval_case.js';
 import {EvalStatus} from './eval_metrics.js';
-
-/**
- * The verdict a metric returns for an invocation, or for a whole eval case.
- *
- * The numeric values match the `EvalStatus` of `google/adk-python`, so a
- * serialized status is portable between the two runtimes. The enum lives in
- * `eval_metrics.ts`, and is re-exported here so that a metric reads its whole
- * contract from this module.
- */
-export {EvalStatus};
 
 /** Metric evaluation score for one invocation. */
 export interface PerInvocationResult {
@@ -107,11 +96,4 @@ export function getEvalStatus(
     return EvalStatus.NOT_EVALUATED;
   }
   return score >= threshold ? EvalStatus.PASSED : EvalStatus.FAILED;
-}
-
-/** Joins the text parts of a content with newlines. */
-export function getTextFromContent(content?: Content): string {
-  return (content?.parts ?? [])
-    .flatMap((part) => (part.text ? [part.text] : []))
-    .join('\n');
 }
