@@ -118,20 +118,35 @@ describe('GCPSkillRegistry', () => {
       );
     });
 
-    it('prefers the options over the environment', () => {
-      const registry = new GCPSkillRegistry({
+    it('prefers the options over the environment', async () => {
+      const transport = stubTransport(
+        credentials,
+        skillResponder({defaultRevision: REVISION}),
+      );
+
+      await new GCPSkillRegistry({
         projectId: 'option-project',
         location: 'europe-west1',
-      });
+      }).getSkill('my-skill');
 
-      expect(registry.projectId).toBe('option-project');
-      expect(registry.location).toBe('europe-west1');
+      expect(transport.calls[0].url).toBe(
+        `${DEFAULT_BASE_URL}/projects/option-project/locations/europe-west1` +
+          '/skills/my-skill',
+      );
     });
 
-    it('stays on the default host when the machine has no certificate to present', () => {
+    it('stays on the default host when the machine has no certificate to present', async () => {
       vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+      const transport = stubTransport(
+        credentials,
+        skillResponder({defaultRevision: REVISION}),
+      );
 
-      expect(new GCPSkillRegistry().baseUrl).toBe(DEFAULT_BASE_URL);
+      await new GCPSkillRegistry().getSkill('my-skill');
+
+      expect(transport.calls[0].url).toBe(
+        `${DEFAULT_BASE_URL}/${RESOURCE_PARENT}/skills/my-skill`,
+      );
     });
 
     it('sends both calls of a fetch to the endpoint override', async () => {

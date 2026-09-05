@@ -252,17 +252,16 @@ async function runCertProvider(
  * them to a temporary directory because `httplib2.add_certificate()` takes
  * paths; `https.Agent` takes PEM text, so nothing is written to disk here.
  *
- * @param options.metadataPath The context-aware metadata file to read. Defaults
- *     to `~/.secureConnect/context_aware_metadata.json`.
  * @return The certificate material, or `undefined` when the machine has no
- *     metadata file. That is the normal case and is not an error.
+ *     `~/.secureConnect/context_aware_metadata.json`. That is the normal case
+ *     and is not an error.
  * @throws If the metadata file is malformed, the provider fails, or the
  *     provider prints no certificate and key pair.
  */
-export async function loadDefaultClientCerts(
-  options: {metadataPath?: string} = {},
-): Promise<MtlsClientCerts | undefined> {
-  const metadataPath = options.metadataPath ?? defaultMetadataPath();
+export async function loadDefaultClientCerts(): Promise<
+  MtlsClientCerts | undefined
+> {
+  const metadataPath = defaultMetadataPath();
 
   const contents = await readMetadataFile(metadataPath);
   if (contents === undefined) {

@@ -93,6 +93,13 @@ function serveSkill(
   );
 }
 
+/** Fetches a skill and reports the URL of the first request it made. */
+async function firstRequestUrl(): Promise<string> {
+  const transport = serveSkill({defaultRevision: REVISION});
+  await new GCPSkillRegistry().getSkill('my-skill');
+  return transport.calls[0].url;
+}
+
 /** The headers the registry sets on every call, besides the bearer token. */
 function expectedHeaders(quotaProject: string): Record<string, string> {
   return {
@@ -308,18 +315,19 @@ describe('GCPSkillRegistry parity', () => {
     },
   );
 
-  it('test_constructor_configures_base_url', () => {
+  it('test_constructor_configures_base_url', async () => {
     vi.stubEnv('AGENT_REGISTRY_ENDPOINT', 'https://staging.endpoint.com');
-    expect(new GCPSkillRegistry().baseUrl).toBe('https://staging.endpoint.com');
+    expect(await firstRequestUrl()).toBe(
+      `https://staging.endpoint.com/${RESOURCE_PARENT}/skills/my-skill`,
+    );
 
     vi.stubEnv('AGENT_REGISTRY_ENDPOINT', undefined);
-    expect(new GCPSkillRegistry().baseUrl).toBe(DEFAULT_BASE_URL);
+    expect(await firstRequestUrl()).toBe(SKILL_URL);
   });
 
   it('test_lazy_load_credentials', () => {
-    const registry = new GCPSkillRegistry();
+    new GCPSkillRegistry();
 
-    expect(registry.baseUrl).toBe(DEFAULT_BASE_URL);
     expect(googleAuthMock).not.toHaveBeenCalled();
     expect(getClientMock).not.toHaveBeenCalled();
     expect(clientCertsToPresentMock).not.toHaveBeenCalled();
@@ -329,8 +337,9 @@ describe('GCPSkillRegistry parity', () => {
     await writeCertSource(homeDir);
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
 
-    expect(new GCPSkillRegistry().baseUrl).toBe(
-      'https://agentregistry.mtls.googleapis.com/v1alpha',
+    expect(await firstRequestUrl()).toBe(
+      'https://agentregistry.mtls.googleapis.com/v1alpha' +
+        `/${RESOURCE_PARENT}/skills/my-skill`,
     );
   });
 

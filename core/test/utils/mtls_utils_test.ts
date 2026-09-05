@@ -248,7 +248,11 @@ describe('loadDefaultClientCerts', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-mtls-'));
-    metadataPath = path.join(tempDir, 'context_aware_metadata.json');
+    metadataPath = path.join(
+      tempDir,
+      '.secureConnect',
+      'context_aware_metadata.json',
+    );
     homedirMock.mockReturnValue(tempDir);
     providerPrints([CERT_PEM, KEY_PEM, PASSPHRASE_BLOCK].join('\n'));
   });
@@ -259,42 +263,25 @@ describe('loadDefaultClientCerts', () => {
 
   /** Writes the SecureConnect metadata the loader will read. */
   async function writeMetadata(contents: string): Promise<void> {
+    await fs.mkdir(path.dirname(metadataPath), {recursive: true});
     await fs.writeFile(metadataPath, contents, 'utf-8');
   }
 
   it('resolves undefined when the machine has no metadata file', async () => {
-    await expect(
-      loadDefaultClientCerts({metadataPath}),
-    ).resolves.toBeUndefined();
+    await expect(loadDefaultClientCerts()).resolves.toBeUndefined();
     expect(execFileMock).not.toHaveBeenCalled();
   });
 
-  it('reads ~/.secureConnect when no path is given', async () => {
-    const secureConnect = path.join(tempDir, '.secureConnect');
-    await fs.mkdir(secureConnect);
-    await fs.writeFile(
-      path.join(secureConnect, 'context_aware_metadata.json'),
-      JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
-      'utf-8',
-    );
-
-    await expect(loadDefaultClientCerts()).resolves.toEqual({
-      cert: CERT_PEM,
-      key: KEY_PEM,
-      passphrase: '0123456789abcdef',
-    });
-  });
-
   it('propagates a read failure that is not a missing file', async () => {
-    await fs.mkdir(metadataPath);
+    await fs.mkdir(metadataPath, {recursive: true});
 
-    await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow();
+    await expect(loadDefaultClientCerts()).rejects.toThrow();
   });
 
   it('throws naming the file when it is not valid JSON', async () => {
     await writeMetadata('{ not json');
 
-    await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow(
+    await expect(loadDefaultClientCerts()).rejects.toThrow(
       `${metadataPath} is not valid JSON.`,
     );
   });
@@ -318,7 +305,7 @@ describe('loadDefaultClientCerts', () => {
   ])('throws when $name', async ({contents}) => {
     await writeMetadata(contents);
 
-    await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow(
+    await expect(loadDefaultClientCerts()).rejects.toThrow(
       'declares no cert_provider_command string array',
     );
   });
@@ -328,7 +315,7 @@ describe('loadDefaultClientCerts', () => {
       JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
     );
 
-    await expect(loadDefaultClientCerts({metadataPath})).resolves.toEqual({
+    await expect(loadDefaultClientCerts()).resolves.toEqual({
       cert: CERT_PEM,
       key: KEY_PEM,
       passphrase: '0123456789abcdef',
@@ -340,7 +327,7 @@ describe('loadDefaultClientCerts', () => {
       JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
     );
 
-    await loadDefaultClientCerts({metadataPath});
+    await loadDefaultClientCerts();
 
     expect(execFileMock).toHaveBeenCalledWith(
       '/opt/secure-connect/cert_provider',
@@ -357,7 +344,7 @@ describe('loadDefaultClientCerts', () => {
       }),
     );
 
-    await loadDefaultClientCerts({metadataPath});
+    await loadDefaultClientCerts();
 
     expect(execFileMock).toHaveBeenCalledWith(
       '/opt/secure-connect/cert_provider',
@@ -373,7 +360,7 @@ describe('loadDefaultClientCerts', () => {
     );
     providerPrints([CERT_PEM, KEY_PEM].join('\n'));
 
-    await expect(loadDefaultClientCerts({metadataPath})).resolves.toEqual({
+    await expect(loadDefaultClientCerts()).resolves.toEqual({
       cert: CERT_PEM,
       key: KEY_PEM,
     });
@@ -388,7 +375,7 @@ describe('loadDefaultClientCerts', () => {
     );
     providerPrints(stdout);
 
-    await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow(
+    await expect(loadDefaultClientCerts()).rejects.toThrow(
       'printed no certificate and private key pair',
     );
   });
@@ -399,7 +386,7 @@ describe('loadDefaultClientCerts', () => {
     );
     providerFails(Object.assign(new Error('Command failed'), {code: 1}));
 
-    await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow(
+    await expect(loadDefaultClientCerts()).rejects.toThrow(
       `The certificate provider named by ${metadataPath} failed with 1.`,
     );
   });
@@ -410,7 +397,7 @@ describe('loadDefaultClientCerts', () => {
     );
     providerFails('spawn failed');
 
-    await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow(
+    await expect(loadDefaultClientCerts()).rejects.toThrow(
       'failed with an unknown error.',
     );
   });
@@ -421,7 +408,7 @@ describe('loadDefaultClientCerts', () => {
     );
     providerFails(new Error(`stderr contained ${KEY_PEM}`));
 
-    await expect(loadDefaultClientCerts({metadataPath})).rejects.toThrow(
+    await expect(loadDefaultClientCerts()).rejects.toThrow(
       /^(?!.*PRIVATE KEY)/s,
     );
   });

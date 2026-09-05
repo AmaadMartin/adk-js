@@ -86,9 +86,8 @@ function readSearchHit(entry: unknown): Frontmatter | undefined {
  */
 @experimental
 export class GCPSkillRegistry implements SkillRegistry {
-  readonly projectId: string;
-  readonly location: string;
-  readonly baseUrl: string;
+  private readonly projectId: string;
+  private readonly baseUrl: string;
   private readonly resourceParent: string;
   private credentials?: AuthClient;
   private agent?: Promise<https.Agent | undefined>;
@@ -103,7 +102,6 @@ export class GCPSkillRegistry implements SkillRegistry {
       );
     }
     this.projectId = projectId;
-    this.location = location;
     this.resourceParent = `projects/${projectId}/locations/${location}`;
     this.baseUrl =
       process.env[ENDPOINT_ENV] ||
