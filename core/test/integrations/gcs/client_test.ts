@@ -13,9 +13,14 @@
  * specifier inside `client.ts` is what lets `vi.mock` intercept it.
  */
 
-import {GCS_USER_AGENT, getGcsClient} from '@google/adk';
+// Not part of the package barrel: the toolset is the public surface, and
+// it is what calls these.
 import {OAuth2Client} from 'google-auth-library';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  GCS_USER_AGENT,
+  getGcsClient,
+} from '../../../src/integrations/gcs/client.js';
 
 import {FakeStorage, resetGcsFakes, storageInstances} from './gcs_fakes.js';
 

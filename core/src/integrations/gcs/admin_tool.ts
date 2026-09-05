@@ -7,6 +7,7 @@
 import type {BucketMetadata} from '@google-cloud/storage';
 import {AuthClient} from 'google-auth-library';
 
+import {GoogleToolStatus} from '../../tools/google_tool.js';
 import {formatError} from '../../utils/error_utils.js';
 
 import {getGcsClient} from './client.js';
@@ -19,12 +20,12 @@ import {getGcsClient} from './client.js';
  */
 export type GcsAdminToolResult =
   | {
-      status: 'SUCCESS';
+      status: GoogleToolStatus.SUCCESS;
       results: unknown;
       /** The token for the next page, when one more page exists. */
       next_page_token?: string;
     }
-  | {status: 'ERROR'; error_details: string};
+  | {status: GoogleToolStatus.ERROR; error_details: string};
 
 /**
  * Arguments shared by every tool that addresses a single bucket, and all
@@ -67,7 +68,7 @@ export interface UpdateBucketOptions extends BucketOptions {
 
 /** Wraps a failure in the error shape, so a tool never throws at the model. */
 function errorResult(error: unknown): GcsAdminToolResult {
-  return {status: 'ERROR', error_details: formatError(error)};
+  return {status: GoogleToolStatus.ERROR, error_details: formatError(error)};
 }
 
 /**
@@ -109,7 +110,10 @@ export async function listBuckets(
 
     if (options.pageSize === undefined) {
       const [buckets] = await storage.getBuckets();
-      return {status: 'SUCCESS', results: buckets.map((bucket) => bucket.name)};
+      return {
+        status: GoogleToolStatus.SUCCESS,
+        results: buckets.map((bucket) => bucket.name),
+      };
     }
 
     const [buckets, nextQuery] = await storage.getBuckets({
@@ -121,7 +125,7 @@ export async function listBuckets(
     });
     const nextPageToken = nextPageTokenOf(nextQuery);
     return {
-      status: 'SUCCESS',
+      status: GoogleToolStatus.SUCCESS,
       results: buckets.map((bucket) => bucket.name),
       ...(nextPageToken ? {next_page_token: nextPageToken} : {}),
     };
@@ -142,7 +146,7 @@ export async function getBucket(
   try {
     const storage = await getGcsClient({credentials: options.credentials});
     const [metadata] = await storage.bucket(options.bucketName).getMetadata();
-    return {status: 'SUCCESS', results: metadata};
+    return {status: GoogleToolStatus.SUCCESS, results: metadata};
   } catch (error: unknown) {
     return errorResult(error);
   }
@@ -167,7 +171,7 @@ export async function createBucket(
       ...(options.location !== undefined ? {location: options.location} : {}),
     });
     return {
-      status: 'SUCCESS',
+      status: GoogleToolStatus.SUCCESS,
       results: `Bucket ${bucket.name} created successfully.`,
     };
   } catch (error: unknown) {
@@ -210,7 +214,7 @@ export async function updateBucket(
     }
 
     return {
-      status: 'SUCCESS',
+      status: GoogleToolStatus.SUCCESS,
       results: `Bucket ${bucket.name} updated successfully.`,
     };
   } catch (error: unknown) {
@@ -231,7 +235,7 @@ export async function deleteBucket(
     const storage = await getGcsClient({credentials: options.credentials});
     await storage.bucket(options.bucketName).delete();
     return {
-      status: 'SUCCESS',
+      status: GoogleToolStatus.SUCCESS,
       results: `Bucket ${options.bucketName} deleted successfully.`,
     };
   } catch (error: unknown) {
