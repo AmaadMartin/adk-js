@@ -4,6 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * Tests of the two facades over the Vertex AI Gen AI evaluation service.
+ *
+ * The cases whose names start with `test_` are ported from
+ * `tests/unittests/evaluation/test_vertex_ai_eval_facade.py` at
+ * `google/adk-python` commit `c7ef8cfa`, and keep those names verbatim. The
+ * reference calls the private static mappers directly. TypeScript has no
+ * equivalent reach, so each of those cases asserts the same mapping through
+ * the request the fake client records.
+ */
+
 import {
   AgentDetails,
   ConversationScenario,
@@ -407,6 +418,30 @@ describe('MultiTurnVertexAiEvalFacade', () => {
     ];
   }
 
+  /** The two-turn conversation the adk-python cases below are written for. */
+  function referenceConversation(): Invocation[] {
+    return [
+      turn({
+        id: 'inv1',
+        query: 'q1',
+        response: 'r1',
+        intermediateData: {invocationEvents: []},
+        agentDetails: {agent1: {name: 'agent1', instructions: 'instructions1'}},
+      }),
+      turn({
+        id: 'inv2',
+        query: 'q2',
+        response: 'r2',
+        intermediateData: {
+          invocationEvents: [
+            {author: 'agent1', content: {parts: [{text: 'intermediate'}]}},
+          ],
+        },
+        agentDetails: {agent1: {name: 'agent1', instructions: 'instructions1'}},
+      }),
+    ];
+  }
+
   function facadeWith(
     client: VertexAiEvalClient,
     threshold = 0.8,
@@ -417,6 +452,181 @@ describe('MultiTurnVertexAiEvalFacade', () => {
       client,
     });
   }
+
+  /** Returns the agent data of the only eval case of the recorded request. */
+  function agentDataOf(client: FakeEvalClient) {
+    const agentData = client.requests[0].dataset.evalCases?.[0].agentData;
+    if (!agentData) {
+      throw new Error('the request carried no eval case');
+    }
+    return agentData;
+  }
+
+  it('test_map_agent_details_to_agent_config', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+
+    await facadeWith(client).evaluateInvocations([
+      turn({
+        id: 'inv1',
+        query: 'q1',
+        response: 'r1',
+        agentDetails: {
+          test_agent: {
+            name: 'test_agent',
+            instructions: 'test_instructions',
+            toolDeclarations: TOOLS,
+          },
+        },
+      }),
+    ]);
+
+    expect(agentDataOf(client).agents).toEqual({
+      test_agent: {
+        agentId: 'test_agent',
+        instruction: 'test_instructions',
+        tools: TOOLS,
+      },
+    });
+  });
+
+  it('test_get_agent_details', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+
+    await facadeWith(client).evaluateInvocations([
+      turn({
+        id: 'inv1',
+        query: 'q1',
+        response: 'r1',
+        agentDetails: {
+          agent1: {name: 'agent1', instructions: 'instructions1'},
+          agent2: {name: 'agent2', instructions: 'instructions2'},
+        },
+      }),
+      turn({
+        id: 'inv2',
+        query: 'q2',
+        response: 'r2',
+        agentDetails: {
+          agent1: {name: 'agent1', instructions: 'a later instruction'},
+          agent3: {name: 'agent3', instructions: 'instructions3'},
+        },
+      }),
+    ]);
+
+    const agents = agentDataOf(client).agents;
+    expect(Object.keys(agents)).toEqual(['agent1', 'agent2', 'agent3']);
+    // An agent declared by several turns is described by the first of them.
+    expect(agents['agent1'].instruction).toBe('instructions1');
+    expect(agents['agent2'].instruction).toBe('instructions2');
+    expect(agents['agent3'].instruction).toBe('instructions3');
+  });
+
+  it('test_map_invocation_event_to_agent_event', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+
+    await facadeWith(client).evaluateInvocations([
+      turn({
+        id: 'inv1',
+        query: 'q1',
+        response: 'r1',
+        intermediateData: {
+          invocationEvents: [
+            {
+              author: 'test_author',
+              content: {parts: [{text: 'test_content'}]},
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(agentDataOf(client).turns[0].events[1]).toEqual({
+      author: 'test_author',
+      content: {parts: [{text: 'test_content'}]},
+    });
+  });
+
+  it('test_map_invocation_turn', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+
+    await facadeWith(client).evaluateInvocations([
+      turn({
+        id: 'inv1',
+        query: 'user query',
+        response: 'final response',
+        intermediateData: {
+          invocationEvents: [
+            {
+              author: 'agent1',
+              content: {parts: [{text: 'intermediate content'}]},
+            },
+          ],
+        },
+      }),
+    ]);
+
+    const conversationTurn = agentDataOf(client).turns[0];
+    expect(conversationTurn.turnIndex).toBe(0);
+    expect(conversationTurn.turnId).toBe('inv1');
+    expect(conversationTurn.events).toEqual([
+      {author: 'user', content: {parts: [{text: 'user query'}]}},
+      {author: 'agent1', content: {parts: [{text: 'intermediate content'}]}},
+      {author: 'agent', content: {parts: [{text: 'final response'}]}},
+    ]);
+  });
+
+  it('test_get_turns', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+
+    await facadeWith(client).evaluateInvocations(referenceConversation());
+
+    const turns = agentDataOf(client).turns;
+    expect(turns.map((t) => t.turnId)).toEqual(['inv1', 'inv2']);
+    expect(turns.map((t) => t.turnIndex)).toEqual([0, 1]);
+  });
+
+  it('test_get_agent_data', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+
+    await facadeWith(client).evaluateInvocations([
+      turn({
+        id: 'inv1',
+        query: 'q1',
+        response: 'r1',
+        intermediateData: {invocationEvents: []},
+        agentDetails: {agent1: {name: 'agent1', instructions: 'instructions1'}},
+      }),
+    ]);
+
+    const agentData = agentDataOf(client);
+    expect(Object.keys(agentData.agents)).toEqual(['agent1']);
+    expect(agentData.turns).toHaveLength(1);
+  });
+
+  it('test_evaluate_invocations_multi_turn_metric_passed', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+
+    const result = await facadeWith(client).evaluateInvocations(
+      referenceConversation(),
+    );
+
+    expect(result.overallScore).toBe(0.9);
+    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
+    expect(result.perInvocationResults).toHaveLength(2);
+    expect(result.perInvocationResults[0].evalStatus).toBe(
+      EvalStatus.NOT_EVALUATED,
+    );
+    expect(result.perInvocationResults[1].evalStatus).toBe(EvalStatus.PASSED);
+    expect(client.requests).toHaveLength(1);
+    expect(client.requests[0].metrics).toEqual([
+      {name: 'CONVERSATIONAL_COHERENCE'},
+    ]);
+    const agentData = agentDataOf(client);
+    expect(Object.keys(agentData.agents)).toEqual(['agent1']);
+    expect(agentData.turns.map((t) => t.turnId)).toEqual(['inv1', 'inv2']);
+    // user, intermediate, agent
+    expect(agentData.turns[1].events).toHaveLength(3);
+  });
 
   it('scores the conversation with one request, and marks the earlier turns unevaluated', async () => {
     const client = new FakeEvalClient([scored(0.9)]);

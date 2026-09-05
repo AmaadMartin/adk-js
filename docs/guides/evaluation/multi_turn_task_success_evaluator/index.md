@@ -9,7 +9,10 @@ point.
 
 A single-turn metric scores one reply against one prompt. That is the wrong
 shape for a booking flow, where turn 3 is only correct because turn 2 asked
-for a date. `MultiTurnTaskSuccessV1Evaluator` sends the whole conversation to
+for a date. It also misreads a turn that is only correct because of an earlier
+one: an agent that answers "Tuesday at 09:15" looks wrong until you read the
+turn where the user named the date.
+`MultiTurnTaskSuccessV1Evaluator` sends the whole conversation to
 the Vertex AI Gen AI evaluation service and asks for its
 `MULTI_TURN_TASK_SUCCESS` rubric metric. The service returns one score in the
 range 0 to 1, and a score closer to 1 means the agent completed the task.
@@ -21,7 +24,13 @@ which sends exactly one request per call however long the conversation is. The
 `V1` suffix marks that a later task-success metric could use a different
 strategy.
 
-The metric is reference-free, so golden invocations are optional.
+`MultiTurnVertexAiEvalFacade` is the general facade over a multi-turn metric of
+the service. This class is the preconfigured form of it. Use the facade
+directly for a multi-turn metric that has no evaluator of its own.
+
+The metric is reference-free, so golden invocations are optional. You may still
+pass expected invocations. They are paired with the actual ones in
+`perInvocationResults`, and are reported back untouched.
 
 ## Get started
 
@@ -83,7 +92,8 @@ you write; ADK does not read them for you.
 
 The evaluator resolves the threshold once, when you construct it. A metric
 carrying `criterion.threshold` wins over the deprecated metric-level
-`threshold`.
+`threshold`. The evaluator holds no mutable state after that, so one instance
+grades any number of conversations.
 
 ```ts
 // criterion.threshold wins, so this evaluator passes at 0.95 and above.
@@ -95,7 +105,8 @@ const evalMetric = {
 ```
 
 A metric with neither field throws `InputValidationError` from the
-constructor, before any request reaches the service.
+constructor, before any request reaches the service. The message is
+`Evaluation metric '<name>' requires a threshold.`
 
 ## Reading the result
 
@@ -122,7 +133,10 @@ Two cases produce no verdict:
 Golden invocations are optional. When you pass them, the two lists must have
 the same length, and each result is paired with the golden invocation at its
 index. A length mismatch rejects the returned promise with
-`InputValidationError`.
+`InputValidationError`, before any request reaches the service.
+
+A rejection from your client propagates unchanged. The evaluator does not
+retry it, wrap it, or swallow it.
 
 ## Differences from adk-python
 
@@ -133,3 +147,9 @@ index. A length mismatch rejects the returned promise with
   `evaluateInvocations` returns a promise.
 - `adk-python` raises `ValueError` where this throws
   `InputValidationError`.
+- `adk-python` registers this metric in its evaluator registry. adk-js does
+  not: its registry builds an evaluator from an `EvalMetric` alone, and this
+  one also needs a client.
+- `evaluateInvocations` accepts a `conversationScenario` because the
+  `Evaluator` contract declares it. This metric derives what it needs from the
+  turns themselves, so the scenario does not reach the service.
