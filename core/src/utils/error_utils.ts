@@ -159,3 +159,65 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/** The canonical status and message a backend reported for a failed call. */
+export interface ApiErrorDetails {
+  /**
+   * The canonical status, e.g. `RESOURCE_EXHAUSTED`. Falls back to the numeric
+   * HTTP status as a string when the body carries no canonical name.
+   */
+  status: string;
+  /** The backend's human-readable message. */
+  message: string;
+}
+
+/**
+ * Parses the JSON error body a `@google/genai` `ApiError` carries in its
+ * message. The streaming path prefixes the body with `got status: <n>. `, so
+ * parsing starts at the first brace.
+ */
+function parseErrorPayload(
+  message: string,
+): Record<string, unknown> | undefined {
+  const start = message.indexOf('{');
+  if (start < 0) {
+    return undefined;
+  }
+  try {
+    return asRecord(JSON.parse(message.slice(start)));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads the canonical status and message out of a `@google/genai` `ApiError`,
+ * or returns `undefined` when `error` is not one.
+ *
+ * Matched structurally on the numeric `status` plus a string `message` rather
+ * than with `instanceof`: a runtime can resolve `@google/genai` twice, and an
+ * `ApiError` built by one copy is not an instance of the other copy's class.
+ *
+ * The SDK reports `status` as the HTTP status code and puts the backend's JSON
+ * error body in `message`, so the canonical status name (`RESOURCE_EXHAUSTED`)
+ * and the human message are recovered from that body.
+ *
+ * @param error The thrown value to inspect.
+ * @return The backend's status and message, or undefined for any other value.
+ */
+export function getApiErrorDetails(
+  error: unknown,
+): ApiErrorDetails | undefined {
+  const record = asRecord(error);
+  if (
+    typeof record?.['status'] !== 'number' ||
+    typeof record['message'] !== 'string'
+  ) {
+    return undefined;
+  }
+  const payload = asRecord(parseErrorPayload(record['message'])?.['error']);
+  return {
+    status: firstString(payload?.['status']) ?? String(record['status']),
+    message: firstString(payload?.['message']) ?? record['message'],
+  };
+}

@@ -25,6 +25,15 @@ export class UrlContextTool extends BuiltInTool {
   protected override async applyBuiltInConfig({
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
+    // A Managed Agent names a backend agent instead of a model, so the model
+    // gates below cannot decide anything. The backend fetches the URLs itself.
+    if (llmRequest.isManagedAgent) {
+      llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+      llmRequest.config.tools = llmRequest.config.tools || [];
+      llmRequest.config.tools.push({urlContext: {}});
+      return;
+    }
+
     if (!llmRequest.model) {
       return;
     }

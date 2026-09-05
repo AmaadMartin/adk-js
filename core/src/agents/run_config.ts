@@ -7,6 +7,7 @@
 import {
   AudioTranscriptionConfig,
   ContextWindowCompressionConfig,
+  HttpOptions,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
@@ -64,6 +65,15 @@ export interface RunConfig {
    * supported and is rejected by `createRunConfig`.
    */
   streamingMode?: StreamingMode;
+
+  /**
+   * Per-request HTTP options applied to the calls this run makes.
+   *
+   * Only `headers` is honoured today: the agent merges them with the ADK
+   * tracking headers, so a caller header never displaces attribution. Mirrors
+   * `RunConfig.http_options` in google/adk-python `agents/run_config.py`.
+   */
+  httpOptions?: HttpOptions;
 
   /**
    * Output audio transcription config.
