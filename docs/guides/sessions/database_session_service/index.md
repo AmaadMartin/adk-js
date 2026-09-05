@@ -21,8 +21,8 @@ stamps every session it returns with the storage revision it was loaded at, and
 The table layout matches adk-python's v1 schema column for column. A team can
 run both SDKs against one database: adk-js reads the sessions adk-python wrote,
 orders lists the same way, and answers `afterTimestamp` queries with the same
-rows. A database still on adk-python's older v0 layout is readable too, but only
-readable — see [Legacy databases](#legacy-databases).
+rows. A database still on adk-python's older v0 layout is read and written too
+— see [Legacy databases](#legacy-databases).
 
 The driver package for your database is an optional peer dependency, so
 installing `@google/adk` does not pull in a SQL client you never use. Install
@@ -255,20 +255,25 @@ reconnecting there opens a new, empty one.
 
 adk-python's v0 schema spread an event across typed columns and stored its
 actions as a Python pickle. adk-js detects such a database and opens it with the
-legacy entity set, so `getSession`, `listSessions` and `deleteSession` work. Two
-limits apply:
+legacy entity set, so every method works on it: `createSession`, `appendEvent`,
+`getSession`, `listSessions` and `deleteSession`.
 
-- **Event actions come back empty.** No TypeScript reader can decode a Python
-  pickle. The service logs a warning once per instance.
-- **Writes are refused.** `createSession` and `appendEvent` throw, because a
-  write from adk-js would produce an `actions` value adk-python cannot read
-  back. Migrate the database with adk-python's `adk migrate session` command
-  first.
+`appendEvent` writes the `actions` column as a pickle adk-python's restricted
+unpickler reads back, and `getSession` decodes one written by either SDK. An
+`actions` value that has no Python counterpart — a `Date`, for example — makes
+`appendEvent` throw rather than store a blob Python cannot load. A stored blob
+that will not decode reads back with empty actions and a warning naming the
+event, so one unreadable row does not cost you the session's history.
 
-A legacy database is never altered: adk-js does not create its tables, add the
-v1 `event_data` column, or write a schema-version row. Detection needs the
-service to open its own connection, so `init()` throws for a legacy database
-reached through a MikroORM instance you built.
+Migrating to v1 is still the recommendation. The v0 layout is deprecated in
+adk-python, and `adk migrate session` moves a database to v1.
+
+adk-js keeps a legacy database on its own layout. Opening one creates a missing
+v0 table and a missing `idx_events_app_user_session_ts` index, and nothing else:
+no `adk_internal_metadata` table, no v1 `event_data` column, and no
+schema-version row. Detection needs the service to open its own connection, so
+`init()` throws for a legacy database reached through a MikroORM instance you
+built.
 
 ## Failure modes
 
@@ -278,7 +283,7 @@ reached through a MikroORM instance you built.
 | `appendEvent` on a session storage does not hold | `SessionNotFoundError`           |
 | `appendEvent` from a superseded session          | `StaleSessionError`              |
 | An app or user state row is missing              | `Error` naming the missing scope |
-| A write against a legacy v0 database             | `Error` naming the migration     |
+| A v0 `actions` value with no Python counterpart  | `Error` from `appendEvent`       |
 | A legacy v0 database behind a caller-owned ORM   | `Error` from `init()`            |
 
 ## Timestamp precision
@@ -296,3 +301,15 @@ The service reads each revision back from storage after it writes, so the
 marker describes the stored value and a held session keeps working there. What
 that database cannot do is tell two writes in the same second apart, so alter
 the columns to `datetime(3)` to get the full guarantee.
+
+## PostgreSQL timestamp columns
+
+Every timestamp column carries no time zone, which is what adk-python declares
+for the same table. On PostgreSQL that is `timestamp(6)`. The driver binds and
+reads a `Date` as UTC, so the stored instant is the same one you wrote.
+
+An adk-js release before this one declared `timestamptz(6)` on PostgreSQL.
+Opening such a database now emits an `ALTER TABLE ... ALTER COLUMN ... TYPE
+timestamp(6)`, and PostgreSQL converts each value through the session
+`TimeZone`. Run the first open with `SET TimeZone = 'UTC'` so the stored
+instants do not shift. A server already on UTC needs nothing.

@@ -21,6 +21,34 @@ export const DEFAULT_MAX_VARCHAR_LENGTH = 256;
 /** Fractional-second digits a timestamp column keeps. */
 const TIMESTAMP_FRACTIONAL_DIGITS = 6;
 
+/** How a backend spells a timestamp column that keeps a time zone. */
+const TIME_ZONE_AWARE_TIMESTAMP = 'timestamptz';
+
+/** How the same backend spells the timezone-naive column. */
+const NAIVE_TIMESTAMP = 'timestamp';
+
+/**
+ * Rewrites a timestamp declaration that keeps a time zone into the naive one.
+ *
+ * adk-python declares a plain `DateTime` for every session timestamp, which
+ * is `TIMESTAMP WITHOUT TIME ZONE` on PostgreSQL, and writes a naive UTC
+ * value into it. `_NAIVE_DATETIME_DIALECTS` and `_uses_naive_datetime` in
+ * `database_session_service.py` name the four dialects that behave this way:
+ * sqlite, postgresql, mysql and mariadb. MikroORM gives a `Platform` no
+ * dialect name — the constraint {@link DynamicJsonType} documents — so the
+ * decision is read off the declaration the platform emits instead. Only
+ * PostgreSQL emits a zone-carrying one; every other backend adk-js supports
+ * already declares a naive column and passes through unchanged.
+ *
+ * @param declaration The declaration the platform emits.
+ * @returns The declaration, with any time zone dropped.
+ */
+function withoutTimeZone(declaration: string): string {
+  return declaration.startsWith(TIME_ZONE_AWARE_TIMESTAMP)
+    ? NAIVE_TIMESTAMP + declaration.slice(TIME_ZONE_AWARE_TIMESTAMP.length)
+    : declaration;
+}
+
 /**
  * Stores a JSON object in the widest JSON-capable column a backend supports.
  *
@@ -68,6 +96,9 @@ export class DynamicJsonType extends JsonType {
  * `datetime2(6)`, or the fractional seconds of an update marker are lost and
  * the optimistic-concurrency check rejects a row it just wrote.
  *
+ * The column keeps no time zone, matching the one adk-python declares. See
+ * {@link withoutTimeZone}.
+ *
  * The type extends `Type` rather than `DateTimeType` because a stored
  * timestamp can read back as SQL `NULL`, which `DateTimeType` cannot express:
  * it declares `Date` as its runtime type.
@@ -77,9 +108,11 @@ export class PreciseTimestampType extends Type<
   string | number | Date | null
 > {
   override getColumnType(_prop: EntityProperty, platform: Platform): string {
-    return platform.getDateTimeTypeDeclarationSQL({
-      length: TIMESTAMP_FRACTIONAL_DIGITS,
-    });
+    return withoutTimeZone(
+      platform.getDateTimeTypeDeclarationSQL({
+        length: TIMESTAMP_FRACTIONAL_DIGITS,
+      }),
+    );
   }
 
   override convertToJSValue(

@@ -1660,8 +1660,6 @@ describe('DatabaseSessionService on a legacy v0 database', () => {
   const appName = 'legacy-app';
   const userId = 'u1';
   const sessionId = 's1';
-  const READ_ONLY_MESSAGE =
-    'adk-js can read such a database but cannot write to it';
 
   let directory: string;
   let databasePath: string;
@@ -1766,31 +1764,44 @@ describe('DatabaseSessionService on a legacy v0 database', () => {
     expect(remaining.sessions).toEqual([]);
   });
 
-  it('warns once that legacy actions come back empty', async () => {
-    await service.getSession({appName, userId, sessionId});
+  it("warns that it could not decode one event's actions", async () => {
     await service.getSession({appName, userId, sessionId});
 
     const actionWarnings = warn.mock.calls.filter((call) =>
-      String(call[0]).includes('come back empty'),
+      String(call[0]).includes('Could not decode the pickled actions'),
     );
     expect(actionWarnings).toHaveLength(1);
   });
 
-  it('refuses to create a session', async () => {
+  it('creates a session', async () => {
+    const created = await service.createSession({
+      appName,
+      userId,
+      sessionId: 's2',
+    });
+
+    expect(created.id).toBe('s2');
     await expect(
-      service.createSession({appName, userId, sessionId: 's2'}),
-    ).rejects.toThrow(READ_ONLY_MESSAGE);
+      service.getSession({appName, userId, sessionId: 's2'}),
+    ).resolves.toMatchObject({id: 's2'});
   });
 
-  it('refuses to append an event', async () => {
-    const session = await service.getSession({appName, userId, sessionId});
-    if (!session) {
-      expect.fail('expected the seeded session to load');
-    }
+  it('appends an event to a session it created', async () => {
+    // The seeded fixture writes no `app_states` row, and `appendEvent` needs
+    // the one `createSession` writes on either layout.
+    const session = await service.createSession({appName, userId});
 
-    await expect(
-      service.appendEvent({session, event: createEvent({timestamp: 9000})}),
-    ).rejects.toThrow(READ_ONLY_MESSAGE);
+    const appended = await service.appendEvent({
+      session,
+      event: createEvent({timestamp: 9000, author: 'user'}),
+    });
+
+    const reloaded = await service.getSession({
+      appName,
+      userId,
+      sessionId: session.id,
+    });
+    expect(reloaded?.events.map((e) => e.id)).toEqual([appended.id]);
   });
 
   it('leaves the database untouched', async () => {
@@ -2947,33 +2958,46 @@ describe('DatabaseSessionService v0 schema', () => {
     expect(remaining).toBe(0);
   });
 
-  it('refuses to create a session', async () => {
+  it('creates a session', async () => {
+    const created = await service.createSession({
+      appName,
+      userId,
+      sessionId: 'new-session',
+    });
+
+    expect(created.id).toBe('new-session');
     await expect(
-      service.createSession({appName, userId, sessionId: 'new-session'}),
-    ).rejects.toThrow('adk migrate session');
+      service.getSession({appName, userId, sessionId: 'new-session'}),
+    ).resolves.toMatchObject({id: 'new-session'});
   });
 
-  it('refuses to append an event', async () => {
+  it('appends an event', async () => {
     const session = await service.getSession({appName, userId, sessionId});
     if (!session) {
       expect.fail('the legacy session was not read');
     }
 
-    await expect(
-      service.appendEvent({session, event: createEvent({timestamp: 3000})}),
-    ).rejects.toThrow('adk migrate session');
+    const before = await countLegacyEvents(databaseFile);
+
+    const appended = await service.appendEvent({
+      session,
+      event: createEvent({timestamp: 3000, author: 'user'}),
+    });
+
+    expect(await countLegacyEvents(databaseFile)).toBe(before + 1);
+    const reloaded = await service.getSession({appName, userId, sessionId});
+    expect(reloaded?.events.map((e) => e.id)).toContain(appended.id);
   });
 
-  it('warns once that the pickled actions are not recoverable', async () => {
+  it('warns that the database uses the deprecated v0 schema', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
 
     await service.getSession({appName, userId, sessionId});
-    await service.getSession({appName, userId, sessionId});
 
-    const actionWarnings = warn.mock.calls.filter(([message]) =>
-      String(message).includes('come back empty'),
+    const schemaWarnings = warn.mock.calls.filter(([message]) =>
+      String(message).includes('legacy v0 session schema'),
     );
-    expect(actionWarnings).toHaveLength(1);
+    expect(schemaWarnings).not.toHaveLength(0);
     warn.mockRestore();
   });
 

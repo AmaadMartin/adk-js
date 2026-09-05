@@ -630,9 +630,9 @@ export async function detectDatabaseSchemaVersion(
   if (hasLegacyEventsTable) {
     logger.warn(
       'The database uses the legacy v0 session schema, which serializes ' +
-        'event actions with Python pickle. This SDK opens it for reading ' +
-        'only. Migrate it with the adk-python `adk migrate session` command ' +
-        'to write to it.',
+        'event actions with Python pickle. That schema will not be supported ' +
+        'going forward. Migrate to the v1 schema, which serializes event ' +
+        'data as JSON, with the adk-python `adk migrate session` command.',
     );
     return SCHEMA_VERSION_0_PICKLE;
   }

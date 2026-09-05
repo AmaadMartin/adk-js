@@ -47,7 +47,9 @@ const TRUNCATION_SUFFIX = '...[truncated]';
 @Entity({tableName: EVENTS_TABLE_NAME})
 @Index({
   name: EVENTS_TIMESTAMP_INDEX_NAME,
-  properties: ['appName', 'userId', 'sessionId', 'timestamp'],
+  expression:
+    `create index ${EVENTS_TIMESTAMP_INDEX_NAME} on ${EVENTS_TABLE_NAME} ` +
+    `(app_name, user_id, session_id, timestamp desc)`,
 })
 export class StorageEventV0 {
   @PrimaryKey({type: 'string', length: STORAGE_KEY_COLUMN_LENGTH})
@@ -260,9 +262,37 @@ export function storageEventV0FromEvent(
   session: Session,
   event: Event,
 ): StorageEventV0 {
+  return fillStorageEventV0(new StorageEventV0(), session, event);
+}
+
+/**
+ * Rewrites a stored legacy row from an {@link Event}.
+ *
+ * A v0 row spreads an event across typed columns, so re-appending an event
+ * that is already stored has to rebuild every one of them. The v1 layout
+ * replaces a single JSON column instead.
+ *
+ * @param row The stored row to rewrite.
+ * @param session The session the event belongs to.
+ * @param event The event to store.
+ * @throws If the event's actions hold a value with no Python counterpart.
+ */
+export function updateStorageEventV0(
+  row: StorageEventV0,
+  session: Session,
+  event: Event,
+): void {
+  fillStorageEventV0(row, session, event);
+}
+
+/** Writes the columns of `event` onto `row`, and returns it. */
+function fillStorageEventV0(
+  row: StorageEventV0,
+  session: Session,
+  event: Event,
+): StorageEventV0 {
   const snakeCased = transformToSnakeCaseEvent(event);
 
-  const row = new StorageEventV0();
   row.id = event.id;
   row.appName = session.appName;
   row.userId = session.userId;

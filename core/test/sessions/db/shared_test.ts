@@ -174,6 +174,18 @@ describe('session storage column types', () => {
     );
   });
 
+  /**
+   * Diverges from MikroORM, not from the reference. `PostgreSqlPlatform`
+   * declares `timestamptz(6)`; adk-python declares a plain `DateTime`, which
+   * is `TIMESTAMP WITHOUT TIME ZONE` there, so adk-js drops the zone to match
+   * the table adk-python creates.
+   */
+  it('declares a timezone-naive timestamp on postgresql', () => {
+    expect(
+      preciseTimestamp.getColumnType(columnProp, PLATFORMS.postgresql),
+    ).toBe('timestamp(6)');
+  });
+
   it('test_precise_timestamp_uses_datetime2_on_mssql', () => {
     expect(preciseTimestamp.getColumnType(columnProp, PLATFORMS.mssql)).toBe(
       'datetime2(6)',

@@ -141,15 +141,22 @@ function decodeLatin1(bytes: Uint8Array): string {
   return out;
 }
 
-/** Narrows to an object whose properties a `BUILD` state may be copied onto. */
+/**
+ * Narrows to an object whose properties a `BUILD` state may be copied onto,
+ * and which the writer may encode as a Python dict.
+ *
+ * A null-prototype map counts. `trimTempDeltaState` builds `stateDelta` that
+ * way so a `__proto__` key cannot re-parent it, and those actions reach the
+ * pickle writer on the legacy v0 write path.
+ */
 export function isPlainObject(
   value: unknown,
 ): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.getPrototypeOf(value) === Object.prototype
-  );
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 /** Returns a `bigint` as a `number` when that loses nothing, else unchanged. */
