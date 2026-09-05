@@ -8,6 +8,7 @@ import AdmZip from 'adm-zip';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {
   loadAllSkillsInDir,
@@ -144,6 +145,26 @@ Instructions content`,
       expect(skill.resources?.references).toEqual({});
       expect(skill.resources?.assets).toEqual({});
       expect(skill.resources?.scripts).toEqual({});
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('records the directory it loaded the skill from in uri', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions content`,
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.uri).toBe(pathToFileURL(path.resolve(skillDir)).href);
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });
@@ -640,6 +661,15 @@ Instruction body`;
       expect(skill.resources?.references?.['ref1.md']).toBe('ref content');
       expect(skill.resources?.assets?.['a.txt']).toBe('asset content');
       expect(skill.resources?.scripts?.['run.sh']?.src).toBe('echo hello');
+    });
+
+    it('leaves uri unset because no path names the archive', () => {
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+
+      const skill = loadSkillFromZipBuffer(zip.toBuffer());
+
+      expect(skill.uri).toBeUndefined();
     });
 
     it('keeps non-UTF-8 binary assets as Buffer', () => {
