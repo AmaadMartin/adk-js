@@ -155,6 +155,74 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
+export type {
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+} from './evaluation/eval_case.js';
+export {
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
+  EvalStatus,
+  PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricCriterion,
+  HallucinationsCriterion,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  RubricsBasedCriterion,
+  Threshold,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export type {
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {MultiTurnTrajectoryQualityV1Evaluator} from './evaluation/multi_turn_trajectory_quality_evaluator.js';
+export type {MultiTurnTrajectoryQualityV1EvaluatorOptions} from './evaluation/multi_turn_trajectory_quality_evaluator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
+export {
+  MultiTurnVertexAiEvalFacade,
+  VertexAiEvalFacade,
+  resolveVertexAiEvalClientConfig,
+} from './evaluation/vertex_ai_eval_facade.js';
+export type {
+  VertexAgentConfig,
+  VertexAgentData,
+  VertexAgentEvent,
+  VertexAggregatedMetricResult,
+  VertexAiEvalClient,
+  VertexAiEvalClientConfig,
+  VertexAiEvalFacadeOptions,
+  VertexAiEvalRequest,
+  VertexConversationTurn,
+  VertexEvalCase,
+  VertexEvalCaseRow,
+  VertexEvalMetricSpec,
+  VertexEvaluationDataset,
+  VertexEvaluationResult,
+} from './evaluation/vertex_ai_eval_facade.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
