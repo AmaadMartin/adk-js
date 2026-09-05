@@ -210,6 +210,17 @@ describe('GEPARootAgentPromptOptimizer end to end', () => {
     ]);
   });
 
+  it('refuses to score a candidate carrying an instruction provider', async () => {
+    await expect(
+      new PhraseCoverageSampler().sampleAndScore({
+        candidate: new LlmAgent({
+          name: 'support_agent',
+          instruction: async () => 'Built per request.',
+        }),
+      }),
+    ).rejects.toThrow(/static string/);
+  });
+
   it('runs the sample workflow without a model', async () => {
     const perTurn = await runSample({
       name: 'optimization/gepa_root_agent_prompt_optimizer',
