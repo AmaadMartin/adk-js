@@ -355,3 +355,97 @@ describe('Node-level state schema and inheritance', () => {
     );
   });
 });
+
+/**
+ * adk-python validates a `FunctionNode`'s state parameters at construction
+ * (`tests/unittests/workflow/test_state_schema.py` at `25f5214c`). adk-js's
+ * `FunctionNodeHandler` is fixed at `(ctx, input)` and binds no state
+ * parameters, so the equivalent check covers the state key an agent node
+ * declares statically: its `outputKey`.
+ */
+describe('state schema validated at construction', () => {
+  it('test_startup_no_validation_when_schema_none', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'anything'});
+    expect(
+      () => new Workflow({name: 'wf', edges: [['START', agent]]}),
+    ).not.toThrow();
+  });
+
+  it('accepts an outputKey the schema declares', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'label'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('names the workflow, the node and the declared fields', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'nope'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'pipeline',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).toThrow(
+      "Workflow pipeline node 'writer' writes state key 'nope', which is not " +
+        'declared in the state schema. Declared fields: ' +
+        '["counter","label","note"]',
+    );
+  });
+
+  it('skips a node that declares its own schema', () => {
+    const agent = replyAgent('writer', 'hi', {
+      outputKey: 'nodeKey',
+      stateSchema: z4.object({nodeKey: z4.string()}),
+    });
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('skips a prefixed key, which belongs to a wider scope', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'temp:scratch'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('leaves a non-object schema unenforced rather than rejecting', () => {
+    const agent = replyAgent('writer', 'hi', {outputKey: 'nope'});
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: z4.string(),
+          edges: [['START', agent]],
+        }),
+    ).not.toThrow();
+  });
+
+  it('leaves a dynamicEntry workflow, which has no graph, unchecked', () => {
+    expect(
+      () =>
+        new Workflow({
+          name: 'wf',
+          stateSchema: schema,
+          dynamicEntry: async () => 'done',
+        }),
+    ).not.toThrow();
+  });
+});
