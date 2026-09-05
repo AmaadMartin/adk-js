@@ -15,10 +15,12 @@ import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {Task} from '../utils/task.js';
 
 import {ActiveStreamingTool} from './active_streaming_tool.js';
 import {BaseAgent} from './base_agent.js';
 import {LiveRequestQueue} from './live_request_queue.js';
+import {RealtimeCacheEntry} from './realtime_cache_entry.js';
 import {RunConfig} from './run_config.js';
 import {TranscriptionEntry} from './transcription_entry.js';
 
@@ -60,6 +62,11 @@ export interface InvocationContextParams {
   nodeToolDepth?: number;
   liveRequestQueue?: LiveRequestQueue;
   liveSessionResumptionHandle?: string;
+  activeNonBlockingToolTasks?: Record<string, Task<void>>;
+  inputRealtimeCache?: RealtimeCacheEntry[];
+  outputRealtimeCache?: RealtimeCacheEntry[];
+  /** Seeds {@link InvocationContext.customMetadata}; child contexts pass the parent's record through. */
+  customMetadata?: Record<string, unknown>;
   /**
    * Request-level metadata passed from an incoming A2A request or caller.
    */
@@ -263,6 +270,37 @@ export class InvocationContext {
   liveSessionResumptionHandle?: string;
 
   /**
+   * The running non-blocking tool tasks of this invocation (live only), keyed
+   * by `<toolName>_<functionCallId>`. The registry a live flow cancels from
+   * when the agent run ends, so a background tool does not outlive it. No
+   * `adk-js` flow writes to it yet; it is the storage that path needs.
+   */
+  activeNonBlockingToolTasks?: Record<string, Task<void>>;
+
+  /**
+   * Caches input audio chunks before flushing to session and artifact
+   * services.
+   */
+  inputRealtimeCache?: RealtimeCacheEntry[];
+
+  /**
+   * Caches output audio chunks before flushing to session and artifact
+   * services.
+   */
+  outputRealtimeCache?: RealtimeCacheEntry[];
+
+  /**
+   * Custom metadata for attaching low-level execution telemetry.
+   *
+   * Seeded at construction from {@link RunConfig.customMetadata} as a shallow
+   * copy, so writes here never reach the caller's run config. Always an
+   * object, so a caller can write into it without a null check. Every context
+   * of one invocation shares the same record: {@link clone} and
+   * `BaseAgent.createInvocationContext` pass it through, rather than reseeding.
+   */
+  readonly customMetadata: Record<string, unknown>;
+
+  /**
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   readonly a2aMetadata?: Record<string, unknown>;
@@ -301,6 +339,12 @@ export class InvocationContext {
         .invocationCostManager ?? new InvocationCostManager();
     this.liveRequestQueue = params.liveRequestQueue;
     this.liveSessionResumptionHandle = params.liveSessionResumptionHandle;
+    this.activeNonBlockingToolTasks = params.activeNonBlockingToolTasks;
+    this.inputRealtimeCache = params.inputRealtimeCache;
+    this.outputRealtimeCache = params.outputRealtimeCache;
+    this.customMetadata = params.customMetadata ?? {
+      ...params.runConfig?.customMetadata,
+    };
   }
 
   /**
