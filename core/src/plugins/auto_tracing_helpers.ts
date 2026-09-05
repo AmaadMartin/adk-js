@@ -222,7 +222,7 @@ function isPlainObject(value: object): boolean {
  * Returns the constructor name of `value`, or its `typeof` when it has none.
  * Never throws, so it is safe to call from an error path.
  */
-function typeNameOf(value: unknown): string {
+export function typeNameOf(value: unknown): string {
   if (value === null) {
     return 'null';
   }

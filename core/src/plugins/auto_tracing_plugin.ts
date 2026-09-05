@@ -29,6 +29,7 @@ import {
   isTracingWrapper,
   TracedFunction,
   tracerWillRecord,
+  typeNameOf,
 } from './auto_tracing_helpers.js';
 import {BasePlugin} from './base_plugin.js';
 
@@ -216,7 +217,14 @@ export class AutoTracingPlugin extends BasePlugin {
     return;
   }
 
-  /** Visits one value, instrumenting or descending according to its shape. */
+  /**
+   * Visits one value, instrumenting or descending according to its shape.
+   *
+   * A value that fights back -- a proxy that throws from a trap, an exotic
+   * object that rejects reflection -- is logged and skipped, so one hostile
+   * node cannot abort the whole pass. The reference does the same for a
+   * module it fails to instrument.
+   */
   private walk(value: unknown, depth: number, state: WalkState): void {
     if (
       depth > this.maxWalkDepth ||
@@ -232,15 +240,27 @@ export class AutoTracingPlugin extends BasePlugin {
     if (state.budget-- <= 0) {
       return;
     }
-    const members = memberValuesOf(value);
+    try {
+      this.visit(value, depth, state);
+    } catch (error) {
+      logger.warn(
+        `AutoTracingPlugin: failed to instrument ${typeNameOf(value)}:` +
+          ` ${formatError(error)}`,
+      );
+    }
+  }
+
+  /** Descends into a container, or instruments an ordinary object. */
+  private visit(node: object, depth: number, state: WalkState): void {
+    const members = memberValuesOf(node);
     if (members) {
       for (const member of members) {
         this.walk(member, depth + 1, state);
       }
       return;
     }
-    this.instrumentOwnProperties(value, depth, state);
-    this.instrumentPrototypeChain(value, state);
+    this.instrumentOwnProperties(node, depth, state);
+    this.instrumentPrototypeChain(node, state);
   }
 
   /**
