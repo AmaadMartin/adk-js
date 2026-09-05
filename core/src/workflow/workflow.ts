@@ -404,9 +404,7 @@ export class Workflow extends BaseNode {
         attemptCount: loop.nodes.get(nodeName)?.attemptCount ?? 1,
         author: nodeName,
         invocationId: ctx.invocationId,
-        nodeInfo: {
-          path: ctx.nodePath ? `${ctx.nodePath}.${nodeName}` : nodeName,
-        },
+        nodeInfo: {path: childNodePath(ctx, nodeName)},
         branch: ctx.branch,
         isolationScope: ctx.isolationScope,
       }),
@@ -729,7 +727,7 @@ export class Workflow extends BaseNode {
     ctx.emit(
       createReplayedOutputEvent(
         this.eventOrigin(ctx),
-        ctx.nodePath ? `${ctx.nodePath}.${nodeName}` : nodeName,
+        childNodePath(ctx, nodeName),
         output,
       ),
     );
@@ -909,6 +907,11 @@ export function hasWaitingTaskAgent(
       isTaskModeNode(node) &&
       nodes.get(node.name)?.status === NodeStatus.WAITING,
   );
+}
+
+/** The path a direct child of `ctx` runs under. */
+function childNodePath(ctx: NodeContext, nodeName: string): string {
+  return ctx.nodePath ? `${ctx.nodePath}.${nodeName}` : nodeName;
 }
 
 /** Whether `node` is an agent that runs as a multi-turn task. */
