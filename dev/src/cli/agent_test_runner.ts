@@ -512,11 +512,11 @@ export async function rebuildTests(target: string): Promise<RebuildResult[]> {
     ) {
       continue;
     }
-    logger.info(`Rebuilding ${testCase.testFile}...`);
+    logger.debug(`Rebuilding ${testCase.testFile}...`);
     results.push(await rebuildOne(testCase));
   }
   if (results.length === 0) {
-    logger.info(`No test files found in ${folder}`);
+    logger.debug(`No test files found in ${folder}`);
   }
   return results;
 }
@@ -594,8 +594,12 @@ async function rebuildOne(testCase: AgentTestCase): Promise<RebuildResult> {
  * that answers a `set_model_response` call, and it raises the workflow
  * human-in-the-loop requests itself. A parallel group is emitted in worker
  * index order, which is the order the workers are started in.
+ *
+ * @param events The recorded events after the opening user turn.
  */
-function buildMockResponses(events: readonly RecordedEvent[]): LlmResponse[] {
+export function buildMockResponses(
+  events: readonly RecordedEvent[],
+): LlmResponse[] {
   const recorded: Array<{author: string; content: Content}> = [];
   let afterSetModelResponse = false;
 
