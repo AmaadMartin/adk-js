@@ -10,36 +10,39 @@
  *
  * Every `it` title is the Python test function name, verbatim, so the two
  * suites can be compared name by name.
+ *
+ * The reference mocks `httpx.AsyncClient.get` and asserts the headers passed
+ * to it, `Authorization` among them. Here the credentials own the transport
+ * and add that header themselves, so the assertions below cover the headers
+ * the registry sets, and `gcp_skill_registry_test.ts` proves the bearer token
+ * on the wire against a real server.
  */
 
 import {GCPSkillRegistry} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {mergeTrackingHeaders} from '../../src/utils/client_labels.js';
+import {getTrackingHeaders} from '../../src/utils/client_labels.js';
 import {logger} from '../../src/utils/logger.js';
 import type {MtlsClientCerts} from '../../src/utils/mtls_utils.js';
 import {
   DEFAULT_BASE_URL,
-  FetchInit,
   RESOURCE_PARENT,
+  RecordedTransport,
+  Responder,
   TEST_LOCATION,
   TEST_PROJECT,
-  bytesResponse,
   createSkillZip,
   credentialsFor,
-  jsonResponse,
+  jsonBody,
+  stubTransport,
 } from './gcp_skill_registry_test_utils.js';
 
-const {
-  googleAuthMock,
-  getClientMock,
-  clientCertsToPresentMock,
-  getBytesWithClientCertMock,
-} = vi.hoisted(() => ({
-  googleAuthMock: vi.fn(),
-  getClientMock: vi.fn(),
-  clientCertsToPresentMock: vi.fn(),
-  getBytesWithClientCertMock: vi.fn(),
-}));
+const {googleAuthMock, getClientMock, clientCertsToPresentMock} = vi.hoisted(
+  () => ({
+    googleAuthMock: vi.fn(),
+    getClientMock: vi.fn(),
+    clientCertsToPresentMock: vi.fn(),
+  }),
+);
 
 vi.mock('google-auth-library', async (importOriginal) => ({
   ...(await importOriginal<typeof import('google-auth-library')>()),
@@ -49,7 +52,6 @@ vi.mock('google-auth-library', async (importOriginal) => ({
 vi.mock('../../src/utils/mtls_utils.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/utils/mtls_utils.js')>()),
   clientCertsToPresent: clientCertsToPresentMock,
-  getBytesWithClientCert: getBytesWithClientCertMock,
 }));
 
 const REVISION = `${RESOURCE_PARENT}/skills/my-skill/revisions/rev-123`;
@@ -57,32 +59,31 @@ const SKILL_URL = `${DEFAULT_BASE_URL}/${RESOURCE_PARENT}/skills/my-skill`;
 const REVISION_URL = `${DEFAULT_BASE_URL}/${REVISION}`;
 const SEARCH_URL = `${DEFAULT_BASE_URL}/${RESOURCE_PARENT}/skills:search`;
 
-const fetchMock = vi.fn<(url: string, init?: FetchInit) => Promise<Response>>();
+/** The credentials the registry resolves when the test passes none. */
+let credentials = credentialsFor('fake-token');
 
-/** The headers the registry is expected to put on the wire. */
-function expectedHeaders(
-  token: string,
-  quotaProject: string,
-): Record<string, string> {
-  return mergeTrackingHeaders({
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'x-goog-user-project': quotaProject,
-  });
-}
-
-/** Returns the headers the registry sent on its `nth` request. */
-function sentHeaders(nth: number): unknown {
-  return fetchMock.mock.calls[nth][1]?.headers;
+/** Installs `respond` on those credentials and records what they were asked. */
+function serve(respond: Responder): RecordedTransport {
+  return stubTransport(credentials, respond);
 }
 
 /** Answers the metadata call with `skillData`, and the media call with `zip`. */
-function serve(skillData: unknown, zip = createSkillZip()): void {
-  fetchMock.mockImplementation((url) =>
-    Promise.resolve(
-      url.includes('alt=media') ? bytesResponse(zip) : jsonResponse(skillData),
-    ),
+function serveSkill(
+  skillData: unknown,
+  zip = createSkillZip(),
+): RecordedTransport {
+  return serve((url) =>
+    url.includes('alt=media') ? {body: zip} : {body: jsonBody(skillData)},
   );
+}
+
+/** The headers the registry sets on every call, besides the bearer token. */
+function expectedHeaders(quotaProject: string): Record<string, string> {
+  return {
+    ...getTrackingHeaders(),
+    'Content-Type': 'application/json',
+    'x-goog-user-project': quotaProject,
+  };
 }
 
 describe('GCPSkillRegistry parity', () => {
@@ -92,42 +93,38 @@ describe('GCPSkillRegistry parity', () => {
     vi.stubEnv('AGENT_REGISTRY_ENDPOINT', undefined);
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
     vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
-    vi.stubGlobal('fetch', fetchMock);
 
-    fetchMock.mockReset();
-    getBytesWithClientCertMock.mockReset();
+    credentials = credentialsFor('fake-token');
     googleAuthMock.mockReset();
     getClientMock.mockReset();
     googleAuthMock.mockImplementation(() => ({getClient: getClientMock}));
-    getClientMock.mockResolvedValue(credentialsFor('fake-token'));
+    getClientMock.mockResolvedValue(credentials);
     clientCertsToPresentMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   it('test_get_skill_success', async () => {
-    serve({name: SKILL_URL, defaultRevision: REVISION});
+    const transport = serveSkill({name: SKILL_URL, defaultRevision: REVISION});
 
     const skill = await new GCPSkillRegistry().getSkill('my-skill');
 
     expect(skill.frontmatter.name).toBe('my-skill');
     expect(skill.frontmatter.description).toBe('test');
     expect(skill.instructions).toBe('# My Skill');
-    expect(skill.uri).toBe(REVISION_URL);
 
-    expect(fetchMock.mock.calls[0][0]).toBe(SKILL_URL);
-    expect(sentHeaders(0)).toEqual(expectedHeaders('fake-token', TEST_PROJECT));
-    expect(fetchMock.mock.calls[1][0]).toBe(`${REVISION_URL}?alt=media`);
-    expect(sentHeaders(1)).toEqual(expectedHeaders('fake-token', TEST_PROJECT));
+    expect(transport.calls[0].url).toBe(SKILL_URL);
+    expect(transport.calls[0].headers).toEqual(expectedHeaders(TEST_PROJECT));
+    expect(transport.calls[1].url).toBe(`${REVISION_URL}?alt=media`);
+    expect(transport.calls[1].headers).toEqual(expectedHeaders(TEST_PROJECT));
   });
 
   it('test_search_skills_success', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({
+    const transport = serve(() => ({
+      body: jsonBody({
         skills: [
           {
             name: `${RESOURCE_PARENT}/skills/skill1`,
@@ -139,7 +136,7 @@ describe('GCPSkillRegistry parity', () => {
           },
         ],
       }),
-    );
+    }));
 
     const results = await new GCPSkillRegistry().searchSkills('query');
 
@@ -147,11 +144,9 @@ describe('GCPSkillRegistry parity', () => {
       expect.objectContaining({name: 'skill1', description: 'Description 1'}),
       expect.objectContaining({name: 'skill2', description: 'Description 2'}),
     ]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      `${SEARCH_URL}?search_string=query`,
-    );
-    expect(sentHeaders(0)).toEqual(expectedHeaders('fake-token', TEST_PROJECT));
+    expect(transport.calls).toHaveLength(1);
+    expect(transport.calls[0].url).toBe(`${SEARCH_URL}?search_string=query`);
+    expect(transport.calls[0].headers).toEqual(expectedHeaders(TEST_PROJECT));
   });
 
   it.each([
@@ -164,8 +159,8 @@ describe('GCPSkillRegistry parity', () => {
     'test_search_skills_skips_entry_failing_validation [%s]',
     async (badName, badDescription) => {
       const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      fetchMock.mockResolvedValue(
-        jsonResponse({
+      serve(() => ({
+        body: jsonBody({
           skills: [
             {
               name: `${RESOURCE_PARENT}/skills/${badName}`,
@@ -177,11 +172,11 @@ describe('GCPSkillRegistry parity', () => {
             },
           ],
         }),
-      );
+      }));
 
       const results = await new GCPSkillRegistry().searchSkills('query');
 
-      expect(results.map((r) => r.name)).toEqual(['skill2']);
+      expect(results.map((hit) => hit.name)).toEqual(['skill2']);
       expect(results[0].description).toBe('Description 2');
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0][0]).toContain(badName);
@@ -192,8 +187,8 @@ describe('GCPSkillRegistry parity', () => {
     'test_search_skills_skips_entry_whose_name_is_not_a_string [%j]',
     async (rawName) => {
       const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      fetchMock.mockResolvedValue(
-        jsonResponse({
+      serve(() => ({
+        body: jsonBody({
           skills: [
             {name: rawName, description: 'Description 1'},
             {
@@ -202,27 +197,28 @@ describe('GCPSkillRegistry parity', () => {
             },
           ],
         }),
-      );
+      }));
 
       const results = await new GCPSkillRegistry().searchSkills('query');
 
-      expect(results.map((r) => r.name)).toEqual(['skill2']);
+      expect(results.map((hit) => hit.name)).toEqual(['skill2']);
       expect(warn).toHaveBeenCalledTimes(1);
     },
   );
 
   it('test_registry_requests_identify_adk', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({skills: []}));
+    const transport = serve(() => ({body: jsonBody({skills: []})}));
 
     await new GCPSkillRegistry().searchSkills('query');
 
-    const headers = sentHeaders(0) as Record<string, string>;
-    expect(headers['x-goog-api-client']).toContain('google-adk/');
-    expect(headers['user-agent']).toContain('google-adk/');
+    expect(transport.calls[0].headers).toMatchObject({
+      'x-goog-api-client': expect.stringContaining('google-adk/'),
+      'user-agent': expect.stringContaining('google-adk/'),
+    });
   });
 
   it('test_get_skill_raises_on_missing_zip', async () => {
-    serve({name: SKILL_URL});
+    serveSkill({name: SKILL_URL});
 
     await expect(new GCPSkillRegistry().getSkill('my-skill')).rejects.toThrow(
       "Skill 'my-skill' does not contain default revision.",
@@ -230,7 +226,7 @@ describe('GCPSkillRegistry parity', () => {
   });
 
   it('test_get_skill_raises_on_zip_slip', async () => {
-    serve(
+    serveSkill(
       {name: SKILL_URL, defaultRevision: REVISION},
       createSkillZip(undefined, '../evil.txt'),
     );
@@ -241,7 +237,7 @@ describe('GCPSkillRegistry parity', () => {
   });
 
   it('test_get_skill_raises_on_invalid_skill_name', async () => {
-    serve(
+    serveSkill(
       {name: SKILL_URL, defaultRevision: REVISION},
       createSkillZip(
         '---\nname: ../evil\ndescription: test\n---\n# My Skill\n',
@@ -265,25 +261,26 @@ describe('GCPSkillRegistry parity', () => {
   ])(
     'test_get_skill_rejects_unsafe_name_before_any_request [%j]',
     async (unsafeName) => {
+      const transport = serveSkill({defaultRevision: REVISION});
+
       await expect(new GCPSkillRegistry().getSkill(unsafeName)).rejects.toThrow(
         'Invalid skill name',
       );
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(transport.calls).toHaveLength(0);
     },
   );
 
   it.each(['my-skill', 'my_skill', 'skill2'])(
     'test_get_skill_builds_expected_url_for_valid_name [%s]',
     async (validName) => {
-      const revision = `${RESOURCE_PARENT}/skills/${validName}/revisions/rev-123`;
-      serve({
+      const transport = serveSkill({
         name: `${RESOURCE_PARENT}/skills/${validName}`,
-        defaultRevision: revision,
+        defaultRevision: `${RESOURCE_PARENT}/skills/${validName}/revisions/rev-123`,
       });
 
       await new GCPSkillRegistry().getSkill(validName);
 
-      expect(fetchMock.mock.calls[0][0]).toBe(
+      expect(transport.calls[0].url).toBe(
         `${DEFAULT_BASE_URL}/${RESOURCE_PARENT}/skills/${validName}`,
       );
     },
@@ -316,52 +313,42 @@ describe('GCPSkillRegistry parity', () => {
 
   it('test_get_skill_with_mtls', async () => {
     const certs: MtlsClientCerts = {cert: 'fake-cert', key: 'fake-key'};
-    const mtlsRevision = `${RESOURCE_PARENT}/skills/my-skill/revisions/rev-123`;
     const mtlsBase = 'https://agentregistry.mtls.googleapis.com/v1alpha';
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
     clientCertsToPresentMock.mockResolvedValue(certs);
-    getBytesWithClientCertMock.mockImplementation((url: string) =>
-      Promise.resolve(
-        url.includes('alt=media')
-          ? {status: 200, body: createSkillZip()}
-          : {
-              status: 200,
-              body: Buffer.from(
-                JSON.stringify({defaultRevision: mtlsRevision}),
-                'utf-8',
-              ),
-            },
-      ),
-    );
+    const transport = serveSkill({
+      defaultRevision: `${RESOURCE_PARENT}/skills/my-skill/revisions/rev-123`,
+    });
 
     const skill = await new GCPSkillRegistry().getSkill('my-skill');
 
     expect(skill.frontmatter.name).toBe('my-skill');
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(getBytesWithClientCertMock).toHaveBeenCalledTimes(2);
-    expect(getBytesWithClientCertMock.mock.calls[0][0]).toBe(
+    expect(transport.calls).toHaveLength(2);
+    expect(transport.calls[0].url).toBe(
       `${mtlsBase}/${RESOURCE_PARENT}/skills/my-skill`,
     );
-    expect(getBytesWithClientCertMock.mock.calls[0][2]).toBe(certs);
-    expect(getBytesWithClientCertMock.mock.calls[1][2]).toBe(certs);
-    // The certificate provider is a child process, so it runs once per
-    // registry however many requests the call makes.
+    for (const call of transport.calls) {
+      expect(call.agent).toHaveProperty('options.cert', 'fake-cert');
+      expect(call.agent).toHaveProperty('options.key', 'fake-key');
+    }
+    // The certificate provider is a child process and an agent owns a
+    // connection pool, so both are built once however many requests are made.
     expect(clientCertsToPresentMock).toHaveBeenCalledTimes(1);
+    expect(transport.calls[0].agent).toBe(transport.calls[1].agent);
   });
 
   it('test_use_custom_credentials', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({skills: []}));
+    const custom = credentialsFor('custom-token', 'custom-quota-project');
+    const transport = stubTransport(custom, () => ({
+      body: jsonBody({skills: []}),
+    }));
 
-    await new GCPSkillRegistry({
-      credentials: credentialsFor('custom-token', 'custom-quota-project'),
-    }).searchSkills('query');
+    await new GCPSkillRegistry({credentials: custom}).searchSkills('query');
 
     expect(getClientMock).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      `${SEARCH_URL}?search_string=query`,
-    );
-    expect(sentHeaders(0)).toEqual(
-      expectedHeaders('custom-token', 'custom-quota-project'),
+    expect(transport.calls[0].url).toBe(`${SEARCH_URL}?search_string=query`);
+    expect(transport.calls[0].headers).toEqual(
+      expectedHeaders('custom-quota-project'),
     );
   });
 });

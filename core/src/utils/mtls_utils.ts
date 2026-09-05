@@ -6,8 +6,6 @@
 
 import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs/promises';
-import {IncomingMessage} from 'node:http';
-import * as https from 'node:https';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
@@ -15,8 +13,8 @@ import {formatError} from './error_utils.js';
 import {logger} from './logger.js';
 
 /**
- * Resolves the regional API host to call, choosing the mutual-TLS host when
- * the environment asks for it.
+ * Chooses the API host to call, picking the mutual-TLS one when the
+ * environment asks for it.
  *
  * `GOOGLE_API_USE_MTLS_ENDPOINT` selects the host: `always` picks the
  * mutual-TLS one, `never` picks the default one, and `auto` picks the
@@ -25,24 +23,19 @@ import {logger} from './logger.js';
  * insensitively, and on every call, so a process that changes one between
  * calls is honoured.
  *
- * @param location Region the endpoint serves, for example `us-central1`.
- * @param defaultTemplate Host template with a `{location}` placeholder.
- * @param mtlsTemplate Mutual-TLS host template with a `{location}` placeholder.
+ * @param defaultEndpoint The host to call without mutual TLS.
+ * @param mtlsEndpoint The mutual-TLS host.
  */
 export function getApiEndpoint(
-  location: string,
-  defaultTemplate: string,
-  mtlsTemplate: string,
+  defaultEndpoint: string,
+  mtlsEndpoint: string,
 ): string {
   const setting = readMtlsEndpointSetting();
   const useMtls =
     setting === MtlsEndpointSetting.ALWAYS ||
     (setting !== MtlsEndpointSetting.NEVER &&
       (process.env[USE_CLIENT_CERTIFICATE_ENV] ?? '').toLowerCase() === 'true');
-  return (useMtls ? mtlsTemplate : defaultTemplate).replace(
-    '{location}',
-    () => location,
-  );
+  return useMtls ? mtlsEndpoint : defaultEndpoint;
 }
 
 /** How `GOOGLE_API_USE_MTLS_ENDPOINT` picks between the two endpoints. */
@@ -301,59 +294,4 @@ export async function clientCertsToPresent(): Promise<
     );
     return undefined;
   }
-}
-
-/** The status and the body of one response, as raw bytes. */
-export interface BytesResponse {
-  status: number;
-  body: Buffer;
-}
-
-/**
- * Sends one GET that presents a client certificate and returns raw bytes.
- *
- * `globalThis.fetch` cannot present a client certificate in Node, which is why
- * this transport is `node:https`. The body is never decoded, so the same call
- * serves a JSON document and a zip archive.
- *
- * @param url The absolute URL to request.
- * @param headers The request headers.
- * @param certs The certificate material to present.
- * @param timeoutMs How long the request may take before it is destroyed.
- */
-export function getBytesWithClientCert(
-  url: string,
-  headers: Record<string, string>,
-  certs: MtlsClientCerts,
-  timeoutMs: number,
-): Promise<BytesResponse> {
-  return new Promise((resolve, reject) => {
-    const collect = (response: IncomingMessage) => {
-      const chunks: Buffer[] = [];
-      response.on('data', (chunk: Buffer) => {
-        chunks.push(chunk);
-      });
-      response.on('error', reject);
-      response.on('end', () => {
-        resolve({
-          status: response.statusCode ?? 0,
-          body: Buffer.concat(chunks),
-        });
-      });
-    };
-
-    const request = https.request(
-      url,
-      {headers, timeout: timeoutMs, agent: new https.Agent(certs)},
-      collect,
-    );
-    // A timeout only fires the event; the request stays open until destroyed.
-    request.on('timeout', () => {
-      request.destroy(
-        new Error(`Request timed out after ${timeoutMs} ms: ${url}`),
-      );
-    });
-    request.on('error', reject);
-    request.end();
-  });
 }

@@ -6,23 +6,26 @@
 
 /**
  * Behaviour of GCPSkillRegistry that the adk-python reference suite does not
- * cover: unresolved configuration, the endpoint override on both calls, and
- * the transport failure paths.
+ * cover: unresolved configuration, the endpoint override on both calls, the
+ * transport failure paths, and what actually reaches the wire.
  */
 
 import {GCPSkillRegistry} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {getTrackingHeaders} from '../../src/utils/client_labels.js';
 import {logger} from '../../src/utils/logger.js';
 import {
   DEFAULT_BASE_URL,
-  FetchInit,
   RESOURCE_PARENT,
+  RegistryServer,
+  Responder,
   TEST_LOCATION,
   TEST_PROJECT,
-  bytesResponse,
   createSkillZip,
   credentialsFor,
-  jsonResponse,
+  jsonBody,
+  startRegistryServer,
+  stubTransport,
 } from './gcp_skill_registry_test_utils.js';
 
 const {googleAuthMock, getClientMock, clientCertsToPresentMock} = vi.hoisted(
@@ -45,33 +48,34 @@ vi.mock('../../src/utils/mtls_utils.js', async (importOriginal) => ({
 
 const REVISION = `${RESOURCE_PARENT}/skills/my-skill/revisions/rev-123`;
 
-const fetchMock = vi.fn<(url: string, init?: FetchInit) => Promise<Response>>();
-
-/** Returns the headers the registry sent on its `nth` request. */
-function sentHeaders(nth: number): Record<string, string> {
-  return fetchMock.mock.calls[nth][1]?.headers as Record<string, string>;
+/** Answers the metadata call with `skillData`, and the media call with a zip. */
+function skillResponder(skillData: unknown): Responder {
+  return (url) =>
+    url.includes('alt=media')
+      ? {body: createSkillZip()}
+      : {body: jsonBody(skillData)};
 }
 
 describe('GCPSkillRegistry', () => {
+  let credentials = credentialsFor('fake-token');
+
   beforeEach(() => {
     vi.stubEnv('GOOGLE_CLOUD_PROJECT', TEST_PROJECT);
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', TEST_LOCATION);
     vi.stubEnv('AGENT_REGISTRY_ENDPOINT', undefined);
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
     vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
-    vi.stubGlobal('fetch', fetchMock);
 
-    fetchMock.mockReset();
+    credentials = credentialsFor('fake-token');
     googleAuthMock.mockReset();
     getClientMock.mockReset();
     googleAuthMock.mockImplementation(() => ({getClient: getClientMock}));
-    getClientMock.mockResolvedValue(credentialsFor('fake-token'));
+    getClientMock.mockResolvedValue(credentials);
     clientCertsToPresentMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -106,37 +110,30 @@ describe('GCPSkillRegistry', () => {
 
     it('sends both calls of a fetch to the endpoint override', async () => {
       vi.stubEnv('AGENT_REGISTRY_ENDPOINT', 'https://staging.endpoint.com');
-      fetchMock.mockImplementation((url) =>
-        Promise.resolve(
-          url.includes('alt=media')
-            ? bytesResponse(createSkillZip())
-            : jsonResponse({defaultRevision: REVISION}),
-        ),
+      const transport = stubTransport(
+        credentials,
+        skillResponder({defaultRevision: REVISION}),
       );
 
-      const skill = await new GCPSkillRegistry().getSkill('my-skill');
+      await new GCPSkillRegistry().getSkill('my-skill');
 
-      expect(fetchMock.mock.calls[0][0]).toBe(
+      expect(transport.calls.map((call) => call.url)).toEqual([
         `https://staging.endpoint.com/${RESOURCE_PARENT}/skills/my-skill`,
-      );
-      expect(fetchMock.mock.calls[1][0]).toBe(
         `https://staging.endpoint.com/${REVISION}?alt=media`,
-      );
-      expect(skill.uri).toBe(`https://staging.endpoint.com/${REVISION}`);
+      ]);
     });
 
     it('reads the revision from the snake_case field', async () => {
-      fetchMock.mockImplementation((url) =>
-        Promise.resolve(
-          url.includes('alt=media')
-            ? bytesResponse(createSkillZip())
-            : jsonResponse({default_revision: REVISION}),
-        ),
+      const transport = stubTransport(
+        credentials,
+        skillResponder({default_revision: REVISION}),
       );
 
-      const skill = await new GCPSkillRegistry().getSkill('my-skill');
+      await new GCPSkillRegistry().getSkill('my-skill');
 
-      expect(skill.uri).toBe(`${DEFAULT_BASE_URL}/${REVISION}`);
+      expect(transport.calls[1].url).toBe(
+        `${DEFAULT_BASE_URL}/${REVISION}?alt=media`,
+      );
     });
   });
 
@@ -150,25 +147,10 @@ describe('GCPSkillRegistry', () => {
         'Failed to get default Google Cloud credentials: no ADC on this' +
           ' machine',
       );
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('bills the project when the credentials carry no quota project', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({skills: []}));
-
-      await new GCPSkillRegistry().searchSkills('query');
-
-      expect(sentHeaders(0)['x-goog-user-project']).toBe(TEST_PROJECT);
     });
 
     it('resolves the credentials once for the two calls of a fetch', async () => {
-      fetchMock.mockImplementation((url) =>
-        Promise.resolve(
-          url.includes('alt=media')
-            ? bytesResponse(createSkillZip())
-            : jsonResponse({defaultRevision: REVISION}),
-        ),
-      );
+      stubTransport(credentials, skillResponder({defaultRevision: REVISION}));
 
       await new GCPSkillRegistry().getSkill('my-skill');
 
@@ -178,9 +160,10 @@ describe('GCPSkillRegistry', () => {
 
   describe('transport failures', () => {
     it('reports the status and the body of a non-2xx response', async () => {
-      fetchMock.mockResolvedValue(
-        new Response('skill not found', {status: 404}),
-      );
+      stubTransport(credentials, () => ({
+        status: 404,
+        body: Buffer.from('skill not found', 'utf-8'),
+      }));
 
       await expect(new GCPSkillRegistry().getSkill('my-skill')).rejects.toThrow(
         'API request failed with status 404: skill not found',
@@ -188,7 +171,9 @@ describe('GCPSkillRegistry', () => {
     });
 
     it('reports a transport error that carries no status', async () => {
-      fetchMock.mockRejectedValue(new Error('getaddrinfo ENOTFOUND'));
+      vi.spyOn(credentials, 'request').mockRejectedValue(
+        new Error('getaddrinfo ENOTFOUND'),
+      );
 
       await expect(
         new GCPSkillRegistry().searchSkills('query'),
@@ -198,7 +183,7 @@ describe('GCPSkillRegistry', () => {
 
   describe('searchSkills', () => {
     it('returns nothing for a response that carries no skills array', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({}));
+      stubTransport(credentials, () => ({body: jsonBody({})}));
 
       await expect(
         new GCPSkillRegistry().searchSkills('query'),
@@ -207,14 +192,14 @@ describe('GCPSkillRegistry', () => {
 
     it('skips a hit that is not an object at all', async () => {
       const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-      fetchMock.mockResolvedValue(
-        jsonResponse({
+      stubTransport(credentials, () => ({
+        body: jsonBody({
           skills: [
             'projects/p/locations/l/skills/skill1',
             {name: `${RESOURCE_PARENT}/skills/skill2`, description: 'kept'},
           ],
         }),
-      );
+      }));
 
       const results = await new GCPSkillRegistry().searchSkills('query');
 
@@ -223,13 +208,81 @@ describe('GCPSkillRegistry', () => {
     });
 
     it('encodes a query that carries URL punctuation', async () => {
-      fetchMock.mockResolvedValue(jsonResponse({skills: []}));
+      const transport = stubTransport(credentials, () => ({
+        body: jsonBody({skills: []}),
+      }));
 
       await new GCPSkillRegistry().searchSkills('a&b=c d');
 
-      expect(fetchMock.mock.calls[0][0]).toBe(
+      expect(transport.calls[0].url).toBe(
         `${DEFAULT_BASE_URL}/${RESOURCE_PARENT}` +
           '/skills:search?search_string=a%26b%3Dc+d',
+      );
+    });
+  });
+
+  // These drive a real HTTP server and real credentials, with nothing mocked
+  // below the registry, so they show what a request actually carries. The
+  // bearer token is the point: the credentials add it, not the registry, so no
+  // assertion on the registry's own headers can prove it was sent.
+  describe('against a real server', () => {
+    let server: RegistryServer;
+
+    afterEach(async () => {
+      await server.close();
+    });
+
+    /** Starts the server and points the registry at it. */
+    async function serveOn(respond: Responder): Promise<void> {
+      server = await startRegistryServer(respond);
+      vi.stubEnv('AGENT_REGISTRY_ENDPOINT', server.baseUrl);
+    }
+
+    it('loads a skill over two requests that carry the bearer token', async () => {
+      await serveOn(skillResponder({defaultRevision: REVISION}));
+
+      const skill = await new GCPSkillRegistry().getSkill('my-skill');
+
+      expect(skill.frontmatter.name).toBe('my-skill');
+      expect(server.requests.map((request) => request.url)).toEqual([
+        `/${RESOURCE_PARENT}/skills/my-skill`,
+        `/${REVISION}?alt=media`,
+      ]);
+      for (const request of server.requests) {
+        expect(request.headers.authorization).toBe('Bearer fake-token');
+        expect(request.headers['x-goog-user-project']).toBe(TEST_PROJECT);
+        expect(request.headers['x-goog-api-client']).toBe(
+          getTrackingHeaders()['x-goog-api-client'],
+        );
+        expect(request.headers['user-agent']).toContain('google-adk/');
+      }
+    });
+
+    it('bills the quota project the credentials name', async () => {
+      await serveOn(() => ({body: jsonBody({skills: []})}));
+
+      await new GCPSkillRegistry({
+        credentials: credentialsFor('custom-token', 'custom-quota-project'),
+      }).searchSkills('query');
+
+      expect(server.requests[0].headers.authorization).toBe(
+        'Bearer custom-token',
+      );
+      expect(server.requests[0].headers['x-goog-user-project']).toBe(
+        'custom-quota-project',
+      );
+    });
+
+    it('reports the body of a non-2xx response the server sent', async () => {
+      await serveOn(() => ({
+        status: 403,
+        body: Buffer.from('caller has no access', 'utf-8'),
+      }));
+
+      await expect(
+        new GCPSkillRegistry().searchSkills('query'),
+      ).rejects.toThrow(
+        'API request failed with status 403: caller has no access',
       );
     });
   });

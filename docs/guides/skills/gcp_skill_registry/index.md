@@ -112,8 +112,7 @@ too.
 
 `getSkill(name)` makes two requests. The first reads the skill resource and its
 `defaultRevision`; the second downloads that revision with `alt=media` and gets
-the zip archive. The loaded skill records the revision URL it came from in
-`skill.uri`.
+the zip archive.
 
 A skill whose resource names no `defaultRevision` fails with `Skill '<name>'
 does not contain default revision.` — there is nothing to download.

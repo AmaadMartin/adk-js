@@ -5,16 +5,12 @@
  */
 
 import {AuthClient, GoogleAuth} from 'google-auth-library';
-import {mergeTrackingHeaders} from '../utils/client_labels.js';
+import * as https from 'node:https';
+import {getTrackingHeaders} from '../utils/client_labels.js';
 import {formatError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
-import {
-  clientCertsToPresent,
-  getApiEndpoint,
-  getBytesWithClientCert,
-  MtlsClientCerts,
-} from '../utils/mtls_utils.js';
+import {clientCertsToPresent, getApiEndpoint} from '../utils/mtls_utils.js';
 import {loadSkillFromZipBuffer} from './loader.js';
 import {
   Frontmatter,
@@ -95,7 +91,7 @@ export class GCPSkillRegistry implements SkillRegistry {
   readonly baseUrl: string;
   private readonly resourceParent: string;
   private credentials?: AuthClient;
-  private certs?: Promise<MtlsClientCerts | undefined>;
+  private agent?: Promise<https.Agent | undefined>;
 
   constructor(options: GCPSkillRegistryOptions = {}) {
     const projectId = options.projectId || process.env['GOOGLE_CLOUD_PROJECT'];
@@ -111,7 +107,7 @@ export class GCPSkillRegistry implements SkillRegistry {
     this.resourceParent = `projects/${projectId}/locations/${location}`;
     this.baseUrl =
       process.env[ENDPOINT_ENV] ||
-      getApiEndpoint('', DEFAULT_ENDPOINT, MTLS_ENDPOINT);
+      getApiEndpoint(DEFAULT_ENDPOINT, MTLS_ENDPOINT);
     this.credentials = options.credentials;
   }
 
@@ -140,12 +136,9 @@ export class GCPSkillRegistry implements SkillRegistry {
       throw new Error(`Skill '${name}' does not contain default revision.`);
     }
 
-    const revisionUrl = `${this.baseUrl}/${defaultRevision}`;
-    const skill = loadSkillFromZipBuffer(
-      await this.get(revisionUrl, {alt: 'media'}),
+    return loadSkillFromZipBuffer(
+      await this.get(`${this.baseUrl}/${defaultRevision}`, {alt: 'media'}),
     );
-    skill.uri = revisionUrl;
-    return skill;
   }
 
   async searchSkills(query: string): Promise<Frontmatter[]> {
@@ -162,12 +155,10 @@ export class GCPSkillRegistry implements SkillRegistry {
   }
 
   /**
-   * Resolves the credentials, then returns the headers every call carries.
-   *
-   * Application default credentials are resolved on the first request rather
-   * than in the constructor, so building a registry costs no I/O.
+   * Returns the credentials, resolving application default credentials on the
+   * first call so that building a registry costs no I/O.
    */
-  private async getHeaders(): Promise<Record<string, string>> {
+  private async resolveCredentials(): Promise<AuthClient> {
     if (!this.credentials) {
       try {
         this.credentials = await new GoogleAuth({
@@ -175,60 +166,49 @@ export class GCPSkillRegistry implements SkillRegistry {
         }).getClient();
       } catch (error: unknown) {
         throw new Error(
-          `Failed to get default Google Cloud credentials: ${formatError(
-            error,
-          )}`,
+          `Failed to get default Google Cloud credentials: ${formatError(error)}`,
         );
       }
     }
-    const {token} = await this.credentials.getAccessToken();
-    return mergeTrackingHeaders({
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'x-goog-user-project': this.credentials.quotaProjectId || this.projectId,
-    });
+    return this.credentials;
   }
 
   /**
    * Sends one authenticated GET and returns the body as raw bytes.
    *
    * The body is never decoded here, so the same call serves the JSON skill
-   * metadata and the zip archive of a revision. A configured client
-   * certificate is presented on the connection, which `globalThis.fetch`
-   * cannot do in Node.
+   * metadata and the zip archive of a revision. The credentials own the
+   * transport, so they add the bearer token themselves; a configured client
+   * certificate travels on the agent.
    */
   private async get(
     url: string,
     params?: Record<string, string>,
   ): Promise<Buffer> {
-    const target = params
-      ? `${url}?${new URLSearchParams(params).toString()}`
-      : url;
-    const headers = await this.getHeaders();
-    // The certificate provider is a child process, so the load runs at most
-    // once per registry.
-    this.certs ??= clientCertsToPresent();
-    const certs = await this.certs;
+    const credentials = await this.resolveCredentials();
+    // The certificate provider is a child process, and an agent owns a
+    // connection pool, so both are built at most once per registry.
+    this.agent ??= clientCertsToPresent().then(
+      (certs) => certs && new https.Agent(certs),
+    );
 
     let status: number;
     let body: Buffer;
     try {
-      if (certs) {
-        ({status, body} = await getBytesWithClientCert(
-          target,
-          headers,
-          certs,
-          REQUEST_TIMEOUT_MS,
-        ));
-      } else {
-        const response = await fetch(target, {
-          method: 'GET',
-          headers,
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        status = response.status;
-        body = Buffer.from(await response.arrayBuffer());
-      }
+      const response = await credentials.request<ArrayBuffer>({
+        url: params ? `${url}?${new URLSearchParams(params).toString()}` : url,
+        headers: {
+          ...getTrackingHeaders(),
+          'Content-Type': 'application/json',
+          'x-goog-user-project': credentials.quotaProjectId || this.projectId,
+        },
+        responseType: 'arraybuffer',
+        timeout: REQUEST_TIMEOUT_MS,
+        agent: await this.agent,
+        validateStatus: () => true,
+      });
+      status = response.status;
+      body = Buffer.from(response.data);
     } catch (error: unknown) {
       throw new Error(`API request failed: ${formatError(error)}`);
     }
