@@ -90,15 +90,20 @@ describe('tool connection map', () => {
       expect(() => statefulParameterFromJson(json)).toThrow(/creatingTools/);
     });
 
-    it('rejects an unknown key', () => {
+    // pydantic ignores an extra field, so adk-js drops it too. A misspelled
+    // required field still fails, because it leaves that field missing.
+    it('drops an unknown key', () => {
       const json =
-        '{"parameter_name": "ticket_id", "creatingTools": [],' +
-        ' "consumingTools": []}';
+        '{"parameterName": "ticket_id", "creatingTools": [],' +
+        ' "consumingTools": [], "confidence": 0.9}';
 
-      expect(() => statefulParameterFromJson(json)).toThrow(
-        InputValidationError,
-      );
-      expect(() => statefulParameterFromJson(json)).toThrow(/parameter_name/);
+      const parameter = statefulParameterFromJson(json);
+
+      expect(parameter).toEqual({
+        parameterName: 'ticket_id',
+        creatingTools: [],
+        consumingTools: [],
+      });
     });
   });
 
@@ -123,14 +128,24 @@ describe('tool connection map', () => {
       expect(() => toolConnectionMapFromJson(json)).toThrow(/consumingTools/);
     });
 
-    it('rejects an unknown key', () => {
+    it('drops an unknown key', () => {
+      const json = '{"statefulParameters": [], "notes": "extra"}';
+
+      expect(toolConnectionMapFromJson(json)).toEqual({
+        statefulParameters: [],
+      });
+    });
+
+    // The wire spelling is an unknown key to the factory, so it leaves the
+    // camelCase field missing rather than being read as it.
+    it('rejects the snake_case wire spelling, which the parse accepts', () => {
       const json = '{"stateful_parameters": []}';
 
       expect(() => toolConnectionMapFromJson(json)).toThrow(
         InputValidationError,
       );
       expect(() => toolConnectionMapFromJson(json)).toThrow(
-        /stateful_parameters/,
+        /statefulParameters/,
       );
     });
   });

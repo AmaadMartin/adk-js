@@ -98,23 +98,12 @@ analyzer prompt fixes those names in the reply it asks a model for. The
 in-process fields are camelCase, which is the adk-js convention. The parse is
 the boundary between the two.
 
-## Unknown keys: rejected by a factory, dropped by the parse
+## An unknown key is dropped
 
-The two entry points disagree on purpose.
-
-A factory rejects a key it does not know, so a misspelled field fails loudly.
-This includes the wire spelling, so `parameter_name` is a key the factory
-rejects:
-
-```ts
-createStatefulParameter(JSON.parse('{"parameter_name": "ticket_id"}'));
-// InputValidationError: Invalid StatefulParameter: ...
-```
-
-`parseToolConnectionMap` drops an unknown key instead. Its input comes from a
-language model, which may add a field the prompt never asked for, and one extra
-field is not a reason to lose the whole map. A dropped key never reaches the
-returned object:
+Every entry point drops a key it does not know, which is what a plain pydantic
+model does. A language model may add a field the prompt never asked for, and
+one extra field is not a reason to lose the whole map. A dropped key never
+reaches the returned object:
 
 ```ts
 parseToolConnectionMap({
@@ -130,8 +119,16 @@ parseToolConnectionMap({
 // {statefulParameters: [{parameterName: 'ticket_id', ...}]} — no confidence
 ```
 
-A missing or wrong-typed field is still an error on both paths, and both throw
-`InputValidationError`.
+A missing or wrong-typed field is still an error, and both entry points throw
+`InputValidationError`. Because every field is required, a misspelled field
+name still fails: it leaves the field it meant to set missing. That is how a
+factory rejects the wire spelling, which only the parse understands:
+
+```ts
+createToolConnectionMap(JSON.parse('{"stateful_parameters": []}'));
+// InputValidationError: Invalid ToolConnectionMap: ✖ Invalid input:
+// expected array, received undefined → at statefulParameters
+```
 
 ## Turning the feature off
 

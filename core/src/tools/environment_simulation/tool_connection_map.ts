@@ -41,32 +41,17 @@ export interface ToolConnectionMap {
 }
 
 // The schemas below stay module-private: the interfaces and the functions are
-// the public surface.
-//
-// `strictObject` rejects an unknown key. That is deliberately stricter than
-// adk-python, whose models are plain `BaseModel` and therefore drop an unknown
-// key in silence. A factory that also receives parsed JSON is the wrong place
-// to swallow a misspelled field.
+// the public surface. `z.object` drops an unknown key rather than rejecting
+// it, which is what a plain pydantic `BaseModel` does.
 
-const statefulParameterShape = {
+const statefulParameterSchema = z.object({
   parameterName: z.string(),
   creatingTools: z.array(z.string()),
   consumingTools: z.array(z.string()),
-};
-
-const statefulParameterSchema = z.strictObject(statefulParameterShape);
-
-const toolConnectionMapSchema = z.strictObject({
-  statefulParameters: z.array(statefulParameterSchema),
 });
 
-// The parse schemas share that shape but drop an unknown key instead of
-// rejecting it, which is what pydantic does. Their input is a document a
-// language model produced, and the model may volunteer a field the prompt
-// never asked for.
-
-const parsedToolConnectionMapSchema = z.object({
-  statefulParameters: z.array(z.object(statefulParameterShape)),
+const toolConnectionMapSchema = z.object({
+  statefulParameters: z.array(statefulParameterSchema),
 });
 
 function assertFeatureEnabled(): void {
@@ -99,7 +84,7 @@ function parseOrThrow<S extends z.ZodType>(
  * @returns A validated, freshly built {@link StatefulParameter}.
  * @throws {Error} When the `ENVIRONMENT_SIMULATION` feature is disabled.
  * @throws {InputValidationError} When a field is missing or has the wrong
- *     type, or when `params` carries an unknown key.
+ *     type. An unknown key is dropped, as pydantic drops one.
  */
 export function createStatefulParameter(
   params: StatefulParameter,
@@ -118,8 +103,8 @@ export function createStatefulParameter(
  *     mutated.
  * @returns A validated, freshly built {@link ToolConnectionMap}.
  * @throws {Error} When the `ENVIRONMENT_SIMULATION` feature is disabled.
- * @throws {InputValidationError} When a nested parameter is invalid, or when
- *     `params` carries an unknown key.
+ * @throws {InputValidationError} When a nested parameter is invalid. An
+ *     unknown key is dropped, as pydantic drops one.
  */
 export function createToolConnectionMap(
   params: ToolConnectionMap,
@@ -152,7 +137,7 @@ export function createToolConnectionMap(
  */
 export function parseToolConnectionMap(value: unknown): ToolConnectionMap {
   return parseOrThrow(
-    parsedToolConnectionMapSchema,
+    toolConnectionMapSchema,
     'ToolConnectionMap',
     camelCaseKeys(value),
   );
