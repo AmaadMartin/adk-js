@@ -8,10 +8,6 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
-### Sessions
-
-- [Evaluation sessions and the session listing](sessions/eval_sessions/index.md) - The reserved session id prefix, and why an evaluation session you can fetch by id is missing from the list.
-
 ### Tools
 
 #### Retrieval
