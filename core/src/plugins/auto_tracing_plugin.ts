@@ -50,7 +50,13 @@ const MAX_WALK_NODES = 10000;
 /** Property name that holds a prototype's own class, never instrumented. */
 const CONSTRUCTOR_KEY = 'constructor';
 
-/** Tracer used when the caller supplies none. */
+/**
+ * Instrumentation scope used when the caller supplies no tracer.
+ *
+ * A scope of the plugin's own, so these spans are distinguishable from the
+ * framework spans ADK emits on `gcp.vertex.agent`. The reference makes the
+ * same choice with `trace.get_tracer(__name__)`.
+ */
 const DEFAULT_TRACER_NAME = 'gcp.vertex.agent.auto_tracing';
 
 /** Bounds carried through one instrumentation pass. */
@@ -129,7 +135,10 @@ function constructorNameOf(prototype: object): string | undefined {
 export interface AutoTracingPluginOptions {
   /** Plugin instance identifier. Defaults to `AutoTracingPlugin`. */
   name?: string;
-  /** Tracer the wrappers emit spans on. Defaults to the ADK tracer. */
+  /**
+   * Tracer the wrappers emit spans on. Defaults to a tracer on the
+   * `gcp.vertex.agent.auto_tracing` scope.
+   */
   tracer?: Tracer;
   /**
    * Extra objects to instrument, for functions the agent graph does not
@@ -148,7 +157,8 @@ export interface AutoTracingPluginOptions {
  * Emits an OpenTelemetry span for every public function an agent can reach.
  *
  * Add it to an `App` and each reached function is replaced by a wrapper that
- * opens a span named `Owner.method`, records the call's arguments as
+ * opens a span named after the function -- `Owner.method` for a method on a
+ * class prototype, the bare name otherwise -- records the call's arguments as
  * `adk.fn.arg.*`, and records the result as `adk.fn.return` or the failure as
  * `adk.fn.exc_type` and `adk.fn.exc_repr`. Arguments and fields whose names
  * mark them as credentials are dropped or masked before anything is written.

@@ -14,8 +14,9 @@
  * Run (needs a model key):
  *   npm run sample -- samples/plugins/auto_tracing/agent.ts
  *
- * Ask about Paris. The console exporter prints a `cityFacts.lookupCity` span
- * and, nested under it, a `cityFacts.format` span.
+ * Ask about Paris. The console exporter prints a `lookupCity` span and,
+ * nested under it, a `format` span. The names are bare because `cityFacts` is
+ * a plain object; a method on a class prototype is named `Owner.method`.
  *
  * `cityFacts` is passed as an `extraTarget` because the agent graph does not
  * reach it: the tool closes over it, and a closure is not walkable.

@@ -477,6 +477,46 @@ describe('AutoTracingPlugin — wrapper shapes', () => {
     expect(attributes['adk.fn.exc_type']).toBe('RangeError');
   });
 
+  it('awaits a thenable that is not a promise', async () => {
+    const bag = {
+      settleLater(): unknown {
+        return {
+          then(resolve: (value: number) => void): void {
+            resolve(7);
+          },
+        };
+      },
+    };
+    await instrument([bag]);
+
+    expect(await bag.settleLater()).toBe(7);
+
+    // The wrapper awaits the thenable inside the span, so the attribute holds
+    // the settled value rather than the thenable itself.
+    expect(attributesOf('settleLater')['adk.fn.return']).toBe('7');
+  });
+
+  it('ends the span of an async generator a consumer abandons early', async () => {
+    const bag = {
+      async *counter(): AsyncGenerator<number> {
+        for (let i = 0; i < 10; i++) {
+          yield i;
+        }
+      },
+    };
+    await instrument([bag]);
+
+    for await (const item of bag.counter()) {
+      if (item === 2) {
+        break;
+      }
+    }
+
+    expect(String(attributesOf('counter')['adk.fn.return'])).toContain(
+      '3 items yielded',
+    );
+  });
+
   it('records the failure of an async generator', async () => {
     const bag = {
       async *failing(): AsyncGenerator<number> {

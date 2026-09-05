@@ -30,6 +30,7 @@ Environment variables:
 | ---------------- | -------- | --------------------------------- |
 | `GEMINI_API_KEY` | yes      | Key for the model the agent calls |
 
-Ask about Paris. The console exporter prints a `cityFacts.lookupCity` span and,
-nested under it, a `cityFacts.format` span, each carrying `adk.fn.*`
-attributes.
+Ask about Paris. The console exporter prints a `lookupCity` span and, nested
+under it, a `format` span, each carrying `adk.fn.*` attributes. The names are
+bare because `cityFacts` is a plain object; a method on a class prototype is
+named `Owner.method`.

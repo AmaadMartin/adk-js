@@ -80,14 +80,18 @@ export const app = new App({
 ```
 
 A call to `cityFacts.lookupCity('Paris')` now emits a span named
-`cityFacts.lookupCity` with these attributes:
+`lookupCity` with these attributes:
 
 | Attribute         | Value                                 |
 | ----------------- | ------------------------------------- |
 | `adk.fn.arg.city` | `"Paris"`                             |
 | `adk.fn.return`   | `"Paris has about 2100000 residents"` |
 
-The `cityFacts.format` span nests under it.
+The `format` span nests under it.
+
+A span takes the bare function name because `cityFacts` is a plain object. A
+method the plugin finds on a class prototype is named `Owner.method` instead,
+after the class — `CityFacts.lookupCity` had the example used a class.
 
 The runnable version is
 [`samples/plugins/auto_tracing/agent.ts`](../../../../samples/plugins/auto_tracing/agent.ts).
@@ -121,6 +125,12 @@ The wrapper keeps the wrapped function's call semantics: the same arguments,
 the same `this`, the same return value, the same thrown error, and the same
 `name` and `length`. It follows the function's shape, so a generator stays a
 generator and an async function stays an async function.
+
+One return value does change. A plain function that returns a thenable is
+awaited inside its span, because otherwise the span closes before the work
+does, and the caller gets a `Promise` in place of the thenable. This is what
+keeps an `async` function a compiler downlevelled into a plain function
+correctly traced.
 
 ## Attributes
 
@@ -179,6 +189,10 @@ elides too.
 | `maxRecordedYields` | `number`            | `16`                  |
 | `maxWalkDepth`      | `number`            | `30`                  |
 
+- **`tracer`** defaults to `trace.getTracer('gcp.vertex.agent.auto_tracing')`,
+  a scope of the plugin's own, so these spans are distinguishable from the
+  framework spans ADK emits on `gcp.vertex.agent`. The reference does the same,
+  with `trace.get_tracer(__name__)`.
 - **`extraTargets`** adds roots the agent graph does not reach.
 - **`maxReprLen`** caps one rendered value. A longer one is cut and marked
   `...[N more chars]`.
@@ -199,3 +213,16 @@ module-name prefixes, becomes `extraTargets`, a list of objects.
 Two guards exist only here. Runtime prototypes are excluded, and the walk has a
 node budget, because a JavaScript object graph reachable from an agent is far
 larger than the set of module names the reference collects.
+
+That difference cuts the other way too, and it is the reason to keep the scope
+in mind. The reference only ever touches modules whose names the agent graph
+implies, so a third-party library stays untouched unless you name it. This walk
+follows object references, so a client object an agent holds puts that
+library's prototypes in scope as well.
+
+A generator's span is not made the active span. Keeping an OpenTelemetry
+context active across a `yield` means taking over the iteration protocol, which
+would drop the source generator's own cleanup, so spans opened inside a wrapped
+generator body are siblings of it rather than children. The reference gets the
+nesting for free from `start_as_current_span`. Every other wrapper shape does
+nest correctly.
