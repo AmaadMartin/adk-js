@@ -10,6 +10,8 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ### Tools
 
+- [Environment simulation plugin](tools/environment_simulation_plugin/index.md) - Routing every tool call through a simulator, so an agent runs against canned results instead of the live services.
+
 #### Retrieval
 
 Client-side retrieval tools. The agent calls a one-argument search function, your code answers it, and you choose the store, the chunking and the ranking. Start with `BaseRetrievalTool` if you are deciding between these and server-side retrieval.
