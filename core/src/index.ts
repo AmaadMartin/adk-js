@@ -43,7 +43,13 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
-export * from './integrations/api_registry/api_registry.js';
+export {
+  API_REGISTRY_MTLS_URL,
+  API_REGISTRY_URL,
+  ApiRegistry,
+  type ApiRegistryOptions,
+  type ApiRegistryToolsetOptions,
+} from './integrations/api_registry/api_registry.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
