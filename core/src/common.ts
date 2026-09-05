@@ -326,6 +326,8 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
+export {baseToolConfigSchema, toolConfigSchema} from './tools/tool_configs.js';
+export type {ToolArgsConfig, ToolConfig} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
