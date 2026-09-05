@@ -14,6 +14,7 @@ export type {
   SingleAgentCallback,
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
+export type {ContextCacheConfig} from './agents/context_cache_config.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
@@ -57,6 +58,10 @@ export {
   CONTENT_REQUEST_PROCESSOR,
   ContentRequestProcessor,
 } from './agents/processors/content_request_processor.js';
+export {
+  CONTEXT_CACHE_REQUEST_PROCESSOR,
+  ContextCacheRequestProcessor,
+} from './agents/processors/context_cache_request_processor.js';
 export {ContextCompactorRequestProcessor} from './agents/processors/context_compactor_request_processor.js';
 export {
   INTERACTIONS_REQUEST_PROCESSOR,
@@ -210,8 +215,44 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
+export type {LlmCapabilities} from './models/capabilities.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
+export {LiteLlm} from './models/lite_llm.js';
+export type {LiteLlmParams} from './models/lite_llm.js';
+export {FetchLiteLlmClient} from './models/lite_llm_client.js';
+export type {
+  FetchLiteLlmClientParams,
+  LiteLlmClient,
+} from './models/lite_llm_client.js';
+export type {
+  AudioContentObject,
+  CacheControlInjectionPoint,
+  ChatMessage,
+  Choice,
+  CompletionArgs,
+  CompletionTokensDetails,
+  ContentObject,
+  FileContentObject,
+  FileUrlObject,
+  ImageContentObject,
+  JsonObject,
+  JsonValue,
+  MessageContent,
+  MessageRole,
+  ModelResponse,
+  ModelResponseStream,
+  PromptTokensDetails,
+  StreamChoice,
+  TextContentObject,
+  ToolCall,
+  ToolCallFunction,
+  ToolChoice,
+  ToolParam,
+  ToolSpec,
+  Usage,
+  VideoContentObject,
+} from './models/lite_llm_types.js';
 export type {LlmRequest} from './models/llm_request.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
