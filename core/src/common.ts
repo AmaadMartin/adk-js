@@ -1344,6 +1344,22 @@ export {
   SpannerCredentialsConfig,
 } from './tools/spanner/spanner_credentials.js';
 
+export {EditFileTool} from './tools/environment/edit_file_tool.js';
+export {
+  EnvironmentToolset,
+  type EnvironmentToolsetOptions,
+} from './tools/environment/environment_toolset.js';
+export {
+  ExecuteTool,
+  ExecuteToolErrorCode,
+  type ExecuteToolOptions,
+} from './tools/environment/execute_tool.js';
+export {
+  ReadFileTool,
+  type ReadFileToolOptions,
+} from './tools/environment/read_file_tool.js';
+export {WriteFileTool} from './tools/environment/write_file_tool.js';
+
 export * from './artifacts/base_artifact_service.js';
 export * from './evaluation/index.js';
 export * from './features/feature_registry.js';

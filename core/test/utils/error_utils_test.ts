@@ -8,6 +8,7 @@ import {describe, expect, it} from 'vitest';
 import {
   formatError,
   isAbortError,
+  isFileNotFoundError,
   isNotFoundError,
   timeoutErrorName,
   truncateBody,
@@ -391,5 +392,31 @@ describe('isNotFoundError', () => {
   it('rejects null and undefined', () => {
     expect(isNotFoundError(null)).toBe(false);
     expect(isNotFoundError(undefined)).toBe(false);
+  });
+});
+
+describe('isFileNotFoundError', () => {
+  it('accepts a Node ENOENT error', () => {
+    const err = Object.assign(new Error('no such file'), {code: 'ENOENT'});
+    expect(isFileNotFoundError(err)).toBe(true);
+  });
+
+  it('accepts a plain object carrying the code', () => {
+    expect(isFileNotFoundError({code: 'ENOENT'})).toBe(true);
+  });
+
+  it('rejects a different error code', () => {
+    const err = Object.assign(new Error('permission denied'), {code: 'EACCES'});
+    expect(isFileNotFoundError(err)).toBe(false);
+  });
+
+  it('rejects an error carrying no code', () => {
+    expect(isFileNotFoundError(new Error('boom'))).toBe(false);
+  });
+
+  it('rejects a non-object value', () => {
+    expect(isFileNotFoundError('ENOENT')).toBe(false);
+    expect(isFileNotFoundError(null)).toBe(false);
+    expect(isFileNotFoundError(undefined)).toBe(false);
   });
 });
