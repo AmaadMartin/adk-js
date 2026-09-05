@@ -17,8 +17,11 @@
 
 import {
   AgentRegistry,
+  AuthCredential,
+  AuthCredentialTypes,
   AuthScheme,
   GcpAuthProviderScheme,
+  ProtocolType,
   ReadonlyContext,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -142,6 +145,39 @@ const MCP_WITH_BINDING = {
     ],
   },
 };
+
+/** Registry metadata for an A2A agent, before any binding is declared. */
+const A2A_AGENT_INFO = {
+  displayName: 'TestAgent',
+  description: 'Test Desc',
+  version: '1.0',
+  protocols: [
+    {
+      type: ProtocolType.A2A_AGENT,
+      interfaces: [{url: 'https://my-agent.com', protocolBinding: 'HTTP_JSON'}],
+    },
+  ],
+};
+
+/** Registry metadata for an A2A agent bound to an auth provider. */
+const AGENT_WITH_BINDING = {
+  'test-agent': {...A2A_AGENT_INFO, agentId: 'urn:agent:pub:ns:agent-456'},
+  'bindings': {
+    bindings: [
+      {
+        target: {identifier: 'urn:agent:pub:ns:agent-456'},
+        authProviderBinding: {
+          authProvider: 'projects/123/locations/l/authProviders/ap-789',
+        },
+      },
+    ],
+  },
+};
+
+/** The registry paths every request of the test addressed. */
+function requestedPaths(): string[] {
+  return fetchMock.mock.calls.map(([input]) => pathOf(String(input)));
+}
 
 function newRegistry(
   headerProvider?: (context: ReadonlyContext) => Record<string, string>,
@@ -386,6 +422,96 @@ describe('TestAgentRegistry', () => {
     const toolset = await registry.getMcpToolset('test-mcp');
 
     expect(toolset.authScheme).toBeUndefined();
+  });
+
+  it('test_get_remote_a2a_agent_with_binding', async () => {
+    routeFetch(AGENT_WITH_BINDING);
+
+    const agent = await registry.getRemoteA2AAgent('test-agent', {
+      continueUri: 'https://override.com/continue',
+    });
+
+    const scheme = gcpSchemeOf(agent.authScheme);
+    expect(scheme.name).toBe('projects/123/locations/l/authProviders/ap-789');
+    expect(scheme.continueUri).toBe('https://override.com/continue');
+  });
+
+  it('test_get_remote_a2a_agent_with_card_and_binding', async () => {
+    routeFetch({
+      ...AGENT_WITH_BINDING,
+      'test-agent': {
+        agentId: 'urn:agent:pub:ns:agent-456',
+        card: {
+          type: 'A2A_AGENT_CARD',
+          content: {
+            name: 'CardName',
+            description: 'CardDesc',
+            version: '2.0',
+            url: 'https://card-agent.com',
+            capabilities: {},
+            defaultInputModes: ['text'],
+            defaultOutputModes: ['text'],
+            skills: [],
+          },
+        },
+      },
+    });
+
+    const agent = await registry.getRemoteA2AAgent('test-agent');
+
+    expect(gcpSchemeOf(agent.authScheme).name).toBe(
+      'projects/123/locations/l/authProviders/ap-789',
+    );
+  });
+
+  it('test_get_remote_a2a_agent_with_explicit_auth', async () => {
+    routeFetch(AGENT_WITH_BINDING);
+    const authScheme: GcpAuthProviderScheme = {
+      type: 'gcpAuthProviderScheme',
+      name: 'explicit-provider',
+    };
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'key',
+    };
+
+    const agent = await registry.getRemoteA2AAgent('test-agent', {
+      authScheme,
+      authCredential,
+    });
+
+    expect(agent.authScheme).toBe(authScheme);
+    expect(agent.authCredential).toBe(authCredential);
+    expect(requestedPaths()).not.toContain('bindings');
+  });
+
+  it('test_get_remote_a2a_agent_without_binding', async () => {
+    routeFetch({...AGENT_WITH_BINDING, bindings: {bindings: []}});
+
+    const agent = await registry.getRemoteA2AAgent('test-agent');
+
+    expect(agent.authScheme).toBeUndefined();
+    expect(agent.authCredential).toBeUndefined();
+  });
+
+  it('test_get_remote_a2a_agent_tolerates_bindings_failure', async () => {
+    routeFetch({
+      ...AGENT_WITH_BINDING,
+      bindings: new Error('bindings unavailable'),
+    });
+
+    const agent = await registry.getRemoteA2AAgent('test-agent');
+
+    expect(agent.authScheme).toBeUndefined();
+  });
+
+  it('getRemoteA2AAgent skips the binding lookup for an agent with no id', async () => {
+    routeFetch({...AGENT_WITH_BINDING, 'test-agent': A2A_AGENT_INFO});
+
+    const agent = await registry.getRemoteA2AAgent('test-agent');
+
+    expect(agent.authScheme).toBeUndefined();
+    expect(requestedPaths()).not.toContain('bindings');
   });
 
   it('test_make_request_raises_http_status_error', async () => {

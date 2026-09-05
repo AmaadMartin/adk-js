@@ -18,6 +18,9 @@ import {
 } from '@a2a-js/sdk/client';
 import {
   Event as AdkEvent,
+  AuthCredential,
+  AuthCredentialTypes,
+  AuthScheme,
   createEvent,
   InvocationContext,
   RemoteA2AAgent,
@@ -96,6 +99,34 @@ describe('A2ARemoteAgent', () => {
       () =>
         new RemoteA2AAgent({name: 'test'} as unknown as RemoteA2AAgentConfig),
     ).toThrow('Either AgentCard or Client must be provided');
+  });
+
+  it('should expose the auth scheme and credential it was configured with', () => {
+    const authScheme: AuthScheme = {type: 'gcpAuthProviderScheme'};
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'key',
+    };
+
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+      authScheme,
+      authCredential,
+    });
+
+    expect(agent.authScheme).toBe(authScheme);
+    expect(agent.authCredential).toBe(authCredential);
+  });
+
+  it('should leave the auth scheme and credential undefined when unconfigured', () => {
+    const agent = new RemoteA2AAgent({
+      name: 'test-agent',
+      agentCard: 'https://example.com/card.json',
+    });
+
+    expect(agent.authScheme).toBeUndefined();
+    expect(agent.authCredential).toBeUndefined();
   });
 
   it('should resolve card from URL and send message streaming', async () => {
