@@ -113,6 +113,42 @@ function createModel(
   });
 }
 
+/** Every variable `Gemini` reads when it decides which credentials it needs. */
+const CREDENTIAL_ENV_VARS = [
+  'GOOGLE_CLOUD_PROJECT',
+  'GOOGLE_CLOUD_LOCATION',
+  'GOOGLE_GENAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY',
+  'GOOGLE_GENAI_USE_VERTEXAI',
+  'GOOGLE_GENAI_USE_ENTERPRISE',
+  'GOOGLE_CLOUD_AGENT_ENGINE_ID',
+];
+
+/**
+ * Replaces the credential environment with `environment`, and returns the
+ * function that puts the developer's own back.
+ */
+function applyEnvironment(environment: Record<string, string>): () => void {
+  const saved = new Map<string, string | undefined>();
+  for (const name of CREDENTIAL_ENV_VARS) {
+    saved.set(name, process.env[name]);
+    delete process.env[name];
+  }
+  Object.assign(process.env, environment);
+
+  return () => {
+    for (const name of CREDENTIAL_ENV_VARS) {
+      const value = saved.get(name);
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  };
+}
+
 describe('ConformanceTestGemini', () => {
   it('keeps only this agent and this turn, in recorded order', async () => {
     const first = await collect(
@@ -241,6 +277,31 @@ describe('ConformanceTestGemini', () => {
     expect(createModel([], 0, {model: 'gemini-2.5-pro'}).model).toBe(
       'gemini-2.5-pro',
     );
+  });
+
+  it('replays under every credential environment', async () => {
+    // `Gemini` demands an API key normally, but a project and a location once
+    // enterprise mode is on. The replay model has no network path, so it has
+    // to construct the same way in all of these.
+    const environments: Array<Record<string, string>> = [
+      {},
+      {GOOGLE_GENAI_USE_VERTEXAI: '1'},
+      {GOOGLE_GENAI_USE_ENTERPRISE: 'true'},
+      {GOOGLE_API_KEY: 'a-real-key'},
+    ];
+
+    for (const environment of environments) {
+      const restore = applyEnvironment(environment);
+      try {
+        const responses = await collect(
+          createModel(plannerRecordings(), 0),
+          createRequest(),
+        );
+        expect(responses.map(responseText)).toEqual(['first']);
+      } finally {
+        restore();
+      }
+    }
   });
 
   it('refuses to open a live connection', async () => {
