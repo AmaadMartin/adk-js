@@ -7,6 +7,7 @@
 import {Content, createModelContent, PartListUnion} from '@google/genai';
 import {createEvent, Event, isEvent} from '../events/event.js';
 import {isIdentifier} from '../utils/identifier_utils.js';
+import {isPlainObject} from '../utils/object_utils.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {NodeSchemaValidationError} from './errors.js';
 import type {NodeContext} from './node_context.js';
@@ -175,7 +176,7 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
       return input;
     }
     try {
-      return validateAgainstSchema(this.inputSchema, input) as TInput;
+      return validateAgainstSchema(this.inputSchema, input);
     } catch (e) {
       throw new NodeSchemaValidationError({
         nodeName: this.name,
@@ -268,15 +269,16 @@ export function validateNodeName(name: unknown): string {
  * `value` is returned untouched when there is no schema, matching
  * `google/adk-python` `utils/_schema_utils.py::validate_node_data`, which
  * returns early rather than serializing a value it never validated.
+ *
+ * The result is declared as `T` for the same reason `parseWithSchema` declares
+ * it: a schema may legitimately widen or flatten the value, and the caller
+ * still holds it under the type it declared.
  */
-function validateAgainstSchema(
-  schema: SchemaLike | undefined,
-  value: unknown,
-): unknown {
+function validateAgainstSchema<T>(schema: SchemaLike | undefined, value: T): T {
   if (schema === undefined) {
     return value;
   }
-  return toSerializable(parseWithSchema(schema, value));
+  return toSerializable(parseWithSchema(schema, value)) as T;
 }
 
 /**
@@ -325,20 +327,6 @@ function hasToJson(value: unknown): value is {toJSON(): unknown} {
 }
 
 /**
- * Narrows a value to a plain object — an object literal, not a class instance.
- *
- * `workflow_graph_utils.ts` holds an equivalent predicate, but it imports this
- * module, so reaching for it here would make the two modules circular.
- */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const proto: unknown = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-/**
  * Returns the static (run-id-free) path of `target` within `root`, or
  * `undefined` when `target` is not reachable from `root`.
  *
@@ -348,8 +336,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * they answer to the same name.
  *
  * Children are the node's own enumerable properties: a property holding a
- * node, or an array, `Set`, `Map` or plain object holding nodes one level
- * deep. Any other class instance is not traversed, so a `Workflow`'s `Graph`
+ * node, or an array or plain object holding nodes one level deep — the
+ * TypeScript reading of the reference's "a field that is a node, a list, or a
+ * dict". Any other class instance is not traversed, so a `Workflow`'s `Graph`
  * is opaque here — as it is in the reference, where `Graph` is a `BaseModel`
  * and not a `BaseNode`.
  *
@@ -413,11 +402,8 @@ function* childNodesOf(node: BaseNode): Generator<BaseNode> {
  * the containers a node may keep its children in.
  */
 function containerValues(value: unknown): Iterable<unknown> {
-  if (Array.isArray(value) || value instanceof Set) {
+  if (Array.isArray(value)) {
     return value;
-  }
-  if (value instanceof Map) {
-    return value.values();
   }
   if (isPlainObject(value)) {
     return Object.values(value);

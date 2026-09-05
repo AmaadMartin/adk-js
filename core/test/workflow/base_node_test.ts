@@ -178,24 +178,28 @@ describe('findStaticNodePath child discovery', () => {
     constructor(readonly inner: BaseNode) {}
   }
 
-  it('finds a child held in an array, a Set, a Map or a plain object', () => {
+  it('finds a child held in an array or a plain object', () => {
     const inArray = new FnNode('in-array', echo);
-    const inSet = new FnNode('in-set', echo);
-    const inMap = new FnNode('in-map', echo);
     const inObject = new FnNode('in-object', echo);
 
     expect(findStaticNodePath(new Holder('r', [inArray]), inArray)).toBe(
       'r.in-array',
     );
-    expect(findStaticNodePath(new Holder('r', new Set([inSet])), inSet)).toBe(
-      'r.in-set',
-    );
-    expect(
-      findStaticNodePath(new Holder('r', new Map([['k', inMap]])), inMap),
-    ).toBe('r.in-map');
     expect(findStaticNodePath(new Holder('r', {k: inObject}), inObject)).toBe(
       'r.in-object',
     );
+  });
+
+  it('does not walk a Set or a Map, which the reference has no analogue of', () => {
+    const inSet = new FnNode('in-set', echo);
+    const inMap = new FnNode('in-map', echo);
+
+    expect(
+      findStaticNodePath(new Holder('r', new Set([inSet])), inSet),
+    ).toBeUndefined();
+    expect(
+      findStaticNodePath(new Holder('r', new Map([['k', inMap]])), inMap),
+    ).toBeUndefined();
   });
 
   it('finds a child held directly on a property', () => {
