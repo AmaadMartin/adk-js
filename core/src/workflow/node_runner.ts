@@ -183,6 +183,10 @@ async function runChildNode({
           isolationScope,
         });
 
+  // Scoped to this run: an event may redirect the branch its successors
+  // inherit, and `childIc` is often the parent's own context (see BranchRef).
+  const branchRef: BranchRef = {value: branch};
+
   const child = new NodeContext({
     invocationContext: childIc,
     channel: parent.channel,
@@ -252,7 +256,7 @@ async function runChildNode({
           child,
           input,
           nodeName,
-          branch,
+          branch: branchRef,
           isolationScope,
           nodePath,
           runId,
@@ -294,7 +298,13 @@ async function runChildNode({
     }
 
     if (!inputRecorded && child.interruptIds.length > 0) {
-      recordInputForResume({child, nodeName, branch, isolationScope, input});
+      recordInputForResume({
+        child,
+        nodeName,
+        branch: branchRef,
+        isolationScope,
+        input,
+      });
     }
 
     traceNodeExecution({
@@ -438,12 +448,25 @@ function resetState(childNodeContext: NodeContext): void {
   }
 }
 
+/**
+ * The branch in force for the rest of a node's run.
+ *
+ * An event can redirect the branch its successors inherit, so the value has to
+ * outlive the single {@link enrichEvent} call that changes it. It is held in a
+ * holder rather than on `child.invocationContext`, because `runChildNode`
+ * reuses the parent's `InvocationContext` when nothing differs — mutating it
+ * there would leak a child's branch into the parent.
+ */
+interface BranchRef {
+  value: string | undefined;
+}
+
 interface RunOnceParams {
   node: BaseNode;
   child: NodeContext;
   input: unknown;
   nodeName: string;
-  branch: string | undefined;
+  branch: BranchRef;
   isolationScope: string | undefined;
 }
 
@@ -617,7 +640,7 @@ async function runOnce({
 interface RecordInputForResumeParams {
   child: NodeContext;
   nodeName: string;
-  branch: string | undefined;
+  branch: BranchRef;
   isolationScope: string | undefined;
   input: unknown;
 }
@@ -640,7 +663,7 @@ function recordInputForResume({
   const event = createEvent({
     author: nodeName,
     invocationId: child.invocationId,
-    branch,
+    branch: branch.value,
     longRunningToolIds: [...child.interruptIds],
     actions: {agentState: {input}},
   });
@@ -652,7 +675,7 @@ interface EnrichEventParams {
   event: Event;
   child: NodeContext;
   nodeName: string;
-  branch: string | undefined;
+  branch: BranchRef;
   isolationScope: string | undefined;
 }
 
@@ -663,6 +686,10 @@ interface EnrichEventParams {
  * them unset, so a node can override them. `path` is different: it is
  * engine-owned and always set to the child's real node path — a node must not be
  * able to misreport where it ran.
+ *
+ * A branch the node set on the event also redirects `branch` for the rest of
+ * the run: an empty string clears the branch, and any other value becomes the
+ * one later events inherit.
  */
 function enrichEvent({
   event,
@@ -682,8 +709,15 @@ function enrichEvent({
   if (event.output !== undefined) {
     event.nodeInfo.outputFor = [child.nodePath, ...child.outputForAncestors];
   }
-  if (branch !== undefined && event.branch === undefined) {
-    event.branch = branch;
+  if (event.branch === undefined) {
+    if (branch.value !== undefined) {
+      event.branch = branch.value;
+    }
+  } else if (event.branch === '') {
+    event.branch = undefined;
+    branch.value = undefined;
+  } else {
+    branch.value = event.branch;
   }
   if (isolationScope !== undefined && event.isolationScope === undefined) {
     event.isolationScope = isolationScope;
