@@ -19,6 +19,19 @@ export interface MemoryEntry {
   content: Content;
 
   /**
+   * The unique identifier of the memory. Services that support it use this as
+   * the last component of the created memory's resource name, instead of
+   * letting the service generate one.
+   */
+  id?: string;
+
+  /**
+   * Custom metadata associated with the memory. Services that support it store
+   * these keys with the memory and return them on retrieval.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /**
    * The author of the memory. Common values are `'user'` and `'model'`, but
    * this can also be the name of an agent when the content was produced by a
    * named sub-agent.

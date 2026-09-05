@@ -10,7 +10,11 @@ import {
   AgentEngineMemoryConfig,
   GenerateAgentEngineMemoriesConfig,
   GenerateMemoriesRequestDirectContentsSourceEvent,
+  IngestEventsRequestParameters,
+  IngestionDirectContentsSourceEvent,
+  MemoryGenerationTriggerConfig,
   MemoryMetadataValue,
+  MemoryProfile,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
 import {Content, createUserContent} from '@google/genai';
 import {Event} from '../events/event.js';
@@ -27,40 +31,77 @@ import {
 } from './base_memory_service.js';
 import {MemoryEntry} from './memory_entry.js';
 
-interface MemoryEntryWithMetadata extends MemoryEntry {
-  customMetadata?: Record<string, unknown>;
-}
-
-const GENERATE_MEMORIES_KNOWN_FIELDS = [
-  'disableConsolidation',
-  'waitForCompletion',
-  'revisionLabels',
-  'revisionExpireTime',
-  'revisionTtl',
-  'disableMemoryRevisions',
-  'metadataMergeStrategy',
+const GENERATE_MEMORIES_KNOWN_FIELDS: ReadonlySet<string> = new Set([
   'allowedTopics',
-];
-
-const CREATE_MEMORY_KNOWN_FIELDS = [
-  'displayName',
-  'description',
-  'waitForCompletion',
+  'disableConsolidation',
+  'disableMemoryRevisions',
+  'httpOptions',
+  'metadata',
+  'metadataMergeStrategy',
+  'revisionExpireTime',
+  'revisionLabels',
+  'revisionTtl',
   'ttl',
+  'waitForCompletion',
+]);
+
+const CREATE_MEMORY_KNOWN_FIELDS: ReadonlySet<string> = new Set([
+  'description',
+  'disableMemoryRevisions',
+  'displayName',
   'expireTime',
+  'httpOptions',
+  'memoryId',
   'revisionExpireTime',
   'revisionTtl',
-  'disableMemoryRevisions',
   'topics',
-  'memoryId',
-];
+  'ttl',
+  'waitForCompletion',
+]);
+
+const INGEST_EVENTS_KNOWN_FIELDS: ReadonlySet<string> = new Set([
+  'forceFlush',
+  'generationTriggerConfig',
+  'streamId',
+]);
 
 const ENABLE_CONSOLIDATION_KEY = 'enable_consolidation';
 const MAX_DIRECT_MEMORIES_PER_GENERATE_CALL = 5;
 
 function shouldFilterOutEvent(content?: Content): boolean {
   return !(content?.parts || []).some(
-    (p) => p.text || p.inlineData || p.fileData,
+    (p) =>
+      p.text ||
+      p.inlineData ||
+      p.fileData ||
+      p.functionCall ||
+      p.functionResponse ||
+      p.executableCode ||
+      p.codeExecutionResult ||
+      p.toolCall ||
+      p.toolResponse,
+  );
+}
+
+function eventsWithContent(events: Event[]): Event[] {
+  return events.filter((event) => !shouldFilterOutEvent(event.content));
+}
+
+/**
+ * Returns whether `customMetadata` carries a key that `memories.generate`
+ * understands and `memories.ingestEvents` does not. Every other event write
+ * goes through `memories.ingestEvents`.
+ */
+function shouldUseGenerateMemories(
+  customMetadata?: Record<string, unknown>,
+): boolean {
+  if (!customMetadata) {
+    return false;
+  }
+  return Object.keys(customMetadata).some(
+    (key) =>
+      GENERATE_MEMORIES_KNOWN_FIELDS.has(key) &&
+      !INGEST_EVENTS_KNOWN_FIELDS.has(key),
   );
 }
 
@@ -99,6 +140,23 @@ function toVertexMetadataValue(
     return undefined;
   }
   return {stringValue: String(value)};
+}
+
+function fromVertexMetadata(
+  vertexMetadata?: Record<string, MemoryMetadataValue>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(vertexMetadata ?? {}).map(([key, value]) => [
+      key,
+      // A value of an unrecognised kind passes through unchanged. The optional
+      // chain keeps a null in a malformed response from throwing.
+      value?.boolValue ??
+        value?.doubleValue ??
+        value?.stringValue ??
+        value?.timestampValue ??
+        value,
+    ]),
+  );
 }
 
 export interface VertexAiMemoryBankServiceOptions {
@@ -218,18 +276,24 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     logger.debug('Search memory response received.');
 
     const memoryEvents: MemoryEntry[] = [];
-    const retrievedMemories = retrievedMemoriesResponse.retrievedMemories || [];
-
-    for (const retrievedMemory of retrievedMemories) {
+    for (const retrievedMemory of retrievedMemoriesResponse.retrievedMemories ||
+      []) {
       logger.debug(`Retrieved memory: ${JSON.stringify(retrievedMemory)}`);
-      if (retrievedMemory.memory && retrievedMemory.memory.fact) {
-        const content = createUserContent(retrievedMemory.memory.fact);
-        memoryEvents.push({
-          author: 'user',
-          content: content,
-          timestamp: retrievedMemory.memory.updateTime,
-        });
+      const memory = retrievedMemory.memory;
+      if (!memory) {
+        logger.warn('Skipping memory entry with missing memory object.');
+        continue;
       }
+      if (!memory.fact) {
+        logger.warn('Skipping memory entry with empty or missing fact.');
+        continue;
+      }
+      memoryEvents.push({
+        author: 'user',
+        content: createUserContent(memory.fact),
+        timestamp: memory.updateTime,
+        customMetadata: fromVertexMetadata(memory.metadata),
+      });
     }
 
     return {memories: memoryEvents};
@@ -241,16 +305,15 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     eventsToProcess: Event[];
     customMetadata?: Record<string, unknown>;
   }): Promise<void> {
-    const directEvents: GenerateMemoriesRequestDirectContentsSourceEvent[] = [];
-    for (const event of request.eventsToProcess) {
-      if (shouldFilterOutEvent(event.content)) {
-        continue;
-      }
-      // Content might need to be serialized or dumped as in Python
-      directEvents.push({
-        content: JSON.parse(JSON.stringify(event.content)),
-      });
+    if (!shouldUseGenerateMemories(request.customMetadata)) {
+      this.addEventsToMemoryViaIngest(request);
+      return;
     }
+
+    const directEvents: GenerateMemoriesRequestDirectContentsSourceEvent[] =
+      eventsWithContent(request.eventsToProcess).map((event) => ({
+        content: JSON.parse(JSON.stringify(event.content)),
+      }));
 
     if (directEvents.length > 0) {
       const config = buildGenerateMemoriesConfig(request.customMetadata);
@@ -271,6 +334,69 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     }
   }
 
+  /**
+   * Adds events to Vertex AI Memory Bank via `memories.ingestEvents`.
+   *
+   * The request is dispatched without waiting for it: the service buffers the
+   * events and generates memories according to its trigger rule, so the
+   * response carries nothing the caller acts on.
+   */
+  private addEventsToMemoryViaIngest(request: {
+    appName: string;
+    userId: string;
+    eventsToProcess: Event[];
+    customMetadata?: Record<string, unknown>;
+  }): void {
+    const directEvents = eventsWithContent(request.eventsToProcess).map(
+      toIngestionEvent,
+    );
+
+    const params: IngestEventsRequestParameters = {
+      name: `reasoningEngines/${this.agentEngineId}`,
+      scope: {
+        app_name: request.appName,
+        user_id: request.userId,
+      },
+      ...ingestOptionsFromMetadata(request.customMetadata),
+    };
+    // An event-less request is valid: it updates the trigger configuration.
+    if (directEvents.length > 0) {
+      params.directContentsSource = {events: directEvents};
+    }
+
+    void this.memories.ingestEventsInternal(params).catch((error: unknown) => {
+      logger.error(`Background ingestEvents request failed: ${error}`);
+    });
+    logger.debug('Ingest events request triggered.');
+  }
+
+  /**
+   * Retrieves the structured profiles of the scope, one per registered schema.
+   *
+   * Profiles are a Vertex Memory Bank capability distinct from memory search:
+   * a scope-keyed lookup rather than a semantic query.
+   */
+  async retrieveProfiles(request: {
+    appName: string;
+    userId: string;
+  }): Promise<MemoryProfile[]> {
+    const response = await this.memories.retrieveProfiles({
+      name: `reasoningEngines/${this.agentEngineId}`,
+      scope: {
+        app_name: request.appName,
+        user_id: request.userId,
+      },
+    });
+
+    const profiles = Object.values(response.profiles ?? {});
+    logger.debug(
+      profiles.length > 0
+        ? `Retrieved ${profiles.length} memory profiles.`
+        : 'Retrieved no memory profiles.',
+    );
+    return profiles;
+  }
+
   private async addMemoriesViaCreate(request: {
     appName: string;
     userId: string;
@@ -283,8 +409,6 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       const memory = validatedMemories[index];
       const memoryFact = memoryEntryToFact(memory, index);
 
-      // We don't have customMetadata on MemoryEntry in JS yet, so we pass undefined or handle it if we extend it.
-      // For now, we assume it's not there as per the current interface.
       const memoryMetadata = mergeCustomMetadataForMemory({
         customMetadata: request.customMetadata,
         memory: memory,
@@ -294,6 +418,7 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
       const config = buildCreateMemoryConfig({
         customMetadata: memoryMetadata,
         memoryRevisionLabels,
+        memoryId: memory.id,
       });
 
       const params = {
@@ -348,9 +473,52 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
 
 // Standalone utility functions
 
+function toIngestionEvent(event: Event): IngestionDirectContentsSourceEvent {
+  const ingestionEvent: IngestionDirectContentsSourceEvent = {
+    content: event.content,
+    eventId: event.id,
+  };
+  // Event.timestamp is in milliseconds; the API expects an RFC 3339 string.
+  if (Number.isFinite(event.timestamp)) {
+    ingestionEvent.eventTime = new Date(event.timestamp).toISOString();
+  }
+  return ingestionEvent;
+}
+
+function ingestOptionsFromMetadata(
+  customMetadata?: Record<string, unknown>,
+): Partial<IngestEventsRequestParameters> {
+  const options: Partial<IngestEventsRequestParameters> = {};
+  if (!customMetadata) {
+    return options;
+  }
+
+  const streamId = customMetadata['streamId'];
+  if (typeof streamId === 'string' && streamId) {
+    options.streamId = streamId;
+  }
+
+  // forceFlush belongs to the ingest config, not to the request itself.
+  const forceFlush = customMetadata['forceFlush'];
+  if (typeof forceFlush === 'boolean') {
+    options.config = {forceFlush};
+  }
+
+  // The caller owns the shape of the trigger config; the Vertex service
+  // rejects a malformed one.
+  const generationTriggerConfig = customMetadata['generationTriggerConfig'];
+  if (generationTriggerConfig && typeof generationTriggerConfig === 'object') {
+    options.generationTriggerConfig =
+      generationTriggerConfig as MemoryGenerationTriggerConfig;
+  }
+
+  return options;
+}
+
 function buildCreateMemoryConfig(params: {
   customMetadata?: Record<string, unknown>;
   memoryRevisionLabels?: Record<string, string>;
+  memoryId?: string;
 }): AgentEngineMemoryConfig {
   const config: Record<string, unknown> = {waitForCompletion: false};
 
@@ -392,7 +560,7 @@ function buildCreateMemoryConfig(params: {
       continue;
     }
 
-    if (CREATE_MEMORY_KNOWN_FIELDS.includes(key)) {
+    if (CREATE_MEMORY_KNOWN_FIELDS.has(key)) {
       if (value !== null && value !== undefined) {
         config[key] = value;
       }
@@ -411,6 +579,11 @@ function buildCreateMemoryConfig(params: {
         ...buildVertexMetadata(metadataByKey),
       };
     }
+  }
+
+  // An explicit customMetadata memoryId wins over the entry's own id.
+  if (params.memoryId !== undefined && config['memoryId'] === undefined) {
+    config['memoryId'] = params.memoryId;
   }
 
   const revisionLabels = {
@@ -502,7 +675,7 @@ function buildGenerateMemoriesConfig(
 
     // In JS we assume the fields are supported if they are in the type.
     // We just map them if they are known fields.
-    if (GENERATE_MEMORIES_KNOWN_FIELDS.includes(key)) {
+    if (GENERATE_MEMORIES_KNOWN_FIELDS.has(key)) {
       if (value !== null && value !== undefined) {
         config[key] = value;
       }
@@ -526,6 +699,14 @@ function buildGenerateMemoriesConfig(
   return config as GenerateAgentEngineMemoriesConfig;
 }
 
+function isMemoryEntry(value: unknown): value is MemoryEntry {
+  if (typeof value !== 'object' || value === null || !('content' in value)) {
+    return false;
+  }
+  const {content} = value;
+  return typeof content === 'object' && content !== null;
+}
+
 function normalizeMemoriesForCreate(memories: MemoryEntry[]): MemoryEntry[] {
   if (!Array.isArray(memories)) {
     throw new TypeError('memories must be a sequence of memory items.');
@@ -533,6 +714,11 @@ function normalizeMemoriesForCreate(memories: MemoryEntry[]): MemoryEntry[] {
   if (memories.length === 0) {
     throw new Error('memories must contain at least one entry.');
   }
+  memories.forEach((memory, index) => {
+    if (!isMemoryEntry(memory)) {
+      throw new TypeError(`memories[${index}] must be a MemoryEntry.`);
+    }
+  });
   return memories;
 }
 
@@ -570,10 +756,8 @@ function mergeCustomMetadataForMemory(params: {
     Object.assign(mergedMetadata, params.customMetadata);
   }
 
-  // Check if memory has customMetadata (it might if passed by user, even if not in interface)
-  const memoryWithMetadata = params.memory as MemoryEntryWithMetadata;
-  if (memoryWithMetadata.customMetadata) {
-    Object.assign(mergedMetadata, memoryWithMetadata.customMetadata);
+  if (params.memory.customMetadata) {
+    Object.assign(mergedMetadata, params.memory.customMetadata);
   }
 
   if (Object.keys(mergedMetadata).length === 0) {
