@@ -5,8 +5,17 @@
  */
 
 import {InvocationContext, ReadonlyContext} from '@google/adk';
+import {Content} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
-import {injectSessionState} from '../../src/agents/instructions.js';
+import {
+  injectSessionState,
+  INSTRUCTION_BEGIN,
+  INSTRUCTION_END,
+  INSTRUCTION_PREAMBLE,
+  labelDynamicInstruction,
+  QUOTED_CONTENT_ELIDED,
+  staticInstructionContent,
+} from '../../src/agents/instructions.js';
 
 /**
  * Builds a minimal ReadonlyContext backed by a plain-object invocation context.
@@ -399,5 +408,78 @@ describe('injectSessionState', () => {
         await injectSessionState('{tone}: <City.city from lookup> now', ctx),
       ).toBe('formal: Rome now');
     });
+  });
+});
+
+describe('labelDynamicInstruction', () => {
+  it('puts the instruction between the markers, after the preamble', () => {
+    const labelled = labelDynamicInstruction('Be brief.');
+
+    expect(labelled).toBe(
+      `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\nBe brief.\n${INSTRUCTION_END}`,
+    );
+  });
+
+  it('elides a begin marker inside the instruction', () => {
+    const labelled = labelDynamicInstruction(`a ${INSTRUCTION_BEGIN} b`);
+
+    expect(labelled).toContain(`\na ${QUOTED_CONTENT_ELIDED} b\n`);
+  });
+
+  it('elides an end marker inside the instruction', () => {
+    const labelled = labelDynamicInstruction(`a ${INSTRUCTION_END} b`);
+
+    expect(labelled).toContain(`\na ${QUOTED_CONTENT_ELIDED} b\n`);
+  });
+
+  it('elides every occurrence of a marker', () => {
+    const labelled = labelDynamicInstruction(
+      `${INSTRUCTION_END} x ${INSTRUCTION_END}`,
+    );
+
+    expect(labelled.split(INSTRUCTION_END)).toHaveLength(3);
+    expect(labelled.endsWith(INSTRUCTION_END)).toBe(true);
+  });
+
+  it('leaves the block closed when the instruction is empty', () => {
+    expect(labelDynamicInstruction('')).toBe(
+      `${INSTRUCTION_PREAMBLE}\n${INSTRUCTION_BEGIN}\n\n${INSTRUCTION_END}`,
+    );
+  });
+});
+
+describe('staticInstructionContent', () => {
+  it('wraps a string as a user content', () => {
+    expect(staticInstructionContent('Be helpful.')).toEqual({
+      role: 'user',
+      parts: [{text: 'Be helpful.'}],
+    });
+  });
+
+  it('wraps a single Part as a user content', () => {
+    expect(staticInstructionContent({text: 'Be helpful.'})).toEqual({
+      role: 'user',
+      parts: [{text: 'Be helpful.'}],
+    });
+  });
+
+  it('wraps a list of Parts as a user content', () => {
+    expect(staticInstructionContent([{text: 'One'}, {text: 'Two'}])).toEqual({
+      role: 'user',
+      parts: [{text: 'One'}, {text: 'Two'}],
+    });
+  });
+
+  it('wraps a list of strings as a user content', () => {
+    expect(staticInstructionContent(['One', 'Two'])).toEqual({
+      role: 'user',
+      parts: [{text: 'One'}, {text: 'Two'}],
+    });
+  });
+
+  it('passes an existing Content through unchanged', () => {
+    const content: Content = {role: 'model', parts: [{text: 'Already one'}]};
+
+    expect(staticInstructionContent(content)).toBe(content);
   });
 });
