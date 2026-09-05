@@ -137,7 +137,10 @@ export class ParallelWorker extends BaseNode {
       }
       return;
     }
-    if (isAborted(ctx)) {
+    if (
+      ctx.abortSignal?.aborted === true ||
+      ctx.invocationContext.abortSignal?.aborted === true
+    ) {
       // Aborted mid-flight: `results` may have holes for unscheduled items, so
       // don't emit a wrong partial list — the invocation is being torn down.
       return;
@@ -179,19 +182,67 @@ export class ParallelWorker extends BaseNode {
       settleFanOut = resolve;
     });
 
+    // Waits for the cancelled items to stop, and releases the worker without
+    // them when they do not. The wait is bounded because an item that swallows
+    // cancellation would otherwise hold the worker here forever. Giving up is
+    // never an error: the worker is already unwinding on another one.
+    const abandonStalledItems = async (): Promise<void> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
+      const outcomes: Array<Promise<DrainOutcome>> = [
+        fanOutSettled.then(() => 'drained' as const),
+        new Promise<DrainOutcome>((resolve) => {
+          timer = setTimeout(
+            () => resolve('timedOut'),
+            CANCELLED_ITEM_DRAIN_TIMEOUT_MS,
+          );
+        }),
+      ];
+      // A signal that is already aborted is the reason for this drain, not a
+      // second cancellation; only a later abort abandons the wait.
+      if (parentSignal && !parentSignal.aborted) {
+        outcomes.push(
+          new Promise<DrainOutcome>((resolve) => {
+            onAbort = () => resolve('cancelledAgain');
+            parentSignal.addEventListener('abort', onAbort, {once: true});
+          }),
+        );
+      }
+
+      let outcome: DrainOutcome;
+      try {
+        outcome = await Promise.race(outcomes);
+      } finally {
+        clearTimeout(timer);
+        if (onAbort) {
+          parentSignal?.removeEventListener('abort', onAbort);
+        }
+      }
+
+      if (outcome === 'drained') {
+        return;
+      }
+      if (outcome === 'timedOut') {
+        logger.warn(
+          `Node ${this.name}: ${inFlight} item(s) did not stop within ` +
+            `${CANCELLED_ITEM_DRAIN_TIMEOUT_MS / 1000}s of being cancelled; ` +
+            'abandoning them.',
+        );
+      } else {
+        logger.warn(
+          `Node ${this.name}: cancelled again while stopping ${inFlight} item(s).`,
+        );
+      }
+      settleFanOut();
+    };
+
     const stopFanOut = (): void => {
       if (windingDown) {
         return;
       }
       windingDown = true;
       itemAbort.abort();
-      void abandonStalledItems({
-        fanOutSettled,
-        settleFanOut,
-        parentSignal,
-        nodeName: this.name,
-        countRemaining: () => inFlight,
-      });
+      void abandonStalledItems();
     };
 
     // A claimant notices a cancelled invocation at the top of its loop, but one
@@ -300,93 +351,6 @@ export class ParallelWorker extends BaseNode {
 
     return {results, failure, interrupted, interruptIds};
   }
-}
-
-/** Whether the invocation running `ctx` has been cancelled. */
-function isAborted(ctx: NodeContext): boolean {
-  return (
-    ctx.abortSignal?.aborted === true ||
-    ctx.invocationContext.abortSignal?.aborted === true
-  );
-}
-
-/** Parameters for {@link abandonStalledItems}. */
-interface DrainParams {
-  /** Resolves once every claimant has let go of its item. */
-  fanOutSettled: Promise<void>;
-  /** Releases the worker when the items are abandoned instead. */
-  settleFanOut: () => void;
-  /** The signal the worker itself observes, if any. */
-  parentSignal?: AbortSignal;
-  /** The worker's name, for the warning. */
-  nodeName: string;
-  /** How many items are still running, read when the wait is abandoned. */
-  countRemaining: () => number;
-}
-
-/**
- * Waits for the cancelled items to stop, and releases the worker without them
- * when they do not.
- *
- * The wait is bounded because an item that swallows cancellation would
- * otherwise hold the worker here forever. Giving up is never an error: the
- * worker is already unwinding on another one.
- */
-async function abandonStalledItems({
-  fanOutSettled,
-  settleFanOut,
-  parentSignal,
-  nodeName,
-  countRemaining,
-}: DrainParams): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let onAbort: (() => void) | undefined;
-  const outcomes: Array<Promise<DrainOutcome>> = [
-    fanOutSettled.then(() => 'drained' as const),
-    new Promise<DrainOutcome>((resolve) => {
-      timer = setTimeout(
-        () => resolve('timedOut'),
-        CANCELLED_ITEM_DRAIN_TIMEOUT_MS,
-      );
-    }),
-  ];
-  // A signal that is already aborted is the reason for this drain, not a second
-  // cancellation; only a later abort abandons the wait.
-  if (parentSignal && !parentSignal.aborted) {
-    outcomes.push(
-      new Promise<DrainOutcome>((resolve) => {
-        onAbort = () => resolve('cancelledAgain');
-        parentSignal.addEventListener('abort', onAbort, {once: true});
-      }),
-    );
-  }
-
-  let outcome: DrainOutcome;
-  try {
-    outcome = await Promise.race(outcomes);
-  } finally {
-    clearTimeout(timer);
-    if (onAbort) {
-      parentSignal?.removeEventListener('abort', onAbort);
-    }
-  }
-
-  if (outcome === 'drained') {
-    return;
-  }
-  const remaining = countRemaining();
-  if (outcome === 'timedOut') {
-    logger.warn(
-      `Node ${nodeName}: ${remaining} item(s) did not stop within ` +
-        `${CANCELLED_ITEM_DRAIN_TIMEOUT_MS / 1000}s of being cancelled; ` +
-        'abandoning them.',
-    );
-  } else {
-    logger.warn(
-      `Node ${nodeName}: cancelled again while stopping ${remaining} item(s).`,
-    );
-  }
-  settleFanOut();
 }
 
 // The factory the engine uses to wrap a built node in a ParallelWorker (for
