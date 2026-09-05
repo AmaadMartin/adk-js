@@ -137,10 +137,7 @@ export class A2AAgentExecutor implements AgentExecutor {
         await this.publishFinalTaskStatus({
           executorContext,
           eventBus,
-          event: withInvocationMetadata(
-            unansweredRequestEvent,
-            executorContext,
-          ),
+          event: unansweredRequestEvent,
         });
 
         return;
@@ -212,11 +209,9 @@ export class A2AAgentExecutor implements AgentExecutor {
       await this.publishFinalTaskStatus({
         executorContext,
         eventBus,
-        event: withInvocationMetadata(
+        event:
           errorStatusEvent ??
-            getFinalTaskStatusUpdate(adkEvents, executorContext),
-          executorContext,
-        ),
+          getFinalTaskStatusUpdate(adkEvents, executorContext),
       });
     } catch (e: unknown) {
       const error = e as Error;
@@ -229,7 +224,6 @@ export class A2AAgentExecutor implements AgentExecutor {
           taskId: ctx.taskId,
           contextId: ctx.contextId,
           error: new Error(`Agent run failed: ${error.message}`),
-          metadata: getInvocationMetadata(executorContext),
         }),
       });
     }
@@ -291,13 +285,18 @@ export class A2AAgentExecutor implements AgentExecutor {
     event: TaskStatusUpdateEvent;
     error?: Error;
   }): Promise<void> {
+    const finalEvent = withInvocationMetadata(event, executorContext);
     try {
-      await this.config.afterExecuteCallback?.(executorContext, event, error);
+      await this.config.afterExecuteCallback?.(
+        executorContext,
+        finalEvent,
+        error,
+      );
     } catch (e: unknown) {
       logger.error('Error in afterExecuteCallback:', e);
     }
 
-    eventBus.publish(event);
+    eventBus.publish(finalEvent);
   }
 }
 
@@ -326,27 +325,20 @@ async function getAdkSession(
   sessionService: BaseSessionService,
   appName: string,
 ): Promise<Session> {
-  const existing = await sessionService.getSession({
+  const session = await sessionService.getSession({
     appName,
     userId,
     sessionId,
-    // Checking existence doesn't require event history.
-    config: {numRecentEvents: 0},
   });
-  if (!existing) {
-    return sessionService.createSession({
-      appName,
-      userId,
-      sessionId,
-    });
+  if (session) {
+    return session;
   }
 
-  // The pending human-in-the-loop scan reads the session history, which the
-  // probe above deliberately did not load. `existing` covers a session deleted
-  // between the two calls.
-  return (
-    (await sessionService.getSession({appName, userId, sessionId})) ?? existing
-  );
+  return sessionService.createSession({
+    appName,
+    userId,
+    sessionId,
+  });
 }
 
 /**
@@ -365,7 +357,7 @@ export async function getAdkRunner(
   runnerOrConfig: unknown,
   fromFactory = false,
 ): Promise<Runner> {
-  if (isRunnerFactory(runnerOrConfig)) {
+  if (typeof runnerOrConfig === 'function') {
     return getAdkRunner(await runnerOrConfig(), true);
   }
 
@@ -376,20 +368,12 @@ export async function getAdkRunner(
   if (!isRunnerConfig(runnerOrConfig)) {
     throw new TypeError(
       fromFactory
-        ? `Runner factory must return a Runner instance, got ${describeType(runnerOrConfig)}`
+        ? `Runner factory must return a Runner or a runner config, got ${describeType(runnerOrConfig)}`
         : `Runner must be a Runner instance or a callable that returns a Runner, got ${describeType(runnerOrConfig)}`,
     );
   }
 
   return new Runner(runnerOrConfig);
-}
-
-/**
- * Type guard for a value that can be called to produce a runner. Any function
- * qualifies; whatever it returns is validated by the recursive call.
- */
-function isRunnerFactory(value: unknown): value is () => unknown {
-  return typeof value === 'function';
 }
 
 /**
