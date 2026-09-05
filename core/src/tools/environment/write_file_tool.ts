@@ -96,24 +96,4 @@ export class WriteFileTool extends BaseTool {
     }
     return {status: 'ok', message: `Wrote ${filePath}`};
   }
-
-  /**
-   * Telemetry hook: classifies a tool response as an error, or `undefined` when
-   * it is not one.
-   *
-   * Mirrors adk-python's `BaseTool._detect_error_in_response`. The environment
-   * tools key off `status`, so a response carrying only an `error` field is not
-   * an error to them.
-   */
-  detectErrorInResponse(response: unknown): string | undefined {
-    if (
-      typeof response === 'object' &&
-      response !== null &&
-      'status' in response &&
-      response.status === 'error'
-    ) {
-      return 'TOOL_ERROR';
-    }
-    return undefined;
-  }
 }
