@@ -17,6 +17,7 @@ import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
+import {DevServer} from '../server/dev_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
@@ -256,7 +257,7 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
-        const server = new AdkApiServer({
+        const server = new DevServer({
           logLevel,
           agentsDir: getAbsolutePath(agentsDir),
           host: options['host'],

@@ -45,7 +45,6 @@ import {
 import {getAgentGraphAsDot, getWorkflowHighlights} from './agent_graph.js';
 import {
   collectSubWorkflows,
-  GraphTarget,
   navigateToNode,
   serializeAgent,
   serializeAppInfo,
@@ -112,7 +111,13 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  /**
+   * The configured agents directory, kept so a subclass can resolve paths
+   * under it. Undefined when the caller supplied its own `agentLoader` and no
+   * directory.
+   */
+  protected readonly agentsDir?: string;
+  protected readonly agentLoader: AgentLoader;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
@@ -138,7 +143,7 @@ export class AdkApiServer {
   private readonly sessionTraceDict: Record<string, string[]> =
     Object.create(null);
   private memoryExporter: InMemoryExporter;
-  private readonly logger: Logger;
+  protected readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
 
@@ -150,6 +155,7 @@ export class AdkApiServer {
     this.memoryService = options.memoryService ?? new InMemoryMemoryService();
     this.artifactService =
       options.artifactService ?? new InMemoryArtifactService();
+    this.agentsDir = options.agentsDir;
     this.agentLoader =
       options.agentLoader ??
       new AgentLoader(
@@ -1119,7 +1125,22 @@ export class AdkApiServer {
         }
       }
     });
+
+    this.registerDevEndpoints(app);
   }
+
+  /**
+   * Hook for a subclass to register further endpoints, called once every route
+   * above is registered. `DevServer` overrides it to add the endpoints the dev
+   * UI needs, which write into the agents directory and so must not reach a
+   * production deployment.
+   *
+   * This is not the whole dev-only surface. `/dev/apps/:appName/debug/trace/*`
+   * and `/dev/apps/:appName/build_graph*` are registered above and stay served
+   * by both classes; adk-python puts them on its `DevServer`, and moving them
+   * here would take them away from `adk api_server`.
+   */
+  protected registerDevEndpoints(_app: express.Application): void {}
 
   async start(): Promise<void> {
     await this.init();
@@ -1186,9 +1207,9 @@ export class AdkApiServer {
    * loader's error text, so an app that exists but throws while loading still
    * surfaces as a 500 with its real cause instead of a misleading 404.
    */
-  private async loadRootTarget(
+  protected async loadRootTarget(
     appName: string,
-  ): Promise<GraphTarget | undefined> {
+  ): Promise<RunnableRoot | undefined> {
     const apps = await this.agentLoader.listAgents();
     if (!apps.includes(appName)) {
       return undefined;
