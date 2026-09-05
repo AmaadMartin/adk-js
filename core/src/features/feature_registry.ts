@@ -36,7 +36,7 @@ export interface FeatureConfig {
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.ENVIRONMENT_SIMULATION]: {
     stage: FeatureStage.EXPERIMENTAL,
-    defaultOn: false,
+    defaultOn: true,
   },
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,

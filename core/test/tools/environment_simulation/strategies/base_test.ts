@@ -15,6 +15,7 @@ import {
   BaseTool,
   Context,
   FeatureName,
+  FeatureStage,
   FunctionTool,
   InvocationContext,
   LlmAgent,
@@ -23,6 +24,7 @@ import {
   ToolConnectionMap,
   TracingMockStrategy,
   createSession,
+  getFeatureConfig,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -269,5 +271,18 @@ describe('TracingMockStrategy', () => {
     await withEnvironmentSimulation(() => {
       expect(new TracingMockStrategy()).toBeInstanceOf(BaseMockStrategy);
     });
+  });
+});
+
+describe('the ENVIRONMENT_SIMULATION feature entry', () => {
+  it('is experimental and on by default, as adk-python registers it', () => {
+    expect(getFeatureConfig(FeatureName.ENVIRONMENT_SIMULATION)).toEqual({
+      stage: FeatureStage.EXPERIMENTAL,
+      defaultOn: true,
+    });
+  });
+
+  it('lets a strategy be constructed without any override', () => {
+    expect(() => new TracingMockStrategy()).not.toThrow();
   });
 });
