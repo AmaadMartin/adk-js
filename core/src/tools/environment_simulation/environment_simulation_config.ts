@@ -8,8 +8,8 @@ import {GenerateContentConfig} from '@google/genai';
 import {z} from 'zod';
 import {InputValidationError} from '../../errors/input_validation_error.js';
 import {
+  assertFeatureEnabled,
   FeatureName,
-  isFeatureEnabled,
 } from '../../features/feature_registry.js';
 
 /** The model the simulator calls when the caller names none. */
@@ -287,14 +287,6 @@ const environmentSimulationConfigSchema = z.strictObject({
   environmentData: z.string().optional(),
 });
 
-function assertFeatureEnabled(): void {
-  if (!isFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION)) {
-    throw new Error(
-      `Feature ${FeatureName.ENVIRONMENT_SIMULATION} is not enabled.`,
-    );
-  }
-}
-
 function parseOrThrow<S extends z.ZodType>(
   schema: S,
   typeName: string,
@@ -346,7 +338,7 @@ function assertToolSimulationConfigsUsable(
  *     field has the wrong type.
  */
 export function createInjectedError(params: InjectedError): InjectedError {
-  assertFeatureEnabled();
+  assertFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION);
   return parseOrThrow(injectedErrorSchema, 'InjectedError', params);
 }
 
@@ -364,7 +356,7 @@ export function createInjectedError(params: InjectedError): InjectedError {
 export function createInjectionConfig(
   params: Partial<InjectionConfig> = {},
 ): InjectionConfig {
-  assertFeatureEnabled();
+  assertFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION);
   return parseOrThrow(injectionConfigSchema, 'InjectionConfig', params);
 }
 
@@ -382,7 +374,7 @@ export function createInjectionConfig(
 export function createToolSimulationConfig(
   params: ToolSimulationConfigParams,
 ): ToolSimulationConfig {
-  assertFeatureEnabled();
+  assertFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION);
   return parseOrThrow(
     toolSimulationConfigSchema,
     'ToolSimulationConfig',
@@ -410,7 +402,7 @@ export function createToolSimulationConfig(
 export function createEnvironmentSimulationConfig(
   params: EnvironmentSimulationConfigParams = {},
 ): EnvironmentSimulationConfig {
-  assertFeatureEnabled();
+  assertFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION);
   const config = parseOrThrow(
     environmentSimulationConfigSchema,
     'EnvironmentSimulationConfig',
