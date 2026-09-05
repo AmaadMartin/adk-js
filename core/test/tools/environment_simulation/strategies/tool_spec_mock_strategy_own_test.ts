@@ -137,7 +137,9 @@ describe('ToolSpecMockStrategy own behaviour', () => {
     });
 
     it('keeps searching past an array that holds no match', async () => {
-      stubRegistryWithText(['{"labels": ["a", "b"], "ticket_id": "T-10"}']);
+      stubRegistryWithText([
+        '{"tags": {"labels": ["a", "b"]}, "meta": {"ticket_id": "T-10"}}',
+      ]);
       const strategy = new ToolSpecMockStrategy('fake-model', {});
       const stateStore = {};
 
