@@ -7,18 +7,18 @@
 import {GoogleAuth} from 'google-auth-library';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
-import {mergeTrackingHeaders} from '../../utils/client_labels.js';
+import {getTrackingHeaders} from '../../utils/client_labels.js';
 import {deprecated} from '../../utils/deprecated.js';
 import {formatError} from '../../utils/error_utils.js';
-import {AgentRegistrySingleMCPToolset} from '../agent_registry/agent_registry_mcp_toolset.js';
-import {isGoogleApi} from '../agent_registry/helpers.js';
 import {
   chooseApiEndpoint,
   clientCertsToPresent,
   getWithClientCert,
   MtlsClientCerts,
   TextResponse,
-} from './mtls.js';
+} from '../../utils/mtls_utils.js';
+import {AgentRegistrySingleMCPToolset} from '../agent_registry/agent_registry_mcp_toolset.js';
+import {isGoogleApi} from '../agent_registry/helpers.js';
 import {
   ApiRegistryMcpServer,
   ApiRegistryOptions,
@@ -195,10 +195,11 @@ export class ApiRegistry {
 
     // Resolved outside the try so a credential failure is not reported as a
     // listing failure.
-    const headers = mergeTrackingHeaders({
+    const headers = {
+      ...getTrackingHeaders(),
       'Content-Type': 'application/json',
       ...(await this.getAuthHeaders()),
-    });
+    };
 
     try {
       let pageToken: string | undefined;

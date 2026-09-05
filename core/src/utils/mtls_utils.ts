@@ -5,7 +5,7 @@
  */
 
 /**
- * Mutual-TLS support for the API Registry client.
+ * Mutual-TLS support for calling a Google API with a client certificate.
  *
  * adk-python delegates this to `google.auth.transport.mtls`. `google-auth-library`
  * for Node has no equivalent, so the SecureConnect device-certificate contract
@@ -20,7 +20,7 @@ import * as https from 'node:https';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {promisify} from 'node:util';
-import {logger} from '../../utils/logger.js';
+import {logger} from './logger.js';
 
 const SECURE_CONNECT_DIR = '.secureConnect';
 const METADATA_FILE = 'context_aware_metadata.json';

@@ -13,13 +13,13 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ApiRegistry} from '../../src/index.js';
+import {getTrackingHeaders} from '../../src/utils/client_labels.js';
+import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
+import {logger} from '../../src/utils/logger.js';
 import {
   clientCertsToPresent,
   getWithClientCert,
-} from '../../src/integrations/api_registry/mtls.js';
-import {mergeTrackingHeaders} from '../../src/utils/client_labels.js';
-import {resetDeprecationWarnings} from '../../src/utils/deprecated.js';
-import {logger} from '../../src/utils/logger.js';
+} from '../../src/utils/mtls_utils.js';
 
 const authState = vi.hoisted(() => ({
   token: 'mock_token' as string | undefined,
@@ -44,20 +44,15 @@ vi.mock('google-auth-library', () => ({
   })),
 }));
 
-vi.mock(
-  '../../src/integrations/api_registry/mtls.js',
-  async (importOriginal) => {
-    const actual =
-      await importOriginal<
-        typeof import('../../src/integrations/api_registry/mtls.js')
-      >();
-    return {
-      ...actual,
-      clientCertsToPresent: vi.fn(async () => undefined),
-      getWithClientCert: vi.fn(),
-    };
-  },
-);
+vi.mock('../../src/utils/mtls_utils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/mtls_utils.js')>();
+  return {
+    ...actual,
+    clientCertsToPresent: vi.fn(async () => undefined),
+    getWithClientCert: vi.fn(),
+  };
+});
 
 const PROJECT_ID = 'test-project';
 const LOCATION = 'global';
@@ -155,10 +150,11 @@ describe('ApiRegistry', () => {
         `${LIST_URL}?filter=enabled%3Dfalse`,
         {
           method: 'GET',
-          headers: mergeTrackingHeaders({
+          headers: {
+            ...getTrackingHeaders(),
             'Content-Type': 'application/json',
             'Authorization': 'Bearer mock_token',
-          }),
+          },
         },
       );
 
@@ -189,11 +185,12 @@ describe('ApiRegistry', () => {
         `${LIST_URL}?filter=enabled%3Dfalse`,
         {
           method: 'GET',
-          headers: mergeTrackingHeaders({
+          headers: {
+            ...getTrackingHeaders(),
             'Content-Type': 'application/json',
             'Authorization': 'Bearer mock_token',
             'x-goog-user-project': 'quota-project',
-          }),
+          },
         },
       );
     });
