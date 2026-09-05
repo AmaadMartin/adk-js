@@ -418,6 +418,7 @@ export {
   createNodeErrorEvent,
   createNodeState,
   createSubBranch,
+  findStaticNodePath,
   isNodeErrorEvent,
   isNodeReportedError,
   isNodeSchemaValidationError,
@@ -429,6 +430,7 @@ export {
   node,
   normalizeRetryExceptions,
   prepareRetryConfig,
+  toSerializable,
 } from './workflow/index.js';
 export type {
   BaseNodeConfig,
