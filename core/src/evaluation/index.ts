@@ -10,8 +10,9 @@
  * accessors that read a recorded trajectory, the contract every metric
  * evaluator implements, the `ResponseEvaluator`, `LlmAsJudge`,
  * `FinalResponseMatchV2Evaluator`, `HallucinationsV1Evaluator`,
- * `SafetyEvaluatorV1`, `RubricBasedToolUseV1Evaluator` and
- * `RubricBasedFinalResponseQualityV1Evaluator` evaluators that stand on it,
+ * `SafetyEvaluatorV1`, `RubricBasedToolUseV1Evaluator`,
+ * `RubricBasedFinalResponseQualityV1Evaluator` and
+ * `MultiTurnToolUseQualityV1Evaluator` evaluators that stand on it,
  * the metric info providers that describe each prebuilt metric,
  * and the user simulation half under `./simulation`.
  */
@@ -136,6 +137,8 @@ export {
   SafetyEvaluatorV1MetricInfoProvider,
   TrajectoryEvaluatorMetricInfoProvider,
 } from './metric_info_providers.js';
+export {MultiTurnToolUseQualityV1Evaluator} from './multi_turn_tool_use_quality_evaluator.js';
+export type {MultiTurnToolUseQualityV1EvaluatorOptions} from './multi_turn_tool_use_quality_evaluator.js';
 export {ResponseEvaluator} from './response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './rouge_scorer.js';

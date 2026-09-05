@@ -124,6 +124,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   agent over an eval set in your own process, scoring the invocations it
   produced, and registering the metric that scores them.
 - [Metric info providers](evaluation/metric_info_providers/index.md) - The name, description and value interval of each prebuilt metric, shared with adk-python.
+- [MultiTurnToolUseQualityV1Evaluator](evaluation/multi_turn_tool_use_quality_evaluator/index.md) - Scoring the tool calls an agent made over a whole conversation, with the Vertex AI Gen AI evaluation service.
 - [PerTurnUserSimulatorQualityV1](evaluation/per_turn_user_simulator_quality_v1/index.md) - Grading the simulated user that drove an eval case: the starting prompt, the conversation plan, and where the conversation should have ended.
 - [ResponseEvaluator](evaluation/response_evaluator/index.md) - Scoring an agent's final answer against a golden answer, or against the Vertex AI coherence metric.
 - [Rubric based evaluator](evaluation/rubric_based_evaluator/index.md) - The base class for a metric that grades an agent against written rubrics, one verdict per rubric.
