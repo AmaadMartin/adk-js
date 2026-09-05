@@ -9,8 +9,8 @@
  * workflow can fast-forward completed nodes and resolve pending interrupts.
  *
  * Ported (static-graph subset) from `google/adk-python`
- * `workflow/utils/_rehydration_utils.py`. The chronological sequence barrier
- * for deterministic parallel/dynamic replay is a Phase 5b continuation.
+ * `workflow/utils/_rehydration_utils.py`, plus the chronological completion
+ * scan the replay sequence barrier orders a resumed run by.
  */
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
@@ -22,6 +22,7 @@ import {
   REQUEST_INPUT_FUNCTION_CALL_NAME,
   responseSchemasByInterruptId,
 } from './hitl_utils.js';
+import {sequenceKey} from './replay_sequence_barrier.js';
 
 const RESULT_KEY = 'result';
 
@@ -301,13 +302,64 @@ function keyFn(parentPath?: string): (event: Event) => string | undefined {
     event.nodeInfo?.path ? nodeNameFromPath(event.nodeInfo.path) : event.author;
 }
 
+/**
+ * Whether a terminal result is present: an output, a route, or a raised
+ * interrupt. One rule, asked either of a single event or of the run that event
+ * accumulates into.
+ */
+function isTerminal(
+  output: unknown,
+  route: unknown,
+  interruptCount: number,
+): boolean {
+  return output !== undefined || route !== undefined || interruptCount > 0;
+}
+
 /** Whether a run has reached a terminal result, so the next event is a new run. */
 function isRunClosed(node: RehydratedNode): boolean {
-  return (
-    node.output !== undefined ||
-    node.route !== undefined ||
-    node.interruptIds.size > 0
+  return isTerminal(node.output, node.route, node.interruptIds.size);
+}
+
+/** Whether `event` closes the run that emitted it. */
+function isTerminalEvent(event: Event): boolean {
+  return isTerminal(
+    event.output,
+    event.route,
+    event.longRunningToolIds?.length ?? 0,
   );
+}
+
+/**
+ * The order in which this workflow's direct children completed, as
+ * `<childName>@<runId>` keys, for `ReplaySequenceBarrier`.
+ *
+ * Ported from `google/adk-python` `workflow/utils/_replay_manager.py`
+ * `_scan_sequence`, reduced to what a static graph needs.
+ *
+ * Only terminal events count. A node that emitted nothing but state updates
+ * produced no recorded completion, so nothing about it needs ordering, and
+ * including it would block the barrier on a key that never advances.
+ *
+ * The reference reads the run id out of the event's node path. TypeScript node
+ * paths carry none for static graph nodes, so runs are numbered positionally
+ * here, exactly as {@link reconstructNodeRuns} numbers them: the Nth terminal
+ * event for a node is its Nth run. Keys are therefore unique by construction,
+ * and the reference's "move a repeated key to the end" rule cannot apply.
+ */
+export function replaySequence(events: Event[], parentPath?: string): string[] {
+  const keyFor = keyFn(parentPath);
+  const runCounts = new Map<string, number>();
+  const sequence: string[] = [];
+  for (const event of events) {
+    const name = keyFor(event);
+    if (!name || !isTerminalEvent(event)) {
+      continue;
+    }
+    const run = (runCounts.get(name) ?? 0) + 1;
+    runCounts.set(name, run);
+    sequence.push(sequenceKey(name, String(run)));
+  }
+  return sequence;
 }
 
 /** Shared scan that groups node events by the key returned by `keyFor`. */
