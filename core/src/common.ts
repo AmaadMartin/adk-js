@@ -238,6 +238,17 @@ export type {
   ReflectionLm,
 } from './optimization/gepa_engine.js';
 export {
+  GEPARootAgentOptimizer,
+  RootAgentGepaAdapter,
+  SKILL_KEY_PREFIX,
+  skillComponentKey,
+} from './optimization/gepa_root_agent_optimizer.js';
+export type {
+  GEPARootAgentOptimizerConfig,
+  GEPARootAgentOptimizerResult,
+  RootAgentGepaAdapterParams,
+} from './optimization/gepa_root_agent_optimizer.js';
+export {
   AGENT_PROMPT_NAME,
   AgentGepaAdapter,
   GEPARootAgentPromptOptimizer,
