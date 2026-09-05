@@ -77,4 +77,23 @@ describe('createRunConfig', () => {
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
   });
+
+  it('carries the request and live fields through without defaulting them', () => {
+    const params = {
+      httpOptions: {timeout: 5000},
+      labels: {owner: 'run'},
+      explicitVadSignal: true,
+      translationConfig: {targetLanguageCode: 'es'},
+      sessionResumption: {handle: 'resume-me'},
+      avatarConfig: {avatarName: 'avatar-1'},
+    };
+
+    const config = createRunConfig(params);
+    const defaults = createRunConfig();
+
+    expect(config).toMatchObject(params);
+    for (const field of Object.keys(params)) {
+      expect(defaults).not.toHaveProperty(field);
+    }
+  });
 });

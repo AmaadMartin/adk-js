@@ -941,6 +941,68 @@ describe('Runner.runLive', () => {
     expect(liveConfig?.enableAffectiveDialog).toBe(true);
   });
 
+  it('opens a Gemini 3.x live connection without affective dialog or proactivity', async () => {
+    const llm = new FakeLiveLlm(
+      [{turnComplete: true}],
+      'gemini-3.5-flash-lite-live-preview',
+    );
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {
+        proactivity: {proactiveAudio: true},
+        enableAffectiveDialog: true,
+      },
+    })) {
+      // drain
+    }
+
+    const liveConfig = llm.llmRequestSeen?.liveConnectConfig;
+    expect(liveConfig?.enableAffectiveDialog).toBeUndefined();
+    expect(liveConfig?.proactivity).toBeUndefined();
+  });
+
+  it('opens a live connection with the agent sampling settings', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: llm,
+      generateContentConfig: {temperature: 0.25, maxOutputTokens: 256},
+    });
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {responseModalities: [Modality.AUDIO]},
+    })) {
+      // drain
+    }
+
+    const liveConfig = llm.llmRequestSeen?.liveConnectConfig;
+    expect(liveConfig?.temperature).toBe(0.25);
+    expect(liveConfig?.maxOutputTokens).toBe(256);
+  });
+
   it.each([1006, 1011, 1012])(
     'reconnects with session handle on websocket close code %i with non-matching message',
     async (code) => {
