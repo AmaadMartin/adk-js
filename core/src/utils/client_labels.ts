@@ -97,31 +97,3 @@ export function getTrackingHeaders(): Record<string, string> {
     'user-agent': headerValue,
   };
 }
-
-/**
- * Merges the tracking headers into `headers`.
- *
- * A caller value that is absent or empty is replaced outright. A non-empty one
- * keeps its own space-separated tokens and gains only the tracking tokens it
- * does not already carry, tracking tokens first.
- */
-export function mergeTrackingHeaders(
-  headers?: Record<string, string>,
-): Record<string, string> {
-  const merged: Record<string, string> = {...headers};
-  for (const [key, trackingValue] of Object.entries(getTrackingHeaders())) {
-    const callerValue = merged[key];
-    if (!callerValue) {
-      merged[key] = trackingValue;
-      continue;
-    }
-    const parts = trackingValue.split(' ');
-    for (const part of callerValue.split(' ')) {
-      if (!parts.includes(part)) {
-        parts.push(part);
-      }
-    }
-    merged[key] = parts.join(' ');
-  }
-  return merged;
-}

@@ -5,9 +5,8 @@
  */
 
 /**
- * Tests for the mutual-TLS helpers behind `ApiRegistry`. They have no
- * counterpart in adk-python, which delegates all of this to
- * `google.auth.transport.mtls`.
+ * Tests for the mutual-TLS helpers. They have no counterpart in adk-python,
+ * which delegates all of this to `google.auth.transport.mtls`.
  *
  * The certificate discovery tests run a real certificate provider subprocess
  * against a real metadata file, so they exercise the SecureConnect contract end
@@ -53,7 +52,7 @@ const {
   clientCertsToPresent,
   getWithClientCert,
   useClientCertEffective,
-} = await import('../../src/integrations/api_registry/mtls.js');
+} = await import('../../src/utils/mtls_utils.js');
 
 const DEFAULT_ENDPOINT = 'https://cloudapiregistry.googleapis.com';
 const MTLS_ENDPOINT = 'https://cloudapiregistry.mtls.googleapis.com';
@@ -146,7 +145,7 @@ describe('clientCertsToPresent', () => {
   let home: string;
 
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), 'adk-api-registry-mtls-'));
+    home = await mkdtemp(join(tmpdir(), 'adk-mtls-'));
     vi.stubEnv('HOME', home);
     vi.stubEnv('USERPROFILE', home);
     vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
