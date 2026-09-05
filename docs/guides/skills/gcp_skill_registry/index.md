@@ -65,7 +65,7 @@ An option wins over the environment:
 The project and the location have no default. When neither source supplies
 both, the constructor throws `project_id and location must be specified or set
 via environment variables.` rather than building a registry that cannot address
-anything.
+anything. A `client` carries its own, so it exempts a caller from this rule.
 
 `credentials` takes a `google-auth-library` `AuthClient`. Without it the
 registry calls `GoogleAuth().getClient()` on the first request, and reports a
@@ -109,6 +109,23 @@ certificate that fails to load warns, and the registry connects without one.
 
 `AGENT_REGISTRY_ENDPOINT` is read first, so it overrides the mutual-TLS host
 too.
+
+### Vertex AI client
+
+A `client` option switches the registry to the Vertex AI `v1beta1` skills
+collection, which `adk-python` does not offer:
+
+```ts
+import {Client} from '@google-cloud/vertexai';
+
+const registry = new GCPSkillRegistry({
+  client: new Client({project: 'my-project', location: 'us-central1'}),
+});
+```
+
+The client carries its own project, location and credentials, so none of the
+settings above apply to it, and neither does the mutual-TLS host selection.
+Prefer the default: the Agent Registry API is the transport both SDKs call.
 
 ## Fetching a skill
 

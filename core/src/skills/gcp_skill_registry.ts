@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Client} from '@google-cloud/vertexai';
 import {AuthClient, GoogleAuth} from 'google-auth-library';
 import * as https from 'node:https';
 import {getTrackingHeaders} from '../utils/client_labels.js';
@@ -19,6 +20,7 @@ import {
   SNAKE_OR_KEBAB_NAME_PATTERN,
 } from './skill.js';
 import {SkillRegistry} from './skill_registry.js';
+import {VertexSkillRegistry} from './vertex_skill_registry.js';
 
 /** The Agent Registry host serving the Skill Registry API. */
 const DEFAULT_ENDPOINT = 'https://agentregistry.googleapis.com/v1alpha';
@@ -42,6 +44,12 @@ export interface GCPSkillRegistryOptions {
   location?: string;
   /** Credentials to use instead of application default credentials. */
   credentials?: AuthClient;
+  /**
+   * Vertex AI client selecting the `v1beta1` skills collection instead of the
+   * Agent Registry API. The client carries its own project, location and
+   * credentials, so the other options do not apply to it.
+   */
+  client?: Client;
 }
 
 /** Reads one own property of a value that may not be an object at all. */
@@ -81,11 +89,8 @@ function readSearchHit(entry: unknown): Frontmatter | undefined {
   return undefined;
 }
 
-/**
- * GCP implementation of SkillRegistry, backed by the Agent Registry API.
- */
-@experimental
-export class GCPSkillRegistry implements SkillRegistry {
+/** Skill registry backed by the Agent Registry API. */
+class AgentRegistrySkillRegistry implements SkillRegistry {
   private readonly projectId: string;
   private readonly baseUrl: string;
   private readonly resourceParent: string;
@@ -225,5 +230,31 @@ export class GCPSkillRegistry implements SkillRegistry {
     params?: Record<string, string>,
   ): Promise<T> {
     return JSON.parse((await this.get(url, params)).toString('utf-8')) as T;
+  }
+}
+
+/**
+ * GCP implementation of SkillRegistry.
+ *
+ * Calls the Agent Registry API, which is the transport `adk-python` uses. A
+ * caller that supplies a `client` gets the Vertex AI `v1beta1` skills
+ * collection instead, which only `adk-js` offers.
+ */
+@experimental
+export class GCPSkillRegistry implements SkillRegistry {
+  private readonly delegate: SkillRegistry;
+
+  constructor(options: GCPSkillRegistryOptions = {}) {
+    this.delegate = options.client
+      ? new VertexSkillRegistry(options.client)
+      : new AgentRegistrySkillRegistry(options);
+  }
+
+  getSkill(name: string): Promise<Skill> {
+    return this.delegate.getSkill(name);
+  }
+
+  searchSkills(query: string): Promise<Frontmatter[]> {
+    return this.delegate.searchSkills(query);
   }
 }
