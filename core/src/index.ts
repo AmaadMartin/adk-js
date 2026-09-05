@@ -43,19 +43,9 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
-export {
-  BIGQUERY_DEFAULT_SCOPES,
-  BIGQUERY_TOKEN_CACHE_KEY,
-  BigQueryCredentialsConfig,
-} from './integrations/bigquery/bigquery_credentials.js';
-export type {BigQueryCredentialsConfigOptions} from './integrations/bigquery/bigquery_credentials.js';
-export {BigQueryCredentialsManager} from './integrations/bigquery/bigquery_credentials_manager.js';
-export {BigQueryTool} from './integrations/bigquery/bigquery_tool.js';
-export type {
-  BigQueryToolErrorResponse,
-  BigQueryToolExecuteFunction,
-  BigQueryToolOptions,
-} from './integrations/bigquery/bigquery_tool.js';
+export * from './integrations/bigquery/bigquery_credentials.js';
+export * from './integrations/bigquery/bigquery_credentials_manager.js';
+export * from './integrations/bigquery/bigquery_tool.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest

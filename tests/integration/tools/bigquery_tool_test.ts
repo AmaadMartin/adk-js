@@ -21,6 +21,7 @@ const ONE_HOUR_MS = 3600 * 1000;
 
 const APP_NAME = 'bigquery_tool_app';
 const USER_ID = 'test_user';
+const CLIENT_ID = 'integration-client-id';
 
 describe('BigQueryTool Integration', () => {
   it('runs a BigQuery tool call with the credential cached in the session', async () => {
@@ -35,7 +36,7 @@ describe('BigQueryTool Integration', () => {
       description: 'Lists the BigQuery datasets in a project.',
       parameters: z.object({projectId: z.string()}),
       credentials: new BigQueryCredentialsConfig({
-        clientId: 'integration-client-id',
+        clientId: CLIENT_ID,
         clientSecret: 'integration-client-secret',
       }),
       execute: (input, credentials) => {
@@ -88,7 +89,7 @@ describe('BigQueryTool Integration', () => {
       appName: APP_NAME,
       userId: USER_ID,
       state: {
-        [BIGQUERY_TOKEN_CACHE_KEY]: {
+        [`${BIGQUERY_TOKEN_CACHE_KEY}_${CLIENT_ID}`]: {
           accessToken: 'session-access-token',
           refreshToken: 'session-refresh-token',
           expiresAt: Date.now() + ONE_HOUR_MS,
@@ -124,7 +125,7 @@ describe('BigQueryTool Integration', () => {
       description: 'Lists the BigQuery datasets in a project.',
       parameters: z.object({projectId: z.string()}),
       credentials: new BigQueryCredentialsConfig({
-        clientId: 'integration-client-id',
+        clientId: CLIENT_ID,
         clientSecret: 'integration-client-secret',
       }),
       execute: () => expect.fail('the tool must not run without a credential'),

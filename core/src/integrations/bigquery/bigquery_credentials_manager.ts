@@ -30,11 +30,7 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/auth';
 /** Google's OAuth2 token endpoint. */
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
-/**
- * The prefix of the key the ADK auth plumbing stores the OAuth response under.
- * The client id is appended, so two tools configured with different OAuth
- * clients in one session do not read each other's response.
- */
+/** The prefix of the key the ADK auth plumbing stores the OAuth response under. */
 const CREDENTIAL_KEY_PREFIX = 'bigquery_oauth';
 
 /** Whether the client holds an access token that has not expired. */
@@ -53,11 +49,15 @@ function isRefreshable(client: OAuth2Client): boolean {
   );
 }
 
-/** The key the OAuth response for this client id is stored under. */
-function credentialKeyFor(clientId?: string): string {
-  return clientId
-    ? `${CREDENTIAL_KEY_PREFIX}_${clientId}`
-    : CREDENTIAL_KEY_PREFIX;
+/**
+ * Appends the client id to a session-state key.
+ *
+ * Both the OAuth response and the cached token are keyed this way, so two tools
+ * configured with different OAuth clients in one session never read each
+ * other's grant.
+ */
+function keyFor(prefix: string, clientId?: string): string {
+  return clientId ? `${prefix}_${clientId}` : prefix;
 }
 
 /** Builds the OAuth2 authorization-code scheme for the requested scopes. */
@@ -182,7 +182,9 @@ export class BigQueryCredentialsManager {
 
   /** Rehydrates the credential cached in session state, when there is one. */
   private loadCached(toolContext: Context): OAuth2Client | undefined {
-    const tokens = toolContext.state.get<OAuth2Auth>(BIGQUERY_TOKEN_CACHE_KEY);
+    const tokens = toolContext.state.get<OAuth2Auth>(
+      keyFor(BIGQUERY_TOKEN_CACHE_KEY, this.credentialsConfig.clientId),
+    );
     if (!tokens) {
       return undefined;
     }
@@ -200,7 +202,7 @@ export class BigQueryCredentialsManager {
     const authConfig: AuthConfig = {
       authScheme: buildAuthScheme(config.scopes),
       rawAuthCredential: buildAuthCredential(config),
-      credentialKey: credentialKeyFor(config.clientId),
+      credentialKey: keyFor(CREDENTIAL_KEY_PREFIX, config.clientId),
     };
 
     const tokens = toolContext.getAuthResponse(authConfig)?.oauth2;
@@ -211,7 +213,10 @@ export class BigQueryCredentialsManager {
 
     const client = buildClient(config, tokens);
     config.credentials = client;
-    toolContext.state.set(BIGQUERY_TOKEN_CACHE_KEY, toCacheEntry(tokens));
+    toolContext.state.set(
+      keyFor(BIGQUERY_TOKEN_CACHE_KEY, config.clientId),
+      toCacheEntry(tokens),
+    );
     return client;
   }
 }

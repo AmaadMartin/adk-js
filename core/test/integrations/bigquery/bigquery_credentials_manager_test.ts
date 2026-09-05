@@ -46,6 +46,11 @@ function createConfig(clientId = CLIENT_ID): BigQueryCredentialsConfig {
   });
 }
 
+/** The session-state key the token of this client id is cached under. */
+function cacheKey(clientId = CLIENT_ID): string {
+  return `${BIGQUERY_TOKEN_CACHE_KEY}_${clientId}`;
+}
+
 function createClient(credentials: Credentials): OAuth2Client {
   const client = new OAuth2Client({
     clientId: CLIENT_ID,
@@ -121,7 +126,7 @@ describe('BigQueryCredentialsManager', () => {
   it('rehydrates a valid cached credential and keeps it on the config', async () => {
     const config = createConfig();
     const toolContext = createToolContext();
-    toolContext.state.set(BIGQUERY_TOKEN_CACHE_KEY, {
+    toolContext.state.set(cacheKey(), {
       accessToken: 'cached-access-token',
       refreshToken: 'cached-refresh-token',
       expiresAt: Date.now() + ONE_HOUR_MS,
@@ -152,7 +157,7 @@ describe('BigQueryCredentialsManager', () => {
   it('refreshes an expired cached credential', async () => {
     const config = createConfig();
     const toolContext = createToolContext();
-    toolContext.state.set(BIGQUERY_TOKEN_CACHE_KEY, {
+    toolContext.state.set(cacheKey(), {
       accessToken: 'stale-access-token',
       refreshToken: 'cached-refresh-token',
       expiresAt: Date.now() - ONE_HOUR_MS,
@@ -244,7 +249,7 @@ describe('BigQueryCredentialsManager', () => {
     expect(result?.credentials.refresh_token).toEqual('new-refresh-token');
     expect(config.credentials).toBe(result);
     expect(requestCredential).not.toHaveBeenCalled();
-    expect(toolContext.state.get(BIGQUERY_TOKEN_CACHE_KEY)).toEqual({
+    expect(toolContext.state.get(cacheKey())).toEqual({
       accessToken: 'new-access-token',
       refreshToken: 'new-refresh-token',
       expiresAt: undefined,
@@ -333,5 +338,28 @@ describe('BigQueryCredentialsManager', () => {
     expect(requestCredential.mock.calls[1][0].credentialKey).toEqual(
       'bigquery_oauth_client-two',
     );
+  });
+
+  it('never serves one client id the token cached for another', async () => {
+    const toolContext = createToolContext();
+    storeAuthResponse(toolContext, 'bigquery_oauth_client-one', {
+      accessToken: 'client-one-token',
+    });
+    await new BigQueryCredentialsManager(
+      createConfig('client-one'),
+    ).getValidCredentials(toolContext);
+    const requestCredential = vi.spyOn(toolContext, 'requestCredential');
+
+    const result = await new BigQueryCredentialsManager(
+      createConfig('client-two'),
+    ).getValidCredentials(toolContext);
+
+    expect(result).toBeUndefined();
+    expect(requestCredential).toHaveBeenCalledTimes(1);
+    expect(toolContext.state.get(cacheKey('client-one'))).toEqual({
+      accessToken: 'client-one-token',
+      refreshToken: undefined,
+      expiresAt: undefined,
+    });
   });
 });
