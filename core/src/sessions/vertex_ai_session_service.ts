@@ -628,16 +628,7 @@ function isInvalidArgumentError(error: unknown): boolean {
   return (error as {status?: number} | null)?.status === HTTP_BAD_REQUEST;
 }
 
-interface ExtendedEventActions extends EventActions {
-  compaction?: {
-    startTime: number;
-    endTime: number;
-    compactedContent: string;
-  };
-}
-
 interface ExtendedEvent extends Event {
-  actions: ExtendedEventActions;
   isCompacted?: boolean;
   startTime?: number;
   endTime?: number;
@@ -696,7 +687,7 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
     }
   }
 
-  const eventActions: ExtendedEventActions = {
+  const eventActions: EventActions = {
     stateDelta: (actions['stateDelta'] as {[key: string]: unknown}) || {},
     artifactDelta: (actions['artifactDelta'] as {[key: string]: number}) || {},
     requestedAuthConfigs:
@@ -713,7 +704,6 @@ function _fromApiEvent(apiEventObj: VertexAiSessionEvent): Event {
       | string
       | undefined,
     escalate: actions['escalate'] as boolean | undefined,
-    compaction: compactionData || undefined,
   };
 
   const event: ExtendedEvent = {

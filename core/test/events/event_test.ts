@@ -8,6 +8,7 @@ import {
   AuthConfig,
   createEvent,
   createEventActions,
+  EventCompaction,
   getFunctionCalls,
   getFunctionResponses,
   hasThoughts,
@@ -417,6 +418,62 @@ describe('Event Utils', () => {
       expect(restored.actions?.agentState).toEqual({
         input: {userId: 42, camelKey: 'v'},
       });
+    });
+
+    it('converts a compaction to snake_case and back', () => {
+      const compaction: EventCompaction = {
+        startTimestamp: 1000,
+        endTimestamp: 2000,
+        compactedContent: {role: 'model', parts: [{text: 'the story so far'}]},
+      };
+      const original = createEvent({
+        id: '123',
+        actions: createEventActions({compaction}),
+      });
+
+      const snakeEvent = transformToSnakeCaseEvent(original);
+      const snakeActions = snakeEvent.actions as Record<string, unknown>;
+      expect(snakeActions.compaction).toEqual({
+        start_timestamp: 1000,
+        end_timestamp: 2000,
+        compacted_content: {role: 'model', parts: [{text: 'the story so far'}]},
+      });
+      expect(transformToCamelCaseEvent(snakeEvent).actions?.compaction).toEqual(
+        compaction,
+      );
+    });
+
+    it('round-trips a compaction summary that carries a function call', () => {
+      const compaction: EventCompaction = {
+        startTimestamp: 1000,
+        endTimestamp: 2000,
+        compactedContent: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                name: 'book_flight',
+                args: {departureCity: 'Paris', return_date: '2026-05-01'},
+              },
+            },
+            {
+              functionResponse: {
+                name: 'book_flight',
+                response: {bookingRef: 'AB12', seat_row: 14},
+              },
+            },
+          ],
+        },
+      };
+      const original = createEvent({
+        id: '123',
+        actions: createEventActions({compaction}),
+      });
+
+      const restored = transformToCamelCaseEvent(
+        transformToSnakeCaseEvent(original),
+      );
+      expect(restored.actions?.compaction).toEqual(compaction);
     });
   });
 
