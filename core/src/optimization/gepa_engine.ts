@@ -5,9 +5,7 @@
  */
 
 /**
- * The GEPA engine contract that {@link
- * ../optimization/gepa_root_agent_prompt_optimizer.GEPARootAgentPromptOptimizer}
- * drives.
+ * The GEPA engine contract that {@link GEPARootAgentOptimizer} drives.
  *
  * ADK does not bundle a GEPA search engine. adk-python imports the PyPI
  * package `gepa`; npm has no first-party equivalent, so the caller supplies an

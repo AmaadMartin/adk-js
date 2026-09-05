@@ -57,7 +57,7 @@ export const CANDIDATE_SKILL_INSTRUCTIONS =
   'Refund an order only inside the refund window, and say which window applied.';
 
 /** The phrases each example rewards, across the agent and its skills. */
-export const EXPECTED_PHRASES: Record<string, string[]> = {
+const EXPECTED_PHRASES: Record<string, string[]> = {
   'case-1': ['order'],
   'case-2': ['order', 'confirm'],
   'case-3': ['refund', 'window'],
@@ -84,7 +84,7 @@ function scoreText(text: string, exampleId: string): number {
   return hits / phrases.length;
 }
 
-export function mean(values: number[]): number {
+function mean(values: number[]): number {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 

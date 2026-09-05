@@ -160,9 +160,7 @@ export class SkillToolset extends BaseToolset {
    *
    * @param skills The skills the new toolset exposes.
    */
-  cloneWithUpdatedSkills(
-    skills: Record<string, Skill> | Skill[],
-  ): SkillToolset {
+  cloneWithUpdatedSkills(skills: Skill[]): SkillToolset {
     return new SkillToolset(skills, {
       codeExecutor: this.codeExecutor,
       additionalTools: this.additionalTools,
