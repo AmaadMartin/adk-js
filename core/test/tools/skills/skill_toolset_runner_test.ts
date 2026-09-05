@@ -90,7 +90,14 @@ describe('SkillToolset driven by a Runner', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(workspace, {recursive: true, force: true});
+    // A killed command can still hold the directory on Windows, which is why
+    // the removal retries rather than failing the test that just passed.
+    await fs.rm(workspace, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   });
 
   function createAgent(environment: LocalEnvironment): LlmAgent {
@@ -127,7 +134,9 @@ describe('SkillToolset driven by a Runner', () => {
 
     const instruction = model.requests[0].config?.systemInstruction;
     expect(instruction).toContain('run_skill_script');
-    expect(instruction).toContain(path.posix.join(workspace, 'skills'));
+    // The toolset reports the folder with forward slashes, whatever the host
+    // gives it.
+    expect(instruction).toContain(`${workspace.replace(/\\/g, '/')}/skills`);
 
     // The command is held: the run asks the client to approve it.
     const confirmationCalls = events
