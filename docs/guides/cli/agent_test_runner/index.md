@@ -126,11 +126,10 @@ in `_xfail` is marked `xfail`, for a conversation that is known to be broken.
 
 ## What the comparison ignores
 
-`EXCLUDED_EVENT_FIELDS` lists the ten volatile fields that are dropped from both
+`EXCLUDED_EVENT_FIELDS` lists the volatile fields that are dropped from both
 sides: `id`, `timestamp`, `invocationId`, `modelVersion`, `finishReason`,
-`usageMetadata`, `avgLogprobs`, `cacheMetadata`, `logprobsResult` and
-`citationMetadata`. Two more, `interactionId` and `turnComplete`, are dropped as
-well; they are held apart so the value of the public constant stays stable.
+`usageMetadata`, `avgLogprobs`, `cacheMetadata`, `logprobsResult`,
+`citationMetadata`, `interactionId` and `turnComplete`.
 
 Normalization also strips thought signatures, drops the role of a
 human-in-the-loop request, sorts the long-running tool ids, prunes empty action
@@ -158,12 +157,6 @@ for (const result of await rebuildTests('./samples/my_agent')) {
 }
 ```
 
-The module also runs directly, mirroring adk-python:
-
-```
-node dist/esm/cli/agent_test_runner.js ./samples/my_agent
-```
-
 A directory rebuilds every fixture below it; a file path rebuilds only that
 fixture. Each file is rewritten with sorted keys, two-space indentation and a
 trailing newline, non-ASCII text is preserved verbatim, and `lastUpdateTime` is
@@ -173,16 +166,13 @@ A rebuild calls the model, so it needs credentials. A replay does not.
 
 ## Limits
 
-- **A workflow that fans out is not pinned to one worker at a time.** The
-  recorded responses are served in the order the agent asks for them, and a
-  parallel group is served in worker index order. adk-python pins
-  `max_concurrency` to 1 before a replay, so its workers ask one at a time.
-  adk-js declares `Workflow.maxConcurrency` and
-  `ParallelWorker.maxParallelWorkers` `readonly`, and the port does not cast
-  them away, so up to `DEFAULT_MAX_PARALLEL_WORKERS` children can ask at once.
-  A fixture whose agent fans out can then pair a recorded response with the
-  wrong worker, and the difference it reports is not reproducible. Record such
-  a conversation with a workflow that runs one worker at a time.
+- **A workflow that fans out is not replayable.** The recorded responses are
+  served positionally, in recording order. adk-python pins `max_concurrency` to
+  1 before a replay so that its workers ask one at a time; adk-js declares
+  `Workflow.maxConcurrency` and `ParallelWorker.maxParallelWorkers` `readonly`,
+  and the port does not cast them away, so several children can ask at once and
+  a response can reach the wrong worker. The difference that reports is not
+  reproducible. Record a conversation whose model calls happen one at a time.
 - **A replay needs the agent's model to be constructible.** An agent that names
   a Gemini model resolves that name through `LLMRegistry` before any callback
   runs, and the Gemini constructor rejects a missing API key. Set any

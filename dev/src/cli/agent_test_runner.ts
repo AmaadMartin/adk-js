@@ -37,9 +37,8 @@ import {Content, createUserContent, Part} from '@google/genai';
 import fg from 'fast-glob';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import {pathToFileURL} from 'node:url';
 
-import {AgentFile} from '../utils/agent_loader.js';
+import {AgentFile, findAgentEntryFile} from '../utils/agent_loader.js';
 import {loadFileData, saveToFile} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 
@@ -65,19 +64,6 @@ const XFAIL_SUFFIX = '_xfail';
 /** The directory a reportable test id is made relative to. */
 const SAMPLES_DIR_NAME = 'samples';
 
-/** Base names of an agent entry file, in the order the loader prefers them. */
-const AGENT_ENTRY_BASE_NAMES: readonly string[] = ['app', 'agent'];
-
-/** Extensions of an agent entry file, matching what `AgentFile` can load. */
-const AGENT_ENTRY_EXTENSIONS: readonly string[] = [
-  '.ts',
-  '.mts',
-  '.cts',
-  '.js',
-  '.mjs',
-  '.cjs',
-];
-
 /** A declarative agent, which marks a directory as an agent directory. */
 const AGENT_CONFIG_FILE_NAME = 'root_agent.yaml';
 
@@ -94,9 +80,6 @@ const TEST_USER_ID = 'test_user';
  * not a recorded model response.
  */
 const SET_MODEL_RESPONSE_TOOL_NAME = 'set_model_response';
-
-/** An author of the form `<name>__<index>`, one worker of a parallel group. */
-const PARALLEL_AUTHOR_PATTERN = /^(.+)__(\d+)$/;
 
 /** One event as recorded in a fixture: any field may be absent. */
 type RecordedEvent = Partial<Event>;
@@ -185,18 +168,6 @@ function isAgentDir(agentDir: string): boolean {
   );
 }
 
-function findAgentEntryFile(agentDir: string): string | undefined {
-  for (const baseName of AGENT_ENTRY_BASE_NAMES) {
-    for (const extension of AGENT_ENTRY_EXTENSIONS) {
-      const candidate = path.join(agentDir, `${baseName}${extension}`);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return undefined;
-}
-
 /**
  * Builds the reportable id of a fixture: its path below the samples root, or
  * just the agent directory name when the agent lives outside it.
@@ -229,10 +200,6 @@ function findSamplesRoot(agentDir: string): string | undefined {
  * request it was asked to answer.
  */
 export class MockModel extends BaseLlm {
-  static override readonly supportedModels: Array<string | RegExp> = [
-    MOCK_MODEL_NAME,
-  ];
-
   /** The requests served so far, in order. */
   readonly requests: LlmRequest[] = [];
 
@@ -479,8 +446,8 @@ export async function runAgentReplay(
 
     return {
       status: 'compared',
-      actual: sortBySortKey(normalizeEvents(normalizeIds(actual), false)),
-      expected: sortBySortKey(normalizeEvents(expected, true)),
+      actual: sortBySortKey(normalizeEvents(normalizeIds(actual))),
+      expected: sortBySortKey(normalizeEvents(expected)),
     };
   } finally {
     await agentFile.dispose();
@@ -592,20 +559,18 @@ async function rebuildOne(testCase: AgentTestCase): Promise<RebuildResult> {
  *
  * Not every recorded model event came from the model: ADK synthesizes the one
  * that answers a `set_model_response` call, and it raises the workflow
- * human-in-the-loop requests itself. A parallel group is emitted in worker
- * index order, which is the order the workers are started in.
+ * human-in-the-loop requests itself.
  *
- * The responses are served positionally, so that index order only holds while
- * the workers ask one at a time. adk-python pins `max_concurrency` to 1 before
- * a replay; adk-js declares that field `readonly`, so this port cannot — see
- * the guide's Limits section.
+ * The responses are served positionally, in recording order, so a replay only
+ * reproduces a conversation whose model calls happen one at a time — see the
+ * guide's Limits section.
  *
  * @param events The recorded events after the opening user turn.
  */
 export function buildMockResponses(
   events: readonly RecordedEvent[],
 ): LlmResponse[] {
-  const recorded: Array<{author: string; content: Content}> = [];
+  const responses: LlmResponse[] = [];
   let afterSetModelResponse = false;
 
   for (const event of events) {
@@ -628,48 +593,10 @@ export function buildMockResponses(
       // A copy, not the fixture's own object: the flow stamps generated ids
       // onto the content it is given, which would edit the recorded side of
       // the comparison into agreeing with the live one.
-      recorded.push({
-        author: event.author ?? '',
-        content: structuredClone(content),
-      });
+      responses.push({content: structuredClone(content)});
     }
   }
-  return orderParallelGroups(recorded).map((content) => ({content}));
-}
-
-function orderParallelGroups(
-  recorded: ReadonlyArray<{author: string; content: Content}>,
-): Content[] {
-  const ordered: Content[] = [];
-  let groupName: string | undefined;
-  let group: Array<{index: number; content: Content}> = [];
-
-  const flush = () => {
-    group.sort((left, right) => left.index - right.index);
-    ordered.push(...group.map((member) => member.content));
-    group = [];
-    groupName = undefined;
-  };
-
-  for (const entry of recorded) {
-    const match = PARALLEL_AUTHOR_PATTERN.exec(entry.author);
-    if (!match) {
-      if (groupName !== undefined) {
-        flush();
-      }
-      ordered.push(entry.content);
-      continue;
-    }
-    if (groupName !== undefined && groupName !== match[1]) {
-      flush();
-    }
-    groupName = match[1];
-    group.push({index: Number(match[2]), content: entry.content});
-  }
-  if (groupName !== undefined) {
-    flush();
-  }
-  return ordered;
+  return responses;
 }
 
 function hasSetModelResponse(content: Content): boolean {
@@ -777,28 +704,4 @@ function rootOf(loaded: RunnableRoot | App): {app?: App; agent?: RunnableRoot} {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Rebuilds the fixtures the command line names, reporting each outcome.
- *
- * @param args The command line arguments after the script name.
- */
-export async function rebuildFromArgv(args: readonly string[]): Promise<void> {
-  const folder = args[0];
-  if (folder === undefined) {
-    logger.info('Usage: node agent_test_runner.js <folder>');
-    return;
-  }
-  for (const result of await rebuildTests(folder)) {
-    logger.info(`${result.status} ${result.testFile}`);
-  }
-}
-
-/** Mirrors adk-python's `python agent_test_runner.py <folder>` entry point. */
-if (
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
-  void rebuildFromArgv(process.argv.slice(2));
 }

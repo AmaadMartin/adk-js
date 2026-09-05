@@ -39,7 +39,7 @@ describe('normalizeEvents', () => {
 
     // Everything that differs between two identical runs has to go, in either
     // naming convention, and null-valued keys must not survive either.
-    expect(normalizeEvents([event], true)).toEqual([{author: 'agent'}]);
+    expect(normalizeEvents([event])).toEqual([{author: 'agent'}]);
   });
 
   it('test_normalize_events_agrees_between_event_objects_and_recorded_json', () => {
@@ -56,12 +56,10 @@ describe('normalizeEvents', () => {
 
     // This equality is the whole point of the function: a live run and the
     // fixture it is compared against must normalize to the same shape.
-    expect(normalizeEvents([event], false)).toEqual(
-      normalizeEvents([recorded], true),
-    );
+    expect(normalizeEvents([event])).toEqual(normalizeEvents([recorded]));
     // An adk-js event carries no `nodeInfo` until a workflow node emits one,
     // where a fresh adk-python event dumps `nodeInfo: {path: ''}`.
-    expect(normalizeEvents([event], false)).toEqual([
+    expect(normalizeEvents([event])).toEqual([
       {
         author: 'agent',
         content: {role: 'model', parts: [{text: 'hello'}]},
@@ -79,7 +77,7 @@ describe('normalizeEvents', () => {
       },
     };
 
-    const normalized = normalizeEvents([event], true);
+    const normalized = normalizeEvents([event]);
 
     expect(normalized[0]['content']).toEqual({
       role: 'model',
@@ -102,7 +100,7 @@ describe('normalizeEvents', () => {
       content: {role: 'model', parts: [{functionCall: {name: 'roll_dice'}}]},
     };
 
-    const normalized = normalizeEvents([hitl, ordinary], true);
+    const normalized = normalizeEvents([hitl, ordinary]);
 
     // The role of a request is not stable across runs; every other event
     // keeps it.
@@ -114,7 +112,7 @@ describe('normalizeEvents', () => {
     const unordered = {author: 'agent', longRunningToolIds: ['z', 'a', 'm']};
     const empty = {author: 'agent', longRunningToolIds: []};
 
-    const normalized = normalizeEvents([unordered, empty], true);
+    const normalized = normalizeEvents([unordered, empty]);
 
     // The ids come from a set, so only the sorted form is reproducible.
     expect(normalized[0]['longRunningToolIds']).toEqual(['a', 'm', 'z']);
@@ -131,7 +129,7 @@ describe('normalizeEvents', () => {
       actions: {stateDelta: {}, artifactDelta: {}},
     };
 
-    const normalized = normalizeEvents([partlyEmpty, allEmpty], true);
+    const normalized = normalizeEvents([partlyEmpty, allEmpty]);
 
     expect(normalized[0]['actions']).toEqual({
       artifactDelta: {'report.md': 1},
@@ -147,7 +145,7 @@ describe('normalizeEvents', () => {
       },
     };
 
-    const normalized = normalizeEvents([event], true);
+    const normalized = normalizeEvents([event]);
 
     // Join bookkeeping is an implementation detail of parallel execution.
     expect(normalized[0]['actions']).toEqual({stateDelta: {answer: 42}});
@@ -160,33 +158,27 @@ describe('normalizeEvents', () => {
       content: {role: 'model', parts: [{text: 'hi', thoughtSignature: 'x'}]},
     };
 
-    normalizeEvents([event], true);
+    normalizeEvents([event]);
 
     expect(event.timestamp).toBe(1);
     expect(event.content.parts[0].thoughtSignature).toBe('x');
   });
-
-  it('keeps a snake_case field on a live event, which never has one', () => {
-    const event = {author: 'agent', invocation_id: 'i-1'};
-
-    expect(normalizeEvents([event], false)).toEqual([
-      {author: 'agent', invocation_id: 'i-1'},
-    ]);
-  });
 });
 
 describe('EXCLUDED_EVENT_FIELDS', () => {
-  it('lists exactly the ten public field names adk-python publishes', () => {
+  it('lists every field adk-python excludes from a comparison', () => {
     expect([...EXCLUDED_EVENT_FIELDS].sort()).toEqual([
       'avgLogprobs',
       'cacheMetadata',
       'citationMetadata',
       'finishReason',
       'id',
+      'interactionId',
       'invocationId',
       'logprobsResult',
       'modelVersion',
       'timestamp',
+      'turnComplete',
       'usageMetadata',
     ]);
   });
