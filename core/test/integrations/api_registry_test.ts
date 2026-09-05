@@ -544,11 +544,15 @@ describe('ApiRegistry', () => {
       );
     });
 
-    it('does not look for a certificate unless one was asked for', async () => {
+    it('lists over plain fetch when no certificate is available', async () => {
       const registry = newRegistry();
       await registry.getToolset('test-mcp-server-1');
 
-      expect(clientCertsToPresent).not.toHaveBeenCalled();
+      expect(getWithClientCert).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${LIST_URL}?filter=enabled%3Dfalse`,
+        expect.anything(),
+      );
     });
 
     it('lists the registry once, however many toolsets are requested', async () => {
