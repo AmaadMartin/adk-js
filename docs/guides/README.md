@@ -27,3 +27,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Workflow
+
+- [Event branches in a node run](workflow/node_branches/index.md) - Which branch a node's events carry, and how a node redirects it.
