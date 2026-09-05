@@ -93,10 +93,15 @@ function fileNotFoundError(resolved: string, cause: unknown): ErrnoError {
   );
 }
 
-/** Converts file content to a shape the e2b SDK accepts. */
+/**
+ * Converts file content to a shape the e2b SDK accepts. `files.write` takes a
+ * string, an `ArrayBuffer`, a `Blob` or a `ReadableStream`, but not a
+ * `Uint8Array`.
+ */
 function toWritableContent(content: string | Uint8Array): string | Blob {
-  // The copy is deliberate: the caller's view may sit over a SharedArrayBuffer,
-  // which `Blob` rejects, or over a slice of a larger pooled buffer.
+  // `Uint8Array` is generic over `ArrayBufferLike`, and `BlobPart` accepts only
+  // a view over an `ArrayBuffer`, so the copy is what makes this assignable
+  // without a cast. Removing it is a compile error, not a runtime one.
   return typeof content === 'string'
     ? content
     : new Blob([new Uint8Array(content)]);
