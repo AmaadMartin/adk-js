@@ -280,7 +280,11 @@ export type {
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
-export {extractStateDelta, makeJsonSafeState} from './sessions/session_util.js';
+export {
+  extractStateDelta,
+  makeJsonSafeState,
+  paginateSessions,
+} from './sessions/session_util.js';
 export type {StateDelta} from './sessions/session_util.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
@@ -354,6 +358,7 @@ export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {randomUUID} from './utils/env_aware_utils.js';
 export {toJsonSafe} from './utils/json_utils.js';
+export type {JsonSafeResult} from './utils/json_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';

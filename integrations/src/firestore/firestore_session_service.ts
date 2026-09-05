@@ -20,6 +20,7 @@ import {
   makeJsonSafeState,
   mergeStates,
   OptionalPeer,
+  paginateSessions,
   randomUUID,
   Session,
   SessionNotFoundError,
@@ -28,7 +29,7 @@ import {
   transformToSnakeCaseEvent,
   trimTempDeltaState,
 } from '@google/adk';
-import type {FirestoreClient, FirestoreSnapshot} from './firestore_client.js';
+import type {FirestoreClient} from './firestore_client.js';
 import {KeyedMutex} from './keyed_mutex.js';
 import {
   appStateRef,
@@ -47,13 +48,7 @@ import {
   userStatesRef,
 } from './session_documents.js';
 
-export {
-  DEFAULT_APP_STATE_COLLECTION,
-  DEFAULT_EVENTS_COLLECTION,
-  DEFAULT_ROOT_COLLECTION,
-  DEFAULT_SESSIONS_COLLECTION,
-  DEFAULT_USER_STATE_COLLECTION,
-} from './session_documents.js';
+export {DEFAULT_ROOT_COLLECTION} from './session_documents.js';
 
 /** Environment variable that overrides the default root collection name. */
 const ROOT_COLLECTION_ENV_VAR = 'ADK_FIRESTORE_ROOT_COLLECTION';
@@ -103,42 +98,6 @@ export function resolveClient(
 /** Serializes appends against one session. */
 function lockKey({appName, userId, id}: Session): string {
   return `${appName}\u0000${userId}\u0000${id}`;
-}
-
-/**
- * Applies the request's pagination to an already-sorted list of sessions.
- *
- * Firestore has no cheap count for a collection-group query, so the whole
- * match set is read and sliced here, the same way `InMemorySessionService`
- * does it.
- */
-function paginate(
-  sessions: Session[],
-  {limit, offset, page}: ListSessionsRequest,
-): ListSessionsResponse {
-  const totalItems = sessions.length;
-  if (limit === undefined) {
-    return {
-      sessions: offset ? sessions.slice(offset) : sessions,
-      page: 1,
-      limit: totalItems,
-      totalItems,
-      totalPages: totalItems === 0 ? 0 : 1,
-    };
-  }
-
-  const effectiveOffset =
-    page !== undefined ? (page - 1) * limit : (offset ?? 0);
-  const effectivePage =
-    page ?? (limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1);
-
-  return {
-    sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
-    page: effectivePage,
-    limit,
-    totalItems,
-    totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
-  };
 }
 
 /** Orders sessions by last update time, then user, then id. */
@@ -300,8 +259,8 @@ export class FirestoreSessionService extends BaseSessionService {
       appName,
       userId,
       state: mergeStates(
-        stateOf(appSnapshot),
-        stateOf(userSnapshot),
+        snapshotData(appSnapshot),
+        snapshotData(userSnapshot),
         parseSessionState(data['state']),
       ),
       events,
@@ -335,7 +294,7 @@ export class FirestoreSessionService extends BaseSessionService {
     const rows = snapshot.docs
       .map((doc) => toSessionRow(doc.data()))
       .filter((row): row is NonNullable<typeof row> => row !== undefined);
-    const appState = stateOf(appSnapshot);
+    const appState = snapshotData(appSnapshot);
     const userStates = await this.readUserStates(client, appName, userId, rows);
 
     const sessions = rows.map((row) =>
@@ -359,7 +318,7 @@ export class FirestoreSessionService extends BaseSessionService {
     if (order === 'desc') {
       sessions.reverse();
     }
-    return paginate(sessions, request);
+    return paginateSessions(sessions, request);
   }
 
   /**
@@ -521,7 +480,7 @@ export class FirestoreSessionService extends BaseSessionService {
         transaction.set(
           sessionRef.collection(DEFAULT_EVENTS_COLLECTION).doc(event.id),
           {
-            event_data: toJsonSafe(transformToSnakeCaseEvent(event)),
+            event_data: toJsonSafe(transformToSnakeCaseEvent(event)).record,
             timestamp: serverTimestamp(),
             appName: session.appName,
             userId: session.userId,
@@ -535,9 +494,4 @@ export class FirestoreSessionService extends BaseSessionService {
     session.lastUpdateTime = event.timestamp;
     return super.appendEvent({session, event});
   }
-}
-
-/** Returns the state a shared-state snapshot holds, or an empty state. */
-function stateOf(snapshot: FirestoreSnapshot): Record<string, unknown> {
-  return snapshot.exists ? snapshotData(snapshot) : {};
 }
