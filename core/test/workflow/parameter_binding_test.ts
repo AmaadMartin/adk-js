@@ -88,6 +88,7 @@ describe('describeParameters', () => {
       properties: {
         city: {type: Type.STRING},
         limit: {type: Type.INTEGER, default: 5},
+        note: {type: Type.STRING, nullable: true},
       },
       required: ['city'],
     };
@@ -97,6 +98,8 @@ describe('describeParameters', () => {
       required: true,
       expectsString: true,
     });
+    // A nullable genai type renders as `type: ['string', 'null']`.
+    expect(descriptorFor(descriptors, 'note').expectsString).toBe(true);
     expect(descriptorFor(descriptors, 'limit')).toMatchObject({
       required: false,
       hasDefault: true,
@@ -237,6 +240,7 @@ describe('bindParameters', () => {
 describe('contentToString', () => {
   it('returns an empty string for a Content with no parts', () => {
     expect(contentToString({role: 'user', parts: []}, 'n', 'p')).toBe('');
+    expect(contentToString({role: 'user'}, 'n', 'p')).toBe('');
   });
 
   it('joins text parts with no separator', () => {

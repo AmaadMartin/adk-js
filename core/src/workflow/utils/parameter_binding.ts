@@ -93,13 +93,14 @@ export function describeParameters(schema: SchemaLike): ParameterDescriptor[] {
   const validators = objectSchemaFields(schema);
   return Object.entries(properties as Record<string, unknown>).map(
     ([name, fieldSchema]) => {
+      const field = asRecord(fieldSchema);
       const validator = validators?.get(name);
       return {
         name,
         required: required.has(name),
-        defaultValue: declaredDefault(fieldSchema),
-        hasDefault: hasDeclaredDefault(fieldSchema),
-        expectsString: expectsString(fieldSchema),
+        defaultValue: field['default'],
+        hasDefault: 'default' in field,
+        expectsString: expectsString(field),
         validate: validator && ((value: unknown) => validator.parse(value)),
       };
     },
@@ -222,51 +223,32 @@ function coerce(
   } catch (cause) {
     throw new Error(
       `Invalid value for parameter "${descriptor.name}" of function ` +
-        `"${nodeName}": ${cause instanceof Error ? cause.message : String(cause)}`,
+        `"${nodeName}": ${String(cause)}`,
       {cause},
     );
   }
 }
 
-/** Narrows a node input to the object `'nodeInput'` binding can read keys off. */
+/** Reads a value as a plain object of keys, or `{}` when it is not one. */
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 }
 
-/** Whether a property's JSON Schema declares a `default`. */
-function hasDeclaredDefault(fieldSchema: unknown): boolean {
-  return (
-    typeof fieldSchema === 'object' &&
-    fieldSchema !== null &&
-    'default' in fieldSchema
-  );
-}
-
-/** The `default` a property's JSON Schema declares, if any. */
-function declaredDefault(fieldSchema: unknown): unknown {
-  return hasDeclaredDefault(fieldSchema)
-    ? (fieldSchema as Record<string, unknown>)['default']
-    : undefined;
-}
-
 /**
  * Whether a property's JSON Schema is a string, or a union containing one.
  *
  * Mirrors Python's `_expects_str`, which also accepts `Optional[str]` and any
- * other union with a `str` member. `anyOf` and `oneOf` are how the schema
- * serializers render a union; a nullable string reaches here as `anyOf`.
+ * other union with a `str` member. `anyOf` is how both schema serializers
+ * render a union; a nullable string reaches here the same way.
  */
 function expectsString(fieldSchema: unknown): boolean {
-  if (typeof fieldSchema !== 'object' || fieldSchema === null) {
-    return false;
-  }
-  const field = fieldSchema as Record<string, unknown>;
+  const field = asRecord(fieldSchema);
   const type = field['type'];
   if (type === 'string' || (Array.isArray(type) && type.includes('string'))) {
     return true;
   }
-  const members = field['anyOf'] ?? field['oneOf'];
+  const members = field['anyOf'];
   return Array.isArray(members) && members.some(expectsString);
 }
