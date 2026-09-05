@@ -11,6 +11,7 @@ import {ApigeeLlm} from './apigee_llm.js';
 import type {BaseLlm} from './base_llm.js';
 import {Gemini} from './google_llm.js';
 import {OciGenAiLlm} from './oci_genai_llm.js';
+import {OpenAILlm} from './openai_llm.js';
 
 /**
  * type[BaseLlm] equivalent in TypeScript, represents a class that can be new-ed
@@ -135,3 +136,4 @@ LLMRegistry.register(Gemini);
 LLMRegistry.register(ApigeeLlm);
 LLMRegistry.register(OciGenAiLlm);
 LLMRegistry.register(Claude);
+LLMRegistry.register(OpenAILlm);

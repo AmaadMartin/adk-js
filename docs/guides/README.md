@@ -57,6 +57,8 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 - [Live responses](models/live_responses/index.md) - Reading a Gemini Live run:
   which response field carries what, how grounding accumulates, and how Gemini
   3.x differs.
+- [OpenAILlm](models/openai/index.md) - Running an agent on a GPT model, or on
+  any host that speaks the OpenAI Chat Completions API.
 
 ### Sessions
 
