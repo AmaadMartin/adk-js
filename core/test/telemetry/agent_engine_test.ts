@@ -7,7 +7,6 @@
 import {
   getPropagatedContext,
   isAgentEngine,
-  telemetryUserAgentHeaders,
   TopSpanProcessor,
 } from '@google/adk';
 import {
@@ -26,10 +25,7 @@ import {
 } from '@opentelemetry/sdk-trace-base';
 import {afterAll, afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
-import {version} from '../../src/version.js';
-
 const AGENT_ENGINE_ID_ENV_VAR = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
-const AGENT_ENGINE_TELEMETRY_ENV = 'GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY';
 const AE_TRACEPARENT_HEADER = 'google-agent-engine-traceparent';
 const TRACEPARENT_HEADER = 'traceparent';
 const SUPPORT_ID_ATTRIBUTE = 'supportID';
@@ -212,31 +208,5 @@ describe('the top span check', () => {
     );
 
     expect(span.attributes[SUPPORT_ID_ATTRIBUTE]).toBe(SUPPORT_ID_VALUE);
-  });
-});
-
-describe('telemetryUserAgentHeaders', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('is undefined when the telemetry variable is unset', () => {
-    vi.stubEnv(AGENT_ENGINE_TELEMETRY_ENV, undefined);
-
-    expect(telemetryUserAgentHeaders()).toBeUndefined();
-  });
-
-  it('is undefined when the telemetry variable is empty', () => {
-    vi.stubEnv(AGENT_ENGINE_TELEMETRY_ENV, '');
-
-    expect(telemetryUserAgentHeaders()).toBeUndefined();
-  });
-
-  it('names the ADK version when telemetry is enabled', () => {
-    vi.stubEnv(AGENT_ENGINE_TELEMETRY_ENV, '1');
-
-    expect(telemetryUserAgentHeaders()).toEqual({
-      'User-Agent': `Vertex-Agent-Engine/${version}`,
-    });
   });
 });

@@ -22,7 +22,7 @@
  * - I1, export only while serving. Every collect runs while a request is in
  *   flight, the only time CPU is guaranteed.
  * - I2, never collect more often than the floor. A collect that would land
- *   closer than {@link MIN_EXPORT_INTERVAL_MS} to the previous one is skipped.
+ *   closer than `MIN_EXPORT_INTERVAL_MS` to the previous one is skipped.
  * - I3, never collect too rarely. A single export carries a bounded number of
  *   points, so a guidepost grid forces a collect under sustained load.
  *
@@ -51,16 +51,7 @@ import {
 import {Span, SpanProcessor} from '@opentelemetry/sdk-trace-base';
 
 import {logger} from '../utils/logger.js';
-
-/**
- * The minimum spacing between two metric exports, shared by every ADK metric
- * reader: the collect floor (I2) of the request-driven reader here, and the
- * export interval of the periodic reader in `./google_cloud.js`.
- *
- * Exporting faster than this risks points being rejected or throttled. Keep
- * new readers at or above it.
- */
-export const MIN_EXPORT_INTERVAL_MS = 5000;
+import {MIN_EXPORT_INTERVAL_MS} from './gcp_metric_exporter.js';
 
 /** Environment variable overriding the collect floor, in milliseconds. */
 const AGENT_ENGINE_METRICS_FLOOR_ENV =

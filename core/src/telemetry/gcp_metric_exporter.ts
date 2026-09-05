@@ -18,6 +18,17 @@ import {PushMetricExporter} from '@opentelemetry/sdk-metrics';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
 /**
+ * The minimum spacing between two metric exports, shared by every ADK metric
+ * reader: the export interval of the periodic reader in `./google_cloud.js`,
+ * and the collect floor of the request-driven reader in
+ * `./agent_engine_metric_exporter.js`.
+ *
+ * Exporting faster than this risks points being rejected or throttled. Keep
+ * new readers at or above it.
+ */
+export const MIN_EXPORT_INTERVAL_MS = 5000;
+
+/**
  * Builds the Cloud Monitoring metric exporter, loading its peer on demand.
  *
  * @param projectId The project to write metrics to. When omitted, the exporter

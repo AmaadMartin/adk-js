@@ -46,11 +46,9 @@ export * from './integrations/agent_registry/agent_registry.js';
 export {
   TopSpanProcessor,
   clearAgentEngineMetricsSetupCache,
-  getAgentEngineMetricsSetup,
   getPropagatedContext,
   isAgentEngine,
   maybeInstallRequestMetricsMiddleware,
-  telemetryUserAgentHeaders,
 } from './telemetry/agent_engine.js';
 export type {
   ClosableResponse,
@@ -58,15 +56,6 @@ export type {
   MiddlewareCapableApp,
   TraceContextHeaders,
 } from './telemetry/agent_engine.js';
-export {
-  RequestDrivenMetricReader,
-  buildRequestDrivenMetrics,
-} from './telemetry/agent_engine_metric_exporter.js';
-export type {
-  MetricsState,
-  RequestDrivenMetricReaderHooks,
-  RequestDrivenMetricReaderOptions,
-} from './telemetry/agent_engine_metric_exporter.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
