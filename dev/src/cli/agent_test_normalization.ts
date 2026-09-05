@@ -160,6 +160,9 @@ export function normalizeRebuiltEvents(
   return events.map((event) => {
     const rebuilt = stripFields(event, REBUILD_EXCLUDED_EVENT_FIELDS, false);
     stripThoughtSignatures(rebuilt);
+    // `createEvent` defaults this to `[]` where adk-python leaves it unset, so
+    // a rebuilt fixture would otherwise carry the empty list on every event.
+    normalizeLongRunningToolIds(rebuilt);
     pruneEmptyActionGroups(rebuilt);
     return rebuilt;
   });
