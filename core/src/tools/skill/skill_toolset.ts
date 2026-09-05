@@ -330,6 +330,8 @@ export class SkillToolset extends BaseToolset {
     }
     this.preparedRequests.add(llmRequest);
 
+    // The default `skillsFolder` reads the environment's working directory,
+    // which only exists once the environment is initialized.
     await this.ensureEnvironmentInitialized();
 
     const allowedTools = new Set(
