@@ -24,12 +24,27 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
- * OpenIdConnectWithConfig.
+ * Authenticates against a Google Cloud auth provider, named by its resource
+ * path. Google Cloud Agent Registry binds a registered resource to one of
+ * these; it has no OpenAPI 3.0 counterpart.
+ */
+export interface GcpAuthProviderScheme {
+  type: 'gcpAuthProviderScheme';
+  /** Resource path of the auth provider. */
+  name: string;
+  scopes?: string[];
+  /** Redirect that overrides the one the auth provider declares. */
+  continueUri?: string;
+}
+
+/**
+ * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
+ * OpenIdConnectWithConfig, and {@link GcpAuthProviderScheme}.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | GcpAuthProviderScheme;
 
 /**
  * Represents the OAuth2 flow (or grant type).

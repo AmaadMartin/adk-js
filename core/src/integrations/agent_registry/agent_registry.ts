@@ -15,8 +15,9 @@ import {GoogleAuth} from 'google-auth-library';
 import {RemoteA2AAgent} from '../../a2a/a2a_remote_agent.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
-import {AuthScheme} from '../../auth/auth_schemes.js';
+import {AuthScheme, GcpAuthProviderScheme} from '../../auth/auth_schemes.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
+import {getTrackingHeaders} from '../../utils/client_labels.js';
 import {logger} from '../../utils/logger.js';
 import {AgentRegistrySingleMCPToolset} from './agent_registry_mcp_toolset.js';
 import {cleanName, isGoogleApi} from './helpers.js';
@@ -27,13 +28,14 @@ import {
   ConnectionUriFilter,
   ConnectionUriResult,
   Endpoint,
-  GcpAuthProviderScheme,
   ListAgentsResponse,
   ListBindingsResponse,
   ListEndpointsResponse,
   ListMcpServersResponse,
+  MakeRequestOptions,
   McpServer,
   ProtocolType,
+  SearchOptions,
 } from './types.js';
 
 export * from './agent_registry_mcp_toolset.js';
@@ -45,6 +47,11 @@ const TRANSPORT_MAPPING: Record<string, TransportProtocol> = {
   'JSONRPC': 'JSONRPC',
   'GRPC': 'GRPC',
 };
+
+/** Returns the message of a thrown value, whatever its type. */
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 /**
  * Client for interacting with the Google Cloud Agent Registry service.
@@ -90,8 +97,16 @@ export class AgentRegistry {
    * Injects the billing/quota project identifier `x-goog-user-project` if present.
    */
   async getAuthHeaders(): Promise<Record<string, string>> {
+    let client: Awaited<ReturnType<GoogleAuth['getClient']>>;
     try {
-      const client = await this.auth.getClient();
+      client = await this.auth.getClient();
+    } catch (err: unknown) {
+      throw new Error(
+        `Failed to get default Google Cloud credentials: ${messageOf(err)}`,
+      );
+    }
+
+    try {
       const headers = await client.getRequestHeaders(
         'https://agentregistry.googleapis.com',
       );
@@ -125,18 +140,21 @@ export class AgentRegistry {
       }
       return authHeaders;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to refresh Google Cloud credentials: ${msg}`);
+      throw new Error(
+        `Failed to refresh Google Cloud credentials: ${messageOf(err)}`,
+      );
     }
   }
 
   /**
-   * Helper function to execute HTTP GET requests against the Agent Registry API.
-   * Handles path resolution, search query params compilation, and auth headers fetching.
+   * Helper function to execute HTTP requests against the Agent Registry API.
+   * Handles path resolution, search query params compilation, and auth headers
+   * fetching. A `POST` sends `options.body` as JSON and ignores `params`.
    */
   async makeRequest<T = unknown>(
     path: string,
     params?: Record<string, string>,
+    options?: MakeRequestOptions,
   ): Promise<T> {
     let url: string;
     // Support absolute resource paths (starting with projects/) or relative paths (resolved inside base path)
@@ -146,16 +164,27 @@ export class AgentRegistry {
       url = `${AGENT_REGISTRY_BASE_URL}/${this.basePath}/${path}`;
     }
 
-    if (params && Object.keys(params).length > 0) {
+    const method = options?.method ?? 'GET';
+    if (method === 'GET' && params && Object.keys(params).length > 0) {
       const searchParams = new URLSearchParams(params);
       url += `?${searchParams.toString()}`;
     }
 
     try {
-      const headers = await this.getAuthHeaders();
+      const authHeaders = await this.getAuthHeaders();
+      const quotaProjectId =
+        authHeaders['x-goog-user-project'] ?? this.projectId;
+      const headers = {
+        ...authHeaders,
+        'x-goog-user-project': quotaProjectId,
+        ...getTrackingHeaders(),
+      };
       const res = await fetch(url, {
-        method: 'GET',
+        method,
         headers,
+        ...(method === 'POST'
+          ? {body: JSON.stringify(options?.body ?? {})}
+          : {}),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -165,12 +194,37 @@ export class AgentRegistry {
       }
       return (await res.json()) as T;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = messageOf(err);
       if (msg.includes('API request failed')) {
         throw err;
       }
       throw new Error(`API request failed: ${msg}`);
     }
+  }
+
+  /**
+   * Executes a `:search` request for one resource type.
+   *
+   * `JSON.stringify` drops an undefined-valued key, so only the options the
+   * caller supplied reach the request body and the service applies its own
+   * default for every other field.
+   */
+  private async search<T>(
+    resourceType: string,
+    options: SearchOptions,
+  ): Promise<T> {
+    const {
+      searchString,
+      searchType,
+      filterStr: filter,
+      orderBy,
+      pageSize,
+      pageToken,
+    } = options;
+    return this.makeRequest<T>(`${resourceType}:search`, undefined, {
+      method: 'POST',
+      body: {searchString, searchType, filter, orderBy, pageSize, pageToken},
+    });
   }
 
   /**
@@ -225,7 +279,57 @@ export class AgentRegistry {
     return {};
   }
 
+  /**
+   * Resolves the auth scheme a registered resource is bound to.
+   *
+   * @param resourceId Stable identifier of the resource, for example an
+   *     `agentId` or an `mcpServerId`, matched against the binding targets.
+   * @param resourceName Resource name, only used for logging.
+   * @param continueUri Continue URI that overrides the auth provider's own.
+   * @return The scheme for the bound auth provider, or `undefined` when the
+   *     resource is bound to none or the bindings could not be read.
+   */
+  private async resolveAuthProviderScheme(
+    resourceId: string | undefined,
+    resourceName: string,
+    continueUri?: string,
+  ): Promise<GcpAuthProviderScheme | undefined> {
+    if (!resourceId) {
+      return undefined;
+    }
+    try {
+      const bindingsData =
+        await this.makeRequest<ListBindingsResponse>('bindings');
+      for (const b of bindingsData.bindings || []) {
+        const targetId = b.target?.identifier || '';
+        if (!targetId.endsWith(resourceId)) {
+          continue;
+        }
+        const authProvider = b.authProviderBinding?.authProvider;
+        if (authProvider) {
+          return {
+            type: 'gcpAuthProviderScheme',
+            name: authProvider,
+            continueUri,
+          };
+        }
+      }
+    } catch (err: unknown) {
+      logger.warn(
+        `Failed to fetch bindings for ${resourceName}: ${messageOf(err)}`,
+      );
+    }
+    return undefined;
+  }
+
   // --- MCP Server Methods ---
+
+  /** Searches registered MCP Servers. */
+  async searchMcpServers(
+    options?: SearchOptions,
+  ): Promise<ListMcpServersResponse> {
+    return this.search<ListMcpServersResponse>('mcpServers', options ?? {});
+  }
 
   async listMcpServers(options?: {
     filterStr?: string;
@@ -277,34 +381,13 @@ export class AgentRegistry {
       );
     }
 
-    let authScheme = options?.authScheme;
-
-    if (mcpServerId && !authScheme) {
-      try {
-        const bindingsData =
-          await this.makeRequest<ListBindingsResponse>('bindings');
-        const bindings = bindingsData.bindings || [];
-        for (const b of bindings) {
-          const targetId = b.target?.identifier || '';
-          if (targetId.endsWith(mcpServerId)) {
-            const authProvider = b.authProviderBinding?.authProvider;
-            if (authProvider) {
-              authScheme = {
-                type: 'gcpAuthProviderScheme',
-                name: authProvider,
-                continueUri: options?.continueUri,
-              } as GcpAuthProviderScheme as unknown as AuthScheme;
-              break;
-            }
-          }
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn(
-          `Failed to fetch bindings for MCP Server ${mcpServerName}: ${msg}`,
-        );
-      }
-    }
+    const authScheme =
+      options?.authScheme ??
+      (await this.resolveAuthProviderScheme(
+        mcpServerId,
+        `MCP Server ${mcpServerName}`,
+        options?.continueUri,
+      ));
 
     const connectionParams: StreamableHTTPConnectionParams = {
       type: 'StreamableHTTPConnectionParams',
@@ -381,6 +464,11 @@ export class AgentRegistry {
 
   // --- Agent Methods ---
 
+  /** Searches registered A2A Agents. */
+  async searchAgents(options?: SearchOptions): Promise<ListAgentsResponse> {
+    return this.search<ListAgentsResponse>('agents', options ?? {});
+  }
+
   async listAgents(options?: {
     filterStr?: string;
     pageSize?: number;
@@ -403,6 +491,14 @@ export class AgentRegistry {
     return this.makeRequest<AgentInfo>(name);
   }
 
+  /**
+   * Creates a {@link RemoteA2AAgent} for a registered A2A Agent.
+   *
+   * Unlike {@link getMcpToolset}, this resolves no auth provider binding:
+   * `RemoteA2AAgent` cannot apply a credential to its outgoing calls, so a
+   * resolved scheme would cost a `bindings` request and change nothing. Pass
+   * an already-authenticated `client` instead.
+   */
   async getRemoteA2AAgent(
     agentName: string,
     options?: {
