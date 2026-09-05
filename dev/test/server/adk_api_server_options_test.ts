@@ -50,11 +50,11 @@ class SilentAgent extends LlmAgent {
   }
 }
 
-function agentLoaderFor(appName: string): AgentLoader {
+function agentLoaderFor(...appNames: string[]): AgentLoader {
   const agent = new SilentAgent({name: 'silent'});
 
   return {
-    listAgents: () => Promise.resolve([appName]),
+    listAgents: () => Promise.resolve(appNames),
     getAgentFile: () =>
       Promise.resolve({
         load: () => Promise.resolve(agent),
@@ -211,19 +211,34 @@ describe('AdkApiServer configuration options', () => {
       );
     });
 
-    it('loads the plugins once and shares them across requests', async () => {
-      const started = await startWithSession({
-        extraPlugins: ['./example_plugins.ts#NamePlugin'],
+    it('builds one plugin instance and shares it across apps', async () => {
+      const secondApp = 'secondApp';
+      server = new AdkApiServer({
+        agentLoader: agentLoaderFor(APP_NAME, secondApp),
+        sessionService,
+        logger,
+        webAssetsDir,
+        extraPlugins: ['./example_plugins.ts#CountingPlugin'],
         agentsDir: TESTDATA_DIR,
       });
+      await server.start();
+      for (const appName of [APP_NAME, secondApp]) {
+        await sessionService.createSession({
+          appName,
+          userId: USER_ID,
+          sessionId: SESSION_ID,
+          state: {},
+        });
+      }
 
-      await run(started, RUN_BODY);
-      await run(started, RUN_BODY);
+      const first = await run(server, RUN_BODY);
+      const second = await run(server, {...RUN_BODY, appName: secondApp});
 
-      // A second load would register a second plugin of the same name, which
-      // PluginManager rejects, so a 200 here proves the memo holds.
-      const {status} = await run(started, RUN_BODY);
-      expect(status).toBe(200);
+      // Each app gets its own Runner. A per-app plugin instance would restart
+      // the count, so the second app seeing "run 2" is what proves one shared
+      // instance serves both.
+      expect(firstEventText(first.json as Event[])).toBe('run 1');
+      expect(firstEventText(second.json as Event[])).toBe('run 2');
     });
   });
 

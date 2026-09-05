@@ -25,5 +25,19 @@ export const namedInstance = new NamePlugin('preBuiltInstance');
 /** Default export, to prove a bare specifier reads `default`. */
 export default new NamePlugin('defaultExport');
 
+/**
+ * Plugin fixture that reports how many runs this instance has handled, which
+ * tells a shared instance apart from one built per app.
+ */
+export class CountingPlugin extends BasePlugin {
+  private runs = 0;
+
+  override async beforeRunCallback(): Promise<Content> {
+    this.runs += 1;
+
+    return {parts: [{text: `run ${this.runs}`}], role: 'model'};
+  }
+}
+
 /** Export that is neither a plugin class nor a plugin instance. */
 export const notAPlugin = {name: 'looksLikeAPluginButIsNot'};
