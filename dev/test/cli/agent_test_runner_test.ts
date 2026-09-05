@@ -478,6 +478,27 @@ describe('runAgentReplay', () => {
     });
   });
 
+  it('ignores a recorded entry that is not an event', async () => {
+    const agentDir = createAgentDir(
+      workspace,
+      'dice_agent',
+      {'basic.json': {events: [null, userTurn('roll a die')]}},
+      'root_agent.yaml',
+    );
+
+    const result = await runAgentReplay(
+      agentDir,
+      path.join(agentDir, 'tests', 'basic.json'),
+    );
+
+    // Reading the opening turn off `null` would throw; the replay gets past it
+    // and stops on the entry file instead.
+    expect(result).toEqual({
+      status: 'skipped',
+      reason: expect.stringContaining('agent entry file'),
+    });
+  });
+
   it('skips a fixture that pins a random number generator', async () => {
     const agentDir = createAgentDir(workspace, 'dice_agent', {
       'basic.json': {

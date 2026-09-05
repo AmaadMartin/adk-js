@@ -595,6 +595,11 @@ async function rebuildOne(testCase: AgentTestCase): Promise<RebuildResult> {
  * human-in-the-loop requests itself. A parallel group is emitted in worker
  * index order, which is the order the workers are started in.
  *
+ * The responses are served positionally, so that index order only holds while
+ * the workers ask one at a time. adk-python pins `max_concurrency` to 1 before
+ * a replay; adk-js declares that field `readonly`, so this port cannot — see
+ * the guide's Limits section.
+ *
  * @param events The recorded events after the opening user turn.
  */
 export function buildMockResponses(
@@ -753,12 +758,15 @@ function openingUserText(event: RecordedEvent): string | undefined {
 
 async function readFixture(testFile: string): Promise<Fixture> {
   const data = (await loadFileData<Record<string, unknown>>(testFile)) ?? {};
-  const events = data['events'];
+  const events = Array.isArray(data['events']) ? data['events'] : [];
   return {
     data,
-    // The fixture is a local file written by this module or by the adk-python
-    // runner, so its events are read as recorded once the container checks out.
-    events: Array.isArray(events) ? (events as RecordedEvent[]) : [],
+    // Only the entries that are objects are events. Their fields are read as
+    // recorded: the fixture is a local file written by this module or by the
+    // adk-python runner.
+    events: events.filter(
+      (event): event is RecordedEvent => asJsonObject(event) !== undefined,
+    ),
     mocks: asJsonObject(data['mocks']),
   };
 }
