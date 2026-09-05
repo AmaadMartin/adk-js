@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ApiRegistry, Event, LlmAgent, MCPToolset} from '@google/adk';
+import {
+  AgentRegistrySingleMCPToolset,
+  ApiRegistry,
+  Event,
+  LlmAgent,
+} from '@google/adk';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   createRunner,
@@ -62,12 +68,23 @@ describe('ApiRegistry Integration', () => {
     const toolset = await registry.getToolset('billing-server', {
       toolNamePrefix: 'billing',
     });
-    expect(toolset).toBeInstanceOf(MCPToolset);
+    expect(toolset).toBeInstanceOf(AgentRegistrySingleMCPToolset);
 
     const tools = await toolset.getTools();
     expect(tools.map((tool) => tool.name)).toEqual([
       'billing_retrieve_billing_data',
     ]);
+
+    // billing-mcp.com is not a Google API host, so it must receive no
+    // Application Default Credentials.
+    const transportCall = vi
+      .mocked(StreamableHTTPClientTransport)
+      .mock.calls.at(-1);
+    if (!transportCall) {
+      expect.fail('StreamableHTTPClientTransport received no call');
+    }
+    expect(transportCall[0].toString()).toBe('https://billing-mcp.com/v1');
+    expect(transportCall[1]?.requestInit?.headers).toEqual({});
 
     const mockLlmResponses: RawGenerateContentResponse[] = [
       {

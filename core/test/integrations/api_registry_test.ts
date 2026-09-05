@@ -42,6 +42,21 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
   StreamableHTTPClientTransport: vi.fn().mockImplementation(() => ({})),
 }));
 
+type MtlsUtils = typeof import('../../src/utils/mtls_utils.js');
+
+const {clientCertsToPresentMock, getWithClientCertMock} = vi.hoisted(() => ({
+  clientCertsToPresentMock: vi.fn<MtlsUtils['clientCertsToPresent']>(),
+  getWithClientCertMock: vi.fn<MtlsUtils['getWithClientCert']>(),
+}));
+
+// Only the two entry points the registry calls are replaced. Loading a real
+// SecureConnect certificate needs a provider binary on the machine.
+vi.mock('../../src/utils/mtls_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<MtlsUtils>()),
+  clientCertsToPresent: clientCertsToPresentMock,
+  getWithClientCert: getWithClientCertMock,
+}));
+
 /** Same fixture as the adk-python `MOCK_MCP_SERVERS_LIST`. */
 const MOCK_MCP_SERVERS_LIST = {
   mcpServers: [
@@ -53,10 +68,35 @@ const MOCK_MCP_SERVERS_LIST = {
   ],
 };
 
+/**
+ * Servers on Google API hosts. The adk-python fixture registers none, so the
+ * credential guard needs its own.
+ */
+const GOOGLE_HOST_SERVERS = {
+  mcpServers: [
+    {
+      name: 'test-mcp-server-google',
+      urls: ['https://mcp.us-central1.googleapis.com'],
+    },
+    {
+      name: 'test-mcp-server-google-http',
+      urls: ['http://mcp.us-central1.googleapis.com'],
+    },
+    {name: 'test-mcp-server-google-no-scheme', urls: ['mcp.googleapis.com']},
+  ],
+};
+
 const PROJECT_ID = 'test-project';
 const LIST_URL =
   'https://cloudapiregistry.googleapis.com/v1beta/projects/test-project' +
   '/locations/global/mcpServers?filter=enabled%3Dfalse';
+const MTLS_LIST_URL = LIST_URL.replace(
+  'cloudapiregistry.googleapis.com',
+  'cloudapiregistry.mtls.googleapis.com',
+);
+
+/** Stands in for the PEM material a SecureConnect provider prints. */
+const CLIENT_CERTS = {cert: 'cert-pem', key: 'key-pem'};
 
 const TransportMock = vi.mocked(StreamableHTTPClientTransport);
 const fetchMock = vi.fn<typeof fetch>();
@@ -104,6 +144,9 @@ describe('ApiRegistry', () => {
     fetchMock.mockReset();
     fetchMock.mockImplementation(async () => okResponse(MOCK_MCP_SERVERS_LIST));
     global.fetch = fetchMock;
+    clientCertsToPresentMock.mockReset();
+    clientCertsToPresentMock.mockResolvedValue(undefined);
+    getWithClientCertMock.mockReset();
   });
 
   describe('construction', () => {
@@ -314,19 +357,21 @@ describe('ApiRegistry', () => {
 
   describe('getToolset', () => {
     it('connects to the resolved URL with only the Authorization header', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
       const {url, headers} = await connectToolset(
         newRegistry(),
-        'test-mcp-server-1',
+        'test-mcp-server-google',
       );
-      expect(url.toString()).toBe('https://mcp.server1.com/');
+      expect(url.toString()).toBe('https://mcp.us-central1.googleapis.com/');
       expect(headers).toEqual({Authorization: 'Bearer mock_token'});
     });
 
     it('adds x-goog-user-project to the MCP headers when ADC has a quota project', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
       mockQuotaProjectId = 'quota-project';
       const {headers} = await connectToolset(
         newRegistry(),
-        'test-mcp-server-1',
+        'test-mcp-server-google',
       );
       expect(headers).toEqual({
         'Authorization': 'Bearer mock_token',
@@ -409,8 +454,136 @@ describe('ApiRegistry', () => {
     });
   });
 
-  describe('mTLS endpoint selection is not ported', () => {
+  describe('credential scoping', () => {
+    /** Server name to whether the MCP connection should carry credentials. */
+    const CREDENTIAL_MATRIX: ReadonlyArray<[string, boolean]> = [
+      ['test-mcp-server-google', true],
+      ['test-mcp-server-google-no-scheme', true],
+      ['test-mcp-server-google-http', false],
+    ];
+
+    it.each(CREDENTIAL_MATRIX)(
+      'attaches credentials to %s: %s',
+      async (serverName, expectsCredentials) => {
+        fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+        const {headers} = await connectToolset(newRegistry(), serverName);
+        expect(headers).toEqual(
+          expectsCredentials ? {Authorization: 'Bearer mock_token'} : {},
+        );
+      },
+    );
+
+    it('sends no credentials to a non-Google host', async () => {
+      const {headers} = await connectToolset(
+        newRegistry(),
+        'test-mcp-server-1',
+      );
+      expect(headers).toEqual({});
+    });
+
+    it('sends no credentials to a host that merely ends in a lookalike domain', async () => {
+      fetchMock.mockResolvedValue(
+        okResponse({
+          mcpServers: [
+            {name: 'lookalike', urls: ['https://evilgoogleapis.com']},
+          ],
+        }),
+      );
+      const {headers} = await connectToolset(newRegistry(), 'lookalike');
+      expect(headers).toEqual({});
+    });
+
+    it('resolves the token again for every connection', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+      const toolset = await newRegistry().getToolset('test-mcp-server-google');
+
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        Authorization: 'Bearer mock_token',
+      });
+
+      mockToken = 'refreshed_token';
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        Authorization: 'Bearer refreshed_token',
+      });
+    });
+  });
+
+  describe('headerProvider', () => {
+    it('merges the caller headers into a Google host connection', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+      const registry = new ApiRegistry({
+        projectId: PROJECT_ID,
+        headerProvider: () => ({'x-tenant': 'acme'}),
+      });
+      const toolset = await registry.getToolset('test-mcp-server-google');
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        'Authorization': 'Bearer mock_token',
+        'x-tenant': 'acme',
+      });
+    });
+
+    it('supplies headers for a non-Google host that gets no credentials', async () => {
+      const registry = new ApiRegistry({
+        projectId: PROJECT_ID,
+        headerProvider: async () => ({'x-tenant': 'acme'}),
+      });
+      const toolset = await registry.getToolset('test-mcp-server-1');
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({'x-tenant': 'acme'});
+    });
+
+    it('lets the caller override the Authorization header', async () => {
+      fetchMock.mockResolvedValue(okResponse(GOOGLE_HOST_SERVERS));
+      const registry = new ApiRegistry({
+        projectId: PROJECT_ID,
+        headerProvider: () => ({Authorization: 'Bearer caller_token'}),
+      });
+      const toolset = await registry.getToolset('test-mcp-server-google');
+      await toolset.getTools();
+      expect(lastTransportCall().headers).toEqual({
+        Authorization: 'Bearer caller_token',
+      });
+    });
+
+    it('is called again for every connection', async () => {
+      const headerProvider = vi.fn().mockReturnValue({'x-tenant': 'acme'});
+      const registry = new ApiRegistry({projectId: PROJECT_ID, headerProvider});
+      const toolset = await registry.getToolset('test-mcp-server-1');
+
+      await toolset.getTools();
+      await toolset.getTools();
+
+      expect(headerProvider).toHaveBeenCalledTimes(2);
+    });
+
+    it('sends no extra headers when the caller supplies no provider', async () => {
+      const {headers} = await connectToolset(
+        newRegistry(),
+        'test-mcp-server-1',
+      );
+      expect(headers).toEqual({});
+    });
+  });
+
+  describe('mTLS endpoint selection', () => {
     const originalMtlsEndpoint = process.env['GOOGLE_API_USE_MTLS_ENDPOINT'];
+
+    /** Makes the certificate loader yield {@link CLIENT_CERTS}. */
+    function withClientCert(): void {
+      clientCertsToPresentMock.mockResolvedValue(CLIENT_CERTS);
+      getWithClientCertMock.mockResolvedValue({
+        status: 200,
+        body: JSON.stringify(MOCK_MCP_SERVERS_LIST),
+      });
+    }
+
+    /** Returns the URL the nth `getWithClientCert` call targeted. */
+    function certRequestUrl(index: number): string {
+      return String(getWithClientCertMock.mock.calls[index][0]);
+    }
 
     afterEach(() => {
       if (originalMtlsEndpoint === undefined) {
@@ -420,11 +593,125 @@ describe('ApiRegistry', () => {
       }
     });
 
-    it('always targets the non-mTLS host, even with GOOGLE_API_USE_MTLS_ENDPOINT=always', async () => {
-      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
+    it('targets the default host when no client certificate is available', async () => {
       const registry = newRegistry();
       await registry.getToolset('test-mcp-server-1');
       expect(fetchedUrl(0)).toBe(LIST_URL);
+      expect(getWithClientCertMock).not.toHaveBeenCalled();
+    });
+
+    it('targets the mTLS host and presents the certificate when one is available', async () => {
+      withClientCert();
+      const registry = newRegistry();
+      await registry.getToolset('test-mcp-server-1');
+      expect(certRequestUrl(0)).toBe(MTLS_LIST_URL);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('presents the certificate with the listing headers and a timeout', async () => {
+      withClientCert();
+      const registry = newRegistry();
+      await registry.getToolset('test-mcp-server-1');
+      const [, headers, certs, timeoutMs] = getWithClientCertMock.mock.calls[0];
+      expect(headers).toEqual({
+        'Authorization': 'Bearer mock_token',
+        'Content-Type': 'application/json',
+      });
+      expect(certs).toBe(CLIENT_CERTS);
+      expect(timeoutMs).toBe(60_000);
+    });
+
+    it('targets the mTLS host with GOOGLE_API_USE_MTLS_ENDPOINT=always and no certificate', async () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'always';
+      const registry = newRegistry();
+      await registry.getToolset('test-mcp-server-1');
+      expect(fetchedUrl(0)).toBe(MTLS_LIST_URL);
+    });
+
+    it('targets the default host with GOOGLE_API_USE_MTLS_ENDPOINT=never, still presenting the certificate', async () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'never';
+      withClientCert();
+      const registry = newRegistry();
+      await registry.getToolset('test-mcp-server-1');
+      expect(certRequestUrl(0)).toBe(LIST_URL);
+    });
+
+    it('treats an unrecognised GOOGLE_API_USE_MTLS_ENDPOINT as auto', async () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'sometimes';
+      withClientCert();
+      const registry = newRegistry();
+      await registry.getToolset('test-mcp-server-1');
+      expect(certRequestUrl(0)).toBe(MTLS_LIST_URL);
+    });
+
+    it('reads GOOGLE_API_USE_MTLS_ENDPOINT case insensitively', async () => {
+      process.env['GOOGLE_API_USE_MTLS_ENDPOINT'] = 'ALWAYS';
+      const registry = newRegistry();
+      await registry.getToolset('test-mcp-server-1');
+      expect(fetchedUrl(0)).toBe(MTLS_LIST_URL);
+    });
+
+    it('pages the listing over the certificate transport', async () => {
+      clientCertsToPresentMock.mockResolvedValue(CLIENT_CERTS);
+      getWithClientCertMock
+        .mockResolvedValueOnce({
+          status: 200,
+          body: JSON.stringify({
+            mcpServers: [{name: 'page-1-server', urls: ['mcp.page1.com']}],
+            nextPageToken: 'next_page_token',
+          }),
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          body: JSON.stringify(MOCK_MCP_SERVERS_LIST),
+        });
+
+      const registry = newRegistry();
+      await expect(registry.getToolset('page-1-server')).resolves.toBeDefined();
+      await expect(
+        registry.getToolset('test-mcp-server-1'),
+      ).resolves.toBeDefined();
+
+      expect(getWithClientCertMock).toHaveBeenCalledTimes(2);
+      expect(certRequestUrl(1)).toBe(
+        `${MTLS_LIST_URL}&pageToken=next_page_token`,
+      );
+    });
+
+    it('rejects when the certificate transport returns a non-2xx status', async () => {
+      clientCertsToPresentMock.mockResolvedValue(CLIENT_CERTS);
+      getWithClientCertMock.mockResolvedValue({
+        status: 403,
+        body: 'caller lacks permission',
+      });
+
+      const registry = newRegistry();
+      await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
+        'Error fetching MCP servers from API Registry: request failed with ' +
+          'status 403: caller lacks permission',
+      );
+    });
+
+    it('rejects when the certificate transport fails', async () => {
+      clientCertsToPresentMock.mockResolvedValue(CLIENT_CERTS);
+      getWithClientCertMock.mockRejectedValue(
+        new Error('Request timed out after 60000 ms'),
+      );
+
+      const registry = newRegistry();
+      await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
+        'Error fetching MCP servers from API Registry: Request timed out',
+      );
+    });
+
+    it('rejects when the certificate transport returns a body that is not JSON', async () => {
+      clientCertsToPresentMock.mockResolvedValue(CLIENT_CERTS);
+      getWithClientCertMock.mockResolvedValue({status: 200, body: 'not json'});
+
+      const registry = newRegistry();
+      await expect(registry.getToolset('test-mcp-server-1')).rejects.toThrow(
+        'Error fetching MCP servers from API Registry',
+      );
     });
   });
 });
