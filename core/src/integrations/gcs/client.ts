@@ -17,18 +17,6 @@ const FEATURE_NAME = 'GcsAdminToolset';
  */
 export const GCS_USER_AGENT = `adk-gcs-tool google-adk/${version}`;
 
-/**
- * An auth client `@google-cloud/storage` accepts.
- *
- * Read off the client's own options rather than imported from
- * `google-auth-library`, because `@google-cloud/storage` v7 pins
- * google-auth-library v9 while this package depends on v10. The two
- * `AuthClient` types are not interchangeable, and a v10 client handed to
- * storage sends no `Authorization` header at all, so the type has to come
- * from storage itself for the compiler to reject the mistake.
- */
-export type GcsAuthClient = NonNullable<StorageOptions['authClient']>;
-
 /** An OAuth authorized user, as the token cache holds one. */
 export interface GcsAuthorizedUser {
   clientId: string;
@@ -41,23 +29,23 @@ export interface GcsAuthorizedUser {
 }
 
 /**
- * How one tool call authenticates to Cloud Storage: either a client the
- * developer built, or an authorized user storage builds a client from.
+ * How one tool call authenticates to Cloud Storage: as the agent's own service
+ * identity, or as an end user who completed the OAuth flow.
+ *
+ * Both are plain data. `@google-cloud/storage` builds the auth client itself,
+ * with the google-auth-library it pins, which is the only version whose
+ * clients it authenticates with.
  */
 export type GcsCredentials =
-  | {authClient: GcsAuthClient}
+  | {applicationDefaultCredentials: true}
   | {authorizedUser: GcsAuthorizedUser};
 
-/**
- * Turns resolved credentials into the storage options that carry them.
- *
- * An authorized user is passed as plain JSON rather than as a built client:
- * `@google-cloud/storage` builds the client with the google-auth-library it
- * pins itself, which is the only version whose clients it authenticates with.
- */
+/** Turns resolved credentials into the storage options that carry them. */
 function authOptions(credentials: GcsCredentials): StorageOptions {
-  if ('authClient' in credentials) {
-    return {authClient: credentials.authClient};
+  if ('applicationDefaultCredentials' in credentials) {
+    // Storage falls back to Application Default Credentials when the options
+    // name no credential of their own.
+    return {};
   }
   const {clientId, clientSecret, refreshToken, accessToken, expiresAt} =
     credentials.authorizedUser;
