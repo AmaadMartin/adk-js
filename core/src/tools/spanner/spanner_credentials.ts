@@ -8,11 +8,6 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {AuthCredentialTypes} from '../../auth/auth_credential.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
-import {experimental} from '../../utils/experimental.js';
-import {
-  BaseGoogleCredentialsConfig,
-  type GoogleCredentialsConfigOptions,
-} from '../_google_credentials.js';
 import {
   createTokenAuthClient,
   SpannerAccessToken,
@@ -23,43 +18,18 @@ import {
 export const SPANNER_TOKEN_CACHE_KEY = 'spanner_token_cache';
 
 /** OAuth scopes the Spanner tools request when the caller names none. */
-export const SPANNER_DEFAULT_SCOPE: readonly string[] = [
+export const SPANNER_DEFAULT_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/spanner.admin',
   'https://www.googleapis.com/auth/spanner.data',
 ];
-
-/**
- * The same scopes as {@link SPANNER_DEFAULT_SCOPE}, under the name
- * `@google/adk/tools/spanner` publishes them as.
- */
-export const SPANNER_DEFAULT_SCOPES: readonly string[] = SPANNER_DEFAULT_SCOPE;
 
 const GOOGLE_AUTHORIZATION_URL = 'https://accounts.google.com/o/oauth2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /**
- * How the Spanner tools obtain credentials (experimental).
- *
- * The config defaults its scopes to {@link SPANNER_DEFAULT_SCOPE} and caches
- * the resolved token under {@link SPANNER_TOKEN_CACHE_KEY}, so Spanner tools
- * never share a cached token with another Google toolset.
- */
-@experimental
-export class SpannerCredentialsConfig extends BaseGoogleCredentialsConfig {
-  constructor(options: GoogleCredentialsConfigOptions = {}) {
-    super(options);
-    if (!this.scopes?.length) {
-      // Copied, so that two configs never share one mutable array.
-      this.scopes = [...SPANNER_DEFAULT_SCOPE];
-    }
-    this.tokenCacheKey = SPANNER_TOKEN_CACHE_KEY;
-  }
-}
-
-/**
- * How the Spanner tools obtain credentials, as `SpannerToolset` accepts them.
- * Exactly one of three shapes is valid, which TypeScript cannot express, so
- * the {@link SpannerToolset} constructor enforces it at runtime:
+ * How the Spanner tools obtain credentials. Exactly one of three shapes is
+ * valid, which TypeScript cannot express, so the {@link SpannerAdminToolset}
+ * constructor enforces it at runtime:
  *
  *   1. `authClient` alone — one identity for every end user.
  *   2. `externalAccessTokenKey` alone — a token another component already
@@ -67,13 +37,10 @@ export class SpannerCredentialsConfig extends BaseGoogleCredentialsConfig {
  *   3. `clientId` and `clientSecret` (and optionally `scopes`) — each end user
  *      goes through the OAuth authorization-code flow.
  *
- * This is a second port of the same adk-python type as
- * {@link SpannerCredentialsConfig}, which is the class the `@google/adk`
- * barrel publishes. The two cannot share one name in this module, so
- * `@google/adk/tools/spanner` re-exports this one as `SpannerCredentialsConfig`
- * instead. Its `authClient` is typed off the Spanner client's own options,
- * because `@google-cloud/spanner` types that field with the copy of
- * `google-auth-library` that `google-gax` pins.
+ * `@google/adk/tools/spanner` publishes this as `SpannerCredentialsConfig`,
+ * the name adk-python uses. Its `authClient` is typed off the Spanner client's
+ * own options, because `@google-cloud/spanner` types that field with the copy
+ * of `google-auth-library` that `google-gax` pins.
  */
 export interface SpannerToolsetCredentialsConfig {
   /**
