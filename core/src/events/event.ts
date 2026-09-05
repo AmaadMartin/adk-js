@@ -7,14 +7,13 @@
 import {FunctionResponse} from '@google/genai';
 
 import {getFunctionCalls, LlmResponse} from '../models/llm_response.js';
+import {randomUUID} from '../utils/env_aware_utils.js';
+import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
+import {createEventActions, EventActions} from './event_actions.js';
 
 // An event is an `LlmResponse`, so the reader lives with the response type
 // and is re-exported here for the callers that read it off an event.
 export {getFunctionCalls};
-
-import {randomUUID} from '../utils/env_aware_utils.js';
-import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
-import {createEventActions, EventActions} from './event_actions.js';
 
 /**
  * A unique symbol identifying ADK Event objects.
