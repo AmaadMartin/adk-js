@@ -1,0 +1,60 @@
+{
+  "events": [
+    {
+      "author": "user",
+      "content": {
+        "parts": [
+          {
+            "text": "Roll a six sided die."
+          }
+        ],
+        "role": "user"
+      }
+    },
+    {
+      "author": "dice_agent",
+      "content": {
+        "parts": [
+          {
+            "functionCall": {
+              "args": {
+                "sides": 6
+              },
+              "id": "fc-1",
+              "name": "roll_dice"
+            }
+          }
+        ],
+        "role": "model"
+      }
+    },
+    {
+      "author": "dice_agent",
+      "content": {
+        "parts": [
+          {
+            "functionResponse": {
+              "id": "fc-1",
+              "name": "roll_dice",
+              "response": {
+                "rolled": 6
+              }
+            }
+          }
+        ],
+        "role": "user"
+      }
+    },
+    {
+      "author": "dice_agent",
+      "content": {
+        "parts": [
+          {
+            "text": "You rolled a 6."
+          }
+        ],
+        "role": "model"
+      }
+    }
+  ]
+}

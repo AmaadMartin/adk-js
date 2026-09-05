@@ -32,6 +32,12 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
+ * Base names of an agent directory's entry file, in the order they are
+ * preferred: an `app` file wins over an `agent` file.
+ */
+const AGENT_ENTRY_BASE_NAMES = ['app', 'agent'];
+
+/**
  * Supported JS/TS file module types.
  */
 export enum FileModuleType {
@@ -579,21 +585,18 @@ export class AgentLoader {
   }
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
-    const subFiles = await getDirFiles(dir.path);
-    const possibleEntryFile =
-      subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext));
+    const possibleEntryFile = findAgentEntryFile(dir.path);
 
     if (!possibleEntryFile) {
       return;
     }
 
     try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
+      const agentFile = new AgentFile(possibleEntryFile, this.options);
       await agentFile.load();
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
-      this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
+      this.recordLoadFailure(dir.name, possibleEntryFile, e);
     }
   }
 
@@ -613,6 +616,25 @@ export class AgentLoader {
         `Skipping it; the other agents are unaffected.`,
     );
   }
+}
+
+/**
+ * Returns the agent entry file of a directory, or `undefined` when the
+ * directory holds none.
+ *
+ * Synchronous, so that a caller listing agent directories can do it while a
+ * test runner collects.
+ */
+export function findAgentEntryFile(dirPath: string): string | undefined {
+  for (const baseName of AGENT_ENTRY_BASE_NAMES) {
+    for (const extension of JS_FILES_EXTENSIONS) {
+      const candidate = path.join(dirPath, `${baseName}${extension}`);
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
 }
 
 function isJsFile(fileExt?: string): boolean {
