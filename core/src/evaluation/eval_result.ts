@@ -138,6 +138,10 @@ const evalSetResultModel: EvalModel<EvalSetResult> = evalModel(
  * ones, and it defaults `evalSetId` and `evalId` to `''` and
  * `overallEvalMetricResults` to `[]`.
  *
+ * The metric, invocation and session payloads pass through by reference and
+ * keep the spelling they arrived in. Only the fields this model names are
+ * renamed. See {@link payloadField}.
+ *
  * @throws {InputValidationError} When the payload omits `finalEvalStatus`,
  *   `evalMetricResultPerInvocation` or `sessionId`, or names an eval status
  *   outside {@link EvalStatus}.
