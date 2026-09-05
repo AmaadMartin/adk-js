@@ -185,7 +185,7 @@ async function runChildNode({
 
   // Scoped to this run: an event may redirect the branch its successors
   // inherit, and `childIc` is often the parent's own context (see BranchRef).
-  const branchRef: BranchRef = {value: branch};
+  const branchRef: BranchRef = {value: branch, initial: branch};
 
   const child = new NodeContext({
     invocationContext: childIc,
@@ -248,7 +248,7 @@ async function runChildNode({
     let succeeded = false;
     let inputRecorded = false;
     while (!succeeded) {
-      resetState(child);
+      resetState(child, branchRef);
       child.attemptCount = nodeState.attemptCount;
       try {
         inputRecorded = await runAttempt({
@@ -425,8 +425,8 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
 
 /**
  * Reset per-attempt state so a retry starts clean. This covers everything a
- * failed attempt can leave behind on the child context: its output/route,
- * interrupt ids, AND its state writes. A node that calls `ctx.state.set(...)`
+ * failed attempt can leave behind: its output/route, interrupt ids, its state
+ * writes, AND any branch it redirected. A node that calls `ctx.state.set(...)`
  * and then throws would otherwise leave the failed attempt's writes in the
  * delta, to be committed alongside the successful attempt's. `NodeContext`
  * builds its `State` over this exact `stateDelta` object once (in its
@@ -438,11 +438,12 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
  *
  * @param childNodeContext Node context to reset
  */
-function resetState(childNodeContext: NodeContext): void {
+function resetState(childNodeContext: NodeContext, branch: BranchRef): void {
   childNodeContext.output = undefined;
   childNodeContext.route = undefined;
   childNodeContext.interruptIds = [];
   childNodeContext.reportedError = undefined;
+  branch.value = branch.initial;
   for (const key of Object.keys(childNodeContext.actions.stateDelta)) {
     delete childNodeContext.actions.stateDelta[key];
   }
@@ -458,7 +459,14 @@ function resetState(childNodeContext: NodeContext): void {
  * there would leak a child's branch into the parent.
  */
 interface BranchRef {
+  /** The branch in force right now. An event can redirect it. */
   value: string | undefined;
+  /**
+   * The branch the run started on. A retry restores it, so a redirect a failed
+   * attempt made is discarded with the rest of that attempt's state — matching
+   * adk-python, which builds a fresh child context per attempt.
+   */
+  readonly initial: string | undefined;
 }
 
 interface RunOnceParams {

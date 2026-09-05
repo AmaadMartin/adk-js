@@ -37,6 +37,48 @@ class EventsNode extends BaseNode {
   }
 }
 
+/**
+ * A node that redirects the branch, then fails its first attempt. Its retry
+ * emits one unbranched event, so the branch that event carries shows whether
+ * the failed attempt's redirect survived.
+ */
+class RedirectThenFailNode extends BaseNode {
+  private attempts = 0;
+
+  constructor(private readonly redirect: string = 'attempt1') {
+    super({name: 'flaky', retryConfig: {maxAttempts: 2, initialDelay: 0}});
+  }
+
+  protected async *runImpl(): AsyncGenerator<Event, void, void> {
+    this.attempts += 1;
+    if (this.attempts === 1) {
+      yield createEvent({branch: this.redirect, content: undefined});
+      throw new Error('first attempt fails');
+    }
+    yield createEvent({content: undefined});
+  }
+}
+
+/** {@link RedirectThenFailNode}, but the failed attempt cleared the branch. */
+class ClearThenFailNode extends RedirectThenFailNode {
+  constructor() {
+    super('');
+  }
+}
+
+/** Redirects the branch, then yields a plain value, then an unbranched event. */
+class RedirectThenPlainNode extends BaseNode {
+  constructor() {
+    super({name: 'n'});
+  }
+
+  protected async *runImpl(): AsyncGenerator<Event | string, void, void> {
+    yield createEvent({branch: 'audit', content: undefined});
+    yield 'plain';
+    yield createEvent({content: undefined});
+  }
+}
+
 /** An {@link InvocationContext} whose running branch is `branch`. */
 function icWithBranch(branch: string | undefined): InvocationContext {
   return new InvocationContext({...createIc(), branch});
@@ -161,5 +203,47 @@ describe('node_runner — the branch an event inherits and redirects', () => {
 
     expect(events.map((e) => e.branch)).toEqual([undefined, undefined]);
     expect(ic.branch).toBe('parent_branch');
+  });
+
+  it('discards a redirect made by an attempt that then failed', async () => {
+    const node = new RedirectThenFailNode();
+
+    const events = await driveWithBranch(node, icWithBranch('parent_branch'));
+
+    expect(events.map((e) => e.branch)).toEqual(['attempt1', 'parent_branch']);
+  });
+
+  it('discards a cleared branch when the attempt that cleared it failed', async () => {
+    const node = new ClearThenFailNode();
+
+    const events = await driveWithBranch(node, icWithBranch('parent_branch'));
+
+    expect(events.map((e) => e.branch)).toEqual([undefined, 'parent_branch']);
+  });
+
+  it('re-stamps the node branch when the node yields a plain value', async () => {
+    const node = new RedirectThenPlainNode();
+
+    const events = await driveWithBranch(node, icWithBranch('parent_branch'));
+
+    expect(events.map((e) => e.branch)).toEqual([
+      'audit',
+      'parent_branch',
+      'parent_branch',
+    ]);
+  });
+
+  it("adopts a foreign author's branch, as adk-python does", async () => {
+    const node = new EventsNode('n', [
+      createEvent({author: 'sub_agent', branch: 'parent_branch.sub'}),
+      createEvent({content: undefined}),
+    ]);
+
+    const events = await driveWithBranch(node, icWithBranch('parent_branch'));
+
+    expect(events.map((e) => e.branch)).toEqual([
+      'parent_branch.sub',
+      'parent_branch.sub',
+    ]);
   });
 });

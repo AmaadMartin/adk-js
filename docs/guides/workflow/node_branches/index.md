@@ -83,9 +83,13 @@ A redirect lasts for the rest of the node's run and no longer.
   siblings keep the branch they had.
 - A later node inherits from the graph, not from whatever the previous node
   last set.
-- A value a node yields directly (rather than an `Event`) is turned into an
-  event by `BaseNode.toEvent`, which stamps the node context's own branch. Such
-  an event sets the branch rather than inheriting a redirect.
+- A failed attempt's redirect is discarded. When a node retries, the branch goes
+  back to the one the run started on.
+- A value a node yields directly (rather than an `Event`) **reverts the
+  redirect** for every event after it. `BaseNode.toEvent` turns the value into
+  an event stamped with the node context's own branch, which is the branch the
+  run started on, and that stamp becomes the new running branch. Yield `Event`s
+  rather than plain values to keep a redirect.
 
 This mirrors `adk-python`'s `NodeRunner._enrich_event`, with one deliberate
 difference: `adk-python` clears the branch by writing `None` onto the context it
