@@ -13,6 +13,7 @@ import {
   PluginManager,
   Session,
   TokenBasedContextCompactor,
+  createEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -38,6 +39,15 @@ class MockSummarizer implements BaseSummarizer {
         parts: [{text: `Mock summary of ${events.length} events`}],
       },
     };
+  }
+}
+
+class NullSummarizer implements BaseSummarizer {
+  readonly calls: Event[][] = [];
+
+  async summarize(events: Event[]): Promise<CompactedEvent | null> {
+    this.calls.push(events);
+    return null;
   }
 }
 
@@ -236,6 +246,65 @@ describe('TokenBasedContextCompactor', () => {
       createMockEvent('4', undefined, false, false, 'hi'),
     ]);
     expect(await compactor.shouldCompact(underThreshold)).toBe(false);
+  });
+
+  // Ported from adk-python
+  // tests/unittests/apps/test_compaction.py:421
+  // test_run_compaction_for_sliding_window_no_compaction_event_returned.
+  it('should leave history untouched when the summarizer declines with null', async () => {
+    const summarizer = new NullSummarizer();
+    const compactor = new TokenBasedContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer,
+    });
+
+    const context = createMockInvocationContext([
+      createMockEvent('1', 5),
+      createMockEvent('2', 8),
+      createMockEvent('3', 12),
+      createMockEvent('4', 15),
+    ]);
+    const eventsBefore = [...context.session.events];
+
+    await compactor.compact(context);
+
+    expect(summarizer.calls.length).toBe(1);
+    expect(context.session.events).toEqual(eventsBefore);
+  });
+
+  it('should leave an earlier compacted event unaltered when the summarizer declines with null', async () => {
+    const summarizer = new NullSummarizer();
+    const compactor = new TokenBasedContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer,
+    });
+
+    // An earlier compacted event is present, so the summarizer receives it
+    // alongside the raw events. Declining must skip the default-filling of
+    // `actions` and the append that follow it.
+    const earlier: CompactedEvent = {
+      ...createEvent({id: 'earlier', author: 'system'}),
+      isCompacted: true,
+      startTime: Date.now() - 1000,
+      endTime: Date.now() - 500,
+      compactedContent: 'earlier summary',
+    };
+    const context = createMockInvocationContext([
+      earlier,
+      createMockEvent('1', 5),
+      createMockEvent('2', 8),
+      createMockEvent('3', 12),
+      createMockEvent('4', 15),
+    ]);
+    const earlierSnapshot = structuredClone(earlier);
+
+    await compactor.compact(context);
+
+    expect(summarizer.calls[0][0]).toBe(earlier);
+    expect(context.session.events.length).toBe(5);
+    expect(structuredClone(earlier)).toEqual(earlierSnapshot);
   });
 
   it('should not compact when no token count or estimate is available', async () => {
