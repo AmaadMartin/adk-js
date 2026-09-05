@@ -287,6 +287,8 @@ export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
+export {createDataAgentToolConfig} from './tools/data_agent/data_agent_tool_config.js';
+export type {DataAgentToolConfig} from './tools/data_agent/data_agent_tool_config.js';
 export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
