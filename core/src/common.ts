@@ -291,6 +291,8 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {WriteFileTool} from './tools/environment/write_file_tool.js';
+export type {WriteFileResponse} from './tools/environment/write_file_tool.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
