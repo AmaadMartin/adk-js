@@ -7,7 +7,10 @@
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
   GcsArtifactService,
+  GcsEvalSetResultsManager,
+  GcsEvalSetsManager,
   InMemoryArtifactService,
+  InMemoryEvalSetsManager,
   InMemorySessionService,
   LlmAgent,
   Logger,
@@ -272,6 +275,51 @@ describe('createApiServer', () => {
       expect(options.reloadAgents).toBe(true);
       expect(options.logger).toBe(logger);
       expect(options.logLevel).toBe(LogLevel.DEBUG);
+    });
+
+    it('builds the GCS eval managers from an eval storage URI', () => {
+      createApiServer({
+        agentsDir,
+        web: true,
+        evalStorageUri: 'gs://my-eval-bucket',
+      });
+
+      const options = serverOptions();
+      expect(options.evalSetsManager).toBeInstanceOf(GcsEvalSetsManager);
+      expect(options.evalSetResultsManager).toBeInstanceOf(
+        GcsEvalSetResultsManager,
+      );
+    });
+
+    it('prefers a supplied eval manager over the eval storage URI', () => {
+      const evalSetsManager = new InMemoryEvalSetsManager();
+
+      createApiServer({
+        agentsDir,
+        web: true,
+        evalStorageUri: 'gs://my-eval-bucket',
+        evalSetsManager,
+      });
+
+      const options = serverOptions();
+      expect(options.evalSetsManager).toBe(evalSetsManager);
+      expect(options.evalSetResultsManager).toBeInstanceOf(
+        GcsEvalSetResultsManager,
+      );
+    });
+
+    it('leaves the eval managers to the server without a URI', () => {
+      createApiServer({agentsDir, web: true});
+
+      const options = serverOptions();
+      expect(options.evalSetsManager).toBeUndefined();
+      expect(options.evalSetResultsManager).toBeUndefined();
+    });
+
+    it('rejects an eval storage URI of an unsupported scheme', () => {
+      expect(() =>
+        createApiServer({agentsDir, web: true, evalStorageUri: 's3://bucket'}),
+      ).toThrow('Unsupported evals storage URI');
     });
 
     it('forwards the plugin, logo and default-model options', () => {

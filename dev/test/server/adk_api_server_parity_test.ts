@@ -19,6 +19,7 @@ import {
   InvocationContext,
   LlmAgent,
   Session,
+  setEvalRuntime,
 } from '@google/adk';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -28,6 +29,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {DEFAULT_APP_NAME_ENV_VAR} from '../../src/server/default_app_rewrite.js';
 import {ServerAgentLoader} from '../../src/utils/base_agent_loader.js';
+import {StubEvalRuntime} from '../cli/stub_eval_runtime.js';
 
 const APP_NAME = 'test_app';
 const USER_ID = 'test_user';
@@ -330,5 +332,174 @@ describe('api_server parity', () => {
 
       expect(() => modelOfAgentWithoutOne()).toThrow('No model found');
     });
+  });
+});
+
+describe('dev_server eval parity', () => {
+  const EVAL_APP = 'test_app';
+  let agentsDir: string;
+  let sessionService: InMemorySessionService;
+  let server: AdkApiServer;
+
+  beforeEach(async () => {
+    agentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-parity-eval-'));
+    fs.mkdirSync(path.join(agentsDir, EVAL_APP));
+    sessionService = new InMemorySessionService();
+    server = new AdkApiServer({
+      agentsDir,
+      serveDebugUI: true,
+      agentLoader: loaderFor([EVAL_APP]),
+      sessionService,
+      memoryService: new InMemoryMemoryService(),
+      artifactService: new InMemoryArtifactService(),
+    });
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.stop();
+    setEvalRuntime(undefined);
+    fs.rmSync(agentsDir, {recursive: true, force: true});
+  });
+
+  /** Creates the source session the add-session cases record. */
+  async function createRecordedSession(): Promise<void> {
+    const session = await sessionService.createSession({
+      appName: EVAL_APP,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      state: {},
+    });
+    await sessionService.appendEvent({
+      session,
+      event: createEvent({
+        invocationId: 'inv-1',
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'what is 2+2?'}]},
+      }),
+    });
+    await sessionService.appendEvent({
+      session,
+      event: createEvent({
+        invocationId: 'inv-1',
+        author: 'dummy agent',
+        content: {role: 'model', parts: [{text: '4'}]},
+      }),
+    });
+  }
+
+  it('test_add_session_to_eval_set_builds_eval_case_from_session', async () => {
+    await post(server.url, `/dev/apps/${EVAL_APP}/eval-sets`, {
+      evalSet: {evalSetId: 'my_eval_set'},
+    });
+    await createRecordedSession();
+
+    const response = await post(
+      server.url,
+      `/dev/apps/${EVAL_APP}/eval-sets/my_eval_set/add-session`,
+      {evalId: 'my_eval_case', sessionId: SESSION_ID, userId: USER_ID},
+    );
+
+    expect(response.status).toBe(200);
+    const evalCase = await get(
+      server.url,
+      `/dev/apps/${EVAL_APP}/eval-sets/my_eval_set/eval-cases/my_eval_case`,
+    );
+    const body = evalCase.body as {
+      sessionInput: {appName: string; userId: string};
+      conversation: Array<{userContent: {parts: Array<{text: string}>}}>;
+    };
+    expect(body.sessionInput.appName).toBe(EVAL_APP);
+    expect(body.sessionInput.userId).toBe(USER_ID);
+    expect(
+      body.conversation.flatMap((invocation) =>
+        invocation.userContent.parts.map((part) => part.text),
+      ),
+    ).toEqual(['what is 2+2?']);
+  });
+
+  it('test_add_session_to_eval_set_unknown_eval_set_is_a_client_error', async () => {
+    await createRecordedSession();
+
+    const response = await post(
+      server.url,
+      `/dev/apps/${EVAL_APP}/eval-sets/missing_eval_set/add-session`,
+      {evalId: 'case-1', sessionId: SESSION_ID, userId: USER_ID},
+    );
+
+    // adk-python marks this xfail: it maps ValueError while its managers
+    // raise NotFoundError, so the request 500s there.
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+
+  it('test_create_eval_set_legacy_route_creates_eval_set', async () => {
+    const response = await post(
+      server.url,
+      `/dev/apps/${EVAL_APP}/eval_sets/legacy_eval_set`,
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    const listed = await get(server.url, `/dev/apps/${EVAL_APP}/eval_sets`);
+    expect(listed.body).toEqual(['legacy_eval_set']);
+  });
+
+  it('test_get_eval_result_returns_saved_eval_set_result', async () => {
+    setEvalRuntime(new StubEvalRuntime());
+    await post(server.url, `/dev/apps/${EVAL_APP}/eval-sets`, {
+      evalSet: {evalSetId: 'my_eval_set'},
+    });
+    await createRecordedSession();
+    await post(
+      server.url,
+      `/dev/apps/${EVAL_APP}/eval-sets/my_eval_set/add-session`,
+      {evalId: 'my_eval_case', sessionId: SESSION_ID, userId: USER_ID},
+    );
+    await post(
+      server.url,
+      `/dev/apps/${EVAL_APP}/eval-sets/my_eval_set/run`,
+      {},
+    );
+
+    const listed = await get(server.url, `/dev/apps/${EVAL_APP}/eval-results`);
+    const {evalResultIds} = listed.body as {evalResultIds: string[]};
+    const response = await get(
+      server.url,
+      `/dev/apps/${EVAL_APP}/eval-results/${evalResultIds[0]}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      evalSetResultId: evalResultIds[0],
+      evalSetId: 'my_eval_set',
+    });
+  });
+
+  it('test_get_eval_set_result_not_found', async () => {
+    const response = await get(
+      server.url,
+      `/apps/${EVAL_APP}/eval_results/test_eval_result_id_not_found`,
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it('test_list_metrics_info', async () => {
+    const response = await get(
+      server.url,
+      `/dev/apps/${EVAL_APP}/metrics-info`,
+    );
+
+    expect(response.status).toBe(200);
+    const {metricsInfo} = response.body as {
+      metricsInfo: Array<{metricName: string}>;
+    };
+    // adk-js seeds three standard metrics where adk-python seeds more.
+    expect(metricsInfo.map((info) => info.metricName).sort()).toEqual([
+      'response_evaluation_score',
+      'response_match_score',
+      'tool_trajectory_avg_score',
+    ]);
   });
 });

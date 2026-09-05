@@ -11,6 +11,8 @@ import {
   BaseMemoryService,
   BasePlugin,
   BaseSessionService,
+  EvalSetResultsManager,
+  EvalSetsManager,
   bearerTokenUserBuilder,
   BigQueryAgentAnalyticsPlugin,
   CompositeSessionKey,
@@ -23,6 +25,8 @@ import {
   InMemorySessionService,
   isApp,
   LlmAgent,
+  LocalEvalSetResultsManager,
+  LocalEvalSetsManager,
   Logger,
   LogLevel,
   RunConfig,
@@ -68,6 +72,7 @@ import {
   getAllowedRequestHosts,
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
+import {registerEvalRoutes} from './eval_routes.js';
 import {loadExtraPlugins} from './extra_plugins.js';
 import {readBigQueryAnalyticsConfig} from './plugins_config.js';
 import {
@@ -172,6 +177,16 @@ interface ServerOptions {
    */
   urlPrefix?: string;
   /**
+   * Stores the eval sets the eval endpoints read and write. Defaults to one
+   * reading `<agentsDir>/<appName>/*.evalset.json`.
+   */
+  evalSetsManager?: EvalSetsManager;
+  /**
+   * Stores the results of eval runs. Defaults to one writing under
+   * `<agentsDir>/.adk/eval_history`.
+   */
+  evalSetResultsManager?: EvalSetResultsManager;
+  /**
    * Fully-qualified names, `<module specifier>#<export>`, of plugins to
    * attach to every agent this server serves. Each names either a plugin
    * instance or a plugin class. A name that cannot be loaded is reported and
@@ -246,6 +261,8 @@ export class AdkApiServer {
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
   private readonly agentsDir: string;
+  private readonly evalSetsManager: EvalSetsManager;
+  private readonly evalSetResultsManager: EvalSetResultsManager;
   private readonly extraPlugins: string[];
   private readonly logo?: UiLogoConfig;
   private readonly defaultLlmModel?: string;
@@ -273,6 +290,11 @@ export class AdkApiServer {
     // Matches the default `AgentLoader` applies to the same option, so that
     // `plugins.yaml` is looked for in the directory the agents load from.
     this.agentsDir = options.agentsDir ?? process.cwd();
+    this.evalSetsManager =
+      options.evalSetsManager ?? new LocalEvalSetsManager(this.agentsDir);
+    this.evalSetResultsManager =
+      options.evalSetResultsManager ??
+      new LocalEvalSetResultsManager(this.agentsDir);
     this.extraPlugins = options.extraPlugins ?? [];
     this.logo = resolveLogoConfig(options.logoText, options.logoImageUrl);
     this.defaultLlmModel = options.defaultLlmModel;
@@ -1013,77 +1035,22 @@ export class AdkApiServer {
       },
     );
 
-    // --------------------- Eval Sets related endpoints -----------------------
-    // TODO: Implement eval set related endpoints.
-    app.post(
-      '/apps/:appName/eval_sets/:evalSetId',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
+    // --------------------- Eval related endpoints ----------------------------
+    // Eleven of these paths answered 501 before. `registerEvalRoutes` serves
+    // both them and the `/dev/apps/...` paths the developer UI asks under,
+    // which is where adk-python serves them from its `DevServer` subclass.
+    registerEvalRoutes(
+      app,
+      {
+        evalSetsManager: this.evalSetsManager,
+        evalSetResultsManager: this.evalSetResultsManager,
+        sessionService: this.sessionService,
+        artifactService: this.artifactService,
+        agentLoader: this.agentLoader,
+        logger: this.logger,
       },
+      {serveDebugUI: this.serveDebugUI},
     );
-
-    app.get('/apps/:appName/eval_sets', (req: Request, res: Response) => {
-      return res.status(501).json({error: 'Not implemented'});
-    });
-
-    app.post(
-      '/apps/:appName/eval_sets/:evalSetId/add_session',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
-      },
-    );
-
-    app.get(
-      '/apps/:appName/eval_sets/:evalSetId/evals',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
-      },
-    );
-
-    app.get(
-      '/apps/:appName/eval_sets/:evalSetId/evals/:evalCaseId',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
-      },
-    );
-
-    app.put(
-      '/apps/:appName/eval_sets/:evalSetId/evals/:evalCaseId',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
-      },
-    );
-
-    app.delete(
-      '/apps/:appName/eval_sets/:evalSetId/evals/:evalCaseId',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
-      },
-    );
-
-    app.post(
-      '/apps/:appName/eval_sets/:evalSetId/run_eval',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
-      },
-    );
-
-    // ----------------------- Eval Results related endpoints ------------------
-    // TODO: Implement eval results related endpoints.
-    app.get(
-      '/apps/:appName/eval_results/:evalResultId',
-      (req: Request, res: Response) => {
-        return res.status(501).json({error: 'Not implemented'});
-      },
-    );
-
-    app.get('/apps/:appName/eval_results', (req: Request, res: Response) => {
-      return res.status(501).json({error: 'Not implemented'});
-    });
-
-    app.get('/apps/:appName/eval_metrics', (req: Request, res: Response) => {
-      return res.status(501).json({error: 'Not implemented'});
-    });
 
     // -------------------------- Run related endpoints ------------------------
     app.post('/run', async (req: Request, res: Response) => {
