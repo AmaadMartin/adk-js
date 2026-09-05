@@ -652,14 +652,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   get finishTaskTool(): FinishTaskTool {
     if (!this._finishTaskTool) {
-      // Arguments are checked against the schema as supplied, for the reason
-      // {@link validateOutput} gives: the genai conversion drops constraints
-      // Zod can express.
-      this._finishTaskTool = new FinishTaskTool(
-        this.outputSchema,
-        this.name,
-        this.outputSchemaSource ?? this.outputSchema,
-      );
+      this._finishTaskTool = FinishTaskTool.forAgent(this);
     }
     return this._finishTaskTool;
   }

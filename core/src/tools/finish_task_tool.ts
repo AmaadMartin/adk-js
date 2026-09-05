@@ -12,7 +12,9 @@ import {
   describeSchemaIssues,
   parseWithSchema,
   SchemaLike,
+  toJsonSchema,
 } from '../utils/schema.js';
+import {isZodSchema} from '../utils/simple_zod_to_json.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -33,10 +35,10 @@ export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
  * The parameter a non-object output schema is wrapped under, because the GenAI
  * API requires object-typed tool parameters.
  */
-const DEFAULT_WRAPPER_KEY = 'result';
+export const FINISH_TASK_DEFAULT_WRAPPER_KEY = 'result';
 
-/** The instruction the tool appends to every request that declares it. */
-const FINISH_TASK_INSTRUCTION =
+/** The instruction {@link FinishTaskTool} appends to the request. */
+export const FINISH_TASK_INSTRUCTION =
   'Do NOT call `finish_task` prematurely. Use your available tools to fully' +
   ' complete every aspect of the task first. If the task is unclear, ask' +
   ' the user for clarification before proceeding. Once the task is fully' +
@@ -56,20 +58,103 @@ const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
 };
 
 /**
+ * JSON Schema keys that only carry meaning at the root of a document: the
+ * definition block a `$ref` addresses from the root, and the dialect
+ * declaration. Nesting a schema under a wrapper property would take them with
+ * it, so they are lifted back out.
+ */
+const ROOT_ONLY_KEYS = ['$defs', '$schema'] as const;
+
+/**
+ * The task agent {@link FinishTaskTool.forAgent} reads.
+ *
+ * Structural rather than an `LlmAgent` import, so the tool does not depend on
+ * the agent module — the same reason adk-python declares its `LlmAgent` import
+ * under `TYPE_CHECKING`.
+ */
+export interface FinishTaskAgent {
+  /** The agent's name, recorded on the tool for diagnostics. */
+  readonly name: string;
+  /** The agent's output schema, as the declaration renders it. */
+  readonly outputSchema?: SchemaLike;
+  /** The agent's output schema as the caller supplied it. */
+  readonly outputSchemaSource?: SchemaLike;
+}
+
+/**
  * The key `finish_task` arguments wrap the task output under, or `undefined`
  * when the schema is object-typed and the output sits at the top level of the
  * arguments.
  *
  * Mirrors adk-python's `_finish_task_tool.FinishTaskTool.__init__`, which keys
  * the decision off the declared `type` alone: a schema that declares
- * `properties` but no `type` counts as a non-object and is wrapped. A schema
- * deserialized from JSON carries a lowercase `type`, so the comparison ignores
- * case rather than testing the genai `Type` enum member.
+ * `properties` but no `type` counts as a non-object and is wrapped.
  */
-function outputWrapperKey(schema: Schema): string | undefined {
-  return schema.type?.toLowerCase() === 'object'
+export function getOutputWrapperKey(
+  outputSchema?: SchemaLike,
+): string | undefined {
+  const schema = outputSchema ?? DEFAULT_TASK_OUTPUT_SCHEMA;
+  return schemaTypeName(schema) === 'object'
     ? undefined
-    : DEFAULT_WRAPPER_KEY;
+    : FINISH_TASK_DEFAULT_WRAPPER_KEY;
+}
+
+/**
+ * The schema document a declaration and a wrapper key are read from.
+ *
+ * A Zod schema is serialized; every other form already is a JSON Schema record
+ * in all but name. A genai `Schema` is read directly rather than through
+ * `toJsonSchema`, because `genaiSchemaToJsonSchema` maps types through the
+ * genai `Type` enum and so drops the lowercase `'object'` that a schema
+ * deserialized from JSON carries.
+ */
+function schemaDocument(schema: SchemaLike): Record<string, unknown> {
+  return isZodSchema(schema)
+    ? toJsonSchema(schema)
+    : (schema as Record<string, unknown>);
+}
+
+/** The schema's declared top-level type, lowercased. */
+function schemaTypeName(schema: SchemaLike): string | undefined {
+  const type = schemaDocument(schema)['type'];
+  return typeof type === 'string' ? type.toLowerCase() : undefined;
+}
+
+/** Whether the document carries a key that has to stay at its root. */
+function hasRootOnlyKeys(document: Record<string, unknown>): boolean {
+  return ROOT_ONLY_KEYS.some((key) => document[key] !== undefined);
+}
+
+/** The `required` key list an object schema declares. */
+function requiredKeys(schema: SchemaLike): string[] {
+  const required = schemaDocument(schema)['required'];
+  return Array.isArray(required)
+    ? required.filter((key): key is string => typeof key === 'string')
+    : [];
+}
+
+/**
+ * Wraps a schema document under `wrapperKey`, hoisting its root-only keys to
+ * the root of the wrapping document so its `$ref` pointers still resolve.
+ */
+function wrapWithHoistedRootKeys(
+  wrapperKey: string,
+  document: Record<string, unknown>,
+): Record<string, unknown> {
+  const inner = {...document};
+  const hoisted: Record<string, unknown> = {};
+  for (const key of ROOT_ONLY_KEYS) {
+    if (inner[key] !== undefined) {
+      hoisted[key] = inner[key];
+      delete inner[key];
+    }
+  }
+  return {
+    ...hoisted,
+    type: 'object',
+    properties: {[wrapperKey]: inner},
+    required: [wrapperKey],
+  };
 }
 
 /**
@@ -85,7 +170,7 @@ function outputWrapperKey(schema: Schema): string | undefined {
  */
 export class FinishTaskTool extends BaseTool {
   /** The schema describing the expected task output. */
-  readonly outputSchema: Schema;
+  readonly outputSchema: SchemaLike;
   /**
    * When the output schema is a non-object (primitive/array), the value is
    * wrapped under this key (the GenAI API requires object-typed parameters).
@@ -111,7 +196,7 @@ export class FinishTaskTool extends BaseTool {
    *   refinements and custom messages the caller wrote.
    */
   constructor(
-    outputSchema?: Schema,
+    outputSchema?: SchemaLike,
     taskAgentName?: string,
     validationSchema?: SchemaLike,
   ) {
@@ -124,21 +209,55 @@ export class FinishTaskTool extends BaseTool {
     }
     super({name: FINISH_TASK_TOOL_NAME, description});
     this.outputSchema = schema;
-    this.wrapperKey = outputWrapperKey(schema);
+    this.wrapperKey = getOutputWrapperKey(schema);
     this.taskAgentName = taskAgentName;
     this.validationSchema = validationSchema ?? schema;
-    this.requiredKeys = this.wrapperKey ? [] : (schema.required ?? []);
+    this.requiredKeys = this.wrapperKey ? [] : requiredKeys(schema);
+  }
+
+  /**
+   * Builds the tool for a task agent, reading its output schema and capturing
+   * its name — the form adk-python's constructor takes.
+   *
+   * Arguments are checked against `outputSchemaSource` where the agent has one,
+   * because the genai conversion loses the refinements and custom messages the
+   * caller wrote. The declaration still comes from `outputSchema`, so the
+   * preference leaves it unchanged.
+   */
+  static forAgent(taskAgent: FinishTaskAgent): FinishTaskTool {
+    return new FinishTaskTool(
+      taskAgent.outputSchema,
+      taskAgent.name,
+      taskAgent.outputSchemaSource ?? taskAgent.outputSchema,
+    );
   }
 
   override _getDeclaration(): FunctionDeclaration {
-    const parameters: Schema = this.wrapperKey
-      ? {
-          type: Type.OBJECT,
-          properties: {[this.wrapperKey]: this.outputSchema},
-          required: [this.wrapperKey],
-        }
-      : this.outputSchema;
-    return {name: this.name, description: this.description, parameters};
+    const {name, description, outputSchema, wrapperKey} = this;
+    const document = schemaDocument(outputSchema);
+    if (!wrapperKey) {
+      return isZodSchema(outputSchema)
+        ? {name, description, parametersJsonSchema: document}
+        : {name, description, parameters: outputSchema as Schema};
+    }
+    // Wrapping moves the schema into a property, which would take a `$defs`
+    // block with it and leave every `#/$defs/...` pointer dangling.
+    if (hasRootOnlyKeys(document)) {
+      return {
+        name,
+        description,
+        parametersJsonSchema: wrapWithHoistedRootKeys(wrapperKey, document),
+      };
+    }
+    return {
+      name,
+      description,
+      parameters: {
+        type: Type.OBJECT,
+        properties: {[wrapperKey]: outputSchema as Schema},
+        required: [wrapperKey],
+      },
+    };
   }
 
   override async processLlmRequest(
