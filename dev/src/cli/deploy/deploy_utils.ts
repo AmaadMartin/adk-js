@@ -45,6 +45,7 @@ export interface CreateDockerFileContentOptions {
   allowOrigins?: string;
   sessionServiceUri?: string;
   artifactServiceUri?: string;
+  memoryServiceUri?: string;
   otelToCloud?: boolean;
   a2a?: boolean;
 }
@@ -134,6 +135,13 @@ export function createDockerFileContent(
     assertNoDockerfileNewline(options.sessionServiceUri, 'sessionServiceUri');
     adkServerOptions.push(
       `--session_service_uri=${shellQuote(options.sessionServiceUri)}`,
+    );
+  }
+
+  if (options.memoryServiceUri) {
+    assertNoDockerfileNewline(options.memoryServiceUri, 'memoryServiceUri');
+    adkServerOptions.push(
+      `--memory_service_uri=${shellQuote(options.memoryServiceUri)}`,
     );
   }
 

