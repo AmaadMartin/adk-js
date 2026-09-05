@@ -12,7 +12,12 @@ import {
 } from '@a2a-js/sdk/server';
 import {RunConfig} from '../agents/run_config.js';
 import {Event as AdkEvent} from '../events/event.js';
-import {isRunner, Runner, RunnerConfig} from '../runner/runner.js';
+import {
+  isRunner,
+  isRunnerConfig,
+  Runner,
+  RunnerConfig,
+} from '../runner/runner.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
@@ -30,7 +35,7 @@ import {
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
 import {
   getA2AEventMetadata,
-  getA2ASessionMetadata,
+  getInvocationMetadata,
 } from './metadata_converter_utils.js';
 import {toA2AParts, toGenAIContent} from './part_converter_utils.js';
 import {getA2aRequestMetadata} from './request_metadata.js';
@@ -144,6 +149,7 @@ export class A2AAgentExecutor implements AgentExecutor {
             taskId: ctx.taskId,
             contextId: ctx.contextId,
             message: a2aUserMessage,
+            metadata: getInvocationMetadata(executorContext),
           }),
         );
       }
@@ -152,9 +158,11 @@ export class A2AAgentExecutor implements AgentExecutor {
         createTaskWorkingEvent({
           taskId: ctx.taskId,
           contextId: ctx.contextId,
+          metadata: getInvocationMetadata(executorContext),
         }),
       );
 
+      let errorStatusEvent: TaskStatusUpdateEvent | undefined;
       const adkEvents: AdkEvent[] = [];
       for await (const adkEvent of adkRunner.runAsync({
         userId,
@@ -170,6 +178,16 @@ export class A2AAgentExecutor implements AgentExecutor {
         },
       })) {
         adkEvents.push(adkEvent);
+
+        // Reassigned rather than broken out of, so the last error wins.
+        if (adkEvent.errorCode || adkEvent.errorMessage) {
+          errorStatusEvent = createTaskFailedEvent({
+            taskId: ctx.taskId,
+            contextId: ctx.contextId,
+            error: new Error(adkEvent.errorMessage || adkEvent.errorCode),
+            metadata: getA2AEventMetadata(adkEvent, executorContext),
+          });
+        }
 
         const a2aEvent = this.convertAdkEventToA2AEvent(
           adkEvent,
@@ -191,7 +209,9 @@ export class A2AAgentExecutor implements AgentExecutor {
       await this.publishFinalTaskStatus({
         executorContext,
         eventBus,
-        event: getFinalTaskStatusUpdate(adkEvents, executorContext),
+        event:
+          errorStatusEvent ??
+          getFinalTaskStatusUpdate(adkEvents, executorContext),
       });
     } catch (e: unknown) {
       const error = e as Error;
@@ -204,7 +224,6 @@ export class A2AAgentExecutor implements AgentExecutor {
           taskId: ctx.taskId,
           contextId: ctx.contextId,
           error: new Error(`Agent run failed: ${error.message}`),
-          metadata: getA2ASessionMetadata(executorContext),
         }),
       });
     }
@@ -235,7 +254,10 @@ export class A2AAgentExecutor implements AgentExecutor {
       contextId: executorContext.requestContext.contextId,
       artifactId,
       parts: a2aParts,
-      metadata: getA2AEventMetadata(adkEvent, executorContext),
+      metadata: {
+        ...getA2AEventMetadata(adkEvent, executorContext),
+        ...getInvocationMetadata(executorContext),
+      },
       append: adkEvent.partial,
       lastChunk: !adkEvent.partial,
     });
@@ -263,14 +285,35 @@ export class A2AAgentExecutor implements AgentExecutor {
     event: TaskStatusUpdateEvent;
     error?: Error;
   }): Promise<void> {
+    const finalEvent = withInvocationMetadata(event, executorContext);
     try {
-      await this.config.afterExecuteCallback?.(executorContext, event, error);
+      await this.config.afterExecuteCallback?.(
+        executorContext,
+        finalEvent,
+        error,
+      );
     } catch (e: unknown) {
       logger.error('Error in afterExecuteCallback:', e);
     }
 
-    eventBus.publish(event);
+    eventBus.publish(finalEvent);
   }
+}
+
+/**
+ * Merges the invocation metadata into an already-built A2A event.
+ *
+ * Spreads on top of the event's own metadata rather than replacing it, so the
+ * per-event keys survive.
+ */
+function withInvocationMetadata<T extends {metadata?: Record<string, unknown>}>(
+  event: T,
+  context: ExecutorContext,
+): T {
+  return {
+    ...event,
+    metadata: {...event.metadata, ...getInvocationMetadata(context)},
+  };
 }
 
 /**
@@ -300,19 +343,49 @@ async function getAdkSession(
 
 /**
  * Resolves the runner from the provided runner or runner config.
+ *
+ * Takes `unknown` because the value arrives unvalidated: a JavaScript caller,
+ * or a factory whose declared return type does not match what it returns, can
+ * hand over anything.
+ *
+ * @param runnerOrConfig The runner, runner config, or factory for either.
+ * @param fromFactory Whether this value came out of a factory, which decides
+ *   which of the two error messages a bad value gets.
+ * @throws {TypeError} If the value is neither a Runner nor a runner config.
  */
-async function getAdkRunner(
-  runnerOrConfig: RunnerOrRunnerConfig,
+export async function getAdkRunner(
+  runnerOrConfig: unknown,
+  fromFactory = false,
 ): Promise<Runner> {
   if (typeof runnerOrConfig === 'function') {
-    const result = await runnerOrConfig();
-
-    return getAdkRunner(result);
+    return getAdkRunner(await runnerOrConfig(), true);
   }
 
   if (isRunner(runnerOrConfig)) {
     return runnerOrConfig;
   }
 
+  if (!isRunnerConfig(runnerOrConfig)) {
+    throw new TypeError(
+      fromFactory
+        ? `Runner factory must return a Runner or a runner config, got ${describeType(runnerOrConfig)}`
+        : `Runner must be a Runner instance or a callable that returns a Runner, got ${describeType(runnerOrConfig)}`,
+    );
+  }
+
   return new Runner(runnerOrConfig);
+}
+
+/**
+ * Names the type of a value for an error message.
+ */
+function describeType(value: unknown): string {
+  if (value === null) {
+    return 'null';
+  }
+  if (typeof value !== 'object') {
+    return typeof value;
+  }
+
+  return value.constructor?.name ?? 'object';
 }
