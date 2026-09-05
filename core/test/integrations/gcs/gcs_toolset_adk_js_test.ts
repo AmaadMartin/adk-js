@@ -16,6 +16,7 @@ import {
   GcsCapability,
   GcsToolset,
   InvocationContext,
+  LlmAgent,
   PluginManager,
   ReadonlyContext,
 } from '@google/adk';
@@ -72,6 +73,25 @@ describe('GcsToolset', () => {
       results: 'hello',
       encoding: 'text',
     });
+  });
+
+  it('serves its tools to an LlmAgent that lists it in tools', async () => {
+    const agent = new LlmAgent({
+      name: 'gcs_agent',
+      model: 'gemini-2.5-flash',
+      instruction: 'Answer questions about the objects in the user bucket.',
+      tools: [new GcsToolset()],
+    });
+
+    const tools = await agent.canonicalTools(
+      new ReadonlyContext(makeInvocationContext()),
+    );
+
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'gcs_get_object_data',
+      'gcs_get_object_metadata',
+      'gcs_list_objects',
+    ]);
   });
 
   it('exposes no write tool by default', async () => {

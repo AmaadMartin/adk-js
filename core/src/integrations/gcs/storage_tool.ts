@@ -115,16 +115,72 @@ const deleteObjectsParameters = z.object({
   object_names: z.array(z.string()).describe('List of object names to delete.'),
 });
 
-/** Arguments of {@link listObjects}. */
-export type ListObjectsArgs = z.infer<typeof listObjectsParameters>;
+/**
+ * Arguments of {@link listObjects}.
+ *
+ * These interfaces mirror the zod schemas above, which stay private because
+ * they are the model-facing declaration rather than public API. The two cannot
+ * drift: each tool passes its schema-inferred input straight to the function
+ * that takes the interface, so a mismatch fails to compile.
+ */
+export interface ListObjectsArgs {
+  /** The name of the GCS bucket. */
+  bucket_name: string;
+  /** Filter results to objects whose names begin with this prefix. */
+  prefix?: string;
+  /** The maximum number of objects to return in a single page. */
+  page_size?: number;
+  /** A page token, received from a previous list_objects call. */
+  page_token?: string;
+}
+
 /** Arguments of {@link getObjectMetadata}. */
-export type GetObjectMetadataArgs = z.infer<typeof getObjectMetadataParameters>;
+export interface GetObjectMetadataArgs {
+  /** The name of the GCS bucket containing the object. */
+  bucket_name: string;
+  /** The name of the GCS object. */
+  object_name: string;
+  /** If present, selects a specific generation of this object. */
+  generation?: number;
+}
+
 /** Arguments of {@link getObjectData}. */
-export type GetObjectDataArgs = z.infer<typeof getObjectDataParameters>;
+export interface GetObjectDataArgs {
+  /** The name of the GCS bucket. */
+  bucket_name: string;
+  /** The name of the GCS object. */
+  object_name: string;
+  /** If present, selects a specific generation of this object. */
+  generation?: number;
+  /**
+   * The local filesystem path to save the downloaded file. The path is not
+   * sandboxed: the object is written wherever this points.
+   */
+  destination_file_path?: string;
+}
+
 /** Arguments of {@link createObject}. */
-export type CreateObjectArgs = z.infer<typeof createObjectParameters>;
+export interface CreateObjectArgs {
+  /** The name of the GCS bucket. */
+  bucket_name: string;
+  /** The name of the GCS object to create. */
+  object_name: string;
+  /** The content to write to the object. */
+  data?: string;
+  /**
+   * The local filesystem path of the file to upload. The path is not
+   * sandboxed: any file this process can read can be uploaded.
+   */
+  source_file_path?: string;
+}
+
 /** Arguments of {@link deleteObjects}. */
-export type DeleteObjectsArgs = z.infer<typeof deleteObjectsParameters>;
+export interface DeleteObjectsArgs {
+  /** The name of the GCS bucket. */
+  bucket_name: string;
+  /** List of object names to delete. */
+  object_names: string[];
+}
 
 /** Supplies the Cloud Storage client a tool runs against. */
 export type GcsClientProvider = () => Promise<Storage>;
