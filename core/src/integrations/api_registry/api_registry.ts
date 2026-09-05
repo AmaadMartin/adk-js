@@ -17,10 +17,9 @@ import {AgentRegistrySingleMCPToolset} from '../agent_registry/agent_registry_mc
 import {isGoogleApi} from '../agent_registry/helpers.js';
 
 /** The default Cloud API Registry host. */
-export const API_REGISTRY_URL = 'https://cloudapiregistry.googleapis.com';
+const API_REGISTRY_URL = 'https://cloudapiregistry.googleapis.com';
 /** The mutual-TLS Cloud API Registry host. */
-export const API_REGISTRY_MTLS_URL =
-  'https://cloudapiregistry.mtls.googleapis.com';
+const API_REGISTRY_MTLS_URL = 'https://cloudapiregistry.mtls.googleapis.com';
 const API_REGISTRY_API_VERSION = 'v1beta';
 /** API Registry no longer supports enabling APIs, so disabled ones are listed too. */
 const LIST_MCP_SERVERS_FILTER = 'enabled=false';
@@ -33,13 +32,6 @@ const CLIENT_CERT_REQUEST_TIMEOUT_MS = 60_000;
 
 /** The environment variable that selects the registry host. */
 const USE_MTLS_ENDPOINT_ENV = 'GOOGLE_API_USE_MTLS_ENDPOINT';
-
-/** The values {@link USE_MTLS_ENDPOINT_ENV} accepts. */
-enum MtlsEndpoint {
-  AUTO = 'auto',
-  ALWAYS = 'always',
-  NEVER = 'never',
-}
 
 interface ApiRegistryMcpServer {
   name?: string;
@@ -106,10 +98,10 @@ function isHttpsGoogleApi(url: string): boolean {
  */
 function apiRegistryUrl(hasClientCert: boolean): string {
   const setting = (process.env[USE_MTLS_ENDPOINT_ENV] ?? '').toLowerCase();
-  if (setting === MtlsEndpoint.ALWAYS) {
+  if (setting === 'always') {
     return API_REGISTRY_MTLS_URL;
   }
-  if (setting === MtlsEndpoint.NEVER) {
+  if (setting === 'never') {
     return API_REGISTRY_URL;
   }
   return hasClientCert ? API_REGISTRY_MTLS_URL : API_REGISTRY_URL;
