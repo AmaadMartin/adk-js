@@ -11,6 +11,7 @@ import {
   GcsAdminToolset,
   InvocationContext,
   PluginManager,
+  ReadonlyContext,
   ToolConfirmation,
   type GcsAdminToolsetOptions,
 } from '@google/adk';
@@ -207,6 +208,11 @@ export function createToolContext(
     functionCallId: 'test-function-call',
     toolConfirmation: options.toolConfirmation,
   });
+}
+
+/** Builds the read-only context a toolset filters with. */
+export function createReadonlyContext(): ReadonlyContext {
+  return new ReadonlyContext(createToolContext().invocationContext);
 }
 
 /** A tool context that has already approved the call. */
