@@ -45,7 +45,6 @@ import {
 import {getAgentGraphAsDot, getWorkflowHighlights} from './agent_graph.js';
 import {
   collectSubWorkflows,
-  GraphTarget,
   navigateToNode,
   serializeAgent,
   serializeAppInfo,
@@ -1131,9 +1130,15 @@ export class AdkApiServer {
   }
 
   /**
-   * Hook for a subclass to register development-only endpoints, called once
-   * every production route is registered. `AdkApiServer` itself serves none,
-   * so a production deployment never exposes them.
+   * Hook for a subclass to register further endpoints, called once every route
+   * above is registered. `DevServer` overrides it to add the endpoints the dev
+   * UI needs, which write into the agents directory and so must not reach a
+   * production deployment.
+   *
+   * This is not the whole dev-only surface. `/dev/apps/:appName/debug/trace/*`
+   * and `/dev/apps/:appName/build_graph*` are registered above and stay served
+   * by both classes; adk-python puts them on its `DevServer`, and moving them
+   * here would take them away from `adk api_server`.
    */
   protected registerDevEndpoints(_app: express.Application): void {}
 
@@ -1202,9 +1207,9 @@ export class AdkApiServer {
    * loader's error text, so an app that exists but throws while loading still
    * surfaces as a 500 with its real cause instead of a misleading 404.
    */
-  private async loadRootTarget(
+  protected async loadRootTarget(
     appName: string,
-  ): Promise<GraphTarget | undefined> {
+  ): Promise<RunnableRoot | undefined> {
     const apps = await this.agentLoader.listAgents();
     if (!apps.includes(appName)) {
       return undefined;

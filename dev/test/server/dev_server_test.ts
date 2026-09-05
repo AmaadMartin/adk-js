@@ -14,6 +14,7 @@ import {
   STUB_AGENT_LOADER,
   stubHomeDir,
   TEST_APP_NAME,
+  TEST_BROKEN_APP_NAME,
   TEST_WRAPPED_APP_NAME,
   TestHttpClient,
   testsDirOf,
@@ -393,8 +394,17 @@ describe('DevServer', () => {
       });
     });
 
-    it('answers 500 for an app the loader does not know', async () => {
+    it('answers 404 for an app the loader does not list', async () => {
       const response = await client.get('/dev/apps/unknown_app/graph');
+
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({error: 'App not found: unknown_app'});
+    });
+
+    it('answers 500 for a listed app that fails to load', async () => {
+      const response = await client.get(
+        `/dev/apps/${TEST_BROKEN_APP_NAME}/graph`,
+      );
 
       expect(response.status).toBe(500);
       expect(response.body).toMatchObject({

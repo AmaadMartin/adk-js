@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isApp} from '@google/adk';
 import express, {Request, Response} from 'express';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+import {isFileNotFoundError, isRecord} from '../utils/file_utils.js';
 import {
   readTelemetryConsent,
   writeTelemetryConsent,
@@ -43,30 +43,6 @@ class HttpError extends Error {
     super(message);
     this.name = 'HttpError';
   }
-}
-
-function isHttpError(error: unknown): error is HttpError {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'status' in error &&
-    typeof error.status === 'number' &&
-    'message' in error &&
-    typeof error.message === 'string'
-  );
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'ENOENT'
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -281,13 +257,14 @@ export class DevServer extends AdkApiServer {
     app.get(
       '/dev/apps/:appName/graph',
       this.handle('Failed to get app graph', async (req, res) => {
-        const darkMode = String(req.query['dark_mode']) === 'true';
-        await using agentFile = await this.agentLoader.getAgentFile(
-          req.params['appName'],
-        );
-        const loaded = await agentFile.load();
-        const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
+        const appName = req.params['appName'];
+        const rootAgent = await this.loadRootTarget(appName);
+        if (!rootAgent) {
+          res.status(404).json({error: `App not found: ${appName}`});
+          return;
+        }
 
+        const darkMode = String(req.query['dark_mode']) === 'true';
         res.json({dotSrc: await getAgentGraphAsDot(rootAgent, [], darkMode)});
       }),
     );
@@ -313,7 +290,9 @@ export class DevServer extends AdkApiServer {
       try {
         await handler(req, res);
       } catch (error: unknown) {
-        if (isHttpError(error)) {
+        // `HttpError` is module-private and thrown only by `resolveAgentDir`
+        // below, so the class identity here is always this module's own.
+        if (error instanceof HttpError) {
           res.status(error.status).json({error: error.message});
           return;
         }

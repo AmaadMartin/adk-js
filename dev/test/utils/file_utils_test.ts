@@ -10,7 +10,9 @@ import {
   createTempDir,
   isFile,
   isFileExists,
+  isFileNotFoundError,
   isFolderExists,
+  isRecord,
   listFiles,
   loadFileData,
   saveToFile,
@@ -183,5 +185,41 @@ describe('file_utils', () => {
   it('isFileExists returns false for directories', async () => {
     fsPromises.stat.mockResolvedValue({isFile: () => false});
     await expect(isFileExists('/dir')).resolves.toBe(false);
+  });
+});
+
+describe('isFileNotFoundError', () => {
+  it('accepts an ENOENT error', () => {
+    expect(
+      isFileNotFoundError(Object.assign(new Error('nope'), {code: 'ENOENT'})),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['another errno', Object.assign(new Error('nope'), {code: 'EISDIR'})],
+    ['an error with no code', new Error('nope')],
+    ['a thrown string', 'ENOENT'],
+    ['null', null],
+  ])('rejects %s', (_name, value) => {
+    expect(isFileNotFoundError(value)).toBe(false);
+  });
+});
+
+describe('isRecord', () => {
+  it.each([
+    ['an object', {}],
+    ['an object with keys', {a: 1}],
+  ])('accepts %s', (_name, value) => {
+    expect(isRecord(value)).toBe(true);
+  });
+
+  it.each([
+    ['an array', [1, 2]],
+    ['null', null],
+    ['a string', 'text'],
+    ['a number', 1],
+    ['undefined', undefined],
+  ])('rejects %s', (_name, value) => {
+    expect(isRecord(value)).toBe(false);
   });
 });
