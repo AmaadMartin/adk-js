@@ -68,7 +68,14 @@ import {
   resolveAgentCard,
 } from './agent_card.js';
 import {validateAgentCard} from './agent_card_validation.js';
-import {toAdkEvent} from './event_converter_utils.js';
+import {
+  A2AArtifactUpdateToEventConverter,
+  A2AEventConverters,
+  A2AMessageToEventConverter,
+  A2AStatusUpdateToEventConverter,
+  A2ATaskToEventConverter,
+  toAdkEvent,
+} from './event_converter_utils.js';
 import {
   A2AErrorMetadataKeys,
   AdkMetadataKeys,
@@ -194,7 +201,22 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
   /** Converts a GenAI part for the outgoing request. Defaults to `toA2APart`. */
   genaiPartConverter?: GenAIPartToA2APartConverter;
 
-  /** Converts an A2A part of the response. Defaults to `toGenAIPart`. */
+  /** Converts an A2A Message of the response. Defaults to the built-in one. */
+  a2aMessageConverter?: A2AMessageToEventConverter;
+
+  /** Converts an A2A Task of the response. Defaults to the built-in one. */
+  a2aTaskConverter?: A2ATaskToEventConverter;
+
+  /** Converts an A2A status update. Defaults to the built-in one. */
+  a2aStatusUpdateConverter?: A2AStatusUpdateToEventConverter;
+
+  /** Converts an A2A artifact update. Defaults to the built-in one. */
+  a2aArtifactUpdateConverter?: A2AArtifactUpdateToEventConverter;
+
+  /**
+   * Converts an individual A2A part of the response. Handed to whichever
+   * converter above runs. Defaults to `toGenAIPart`.
+   */
   a2aPartConverter?: A2APartToGenAIPartConverter;
 
   /** Interceptors around the A2A message send. */
@@ -591,7 +613,13 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       let contextId: string | undefined = undefined;
 
       const genaiPartConverter = this.a2aConfig.genaiPartConverter ?? toA2APart;
-      const a2aPartConverter = this.a2aConfig.a2aPartConverter ?? toGenAIPart;
+      const converters: A2AEventConverters = {
+        message: this.a2aConfig.a2aMessageConverter,
+        task: this.a2aConfig.a2aTaskConverter,
+        statusUpdate: this.a2aConfig.a2aStatusUpdateConverter,
+        artifactUpdate: this.a2aConfig.a2aArtifactUpdateConverter,
+        part: this.a2aConfig.a2aPartConverter ?? toGenAIPart,
+      };
 
       if (userFnCall) {
         const event = userFnCall.response;
@@ -700,7 +728,7 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
           context.invocationId,
           this.name,
           context.branch,
-          a2aPartConverter,
+          converters,
         );
         const adkEvent = converted
           ? await executeAfterRequestInterceptors(

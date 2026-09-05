@@ -6,13 +6,17 @@
 
 import {HTTP_EXTENSION_HEADER, Message} from '@a2a-js/sdk';
 import {
+  A2ABeforeRequestResult,
+  A2AMessageToEventConverter,
   Event as AdkEvent,
   createEvent,
+  createSession,
   NEW_A2A_ADK_INTEGRATION_EXTENSION,
   newIntegrationExtensionInterceptor,
+  RemoteA2AAgent,
   Session,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {
   A2ACardRequestInterceptor,
   A2ARequestInterceptor,
@@ -23,6 +27,7 @@ import {
 } from '../../src/a2a/a2a_remote_agent_interceptors.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
+import {createRecordingClient, RecordingTransport} from './a2a_client_fakes.js';
 
 const CTX = new InvocationContext({
   invocationId: 'inv-1',
@@ -336,5 +341,70 @@ describe('newIntegrationExtensionInterceptor', () => {
     expect(await declaredExtensions({[HTTP_EXTENSION_HEADER]: ''})).toBe(
       NEW_A2A_ADK_INTEGRATION_EXTENSION,
     );
+  });
+});
+
+/**
+ * Ports `TestRemoteA2aAgentDeepcopy` from
+ * `tests/unittests/agents/test_remote_a2a_agent.py` on `google/adk-python`
+ * `main`, keeping the reference test's name so a reviewer can grep for it in
+ * either repository.
+ */
+describe('clone', () => {
+  it('test_deepcopy_config', async () => {
+    // adk-python deep-copies the objects inside `request_interceptors` and
+    // asserts `copied[0] is not original[0]`. adk-js interceptors are plain
+    // objects holding functions, and `BaseAgent.clone` copies the array
+    // without copying its members, so the caller's own callables survive.
+    // Assert that observable contract instead of the Python identity check.
+    const converted = createEvent({author: 'remote', invocationId: 'inv'});
+    const converter = vi.fn<A2AMessageToEventConverter>(() => converted);
+    const interceptor: A2ARequestInterceptor = {
+      beforeRequest: vi.fn(
+        async (_ctx, request, params): Promise<A2ABeforeRequestResult> => ({
+          request,
+          params,
+        }),
+      ),
+    };
+    const transport = new RecordingTransport([
+      {
+        kind: 'message',
+        messageId: 'resp',
+        role: 'agent',
+        parts: [{kind: 'text', text: 'from remote'}],
+      },
+    ]);
+    const agent = new RemoteA2AAgent({
+      name: 'remote_agent',
+      client: createRecordingClient(transport),
+      a2aMessageConverter: converter,
+      requestInterceptors: [interceptor],
+    });
+
+    const context = new InvocationContext({
+      invocationId: 'invocation-123',
+      session: createSession({
+        id: 'session-123',
+        appName: 'test-app',
+        userId: 'test-user',
+        events: [
+          createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text: 'hello'}]},
+          }),
+        ],
+      }),
+      pluginManager: new PluginManager(),
+    });
+    const copied = agent.clone();
+    const events: AdkEvent[] = [];
+    for await (const event of copied.runAsync(context)) {
+      events.push(event);
+    }
+
+    expect(converter).toHaveBeenCalled();
+    expect(interceptor.beforeRequest).toHaveBeenCalled();
+    expect(events).toContain(converted);
   });
 });

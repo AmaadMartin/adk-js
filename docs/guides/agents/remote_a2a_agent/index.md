@@ -135,12 +135,70 @@ const tracing: A2ARequestInterceptor = {
 };
 ```
 
+Card hooks run in list order and their headers merge, so a later interceptor
+wins a conflicting key. They are consulted only for an `http(s)` card source: a
+card object and a file path never reach the network.
+
 When card request interceptors are configured for a URL source, the card and the
 client are rebuilt per invocation and kept local, so one session's authenticated
 card cannot leak into another.
 
+`params.requestMetadata` lands on `MessageSendParams.metadata`, and
+`params.headers` are sent as `RequestOptions.serviceParameters`, on both the
+streaming and the non-streaming send.
+
+`beforeRequestCallbacks` and `afterRequestCallbacks` still run. They are
+observers: they can mutate `MessageSendParams` but cannot abort a send or
+replace an event. Use an interceptor when you need either of those.
+
 Set `useLegacy: false` to declare the ADK A2A extension on every send, which
 asks an ADK server to use its newer integration.
+
+## Converting the response
+
+Each converter slot owns the whole conversion for one A2A frame kind:
+
+| Field                        | Frame                              |
+| ---------------------------- | ---------------------------------- |
+| `a2aMessageConverter`        | `Message`                          |
+| `a2aTaskConverter`           | `Task`                             |
+| `a2aStatusUpdateConverter`   | `TaskStatusUpdateEvent`            |
+| `a2aArtifactUpdateConverter` | `TaskArtifactUpdateEvent`          |
+| `a2aPartConverter`           | one `Part` inside any of the above |
+
+An omitted slot uses the built-in converter, so a config that sets none of them
+behaves exactly as before. A converter that returns `undefined` emits no event
+for that frame, and the run continues.
+
+The four frame converters receive the part converter as their last argument, so
+an override can reuse it instead of hardcoding the default:
+
+```ts
+import {A2AMessageToEventConverter, createEvent} from '@google/adk';
+
+const messageConverter: A2AMessageToEventConverter = (
+  message,
+  invocationId,
+  author,
+  branch,
+  partConverter,
+) =>
+  createEvent({
+    author,
+    invocationId,
+    branch,
+    content: {
+      role: 'model',
+      parts: message.parts.flatMap((p) => partConverter(p) ?? []),
+    },
+  });
+```
+
+A part converter may drop a part by returning `undefined`, or expand one into
+several by returning an array.
+
+`clone()` carries converters and interceptors across by reference, so a cloned
+agent calls the same function objects the original was given.
 
 ## Other options
 

@@ -74,6 +74,59 @@ export function toA2AMessage(
 }
 
 /**
+ * Converts one A2A response frame into an ADK event.
+ *
+ * The `partConverter` argument is the part converter in force for the
+ * invocation, so an override can reuse it instead of hardcoding `toGenAIPart`.
+ */
+export type A2AToAdkEventConverter<T> = (
+  payload: T,
+  invocationId: string,
+  agentName: string,
+  branch: string | undefined,
+  partConverter: A2APartToGenAIPartConverter,
+) => AdkEvent | undefined;
+
+/** Converts an A2A Message. */
+export type A2AMessageToEventConverter = A2AToAdkEventConverter<Message>;
+
+/** Converts an A2A Task. */
+export type A2ATaskToEventConverter = A2AToAdkEventConverter<Task>;
+
+/** Converts an A2A task status update. */
+export type A2AStatusUpdateToEventConverter =
+  A2AToAdkEventConverter<TaskStatusUpdateEvent>;
+
+/** Converts an A2A task artifact update. */
+export type A2AArtifactUpdateToEventConverter =
+  A2AToAdkEventConverter<TaskArtifactUpdateEvent>;
+
+/**
+ * Converter overrides for the A2A to ADK event conversion.
+ *
+ * @remarks
+ * Every field is optional, and an omitted field falls back to the built-in
+ * converter, so an empty bag reproduces the default conversion exactly. An
+ * override owns the whole conversion for its A2A event kind: it may return
+ * `undefined` to emit no event at all.
+ */
+export interface A2AEventConverters {
+  /** Converts an A2A Message. */
+  message?: A2AMessageToEventConverter;
+  /** Converts an A2A Task. */
+  task?: A2ATaskToEventConverter;
+  /** Converts an A2A task status update. */
+  statusUpdate?: A2AStatusUpdateToEventConverter;
+  /** Converts an A2A task artifact update. */
+  artifactUpdate?: A2AArtifactUpdateToEventConverter;
+  /**
+   * Converts an individual A2A part. Handed to whichever converter above runs,
+   * including the built-in ones. Defaults to `toGenAIPart`.
+   */
+  part?: A2APartToGenAIPartConverter;
+}
+
+/**
  * Converts an A2A Event to an ADK Session Event.
  *
  * @param event - The A2A event to convert (message, task, artifact update, or
@@ -83,6 +136,8 @@ export function toA2AMessage(
  * @param branch - The local invocation's branch to attach to the resulting
  *   event. Must come from the caller's own `InvocationContext`, never from
  *   the A2A peer: see the comment on `createAdkEventFromMetadata` for why.
+ * @param converters - Converter overrides. Defaults to the built-in
+ *   converters.
  * @returns The converted ADK event, or `undefined` if the A2A event type
  *   produces no content.
  */
@@ -91,45 +146,76 @@ export function toAdkEvent(
   invocationId: string,
   agentName: string,
   branch?: string,
-  converter: A2APartToGenAIPartConverter = toGenAIPart,
+  converters: A2AEventConverters = {},
 ): AdkEvent | undefined {
+  const partConverter = converters.part ?? toGenAIPart;
+
   if (isMessage(event)) {
-    return messageToAdkEvent(event, invocationId, agentName, branch, converter);
-  }
-
-  if (isTask(event)) {
-    return taskToAdkEvent(event, invocationId, agentName, branch, converter);
-  }
-
-  if (isTaskArtifactUpdateEvent(event)) {
-    return artifactUpdateToAdkEvent(
+    return (converters.message ?? messageToAdkEvent)(
       event,
       invocationId,
       agentName,
       branch,
-      converter,
+      partConverter,
+    );
+  }
+
+  if (isTask(event)) {
+    return (converters.task ?? taskToAdkEvent)(
+      event,
+      invocationId,
+      agentName,
+      branch,
+      partConverter,
+    );
+  }
+
+  if (isTaskArtifactUpdateEvent(event)) {
+    return (converters.artifactUpdate ?? artifactUpdateToAdkEvent)(
+      event,
+      invocationId,
+      agentName,
+      branch,
+      partConverter,
     );
   }
 
   if (isTaskStatusUpdateEvent(event)) {
-    return event.final
-      ? finalTaskStatusUpdateToAdkEvent(
-          event,
-          invocationId,
-          agentName,
-          branch,
-          converter,
-        )
-      : taskStatusUpdateToAdkEvent(
-          event,
-          invocationId,
-          agentName,
-          branch,
-          converter,
-        );
+    return (converters.statusUpdate ?? statusUpdateToAdkEvent)(
+      event,
+      invocationId,
+      agentName,
+      branch,
+      partConverter,
+    );
   }
 
   return undefined;
+}
+
+/** Routes a status update to the final or the incremental converter. */
+function statusUpdateToAdkEvent(
+  a2aEvent: TaskStatusUpdateEvent,
+  invocationId: string,
+  agentName: string,
+  branch: string | undefined,
+  partConverter: A2APartToGenAIPartConverter,
+): AdkEvent | undefined {
+  return a2aEvent.final
+    ? finalTaskStatusUpdateToAdkEvent(
+        a2aEvent,
+        invocationId,
+        agentName,
+        branch,
+        partConverter,
+      )
+    : taskStatusUpdateToAdkEvent(
+        a2aEvent,
+        invocationId,
+        agentName,
+        branch,
+        partConverter,
+      );
 }
 
 function messageToAdkEvent(
@@ -137,9 +223,9 @@ function messageToAdkEvent(
   invocationId: string,
   agentName: string,
   branch: string | undefined,
-  converter: A2APartToGenAIPartConverter,
+  partConverter: A2APartToGenAIPartConverter,
 ): AdkEvent {
-  const parts = toGenAIParts(msg.parts, converter);
+  const parts = toGenAIParts(msg.parts, partConverter);
   const content =
     parts.length === 0
       ? undefined
@@ -163,7 +249,7 @@ function artifactUpdateToAdkEvent(
   invocationId: string,
   agentName: string,
   branch: string | undefined,
-  converter: A2APartToGenAIPartConverter,
+  partConverter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const partsToConvert = a2aEvent.artifact?.parts || [];
   if (partsToConvert.length === 0) {
@@ -180,7 +266,7 @@ function artifactUpdateToAdkEvent(
     invocationId,
     author: agentName,
     branch,
-    content: createModelContent(toGenAIParts(partsToConvert, converter)),
+    content: createModelContent(toGenAIParts(partsToConvert, partConverter)),
     longRunningToolIds: getLongRunningToolIDs(partsToConvert),
     partial,
   };
@@ -191,14 +277,14 @@ function finalTaskStatusUpdateToAdkEvent(
   invocationId: string,
   agentName: string,
   branch: string | undefined,
-  converter: A2APartToGenAIPartConverter,
+  partConverter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const partsToConvert = a2aEvent.status.message?.parts || [];
   if (partsToConvert.length === 0) {
     return undefined;
   }
 
-  const parts = toGenAIParts(partsToConvert, converter);
+  const parts = toGenAIParts(partsToConvert, partConverter);
   const isFailedTask = isFailedTaskStatusUpdateEvent(a2aEvent);
   const hasContent = !isFailedTask && parts.length > 0;
 
@@ -221,14 +307,14 @@ function taskStatusUpdateToAdkEvent(
   invocationId: string,
   agentName: string,
   branch: string | undefined,
-  converter: A2APartToGenAIPartConverter,
+  partConverter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const msg = a2aEvent.status.message;
   if (!msg) {
     return undefined;
   }
 
-  const parts = toGenAIParts(msg.parts, converter);
+  const parts = toGenAIParts(msg.parts, partConverter);
   if (parts.length === 0) {
     return undefined;
   }
@@ -249,7 +335,7 @@ function taskToAdkEvent(
   invocationId: string,
   agentName: string,
   branch: string | undefined,
-  converter: A2APartToGenAIPartConverter,
+  partConverter: A2APartToGenAIPartConverter,
 ): AdkEvent | undefined {
   const parts: GenAIPart[] = [];
   const longRunningToolIds: string[] = [];
@@ -257,7 +343,7 @@ function taskToAdkEvent(
   if (a2aTask.artifacts) {
     for (const artifact of a2aTask.artifacts) {
       if (artifact.parts?.length > 0) {
-        const artifactParts = toGenAIParts(artifact.parts, converter);
+        const artifactParts = toGenAIParts(artifact.parts, partConverter);
         parts.push(...artifactParts);
         longRunningToolIds.push(...getLongRunningToolIDs(artifact.parts));
       }
@@ -266,7 +352,7 @@ function taskToAdkEvent(
 
   if (a2aTask.status?.message) {
     const a2aParts = a2aTask.status.message.parts;
-    const genAIParts = toGenAIParts(a2aParts, converter);
+    const genAIParts = toGenAIParts(a2aParts, partConverter);
 
     parts.push(...genAIParts);
     longRunningToolIds.push(...getLongRunningToolIDs(a2aParts));
