@@ -618,12 +618,16 @@ export async function handleFunctionCallList({
       functionResponse = normalizeCallbackResponse(alteredFunctionResponse);
     }
 
-    // Allow long running function to return None as response.
+    // Allow a tool that runs long, or that defers its response by design, to
+    // return None as response.
     // Only a nullish response defers the event. A falsy-but-present response
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
     // previously produced none.
-    if (tool.isLongRunning && functionResponse == null) {
+    if (
+      (tool.isLongRunning || tool.defersResponse) &&
+      functionResponse == null
+    ) {
       // The tool's response will arrive later, but any actions it recorded on
       // the tool context (state/artifact deltas, auth or confirmation
       // requests, transfer, escalation, skipSummarization) must not be lost.

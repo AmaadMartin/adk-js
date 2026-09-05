@@ -281,6 +281,7 @@ export {BaseTool, isBaseTool} from './tools/base_tool.js';
 export type {
   BaseToolParams,
   RunAsyncToolRequest,
+  ToolArgsConfig,
   ToolProcessLlmRequest,
 } from './tools/base_tool.js';
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
