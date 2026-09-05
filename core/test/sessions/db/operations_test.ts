@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {setLogger} from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -20,6 +21,7 @@ import {
   StorageEvent,
   StorageMetadata,
 } from '../../../src/sessions/db/schema.js';
+import {resetLogger} from '../../../src/utils/logger.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
 vi.mock('@mikro-orm/postgresql', () => ({
@@ -146,6 +148,7 @@ describe('operations', () => {
     let orm: MikroORM;
 
     afterEach(async () => {
+      resetLogger();
       if (orm) {
         await orm.close();
       }
@@ -161,6 +164,59 @@ describe('operations', () => {
 
       // Verify it runs without error
       await expect(ensureDatabaseCreated(orm)).resolves.not.toThrow();
+    });
+
+    /**
+     * MySQL emits the foreign key as its own `alter table` against a table
+     * that already exists, and rejects it when that table already holds rows
+     * the constraint forbids. The statements are stubbed because the failure
+     * needs a server that enforces foreign keys on an alter, and the suite
+     * runs on sqlite.
+     */
+    it('applies the other statements when the database refuses a foreign key', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: [StorageMetadata],
+      });
+      vi.spyOn(orm.schema, 'getUpdateSchemaSQL').mockResolvedValue(
+        [
+          'create table `late` (`id` text not null, primary key (`id`));',
+          'alter table `late` add constraint `late_fk` foreign key (`id`) references `missing` (`id`) on delete cascade;',
+          "insert into `late` values ('kept');",
+        ].join('\n'),
+      );
+      const warnings: unknown[][] = [];
+      setLogger({
+        setLogLevel: () => {},
+        log: () => {},
+        debug: () => {},
+        info: () => {},
+        warn: (...args: unknown[]) => warnings.push(args),
+        error: () => {},
+      });
+
+      await expect(ensureDatabaseCreated(orm)).resolves.not.toThrow();
+
+      const rows = await orm.em
+        .getConnection()
+        .execute('select `id` from `late`');
+      expect(rows).toEqual([{id: 'kept'}]);
+      expect(warnings).toHaveLength(1);
+      expect(String(warnings[0][0])).toContain('left it off');
+    });
+
+    it('still fails when a statement other than a foreign key fails', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: [StorageMetadata],
+      });
+      vi.spyOn(orm.schema, 'getUpdateSchemaSQL').mockResolvedValue(
+        'create table `broken` (this is not sql);',
+      );
+
+      await expect(ensureDatabaseCreated(orm)).rejects.toThrow();
     });
   });
 
