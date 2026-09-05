@@ -7,6 +7,8 @@
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event} from '../events/event.js';
+import {createEventActions} from '../events/event_actions.js';
+import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
 import {BaseNode} from './base_node.js';
@@ -20,7 +22,12 @@ import {
   NodeTimeoutError,
 } from './errors.js';
 import {NodeContext} from './node_context.js';
-import {claimNodeErrorReport, isNodeErrorEvent} from './node_error_event.js';
+import {
+  claimNodeErrorReport,
+  createNodeErrorEvent,
+  isNodeErrorEvent,
+  releaseNodeErrorReport,
+} from './node_error_event.js';
 import {createNodeState, NodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
 import {getRetryDelaySeconds, shouldRetryNode} from './utils/retry_utils.js';
@@ -281,6 +288,26 @@ async function runChildNode({
         if (isDynamicNodeFailError(err)) {
           throw err;
         }
+        // Report the failure here, so a node run through ctx.runNode outside a
+        // Workflow still records it. The claim keeps it to one event: an outer
+        // node the error only passed through finds it already claimed. A node
+        // whose signal fired was cancelled — by the invocation, or by a sibling
+        // failure shutting the workflow down — and did not fail on its own
+        // account, whatever error its body raised on the way out.
+        const cancelled = effectiveAbortSignal?.aborted ?? false;
+        if (!cancelled && claimNodeErrorReport(err, child.invocationId)) {
+          child.channel.push(
+            createNodeErrorEvent({
+              error: err,
+              attemptCount: nodeState.attemptCount,
+              author: nodeName,
+              invocationId: child.invocationId,
+              nodeInfo: {path: nodePath},
+              branch: branchRef.value,
+              isolationScope,
+            }),
+          );
+        }
         // Check retry eligibility with the attempt that just failed, compute
         // its backoff delay, THEN advance the counter (matches Python
         // semantics).
@@ -291,6 +318,8 @@ async function runChildNode({
         ) {
           throw err;
         }
+        // This node runs again and owes an event for the next failure too.
+        releaseNodeErrorReport(err);
         const delaySeconds = getRetryDelaySeconds({retryConfig, nodeState});
         nodeState.attemptCount += 1;
         await delay(delaySeconds * 1000, effectiveAbortSignal);
@@ -326,9 +355,19 @@ async function runChildNode({
       }
     }
 
+    flushOutputAndDeltas({
+      child,
+      nodeName,
+      branch: branchRef,
+      isolationScope,
+    });
+
     if (options.useAsOutput) {
       parent.output = child.output;
+      // The setter clears `routeEmitted`, so restore what the child recorded:
+      // the child's own event already carried the route.
       parent.route = child.route;
+      parent.routeEmitted = child.routeEmitted;
       parent.outputDelegated = true;
     }
 
@@ -440,12 +479,115 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
  */
 function resetState(childNodeContext: NodeContext, branch: BranchRef): void {
   childNodeContext.output = undefined;
+  childNodeContext.outputEmitted = false;
+  childNodeContext.outputDelegated = false;
+  // The setter clears `routeEmitted`.
   childNodeContext.route = undefined;
   childNodeContext.interruptIds = [];
   childNodeContext.reportedError = undefined;
   branch.value = branch.initial;
-  for (const key of Object.keys(childNodeContext.actions.stateDelta)) {
-    delete childNodeContext.actions.stateDelta[key];
+  clearInPlace(childNodeContext.actions.stateDelta);
+  clearInPlace(childNodeContext.actions.artifactDelta);
+}
+
+/**
+ * Empties a delta map without replacing it. `NodeContext` builds its `State`
+ * over the very `stateDelta` object it was constructed with, so reassigning
+ * would detach the two.
+ */
+function clearInPlace(delta: Record<string, unknown>): void {
+  for (const key of Object.keys(delta)) {
+    delete delta[key];
+  }
+}
+
+/** Whether a delta map holds anything to flush. */
+function hasEntries(delta: Record<string, unknown> | undefined): boolean {
+  return delta !== undefined && Object.keys(delta).length > 0;
+}
+
+/**
+ * Moves the node's pending state and artifact deltas onto an outgoing event.
+ *
+ * A node writes through `ctx.state` and `ctx.actions.artifactDelta`, which
+ * accumulate on the context. Nothing else drains them, so without this a plain
+ * node's writes never reach the session. Mirrors adk-python's
+ * `NodeRunner._flush_deltas`.
+ *
+ * The event's own value wins for a key both carry, which is what `FunctionNode`
+ * already does when it attaches its pending keys.
+ */
+function flushDeltasOnto(event: Event, child: NodeContext): void {
+  const {stateDelta, artifactDelta} = child.actions;
+  if (!hasEntries(stateDelta) && !hasEntries(artifactDelta)) {
+    return;
+  }
+  event.actions ??= createEventActions();
+  if (hasEntries(stateDelta)) {
+    const merged = {...stateDelta, ...event.actions.stateDelta};
+    // Without the stamps a late commit can roll a key back over a newer write.
+    carryDeltaStamps(stateDelta, merged);
+    carryDeltaStamps(event.actions.stateDelta, merged);
+    event.actions.stateDelta = merged;
+    clearInPlace(stateDelta);
+  }
+  if (hasEntries(artifactDelta)) {
+    event.actions.artifactDelta = {
+      ...artifactDelta,
+      ...event.actions.artifactDelta,
+    };
+    clearInPlace(artifactDelta);
+  }
+}
+
+interface FlushOutputAndDeltasParams {
+  child: NodeContext;
+  nodeName: string;
+  branch: BranchRef;
+  isolationScope: string | undefined;
+}
+
+/**
+ * Emits the node's output, route and deltas when no event it yielded carried
+ * them.
+ *
+ * A node that sets `ctx.output` rather than yielding it, or that only writes
+ * state, would otherwise finish without producing an event at all. Mirrors
+ * adk-python's `NodeRunner._flush_output_and_deltas`.
+ *
+ * adk-python tests `is not None`; adk-js treats `undefined` as "no output" and
+ * `null` as a legitimate output value, so this tests `!== undefined`.
+ */
+function flushOutputAndDeltas({
+  child,
+  nodeName,
+  branch,
+  isolationScope,
+}: FlushOutputAndDeltasParams): void {
+  const hasDeferredOutput =
+    child.output !== undefined &&
+    !child.outputEmitted &&
+    !child.outputDelegated;
+  const hasUnflushedRoute = child.route !== undefined && !child.routeEmitted;
+  const hasDeltas =
+    hasEntries(child.actions.stateDelta) ||
+    hasEntries(child.actions.artifactDelta);
+  if (!hasDeferredOutput && !hasUnflushedRoute && !hasDeltas) {
+    return;
+  }
+
+  const event = createEvent({
+    output: hasDeferredOutput ? child.output : undefined,
+    route: hasUnflushedRoute ? child.route : undefined,
+  });
+  flushDeltasOnto(event, child);
+  enrichEvent({event, child, nodeName, branch, isolationScope});
+  child.channel.push(event);
+  if (hasDeferredOutput) {
+    child.outputEmitted = true;
+  }
+  if (hasUnflushedRoute) {
+    child.routeEmitted = true;
   }
 }
 
@@ -509,6 +651,8 @@ async function runOnce({
 }: RunOnceParams): Promise<boolean> {
   let inputRecorded = false;
   const consume = (event: Event): void => {
+    // Captured before enrichEvent stamps the node's name over an unset author.
+    const rawAuthor = event.author;
     enrichEvent({event, child, nodeName, branch, isolationScope});
     // An event can carry a state delta that never went through `ctx.state`,
     // so the schema is enforced here too rather than only on the setter.
@@ -526,9 +670,20 @@ async function runOnce({
         event.output = undefined;
         event.content = undefined;
       }
+    } else if (event.nodeInfo?.messageAsOutput) {
+      child.output = event.content;
     }
-    if (event.route !== undefined) {
-      child.route = event.route;
+    // A structured parent must not bubble up a route or transfer its nested
+    // sub-agent already handled, so only the node's own events decide these.
+    if (!rawAuthor || rawAuthor === nodeName) {
+      if (event.route !== undefined) {
+        // Assign first: the setter clears routeEmitted.
+        child.route = event.route;
+        child.routeEmitted = true;
+      }
+      if (event.actions?.transferToAgent !== undefined) {
+        child.actions.transferToAgent = event.actions.transferToAgent;
+      }
     }
     if (event.errorCode !== undefined && !isNodeErrorEvent(event)) {
       child.reportedError = {
@@ -552,7 +707,18 @@ async function runOnce({
       };
       inputRecorded = true;
     }
+    // A partial event is a streaming fragment; its deltas belong to the final
+    // event of the turn, not to the fragment.
+    if (!event.partial) {
+      flushDeltasOnto(event, child);
+    }
     child.channel.push(event);
+    if (event.output !== undefined) {
+      child.outputEmitted = true;
+    }
+    if (event.nodeInfo?.messageAsOutput) {
+      child.outputDelegated = true;
+    }
   };
 
   const parentSignal = child.invocationContext.abortSignal;

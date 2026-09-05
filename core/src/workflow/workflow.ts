@@ -278,6 +278,16 @@ export class Workflow extends BaseNode {
     }
     if (output !== undefined) {
       ctx.output = output;
+      // A value the entry passed straight back from a child was already
+      // emitted by that child. One the entry computed itself still needs an
+      // event, so only suppress the flush for the former.
+      if (
+        [...dynamicState.runs.values()].some((run) =>
+          Object.is(run.output, output),
+        )
+      ) {
+        ctx.outputEmitted = true;
+      }
     }
   }
 
@@ -634,6 +644,9 @@ export class Workflow extends BaseNode {
 
     if (terminalOutputs.length === 1) {
       ctx.output = terminalOutputs[0];
+      // The terminal node's own event already carried this value, so the
+      // runner's end-of-node flush must not emit it a second time.
+      ctx.outputEmitted = true;
     } else if (terminalOutputs.length > 1) {
       throw new Error(
         `Workflow ${this.name}: multiple terminal nodes produced output ` +
