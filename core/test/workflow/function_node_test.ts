@@ -115,32 +115,7 @@ describe('FunctionNode auth gate', () => {
   });
 });
 
-/**
- * Exposes the protected `toEvent` so the direct-caller path can be exercised.
- * `BaseNode.run` converts a yielded `RequestInput` before `toEvent` sees one,
- * so a subclass is the only caller that reaches that branch.
- */
-class ToEventProbe extends FunctionNode {
-  convert(ctx: NodeContext, data: unknown): Event | null {
-    return this.toEvent(ctx, data);
-  }
-}
-
 describe('FunctionNode RequestInput handling', () => {
-  it('converts a RequestInput handed straight to toEvent', async () => {
-    const probe = new ToEventProbe('probe', () => null);
-    const {ctx} = await driveNode(probe, 'x');
-
-    const event = probe.convert(
-      ctx,
-      new RequestInput({interruptId: 'direct-1', message: 'Approve?'}),
-    );
-
-    const fc = event?.content?.parts?.[0]?.functionCall;
-    expect(fc?.name).toBe(REQUEST_INPUT_FUNCTION_CALL_NAME);
-    expect(fc?.id).toBe('direct-1');
-  });
-
   it('emits an interrupt event for a returned RequestInput', async () => {
     // `FunctionNodeResult` carries `RequestInput`, so no cast is needed here.
     const node = new FunctionNode(
@@ -157,8 +132,8 @@ describe('FunctionNode RequestInput handling', () => {
   });
 
   it('keeps a pending state delta on the event after the interrupt', async () => {
-    // The RequestInput branch runs before the delta is drained, so the write
-    // still reaches the next emitted event rather than being swallowed.
+    // `BaseNode.run` converts the RequestInput without reaching `toEvent`, so
+    // the delta is not drained by it and still reaches the next event.
     const node = new FunctionNode('ask', function* (ctx) {
       ctx.state.set('k', 1);
       yield new RequestInput({interruptId: 'ask-2'});
