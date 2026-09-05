@@ -5,17 +5,11 @@
  */
 
 import {Client} from '@google-cloud/vertexai';
-import {Language} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {Chunk, Language} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {base64Encode} from '../utils/env_aware_utils.js';
+import {formatError, isNotFoundError} from '../utils/error_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {guessMimeType} from '../utils/file_utils.js';
-
-interface LocalChunk {
-  data?: string;
-  mimeType?: string;
-  metadata?: {
-    attributes?: Record<string, string>;
-  };
-}
 
 const SANDBOX_PATTERN =
   /^projects\/([a-zA-Z0-9-_]+)\/locations\/([a-zA-Z0-9-_]+)\/reasoningEngines\/(\d+)\/sandboxEnvironments\/(\d+)$/;
@@ -35,7 +29,39 @@ import {
 const DEFAULT_MAX_ATTEMPTS = 180;
 const DEFAULT_SANDBOX_TTL = '31536000s';
 const DEFAULT_SANDBOX_DISPLAY_NAME = 'default_sandbox';
-const DEFAULT_ENGINE_DISPLAY_NAME = 'default_engine';
+
+/**
+ * Session-state key holding the sandbox of the current session. adk-python
+ * writes and reads the same key, so a session started by either SDK resolves
+ * to the same sandbox.
+ */
+const SANDBOX_NAME_STATE_KEY = 'sandbox_name';
+
+/**
+ * Translates the execution request into the chunk list the sandbox API takes:
+ * one JSON chunk carrying the code, then one chunk per input file carrying its
+ * already base64-encoded content and its name. This is the translation the
+ * Python SDK performs internally for `execute_code(input_data=...)`; the
+ * JavaScript SDK exposes only the lower-level `executeCodeInternal`.
+ */
+function toInputChunks(code: string, files: File[]): Chunk[] {
+  const chunks: Chunk[] = [
+    {
+      mimeType: 'application/json',
+      data: base64Encode(JSON.stringify({code})),
+    },
+  ];
+
+  for (const file of files) {
+    chunks.push({
+      mimeType: file.mimeType,
+      data: file.content,
+      metadata: {attributes: {file_name: base64Encode(file.name)}},
+    });
+  }
+
+  return chunks;
+}
 
 /**
  * Options for AgentEngineSandboxCodeExecutor.
@@ -146,41 +172,24 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
 
     const language = mapLanguage(codeExecutionInput.language);
 
-    const agentEngineName = await this.getOrCreateAgentEngine();
-    const sandboxName = await this.getOrCreateSandbox(
-      invocationContext,
-      agentEngineName,
-      language,
-    );
-
-    const inputs: LocalChunk[] = [
-      {
-        mimeType: 'application/json',
-        data: Buffer.from(
-          JSON.stringify({code: codeExecutionInput.code}),
-        ).toString('base64'),
-      },
-    ];
-
-    if (codeExecutionInput.inputFiles) {
-      for (const file of codeExecutionInput.inputFiles) {
-        inputs.push({
-          mimeType: file.mimeType,
-          data: file.content, // Assumed to be already base64 encoded based on CodeExecutionInput definition
-          metadata: {
-            attributes: {
-              file_name: Buffer.from(file.name).toString('base64'),
-            },
-          },
-        });
-      }
-    }
+    // An Agent Engine is only needed to host a new sandbox, so an executor
+    // constructed with a sandbox resource name never creates one.
+    const sandboxName =
+      this.sandboxResourceName ??
+      (await this.getOrCreateSandbox(
+        invocationContext,
+        await this.getOrCreateAgentEngine(),
+        language,
+      ));
 
     logger.debug(`Executing code in sandbox ${sandboxName}...`);
     const response =
       await this.client.agentEnginesInternal.sandboxes.executeCodeInternal({
         name: sandboxName,
-        inputs: inputs,
+        inputs: toInputChunks(
+          codeExecutionInput.code,
+          codeExecutionInput.inputFiles,
+        ),
       });
 
     let stdout = '';
@@ -250,11 +259,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           'No Agent Engine resource name provided. Creating a new one...',
         );
         const operation = await this.client.agentEnginesInternal.createInternal(
-          {
-            config: {
-              displayName: DEFAULT_ENGINE_DISPLAY_NAME,
-            },
-          },
+          {},
         );
 
         let apiResponse = operation;
@@ -289,15 +294,9 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
     agentEngineName: string,
     language: Language,
   ): Promise<string> {
-    if (this.sandboxResourceName) {
-      return this.sandboxResourceName;
-    }
-
-    // Try to get from session state with language-specific key
-    const stateKey = `sandbox_name_${language.toLowerCase()}`;
-    let sandboxName = invocationContext.session?.state?.[stateKey] as
-      | string
-      | undefined;
+    let sandboxName = invocationContext.session?.state?.[
+      SANDBOX_NAME_STATE_KEY
+    ] as string | undefined;
     let createNewSandbox = false;
 
     if (!sandboxName) {
@@ -308,13 +307,23 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
           await this.client.agentEnginesInternal.sandboxes.getInternal({
             name: sandboxName,
           });
-        if (!sandbox || sandbox.state !== 'STATE_RUNNING') {
+        // adk-js binds a sandbox to one language, so a cached sandbox that
+        // declares a different one cannot serve this request.
+        const cachedLanguage =
+          sandbox?.spec?.codeExecutionEnvironment?.codeLanguage;
+        if (
+          !sandbox ||
+          sandbox.state !== 'STATE_RUNNING' ||
+          (cachedLanguage !== undefined && cachedLanguage !== language)
+        ) {
           createNewSandbox = true;
         }
-      } catch (error) {
+      } catch (error: unknown) {
+        if (!isNotFoundError(error)) {
+          throw error;
+        }
         logger.debug(
-          `Failed to get sandbox ${sandboxName}, will create a new one`,
-          error,
+          `Sandbox ${sandboxName} no longer exists, will create a new one: ${formatError(error)}`,
         );
         createNewSandbox = true;
       }
@@ -362,7 +371,7 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
         if (!invocationContext.session.state) {
           invocationContext.session.state = {};
         }
-        invocationContext.session.state[stateKey] = sandboxName;
+        invocationContext.session.state[SANDBOX_NAME_STATE_KEY] = sandboxName;
       }
     }
 
