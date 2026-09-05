@@ -11,6 +11,7 @@ import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {REQUIRE_CONFIRMATION_MESSAGE} from '../tool_confirmation.js';
 import {DEFAULT_TIMEOUT_SECONDS, MAX_OUTPUT_CHARS} from './constants.js';
 import {truncate} from './truncate.js';
 
@@ -22,14 +23,6 @@ import {truncate} from './truncate.js';
 export enum ExecuteToolErrorCode {
   CONFIRMATION_REJECTED = 'CONFIRMATION_REJECTED',
 }
-
-/**
- * Message returned while the tool call is paused waiting for the client to
- * confirm (or reject) the command. Mirrors the intermediate message used by the
- * tool-confirmation flow elsewhere in the codebase.
- */
-const REQUIRE_CONFIRMATION_MESSAGE =
-  'This tool call needs external confirmation before completion.';
 
 const EXECUTE_TOOL_DESCRIPTION = `
 Run a shell command in the environment. For running programs, tests, and build

@@ -94,8 +94,8 @@ export class EditFileTool extends BaseTool {
     }
     const content = new TextDecoder('utf-8', {ignoreBOM: true}).decode(data);
 
-    const pattern = buildSearchPattern(oldString);
-    const count = (content.match(new RegExp(pattern, 'g')) ?? []).length;
+    const matcher = new RegExp(buildSearchPattern(oldString), 'g');
+    const count = (content.match(matcher) ?? []).length;
     if (count === 0) {
       return {
         status: 'error',
@@ -115,7 +115,7 @@ export class EditFileTool extends BaseTool {
 
     // A replacement function, not a string: a string replacement expands `$&`,
     // `` $` ``, `$'` and `$1` inside model-supplied `new_string`.
-    const newContent = content.replace(new RegExp(pattern), () => newString);
+    const newContent = content.replace(matcher, () => newString);
     await this.environment.writeFile(filePath, newContent);
     return {status: 'ok', message: `Edited ${filePath}`};
   }
