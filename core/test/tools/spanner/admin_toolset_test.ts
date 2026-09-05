@@ -24,6 +24,15 @@ import {SpannerAdminToolset} from '@google/adk/tools/spanner';
 import {describe, expect, it} from 'vitest';
 import {makeToolContext, testCredentialsConfig} from './spanner_test_utils.js';
 
+/** Arguments every tool's schema accepts, so the gate is what is measured. */
+const CREATE_ARGS = {
+  project_id: 'p',
+  instance_id: 'i',
+  config_id: 'c',
+  display_name: 'Test',
+  database_id: 'db',
+};
+
 /** The seven tools, in the order adk-python's `get_tools` builds them. */
 const ADMIN_TOOL_NAMES = [
   'spanner_create_database',
@@ -76,6 +85,27 @@ describe('SpannerAdminToolset', () => {
     for (const tool of writeTools) {
       expect(tool.description).toMatch(/billable|billed/);
     }
+  });
+
+  it('gates the two create tools behind a confirmation', async () => {
+    const tools = await makeToolset().getTools();
+    const gated: Record<string, boolean> = {};
+    for (const tool of tools) {
+      gated[tool.name] = await tool.checkRequireConfirmation(
+        CREATE_ARGS,
+        makeToolContext(),
+      );
+    }
+
+    expect(gated).toEqual({
+      spanner_create_database: true,
+      spanner_create_instance: true,
+      spanner_get_instance: false,
+      spanner_get_instance_config: false,
+      spanner_list_databases: false,
+      spanner_list_instance_configs: false,
+      spanner_list_instances: false,
+    });
   });
 
   it('rejects credentials naming no source', () => {

@@ -27,6 +27,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {OPERATION_TIMEOUT_MS} from '../../../src/tools/spanner/client.js';
 import {logger} from '../../../src/utils/logger.js';
 import {
+  confirmedToolContext,
   errorOf,
   runTool,
   spannerFake,
@@ -69,7 +70,19 @@ async function resultsOf(
   name: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  return successOf(await runTool(toolset(), name, args))['results'];
+  // Approved, so a gated tool runs its body instead of asking again. The
+  // ungated five ignore it.
+  return successOf(
+    await runTool(toolset(), name, args, confirmedToolContext()),
+  )['results'];
+}
+
+/** Runs one tool with the user's approval already given. */
+function runApproved(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  return runTool(toolset(), name, args, confirmedToolContext());
 }
 
 describe('the Spanner admin tools', () => {
@@ -83,7 +96,7 @@ describe('the Spanner admin tools', () => {
 
   describe('spanner_list_instances', () => {
     it('reports the id of every instance', async () => {
-      spannerFake.adminResponses.instances = [
+      spannerFake.responses.instances = [
         {name: 'projects/test-project/instances/test-instance-1'},
         {name: 'projects/test-project/instances/test-instance-2'},
       ];
@@ -102,7 +115,7 @@ describe('the Spanner admin tools', () => {
 
     it('reports a rejected listing as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
-      spannerFake.adminFailures.listInstances = new Error('test error');
+      spannerFake.failures.listInstances = new Error('test error');
 
       const result = await runTool(
         toolset(),
@@ -121,7 +134,7 @@ describe('the Spanner admin tools', () => {
     });
 
     it('reports an instance with no name as an empty id', async () => {
-      spannerFake.adminResponses.instances = [{}];
+      spannerFake.responses.instances = [{}];
 
       expect(await resultsOf('spanner_list_instances', PROJECT_ARGS)).toEqual([
         '',
@@ -131,7 +144,7 @@ describe('the Spanner admin tools', () => {
 
   describe('spanner_get_instance', () => {
     it('reports the six instance fields', async () => {
-      spannerFake.adminResponses.instance = {
+      spannerFake.responses.instance = {
         name: 'projects/test-project/instances/test-instance',
         displayName: 'Test Instance',
         config: 'projects/test-project/instanceConfigs/regional-us-central1',
@@ -159,7 +172,7 @@ describe('the Spanner admin tools', () => {
     });
 
     it('reports an instance with no labels as having none', async () => {
-      spannerFake.adminResponses.instance = {displayName: 'No Labels'};
+      spannerFake.responses.instance = {displayName: 'No Labels'};
 
       const results = await resultsOf('spanner_get_instance', INSTANCE_ARGS);
 
@@ -168,7 +181,7 @@ describe('the Spanner admin tools', () => {
 
     it('reports a rejected read as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
-      spannerFake.adminFailures.getInstance = new Error('test error');
+      spannerFake.failures.getInstance = new Error('test error');
 
       const result = await runTool(
         toolset(),
@@ -183,7 +196,7 @@ describe('the Spanner admin tools', () => {
 
   describe('spanner_list_instance_configs', () => {
     it('reports the id of every instance config', async () => {
-      spannerFake.adminResponses.instanceConfigs = [
+      spannerFake.responses.instanceConfigs = [
         {name: 'projects/test-project/instanceConfigs/config-1'},
         {name: 'projects/test-project/instanceConfigs/config-2'},
       ];
@@ -204,7 +217,7 @@ describe('the Spanner admin tools', () => {
 
     it('reports a rejected listing as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
-      spannerFake.adminFailures.listInstanceConfigs = new Error('test error');
+      spannerFake.failures.listInstanceConfigs = new Error('test error');
 
       const result = await runTool(
         toolset(),
@@ -220,7 +233,7 @@ describe('the Spanner admin tools', () => {
     const CONFIG_ARGS = {...PROJECT_ARGS, config_id: 'config-1'};
 
     it('names the replica type instead of numbering it', async () => {
-      spannerFake.adminResponses.instanceConfig = {
+      spannerFake.responses.instanceConfig = {
         name: 'projects/test-project/instanceConfigs/config-1',
         displayName: 'Config 1',
         labels: {env: 'test'},
@@ -255,7 +268,7 @@ describe('the Spanner admin tools', () => {
     });
 
     it('keeps a replica type the wire already names', async () => {
-      spannerFake.adminResponses.instanceConfig = {
+      spannerFake.responses.instanceConfig = {
         replicas: [{location: 'us-east1', type: 'READ_ONLY'}],
       };
 
@@ -270,7 +283,7 @@ describe('the Spanner admin tools', () => {
     });
 
     it('reports a replica with no type as unspecified', async () => {
-      spannerFake.adminResponses.instanceConfig = {
+      spannerFake.responses.instanceConfig = {
         replicas: [{location: 'us-west1'}],
       };
 
@@ -285,7 +298,7 @@ describe('the Spanner admin tools', () => {
     });
 
     it('reports a config with no replicas as having none', async () => {
-      spannerFake.adminResponses.instanceConfig = {displayName: 'Empty'};
+      spannerFake.responses.instanceConfig = {displayName: 'Empty'};
 
       const results = await resultsOf(
         'spanner_get_instance_config',
@@ -297,7 +310,7 @@ describe('the Spanner admin tools', () => {
 
     it('reports a rejected read as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
-      spannerFake.adminFailures.getInstanceConfig = new Error('test error');
+      spannerFake.failures.getInstanceConfig = new Error('test error');
 
       const result = await runTool(
         toolset(),
@@ -345,13 +358,9 @@ describe('the Spanner admin tools', () => {
 
     it('reports a rejected creation as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
-      spannerFake.adminFailures.createInstance = new Error('test error');
+      spannerFake.failures.createInstance = new Error('test error');
 
-      const result = await runTool(
-        toolset(),
-        'spanner_create_instance',
-        CREATE_ARGS,
-      );
+      const result = await runApproved('spanner_create_instance', CREATE_ARGS);
 
       expect(errorOf(result)).toContain('test error');
       expect(spannerFake.closedClients).toBe(1);
@@ -360,13 +369,9 @@ describe('the Spanner admin tools', () => {
     it('reports a failed operation as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
       spannerFake.operationOutcome = 'reject';
-      spannerFake.adminFailures.operation = new Error('provisioning failed');
+      spannerFake.failures.operation = new Error('provisioning failed');
 
-      const result = await runTool(
-        toolset(),
-        'spanner_create_instance',
-        CREATE_ARGS,
-      );
+      const result = await runApproved('spanner_create_instance', CREATE_ARGS);
 
       expect(errorOf(result)).toContain('provisioning failed');
     });
@@ -378,11 +383,7 @@ describe('the Spanner admin tools', () => {
       vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
       spannerFake.operationOutcome = 'pending';
 
-      const pending = runTool(
-        toolset(),
-        'spanner_create_instance',
-        CREATE_ARGS,
-      );
+      const pending = runApproved('spanner_create_instance', CREATE_ARGS);
       await waitForArmedTimer();
       await vi.advanceTimersByTimeAsync(OPERATION_TIMEOUT_MS);
       const result = await pending;
@@ -391,17 +392,37 @@ describe('the Spanner admin tools', () => {
       expect(errorOf(result)).toContain(
         `did not complete within ${OPERATION_TIMEOUT_MS} ms`,
       );
+      // Cancelled, so google-gax stops polling once the tool has answered.
+      expect(spannerFake.cancelledOperations).toBe(1);
       expect(spannerFake.closedClients).toBe(1);
+    });
+
+    it('keeps the timeout error when cancelling the operation fails', async () => {
+      vi.spyOn(logger, 'error').mockImplementation(() => {});
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+      spannerFake.operationOutcome = 'pending';
+      spannerFake.failures.cancelOperation = new Error('cancel failed');
+
+      const pending = runApproved('spanner_create_instance', CREATE_ARGS);
+      await waitForArmedTimer();
+      await vi.advanceTimersByTimeAsync(OPERATION_TIMEOUT_MS);
+      const result = await pending;
+      vi.useRealTimers();
+
+      expect(errorOf(result)).toContain(
+        `did not complete within ${OPERATION_TIMEOUT_MS} ms`,
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to close the Spanner operation'),
+      );
     });
 
     it('refuses a node count below one', async () => {
       // The schema rejects it in `FunctionTool.runAsync`, before the tool body
       // and its `ERROR` envelope are reached.
       await expect(
-        runTool(toolset(), 'spanner_create_instance', {
-          ...CREATE_ARGS,
-          nodes: 0,
-        }),
+        runApproved('spanner_create_instance', {...CREATE_ARGS, nodes: 0}),
       ).rejects.toThrow('Too small');
       expect(spannerFake.clientOptions).toEqual([]);
     });
@@ -409,7 +430,7 @@ describe('the Spanner admin tools', () => {
 
   describe('spanner_list_databases', () => {
     it('reports the id of every database', async () => {
-      spannerFake.adminResponses.databases = [
+      spannerFake.responses.databases = [
         {name: 'projects/test-project/instances/test-instance/databases/db-1'},
         {name: 'projects/test-project/instances/test-instance/databases/db-2'},
       ];
@@ -427,7 +448,7 @@ describe('the Spanner admin tools', () => {
 
     it('reports a rejected listing as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
-      spannerFake.adminFailures.listDatabases = new Error('test error');
+      spannerFake.failures.listDatabases = new Error('test error');
 
       const result = await runTool(
         toolset(),
@@ -443,11 +464,7 @@ describe('the Spanner admin tools', () => {
     const CREATE_ARGS = {...INSTANCE_ARGS, database_id: 'db-1'};
 
     it('reports no results, unlike create_instance', async () => {
-      const result = await runTool(
-        toolset(),
-        'spanner_create_database',
-        CREATE_ARGS,
-      );
+      const result = await runApproved('spanner_create_database', CREATE_ARGS);
 
       expect(result).toEqual({status: 'SUCCESS'});
       expect(spannerFake.requestsFor('createDatabase')).toEqual([
@@ -461,7 +478,7 @@ describe('the Spanner admin tools', () => {
     });
 
     it('accepts the hyphen a Spanner database id may carry', async () => {
-      const result = await runTool(toolset(), 'spanner_create_database', {
+      const result = await runApproved('spanner_create_database', {
         ...CREATE_ARGS,
         database_id: 'my-catalog-db',
       });
@@ -482,7 +499,7 @@ describe('the Spanner admin tools', () => {
     ])('refuses %j, which carries %s', async (databaseId) => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
 
-      const result = await runTool(toolset(), 'spanner_create_database', {
+      const result = await runApproved('spanner_create_database', {
         ...CREATE_ARGS,
         database_id: databaseId,
       });
@@ -496,16 +513,65 @@ describe('the Spanner admin tools', () => {
 
     it('reports a rejected creation as an error', async () => {
       vi.spyOn(logger, 'error').mockImplementation(() => {});
-      spannerFake.adminFailures.createDatabase = new Error('test error');
+      spannerFake.failures.createDatabase = new Error('test error');
 
-      const result = await runTool(
-        toolset(),
-        'spanner_create_database',
-        CREATE_ARGS,
-      );
+      const result = await runApproved('spanner_create_database', CREATE_ARGS);
 
       expect(errorOf(result)).toContain('test error');
       expect(spannerFake.closedClients).toBe(1);
+    });
+  });
+
+  describe('the confirmation gate on the two create tools', () => {
+    const CREATE_ARGS = {
+      ...INSTANCE_ARGS,
+      config_id: 'config-1',
+      display_name: 'Test Instance',
+      database_id: 'db',
+    };
+
+    it.each(['spanner_create_instance', 'spanner_create_database'])(
+      '%s asks before it provisions anything',
+      async (name) => {
+        const result = await runTool(toolset(), name, CREATE_ARGS);
+
+        expect(result).toEqual({
+          error:
+            'This tool call requires confirmation, please approve or reject.',
+        });
+        expect(spannerFake.clientOptions).toEqual([]);
+      },
+    );
+
+    it.each(['spanner_create_instance', 'spanner_create_database'])(
+      '%s provisions nothing once the user rejects it',
+      async (name) => {
+        const result = await runTool(
+          toolset(),
+          name,
+          CREATE_ARGS,
+          confirmedToolContext(false),
+        );
+
+        expect(result).toEqual({error: 'This tool call is rejected.'});
+        expect(spannerFake.clientOptions).toEqual([]);
+      },
+    );
+
+    it.each([
+      'spanner_list_instances',
+      'spanner_get_instance',
+      'spanner_list_databases',
+      'spanner_list_instance_configs',
+      'spanner_get_instance_config',
+    ])('%s runs without asking', async (name) => {
+      const result = await runTool(toolset(), name, {
+        ...CREATE_ARGS,
+        config_id: 'config-1',
+      });
+
+      expect(successOf(result)['status']).toBe('SUCCESS');
+      expect(spannerFake.clientOptions).toHaveLength(1);
     });
   });
 
@@ -524,7 +590,7 @@ describe('the Spanner admin tools', () => {
     it('keeps the result when closing the client fails', async () => {
       const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
       spannerFake.failures.closeClient = new Error('close failed');
-      spannerFake.adminResponses.instances = [
+      spannerFake.responses.instances = [
         {name: 'projects/test-project/instances/only'},
       ];
 

@@ -19,7 +19,6 @@ import {describe, expect, it, vi} from 'vitest';
 import {
   withDatabaseAdminClient,
   withInstanceAdminClient,
-  withSpannerDatabase,
 } from '../../../src/tools/spanner/client.js';
 import {logger} from '../../../src/utils/logger.js';
 import {
@@ -47,26 +46,12 @@ const ADMIN_TARGET = {projectId: 'p', authClient: testAuthClient()};
 
 describe('the Spanner client module without its peer dependency', () => {
   it('names @google-cloud/spanner and the install command', async () => {
-    const promise = withSpannerDatabase(
-      {
-        projectId: 'p',
-        instanceId: 'i',
-        databaseId: 'd',
-        authClient: testAuthClient(),
-      },
-      async () => undefined,
-    );
-
-    await expect(promise).rejects.toThrow(/SpannerToolset requires/);
-    await expect(promise).rejects.toThrow(/npm install @google-cloud\/spanner/);
-  });
-
-  it('names the install command for the instance admin endpoint too', async () => {
     const promise = withInstanceAdminClient(
       ADMIN_TARGET,
       async () => undefined,
     );
 
+    await expect(promise).rejects.toThrow(/SpannerAdminToolset requires/);
     await expect(promise).rejects.toThrow(/npm install @google-cloud\/spanner/);
   });
 

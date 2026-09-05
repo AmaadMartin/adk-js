@@ -6,9 +6,138 @@
 
 import type {protos} from '@google-cloud/spanner';
 import {z} from 'zod';
-import {waitForOperation} from './client.js';
-import {SpannerAdminToolDefinition} from './spanner_tool.js';
-import {validateDatabaseId} from './sql_validation.js';
+import {FunctionTool, ToolExecuteArgument} from '../function_tool.js';
+import {
+  SpannerDatabaseAdminClient,
+  SpannerInstanceAdminClient,
+  waitForOperation,
+  withDatabaseAdminClient,
+  withInstanceAdminClient,
+} from './client.js';
+import {SpannerCredentialsManager} from './spanner_credentials.js';
+import {runSpannerTool, SpannerToolResult} from './tool_result.js';
+
+/** Prefix prepended to every tool name in the Spanner toolsets. */
+export const SPANNER_TOOL_NAME_PREFIX = 'spanner';
+
+/** How long a Spanner database id may be. */
+const DATABASE_ID_MAX_LENGTH = 30;
+
+/**
+ * The database ids Spanner accepts.
+ *
+ * `CreateDatabaseRequest.create_statement` documents the grammar as
+ * `[a-z][a-z0-9_\-]*[a-z0-9]`, between 2 and 30 characters.
+ */
+const SPANNER_DATABASE_ID_RE = /^[a-z][a-z0-9_-]*[a-z0-9]$/;
+
+/**
+ * Rejects a database id Spanner would not accept.
+ *
+ * The id is quoted into a `CREATE DATABASE` statement, so refusing anything
+ * outside the grammar also keeps a backtick out of that statement.
+ *
+ * @param value The database id.
+ * @param paramName The parameter the value came from, named in the error.
+ * @throws Error if the id is outside Spanner's database id grammar.
+ */
+function validateDatabaseId(value: string, paramName: string): void {
+  if (
+    value.length > DATABASE_ID_MAX_LENGTH ||
+    !SPANNER_DATABASE_ID_RE.test(value)
+  ) {
+    throw new Error(
+      `Invalid Spanner database id for ${paramName}: ${JSON.stringify(value)}.` +
+        ' A database id must match [a-z][a-z0-9_-]*[a-z0-9] and be between 2' +
+        ` and ${DATABASE_ID_MAX_LENGTH} characters long.`,
+    );
+  }
+}
+
+/** What every Spanner admin tool declares, whichever endpoint it calls. */
+interface SpannerAdminToolBase<TParams extends z.ZodObject> {
+  /** Tool name without the `spanner_` prefix. */
+  name: string;
+  description: string;
+  parameters: TParams;
+  /**
+   * Whether the model must confirm the call before it runs. Set on the tools
+   * that create billable resources.
+   */
+  requireConfirmation?: boolean;
+  /**
+   * Rejects arguments that must not reach Spanner, before any client is
+   * built, so a value that would break out of generated DDL never opens a
+   * connection.
+   */
+  validate?(args: ToolExecuteArgument<TParams>): void;
+  /** The project whose administration endpoint the call is made against. */
+  projectId(args: ToolExecuteArgument<TParams>): string;
+}
+
+/**
+ * One Spanner admin tool. `admin` picks the endpoint, so `run` receives the
+ * client it actually calls rather than one it has to narrow.
+ */
+export type SpannerAdminToolDefinition<TParams extends z.ZodObject> =
+  | (SpannerAdminToolBase<TParams> & {
+      admin: 'instance';
+      run(
+        client: SpannerInstanceAdminClient,
+        args: ToolExecuteArgument<TParams>,
+      ): Promise<object>;
+    })
+  | (SpannerAdminToolBase<TParams> & {
+      admin: 'database';
+      run(
+        client: SpannerDatabaseAdminClient,
+        args: ToolExecuteArgument<TParams>,
+      ): Promise<object>;
+    });
+
+/**
+ * Wraps one Spanner administration call as a prefixed tool that never throws.
+ *
+ * Validating the arguments, resolving the credentials, loading the optional
+ * peer dependency and the call itself are all inside the same guard, so every
+ * failure reaches the model as an `ERROR` result.
+ *
+ * @param credentials Resolves the calling end user's Spanner credentials.
+ * @param definition What the tool declares and which endpoint it calls.
+ * @return The tool, named `spanner_<definition.name>`.
+ */
+export function createSpannerAdminTool<TParams extends z.ZodObject>(
+  credentials: SpannerCredentialsManager,
+  definition: SpannerAdminToolDefinition<TParams>,
+): FunctionTool<TParams> {
+  const name = `${SPANNER_TOOL_NAME_PREFIX}_${definition.name}`;
+  return new FunctionTool({
+    name,
+    description: definition.description,
+    parameters: definition.parameters,
+    requireConfirmation: definition.requireConfirmation ?? false,
+    execute(args, toolContext): Promise<SpannerToolResult> {
+      return runSpannerTool(name, async () => {
+        definition.validate?.(args);
+        const authClient = await credentials.getAuthClient(toolContext);
+        if (!authClient) {
+          throw new Error(
+            'User authorization is required to access Google services for' +
+              ` ${name}. Please complete the authorization flow.`,
+          );
+        }
+        const target = {projectId: definition.projectId(args), authClient};
+        return definition.admin === 'instance'
+          ? withInstanceAdminClient(target, (client) =>
+              definition.run(client, args),
+            )
+          : withDatabaseAdminClient(target, (client) =>
+              definition.run(client, args),
+            );
+      });
+    },
+  });
+}
 
 /** A replica type as the wire carries it: its number, or its name. */
 type ReplicaTypeField =
@@ -204,6 +333,7 @@ export const createInstanceTool: SpannerAdminToolDefinition<
     ' compute capacity that is charged until the instance is deleted.',
   parameters: createInstanceParams,
   admin: 'instance',
+  requireConfirmation: true,
   projectId: projectOf,
   async run(client, args) {
     const [operation] = await client.createInstance({
@@ -247,6 +377,7 @@ export const createDatabaseTool: SpannerAdminToolDefinition<
     ' is billed for the storage it uses until it is dropped.',
   parameters: createDatabaseParams,
   admin: 'database',
+  requireConfirmation: true,
   projectId: projectOf,
   // `database_id` is quoted into the CREATE DATABASE statement below, so a
   // backtick in it would escape the quoting. adk-python does not check this.
