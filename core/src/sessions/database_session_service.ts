@@ -104,16 +104,28 @@ export class DatabaseSessionService extends BaseSessionService {
   private initialized = false;
   private options?: MikroDBOptions;
   private connectionString?: string;
+  private additionalOptions?: MikroDBOptions;
 
-  constructor(connectionStringOrOptions: MikroDBOptions | string) {
+  /**
+   * @param connectionStringOrOptions A connection URI, or MikroORM options.
+   * @param additionalOptions Further MikroORM options, such as pool sizing or
+   *   driver options. The first argument wins every key it sets, and the ADK
+   *   entity list is never replaceable.
+   */
+  constructor(
+    connectionStringOrOptions: MikroDBOptions | string,
+    additionalOptions?: MikroDBOptions,
+  ) {
     super();
     if (typeof connectionStringOrOptions === 'string') {
       this.connectionString = connectionStringOrOptions;
+      this.additionalOptions = additionalOptions;
     } else {
       if (!connectionStringOrOptions.driver) {
         throw new Error('Driver is required when passing options object.');
       }
 
+      this.additionalOptions = additionalOptions;
       this.options = connectionStringOrOptions;
     }
   }
@@ -126,10 +138,15 @@ export class DatabaseSessionService extends BaseSessionService {
     await loadMikroOrm();
 
     // ENTITIES overrides a caller-supplied `entities`, exactly as the
-    // constructor did before the schema module became lazy.
+    // constructor did before the schema module became lazy. Additional options
+    // are the lowest-priority layer: the first constructor argument wins every
+    // key it sets, and the ADK entity list is never replaceable.
     const options: MikroDBOptions = this.connectionString
-      ? await getConnectionOptionsFromUri(this.connectionString)
-      : {...this.options, entities: ENTITIES};
+      ? {
+          ...this.additionalOptions,
+          ...(await getConnectionOptionsFromUri(this.connectionString)),
+        }
+      : {...this.additionalOptions, ...this.options, entities: ENTITIES};
     this.options = options;
 
     this.orm = await MikroORM.init(options);
