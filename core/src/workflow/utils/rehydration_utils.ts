@@ -356,6 +356,10 @@ function isTerminalEvent(event: Event): boolean {
  * activation finishes. First-completion order cannot do this: a node first
  * completes after the nodes it depends on, and a replay activates them in that
  * same order.
+ *
+ * A workflow's echo of a recovered output needs no guard here, unlike in
+ * {@link reconstructNodeRuns}: the node it echoes has already contributed its
+ * key, so keeping first positions drops the echo anyway.
  */
 export function replaySequence(events: Event[], parentPath?: string): string[] {
   const keyFor = keyFn(parentPath);
@@ -363,10 +367,7 @@ export function replaySequence(events: Event[], parentPath?: string): string[] {
   const sequence: string[] = [];
   for (const event of events) {
     const name = keyFor(event);
-    if (!name || seen.has(name)) {
-      continue;
-    }
-    if (isReplayEcho(event) || !isTerminalEvent(event)) {
+    if (!name || seen.has(name) || !isTerminalEvent(event)) {
       continue;
     }
     seen.add(name);
