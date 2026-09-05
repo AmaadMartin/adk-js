@@ -26,12 +26,13 @@ type PluginConstructor = new (name: string) => BasePlugin;
  * Imports the plugins an operator named on the command line and returns the
  * ones that loaded.
  *
- * Each name is `<module>.<export>`, split on the last `.` — `./plugins/audit`
- * plus `AuditPlugin` for `./plugins/audit.AuditPlugin`. A relative or absolute
- * module is resolved against the working directory; anything else is passed to
- * `import()` as a package specifier. An export that is a plugin class is
- * constructed with its qualified name, and one that is already a plugin
- * instance is used as it is.
+ * Each name is `<module>.<export>`, split on the last `.` —
+ * `./plugins/audit.js` plus `AuditPlugin` for `./plugins/audit.js.AuditPlugin`.
+ * A relative or absolute module is resolved against the working directory;
+ * anything else is passed to `import()` as a package specifier, so a file path
+ * needs its extension. An export that is a plugin class is constructed with
+ * its qualified name, and one that is already a plugin instance is used as it
+ * is.
  *
  * A name that fails to load is logged and skipped, so one bad plugin stops
  * neither the others nor the server.
@@ -61,7 +62,7 @@ async function loadPlugin(qualifiedName: string): Promise<BasePlugin> {
   const separator = qualifiedName.lastIndexOf('.');
   if (separator <= 0) {
     throw new Error(
-      'expected a "<module>.<export>" name, e.g. "./plugins/audit.AuditPlugin"',
+      'expected a "<module>.<export>" name, e.g. "./plugins/audit.js.AuditPlugin"',
     );
   }
 
