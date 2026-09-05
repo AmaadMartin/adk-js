@@ -6,7 +6,7 @@
 
 import {Content, createModelContent, PartListUnion} from '@google/genai';
 import {createEvent, Event, isEvent} from '../events/event.js';
-import {isIdentifier} from '../utils/identifier_utils.js';
+import {validateIdentifierName} from '../utils/identifier_utils.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
 import {NodeSchemaValidationError} from './errors.js';
 import type {NodeContext} from './node_context.js';
@@ -113,14 +113,7 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
     ) {
       throw new Error('Node name must be a non-empty string.');
     }
-    this.name = config.name.trim();
-    if (!isIdentifier(this.name)) {
-      throw new Error(
-        `Found invalid node name: "${
-          this.name
-        }". Node name must be a valid identifier. It should start with a letter (a-z, A-Z) or an underscore (_), and can only contain letters, digits (0-9), underscores, and hyphens.`,
-      );
-    }
+    this.name = validateIdentifierName('Node', config.name.trim());
     this.description = config.description ?? '';
     this.rerunOnResume = config.rerunOnResume ?? false;
     this.waitForOutput = config.waitForOutput ?? false;
@@ -420,9 +413,7 @@ interface JsonSerializable {
  * dumped, and any other object becomes a plain object of its own enumerable
  * properties.
  *
- * The original reference is returned when nothing needed converting, so an
- * output that is already plain reaches its `Event` unchanged. The conversion
- * never throws: a value it cannot convert is returned as it is.
+ * The conversion never throws: a value it cannot convert is returned as it is.
  *
  * Mirrors `google/adk-python` `workflow/_base_node.py::_to_serializable` (and
  * the equivalent helper in `utils/_schema_utils.py::validate_node_data`), whose
@@ -452,10 +443,10 @@ function convertValue(value: unknown, converting: WeakSet<object>): unknown {
 /** Dispatches an object to the conversion its shape calls for. */
 function convertObject(value: object, converting: WeakSet<object>): unknown {
   if (Array.isArray(value)) {
-    return convertItems(value, converting);
+    return value.map((item) => convertValue(item, converting));
   }
   if (value instanceof Set) {
-    return convertItems([...value], converting);
+    return [...value].map((item) => convertValue(item, converting));
   }
   if (value instanceof Map) {
     return Object.fromEntries(
@@ -468,40 +459,12 @@ function convertObject(value: object, converting: WeakSet<object>): unknown {
   if (hasToJson(value)) {
     return convertDumped(value, converting);
   }
-  return convertProperties(value, converting);
-}
-
-/** Converts array items, returning the original array when none changed. */
-function convertItems(
-  items: unknown[],
-  converting: WeakSet<object>,
-): unknown[] {
-  let changed = false;
-  const converted = items.map((item) => {
-    const value = convertValue(item, converting);
-    changed ||= value !== item;
-    return value;
-  });
-  return changed ? converted : items;
-}
-
-/**
- * Converts an object's own enumerable properties. A plain object whose
- * properties all stayed the same is returned as it is; a class instance always
- * becomes a new plain object, which is the point of the conversion.
- */
-function convertProperties(
-  value: object,
-  converting: WeakSet<object>,
-): unknown {
-  const converted: Record<string, unknown> = {};
-  let changed = !isPlainObject(value);
-  for (const [key, item] of Object.entries(value)) {
-    const property = convertValue(item, converting);
-    changed ||= property !== item;
-    converted[key] = property;
-  }
-  return changed ? converted : value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      convertValue(item, converting),
+    ]),
+  );
 }
 
 /** Dumps an object through `toJSON()`, or returns it if the dump fails. */
@@ -520,11 +483,6 @@ function convertDumped(
 
 function hasToJson(value: object): value is JsonSerializable {
   return typeof (value as Partial<JsonSerializable>).toJSON === 'function';
-}
-
-function isPlainObject(value: object): boolean {
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
 }
 
 /** Serializes an arbitrary value to a text string for display. */

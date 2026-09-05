@@ -213,14 +213,14 @@ describe('toSerializable', () => {
     expect(toSerializable(false)).toBe(false);
   });
 
-  it('returns an already-plain object by identity', () => {
+  it('leaves an already-plain object equal to itself', () => {
     const plain = {a: 1, b: {c: [1, 2]}};
-    expect(toSerializable(plain)).toBe(plain);
+    expect(toSerializable(plain)).toEqual(plain);
   });
 
-  it('returns an already-plain array by identity', () => {
+  it('leaves an already-plain array equal to itself', () => {
     const items = [1, {a: 2}];
-    expect(toSerializable(items)).toBe(items);
+    expect(toSerializable(items)).toEqual(items);
   });
 
   it('converts a Set to an array', () => {
