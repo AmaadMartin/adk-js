@@ -31,6 +31,7 @@ import {
   LlmResponse,
 } from '@google/adk';
 
+import {LlmRecording, Recordings} from '../integration/test_types.js';
 import {
   isRecord,
   normalizeRelayedAgentContent,
@@ -71,27 +72,9 @@ const EXCLUDED_CONFIG_FIELDS: readonly string[] = [
   'abortSignal',
 ];
 
-/** One recorded LLM call. */
-export interface ReplayLlmRecording {
-  llmRequest?: LlmRequest;
-  /**
-   * adk-python records a list per call (`llm_responses`); adk-js's existing
-   * `LlmRecording` records a single one. Both are accepted, the list first.
-   */
-  llmResponses?: LlmResponse[];
-  llmResponse?: LlmResponse;
-}
-
-/** One recorded step of a conformance test. */
-export interface ReplayRecording {
-  userMessageIndex: number;
-  agentName: string;
-  llmRecording?: ReplayLlmRecording;
-}
-
 /** Everything the replay model needs to serve one model call. */
 export interface ConformanceReplayModelConfig {
-  recordings: {recordings: ReplayRecording[]};
+  recordings: Recordings;
   agentName: string;
   userMessageIndex: number;
   /** Which of this agent's recorded calls in this turn is being served. */
@@ -247,7 +230,7 @@ export class ConformanceTestGemini extends Gemini {
   private readonly agentName: string;
   private readonly userMessageIndex: number;
   private readonly replayIndex: number;
-  private readonly agentLlmRecordings: readonly ReplayLlmRecording[];
+  private readonly agentLlmRecordings: readonly LlmRecording[];
 
   constructor(config: ConformanceReplayModelConfig) {
     super({model: config.model, ...REPLAY_PLACEHOLDER_CREDENTIALS});

@@ -18,10 +18,10 @@ import {describe, expect, it} from 'vitest';
 import {
   ConformanceTestGemini,
   isReplayVerificationError,
-  ReplayRecording,
   ReplayVerificationError,
   verifyLlmRequestMatch,
 } from '../../src/conformance/conformance_test_google_llm.js';
+import {Recording} from '../../src/integration/test_types.js';
 
 const QUOTED_CONTENT_BEGIN = '<<<BEGIN_QUOTED_AGENT_CONTENT>>>';
 const QUOTED_CONTENT_END = '<<<END_QUOTED_AGENT_CONTENT>>>';
@@ -69,7 +69,7 @@ async function collect(
  * Two calls recorded for `planner` in turn 0, surrounded by recordings the
  * model must filter out.
  */
-function plannerRecordings(): ReplayRecording[] {
+function plannerRecordings(): Recording[] {
   return [
     {
       userMessageIndex: 0,
@@ -96,7 +96,7 @@ function plannerRecordings(): ReplayRecording[] {
 }
 
 function createModel(
-  recordings: ReplayRecording[],
+  recordings: Recording[],
   replayIndex: number,
   overrides: {
     agentName?: string;
@@ -165,7 +165,7 @@ describe('ConformanceTestGemini', () => {
   });
 
   it('yields every recorded response in order', async () => {
-    const recordings: ReplayRecording[] = [
+    const recordings: Recording[] = [
       {
         userMessageIndex: 0,
         agentName: 'planner',
@@ -184,7 +184,7 @@ describe('ConformanceTestGemini', () => {
   });
 
   it('falls back to a recording that holds a single response', async () => {
-    const recordings: ReplayRecording[] = [
+    const recordings: Recording[] = [
       {
         userMessageIndex: 0,
         agentName: 'planner',
@@ -201,7 +201,7 @@ describe('ConformanceTestGemini', () => {
   });
 
   it('yields nothing when the recording holds no response', async () => {
-    const recordings: ReplayRecording[] = [
+    const recordings: Recording[] = [
       {userMessageIndex: 0, agentName: 'planner', llmRecording: {}},
     ];
 
@@ -229,7 +229,7 @@ describe('ConformanceTestGemini', () => {
   });
 
   it('lets a matching request through', async () => {
-    const recordings: ReplayRecording[] = [
+    const recordings: Recording[] = [
       {
         userMessageIndex: 0,
         agentName: 'planner',
@@ -249,7 +249,7 @@ describe('ConformanceTestGemini', () => {
   });
 
   it('throws and names the turn, the agent and the index on a mismatch', async () => {
-    const recordings: ReplayRecording[] = [
+    const recordings: Recording[] = [
       {
         userMessageIndex: 3,
         agentName: 'planner',
