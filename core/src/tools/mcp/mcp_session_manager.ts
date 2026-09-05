@@ -7,7 +7,6 @@
 import type {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import type {StdioServerParameters} from '@modelcontextprotocol/sdk/client/stdio.js';
 import type {StreamableHTTPClientTransportOptions} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type {RequestOptions} from '@modelcontextprotocol/sdk/shared/protocol.js';
 
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
@@ -25,11 +24,6 @@ const MCP_SDK: OptionalPeer = {
   feature: 'MCPSessionManager (and the MCP tools built on it)',
 };
 
-const MS_PER_SECOND = 1000;
-
-/** Whether a streamable HTTP session terminates its server session on close. */
-const DEFAULT_TERMINATE_ON_CLOSE = true;
-
 /**
  * Tears a server-side session down before its client is closed. Only a
  * streamable HTTP session has one; a stdio session has nothing to release.
@@ -39,16 +33,6 @@ type SessionTerminator = () => Promise<void>;
 /** Surfaces a background transport error that would otherwise be dropped. */
 function logTransportError(err: unknown): void {
   logger.error('MCP transport error: ' + formatError(err));
-}
-
-/**
- * Builds the SDK request options for the `initialize` handshake. Returns
- * `undefined` when no timeout was configured, so the SDK's own default stands.
- */
-function connectOptions(timeoutSeconds?: number): RequestOptions | undefined {
-  return timeoutSeconds === undefined
-    ? undefined
-    : {timeout: timeoutSeconds * MS_PER_SECOND};
 }
 
 /**
@@ -151,6 +135,11 @@ export class MCPSessionManager {
     );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
     let terminate: SessionTerminator | undefined;
+    // The params carry seconds; `RequestOptions.timeout` is milliseconds.
+    // Undefined leaves the SDK's own request timeout in force.
+    const {timeout} = this.connectionParams;
+    const requestOptions =
+      timeout === undefined ? undefined : {timeout: timeout * 1000};
 
     try {
       switch (this.connectionParams.type) {
@@ -163,10 +152,7 @@ export class MCPSessionManager {
             this.connectionParams.serverParams,
           );
           transport.onerror = logTransportError;
-          await client.connect(
-            transport,
-            connectOptions(this.connectionParams.timeout),
-          );
+          await client.connect(transport, requestOptions);
           break;
         }
         case 'StreamableHTTPConnectionParams': {
@@ -190,14 +176,8 @@ export class MCPSessionManager {
             options,
           );
           transport.onerror = logTransportError;
-          await client.connect(
-            transport,
-            connectOptions(this.connectionParams.timeout),
-          );
-          if (
-            this.connectionParams.terminateOnClose ??
-            DEFAULT_TERMINATE_ON_CLOSE
-          ) {
+          await client.connect(transport, requestOptions);
+          if (this.connectionParams.terminateOnClose ?? true) {
             terminate = async () => {
               // `terminateSession()` reports through `onerror` as well as
               // rejecting. `closeSession` awaits and logs the rejection, so
