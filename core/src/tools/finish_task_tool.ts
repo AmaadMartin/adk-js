@@ -53,11 +53,12 @@ const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
 };
 
 /**
- * JSON Schema keys holding a definitions block. A `$ref` addresses one from the
- * document root, so the block has to stay at the root when the schema owning it
- * is nested under a wrapper property.
+ * JSON Schema keys that only carry meaning at the root of a document: the
+ * definition block a `$ref` addresses from the root, and the dialect
+ * declaration. Nesting a schema under a wrapper property would take them with
+ * it, so they are lifted back out.
  */
-const DEFINITION_KEYS = ['$defs', 'definitions'] as const;
+const ROOT_ONLY_KEYS = ['$defs', '$schema'] as const;
 
 /**
  * The task agent {@link FinishTaskTool.forAgent} reads.
@@ -69,8 +70,8 @@ const DEFINITION_KEYS = ['$defs', 'definitions'] as const;
 export interface FinishTaskAgent {
   /** The agent's name, recorded on the tool for diagnostics. */
   readonly name: string;
-  /** The agent's output schema in the genai dialect. */
-  readonly outputSchema?: Schema;
+  /** The agent's output schema, as the declaration renders it. */
+  readonly outputSchema?: SchemaLike;
   /** The agent's output schema as the caller supplied it. */
   readonly outputSchemaSource?: SchemaLike;
 }
@@ -120,12 +121,6 @@ function schemaTypeName(schema: SchemaLike): string | undefined {
   return typeof type === 'string' ? type.toLowerCase() : undefined;
 }
 
-/** Whether the schema carries a definitions block. */
-function hasDefinitions(schema: object): boolean {
-  const document = schema as Record<string, unknown>;
-  return DEFINITION_KEYS.some((key) => document[key] !== undefined);
-}
-
 /** The `required` key list an object schema declares. */
 function requiredKeys(schema: SchemaLike): string[] {
   const required = toJsonSchema(schema)['required'];
@@ -135,46 +130,55 @@ function requiredKeys(schema: SchemaLike): string[] {
 }
 
 /**
- * Wraps a schema document under `wrapperKey`, moving any definitions block to
+ * Wraps a schema document under `wrapperKey`, hoisting its root-only keys to
  * the root of the wrapping document so its `$ref` pointers still resolve.
  */
-function wrapWithHoistedDefinitions(
+function wrapWithHoistedRootKeys(
   wrapperKey: string,
   document: Record<string, unknown>,
 ): Record<string, unknown> {
   const inner = {...document};
-  const definitions: Record<string, unknown> = {};
-  for (const key of DEFINITION_KEYS) {
+  const hoisted: Record<string, unknown> = {};
+  for (const key of ROOT_ONLY_KEYS) {
     if (inner[key] !== undefined) {
-      definitions[key] = inner[key];
+      hoisted[key] = inner[key];
       delete inner[key];
     }
   }
   return {
+    ...hoisted,
     type: 'object',
     properties: {[wrapperKey]: inner},
     required: [wrapperKey],
-    ...definitions,
   };
 }
 
-/** One `path: message` line per issue carried by a schema validation error. */
+/** The shape Zod v3 and Zod v4 both give a validation issue. */
+interface SchemaIssue {
+  readonly path: readonly PropertyKey[];
+  readonly message: string;
+}
+
+/**
+ * One `path: message` line per issue a schema validation error carries.
+ *
+ * An error carrying no issue list — a `refine` predicate that threw, say — is
+ * rendered as itself, so the model still sees why the call failed.
+ */
 function describeIssues(error: unknown): string[] {
   const issues =
     typeof error === 'object' && error !== null && 'issues' in error
       ? (error as {issues: unknown}).issues
       : undefined;
-  return Array.isArray(issues) ? issues.map(describeIssue) : [String(error)];
+  return Array.isArray(issues)
+    ? (issues as SchemaIssue[]).map(describeIssue)
+    : [String(error)];
 }
 
 /** One `path: message` line for a single validation issue. */
-function describeIssue(issue: unknown): string {
-  if (typeof issue !== 'object' || issue === null) {
-    return String(issue);
-  }
-  const {path, message} = issue as {path?: unknown; message?: unknown};
-  const location = Array.isArray(path) ? path.join('.') : '';
-  return `${location}: ${message ?? String(issue)}`;
+function describeIssue({path, message}: SchemaIssue): string {
+  const location = path.join('.');
+  return location ? `${location}: ${message}` : message;
 }
 
 /**
@@ -239,32 +243,29 @@ export class FinishTaskTool extends BaseTool {
 
   override _getDeclaration(): FunctionDeclaration {
     const {name, description, outputSchema, wrapperKey} = this;
-    const genaiSchema = isZodSchema(outputSchema)
-      ? undefined
-      : (outputSchema as Schema);
-    if (!wrapperKey) {
-      return genaiSchema
-        ? {name, description, parameters: genaiSchema}
-        : {name, description, parametersJsonSchema: toJsonSchema(outputSchema)};
-    }
-    if (genaiSchema && !hasDefinitions(genaiSchema)) {
+    // Only the Zod serializers emit a definitions block, so only they need the
+    // hoist. A genai `Schema` keeps the declaration it has always produced.
+    if (isZodSchema(outputSchema)) {
+      const document = toJsonSchema(outputSchema);
       return {
         name,
         description,
-        parameters: {
-          type: Type.OBJECT,
-          properties: {[wrapperKey]: genaiSchema},
-          required: [wrapperKey],
-        },
+        parametersJsonSchema: wrapperKey
+          ? wrapWithHoistedRootKeys(wrapperKey, document)
+          : document,
       };
     }
+    const genaiSchema = outputSchema as Schema;
     return {
       name,
       description,
-      parametersJsonSchema: wrapWithHoistedDefinitions(
-        wrapperKey,
-        toJsonSchema(outputSchema),
-      ),
+      parameters: wrapperKey
+        ? {
+            type: Type.OBJECT,
+            properties: {[wrapperKey]: genaiSchema},
+            required: [wrapperKey],
+          }
+        : genaiSchema,
     };
   }
 
@@ -293,7 +294,7 @@ export class FinishTaskTool extends BaseTool {
     // The presence check is the floor: `parseWithSchema` returns the value
     // unvalidated for a schema it cannot compile, so dropping it would lose the
     // check the tool already performs.
-    const missing = this.missingRequiredKeys(value);
+    const missing = this.missingRequiredKeys(args);
     if (missing.length > 0) {
       return this.validationError(
         missing.map((key) => `${key}: field required`),
@@ -307,16 +308,13 @@ export class FinishTaskTool extends BaseTool {
     return FINISH_TASK_SUCCESS_RESULT;
   }
 
-  /** Returns any `required` keys the schema declares that are absent. */
-  private missingRequiredKeys(value: unknown): string[] {
+  /** Returns any `required` keys the arguments do not carry. */
+  private missingRequiredKeys(args: Record<string, unknown>): string[] {
     if (this.wrapperKey) {
-      return value === undefined || value === null ? [this.wrapperKey] : [];
+      const wrapped = args[this.wrapperKey];
+      return wrapped === undefined || wrapped === null ? [this.wrapperKey] : [];
     }
-    if (typeof value !== 'object' || value === null) {
-      return [...this.requiredKeys];
-    }
-    const object = value as Record<string, unknown>;
-    return this.requiredKeys.filter((key) => object[key] === undefined);
+    return this.requiredKeys.filter((key) => args[key] === undefined);
   }
 
   /** The retry payload the model receives when its arguments do not validate. */
