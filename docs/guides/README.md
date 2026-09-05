@@ -172,6 +172,10 @@ documentation, visit [adk.dev](https://adk.dev/).
   few-shot examples from a curated Vertex AI Example Store instead of from an
   array in your source.
 
+### Integrations
+
+- [SlackRunner](integrations/slack_runner/index.md) - Putting an ADK agent behind a Slack bot over Socket Mode, and how a Slack thread maps onto a session.
+
 ### Memory
 
 - [BaseMemoryService write paths](memory/base_memory_service/index.md) - The
