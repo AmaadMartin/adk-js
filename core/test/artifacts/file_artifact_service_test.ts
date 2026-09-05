@@ -185,4 +185,26 @@ describe('FileArtifactService', () => {
       });
     });
   });
+
+  describe('untyped artifact input', () => {
+    it('normalizes a snake_case artifact object', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const key = {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+      };
+
+      await service.saveArtifact({
+        ...key,
+        filename: 'note.txt',
+        artifact: {inline_data: {mime_type: 'text/plain', data: 'aGVsbG8='}},
+      });
+
+      const loaded = await service.loadArtifact({...key, filename: 'note.txt'});
+      expect(loaded?.inlineData?.mimeType).toBe('text/plain');
+      expect(loaded?.inlineData?.data).toBe('aGVsbG8=');
+    });
+  });
 });

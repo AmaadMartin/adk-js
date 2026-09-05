@@ -7,6 +7,7 @@
 import {Part} from '@google/genai';
 
 import {InvocationContext} from '../agents/invocation_context.js';
+import {ensurePart} from '../artifacts/artifact_util.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
@@ -31,7 +32,10 @@ export class ForwardingArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
-    return this.toolContext.saveArtifact(request.filename, request.artifact);
+    return this.toolContext.saveArtifact(
+      request.filename,
+      ensurePart(request.artifact),
+    );
   }
 
   async loadArtifact(request: LoadArtifactRequest): Promise<Part | undefined> {

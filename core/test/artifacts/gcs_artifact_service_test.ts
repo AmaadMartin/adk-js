@@ -363,4 +363,28 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
     });
   });
+
+  describe('untyped artifact input', () => {
+    it('normalizes a snake_case artifact object', async () => {
+      const service = new GcsArtifactService(bucketName);
+      const key = {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'test-session',
+      };
+
+      await service.saveArtifact({
+        ...key,
+        filename: 'photo.png',
+        artifact: {inline_data: {mime_type: 'image/png', data: 'aGVsbG8='}},
+      });
+
+      const loaded = await service.loadArtifact({
+        ...key,
+        filename: 'photo.png',
+      });
+      expect(loaded?.inlineData?.mimeType).toBe('image/png');
+      expect(loaded?.inlineData?.data).toBe('aGVsbG8=');
+    });
+  });
 });
