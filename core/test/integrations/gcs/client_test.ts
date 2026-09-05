@@ -45,10 +45,18 @@ describe('getGcsClient', () => {
 
     expect(storage).toBeInstanceOf(FakeStorage);
     expect(storageInstances).toHaveLength(1);
-    expect(storageInstances[0].options).toEqual({
+    const {authClient, ...rest} = storageInstances[0].options;
+    expect(rest).toEqual({
       projectId: 'test-project',
-      authClient: credentials,
       userAgent: GCS_USER_AGENT,
+    });
+    // The client is handed over through `asStorageAuthClient`, so it is the
+    // adapter rather than the credential itself. It must still answer for
+    // that credential, and with a plain object: `storage_auth_test.ts` shows
+    // what a `Headers` here costs.
+    expect(authClient).not.toBe(credentials);
+    expect(await authClient?.getRequestHeaders()).toEqual({
+      authorization: 'Bearer test-token',
     });
   });
 
@@ -58,7 +66,9 @@ describe('getGcsClient', () => {
 
       await getGcsClient({credentials});
 
-      expect(storageInstances[i].options.authClient).toBe(credentials);
+      expect(
+        await storageInstances[i].options.authClient?.getRequestHeaders(),
+      ).toEqual({authorization: `Bearer token-${i}`});
     }
     expect(storageInstances).toHaveLength(200);
   });

@@ -171,7 +171,11 @@ describe('GcsAdminToolset tool bodies', () => {
     });
 
     expect(result).toEqual({status: 'SUCCESS', results: ['b']});
-    expect(storageInstances[0].options.authClient).toBe(client);
+    // Handed over through `asStorageAuthClient`, so the client answers for the
+    // resolved credential rather than being that object.
+    expect(
+      await storageInstances[0].options.authClient?.getRequestHeaders(),
+    ).toEqual({authorization: 'Bearer valid_token'});
     vi.restoreAllMocks();
   });
 
