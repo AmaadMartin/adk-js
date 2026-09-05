@@ -3,7 +3,7 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {Content, createUserContent} from '@google/genai';
+import {Content, createUserContent, Part} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
 import {
@@ -17,6 +17,7 @@ import {
   getFunctionResponses,
 } from '../../events/event.js';
 import {isSegmentPrefix} from '../../utils/branch_trie.js';
+import {logger} from '../../utils/logger.js';
 
 import {
   AF_FUNCTION_CALL_ID_PREFIX,
@@ -44,12 +45,44 @@ export function removeClientFunctionCallId(content: Content): void {
 }
 
 /**
+ * The sentence appended to a single-turn agent's first user turn.
+ *
+ * A single-turn agent answers once and never sees a reply, so it is told that
+ * up front instead of asking a clarifying question nobody will answer.
+ */
+const SINGLE_TURN_NUDGE =
+  'Important: You will not receive any user replies or clarifications.' +
+  ' Complete the task using only the information provided above.';
+
+/**
+ * How a caller wants the contents built. Every field is optional and off by
+ * default, so a caller that only wants the plain history passes nothing.
+ */
+export interface GetContentsOptions {
+  /**
+   * Keep `adk-` prefixed function call/response ids in the request. Set for a
+   * provider that pairs a tool call with its result by id.
+   */
+  preserveFunctionCallIds?: boolean;
+
+  /** Append the single-turn nudge to the synthetic leading user turn. */
+  isSingleTurn?: boolean;
+
+  /** Fallback first user turn for a scoped agent with no originating call. */
+  userContent?: Content;
+
+  /** Relay thought parts from other agents as labelled context. */
+  includeThoughtsFromOtherAgents?: boolean;
+}
+
+/**
  * Get the contents for the LLM request.
  *
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
  * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param options: How to build the contents.
  *
  * @returns A list of processed contents.
  */
@@ -58,38 +91,85 @@ export function getContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  options: GetContentsOptions = {},
 ): Content[] {
-  const filteredEvents: Event[] = [];
+  const includedEvents: Event[] = [];
 
   for (const event of events) {
     if (isCompactedEvent(event)) {
-      filteredEvents.push(convertCompactedEvent(event));
+      includedEvents.push(convertCompactedEvent(event));
       continue;
     }
 
     if (
-      !shouldIncludeEventInContext(event, currentBranch, currentIsolationScope)
+      !shouldIncludeEventInContext(
+        event,
+        currentBranch,
+        currentIsolationScope,
+        includeThoughtsOf(agentName, event, options),
+      )
     ) {
       continue;
     }
 
-    filteredEvents.push(
-      isEventFromAnotherAgent(agentName, event)
-        ? convertForeignEvent(event)
-        : event,
-    );
+    includedEvents.push(event);
   }
 
-  let resultEvents = rearrangeEventsForLatestFunctionResponse(filteredEvents);
+  const filteredEvents = accumulateTranscriptions(includedEvents).map(
+    (event) =>
+      isEventFromAnotherAgent(agentName, event)
+        ? convertForeignEvent(event, !!options.includeThoughtsFromOtherAgents)
+        : event,
+  );
+
+  let resultEvents = dropOrphanedFunctionResponses(filteredEvents);
+  resultEvents = rearrangeEventsForLatestFunctionResponse(resultEvents);
   resultEvents =
     rearrangeEventsForAsyncFunctionResponsesInHistory(resultEvents);
-  const contents = [];
+  const contents: Content[] = [];
   for (const event of resultEvents) {
-    const content = cloneDeep(event.content!);
-    removeClientFunctionCallId(content);
+    if (!event.content) {
+      continue;
+    }
+    const content = cloneDeep(event.content);
+    if (!options.preserveFunctionCallIds) {
+      removeClientFunctionCallId(content);
+    }
     contents.push(content);
   }
+
+  if (currentIsolationScope !== undefined) {
+    // The delegating call lives on the parent's event, which the isolation
+    // filter just removed, so it is re-derived from the unfiltered history.
+    const leading = buildTaskInputUserContent(
+      events,
+      currentIsolationScope,
+      !!options.isSingleTurn,
+      options.userContent,
+    );
+    if (leading) {
+      contents.unshift(leading);
+    }
+  }
+
   return contents;
+}
+
+/**
+ * Whether another agent's thought parts count as visible for `event`.
+ *
+ * The flag only ever relaxes the filter for an event authored by a different
+ * agent; the current agent's own thoughts stay out of its history.
+ */
+function includeThoughtsOf(
+  agentName: string,
+  event: Event,
+  options: GetContentsOptions,
+): boolean {
+  return (
+    !!options.includeThoughtsFromOtherAgents &&
+    isEventFromAnotherAgent(agentName, event)
+  );
 }
 
 /**
@@ -106,8 +186,9 @@ function shouldIncludeEventInContext(
   event: Event,
   currentBranch?: string,
   currentIsolationScope?: string,
+  includeThoughts = false,
 ): boolean {
-  if (!event.content?.role || event.content.parts?.[0]?.text === '') {
+  if (containsEmptyContent(event, includeThoughts)) {
     return false;
   }
   if (
@@ -125,6 +206,235 @@ function shouldIncludeEventInContext(
     !isToolConfirmationEvent(event) &&
     !isRequestInputEvent(event)
   );
+}
+
+/**
+ * Whether a part carries nothing the model can act on.
+ *
+ * A function call or response is always visible, even when it is marked as a
+ * thought: it is an action to run or a result to read. A thought signature is
+ * always visible too — it is opaque state the model expects back verbatim, and
+ * it routinely arrives on a part that holds nothing else, so it is checked
+ * before the emptiness test. A server-side tool call and its response are
+ * visible for the same reason: the model ran the tool itself and expects the
+ * parts echoed back.
+ */
+function isPartInvisible(part: Part, includeThoughts: boolean): boolean {
+  if (part.functionCall || part.functionResponse) {
+    return false;
+  }
+  if (part.thoughtSignature) {
+    return false;
+  }
+  if (part.toolCall || part.toolResponse) {
+    return false;
+  }
+  return (
+    (!!part.thought && !includeThoughts) ||
+    !(
+      part.text ||
+      part.inlineData ||
+      part.fileData ||
+      part.executableCode ||
+      part.codeExecutionResult
+    )
+  );
+}
+
+/**
+ * Whether an event carries neither visible content nor a transcription.
+ *
+ * An event that only changed session state lands here. A content-less
+ * transcription event does not: it is kept so
+ * {@link accumulateTranscriptions} can turn it into a text content.
+ */
+function containsEmptyContent(event: Event, includeThoughts: boolean): boolean {
+  if (isCompactedEvent(event)) {
+    return false;
+  }
+  return (
+    (!event.content ||
+      !event.content.role ||
+      !event.content.parts?.length ||
+      event.content.parts.every((part) =>
+        isPartInvisible(part, includeThoughts),
+      )) &&
+    !event.outputTranscription &&
+    !event.inputTranscription
+  );
+}
+
+/**
+ * Turns runs of content-less transcription events into text contents.
+ *
+ * A live audio session reports what it heard and what it said as
+ * transcriptions rather than content, one event per fragment. Consecutive
+ * fragments of the same kind are concatenated and emitted as a single user (or
+ * model) content, so the model reads a sentence instead of nothing at all.
+ *
+ * The two accumulators are independent, so an input run and an output run that
+ * interleave do not bleed into each other.
+ */
+function accumulateTranscriptions(events: Event[]): Event[] {
+  const result: Event[] = [];
+  let inputTranscript = '';
+  let outputTranscript = '';
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (event.content) {
+      result.push(event);
+      continue;
+    }
+
+    const inputText = event.inputTranscription?.text;
+    const outputText = event.outputTranscription?.text;
+    if (inputText) {
+      inputTranscript += inputText;
+      if (events[i + 1]?.inputTranscription?.text) {
+        continue;
+      }
+      // Copy the event; the session owns the original.
+      result.push({
+        ...event,
+        inputTranscription: undefined,
+        content: {role: 'user', parts: [{text: inputTranscript}]},
+      });
+      inputTranscript = '';
+    } else if (outputText) {
+      outputTranscript += outputText;
+      if (events[i + 1]?.outputTranscription?.text) {
+        continue;
+      }
+      result.push({
+        ...event,
+        outputTranscription: undefined,
+        content: {role: 'model', parts: [{text: outputTranscript}]},
+      });
+      outputTranscript = '';
+    } else {
+      result.push(event);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Drops function response parts whose function call is gone.
+ *
+ * An orphan reaches this point when the producer of the call is no longer in
+ * the history — a session edited by hand, or one stitched from two sources.
+ * Left in place it behaves differently depending on where it sits: mid-history
+ * it is quietly discarded, while as the trailing event it aborts the whole
+ * request. Pruning it here makes the outcome the same wherever it appears.
+ *
+ * A response with no id is left alone: ids are stripped on the way out for
+ * some providers, so a missing id does not imply a missing call.
+ */
+function dropOrphanedFunctionResponses(events: Event[]): Event[] {
+  const callIds = new Set<string>();
+  for (const event of events) {
+    for (const functionCall of getFunctionCalls(event)) {
+      if (functionCall.id) {
+        callIds.add(functionCall.id);
+      }
+    }
+  }
+
+  const orphanedIds: string[] = [];
+  const resultEvents: Event[] = [];
+  for (const event of events) {
+    const content = event.content;
+    if (!content?.parts?.length || getFunctionResponses(event).length === 0) {
+      resultEvents.push(event);
+      continue;
+    }
+
+    const keptParts: Part[] = [];
+    for (const part of content.parts) {
+      const response = part.functionResponse;
+      if (response?.id && !callIds.has(response.id)) {
+        orphanedIds.push(response.id);
+        continue;
+      }
+      keptParts.push(part);
+    }
+
+    if (keptParts.length === 0) {
+      continue;
+    }
+    resultEvents.push(
+      keptParts.length === content.parts.length
+        ? event
+        : {...event, content: {...content, parts: keptParts}},
+    );
+  }
+
+  if (orphanedIds.length > 0) {
+    logger.warn(
+      'Dropping function responses with no matching function call: ' +
+        orphanedIds.join(', '),
+    );
+  }
+
+  return resultEvents;
+}
+
+/**
+ * Builds the first user turn for an agent running under an isolation scope.
+ *
+ * A scoped agent sees only its own turns, so without this it starts with no
+ * statement of the task it was given. The delegating function call — whose id
+ * is the scope — supplies it: its arguments are rendered as the user's
+ * request. A workflow node dispatched without a delegating call falls back to
+ * `userContent`, which the workflow stamps with the node input.
+ *
+ * @returns The synthetic turn, or `undefined` when neither source yields one.
+ */
+function buildTaskInputUserContent(
+  allEvents: Event[],
+  isolationScope: string,
+  isSingleTurn: boolean,
+  userContent?: Content,
+): Content | undefined {
+  for (const event of allEvents) {
+    for (const part of event.content?.parts ?? []) {
+      const functionCall = part.functionCall;
+      if (
+        functionCall?.id === isolationScope &&
+        functionCall.args &&
+        Object.keys(functionCall.args).length > 0
+      ) {
+        return {
+          role: 'user',
+          // JSON.stringify leaves non-ASCII text as it is, so a task stated in
+          // another script reaches the model readable rather than escaped.
+          parts: withSingleTurnNudge(
+            [{text: JSON.stringify(functionCall.args)}],
+            isSingleTurn,
+          ),
+        };
+      }
+    }
+  }
+
+  if (userContent?.parts?.length) {
+    return {
+      role: 'user',
+      parts: withSingleTurnNudge(
+        userContent.parts.map((part) => ({...part})),
+        isSingleTurn,
+      ),
+    };
+  }
+
+  return undefined;
+}
+
+/** Appends the single-turn nudge part when the agent answers only once. */
+function withSingleTurnNudge(parts: Part[], isSingleTurn: boolean): Part[] {
+  return isSingleTurn ? [...parts, {text: SINGLE_TURN_NUDGE}] : parts;
 }
 
 /**
@@ -165,6 +475,8 @@ function isRequestInputEvent(event: Event): boolean {
  * @param events: A list of all session events.
  * @param agentName: The name of the agent.
  * @param currentBranch: The current branch of the agent.
+ * @param currentIsolationScope: The isolation scope of the current node, if any.
+ * @param options: How to build the contents.
  *
  * @returns A list of contents for the current turn only, preserving context
  *     needed for proper tool execution while excluding conversation history.
@@ -174,12 +486,18 @@ export function getCurrentTurnContents(
   agentName: string,
   currentBranch?: string,
   currentIsolationScope?: string,
+  options: GetContentsOptions = {},
 ): Content[] {
   // Find the latest event that starts the current turn and process from there.
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (
-      !shouldIncludeEventInContext(event, currentBranch, currentIsolationScope)
+      !shouldIncludeEventInContext(
+        event,
+        currentBranch,
+        currentIsolationScope,
+        includeThoughtsOf(agentName, event, options),
+      )
     ) {
       continue;
     }
@@ -189,6 +507,7 @@ export function getCurrentTurnContents(
         agentName,
         currentBranch,
         currentIsolationScope,
+        options,
       );
     }
   }
@@ -232,18 +551,17 @@ function turnStart(events: Event[], anchor: number): number {
  * Whether an event belongs to a different isolation scope than the one asking
  * for it, and so must be withheld.
  *
- * A tagged event is visible only within its own scope; an untagged event is
- * shared history and visible everywhere. So an isolated node sees the ambient
- * conversation plus its own turns, while its peers never see those turns.
+ * An event is visible only to a reader in exactly its own scope. A scoped agent
+ * therefore sees its own turns and nothing else, and an unscoped reader sees
+ * only untagged events. What a scoped agent used to get from the ambient
+ * conversation it now gets from its synthetic first turn, which states the task
+ * it was given.
  */
 function isOutsideIsolationScope(
   event: Event,
   currentIsolationScope?: string,
 ): boolean {
-  return (
-    event.isolationScope !== undefined &&
-    event.isolationScope !== currentIsolationScope
-  );
+  return event.isolationScope !== currentIsolationScope;
 }
 
 /**
@@ -305,10 +623,13 @@ function isEventFromAnotherAgent(agentName: string, event: Event): boolean {
  * agent's reply, etc.
  *
  * @param event The event to convert.
+ * @param includeThoughts Whether to relay the other agent's thought parts as
+ *     labelled context. Off by default: a thought is its reasoning, not its
+ *     answer.
  *
  * @returns The converted event.
  */
-function convertForeignEvent(event: Event): Event {
+function convertForeignEvent(event: Event, includeThoughts: boolean): Event {
   if (!event.content?.parts?.length) {
     return event;
   }
@@ -323,9 +644,15 @@ function convertForeignEvent(event: Event): Event {
   };
 
   for (const part of event.content.parts) {
-    // Exclude thoughts from the context.
-    // TODO - b/425992518: filtring should be configurable.
-    if (part.text && !part.thought) {
+    if (part.thought) {
+      if (includeThoughts && part.text?.trim()) {
+        content.parts?.push({
+          text: `[${event.author}] thought: ${part.text}`,
+        });
+      }
+      continue;
+    }
+    if (part.text) {
       content.parts?.push({
         text: `[${event.author}] said: ${part.text}`,
       });

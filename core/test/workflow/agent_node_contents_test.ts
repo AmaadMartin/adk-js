@@ -12,6 +12,7 @@
  * other.
  */
 
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
 import {createEvent, Event} from '../../src/events/event.js';
@@ -120,5 +121,54 @@ describe('LlmAgent as a workflow node — request contents', () => {
 
     expect(agent.includeContents).toBe('default');
     expect(texts(requests[0])).toContain('hello');
+  });
+});
+
+/** Records each request, then finishes the task. */
+class CaptureTaskLlm extends BaseLlm {
+  static override readonly supportedModels = [/capture-task-.*/];
+
+  override async *generateContentAsync(
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    requests.push({
+      contents: structuredClone(llmRequest.contents),
+      toolsDict: {},
+      liveConnectConfig: {},
+    });
+    yield {
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'finish_task', args: {answer: 'done'}}}],
+      },
+    };
+  }
+
+  override connect(): Promise<BaseLlmConnection> {
+    throw new Error('not supported');
+  }
+}
+LLMRegistry.register(CaptureTaskLlm);
+
+describe('task-mode agent node — request contents', () => {
+  it('reads its node input as the synthetic first user turn', async () => {
+    requests.length = 0;
+    const agent = new LlmAgent({
+      name: 'agent',
+      model: 'capture-task-1',
+      mode: 'task',
+      isolationScope: true,
+      instruction: 'answer',
+      outputSchema: {
+        type: Type.OBJECT,
+        properties: {answer: {type: Type.STRING}},
+      },
+    });
+    const wf = new Workflow({name: 'wf', edges: [['START', agent]]});
+
+    await drive(wf, 'summarize the report');
+
+    expect(requests).toHaveLength(1);
+    expect(texts(requests[0])).toEqual(['summarize the report']);
   });
 });
