@@ -24,6 +24,16 @@ vi.mock('../../src/utils/env_aware_utils.js', () => ({
   randomUUID: () => 'mock-uuid',
 }));
 
+// Left as a pass-through so one test can make the part conversion yield
+// nothing, which no real input can do while `toA2AParts` maps one to one.
+vi.mock('../../src/a2a/part_converter_utils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('../../src/a2a/part_converter_utils.js')
+    >();
+  return {...actual, toA2AParts: vi.fn(actual.toA2AParts)};
+});
+
 describe('event_processor_utils', () => {
   describe('getFinalTaskStatusUpdate', () => {
     const mockContext = {
@@ -171,6 +181,24 @@ describe('event_processor_utils', () => {
       const parts = result.status?.message?.parts;
       expect(parts?.length).toBe(1);
       expect((parts?.[0] as DataPart)?.data?.id).toBe('call_1');
+    });
+
+    it('throws when the long-running parts convert to nothing', () => {
+      // An input-required event with no parts is unanswerable. `toA2AParts`
+      // maps one to one today, so the converter is stubbed to reach the guard.
+      vi.mocked(toA2AParts).mockReturnValueOnce([]);
+      const events: AdkEvent[] = [
+        createEvent({
+          longRunningToolIds: ['call_1'],
+          content: {
+            parts: [{functionCall: {id: 'call_1', name: 'myFunc', args: {}}}],
+          },
+        }),
+      ];
+
+      expect(() => getFinalTaskStatusUpdate(events, mockContext)).toThrow(
+        'Long-running function calls produced no A2A response parts',
+      );
     });
   });
 
