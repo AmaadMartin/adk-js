@@ -14,6 +14,8 @@ import {
   AgentGepaAdapter,
   BaseLlm,
   GEPARootAgentPromptOptimizer,
+  isAgentOptimizer,
+  isSampler,
   LlmAgent,
   LLMRegistry,
   MISSING_GEPA_ENGINE_MESSAGE,
@@ -135,6 +137,18 @@ async function reflectOnce(
 
 beforeAll(() => {
   LLMRegistry.register(FakeReflectionLlm);
+});
+
+describe('GEPARootAgentPromptOptimizer identity', () => {
+  it('is recognized as an agent optimizer', () => {
+    expect(isAgentOptimizer(new GEPARootAgentPromptOptimizer())).toBe(true);
+    expect(isAgentOptimizer(createSampler())).toBe(false);
+  });
+
+  it('accepts a sampler the public type guard recognizes', () => {
+    expect(isSampler(createSampler())).toBe(true);
+    expect(isSampler(new GEPARootAgentPromptOptimizer())).toBe(false);
+  });
 });
 
 describe('requireGepaEngine', () => {
