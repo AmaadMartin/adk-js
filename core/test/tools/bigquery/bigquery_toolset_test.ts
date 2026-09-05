@@ -13,7 +13,6 @@
 import {
   BigQueryToolset,
   createSession,
-  executeSqlDescription,
   InvocationContext,
   LlmAgent,
   PluginManager,
@@ -22,6 +21,7 @@ import {
   type BaseTool,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {executeSqlDescription} from '../../../src/tools/bigquery/query_tool_descriptions.js';
 import {
   bigQueryState,
   createToolContext,

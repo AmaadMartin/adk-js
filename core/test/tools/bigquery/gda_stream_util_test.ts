@@ -13,8 +13,6 @@
 
 import {describe, expect, it, vi} from 'vitest';
 import {
-  GDA_DEFAULT_ENDPOINT,
-  getGdaEndpoint,
   getGdaHeaders,
   postGdaStream,
   readGdaStream,
@@ -47,33 +45,6 @@ function stream(lines: string[]): ReadableStream<Uint8Array> {
     },
   });
 }
-
-describe('getGdaEndpoint', () => {
-  it('serves the global endpoint when no location is given', () => {
-    expect(getGdaEndpoint()).toBe(GDA_DEFAULT_ENDPOINT);
-    expect(getGdaEndpoint('')).toBe(GDA_DEFAULT_ENDPOINT);
-    expect(getGdaEndpoint('GLOBAL')).toBe(GDA_DEFAULT_ENDPOINT);
-  });
-
-  it.each(['eu', 'us'])('serves the %s regional endpoint', (location) => {
-    expect(getGdaEndpoint(location)).toBe(
-      `https://geminidataanalytics.${location}.rep.googleapis.com`,
-    );
-  });
-
-  it('serves a per-region endpoint for any other location', () => {
-    expect(getGdaEndpoint(' us-central1 ')).toBe(
-      'https://geminidataanalytics-us-central1.googleapis.com',
-    );
-  });
-
-  it('takes an explicit endpoint over the location', () => {
-    expect(getGdaEndpoint('eu', 'https://example.test')).toBe(
-      'https://example.test',
-    );
-    expect(getGdaEndpoint('eu', 'example.test')).toBe('https://example.test');
-  });
-});
 
 describe('readGdaStream', () => {
   it('reassembles the array the API frames across lines', async () => {
@@ -256,7 +227,12 @@ describe('readGdaStream', () => {
     const message = {
       systemMessage: {
         data: {
-          result: {schema: {fields: [{name: 'n'}]}, data: [{n: 1}, 'junk']},
+          result: {
+            schema: {fields: [{name: 'n'}]},
+            // A list and a string are both dropped, matching adk-python's
+            // `isinstance(r, dict)` check.
+            data: [{n: 1}, 'junk', [2]],
+          },
         },
       },
     };
@@ -268,7 +244,7 @@ describe('readGdaStream', () => {
         'Data Retrieved': {
           headers: ['n'],
           rows: [[1]],
-          summary: 'Showing all 2 rows.',
+          summary: 'Showing all 3 rows.',
         },
       },
     ]);

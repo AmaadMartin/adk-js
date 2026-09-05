@@ -10,13 +10,13 @@
  * (branch `main`).
  */
 
-import {
-  askDataInsights,
-  BigQueryClientCache,
-  createBigQueryToolConfig,
-  type BigQueryToolDeps,
-} from '@google/adk';
+import {createBigQueryToolConfig} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  BigQueryClientCache,
+  type BigQueryToolDeps,
+} from '../../../src/tools/bigquery/client.js';
+import {askDataInsights} from '../../../src/tools/bigquery/data_insights_tool.js';
 
 /** The options argument of the global `fetch`. */
 type FetchOptions = Parameters<typeof fetch>[1];

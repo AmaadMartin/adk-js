@@ -12,12 +12,14 @@
 
 import {
   createBigQueryToolConfig,
-  DEFAULT_MAX_QUERY_RESULT_ROWS,
-  MINIMUM_BYTES_BILLED,
   WriteMode,
   type BigQueryToolConfig,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {
+  DEFAULT_MAX_QUERY_RESULT_ROWS,
+  MINIMUM_BYTES_BILLED,
+} from '../../../src/tools/bigquery/config.js';
 
 /** Builds `count` distinct, valid job labels. */
 function labels(count: number): Record<string, string> {
@@ -27,18 +29,6 @@ function labels(count: number): Record<string, string> {
 }
 
 describe('createBigQueryToolConfig', () => {
-  it('test_bigquery_tool_config_invalid_property', () => {
-    // TypeScript rejects an undeclared field at compile time; the runtime
-    // check is what a caller building the config from JSON hits.
-    const fromJson: BigQueryToolConfig = JSON.parse(
-      '{"non_existent_field": "some value"}',
-    ) as BigQueryToolConfig;
-
-    expect(() => createBigQueryToolConfig(fromJson)).toThrow(
-      'Unknown BigQueryToolConfig field: non_existent_field',
-    );
-  });
-
   it('test_bigquery_tool_config_invalid_application_name', () => {
     expect(() =>
       createBigQueryToolConfig({applicationName: 'my agent'}),

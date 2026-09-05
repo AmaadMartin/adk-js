@@ -10,18 +10,17 @@
  * (branch `main`).
  */
 
+import {createBigQueryToolConfig, type BigQueryToolConfig} from '@google/adk';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   BigQueryClientCache,
-  createBigQueryToolConfig,
   DP_USER_AGENT,
-  searchCatalog,
-  type BigQueryToolConfig,
   type BigQueryToolDeps,
-} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/tools/bigquery/client.js';
 import {
   constructSearchQuery,
   constructSearchQueryClause,
+  searchCatalog,
 } from '../../../src/tools/bigquery/search_tool.js';
 import {bigQueryState, resetBigQueryState} from './bigquery_fakes.js';
 

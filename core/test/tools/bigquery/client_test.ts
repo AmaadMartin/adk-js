@@ -10,6 +10,7 @@
  * (branch `main`).
  */
 
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   BigQueryClientCache,
   BQ_USER_AGENT,
@@ -18,8 +19,7 @@ import {
   getBigQueryClient,
   getDataplexCatalogClient,
   USER_AGENT_BASE,
-} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/tools/bigquery/client.js';
 import {version} from '../../../src/version.js';
 import {bigQueryState, resetBigQueryState} from './bigquery_fakes.js';
 

@@ -16,18 +16,10 @@
 
 import type {CredentialBody} from 'google-auth-library';
 
-/** State key adk-python caches the BigQuery OAuth token under. */
-export const BIGQUERY_TOKEN_CACHE_KEY = 'bigquery_token_cache';
-
 /** OAuth scopes the BigQuery tools need, including catalog search. */
 export const BIGQUERY_SCOPES = [
   'https://www.googleapis.com/auth/bigquery',
   'https://www.googleapis.com/auth/dataplex.read-write',
-];
-
-/** The BigQuery scope on its own, without catalog search. */
-export const BIGQUERY_DEFAULT_SCOPE = [
-  'https://www.googleapis.com/auth/bigquery',
 ];
 
 /**

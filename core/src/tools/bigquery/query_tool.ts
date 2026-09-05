@@ -17,6 +17,7 @@ import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 
 import {Context} from '../../agents/context.js';
+import {errorStatusCode} from '../../utils/error_utils.js';
 import {BaseTool} from '../base_tool.js';
 import {FunctionTool} from '../function_tool.js';
 
@@ -35,6 +36,7 @@ import {
   BigQueryToolError,
   BigQueryToolResult,
   bigQueryToolError,
+  isBigQueryToolError,
   runBigQueryTool,
 } from './tool_result.js';
 
@@ -531,13 +533,6 @@ function withModelSession(
   };
 }
 
-/** Whether a value is the failure envelope rather than a tool's deps. */
-function isToolError(
-  value: BigQueryToolDeps | BigQueryToolError,
-): value is BigQueryToolError {
-  return 'status' in value;
-}
-
 /** Names a temporary BigQuery ML model uniquely within the session. */
 function temporaryModelName(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, '_')}`;
@@ -598,14 +593,6 @@ async function resolveDataSource(
   }
   const error = await validateSubquery(source, deps, projectId, callerId);
   return error ?? `(${source})`;
-}
-
-/** The HTTP status of a Google API error, when it carries one. */
-function errorStatusCode(err: unknown): number | undefined {
-  if (typeof err === 'object' && err !== null && 'code' in err) {
-    return typeof err.code === 'number' ? err.code : undefined;
-  }
-  return undefined;
 }
 
 /**
@@ -762,7 +749,7 @@ export async function analyzeContribution(
   }
 
   const modelDeps = withModelSession(deps, 'analyze_contribution');
-  if (isToolError(modelDeps)) {
+  if (isBigQueryToolError(modelDeps)) {
     return modelDeps;
   }
 
@@ -839,7 +826,7 @@ export async function detectAnomalies(
   }
 
   const modelDeps = withModelSession(deps, 'anomaly detection');
-  if (isToolError(modelDeps)) {
+  if (isBigQueryToolError(modelDeps)) {
     return modelDeps;
   }
 

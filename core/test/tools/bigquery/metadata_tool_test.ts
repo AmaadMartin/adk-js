@@ -10,18 +10,20 @@
  * (branch `main`).
  */
 
+import {createBigQueryToolConfig} from '@google/adk';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   BigQueryClientCache,
   BQ_USER_AGENT,
-  createBigQueryToolConfig,
+  type BigQueryToolDeps,
+} from '../../../src/tools/bigquery/client.js';
+import {
   getDatasetInfo,
   getJobInfo,
   getTableInfo,
   listDatasetIds,
   listTableIds,
-  type BigQueryToolDeps,
-} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+} from '../../../src/tools/bigquery/metadata_tool.js';
 import {bigQueryState, resetBigQueryState} from './bigquery_fakes.js';
 
 vi.mock('@google-cloud/bigquery', async () => {

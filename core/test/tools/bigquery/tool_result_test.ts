@@ -10,12 +10,12 @@
  * `src/google/adk/integrations/bigquery/` does (branch `main`).
  */
 
+import {isBigQueryToolError} from '@google/adk';
+import {describe, expect, it} from 'vitest';
 import {
   bigQueryToolError,
-  isBigQueryToolError,
   runBigQueryTool,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+} from '../../../src/tools/bigquery/tool_result.js';
 
 describe('runBigQueryTool', () => {
   it('returns the body value when the body resolves', async () => {

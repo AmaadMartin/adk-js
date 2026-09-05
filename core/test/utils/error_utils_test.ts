@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {errorStatusCode, formatError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,24 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('errorStatusCode', () => {
+  it.each([
+    {id: 'an HTTP status', err: Object.assign(new Error('bad'), {code: 400})},
+    {id: 'a gRPC status', err: Object.assign(new Error('denied'), {code: 7})},
+  ])('reads $id', ({err}) => {
+    expect(errorStatusCode(err)).toBe((err as Error & {code: number}).code);
+  });
+
+  it.each([
+    {id: 'a string code', value: Object.assign(new Error('x'), {code: 'E'})},
+    {id: 'an error without a code', value: new Error('x')},
+    {id: 'a string', value: 'boom'},
+    {id: 'null', value: null},
+    {id: 'undefined', value: undefined},
+  ])('reports no status for $id', ({value}) => {
+    expect(errorStatusCode(value)).toBeUndefined();
   });
 });

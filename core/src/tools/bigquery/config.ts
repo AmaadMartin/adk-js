@@ -55,14 +55,12 @@ export interface BigQueryToolConfig {
    */
   writeMode?: WriteMode;
   /**
-   * Cap on the bytes a query may bill. Must be at least
-   * {@link MINIMUM_BYTES_BILLED}. Absent means no cap.
+   * Cap on the bytes a query may bill. Must be at least `10485760`, because
+   * BigQuery on-demand pricing bills a minimum of 10 MB per query. Absent
+   * means no cap.
    */
   maximumBytesBilled?: number;
-  /**
-   * How many rows a query result may carry. Defaults to
-   * {@link DEFAULT_MAX_QUERY_RESULT_ROWS}.
-   */
+  /** How many rows a query result may carry. Defaults to `50`. */
   maxQueryResultRows?: number;
   /**
    * Name of the application that uses the tools. It is added to the BigQuery
@@ -85,9 +83,9 @@ export interface BigQueryToolConfig {
    */
   location?: string;
   /**
-   * Labels applied to every BigQuery job the tools run. At most
-   * {@link MAX_JOB_LABELS} entries; a key must not be empty and must not start
-   * with {@link RESERVED_JOB_LABEL_PREFIX}. See
+   * Labels applied to every BigQuery job the tools run. At most 20 entries;
+   * a key must not be empty and must not start with `adk-bigquery-`, which
+   * the tools reserve. See
    * https://cloud.google.com/bigquery/docs/labels-intro.
    *
    * These labels serve usage discovery and tracking. Do not use them for a
@@ -104,17 +102,6 @@ export interface ResolvedBigQueryToolConfig extends BigQueryToolConfig {
   writeMode: WriteMode;
   maxQueryResultRows: number;
 }
-
-/** The fields {@link BigQueryToolConfig} declares, for the unknown-key check. */
-const CONFIG_FIELDS: ReadonlyArray<keyof BigQueryToolConfig> = [
-  'writeMode',
-  'maximumBytesBilled',
-  'maxQueryResultRows',
-  'applicationName',
-  'computeProjectId',
-  'location',
-  'jobLabels',
-];
 
 /** Rejects a `maximumBytesBilled` a BigQuery job could never honour. */
 function validateMaximumBytesBilled(value: number | undefined): void {
@@ -157,16 +144,6 @@ function validateJobLabels(labels: Record<string, string> | undefined): void {
   }
 }
 
-/** Rejects a key the config does not declare. */
-function validateNoUnknownFields(config: BigQueryToolConfig): void {
-  const known = new Set<string>(CONFIG_FIELDS);
-  for (const key of Object.keys(config)) {
-    if (!known.has(key)) {
-      throw new Error(`Unknown BigQueryToolConfig field: ${key}`);
-    }
-  }
-}
-
 /**
  * Validates a BigQuery tool configuration and applies its defaults.
  *
@@ -175,12 +152,11 @@ function validateNoUnknownFields(config: BigQueryToolConfig): void {
  *
  * @param config The caller's configuration. Absent means every default.
  * @return The configuration the tools read.
- * @throws If a field is unknown or its value is out of range.
+ * @throws If a value is out of range.
  */
 export function createBigQueryToolConfig(
   config: BigQueryToolConfig = {},
 ): ResolvedBigQueryToolConfig {
-  validateNoUnknownFields(config);
   validateMaximumBytesBilled(config.maximumBytesBilled);
   validateApplicationName(config.applicationName);
   validateJobLabels(config.jobLabels);
