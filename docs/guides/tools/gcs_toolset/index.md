@@ -61,9 +61,7 @@ Pass the read-write capability to add `gcs_create_object` and
 ```ts
 import {GcsCapability, GcsToolset} from '@google/adk';
 
-const toolset = new GcsToolset({
-  toolSettings: {capabilities: [GcsCapability.READ_WRITE]},
-});
+const toolset = new GcsToolset({capabilities: [GcsCapability.READ_WRITE]});
 ```
 
 `gcs_delete_objects` deletes permanently and there is no undo. Give a toolset
@@ -77,7 +75,7 @@ prefix.
 
 ```ts
 const toolset = new GcsToolset({
-  toolSettings: {capabilities: [GcsCapability.READ_WRITE]},
+  capabilities: [GcsCapability.READ_WRITE],
   toolFilter: ['gcs_create_object', 'gcs_get_object_data'],
 });
 ```

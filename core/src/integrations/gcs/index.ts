@@ -7,21 +7,25 @@
 export {GCS_TOOL_USER_AGENT, createGcsClient} from './client.js';
 export {GCS_DEFAULT_SCOPE} from './gcs_credentials.js';
 export type {GcsCredentialsConfig} from './gcs_credentials.js';
-export {DEFAULT_GCS_CAPABILITIES, GcsCapability} from './settings.js';
-export type {GcsToolSettings} from './settings.js';
+export {GcsCapability} from './settings.js';
+// The parameter schemas are published because the exported `*Args` types are
+// inferred from them, and typedoc resolves an inferred type only when the
+// schema it names is itself documented.
 export {
-  createGcsReadTools,
-  createGcsWriteTools,
   createObject,
+  createObjectParameters,
   deleteObjects,
+  deleteObjectsParameters,
   getObjectData,
+  getObjectDataParameters,
   getObjectMetadata,
+  getObjectMetadataParameters,
   listObjects,
+  listObjectsParameters,
 } from './storage_tool.js';
 export type {
   CreateObjectArgs,
   DeleteObjectsArgs,
-  GcsClientProvider,
   GcsErrorResult,
   GcsListObjectsResult,
   GcsMessageResult,

@@ -49,7 +49,7 @@ describe('test_gcs_toolset.py', () => {
 
   it('test_gcs_toolset_tools_read_write', async () => {
     const toolset = new GcsToolset({
-      toolSettings: {capabilities: [GcsCapability.READ_WRITE]},
+      capabilities: [GcsCapability.READ_WRITE],
     });
 
     expect(await toolNames(toolset)).toEqual([...ALL_TOOL_NAMES].sort());

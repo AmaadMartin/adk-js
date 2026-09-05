@@ -16,20 +16,3 @@ export enum GcsCapability {
   /** Both read and write operations are allowed. */
   READ_WRITE = 'read_write',
 }
-
-/** Settings for the Cloud Storage tools. */
-export interface GcsToolSettings {
-  /**
-   * Allowed capabilities for the Cloud Storage tools.
-   *
-   * Defaults to `[GcsCapability.READ_ONLY]` when omitted, so a toolset built
-   * with no settings never exposes a write tool. This default may change in
-   * future versions.
-   */
-  capabilities?: GcsCapability[];
-}
-
-/** The capabilities a toolset uses when the caller supplies none. */
-export const DEFAULT_GCS_CAPABILITIES: GcsCapability[] = [
-  GcsCapability.READ_ONLY,
-];

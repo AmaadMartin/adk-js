@@ -51,7 +51,7 @@ export interface GcsMessageResult {
  * Model-facing parameters stay snake_case: they appear in the function
  * declaration the model reads, so they match adk-python exactly.
  */
-const listObjectsParameters = z.object({
+export const listObjectsParameters = z.object({
   bucket_name: z.string().describe('The name of the GCS bucket.'),
   prefix: z
     .string()
@@ -68,7 +68,7 @@ const listObjectsParameters = z.object({
     .describe('A page token, received from a previous list_objects call.'),
 });
 
-const getObjectMetadataParameters = z.object({
+export const getObjectMetadataParameters = z.object({
   bucket_name: z
     .string()
     .describe('The name of the GCS bucket containing the object.'),
@@ -80,7 +80,7 @@ const getObjectMetadataParameters = z.object({
     .describe('If present, selects a specific generation of this object.'),
 });
 
-const getObjectDataParameters = z.object({
+export const getObjectDataParameters = z.object({
   bucket_name: z.string().describe('The name of the GCS bucket.'),
   object_name: z.string().describe('The name of the GCS object.'),
   generation: z
@@ -97,7 +97,7 @@ const getObjectDataParameters = z.object({
     ),
 });
 
-const createObjectParameters = z.object({
+export const createObjectParameters = z.object({
   bucket_name: z.string().describe('The name of the GCS bucket.'),
   object_name: z.string().describe('The name of the GCS object to create.'),
   data: z.string().optional().describe('The content to write to the object.'),
@@ -110,77 +110,21 @@ const createObjectParameters = z.object({
     ),
 });
 
-const deleteObjectsParameters = z.object({
+export const deleteObjectsParameters = z.object({
   bucket_name: z.string().describe('The name of the GCS bucket.'),
   object_names: z.array(z.string()).describe('List of object names to delete.'),
 });
 
-/**
- * Arguments of {@link listObjects}.
- *
- * These interfaces mirror the zod schemas above, which stay private because
- * they are the model-facing declaration rather than public API. The two cannot
- * drift: each tool passes its schema-inferred input straight to the function
- * that takes the interface, so a mismatch fails to compile.
- */
-export interface ListObjectsArgs {
-  /** The name of the GCS bucket. */
-  bucket_name: string;
-  /** Filter results to objects whose names begin with this prefix. */
-  prefix?: string;
-  /** The maximum number of objects to return in a single page. */
-  page_size?: number;
-  /** A page token, received from a previous list_objects call. */
-  page_token?: string;
-}
-
+/** Arguments of {@link listObjects}. */
+export type ListObjectsArgs = z.infer<typeof listObjectsParameters>;
 /** Arguments of {@link getObjectMetadata}. */
-export interface GetObjectMetadataArgs {
-  /** The name of the GCS bucket containing the object. */
-  bucket_name: string;
-  /** The name of the GCS object. */
-  object_name: string;
-  /** If present, selects a specific generation of this object. */
-  generation?: number;
-}
-
+export type GetObjectMetadataArgs = z.infer<typeof getObjectMetadataParameters>;
 /** Arguments of {@link getObjectData}. */
-export interface GetObjectDataArgs {
-  /** The name of the GCS bucket. */
-  bucket_name: string;
-  /** The name of the GCS object. */
-  object_name: string;
-  /** If present, selects a specific generation of this object. */
-  generation?: number;
-  /**
-   * The local filesystem path to save the downloaded file. The path is not
-   * sandboxed: the object is written wherever this points.
-   */
-  destination_file_path?: string;
-}
-
+export type GetObjectDataArgs = z.infer<typeof getObjectDataParameters>;
 /** Arguments of {@link createObject}. */
-export interface CreateObjectArgs {
-  /** The name of the GCS bucket. */
-  bucket_name: string;
-  /** The name of the GCS object to create. */
-  object_name: string;
-  /** The content to write to the object. */
-  data?: string;
-  /**
-   * The local filesystem path of the file to upload. The path is not
-   * sandboxed. Every file this process can read can be uploaded.
-   */
-  source_file_path?: string;
-}
-
+export type CreateObjectArgs = z.infer<typeof createObjectParameters>;
 /** Arguments of {@link deleteObjects}. */
-export interface DeleteObjectsArgs {
-  /** The name of the GCS bucket. */
-  bucket_name: string;
-  /** List of object names to delete. */
-  object_names: string[];
-}
+export type DeleteObjectsArgs = z.infer<typeof deleteObjectsParameters>;
 
 /** Supplies the Cloud Storage client a tool runs against. */
 export type GcsClientProvider = () => Promise<Storage>;
@@ -188,10 +132,7 @@ export type GcsClientProvider = () => Promise<Storage>;
 /** True when the Cloud Storage SDK reported HTTP 404 for a request. */
 function isNotFound(err: unknown): boolean {
   return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as {code?: unknown}).code === 404
+    typeof err === 'object' && err !== null && 'code' in err && err.code === 404
   );
 }
 

@@ -12,11 +12,7 @@ import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
 import {experimental} from '../../utils/experimental.js';
 import {createGcsClient} from './client.js';
 import {GcsCredentialsConfig} from './gcs_credentials.js';
-import {
-  DEFAULT_GCS_CAPABILITIES,
-  GcsCapability,
-  GcsToolSettings,
-} from './settings.js';
+import {GcsCapability} from './settings.js';
 import {createGcsReadTools, createGcsWriteTools} from './storage_tool.js';
 
 /** The name prefix every Cloud Storage tool carries by default. */
@@ -31,8 +27,12 @@ export interface GcsToolsetOptions {
   toolFilter?: ToolPredicate | string[];
   /** How to authenticate. Defaults to Application Default Credentials. */
   credentialsConfig?: GcsCredentialsConfig;
-  /** Which operations to expose. Defaults to read-only. */
-  toolSettings?: GcsToolSettings;
+  /**
+   * Which operations to expose. Defaults to `[GcsCapability.READ_ONLY]`, so a
+   * toolset built with no options never exposes a write tool. This default may
+   * change in future versions.
+   */
+  capabilities?: GcsCapability[];
   /** The project id to bill. Left to the SDK's resolution when omitted. */
   project?: string;
   /**
@@ -56,9 +56,7 @@ export interface GcsToolsetOptions {
  * that changes a bucket.
  *
  * ```ts
- * const toolset = new GcsToolset({
- *   toolSettings: {capabilities: [GcsCapability.READ_WRITE]},
- * });
+ * const toolset = new GcsToolset({capabilities: [GcsCapability.READ_WRITE]});
  * ```
  *
  * Requires the optional peer dependency `@google-cloud/storage`, which is
@@ -76,8 +74,7 @@ export class GcsToolset extends BaseToolset {
       options.toolFilter ?? [],
       options.prefix ?? DEFAULT_GCS_TOOL_NAME_PREFIX,
     );
-    this.capabilities =
-      options.toolSettings?.capabilities ?? DEFAULT_GCS_CAPABILITIES;
+    this.capabilities = options.capabilities ?? [GcsCapability.READ_ONLY];
     this.credentialsConfig = options.credentialsConfig;
     this.project = options.project;
   }
