@@ -131,13 +131,14 @@ exports.rootAgent = new NodeModulesAgent();`,
       expect(apps).toContain('standalone_app');
 
       const agentsAndApps = await loader.listAgents();
-      expect(agentsAndApps).toHaveLength(5);
+      expect(agentsAndApps).toHaveLength(6);
       expect(agentsAndApps).toContain('service_alpha');
       expect(agentsAndApps).toContain('service_beta');
       // Before a Workflow could be a root this was not an error, it was a
       // silence: the file exported nothing matching `isBaseAgent`, so the
       // directory simply did not show up.
       expect(agentsAndApps).toContain('service_graph');
+      expect(agentsAndApps).toContain('service_index');
       expect(agentsAndApps).toContain('standalone_agent');
       expect(agentsAndApps).toContain('standalone_app');
       expect(agentsAndApps).not.toContain('.hidden');
@@ -158,6 +159,18 @@ exports.rootAgent = new NodeModulesAgent();`,
       const rootAgent = await appFile.loadAgent();
       expect(isBaseAgent(rootAgent)).toBe(true);
       expect(rootAgent.name).toBe('alpha_agent');
+    },
+    TEST_EXECUTION_TIMEOUT,
+  );
+
+  it(
+    'should load a directory agent from its index entrypoint',
+    async () => {
+      const agentFile = await loader.getAgentFile('service_index');
+      const rootAgent = await agentFile.loadAgent();
+
+      expect(isBaseAgent(rootAgent)).toBe(true);
+      expect(rootAgent.name).toBe('index_agent');
     },
     TEST_EXECUTION_TIMEOUT,
   );
