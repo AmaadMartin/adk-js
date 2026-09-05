@@ -622,8 +622,13 @@ export async function handleFunctionCallList({
     // Only a nullish response defers the event. A falsy-but-present response
     // ('', 0, false) is a real result and still emits one, so long-running
     // tools that return such a value now produce a response event where they
-    // previously produced none.
-    if (tool.isLongRunning && functionResponse == null) {
+    // previously produced none. A deferring tool supplies the matching
+    // FunctionResponse later by design, so it skips the same way without being
+    // marked long running.
+    if (
+      (tool.isLongRunning || tool.defersResponse) &&
+      functionResponse == null
+    ) {
       // The tool's response will arrive later, but any actions it recorded on
       // the tool context (state/artifact deltas, auth or confirmation
       // requests, transfer, escalation, skipSummarization) must not be lost.
