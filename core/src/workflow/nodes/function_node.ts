@@ -7,13 +7,24 @@
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {createEvent, Event, isEvent} from '../../events/event.js';
 import {carryDeltaStamp} from '../../sessions/state_write_order.js';
+import {SchemaLike} from '../../utils/schema.js';
 import {BaseNode, BaseNodeConfig, isContent, toContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
+import {isRequestInput, RequestInput} from '../request_input.js';
 import {
   createAuthRequestEvent,
+  createRequestInputEvent,
   hasAuthCredential,
   processAuthResume,
 } from '../utils/hitl_utils.js';
+import {
+  bindParameters,
+  describeParameters,
+  NODE_INPUT_PARAMETER,
+  ParameterBinding,
+  ParameterDescriptor,
+  parameterFieldSchema,
+} from '../utils/parameter_binding.js';
 
 /**
  * A value a {@link FunctionNodeHandler} may return or yield.
@@ -21,6 +32,7 @@ import {
 export type FunctionNodeResult<TOutput> =
   | TOutput
   | Event
+  | RequestInput
   | null
   | undefined
   | void;
@@ -28,11 +40,10 @@ export type FunctionNodeResult<TOutput> =
 /**
  * The handler wrapped by a {@link FunctionNode}.
  *
- * Unlike Python's `FunctionNode` (which binds named parameters from `ctx.state`
- * or `node_input` via runtime signature introspection), the TypeScript form
- * uses the idiomatic explicit `(ctx, input)` signature. Read `ctx.state`
- * directly for state-bound values. It may return a value/`Event`, a Promise, or
- * a (sync/async) generator of those.
+ * The handler receives the raw node input as its second argument. When the node
+ * declares {@link FunctionNodeConfig.parameters}, it receives the bound,
+ * defaulted and validated arguments object instead. It may return a
+ * value/`Event`, a Promise, or a (sync/async) generator of those.
  */
 export type FunctionNodeHandler<TInput = unknown, TOutput = unknown> = (
   ctx: NodeContext,
@@ -46,14 +57,31 @@ export type FunctionNodeHandler<TInput = unknown, TOutput = unknown> = (
 /**
  * Options for a {@link FunctionNode}.
  */
-export interface FunctionNodeConfig extends Partial<
-  Omit<BaseNodeConfig, 'name'>
-> {
+export interface FunctionNodeConfig extends Partial<BaseNodeConfig> {
   /**
    * If set, the framework requests user authentication before running (Phase 5
    * enables the auth gate; stored here now for API parity).
+   *
+   * Requires `rerunOnResume: true`, because the node has to run again once the
+   * credential arrives; otherwise the handler never sees it.
    */
   authConfig?: AuthConfig;
+
+  /**
+   * The parameters the handler consumes, declared as an object schema (Zod
+   * v3/v4 or a genai `Schema`).
+   *
+   * When set, the handler's second argument is the bound, defaulted and
+   * validated arguments object instead of the raw node input. Python derives
+   * the same information from the function signature, which TypeScript erases.
+   *
+   * A parameter whose schema has no Zod equivalent passes its value through
+   * unchecked — the same degradation `parseWithSchema` makes, not a guarantee.
+   */
+  parameters?: SchemaLike;
+
+  /** Where the declared {@link parameters} are read from. Default `'state'`. */
+  parameterBinding?: ParameterBinding;
 }
 
 /**
@@ -66,13 +94,27 @@ export interface FunctionNodeConfig extends Partial<
  *  - `null`/`undefined` → skipped (unless there are pending state deltas)
  *  - anything else → emitted as `Event(output=value)`
  * State written via `ctx.state` during execution is attached to emitted events.
+ *
+ * Declaring {@link FunctionNodeConfig.parameters} switches the handler's second
+ * argument from the raw node input to an arguments object bound from
+ * `ctx.state` (`parameterBinding: 'state'`, the default) or from the upstream
+ * node's output (`'nodeInput'`).
  */
 export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
   TInput,
   TOutput
 > {
   readonly authConfig?: AuthConfig;
+  /** Where declared parameters are read from (`'state'` when none are). */
+  readonly parameterBinding: ParameterBinding;
   private readonly handler: FunctionNodeHandler<TInput, TOutput>;
+  /**
+   * The declared parameters, resolved from the schema here rather than on every
+   * run, mirroring Python's construction-time `_type_adapters`. `undefined`
+   * when the node declares none, which is the raw-input path every caller
+   * written before this option took.
+   */
+  private readonly parameterDescriptors?: readonly ParameterDescriptor[];
   /** Per-run shadow of the state entries already attached to an emitted event. */
   private readonly attachedStateByCtx = new WeakMap<
     NodeContext,
@@ -82,16 +124,56 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
   constructor(
     name: string,
     handler: FunctionNodeHandler<TInput, TOutput>,
-    config: FunctionNodeConfig = {},
+    config?: FunctionNodeConfig,
+  );
+  constructor(
+    handler: FunctionNodeHandler<TInput, TOutput>,
+    config?: FunctionNodeConfig,
+  );
+  constructor(
+    nameOrHandler: string | FunctionNodeHandler<TInput, TOutput>,
+    handlerOrConfig?: FunctionNodeHandler<TInput, TOutput> | FunctionNodeConfig,
+    trailingConfig: FunctionNodeConfig = {},
   ) {
+    const nameOmitted = typeof nameOrHandler === 'function';
+    const handler = (
+      nameOmitted ? nameOrHandler : handlerOrConfig
+    ) as FunctionNodeHandler<TInput, TOutput>;
+    const config =
+      (nameOmitted
+        ? (handlerOrConfig as FunctionNodeConfig | undefined)
+        : trailingConfig) ?? {};
+
     if (typeof handler !== 'function') {
       throw new TypeError('FunctionNode handler must be a function.');
     }
+    if (config.authConfig && !config.rerunOnResume) {
+      throw new Error(
+        'FunctionNode with authConfig requires rerunOnResume: true. The node ' +
+          'must rerun after credentials are provided.',
+      );
+    }
+    const name =
+      (nameOmitted ? undefined : nameOrHandler) || config.name || handler.name;
+    if (!name) {
+      throw new Error(
+        'FunctionNode must have a name. If the wrapped callable does not have ' +
+          'a name, please provide one explicitly.',
+      );
+    }
     // Spread first so an explicit `undefined` name in `config` can't clobber
     // the resolved name (which BaseNode requires to be non-empty).
-    super({...config, name});
+    super({
+      ...config,
+      name,
+      inputSchema: config.inputSchema ?? inferInputSchema(config),
+    });
     this.handler = handler;
     this.authConfig = config.authConfig;
+    this.parameterBinding = config.parameterBinding ?? 'state';
+    this.parameterDescriptors = config.parameters
+      ? describeParameters(config.parameters)
+      : undefined;
   }
 
   protected async *runImpl(
@@ -107,7 +189,7 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
       }
     }
 
-    const result = this.handler(ctx, input);
+    const result = this.handler(ctx, this.handlerInput(ctx, input));
 
     if (isAsyncIterable(result)) {
       for await (const item of result) {
@@ -123,6 +205,26 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
     }
 
     yield undefined;
+  }
+
+  /**
+   * The second argument handed to the handler: the raw node input, or the bound
+   * arguments object when the node declares its parameters.
+   */
+  private handlerInput(ctx: NodeContext, input: TInput): TInput {
+    if (!this.parameterDescriptors) {
+      return input;
+    }
+    const args = bindParameters({
+      descriptors: this.parameterDescriptors,
+      binding: this.parameterBinding,
+      state: ctx.state,
+      nodeInput: input,
+      nodeName: this.name,
+    });
+    // The declared `parameters` schema, not `TInput`, decides the runtime shape
+    // here; `FunctionTool.validateArgs` has the same seam for the same reason.
+    return args as TInput;
   }
 
   /**
@@ -206,6 +308,16 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
   }
 
   protected override toEvent(ctx: NodeContext, data: unknown): Event | null {
+    // Checked before the state delta is drained: draining marks those keys as
+    // attached, so an early return after it would lose them. `BaseNode.run`
+    // already converts a yielded RequestInput, so this only catches one handed
+    // to `toEvent` directly. Python's `_to_event` returns the RequestInput
+    // itself; here the override's return type is `Event | null`, so it returns
+    // the interrupt event `run` would have produced.
+    if (isRequestInput(data)) {
+      return createRequestInputEvent(data);
+    }
+
     const stateDelta = this.pendingStateDelta(ctx);
 
     if (data === null || data === undefined) {
@@ -253,6 +365,24 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
       actions: stateDelta ? {stateDelta} : undefined,
     });
   }
+}
+
+/**
+ * The `inputSchema` implied by the declared parameters, so a node that binds
+ * from its input can be wrapped by `NodeTool` without restating its schema.
+ * This is Python's `_infer_schemas_from_func_signature`, and the `node_input`
+ * hint of `_infer_schemas_for_state_mode`.
+ *
+ * `outputSchema` has no counterpart: TypeScript keeps no return type at
+ * runtime, so it stays an explicit `BaseNodeConfig` field.
+ */
+function inferInputSchema(config: FunctionNodeConfig): SchemaLike | undefined {
+  if (!config.parameters) {
+    return undefined;
+  }
+  return config.parameterBinding === 'nodeInput'
+    ? config.parameters
+    : parameterFieldSchema(config.parameters, NODE_INPUT_PARAMETER);
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
