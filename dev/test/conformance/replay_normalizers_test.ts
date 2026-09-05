@@ -387,7 +387,10 @@ describe('normalizeRelayedAgentContent', () => {
   });
 
   it('leaves a one-part message verbatim', () => {
-    const message = {role: 'user', parts: [{text: 'For context:'}]};
+    const message = {
+      role: 'user',
+      parts: [{text: OTHER_AGENT_CONTEXT_PREAMBLE}],
+    };
     expect(normalizeRelayedAgentContent(message)).toEqual(message);
   });
 
@@ -396,7 +399,7 @@ describe('normalizeRelayedAgentContent', () => {
       role: 'user',
       parts: [
         {text: 'For context: I already told you my name.'},
-        {text: 'What is it?'},
+        {text: `What is it?:\n${fence('Alex')}`},
       ],
     };
     expect(normalizeRelayedAgentContent(message)).toEqual(message);
