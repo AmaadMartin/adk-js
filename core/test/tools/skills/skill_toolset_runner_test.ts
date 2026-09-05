@@ -34,18 +34,20 @@ const SKILL: Skill = {
   instructions: 'Run the counter.',
   resources: {
     references: {'notes.md': 'alpha beta gamma'},
-    scripts: {'count.sh': {src: 'echo counted'}},
+    scripts: {'count.js': {src: "console.log('counted');"}},
   },
 };
 
-const COMMAND = 'sh skills/word-count/scripts/count.sh';
+// Run through the Node binary running the test: `LocalEnvironment` spawns
+// through the platform shell, and `cmd.exe` on Windows has no `sh`.
+const COMMAND = `"${process.execPath}" skills/word-count/scripts/count.js`;
 
 const SCRIPT_CALL: FunctionCall = {
   id: 'orig-1',
   name: 'run_skill_script',
   args: {
     skill_name: 'word-count',
-    script_path: 'count.sh',
+    script_path: 'count.js',
     command: COMMAND,
   },
 };
@@ -184,17 +186,15 @@ describe('SkillToolset driven by a Runner', () => {
     expect(out).toHaveLength(1);
     const response = out[0].content?.parts?.[0].functionResponse;
     expect(response?.id).toBe('orig-1');
-    expect(response?.response).toMatchObject({
-      stdout: 'counted\n',
-      exit_code: 0,
-      timed_out: false,
-    });
+    expect(response?.response).toMatchObject({exit_code: 0, timed_out: false});
+    // Trimmed: Windows ends the line with a carriage return as well.
+    expect(String(response?.response?.['stdout']).trim()).toBe('counted');
     expect(
       await fs.readFile(
-        path.join(workspace, 'skills/word-count/scripts/count.sh'),
+        path.join(workspace, 'skills/word-count/scripts/count.js'),
         'utf8',
       ),
-    ).toBe('echo counted');
+    ).toBe("console.log('counted');");
   });
 
   it('refuses the command when the client denies the pinned call', async () => {
@@ -251,7 +251,7 @@ describe('SkillToolset driven by a Runner', () => {
     });
     // Nothing ran and nothing was written.
     await expect(
-      fs.access(path.join(workspace, 'skills/word-count/scripts/count.sh')),
+      fs.access(path.join(workspace, 'skills/word-count/scripts/count.js')),
     ).rejects.toThrow();
   });
 });
