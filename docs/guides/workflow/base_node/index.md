@@ -116,14 +116,15 @@ parent terminates.
 | Input                                         | Result                               |
 | :-------------------------------------------- | :----------------------------------- |
 | a primitive, a function                       | returned unchanged                   |
-| a plain object or array needing no conversion | returned by identity                 |
+| an array                                      | a new array of flattened items       |
 | a `Set`                                       | an array                             |
 | a `Map`                                       | a plain object with stringified keys |
 | a value carrying `toJSON()`, such as a `Date` | the result of `toJSON()`             |
-| any other class instance                      | a plain object of its own properties |
+| a plain object, or any other class instance   | a plain object of its own properties |
 
-It never throws. A value it cannot flatten comes back unchanged, and a circular
-structure terminates where the cycle closes.
+A circular structure terminates: the reference that closes the cycle comes back
+as it is. A `toJSON()` that throws leaves its own value unflattened, and the
+rest of the tree is still flattened.
 
 `validateOutput` calls it on the result of a successful schema parse, so a
 transform that builds a class instance still stores plain data:
