@@ -60,10 +60,12 @@ describe('node() options-only form', () => {
   });
 
   it('rejects a plain object carrying a key that is not an option', () => {
-    // The disambiguation cannot be a bare plain-object check: this object has
-    // to fall through to buildNode and be rejected there.
+    // `name` alone makes this assignable to the options type, so the compiler
+    // reads the call as the options-only form. The runtime check sees the
+    // `runAsync` key, routes it to buildNode, and buildNode rejects it — which
+    // is why the disambiguation cannot be a bare plain-object test.
     const fakeAgent = {name: 'a', runAsync: async function* () {}};
-    expect(() => node(fakeAgent as unknown as never)).toThrow(/unsupported/);
+    expect(() => node(fakeAgent)).toThrow(/unsupported/);
   });
 
   it('rejects an invalid option pair when the factory is created, not when it is applied', () => {
