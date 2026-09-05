@@ -16,35 +16,31 @@
  * instead of a module registry.
  */
 
-import {type Attributes, type Tracer} from '@opentelemetry/api';
-import {
-  BasicTracerProvider,
-  InMemorySpanExporter,
-  SimpleSpanProcessor,
-} from '@opentelemetry/sdk-trace-base';
 import {afterAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   AUTO_TRACING_WRAPPED,
   AuthCredentialTypes,
   AutoTracingPlugin,
-  BaseAgent,
-  Event,
-  InMemorySessionService,
-  InvocationContext,
-  PluginManager,
   createCaps,
   safeRepr,
 } from '@google/adk';
 
-const CAPS = createCaps();
-const SENTINEL_TOKEN = 'sentinel-token-do-not-trace';
+import {
+  SENTINEL_TOKEN,
+  attributesOf,
+  buildGraph,
+  contextFor,
+  exporter,
+  instrument,
+  isWrapped,
+  provider,
+  sentinelCredential,
+  spanNames,
+  tracer,
+} from './auto_tracing_test_helpers.js';
 
-const exporter = new InMemorySpanExporter();
-const provider = new BasicTracerProvider({
-  spanProcessors: [new SimpleSpanProcessor(exporter)],
-});
-const tracer: Tracer = provider.getTracer('auto-tracing-plugin-test');
+const CAPS = createCaps();
 
 beforeEach(() => {
   exporter.reset();
@@ -53,104 +49,6 @@ beforeEach(() => {
 afterAll(async () => {
   await provider.shutdown();
 });
-
-/** A plain object holding an ADK OAuth2 credential, shape for shape. */
-function sentinelCredential(): Record<string, unknown> {
-  return {
-    authType: AuthCredentialTypes.OAUTH2,
-    oauth2: {accessToken: SENTINEL_TOKEN, refreshToken: SENTINEL_TOKEN},
-  };
-}
-
-class Fixture {
-  method(x: number): number {
-    return x - 1;
-  }
-
-  async asyncMethod(x: number): Promise<number> {
-    return x + 10;
-  }
-}
-
-/** The object graph the fixture agent holds, standing in for a module. */
-function buildGraph() {
-  return {
-    syncFn(x: number): number {
-      return x + 1;
-    },
-    async asyncFn(x: number): Promise<number> {
-      return x * 2;
-    },
-    instance: new Fixture(),
-  };
-}
-
-class FixtureAgent extends BaseAgent {
-  constructor(readonly graph: object) {
-    super({name: 'fixture_agent', description: 'holds the traced graph'});
-  }
-
-  // eslint-disable-next-line require-yield -- BaseAgent mandates an AsyncGenerator; this fixture emits no events.
-  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {
-    return;
-  }
-
-  // eslint-disable-next-line require-yield -- BaseAgent mandates an AsyncGenerator; this fixture emits no events.
-  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-    return;
-  }
-}
-
-async function contextFor(agent?: BaseAgent): Promise<InvocationContext> {
-  const sessionService = new InMemorySessionService();
-  const session = await sessionService.createSession({
-    appName: 'auto-tracing',
-    userId: 'tester',
-  });
-  return new InvocationContext({
-    invocationId: 'auto-tracing-invocation',
-    agent,
-    session,
-    pluginManager: new PluginManager([]),
-  });
-}
-
-/** Instruments a graph held by a fresh agent and returns both. */
-async function instrument<G extends object>(options: {
-  graph: G;
-  extraTargets?: readonly object[];
-  maxRecordedYields?: number;
-}): Promise<{
-  plugin: AutoTracingPlugin;
-  graph: G;
-  invocationContext: InvocationContext;
-}> {
-  const {graph} = options;
-  const plugin = new AutoTracingPlugin({
-    tracer,
-    extraTargets: options.extraTargets,
-    maxRecordedYields: options.maxRecordedYields,
-  });
-  const invocationContext = await contextFor(new FixtureAgent(graph));
-  await plugin.beforeRunCallback({invocationContext});
-  return {plugin, graph, invocationContext};
-}
-
-function spanNames(): string[] {
-  return exporter.getFinishedSpans().map((span) => span.name);
-}
-
-function attributesOf(spanName: string): Attributes {
-  const matches = exporter
-    .getFinishedSpans()
-    .filter((span) => span.name === spanName);
-  expect(matches.map((span) => span.name)).toEqual([spanName]);
-  return matches[0].attributes;
-}
-
-function isWrapped(value: unknown): boolean {
-  return typeof value === 'function' && AUTO_TRACING_WRAPPED in value;
-}
 
 describe('AutoTracingPlugin instrumentation', () => {
   it('test_emits_span', async () => {
