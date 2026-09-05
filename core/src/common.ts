@@ -532,9 +532,16 @@ export {
 export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
 export {
   LLM_BACKED_USER_SIMULATOR_TYPE,
+  LlmBackedUserSimulator,
   parseLlmBackedUserSimulatorConfig,
+  summarizeConversation,
 } from './evaluation/simulation/llm_backed_user_simulator.js';
 export type {LlmBackedUserSimulatorConfig} from './evaluation/simulation/llm_backed_user_simulator.js';
+export {
+  getLlmBackedUserSimulatorPrompt,
+  getUserSimulatorInstructionsTemplate,
+  isValidUserSimulatorTemplate,
+} from './evaluation/simulation/llm_backed_user_simulator_prompts.js';
 export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
 export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
