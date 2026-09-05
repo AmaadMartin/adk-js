@@ -335,6 +335,10 @@ export type {
   AgentModuleRef,
   ResolvedAgent,
 } from './evaluation/agent_module_loader.js';
+export {
+  getDeveloperInstructions,
+  getToolsByAgentName,
+} from './evaluation/app_details.js';
 export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export {
   DEFAULT_EVAL_PARALLELISM,
@@ -447,6 +451,7 @@ export type {
   MetricInfoProvider,
   MetricValueInfo,
   ParsedLlmBackedUserSimulatorCriterion,
+  ParsedRubricsBasedCriterion,
   ParsedToolTrajectoryCriterion,
   ResolvedJudgeModelOptions,
   RubricsBasedCriterion,
@@ -570,6 +575,11 @@ export {
   DEFAULT_USER_SIMULATOR_MODEL,
   DEFAULT_USER_SIMULATOR_THINKING_BUDGET,
   UserSimulatorStatus,
+  getRegisteredUserSimulator,
+  parseBaseUserSimulatorConfig,
+  registerUserSimulator,
+  registeredUserSimulatorTypes,
+  unregisterUserSimulator,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
 export type {
@@ -577,6 +587,7 @@ export type {
   LlmUserSimulatorConfig,
   NextUserMessage,
   UserSimulator,
+  UserSimulatorFactory,
 } from './evaluation/simulation/user_simulator.js';
 export {
   UserPersonaRegistry,
@@ -774,6 +785,7 @@ export type {
   Usage,
   VideoContentObject,
 } from './models/lite_llm_types.js';
+export {finalizeDynamicInstructions} from './models/llm_request.js';
 export type {LlmRequest} from './models/llm_request.js';
 export {
   InteractionStatus,
