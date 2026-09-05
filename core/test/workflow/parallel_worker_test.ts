@@ -560,24 +560,26 @@ describe('ParallelWorker parity with adk-python', () => {
     const stuck = deferred();
     const stuckStarted = deferred();
     try {
+      // Items 0 and 1 fail together, so two claimants try to stop the fan-out
+      // and the drain must still run once. Item 2 ignores its cancellation.
       const inner = new FunctionNode('mixed', async (_c, n: number) => {
-        if (n === 0) {
-          await stuckStarted.promise;
-          throw new Error('item-0 failed');
+        if (n === 2) {
+          stuckStarted.resolve();
+          await stuck.promise;
+          return n;
         }
-        stuckStarted.resolve();
-        // Never observes ctx.abortSignal: the worker has to give up on it.
-        await stuck.promise;
-        return n;
+        await stuckStarted.promise;
+        throw new Error(`item-${n} failed`);
       });
 
-      const run = driveNode(new ParallelWorker(inner), [0, 1]);
+      const run = driveNode(new ParallelWorker(inner), [0, 1, 2]);
       const rejects = expect(run).rejects.toThrow('item-0 failed');
       // The drain timeout is 5s; without it this advance changes nothing and
       // the run never settles.
       await vi.advanceTimersByTimeAsync(5000);
       await rejects;
 
+      expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('did not stop within'),
       );
