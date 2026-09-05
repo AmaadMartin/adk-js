@@ -9,17 +9,19 @@ to grade how it got there.
 Multi-turn task success asks one question: did the agent reach the goal? This
 metric asks a different one: was the route to the goal a good one? A detour, a
 backtrack, or a step the agent repeated lowers the score even when the final
-answer is right.
+answer is right. So the two metrics disagree on the same conversation, and that
+disagreement is the reason to run both.
 
 The Vertex AI Gen AI evaluation service does the scoring, through its prebuilt
 `MULTI_TURN_TRAJECTORY_QUALITY` rubric metric. Scores range over 0 to 1, and a
 score closer to 1 is better. The metric is reference-free, so golden
 invocations are optional.
 
-The class holds a `MultiTurnVertexAiEvalFacade` and preconfigures it with this
-one metric name. It implements the `Evaluator` interface, so an eval harness
-holds it behind the same call as every other metric. The `V1` suffix marks that
-a later version of the metric could use a different strategy.
+The class holds a `MultiTurnVertexAiEvalFacade`, the facade that speaks to the
+service, and preconfigures it with this one metric name. It implements the
+`Evaluator` interface, so an eval harness holds it behind the same call as
+every other metric. The `V1` suffix marks that a later version of the metric
+could use a different strategy.
 
 ## Get started
 
