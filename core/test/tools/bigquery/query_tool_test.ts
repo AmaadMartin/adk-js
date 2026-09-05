@@ -18,12 +18,12 @@ import {
   detectAnomalies,
   executeSql,
   forecast,
-  validateSubquery,
   WriteMode,
   type BigQueryToolConfig,
   type BigQueryToolDeps,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {validateSubquery} from '../../../src/tools/bigquery/query_tool.js';
 import {
   bigQueryState,
   resetBigQueryState,
