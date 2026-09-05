@@ -324,6 +324,7 @@ export class Runner {
             userContent: newMessage,
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
+            resumabilityConfig: this.resumabilityConfig,
             pluginManager: this.pluginManager,
             abortSignal: params.abortSignal,
           });
@@ -712,6 +713,7 @@ export class Runner {
             session,
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
+            resumabilityConfig: this.resumabilityConfig,
             pluginManager: this.pluginManager,
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,
