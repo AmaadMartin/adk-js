@@ -20,7 +20,10 @@ import {
   SNAKE_OR_KEBAB_NAME_PATTERN,
 } from './skill.js';
 import {SkillRegistry} from './skill_registry.js';
-import {VertexSkillRegistry} from './vertex_skill_registry.js';
+import {
+  vertexApiTransport,
+  VertexSkillRegistry,
+} from './vertex_skill_registry.js';
 
 /** The Agent Registry host serving the Skill Registry API. */
 const DEFAULT_ENDPOINT = 'https://agentregistry.googleapis.com/v1alpha';
@@ -246,7 +249,7 @@ export class GCPSkillRegistry implements SkillRegistry {
 
   constructor(options: GCPSkillRegistryOptions = {}) {
     this.delegate = options.client
-      ? new VertexSkillRegistry(options.client)
+      ? new VertexSkillRegistry(vertexApiTransport(options.client))
       : new AgentRegistrySkillRegistry(options);
   }
 

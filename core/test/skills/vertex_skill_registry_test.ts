@@ -7,53 +7,52 @@
 /**
  * Covers the Vertex AI `v1beta1` transport that a `client` option selects.
  *
- * `core/test/tools/skills/skill_registry_test.ts` already pins the search path
- * and the zipped-filesystem path. These cases cover the rest: the listing path
- * a blank query takes, and the constructor rule that a client exempts a caller
- * from naming a project and a location.
+ * `core/test/tools/skills/skill_registry_test.ts` drives it through the public
+ * `GCPSkillRegistry({client})` and pins the search path and the
+ * zipped-filesystem path. These cases cover the rest: the listing path a blank
+ * query takes, and the name spelling only that path produces.
  */
 
-import {Client} from '@google-cloud/vertexai';
-import {GCPSkillRegistry} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+import {
+  VertexApiTransport,
+  VertexSkillRegistry,
+} from '../../src/skills/vertex_skill_registry.js';
 import {createSkillZip} from './gcp_skill_registry_test_utils.js';
 
-/** Records every request path, and answers each with `payload`. */
-function createMockClient(payload: unknown) {
+/** A transport that records every request and answers each with `payload`. */
+function createTransport(payload: unknown) {
   const request = vi
-    .fn()
+    .fn<VertexApiTransport['request']>()
     .mockResolvedValue({json: vi.fn().mockResolvedValue(payload)});
-  return {
-    request,
-    client: {apiClient: {request}} as unknown as Client,
-  };
+  return {request, registry: new VertexSkillRegistry({request})};
 }
 
-describe('GCPSkillRegistry with a Vertex AI client', () => {
-  beforeEach(() => {
-    delete process.env.GOOGLE_CLOUD_PROJECT;
-    delete process.env.GOOGLE_CLOUD_LOCATION;
-  });
-
-  it('constructs without a project or a location', async () => {
-    const {client} = createMockClient({
+describe('VertexSkillRegistry', () => {
+  it('downloads the zipped filesystem of a skill', async () => {
+    const {request, registry} = createTransport({
       zippedFilesystem: createSkillZip().toString('base64'),
     });
 
-    const skill = await new GCPSkillRegistry({client}).getSkill('my-skill');
+    const skill = await registry.getSkill('my-skill');
 
+    expect(request).toHaveBeenCalledWith({
+      path: 'skills/my-skill',
+      httpMethod: 'GET',
+      httpOptions: {apiVersion: 'v1beta1'},
+    });
     expect(skill.frontmatter.name).toBe('my-skill');
   });
 
   it('lists every skill when the query is blank', async () => {
-    const {request, client} = createMockClient({
+    const {request, registry} = createTransport({
       skills: [
         {name: 'projects/p/locations/l/skills/first', description: 'one'},
         {skillName: 'second', description: 'two'},
       ],
     });
 
-    const results = await new GCPSkillRegistry({client}).searchSkills('   ');
+    const results = await registry.searchSkills('   ');
 
     expect(request).toHaveBeenCalledWith({
       path: 'skills',
@@ -67,15 +66,15 @@ describe('GCPSkillRegistry with a Vertex AI client', () => {
   });
 
   it('returns nothing when the listing carries no skills', async () => {
-    const {client} = createMockClient({});
+    const {registry} = createTransport({});
 
-    expect(await new GCPSkillRegistry({client}).searchSkills('')).toEqual([]);
+    expect(await registry.searchSkills('')).toEqual([]);
   });
 
   it('escapes a query that carries URL punctuation', async () => {
-    const {request, client} = createMockClient({retrievedSkills: []});
+    const {request, registry} = createTransport({retrievedSkills: []});
 
-    await new GCPSkillRegistry({client}).searchSkills('a&b c?d');
+    await registry.searchSkills('a&b c?d');
 
     expect(request).toHaveBeenCalledWith({
       path: 'skills:retrieve?query=a%26b%20c%3Fd',

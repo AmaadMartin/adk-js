@@ -12,18 +12,32 @@ import {SkillRegistry} from './skill_registry.js';
 /** The Vertex AI API version serving the skills collection. */
 const API_VERSION = 'v1beta1';
 
+/** The part of a Vertex AI client's transport this registry calls. */
+export interface VertexApiTransport {
+  request(request: {
+    path: string;
+    httpMethod: 'GET';
+    httpOptions: {apiVersion: string};
+  }): Promise<{json(): Promise<unknown>}>;
+}
+
 /**
  * Reads the transport out of a Vertex AI {@link Client}.
  *
  * `Client` declares `apiClient` as `protected` and exposes no accessor for it,
  * and a subclass may read a protected member of its own instance type. Going
- * through the client's own transport is what keeps its credentials, project
- * and location in effect.
+ * through the client's own transport is what keeps its credentials, its
+ * project and its location in effect.
  */
-class VertexTransport extends Client {
-  static of(client: VertexTransport) {
+class TransportReader extends Client {
+  static of(client: TransportReader): VertexApiTransport {
     return client.apiClient;
   }
+}
+
+/** Returns the transport a Vertex AI {@link Client} sends requests through. */
+export function vertexApiTransport(client: Client): VertexApiTransport {
+  return TransportReader.of(client);
 }
 
 /**
@@ -55,7 +69,7 @@ function readSearchHit(entry: Record<string, unknown>): Frontmatter {
  * already injects a Vertex AI client keeps working.
  */
 export class VertexSkillRegistry implements SkillRegistry {
-  constructor(private readonly client: Client) {}
+  constructor(private readonly transport: VertexApiTransport) {}
 
   async getSkill(name: string): Promise<Skill> {
     const response = await this.request(`skills/${name}`);
@@ -84,7 +98,7 @@ export class VertexSkillRegistry implements SkillRegistry {
   }
 
   private async request(path: string): Promise<Record<string, unknown>> {
-    const response = await VertexTransport.of(this.client).request({
+    const response = await this.transport.request({
       path,
       httpMethod: 'GET',
       httpOptions: {apiVersion: API_VERSION},
