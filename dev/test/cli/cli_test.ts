@@ -4,7 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {
+  DatabaseSessionService,
+  InMemoryMemoryService,
+  InMemorySessionService,
+  LogLevel,
+  setLogLevel,
+} from '@google/adk';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -12,6 +21,7 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {serviceClassSource} from './service_class_fixture.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -192,6 +202,108 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+  });
+
+  describe('service registry wiring', () => {
+    let agentsDir: string;
+
+    beforeEach(() => {
+      agentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-cli-services-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(agentsDir, {recursive: true, force: true});
+    });
+
+    it('builds a session service from a scheme declared beside the agent', async () => {
+      const recordPath = path.join(agentsDir, 'constructed.json');
+      fs.writeFileSync(
+        path.join(agentsDir, 'wired_session.js'),
+        serviceClassSource('WiredSession', 'session', {
+          recordOptionsTo: recordPath,
+        }),
+      );
+      fs.writeFileSync(
+        path.join(agentsDir, 'services.yaml'),
+        `services:
+  - scheme: wired
+    type: session
+    class: './wired_session.js#WiredSession'
+`,
+      );
+
+      await parse([
+        'api_server',
+        agentsDir,
+        '--session_service_uri',
+        'wired://x',
+      ]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.sessionService).toBeDefined();
+      const recorded: unknown = JSON.parse(
+        fs.readFileSync(recordPath, 'utf-8'),
+      );
+      expect(recorded).toEqual({uri: 'wired://x', agentsDir});
+    });
+
+    it('still builds the in-memory session service for memory://', async () => {
+      await parse([
+        'api_server',
+        agentsDir,
+        '--session_service_uri',
+        'memory://',
+      ]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(InMemorySessionService);
+    });
+
+    it('builds the memory service --memory_service_uri names', async () => {
+      await parse([
+        'api_server',
+        agentsDir,
+        '--memory_service_uri',
+        'memory://',
+      ]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeInstanceOf(InMemoryMemoryService);
+    });
+
+    it('refuses a memory URI no factory claims', async () => {
+      // Throwing from the `process.exit` stub both keeps the worker alive and
+      // gives the mock the `never` return type its signature declares.
+      vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit');
+      });
+
+      await expect(
+        parse(['api_server', agentsDir, '--memory_service_uri', 'nope://x']),
+      ).rejects.toThrowError('process.exit');
+      expect(AdkApiServer).not.toHaveBeenCalled();
+    });
+
+    it('leaves the memory service unset when no URI is given', async () => {
+      await parse(['api_server', agentsDir]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.memoryService).toBeUndefined();
+    });
+
+    it('falls back to the core resolver for a scheme the registry does not claim', async () => {
+      // `postgres://` is served by core but is not a registered scheme, so it
+      // proves the fallback rather than the registry.
+      await parse([
+        'api_server',
+        agentsDir,
+        '--session_service_uri',
+        'postgres://user:pass@host/db',
+      ]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.sessionService).toBeInstanceOf(DatabaseSessionService);
     });
   });
 

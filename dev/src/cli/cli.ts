@@ -7,6 +7,7 @@
 
 import {
   BaseArtifactService,
+  BaseMemoryService,
   BaseSessionService,
   LogLevel,
   getArtifactServiceFromUri,
@@ -15,6 +16,7 @@ import {
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
+import * as path from 'node:path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
@@ -25,6 +27,11 @@ import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
+import {
+  getServiceRegistry,
+  loadServicesModule,
+  parseUriScheme,
+} from './service_registry.js';
 
 dotenv.config({quiet: true});
 
@@ -52,20 +59,55 @@ function getLogLevelFromOptions(options: {
   return LogLevel.INFO;
 }
 
-function getSessionServiceFromOptions(options: {
-  session_service_uri?: string;
-}): BaseSessionService {
-  return getSessionServiceFromUri(
-    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://',
+function getSessionServiceFromOptions(
+  options: {
+    session_service_uri?: string;
+  },
+  agentsDir?: string,
+): BaseSessionService {
+  const uri =
+    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://';
+  return (
+    getServiceRegistry().createSessionService(uri, {agentsDir}) ??
+    getSessionServiceFromUri(uri)
   );
 }
 
-function getArtifactServiceFromOptions(options: {
-  artifact_service_uri?: string;
-}): BaseArtifactService | undefined {
-  return getArtifactServiceFromUri(
-    options['artifact_service_uri'] || 'memory://',
+function getArtifactServiceFromOptions(
+  options: {
+    artifact_service_uri?: string;
+  },
+  agentsDir?: string,
+): BaseArtifactService | undefined {
+  const uri = options['artifact_service_uri'] || 'memory://';
+  return (
+    getServiceRegistry().createArtifactService(uri, {agentsDir}) ??
+    getArtifactServiceFromUri(uri)
   );
+}
+
+/**
+ * There is no core resolver to fall back to for a memory URI, so an unclaimed
+ * scheme is an error rather than a silent downgrade to the in-memory default.
+ * The message names the scheme only: a custom URI may carry credentials.
+ */
+function getMemoryServiceFromOptions(
+  options: {
+    memory_service_uri?: string;
+  },
+  agentsDir?: string,
+): BaseMemoryService | undefined {
+  const uri = options['memory_service_uri'];
+  if (!uri) {
+    return undefined;
+  }
+  const service = getServiceRegistry().createMemoryService(uri, {agentsDir});
+  if (!service) {
+    throw new Error(
+      `Unsupported memory service URI scheme: '${parseUriScheme(uri) ?? ''}'`,
+    );
+  }
+  return service;
 }
 
 function getAgentFileOptions(options: {
@@ -147,6 +189,10 @@ const SESSION_SERVICE_URI_OPTION = new Option(
 const ARTIFACT_SERVICE_URI_OPTION = new Option(
   '--artifact_service_uri <string>',
   'Optional. The URI of the artifact service. Supported URIs: gs://<bucket name> for GCS artifact service.',
+);
+const MEMORY_SERVICE_URI_OPTION = new Option(
+  '--memory_service_uri <string>',
+  'Optional. The URI of the memory service. Supported URIs: memory:// for in-memory memory service, agentengine://<resource id> for Vertex AI Memory Bank.',
 );
 const OTEL_TO_CLOUD_OPTION = new Option(
   '--otel_to_cloud [boolean]',
@@ -244,6 +290,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -256,16 +303,28 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
+        const resolvedAgentsDir = getAbsolutePath(agentsDir);
+        await loadServicesModule(resolvedAgentsDir);
         const server = new AdkApiServer({
           logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
+          agentsDir: resolvedAgentsDir,
           host: options['host'],
           port: parseInt(options['port'], 10),
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: getSessionServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
+          artifactService: getArtifactServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
+          memoryService: getMemoryServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -292,6 +351,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -304,16 +364,28 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
+        const resolvedAgentsDir = getAbsolutePath(agentsDir);
+        await loadServicesModule(resolvedAgentsDir);
         const server = new AdkApiServer({
           logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
+          agentsDir: resolvedAgentsDir,
           host: options['host'],
           port: parseInt(options['port'], 10),
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: getSessionServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
+          artifactService: getArtifactServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
+          memoryService: getMemoryServiceFromOptions(
+            options,
+            resolvedAgentsDir,
+          ),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -390,6 +462,7 @@ export function createProgram(): Command {
     .addOption(LOG_LEVEL_OPTION)
     .addOption(SESSION_SERVICE_URI_OPTION)
     .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(OTEL_TO_CLOUD_OPTION)
     .addOption(COMPILE_AGENT_FILE)
     .addOption(BUNDLE_AGENT_FILE)
@@ -399,14 +472,17 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
       try {
+        const agentsDir = path.dirname(getAbsolutePath(agentPath));
+        await loadServicesModule(agentsDir);
         await runAgent({
           agentPath,
           inputFile: options['replay'],
           savedSessionFile: options['resume'],
           saveSession: getBoolean(options['save_session']),
           sessionId: options['session_id'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: getSessionServiceFromOptions(options, agentsDir),
+          artifactService: getArtifactServiceFromOptions(options, agentsDir),
+          memoryService: getMemoryServiceFromOptions(options, agentsDir),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           reloadAgents: getBoolean(options['reload_agents']),
