@@ -106,6 +106,11 @@ describe('isDefaultEventActions', () => {
   it.each(nonDefaults)('returns false when %s', (_label, overrides) => {
     expect(isDefaultEventActions(createEventActions(overrides))).toBe(false);
   });
+
+  it('returns false when transferReason is set', () => {
+    const actions = createEventActions({transferReason: 'refund request'});
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
 });
 
 describe('mergeEventActions', () => {
@@ -218,6 +223,30 @@ describe('mergeEventActions', () => {
       createEventActions({transferToAgent: 'agent-b'}),
     ]);
     expect(result.transferToAgent).toBe('agent-b');
+  });
+
+  it('uses last-writer-wins for transferReason', () => {
+    const result = mergeEventActions([
+      createEventActions({transferReason: 'first reason'}),
+      createEventActions({transferReason: 'second reason'}),
+    ]);
+    expect(result.transferReason).toBe('second reason');
+  });
+
+  it('carries transferReason from the only source that sets it', () => {
+    const result = mergeEventActions([
+      createEventActions({transferToAgent: 'agent-a'}),
+      createEventActions({transferReason: 'refund request'}),
+    ]);
+    expect(result.transferToAgent).toBe('agent-a');
+    expect(result.transferReason).toBe('refund request');
+  });
+
+  it('leaves transferReason undefined when no source sets it', () => {
+    const result = mergeEventActions([
+      createEventActions({transferToAgent: 'agent-a'}),
+    ]);
+    expect(result.transferReason).toBeUndefined();
   });
 
   it('uses last-writer-wins for escalate', () => {
