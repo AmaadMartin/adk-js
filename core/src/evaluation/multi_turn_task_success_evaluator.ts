@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ConversationScenario} from './conversation_scenarios.js';
-import {Invocation} from './eval_case.js';
 import {EvalMetric, getMetricThreshold} from './eval_metrics.js';
-import {EvaluationResult, Evaluator} from './evaluator.js';
 import {
   MultiTurnVertexAiEvalFacade,
   VertexAiEvalClient,
@@ -28,11 +25,11 @@ export interface MultiTurnTaskSuccessV1EvaluatorOptions {
 /**
  * Evaluates whether the agent achieved the goal or goals of a conversation.
  *
- * The class delegates the scoring to the `MULTI_TURN_TASK_SUCCESS` rubric
- * metric of the Vertex AI Gen AI evaluation service, which reads every turn
- * and judges whether the user got what they came for. Scores range over
- * [0, 1], and a score closer to 1 is more desirable. The metric is reference
- * free, so golden invocations are optional.
+ * The class scores with the `MULTI_TURN_TASK_SUCCESS` rubric metric of the
+ * Vertex AI Gen AI evaluation service, which reads every turn and judges
+ * whether the user got what they came for. Scores range over [0, 1], and a
+ * score closer to 1 is more desirable. The metric is reference free, so golden
+ * invocations are optional.
  *
  * The `V1` suffix conveys that there could be other versions of the metric,
  * and that those versions could use a different strategy.
@@ -40,29 +37,15 @@ export interface MultiTurnTaskSuccessV1EvaluatorOptions {
  * The service has no JavaScript SDK, so the caller supplies the transport and
  * owns authentication.
  */
-export class MultiTurnTaskSuccessV1Evaluator implements Evaluator {
-  private readonly delegate: Evaluator;
-
+export class MultiTurnTaskSuccessV1Evaluator extends MultiTurnVertexAiEvalFacade {
   /**
    * @throws InputValidationError if the metric carries no threshold.
    */
   constructor(options: MultiTurnTaskSuccessV1EvaluatorOptions) {
-    this.delegate = new MultiTurnVertexAiEvalFacade({
+    super({
       threshold: getMetricThreshold(options.evalMetric),
       metricName: MULTI_TURN_TASK_SUCCESS_METRIC_NAME,
       client: options.evalClient,
     });
-  }
-
-  async evaluateInvocations(
-    actualInvocations: Invocation[],
-    expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
-  ): Promise<EvaluationResult> {
-    return this.delegate.evaluateInvocations(
-      actualInvocations,
-      expectedInvocations,
-      conversationScenario,
-    );
   }
 }

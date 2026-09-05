@@ -58,12 +58,8 @@ export interface VertexEvalCase {
 
 /** The data submitted in one evaluation request. */
 export interface VertexEvaluationDataset {
-  /**
-   * The conversations a multi-turn metric scores. Optional because the
-   * service also accepts a row-per-invocation dataset for its single-turn
-   * metrics, which this module does not send.
-   */
-  evalCases?: VertexEvalCase[];
+  /** The conversations a multi-turn metric scores. */
+  evalCases: VertexEvalCase[];
 }
 
 /** The name of a metric to run over the dataset. */
@@ -97,7 +93,7 @@ export interface VertexAiEvalClient {
   evaluate(request: VertexAiEvalRequest): Promise<VertexEvaluationResult>;
 }
 
-/** Options for a {@link VertexAiEvalFacade}. */
+/** Options for a {@link MultiTurnVertexAiEvalFacade}. */
 export interface VertexAiEvalFacadeOptions {
   /** The score at or above which an invocation passes. */
   threshold: number;
@@ -107,30 +103,6 @@ export interface VertexAiEvalFacadeOptions {
 
   /** The client that reaches the service. The caller builds it. */
   client: VertexAiEvalClient;
-}
-
-/**
- * The state a facade over the Vertex AI Gen AI evaluation service holds.
- *
- * A facade reaches the service through the {@link VertexAiEvalClient} it is
- * given, and the caller owns how that client is built and authenticated.
- */
-export abstract class VertexAiEvalFacade implements Evaluator {
-  protected readonly threshold: number;
-  protected readonly metricName: string;
-  protected readonly client: VertexAiEvalClient;
-
-  constructor(options: VertexAiEvalFacadeOptions) {
-    this.threshold = options.threshold;
-    this.metricName = options.metricName;
-    this.client = options.client;
-  }
-
-  abstract evaluateInvocations(
-    actualInvocations: Invocation[],
-    expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
-  ): Promise<EvaluationResult>;
 }
 
 /** Reads the mean score of the first summary metric, when there is one. */
@@ -204,7 +176,17 @@ function getAgentData(invocations: Invocation[]): VertexAgentData {
  * request covers the conversation and only its last turn carries the score.
  * The leading turns come back `NOT_EVALUATED`.
  */
-export class MultiTurnVertexAiEvalFacade extends VertexAiEvalFacade {
+export class MultiTurnVertexAiEvalFacade implements Evaluator {
+  protected readonly threshold: number;
+  protected readonly metricName: string;
+  protected readonly client: VertexAiEvalClient;
+
+  constructor(options: VertexAiEvalFacadeOptions) {
+    this.threshold = options.threshold;
+    this.metricName = options.metricName;
+    this.client = options.client;
+  }
+
   /**
    * @param _conversationScenario Ignored: the service derives what it needs
    *   from the turns themselves. The parameter is on the shared contract, so
@@ -221,6 +203,18 @@ export class MultiTurnVertexAiEvalFacade extends VertexAiEvalFacade {
       return emptyEvaluationResult();
     }
 
+    const result = await this.client.evaluate({
+      dataset: {evalCases: [{agentData: getAgentData(actualInvocations)}]},
+      metrics: [{name: this.metricName}],
+    });
+
+    const score = getScore(result);
+    if (score === undefined) {
+      // Parity with adk-python: an unscored conversation reports nothing.
+      return emptyEvaluationResult();
+    }
+    const evalStatus = getEvalStatus(score, this.threshold);
+
     const perInvocationResults: PerInvocationResult[] = actualInvocations
       .slice(0, -1)
       .map((actual, index) => ({
@@ -230,29 +224,17 @@ export class MultiTurnVertexAiEvalFacade extends VertexAiEvalFacade {
         evalStatus: EvalStatus.NOT_EVALUATED,
       }));
 
-    const result = await this.client.evaluate({
-      dataset: {evalCases: [{agentData: getAgentData(actualInvocations)}]},
-      metrics: [{name: this.metricName}],
-    });
-
     const lastTurn = actualInvocations.length - 1;
-    const score = getScore(result);
     perInvocationResults.push({
       actualInvocation: actualInvocations[lastTurn],
       expectedInvocation: expectedInvocations?.[lastTurn],
       score,
-      evalStatus: getEvalStatus(score, this.threshold),
+      evalStatus,
     });
-
-    if (score === undefined) {
-      // Parity with adk-python: an unscored conversation reports nothing at
-      // all, and the per-invocation results accumulated above are discarded.
-      return emptyEvaluationResult();
-    }
 
     return {
       overallScore: score,
-      overallEvalStatus: getEvalStatus(score, this.threshold),
+      overallEvalStatus: evalStatus,
       perInvocationResults,
     };
   }
