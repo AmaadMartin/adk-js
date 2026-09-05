@@ -43,8 +43,13 @@ import {
   makeFastForwardResult,
   reconstructNodeRuns,
   RehydratedNode,
+  replaySequence,
   resolvedInterruptResponses,
 } from './utils/rehydration_utils.js';
+import {
+  ReplaySequenceBarrier,
+  sequenceKey,
+} from './utils/replay_sequence_barrier.js';
 
 /**
  * A unique symbol branding {@link Workflow} instances.
@@ -118,6 +123,12 @@ class LoopState {
    * re-surfaces the recovered output instead of recording a fresh checkpoint.
    */
   readonly replayedNodes = new Set<string>();
+  /**
+   * Releases this turn's fast-forwarded completions in the order history
+   * recorded them. A fresh run recovers no sequence, so the barrier stays
+   * empty and never blocks.
+   */
+  sequenceBarrier = new ReplaySequenceBarrier([]);
   errorShutDown = false;
   /**
    * Workflow-scoped abort signal handed to each scheduled node so a failure can
@@ -128,6 +139,8 @@ class LoopState {
 
 interface CompletedTask {
   name: string;
+  /** This run's replay sequence key, `<nodeName>@<runId>`. */
+  key: string;
   /**
    * The finished node's result: a live {@link NodeContext} for a node that ran,
    * or a bare {@link NodeResult} for one fast-forwarded from cached output on
@@ -258,6 +271,9 @@ export class Workflow extends BaseNode {
     const loop = new LoopState();
     loop.rehydrated = rehydrated;
     loop.abortSignal = abortController.signal;
+    loop.sequenceBarrier = new ReplaySequenceBarrier(
+      replaySequence(runEvents, ctx.nodePath || undefined),
+    );
 
     this.seedStartTriggers(loop, ctx, nodeInput);
 
@@ -362,6 +378,9 @@ export class Workflow extends BaseNode {
 
       const result = await Promise.race(loop.pending.values());
       loop.pending.delete(result.name);
+      // Release whichever replayed completion the recording puts next. A fresh
+      // run advances nothing, because its keys are not in the sequence.
+      loop.sequenceBarrier.checkAndAdvance(result.key);
 
       if (result.error) {
         const nodeState = loop.nodes.get(result.name);
@@ -482,6 +501,19 @@ export class Workflow extends BaseNode {
     const repeatActivation = loop.activated.has(nodeName);
     loop.activated.add(nodeName);
 
+    // Reuse the run id on resume; number a fresh run sequentially. Resolved
+    // before the fast-forward branches below, so every activation consumes a
+    // run number whether it executes or replays. That keeps the Nth activation
+    // aligned with the Nth recorded run, which is what both the replay
+    // sequence barrier and a task agent's isolation scope key on.
+    let runId = nodeState.runId;
+    if (!runId) {
+      nodeState.runCounter += 1;
+      runId = String(nodeState.runCounter);
+      nodeState.runId = runId;
+    }
+    const key = sequenceKey(nodeName, runId);
+
     // Resume: fast-forward a node that already completed in a prior run
     // (cached output, all interrupts resolved). `rerunOnResume` governs an
     // interrupt the node is still waiting on, not a run that already produced
@@ -489,13 +521,11 @@ export class Workflow extends BaseNode {
     // is not consulted here. Python reaches its cached-result case first too.
     const prior = loop.rehydrated.get(nodeName)?.shift();
     if (prior && isFastForwardable(prior)) {
-      loop.replayedNodes.add(nodeName);
-      loop.pending.set(
+      queueReplayedCompletion(
+        loop,
         nodeName,
-        Promise.resolve({
-          name: nodeName,
-          childCtx: makeFastForwardResult(ctx, prior),
-        }),
+        key,
+        makeFastForwardResult(ctx, prior),
       );
       return false;
     }
@@ -520,20 +550,9 @@ export class Workflow extends BaseNode {
           branch: prior.branch ?? ctx.branch,
           interruptIds: [],
         };
-        loop.replayedNodes.add(nodeName);
-        loop.pending.set(
-          nodeName,
-          Promise.resolve({name: nodeName, childCtx: resumeResult}),
-        );
+        queueReplayedCompletion(loop, nodeName, key, resumeResult);
         return false;
       }
-    }
-
-    let runId = nodeState.runId;
-    if (!runId) {
-      nodeState.runCounter += 1;
-      runId = String(nodeState.runCounter);
-      nodeState.runId = runId;
     }
 
     // On resume, a waiting node (it interrupted last turn) re-runs with its
@@ -562,8 +581,8 @@ export class Workflow extends BaseNode {
         useAsOutput: this.graph!.terminalNodeNames.has(nodeName),
       },
     }).then(
-      (childCtx) => ({name: nodeName, childCtx}),
-      (error) => ({name: nodeName, error}),
+      (childCtx) => ({name: nodeName, key, childCtx}),
+      (error) => ({name: nodeName, key, error}),
     );
     loop.pending.set(nodeName, task);
     return true;
@@ -901,6 +920,25 @@ function childNodePath(ctx: NodeContext, nodeName: string): string {
 /** Whether `node` is an agent that runs as a multi-turn task. */
 function isTaskModeNode(node: BaseNode): boolean {
   return isLlmAgent(node) && node.mode === 'task';
+}
+
+/**
+ * Queues a completion the resumed run recovered instead of executing, held
+ * until the recorded sequence reaches it.
+ */
+function queueReplayedCompletion(
+  loop: LoopState,
+  nodeName: string,
+  key: string,
+  childCtx: NodeResult,
+): void {
+  loop.replayedNodes.add(nodeName);
+  loop.pending.set(
+    nodeName,
+    loop.sequenceBarrier
+      .wait(key)
+      .then(() => ({name: nodeName, key, childCtx})),
+  );
 }
 
 /**
