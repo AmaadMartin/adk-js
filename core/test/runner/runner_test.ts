@@ -8,6 +8,8 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  BaseTool,
+  BaseToolset,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -1513,5 +1515,65 @@ describe('Runner reserved function call rejection', () => {
     });
 
     expect(error).toBeUndefined();
+  });
+});
+
+describe('Runner close', () => {
+  class StubToolset extends BaseToolset {
+    readonly closed = vi.fn();
+
+    constructor() {
+      super([]);
+    }
+
+    override async getTools(): Promise<BaseTool[]> {
+      return [];
+    }
+
+    override async close(): Promise<void> {
+      this.closed();
+    }
+  }
+
+  function createRunnerWithToolset(): {runner: Runner; toolset: StubToolset} {
+    const toolset = new StubToolset();
+    const agent = new MockLlmAgent('root_agent');
+    agent.tools = [toolset];
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService: new InMemorySessionService(),
+    });
+    return {runner, toolset};
+  }
+
+  it('closes the toolsets the agent holds', async () => {
+    const {runner, toolset} = createRunnerWithToolset();
+
+    await runner.close();
+
+    expect(toolset.closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the toolsets again after a completed run', async () => {
+    const {runner, toolset} = createRunnerWithToolset();
+    const session = await runner.sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the run so its own cleanup completes.
+    }
+    expect(toolset.closed).toHaveBeenCalledTimes(1);
+
+    await runner.close();
+
+    expect(toolset.closed).toHaveBeenCalledTimes(2);
   });
 });
