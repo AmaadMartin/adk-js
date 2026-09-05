@@ -9,8 +9,17 @@ import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
 import {CustomMetricEvaluator} from './custom_metric_evaluator.js';
 import {EvalConfig} from './eval_config.js';
-import {EvalMetric, PrebuiltMetrics} from './eval_metrics.js';
+import {
+  EvalMetric,
+  MetricInfo,
+  MetricInfoProvider,
+  PrebuiltMetrics,
+} from './eval_metrics.js';
 import {Evaluator} from './evaluator.js';
+import {
+  ResponseEvaluatorMetricInfoProvider,
+  TrajectoryEvaluatorMetricInfoProvider,
+} from './metric_info_providers.js';
 import {ResponseEvaluator} from './response_evaluator.js';
 import {TrajectoryEvaluator} from './trajectory_evaluator.js';
 
@@ -27,6 +36,7 @@ export type MetricEvaluatorFactory = (evalMetric: EvalMetric) => Evaluator;
 @experimental
 export class MetricEvaluatorRegistry {
   private readonly factories = new Map<string, MetricEvaluatorFactory>();
+  private readonly infoProviders = new Map<string, MetricInfoProvider>();
 
   constructor() {
     registerStandardMetrics(this);
@@ -47,12 +57,39 @@ export class MetricEvaluatorRegistry {
     return factory(evalMetric);
   }
 
-  /** Registers a factory, replacing any factory already under that name. */
-  registerEvaluator(metricName: string, factory: MetricEvaluatorFactory): void {
+  /**
+   * Registers a factory, replacing any factory already under that name.
+   *
+   * @param metricName The metric the factory scores.
+   * @param factory Builds the evaluator for one configuration of the metric.
+   * @param infoProvider Describes the metric to a caller listing what this
+   *   registry can score. A metric registered without one is resolvable but
+   *   not listed, because there is nothing to say about it.
+   */
+  registerEvaluator(
+    metricName: string,
+    factory: MetricEvaluatorFactory,
+    infoProvider?: MetricInfoProvider,
+  ): void {
     if (this.factories.has(metricName)) {
       logger.debug(`Replacing the evaluator registered for ${metricName}.`);
     }
     this.factories.set(metricName, factory);
+    if (infoProvider) {
+      this.infoProviders.set(metricName, infoProvider);
+    }
+  }
+
+  /**
+   * Describes every metric this registry can both score and describe.
+   *
+   * adk-js seeds fewer standard metrics than adk-python does, so this list is
+   * shorter than the one adk-python's registry returns.
+   */
+  getRegisteredMetrics(): MetricInfo[] {
+    return [...this.infoProviders.values()].map((provider) =>
+      provider.getMetricInfo(),
+    );
   }
 
   /**
@@ -68,6 +105,9 @@ export class MetricEvaluatorRegistry {
     const forked = new MetricEvaluatorRegistry();
     for (const [metricName, factory] of this.factories) {
       forked.factories.set(metricName, factory);
+    }
+    for (const [metricName, provider] of this.infoProviders) {
+      forked.infoProviders.set(metricName, provider);
     }
     return forked;
   }
@@ -87,14 +127,21 @@ function registerStandardMetrics(registry: MetricEvaluatorRegistry): void {
   registry.registerEvaluator(
     PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
     (evalMetric) => new TrajectoryEvaluator({evalMetric}),
+    new TrajectoryEvaluatorMetricInfoProvider(),
   );
   registry.registerEvaluator(
     PrebuiltMetrics.RESPONSE_MATCH_SCORE,
     (evalMetric) => new ResponseEvaluator({evalMetric}),
+    new ResponseEvaluatorMetricInfoProvider(
+      PrebuiltMetrics.RESPONSE_MATCH_SCORE,
+    ),
   );
   registry.registerEvaluator(
     PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
     (evalMetric) => new ResponseEvaluator({evalMetric}),
+    new ResponseEvaluatorMetricInfoProvider(
+      PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+    ),
   );
 }
 

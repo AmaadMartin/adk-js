@@ -8,6 +8,10 @@ import {
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
+  createGcsEvalManagersFromUri,
+  EvalManagers,
+  EvalSetResultsManager,
+  EvalSetsManager,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
   Logger,
@@ -122,6 +126,21 @@ export interface ApiServerOptions {
    * Held process-wide, as `LlmAgent.setDefaultModel` does.
    */
   defaultLlmModel?: string;
+  /**
+   * URI of the storage the eval sets and eval results live in, `gs://<bucket>`
+   * being the only scheme supported. Defaults to files under `agentsDir`.
+   */
+  evalStorageUri?: string;
+  /**
+   * Eval sets manager to serve from, for a caller that built one itself. It
+   * takes the place of {@link evalStorageUri}.
+   */
+  evalSetsManager?: EvalSetsManager;
+  /**
+   * Eval results manager to serve from, for a caller that built one itself.
+   * It takes the place of {@link evalStorageUri}.
+   */
+  evalSetResultsManager?: EvalSetResultsManager;
 }
 
 /**
@@ -165,6 +184,7 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     reloadAgents: options.reloadAgents ?? false,
     urlPrefix: options.urlPrefix,
     autoCreateSession: options.autoCreateSession,
+    ...resolveEvalManagers(options),
     extraPlugins: options.extraPlugins,
     logoText: options.logoText,
     logoImageUrl: options.logoImageUrl,
@@ -185,6 +205,25 @@ export function createApiServerApp(
   options: ApiServerOptions,
 ): Promise<Application> {
   return createApiServer(options).buildApp();
+}
+
+/**
+ * Resolves the pair of eval managers the server serves from. A manager the
+ * caller supplied wins over the URI, as `sessionService` wins over
+ * `sessionServiceUri`. With neither, the server builds the local pair itself
+ * from its resolved `agentsDir`.
+ */
+function resolveEvalManagers(
+  options: ApiServerOptions,
+): Partial<EvalManagers> {
+  const fromUri = options.evalStorageUri
+    ? createGcsEvalManagersFromUri(options.evalStorageUri)
+    : undefined;
+  return {
+    evalSetsManager: options.evalSetsManager ?? fromUri?.evalSetsManager,
+    evalSetResultsManager:
+      options.evalSetResultsManager ?? fromUri?.evalSetResultsManager,
+  };
 }
 
 /**
