@@ -506,7 +506,10 @@ export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
 export type {AutoRaterScore} from './evaluation/llm_as_judge.js';
 export {LocalEvalRuntime} from './evaluation/local_eval_runtime.js';
-export {LocalEvalService} from './evaluation/local_eval_service.js';
+export {
+  LocalEvalService,
+  createEvalSessionId,
+} from './evaluation/local_eval_service.js';
 export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {
   MetricEvaluatorRegistry,
@@ -812,6 +815,20 @@ export type {
   GEPARootAgentPromptOptimizerResult,
 } from './optimization/gepa_root_agent_prompt_optimizer.js';
 export {requireStaticInstruction} from './optimization/gepa_utils.js';
+export {
+  LocalEvalSampler,
+  extractSingleInvocationInfo,
+  extractToolCallData,
+} from './optimization/local_eval_sampler.js';
+export type {
+  CapturedEvalData,
+  CapturedInvocation,
+  CapturedMetricResult,
+  InvocationInfo,
+  LocalEvalSamplerConfig,
+  LocalEvalSamplerOptions,
+  ToolCallData,
+} from './optimization/local_eval_sampler.js';
 export {Sampler, isSampler} from './optimization/sampler.js';
 export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {SimplePromptOptimizer} from './optimization/simple_prompt_optimizer.js';

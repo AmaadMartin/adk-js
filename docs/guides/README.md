@@ -190,6 +190,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Optimization
 
 - [Agent optimization data types](optimization/data_types/index.md) - The vocabulary a sampler and an optimizer share: per-example scores and a Pareto front of optimized agents.
+- [LocalEvalSampler](optimization/local_eval_sampler/index.md) - Scoring a
+  candidate agent against your ADK eval sets, so an optimizer can rank it.
 
 ### Planners
 
