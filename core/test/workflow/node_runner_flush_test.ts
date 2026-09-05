@@ -11,10 +11,15 @@
  * resume state surviving a retry.
  */
 
+import {Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {createEvent} from '../../src/events/event.js';
+import {createEvent, Event} from '../../src/events/event.js';
+import {Runner} from '../../src/runner/runner.js';
+import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
 import {node} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
+import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
+import {RequestInput} from '../../src/workflow/request_input.js';
 import {Workflow} from '../../src/workflow/workflow.js';
 import {
   driveWorkflow,
@@ -170,6 +175,67 @@ describe('node runner — the flush stays silent when nothing is pending', () =>
     const withOutput = events.filter((e) => e.output !== undefined);
     expect(withOutput).toHaveLength(1);
     expect(withOutput[0].author).toBe('inner');
+  });
+
+  it('does not re-announce a fast-forwarded child output on resume', async () => {
+    const answer = new FunctionNode('answer', () => 'the_answer');
+    const ask = new FunctionNode(
+      'ask',
+      (ctx: NodeContext) => {
+        const reply = ctx.resumeInputs['confirm'];
+        return reply === undefined
+          ? new RequestInput({interruptId: 'confirm', message: 'confirm?'})
+          : `confirmed:${reply}`;
+      },
+      {rerunOnResume: true},
+    );
+    const wf = new Workflow({
+      name: 'ff_wf',
+      dynamicEntry: async (ctx: NodeContext) => {
+        // The caller takes the child's output as its own, so on resume the
+        // cached value arrives without the child running.
+        await ctx.runNode(answer, null, {useAsOutput: true});
+        await ctx.runNode(ask);
+        return undefined;
+      },
+    });
+
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'u1',
+    });
+    const runner = new Runner({appName: 'test_app', agent: wf, sessionService});
+    const turn = async (message: Part[]): Promise<Event[]> => {
+      const events: Event[] = [];
+      for await (const event of runner.runAsync({
+        userId: 'u1',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: message},
+      })) {
+        events.push(event);
+      }
+      return events;
+    };
+
+    await turn([{text: 'x'}]);
+    const resumed = await turn([
+      {
+        functionResponse: {
+          id: 'confirm',
+          name: 'adk_request_input',
+          response: {result: 'yes'},
+        },
+      },
+    ]);
+
+    // The workflow itself must not emit the cached value as a node event.
+    // Announcing the run's result to its caller is the invocation wrapper's
+    // job, and the event it adds carries no node provenance.
+    const fromWorkflow = resumed.filter(
+      (e) => e.output === 'the_answer' && e.nodeInfo !== undefined,
+    );
+    expect(fromWorkflow).toHaveLength(0);
   });
 
   it('does not repeat a delta a FunctionNode already emitted', async () => {
