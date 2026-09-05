@@ -57,7 +57,6 @@ export interface WorkflowNodeConfig extends BaseNodeConfig {
  * const a = node(myFunction, {name: 'classify'});
  * const b = node(myTool);
  * const asWorker = node({parallelWorker: true, maxParallelWorkers: 3});
- * const c = node(myFunction, {name: 'classify'});
  * ```
  *
  * Ported from `google/adk-python` `workflow/_node.py::node`.
@@ -138,8 +137,16 @@ export abstract class WorkflowNode<
   /**
    * Copies this node, preserving its class and its own fields, and rebuilds the
    * copy's fan-out wrapper. Mirrors `Node.model_copy`.
+   *
+   * Only the parallel-worker fields can be overridden. The copy is shallow, so
+   * replacing a property something else is derived from — `retryConfig`, whose
+   * prepared form is computed at construction — would leave the two disagreeing.
    */
-  clone(overrides: Partial<WorkflowNodeConfig> = {}): this {
+  clone(
+    overrides: Partial<
+      Pick<WorkflowNodeConfig, 'parallelWorker' | 'maxParallelWorkers'>
+    > = {},
+  ): this {
     const copy = copyNodeWithPrototype(this, overrides);
     copy.rebuildParallelWorker();
     return copy;
@@ -150,11 +157,9 @@ export abstract class WorkflowNode<
    * with `parallelWorker` off, so the copy's {@link runImpl} dispatches to
    * {@link runNodeImpl} instead of recursing back into the wrapper.
    *
-   * Called only when `parallelWorker` is set. An override may return
-   * `undefined` to decline, which fails the run rather than quietly skipping
-   * the fan-out.
+   * Called only when `parallelWorker` is set.
    */
-  protected createParallelWorker(): BaseNode | undefined {
+  protected createParallelWorker(): BaseNode {
     return buildNode(this.clone({parallelWorker: false}), {
       parallelWorker: true,
       maxParallelWorkers: this.maxParallelWorkers,
@@ -169,7 +174,7 @@ export abstract class WorkflowNode<
    * before a subclass assigns its own fields, so a wrapper built there would
    * wrap a copy with every subclass field still undefined.
    */
-  private get innerNode(): BaseNode | undefined {
+  private get innerNode(): BaseNode {
     this.worker ??= this.createParallelWorker();
     return this.worker;
   }
@@ -191,11 +196,7 @@ export abstract class WorkflowNode<
       yield* this.runNodeImpl(ctx, input);
       return;
     }
-    const inner = this.innerNode;
-    if (!inner) {
-      throw new Error('inner node is not initialized for parallel worker.');
-    }
-    yield* inner.run(ctx, input);
+    yield* this.innerNode.run(ctx, input);
   }
 }
 
