@@ -751,7 +751,10 @@ function createWorkflowAbort(parentSignal?: AbortSignal): {
  * Whether a `ctx.runNode` child produced this exact value as its own output,
  * and so has already announced it on an event of its own.
  */
-function childEmitted(dynamicState: DynamicNodeState, output: unknown): boolean {
+function childEmitted(
+  dynamicState: DynamicNodeState,
+  output: unknown,
+): boolean {
   for (const run of dynamicState.runs.values()) {
     if (Object.is(run.output, output)) {
       return true;

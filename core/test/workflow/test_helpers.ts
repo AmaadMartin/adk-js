@@ -253,8 +253,10 @@ export async function drain(channel: AsyncQueue<Event>): Promise<Event[]> {
 }
 
 /** Options for {@link runChildNode} and {@link runFailingChildNode}. */
-export interface RunChildNodeParams
-  extends Omit<Partial<ExecuteChildNodeParams>, 'parent' | 'node'> {
+export interface RunChildNodeParams extends Omit<
+  Partial<ExecuteChildNodeParams>,
+  'parent' | 'node'
+> {
   /** Invocation context to run under (defaults to a fresh {@link createIc}). */
   ic?: InvocationContext;
   /** Node path of the context standing in for the parent (default: root). */
