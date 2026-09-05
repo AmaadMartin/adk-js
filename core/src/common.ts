@@ -1066,6 +1066,11 @@ export {EnvironmentSimulationEngine} from './tools/environment_simulation/enviro
 export {EnvironmentSimulationFactory} from './tools/environment_simulation/environment_simulation_factory.js';
 export {EnvironmentSimulationPlugin} from './tools/environment_simulation/environment_simulation_plugin.js';
 export {
+  BaseMockStrategy,
+  TracingMockStrategy,
+} from './tools/environment_simulation/strategies/base.js';
+export type {MockRequest} from './tools/environment_simulation/strategies/base.js';
+export {
   createStatefulParameter,
   createToolConnectionMap,
   parseToolConnectionMap,

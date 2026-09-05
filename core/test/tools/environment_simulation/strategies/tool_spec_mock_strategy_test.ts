@@ -57,7 +57,7 @@ function mock(params: {
   return params.strategy.mock({
     tool: params.tool,
     args: params.args ?? {},
-    context: createToolContext(),
+    toolContext: createToolContext(),
     toolConnectionMap: params.toolConnectionMap,
     stateStore: params.stateStore,
   });

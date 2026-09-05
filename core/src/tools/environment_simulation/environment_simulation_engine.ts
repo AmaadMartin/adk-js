@@ -214,7 +214,7 @@ export class EnvironmentSimulationEngine {
     return mockStrategy.mock({
       tool: params.tool,
       args: params.args,
-      context: params.context,
+      toolContext: params.context,
       toolConnectionMap: this.toolConnectionMap,
       stateStore: this.stateStore,
       environmentData: this.config.environmentData,

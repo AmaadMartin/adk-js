@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {GenerateContentConfig} from '@google/genai';
+
 import {Context} from '../../../agents/context.js';
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../../features/feature_registry.js';
 import {experimental} from '../../../utils/experimental.js';
 import {BaseTool} from '../../base_tool.js';
 import {ToolConnectionMap} from '../tool_connection_map.js';
@@ -13,8 +19,8 @@ import {ToolConnectionMap} from '../tool_connection_map.js';
  * The entities a simulation has created so far, keyed by parameter name and
  * then by that parameter's value.
  *
- * adk-python types this `Dict[str, Any]`; adk-js names the nested shape the
- * strategies actually write.
+ * This is the shape the built-in strategies write into a
+ * {@link MockRequest.stateStore}. A strategy of your own may write any shape.
  *
  * WARNING: This feature is **experimental** and its API or behavior may change
  * in future releases.
@@ -27,24 +33,28 @@ export type SimulationStateStore = Record<string, Record<string, unknown>>;
  * WARNING: This feature is **experimental** and its API or behavior may change
  * in future releases.
  */
-export interface MockParams {
-  /** The tool the agent asked to call. */
+export interface MockRequest {
+  /** The tool the model called. */
   tool: BaseTool;
 
-  /** The arguments the agent passed to the tool. */
+  /** The arguments the model called the tool with. */
   args: Record<string, unknown>;
 
   /** The context of the tool call. */
-  context: Context;
+  toolContext: Context;
 
   /** How the simulated tools connect, when the analyzer produced a map. */
   toolConnectionMap?: ToolConnectionMap;
 
   /**
-   * The entities created so far in this simulation. A strategy that creates an
-   * entity writes it here, so a later tool call can read it back.
+   * The simulated state shared across the calls of one run.
+   *
+   * A strategy that simulates a creating tool records its response here, so a
+   * later consuming call stays consistent with it. The object is mutated in
+   * place. adk-python types this `Dict[str, Any]`, and adk-js keeps it open
+   * for the same reason: the shape is the strategy's to choose.
    */
-  stateStore: SimulationStateStore;
+  stateStore: Record<string, unknown>;
 
   /** Environment-specific data, such as a small database dump. */
   environmentData?: string;
@@ -54,37 +64,62 @@ export interface MockParams {
 }
 
 /**
- * Produces the response of a tool that is never called.
+ * Base class for mock strategies.
  *
- * WARNING: This feature is **experimental** and its API or behavior may change
- * in future releases.
- */
-export abstract class BaseMockStrategy {
-  /**
-   * Generates a mock response for one tool call.
-   *
-   * @param params The tool call to answer.
-   * @returns The response to hand back in place of the tool's own.
-   */
-  abstract mock(params: MockParams): Promise<Record<string, unknown>>;
-}
-
-/**
- * The placeholder strategy behind the deprecated
- * `MockStrategy.MOCK_STRATEGY_TRACING`, which reports that it does nothing.
- *
- * Pass the trace as `tracing` on the environment simulation config and use
- * `MockStrategy.MOCK_STRATEGY_TOOL_SPEC` instead.
+ * A mock strategy answers a tool call with a simulated response, so an agent
+ * can be exercised without the tool's real backend. Subclass it and implement
+ * {@link BaseMockStrategy.mock}.
  *
  * WARNING: This feature is **experimental** and its API or behavior may change
  * in future releases.
  */
 @experimental
+export abstract class BaseMockStrategy {
+  constructor() {
+    if (!isFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION)) {
+      throw new Error(
+        `Feature ${FeatureName.ENVIRONMENT_SIMULATION} is not enabled.`,
+      );
+    }
+  }
+
+  /**
+   * Generates a mock response for one tool call.
+   *
+   * @param request The tool call to answer.
+   * @returns The response to hand back in place of the tool's own.
+   */
+  abstract mock(request: MockRequest): Promise<Record<string, unknown>>;
+}
+
+/**
+ * A placeholder strategy that would answer a call from an execution trace.
+ *
+ * It carries the model it would use and always reports that it is not
+ * implemented. adk-python ships the same placeholder, and the simulation
+ * engine builds it for the deprecated `MockStrategy.MOCK_STRATEGY_TRACING`
+ * config value. Pass the trace as `tracing` on the environment simulation
+ * config and use `MockStrategy.MOCK_STRATEGY_TOOL_SPEC` instead.
+ *
+ * WARNING: This feature is **experimental** and its API or behavior may change
+ * in future releases.
+ */
 export class TracingMockStrategy extends BaseMockStrategy {
+  /**
+   * @param llmName The model a real implementation would call.
+   * @param llmConfig The generation config a real implementation would use.
+   */
+  constructor(
+    readonly llmName: string = '',
+    readonly llmConfig?: GenerateContentConfig,
+  ) {
+    super();
+  }
+
   /**
    * @returns An error response, because this strategy mocks nothing.
    */
-  async mock(): Promise<Record<string, unknown>> {
+  override async mock(_request: MockRequest): Promise<Record<string, unknown>> {
     return {status: 'error', errorMessage: 'Not implemented'};
   }
 }

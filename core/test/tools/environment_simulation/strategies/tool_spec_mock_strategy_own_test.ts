@@ -54,7 +54,7 @@ describe('ToolSpecMockStrategy model answers it cannot use', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 
@@ -71,7 +71,7 @@ describe('ToolSpecMockStrategy model answers it cannot use', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 
@@ -88,7 +88,7 @@ describe('ToolSpecMockStrategy model answers it cannot use', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 
@@ -107,7 +107,7 @@ describe('ToolSpecMockStrategy fenced answers', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 
@@ -123,7 +123,7 @@ describe('ToolSpecMockStrategy state store writes', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('ticketId', 'create_ticket'),
       stateStore,
     });
@@ -138,7 +138,7 @@ describe('ToolSpecMockStrategy state store writes', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('ticketId', 'create_ticket'),
       stateStore,
     });
@@ -153,7 +153,7 @@ describe('ToolSpecMockStrategy state store writes', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('archive_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('archived', 'archive_ticket'),
       stateStore,
     });
@@ -168,7 +168,7 @@ describe('ToolSpecMockStrategy state store writes', () => {
     await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('ticketId', 'create_ticket'),
       stateStore,
     });
@@ -183,7 +183,7 @@ describe('ToolSpecMockStrategy state store writes', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('ticketId', 'create_ticket'),
       stateStore,
     });
@@ -198,7 +198,7 @@ describe('ToolSpecMockStrategy state store writes', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: {
         statefulParameters: [
           {
@@ -235,7 +235,7 @@ describe('ToolSpecMockStrategy hostile parameter names', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('__proto__', 'create_ticket'),
       stateStore,
     });
@@ -258,7 +258,7 @@ describe('ToolSpecMockStrategy hostile parameter names', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('ticketId', 'create_ticket'),
       stateStore,
     });
@@ -278,7 +278,7 @@ describe('ToolSpecMockStrategy hostile parameter names', () => {
     await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('constructor', 'create_ticket'),
       stateStore,
     });
@@ -299,7 +299,7 @@ describe('ToolSpecMockStrategy hostile parameter names', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       toolConnectionMap: creatorMap('constructor', 'create_ticket'),
       stateStore,
     });
@@ -316,7 +316,7 @@ describe('ToolSpecMockStrategy prompt', () => {
     await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 
@@ -331,7 +331,7 @@ describe('ToolSpecMockStrategy prompt', () => {
     await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 
@@ -346,7 +346,7 @@ describe('ToolSpecMockStrategy prompt', () => {
     await strategy.mock({
       tool: new UncallableTool('get_ticket'),
       args: {ticketId: 'T-11'},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {ticketId: {'T-11': {status: 'open'}}},
     });
 
@@ -363,7 +363,7 @@ describe('ToolSpecMockStrategy prompt', () => {
     await strategy.mock({
       tool: new UncallableTool('create_ticket'),
       args: {note: "$& $` $' $1"},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 

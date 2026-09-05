@@ -10,7 +10,7 @@ import {experimental} from '../../../utils/experimental.js';
 import {isJsonObject, parseFencedJson} from '../../../utils/json_utils.js';
 import {SimulationModel} from '../simulation_model.js';
 import {ToolConnectionMap} from '../tool_connection_map.js';
-import {BaseMockStrategy, MockParams, SimulationStateStore} from './base.js';
+import {BaseMockStrategy, MockRequest, SimulationStateStore} from './base.js';
 
 const TOOL_SPEC_MOCK_PROMPT_TEMPLATE = `
   You are a stateful tool simulator. Your task is to generate a
@@ -89,7 +89,7 @@ function tracingSnippet(tracing: string): string {
  * @param toolSchemaJson The tool's declaration, as JSON.
  * @returns The prompt to send to the model.
  */
-function buildMockPrompt(params: MockParams, toolSchemaJson: string): string {
+function buildMockPrompt(params: MockRequest, toolSchemaJson: string): string {
   const replacements: Array<[string, string]> = [
     [
       '{environmentDataSnippet}',
@@ -191,12 +191,14 @@ function findValueByKey(data: unknown, targetKey: string): unknown {
  * @param params.toolConnectionMap How the simulated tools connect.
  * @param params.stateStore The store to write into. It is mutated in place,
  *     because the engine shares one store across every call of a simulation.
+ *     A `MockRequest` leaves the store's shape to the strategy, so an entry
+ *     this function did not write is replaced rather than written into.
  */
 function recordCreatedEntities(params: {
   toolName: string;
   mockResponse: Record<string, unknown>;
   toolConnectionMap: ToolConnectionMap;
-  stateStore: SimulationStateStore;
+  stateStore: Record<string, unknown>;
 }): void {
   const {toolName, mockResponse, toolConnectionMap, stateStore} = params;
   for (const parameter of toolConnectionMap.statefulParameters) {
@@ -207,9 +209,13 @@ function recordCreatedEntities(params: {
     if (value === undefined || value === null) {
       continue;
     }
-    let entities = Object.hasOwn(stateStore, parameter.parameterName)
+    const stored = Object.hasOwn(stateStore, parameter.parameterName)
       ? stateStore[parameter.parameterName]
       : undefined;
+    let entities: SimulationStateStore[string] | undefined =
+      typeof stored === 'object' && stored !== null
+        ? (stored as SimulationStateStore[string])
+        : undefined;
     if (!entities) {
       entities = {};
       setOwnProperty(stateStore, parameter.parameterName, entities);
@@ -255,7 +261,7 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
    *     wrong.
    * @throws {Error} When the model call itself fails.
    */
-  async mock(params: MockParams): Promise<Record<string, unknown>> {
+  async mock(params: MockRequest): Promise<Record<string, unknown>> {
     const declaration = params.tool._getDeclaration();
     if (!declaration) {
       return {status: 'error', errorMessage: 'Could not get tool declaration.'};

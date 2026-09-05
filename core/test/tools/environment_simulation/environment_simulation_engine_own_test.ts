@@ -574,7 +574,7 @@ describe('createMockStrategy', () => {
     const result = await strategy.mock({
       tool: new UncallableTool('test_tool'),
       args: {},
-      context: createToolContext(),
+      toolContext: createToolContext(),
       stateStore: {},
     });
 
