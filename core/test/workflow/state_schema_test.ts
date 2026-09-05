@@ -312,16 +312,18 @@ describe('Node-level state schema and inheritance', () => {
     );
   });
 
-  it('rejects an undeclared outputKey written by an agent node', async () => {
+  it('rejects an undeclared outputKey written by an agent node', () => {
     const agent = replyAgent('writer', 'hi', {outputKey: 'undeclaredKey'});
-    const wf = new Workflow({
-      name: 'agent_output_key',
-      stateSchema: schema,
-      edges: [['START', agent]],
-    });
-    await expect(driveWorkflow(wf, 'x')).rejects.toThrow(
-      /not declared in the state schema/,
-    );
+    // The workflow refuses this at construction now, rather than on the first
+    // write. The error is the same one the run used to raise.
+    expect(
+      () =>
+        new Workflow({
+          name: 'agent_output_key',
+          stateSchema: schema,
+          edges: [['START', agent]],
+        }),
+    ).toThrow(/not declared in the state schema/);
   });
 
   it('accepts a declared outputKey written by an agent node', async () => {
