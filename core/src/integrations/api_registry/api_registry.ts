@@ -7,9 +7,11 @@
 import {GoogleAuth} from 'google-auth-library';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {StreamableHTTPConnectionParams} from '../../tools/mcp/mcp_session_manager.js';
+import {mergeTrackingHeaders} from '../../utils/client_labels.js';
 import {deprecated} from '../../utils/deprecated.js';
 import {formatError} from '../../utils/error_utils.js';
 import {AgentRegistrySingleMCPToolset} from '../agent_registry/agent_registry_mcp_toolset.js';
+import {isGoogleApi} from '../agent_registry/helpers.js';
 import {
   chooseApiEndpoint,
   clientCertsToPresent,
@@ -54,6 +56,18 @@ function withHttpScheme(url: string): string {
   return url.startsWith('http://') || url.startsWith('https://')
     ? url
     : `https://${url}`;
+}
+
+/**
+ * Whether the caller's own credentials may be attached to `url`.
+ *
+ * A registry entry can name any host, so an access token goes only to a Google
+ * API endpoint reached over https. {@link isGoogleApi} tests the host alone and
+ * is shared with `AgentRegistry`, so the scheme test lives here rather than
+ * there; adk-python's `_is_google_api` requires both.
+ */
+function isHttpsGoogleApi(url: string): boolean {
+  return url.startsWith('https://') && isGoogleApi(url);
 }
 
 /**
@@ -125,17 +139,21 @@ export class ApiRegistry {
       throw new Error(`MCP server ${mcpServerName} has no URLs.`);
     }
 
+    const url = withHttpScheme(registeredUrl);
     const connectionParams: StreamableHTTPConnectionParams = {
       type: 'StreamableHTTPConnectionParams',
-      url: withHttpScheme(registeredUrl),
+      url,
     };
+    const attachCredentials = isHttpsGoogleApi(url);
 
     return new AgentRegistrySingleMCPToolset({
       connectionParams,
       toolFilter: options?.toolFilter,
       prefix: options?.toolNamePrefix,
       headerProvider: async (context?: ReadonlyContext) => {
-        const headers = await this.getAuthHeaders();
+        const headers: Record<string, string> = attachCredentials
+          ? await this.getAuthHeaders()
+          : {};
         if (this.headerProvider) {
           Object.assign(headers, await this.headerProvider(context));
         }
@@ -177,10 +195,10 @@ export class ApiRegistry {
 
     // Resolved outside the try so a credential failure is not reported as a
     // listing failure.
-    const headers = {
+    const headers = mergeTrackingHeaders({
       'Content-Type': 'application/json',
       ...(await this.getAuthHeaders()),
-    };
+    });
 
     try {
       let pageToken: string | undefined;

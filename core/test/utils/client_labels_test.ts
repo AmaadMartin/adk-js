@@ -6,7 +6,11 @@
 
 import {getClientLabels, runWithClientLabel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {parseUserAgent} from '../../src/utils/client_labels.js';
+import {
+  getTrackingHeaders,
+  mergeTrackingHeaders,
+  parseUserAgent,
+} from '../../src/utils/client_labels.js';
 
 describe('client_labels', () => {
   describe('parseUserAgent', () => {
@@ -143,6 +147,59 @@ describe('client_labels', () => {
       expect(() => {
         runWithClientLabel('   ', () => {});
       }).toThrow('Client label must be a non-empty string.');
+    });
+  });
+
+  describe('getTrackingHeaders', () => {
+    it('reports the ADK label under both header names', () => {
+      const headers = getTrackingHeaders();
+
+      expect(headers['x-goog-api-client']).toContain('google-adk/');
+      expect(headers['x-goog-api-client']).toBe(getClientLabels().join(' '));
+      expect(headers['user-agent']).toBe(headers['x-goog-api-client']);
+    });
+  });
+
+  describe('mergeTrackingHeaders', () => {
+    it('adds both headers when the caller passes none', () => {
+      expect(mergeTrackingHeaders()).toEqual(getTrackingHeaders());
+    });
+
+    it('keeps the caller headers it does not own', () => {
+      const merged = mergeTrackingHeaders({'Content-Type': 'application/json'});
+
+      expect(merged['Content-Type']).toBe('application/json');
+      expect(merged['user-agent']).toContain('google-adk/');
+    });
+
+    it('replaces an empty caller value outright', () => {
+      const merged = mergeTrackingHeaders({'user-agent': ''});
+
+      expect(merged['user-agent']).toBe(getTrackingHeaders()['user-agent']);
+    });
+
+    it('keeps a caller token and puts the tracking tokens first', () => {
+      const merged = mergeTrackingHeaders({'user-agent': 'my-app/1.0'});
+
+      const expected = `${getTrackingHeaders()['user-agent']} my-app/1.0`;
+      expect(merged['user-agent']).toBe(expected);
+    });
+
+    it('does not double a caller token the tracking value already carries', () => {
+      const tracked = getTrackingHeaders()['user-agent'];
+      const [firstToken] = tracked.split(' ');
+
+      const merged = mergeTrackingHeaders({'user-agent': firstToken});
+
+      expect(merged['user-agent']).toBe(tracked);
+    });
+
+    it('leaves the caller object untouched', () => {
+      const caller = {'Content-Type': 'application/json'};
+
+      mergeTrackingHeaders(caller);
+
+      expect(caller).toEqual({'Content-Type': 'application/json'});
     });
   });
 });
