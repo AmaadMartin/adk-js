@@ -134,6 +134,9 @@ documentation, visit [adk.dev](https://adk.dev/).
   produced, and registering the metric that scores them.
 - [Metric info providers](evaluation/metric_info_providers/index.md) - The name, description and value interval of each prebuilt metric, shared with adk-python.
 - [MultiTurnToolUseQualityV1Evaluator](evaluation/multi_turn_tool_use_quality_evaluator/index.md) - Scoring the tool calls an agent made over a whole conversation, with the Vertex AI Gen AI evaluation service.
+- [MultiTurnTrajectoryQualityV1Evaluator](evaluation/multi_turn_trajectory_quality_v1/index.md) -
+  Scoring the path an agent took across a whole conversation, not just whether
+  it reached the goal.
 - [PerTurnUserSimulatorQualityV1](evaluation/per_turn_user_simulator_quality_v1/index.md) - Grading the simulated user that drove an eval case: the starting prompt, the conversation plan, and where the conversation should have ended.
 - [Pre-built user personas](evaluation/pre_built_personas/index.md) - The user
   personas ADK ships, the behaviors they are built from, and how to compose and

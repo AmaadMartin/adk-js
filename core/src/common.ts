@@ -528,6 +528,8 @@ export {
   SafetyEvaluatorV1MetricInfoProvider,
   TrajectoryEvaluatorMetricInfoProvider,
 } from './evaluation/metric_info_providers.js';
+export {MultiTurnTrajectoryQualityV1Evaluator} from './evaluation/multi_turn_trajectory_quality_evaluator.js';
+export type {MultiTurnTrajectoryQualityV1EvaluatorOptions} from './evaluation/multi_turn_trajectory_quality_evaluator.js';
 export {ResponseEvaluator} from './evaluation/response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './evaluation/rouge_scorer.js';
