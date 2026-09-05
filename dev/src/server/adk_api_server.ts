@@ -13,12 +13,15 @@ import {
   Event,
   getFunctionCalls,
   getFunctionResponses,
+  getPropagatedContext,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
+  isAgentEngine,
   isApp,
   Logger,
   LogLevel,
+  maybeInstallRequestMetricsMiddleware,
   RunConfig,
   RunnableRoot,
   Runner,
@@ -26,7 +29,7 @@ import {
   toA2a,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import {trace, TracerProvider} from '@opentelemetry/api';
+import {context, trace, TracerProvider} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
 import express, {Request, Response} from 'express';
@@ -232,6 +235,19 @@ export class AdkApiServer {
   private async init() {
     const app = this.app;
     await this.setupTelemetry();
+
+    // Registered before every route so an Agent Engine caller's trace context
+    // covers the whole request.
+    if (isAgentEngine()) {
+      app.use((req: Request, _res: Response, next: express.NextFunction) => {
+        context.with(getPropagatedContext(req.headers), next);
+      });
+    }
+
+    // Drives metric export from the request path on Agent Engine. No builder
+    // is supplied yet, so this is inert until adk-js ports adk-python's
+    // `telemetry/_agent_engine_metric_exporter.py`.
+    maybeInstallRequestMetricsMiddleware(app, {otelToCloud: this.otelToCloud});
 
     // Registered before any route (including /health, /, /version) so the
     // DNS-rebinding guard applies to every endpoint, not just the ones

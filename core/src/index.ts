@@ -43,6 +43,24 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+// Named rather than `export *`, so `drainMetrics` and the memo reset stay
+// internal to the module.
+export {
+  TopSpanProcessor,
+  createMetricsFlushingMiddleware,
+  getAgentEngineMetricsSetup,
+  getPropagatedContext,
+  isAgentEngine,
+  maybeInstallRequestMetricsMiddleware,
+  telemetryUserAgentHeaders,
+} from './telemetry/agent_engine.js';
+export type {
+  AgentEngineMetricsBuilder,
+  AgentEngineMetricsState,
+  RequestDrivenMetricReader,
+  RequestMetricsMiddlewareOptions,
+  TraceContextHeaders,
+} from './telemetry/agent_engine.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
