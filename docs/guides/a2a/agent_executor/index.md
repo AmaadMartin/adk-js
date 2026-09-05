@@ -82,8 +82,9 @@ session up on the runner's session service and creates it when it is missing.
 
 The lookup reads an existing session twice. The first read passes
 `numRecentEvents: 0`, because it only asks whether the session exists. The
-second read fetches the event history. A session the executor had to create
-skips the second read.
+second read fetches the event history. The executor creates the session when
+either read finds none, so it never runs against the event-less result the
+first read asked for.
 
 Those events decide whether a human-in-the-loop request raised by an earlier
 turn is still unanswered. When one is, the executor publishes an
