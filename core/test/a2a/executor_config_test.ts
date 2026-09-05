@@ -127,6 +127,7 @@ describe('resolveA2aAgentExecutorConfig', () => {
   it.each([
     ['a2aPartConverter', 'number', 3],
     ['genAiPartConverter', 'null', null],
+    ['eventConverter', 'string', 'nope'],
     ['adkEventConverter', 'object', {}],
   ])('rejects a %s that is a %s', (field, described, value) => {
     expect(() =>
