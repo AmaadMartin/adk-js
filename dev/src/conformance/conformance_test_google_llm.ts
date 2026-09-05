@@ -40,12 +40,24 @@ import {
 const logger = getLogger();
 
 /**
- * `Gemini` refuses to construct without Vertex AI or an API key, which a model
- * that never reaches the network should not require. This key is passed in its
- * place and is never used: `connect` throws, and `generateContentAsync` serves
- * a recording.
+ * `Gemini` refuses to construct without credentials, and which credentials it
+ * demands depends on the ambient environment: an API key normally, but a
+ * project and a location once `GOOGLE_GENAI_USE_VERTEXAI` or
+ * `GOOGLE_GENAI_USE_ENTERPRISE` is set. Passing `vertexai: false` does not
+ * settle it, because `geminiInitParams` re-reads enterprise mode whenever the
+ * explicit flag is falsy. A replay model has to construct the same way in
+ * every environment, so all three are supplied here.
+ *
+ * None of them is ever used: `connect` throws and `generateContentAsync`
+ * serves a recording, so the model has no network path. They do shadow real
+ * credentials, which is deliberate -- a conformance run must not behave
+ * differently on a machine that happens to have them configured.
  */
-const REPLAY_PLACEHOLDER_API_KEY = 'conformance-replay-no-network';
+const REPLAY_PLACEHOLDER_CREDENTIALS = {
+  apiKey: 'conformance-replay-no-network',
+  project: 'conformance-replay-no-network',
+  location: 'conformance-replay-no-network',
+};
 
 /**
  * Request fields that carry no behavior and would otherwise fail every
@@ -238,7 +250,7 @@ export class ConformanceTestGemini extends Gemini {
   private readonly agentLlmRecordings: readonly ReplayLlmRecording[];
 
   constructor(config: ConformanceReplayModelConfig) {
-    super({model: config.model, apiKey: REPLAY_PLACEHOLDER_API_KEY});
+    super({model: config.model, ...REPLAY_PLACEHOLDER_CREDENTIALS});
 
     this.agentName = config.agentName;
     this.userMessageIndex = config.userMessageIndex;
