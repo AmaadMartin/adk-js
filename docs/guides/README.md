@@ -105,6 +105,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [EvalCase](evaluation/eval_case/index.md) - The gradable unit of an
   evaluation: a recorded conversation or a scenario, and the accessors that
   read a turn's tool trajectory.
+- [Eval config](evaluation/eval_config/index.md) - The `test_config.json` an
+  eval run reads: the criteria it scores, the custom metrics it declares, the
+  user simulator it selects, and the live timeout it sets.
 - [Eval metrics](evaluation/eval_metrics/index.md) - The vocabulary an eval
   config speaks: metric names, criteria, judge model options, thresholds and
   metric results.

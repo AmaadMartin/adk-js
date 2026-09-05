@@ -387,6 +387,7 @@ export type {
   CustomMetricConfig,
   EvalConfig,
   LiveModelConfig,
+  UserSimulatorConfig,
 } from './evaluation/eval_config.js';
 export {
   DEFAULT_JUDGE_MODEL,
@@ -515,15 +516,29 @@ export {ResponseEvaluator} from './evaluation/response_evaluator.js';
 export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
 export {rouge1Score, tokenizeForRouge} from './evaluation/rouge_scorer.js';
 export type {RougeScore} from './evaluation/rouge_scorer.js';
+export {
+  DEFAULT_USER_SIMULATOR_AUDIO_MODEL,
+  DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
+  DEFAULT_USER_SIMULATOR_VOICE_NAME,
+  LLM_AUDIO_USER_SIMULATOR_TYPE,
+} from './evaluation/simulation/llm_audio_user_simulator.js';
+export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
+export {LLM_BACKED_USER_SIMULATOR_TYPE} from './evaluation/simulation/llm_backed_user_simulator.js';
+export type {LlmBackedUserSimulatorConfig} from './evaluation/simulation/llm_backed_user_simulator.js';
 export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
 export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
+  DEFAULT_MAX_ALLOWED_INVOCATIONS,
+  DEFAULT_USER_SIMULATOR_MODEL,
+  DEFAULT_USER_SIMULATOR_THINKING_BUDGET,
   UserSimulatorStatus,
   validateNextUserMessage,
 } from './evaluation/simulation/user_simulator.js';
 export type {
+  BaseUserSimulatorConfig,
+  LlmUserSimulatorConfig,
   NextUserMessage,
   UserSimulator,
 } from './evaluation/simulation/user_simulator.js';
