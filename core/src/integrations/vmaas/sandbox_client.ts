@@ -13,9 +13,11 @@
 
 import {SandboxEnvironment} from '@google-cloud/vertexai/build/src/genai/types.js';
 
+import {ScrollDirection} from '../../tools/computer_use/base_computer.js';
 import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {sleep} from '../../utils/time_utils.js';
 import {SandboxError, SandboxErrorCode} from './sandbox_errors.js';
 
 const CDP_PAGE_CAPTURE_SCREENSHOT = 'Page.captureScreenshot';
@@ -111,9 +113,6 @@ const MODIFIER_MAP: Readonly<Record<string, number>> = {
   SUPER: 4,
 };
 
-/** The direction a scroll moves the page. */
-export type SandboxScrollDirection = 'up' | 'down' | 'left' | 'right';
-
 /** A JSON object carried in a sandbox request or response. */
 export type SandboxJson = Record<string, unknown>;
 
@@ -155,11 +154,6 @@ export interface SandboxClientOptions {
   accessToken: string;
   /** The transport that carries a request to the sandbox. */
   sendCommand: SandboxCommandSender;
-}
-
-/** Resolves after `ms` milliseconds. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Narrows a value to a JSON object, or `undefined` when it is not one. */
@@ -314,12 +308,11 @@ function combinationKeyCommands(key: string): CdpCommand[] {
 
 /** The scroll deltas of a scroll in one direction. */
 function scrollDeltas(
-  direction: SandboxScrollDirection,
+  direction: ScrollDirection,
   magnitude: number,
 ): {deltaX: number; deltaY: number} {
-  const normalized = direction.toLowerCase();
-  const sign = normalized === 'left' || normalized === 'up' ? -1 : 1;
-  const horizontal = normalized === 'left' || normalized === 'right';
+  const sign = direction === 'left' || direction === 'up' ? -1 : 1;
+  const horizontal = direction === 'left' || direction === 'right';
   return {
     deltaX: horizontal ? sign * magnitude : 0,
     deltaY: horizontal ? 0 : sign * magnitude,
@@ -329,25 +322,19 @@ function scrollDeltas(
 /**
  * Drives the browser of a Vertex AI Computer Use Sandbox over CDP.
  *
- * One client holds one sandbox and one access token. The token is replaced with
- * {@link updateAccessToken} rather than by building a second client, so an
- * in-flight sequence of commands keeps using the same sandbox.
+ * One client holds one sandbox and one access token, and the computer builds a
+ * new one for each action, so a refreshed token reaches the next action.
  */
 @experimental
 export class SandboxClient {
   private readonly sandbox: SandboxEnvironment;
   private readonly sendCommand: SandboxCommandSender;
-  private accessToken: string;
+  private readonly accessToken: string;
 
   constructor(options: SandboxClientOptions) {
     this.sandbox = options.sandbox;
     this.accessToken = options.accessToken;
     this.sendCommand = options.sendCommand;
-  }
-
-  /** Replaces the access token later requests carry. */
-  updateAccessToken(accessToken: string): void {
-    this.accessToken = accessToken;
   }
 
   /** Runs one CDP command and returns its response. */
@@ -497,7 +484,7 @@ export class SandboxClient {
   async scrollAt(params: {
     x: number;
     y: number;
-    direction: SandboxScrollDirection;
+    direction: ScrollDirection;
     magnitude: number;
   }): Promise<void> {
     const {deltaX, deltaY} = scrollDeltas(params.direction, params.magnitude);
