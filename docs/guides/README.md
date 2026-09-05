@@ -33,3 +33,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+#### Environment
+
+- [EnvironmentToolset](tools/environment_toolset/index.md) - Giving an agent a working directory it can run commands in, read files from and edit, and the confirmation gate on shell execution.
