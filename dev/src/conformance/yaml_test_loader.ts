@@ -5,7 +5,6 @@
  */
 
 import {Session, StreamingMode} from '@google/adk';
-import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
@@ -17,6 +16,7 @@ import {
   TestSpec,
 } from '../integration/test_types.js';
 import {generatedFilePaths} from './generated_file_utils.js';
+import {toCamelKeys} from './yaml_writer.js';
 
 /**
  * batchLoadTestSpecs will recursively search the directory given and load the
@@ -108,5 +108,5 @@ async function loadYamlMapping<T>(file: string, label: string): Promise<T> {
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error(`${label} file must be a YAML mapping`);
   }
-  return camelcaseKeys(parsed, {deep: true}) as T;
+  return toCamelKeys(parsed) as T;
 }

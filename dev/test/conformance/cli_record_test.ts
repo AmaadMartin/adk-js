@@ -69,9 +69,9 @@ describe('runConformanceRecord', () => {
           user_message_index: 0,
           agent_name: 'my_agent',
           llm_recording: expect.objectContaining({
-            llm_response: {
-              content: {role: 'model', parts: [{text: 'hi there'}]},
-            },
+            llm_responses: [
+              {content: {role: 'model', parts: [{text: 'hi there'}]}},
+            ],
           }),
         }),
       ],

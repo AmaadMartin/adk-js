@@ -19,6 +19,9 @@ import {Recording} from './test_types.js';
  * Entries are appended in call order and keyed by the same pair the replay
  * matches on, the index of the user message and the agent name. The recorder
  * sets {@link userMessageIndex} before it sends each message.
+ *
+ * For the session-state driven recorder that writes the fixture itself, see
+ * `ConformanceRecordingPlugin`.
  */
 export class RecordingPlugin extends BasePlugin {
   readonly recordings: Recording[] = [];
@@ -54,7 +57,7 @@ export class RecordingPlugin extends BasePlugin {
       agentName,
       llmRecording: {
         llmRequest: this.requestsInFlight.get(agentName),
-        llmResponse,
+        llmResponses: [llmResponse],
       },
     });
     return undefined;
