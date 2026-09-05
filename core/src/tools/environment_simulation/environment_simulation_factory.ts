@@ -6,21 +6,13 @@
 
 import {SingleBeforeToolCallback} from '../../agents/llm_agent.js';
 import {
+  assertFeatureEnabled,
   FeatureName,
-  isFeatureEnabled,
 } from '../../features/feature_registry.js';
 
 import {EnvironmentSimulationConfig} from './environment_simulation_config.js';
 import {EnvironmentSimulationEngine} from './environment_simulation_engine.js';
 import {EnvironmentSimulationPlugin} from './environment_simulation_plugin.js';
-
-function assertFeatureEnabled(): void {
-  if (!isFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION)) {
-    throw new Error(
-      `Feature ${FeatureName.ENVIRONMENT_SIMULATION} is not enabled.`,
-    );
-  }
-}
 
 /**
  * Turns an {@link EnvironmentSimulationConfig} into something an agent runs.
@@ -45,7 +37,7 @@ export class EnvironmentSimulationFactory {
   static createCallback(
     config: EnvironmentSimulationConfig,
   ): SingleBeforeToolCallback {
-    assertFeatureEnabled();
+    assertFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION);
     const simulatorEngine = new EnvironmentSimulationEngine(config);
     return ({tool, args, context}) =>
       simulatorEngine.simulate({tool, args, toolContext: context});
@@ -61,7 +53,7 @@ export class EnvironmentSimulationFactory {
   static createPlugin(
     config: EnvironmentSimulationConfig,
   ): EnvironmentSimulationPlugin {
-    assertFeatureEnabled();
+    assertFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION);
     return new EnvironmentSimulationPlugin(
       new EnvironmentSimulationEngine(config),
     );

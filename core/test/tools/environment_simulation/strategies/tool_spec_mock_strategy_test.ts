@@ -8,12 +8,11 @@
 // tests/unittests/tools/environment_simulation/test_tool_spec_mock_strategy.py
 // at google/adk-python@main.
 
-import {
-  SimulationStateStore,
-  ToolConnectionMap,
-  ToolSpecMockStrategy,
-} from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+
+import {SimulationStateStore} from '../../../../src/tools/environment_simulation/strategies/base.js';
+import {ToolSpecMockStrategy} from '../../../../src/tools/environment_simulation/strategies/tool_spec_mock_strategy.js';
+import {ToolConnectionMap} from '../../../../src/tools/environment_simulation/tool_connection_map.js';
 
 import {
   FAKE_SIMULATION_MODEL,

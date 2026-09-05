@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseMockStrategy, TracingMockStrategy} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+import {
+  BaseMockStrategy,
+  TracingMockStrategy,
+} from '../../../../src/tools/environment_simulation/strategies/base.js';
 
 import {FakeTool, createToolContext} from '../simulation_test_support.js';
 

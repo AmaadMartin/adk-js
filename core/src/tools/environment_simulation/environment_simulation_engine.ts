@@ -73,13 +73,17 @@ function sleepSeconds(seconds: number): Promise<void> {
 /**
  * Builds the strategy that mocks a tool the injection rules did not answer.
  *
+ * `MOCK_STRATEGY_UNSPECIFIED` names no strategy. {@link
+ * EnvironmentSimulationEngine.simulate} answers those calls itself, so that
+ * value reaching here is a bug rather than a config a user can write.
+ *
  * @param params.mockStrategyType Which strategy the tool config asked for.
  * @param params.model The model a strategy calls.
  * @param params.modelConfig The configuration of those model calls.
  * @returns The strategy to mock with.
  * @throws {InputValidationError} When `mockStrategyType` names no strategy.
  */
-function createMockStrategy(params: {
+export function createMockStrategy(params: {
   mockStrategyType: MockStrategy;
   model: string;
   modelConfig: GenerateContentConfig;

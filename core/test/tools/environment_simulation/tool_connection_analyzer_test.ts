@@ -8,9 +8,9 @@
 // tests/unittests/tools/environment_simulation/test_tool_connection_analyzer.py
 // at google/adk-python@main.
 
-import {ToolConnectionAnalyzer} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {ToolConnectionAnalyzer} from '../../../src/tools/environment_simulation/tool_connection_analyzer.js';
 import {logger} from '../../../src/utils/logger.js';
 
 import {

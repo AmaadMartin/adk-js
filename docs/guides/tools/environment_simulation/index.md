@@ -6,8 +6,7 @@ a tool that is not built yet, or a tool you must not call for real.
 
 ## Introduction
 
-`EnvironmentSimulationFactory` turns an
-[`EnvironmentSimulationConfig`](../environment_simulation_config/index.md) into
+`EnvironmentSimulationFactory` turns an `EnvironmentSimulationConfig` into
 something an agent runs. It gives you two forms of the same thing:
 
 - `createCallback(config)` returns a `beforeToolCallback` for one agent.

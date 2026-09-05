@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ToolConnectionAnalyzer} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {ToolConnectionAnalyzer} from '../../../src/tools/environment_simulation/tool_connection_analyzer.js';
 import {logger} from '../../../src/utils/logger.js';
 
 import {

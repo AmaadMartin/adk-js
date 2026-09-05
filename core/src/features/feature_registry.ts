@@ -144,6 +144,21 @@ export function isFeatureEnabled(featureName: FeatureName): boolean {
   return config.defaultOn;
 }
 
+/**
+ * Throws unless a feature is enabled at runtime.
+ *
+ * A feature whose entry point is reachable without its own factory needs this
+ * at that entry point, so the flag cannot be walked around.
+ *
+ * @param featureName The feature name.
+ * @throws {Error} When the feature is disabled.
+ */
+export function assertFeatureEnabled(featureName: FeatureName): void {
+  if (!isFeatureEnabled(featureName)) {
+    throw new Error(`Feature ${featureName} is not enabled.`);
+  }
+}
+
 function emitNonStableWarningOnce(
   featureName: FeatureName,
   featureStage: FeatureStage,

@@ -19,6 +19,8 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 
+import {createMockStrategy} from '../../../src/tools/environment_simulation/environment_simulation_engine.js';
+
 import {
   FAKE_SIMULATION_MODEL,
   FakeTool,
@@ -170,25 +172,19 @@ describe('EnvironmentSimulationEngine mock strategies', () => {
     expect(recordedRequests).toHaveLength(0);
   });
 
-  it('rejects a strategy it does not know', async () => {
-    // A JavaScript caller can reach the engine with a strategy the enum does
-    // not carry, because only the config factories validate their input.
-    const unknownStrategy = 'MOCK_STRATEGY_FUTURE' as MockStrategy;
-    const config: EnvironmentSimulationConfig = {
-      toolSimulationConfigs: [
-        {
-          toolName: TOOL_NAME,
-          injectionConfigs: [],
-          mockStrategyType: unknownStrategy,
-        },
-      ],
-      simulationModel: FAKE_SIMULATION_MODEL,
-      simulationModelConfiguration: {},
-    };
+  it('rejects a strategy type that names no strategy', () => {
+    // simulate() answers an UNSPECIFIED tool itself, so the factory only ever
+    // sees this value when that guard is gone.
+    const buildUnspecified = () =>
+      createMockStrategy({
+        mockStrategyType: MockStrategy.MOCK_STRATEGY_UNSPECIFIED,
+        model: FAKE_SIMULATION_MODEL,
+        modelConfig: {},
+      });
 
-    await expect(simulate(config)).rejects.toThrow(InputValidationError);
-    await expect(simulate(config)).rejects.toThrow(
-      'Unknown mock strategy type: MOCK_STRATEGY_FUTURE',
+    expect(buildUnspecified).toThrow(InputValidationError);
+    expect(buildUnspecified).toThrow(
+      'Unknown mock strategy type: MOCK_STRATEGY_UNSPECIFIED',
     );
   });
 
