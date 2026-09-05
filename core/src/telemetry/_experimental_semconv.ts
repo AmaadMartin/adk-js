@@ -85,40 +85,45 @@ const UNSERIALIZABLE_TOOL = 'UnserializableTool';
  * The emitted payload keys are `snake_case` because they are the wire contract
  * that downstream OpenTelemetry consumers read. They match adk-python's output
  * byte for byte, so they do not follow the repository's `camelCase` style.
+ *
+ * These are `type` aliases rather than `interface`s so that they carry an
+ * implicit index signature and are assignable to `AnyValue` directly. An
+ * `interface` is not, which would force a deep copy through {@link toAnyValue}
+ * on data these builders have already normalized.
  */
-export interface TextPart {
+type TextPart = {
   content: string;
   type: 'text';
-}
+};
 
-export interface BlobPart {
+type BlobPart = {
   mime_type: string;
   /** Base64, because `@google/genai` encodes `Blob.data` as a string. */
   data: string;
   type: 'blob';
-}
+};
 
-export interface FileDataPart {
+type FileDataPart = {
   mime_type: string;
   uri: string;
   type: 'file_data';
-}
+};
 
-export interface ToolCallPart {
+type ToolCallPart = {
   id: string;
   name: string;
   arguments: AnyValueMap | null;
   type: 'tool_call';
-}
+};
 
-export interface ToolCallResponsePart {
+type ToolCallResponsePart = {
   id: string;
   response: AnyValueMap | null;
   type: 'tool_call_response';
-}
+};
 
 /** One entry of an emitted message's `parts` list. */
-export type SemconvPart =
+type SemconvPart =
   | TextPart
   | BlobPart
   | FileDataPart
@@ -126,34 +131,34 @@ export type SemconvPart =
   | ToolCallResponsePart;
 
 /** One entry of `gen_ai.input.messages`. */
-export interface InputMessage {
+type InputMessage = {
   role: string;
   parts: SemconvPart[];
-}
+};
 
 /** One entry of `gen_ai.output.messages`. */
-export interface OutputMessage {
+type OutputMessage = {
   role: string;
   parts: SemconvPart[];
   finish_reason: string;
-}
+};
 
 /** A declared function, reported with its JSON schema. */
-export interface FunctionToolDefinition {
+type FunctionToolDefinition = {
   name: string;
   description: string | null;
   parameters: AnyValueMap | null;
   type: 'function';
-}
+};
 
 /** A built-in tool, reported by name only. */
-export interface GenericToolDefinition {
+type GenericToolDefinition = {
   name: string;
   type: string;
-}
+};
 
 /** One entry of `gen_ai.tool.definitions`. */
-export type ToolDefinition = FunctionToolDefinition | GenericToolDefinition;
+type ToolDefinition = FunctionToolDefinition | GenericToolDefinition;
 
 /**
  * A tool descriptor that is not a `@google/genai` `Tool`, such as the plain
@@ -207,21 +212,17 @@ function isAnyValueMap(value: AnyValue): value is AnyValueMap {
 }
 
 /**
- * `Uint8Array` and `Map` are JavaScript built-ins, so a second copy of adk-js
- * in the same runtime does not give them a second identity. The objection to
- * `instanceof` in the style guide is about class identity across package
- * copies, which cannot apply to them.
+ * `Uint8Array` is a JavaScript built-in, so a second copy of adk-js in the same
+ * runtime does not give it a second identity. The objection to `instanceof` in
+ * the style guide is about class identity across package copies, which cannot
+ * apply to it.
  */
 function isByteArray(value: object): value is Uint8Array {
   return value instanceof Uint8Array;
 }
 
-function isMap(value: object): value is Map<unknown, unknown> {
-  return value instanceof Map;
-}
-
 /** Whether `value` is a plain object rather than a class instance. */
-function isPlainObject(value: object): boolean {
+function isPlainObject(value: object): value is Record<string, unknown> {
   const prototype = Object.getPrototypeOf(value) as object | null;
   return prototype === Object.prototype || prototype === null;
 }
@@ -237,16 +238,16 @@ function typeName(value: unknown): string {
   return value.constructor?.name ?? 'object';
 }
 
-function entriesToAnyValue(
-  entries: Iterable<readonly [unknown, unknown]>,
+function recordToAnyValue(
+  value: Record<string, unknown>,
   path: Set<object>,
 ): AnyValueMap {
   const normalized: AnyValueMap = {};
-  for (const [key, value] of entries) {
+  for (const [key, item] of Object.entries(value)) {
     // The counterpart of pydantic's `exclude_none=True`. An explicit `null`
     // survives, because the redacted tool view emits `description: null`.
-    if (value !== undefined) {
-      normalized[String(key)] = toAnyValue(value, path);
+    if (item !== undefined) {
+      normalized[key] = toAnyValue(item, path);
     }
   }
   return normalized;
@@ -256,11 +257,8 @@ function objectToAnyValue(value: object, path: Set<object>): AnyValue {
   if (Array.isArray(value)) {
     return value.map((item) => toAnyValue(item, path));
   }
-  if (isMap(value)) {
-    return entriesToAnyValue(value.entries(), path);
-  }
   if (isPlainObject(value)) {
-    return entriesToAnyValue(Object.entries(value), path);
+    return recordToAnyValue(value, path);
   }
   return NOT_SERIALIZABLE;
 }
@@ -779,14 +777,12 @@ export function setOperationDetailsAttributesFromRequest(
   attributes: AnyValueMap,
   llmRequest: LlmRequest,
 ): void {
-  attributes[GEN_AI_INPUT_MESSAGES] = toAnyValue(
-    llmRequest.contents.map(toInputMessage),
+  attributes[GEN_AI_INPUT_MESSAGES] = llmRequest.contents.map(toInputMessage);
+  attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = toSystemInstructions(
+    llmRequest.config?.systemInstruction,
   );
-  attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = toAnyValue(
-    toSystemInstructions(llmRequest.config?.systemInstruction),
-  );
-  attributes[GEN_AI_TOOL_DEFINITIONS] = toAnyValue(
-    resolveToolDefinitions(llmRequest.config?.tools ?? []),
+  attributes[GEN_AI_TOOL_DEFINITIONS] = resolveToolDefinitions(
+    llmRequest.config?.tools ?? [],
   );
 }
 
@@ -815,10 +811,9 @@ export function setOperationDetailsAttributesFromResponse(
   const outputMessage = toOutputMessage(llmResponse);
   if (outputMessage) {
     const recorded = details[GEN_AI_OUTPUT_MESSAGES];
-    const arrived = toAnyValue(outputMessage);
     details[GEN_AI_OUTPUT_MESSAGES] = Array.isArray(recorded)
-      ? [...recorded, arrived]
-      : [arrived];
+      ? [...recorded, outputMessage]
+      : [outputMessage];
   }
 }
 
