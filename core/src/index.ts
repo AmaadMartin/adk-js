@@ -7,6 +7,14 @@
 // Also available as `@google/adk/a2a`, which does not evaluate the rest of
 // this barrel.
 export * from './a2a/index.js';
+// Resolving a config document imports the modules it names, so this half of
+// the declarative config layer is Node-only and stays out of `common.ts`.
+export {
+  llmAgentFromConfig,
+  resolveCallbacks,
+  resolveTools,
+} from './agents/config_agent_utils.js';
+export type {CallbackFunction} from './agents/config_agent_utils.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';

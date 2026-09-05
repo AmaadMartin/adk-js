@@ -13,6 +13,7 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export type {AgentRefConfig, CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -45,6 +46,11 @@ export type {
   SingleBeforeToolCallback,
   ToolUnion,
 } from './agents/llm_agent.js';
+export {
+  llmAgentYamlConfigSchema,
+  parseLlmAgentConfig,
+} from './agents/llm_agent_config.js';
+export type {LlmAgentYamlConfig} from './agents/llm_agent_config.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig} from './agents/loop_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
@@ -326,6 +332,7 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
+export type {ToolArgsConfig, ToolConfig} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
   ToolConfirmation,
