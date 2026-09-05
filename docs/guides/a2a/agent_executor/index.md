@@ -1,7 +1,7 @@
 # A2AAgentExecutor converter configuration
 
 `A2AAgentExecutor` translates one Agent2Agent (A2A) request into an ADK run,
-and the run's ADK events back into A2A events. Three converter slots on its
+and the run's ADK events back into A2A events. Four converter slots on its
 config decide how that translation happens. Reach for them when the built-in
 conversion is close but not what you want to publish.
 
@@ -15,10 +15,14 @@ Every executor holds a converter for each direction of the boundary:
   it, and takes the artifact map of the execution in progress. It is the
   counterpart of `adk_event_converter` on adk-python's
   `A2aAgentExecutorConfig`.
+- `eventConverter` does the same job, but takes the `ExecutorContext` instead
+  of the artifact map. It is the counterpart of `event_converter` on that same
+  config. Use it when the conversion depends on the session, the user or the
+  request rather than on the stream in progress.
 
-An unset slot takes the default named below. The executor resolves the whole
-set once, in its constructor, so a config it accepts cannot fail later in the
-middle of a live stream.
+A defaulted slot that you leave unset takes the default named below. The
+executor resolves the whole set once, in its constructor, so a config it
+accepts cannot fail later in the middle of a live stream.
 
 The executor stamps ADK metadata — the app, user and session ids, the
 invocation id, the author, the branch — onto every event a converter returns.
@@ -83,10 +87,48 @@ Returning an empty array publishes nothing for that ADK event.
 | -------------------- | ------------------------------------------ |
 | `a2aPartConverter`   | `toGenAIPart`                              |
 | `genAiPartConverter` | `toA2APart`                                |
+| `eventConverter`     | none                                       |
 | `adkEventConverter`  | `toA2AArtifactUpdateEventsFromArtifactMap` |
 
 `resolveA2aAgentExecutorConfig` applies those defaults. The executor calls it
 in its constructor.
+
+## Converting an event from the executor context
+
+`eventConverter` is the second ADK-event slot. It receives the
+`ExecutorContext` of the run, which carries the session, the user, the events
+so far and the `RequestContext` the A2A server built:
+
+```ts
+import {A2AAgentExecutor} from '@google/adk';
+
+const executor = new A2AAgentExecutor({
+  runner: myRunner,
+  eventConverter: (adkEvent, ctx, genAiPartConverter) => [
+    {
+      kind: 'status-update',
+      taskId: ctx.requestContext.taskId,
+      contextId: ctx.requestContext.contextId,
+      final: false,
+      status: {
+        state: 'working',
+        message: {
+          kind: 'message',
+          messageId: adkEvent.id,
+          role: 'agent',
+          parts: (adkEvent.content?.parts ?? []).map((part) =>
+            genAiPartConverter(part),
+          ),
+        },
+      },
+    },
+  ],
+});
+```
+
+It has no default, and the executor prefers it over `adkEventConverter` when
+you set both. adk-python splits these two slots across two executor classes;
+adk-js has one executor, so the precedence rule stands in for that split.
 
 ## The artifact map
 
