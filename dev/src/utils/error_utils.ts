@@ -22,3 +22,16 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * Returns the class name of a thrown value — `Error`, `TypeError`, and so on —
+ * or its `typeof` when it is not an `Error`.
+ *
+ * Use it in place of {@link errorMessage} where the message cannot be trusted
+ * with the log. A library is free to build its caller's input into a message,
+ * so an error raised while handling a credential can carry that credential;
+ * `name` is a fixed class identifier and carries no input.
+ */
+export function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}

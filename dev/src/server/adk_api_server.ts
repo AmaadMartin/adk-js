@@ -1189,6 +1189,17 @@ export class AdkApiServer {
       this.triggerAuthVerifier ??
       (oidcVerifier ? (req: Request) => oidcVerifier.verify(req) : undefined);
 
+    // triggerAuthVerifier wins, which leaves any configured allowlist with
+    // nothing enforcing it. Say so rather than letting the operator believe
+    // the trigger endpoints are restricted to those principals.
+    if (this.triggerAuthVerifier && this.triggerOidcServiceAccounts?.length) {
+      this.logger.warn(
+        'triggerOidcServiceAccounts is ignored because triggerAuthVerifier ' +
+          'is set: the custom verifier decides who may call the trigger ' +
+          'endpoints.',
+      );
+    }
+
     const context: TriggerServerContext = {
       logger: this.logger,
       withRunner: async <T>(
