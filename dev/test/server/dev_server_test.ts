@@ -12,6 +12,7 @@ import {DevServer, resolveAgentDir} from '../../src/server/dev_server.js';
 import {
   makeAgentsDir,
   STUB_AGENT_LOADER,
+  stubHomeDir,
   TEST_APP_NAME,
   TEST_WRAPPED_APP_NAME,
   TestHttpClient,
@@ -69,12 +70,14 @@ describe('resolveAgentDir', () => {
 
   it('resolves a nested app name to a nested directory', () => {
     expect(resolveAgentDir('/agents', 'parent.child')).toBe(
-      path.join('/agents', 'parent', 'child'),
+      path.resolve('/agents', 'parent', 'child'),
     );
   });
 
   it('resolves a plain app name directly under the agents directory', () => {
-    expect(resolveAgentDir('/agents', 'app')).toBe(path.join('/agents', 'app'));
+    expect(resolveAgentDir('/agents', 'app')).toBe(
+      path.resolve('/agents', 'app'),
+    );
   });
 });
 
@@ -87,7 +90,7 @@ describe('DevServer', () => {
   beforeEach(async () => {
     agentsDir = await makeAgentsDir();
     homeDir = await makeAgentsDir();
-    vi.stubEnv('HOME', homeDir);
+    stubHomeDir(homeDir);
 
     server = new DevServer({agentsDir, agentLoader: STUB_AGENT_LOADER});
     await server.start();

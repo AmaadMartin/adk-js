@@ -8,6 +8,7 @@ import {App, FunctionTool, LlmAgent, RunnableRoot} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {vi} from 'vitest';
 
 import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
 
@@ -134,6 +135,16 @@ export class TestHttpClient {
 /** Creates a private temporary agents directory. */
 export function makeAgentsDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'adk-dev-server-test-'));
+}
+
+/**
+ * Points the ADK config file at a temporary home directory, so a test never
+ * writes to the real one. `os.homedir()` reads `HOME` on POSIX and
+ * `USERPROFILE` on Windows, so both are stubbed.
+ */
+export function stubHomeDir(homeDir: string): void {
+  vi.stubEnv('HOME', homeDir);
+  vi.stubEnv('USERPROFILE', homeDir);
 }
 
 /** Returns the tests directory of an app inside an agents directory. */
