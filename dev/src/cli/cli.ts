@@ -93,20 +93,20 @@ function getBoolean(option?: string | boolean): boolean {
 }
 
 /**
- * Splits the comma-separated --allowed_hosts value into a list, dropping
+ * Splits a comma-separated option value into a list, dropping
  * empty/whitespace-only entries. An unset or empty option yields undefined
- * rather than [], so it composes with ServerOptions.allowedHosts?: string[]
+ * rather than [], so it composes with an optional `string[]` server option
  * without callers needing to special-case "no value provided".
  */
-function getAllowedHosts(option?: string): string[] | undefined {
+function splitCommaSeparated(option?: string): string[] | undefined {
   if (!option) {
     return undefined;
   }
-  const hosts = option
+  const values = option
     .split(',')
-    .map((host) => host.trim())
+    .map((value) => value.trim())
     .filter(Boolean);
-  return hosts.length > 0 ? hosts : undefined;
+  return values.length > 0 ? values : undefined;
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -172,6 +172,24 @@ const A2A_AUTH_TOKEN_OPTION = new Option(
 const A2A_AUTH_TOKEN_DEPLOY_OPTION = new Option(
   '--a2a_auth_token <string>',
   'Optional. Shared bearer token used to authenticate the deployed A2A surface. Callers must send "Authorization: Bearer <token>". It is sent to Cloud Run as the ADK_A2A_AUTH_TOKEN environment variable and is never written into the image. If unset, the deployed A2A surface is served WITHOUT authentication.',
+);
+const TRIGGER_SOURCES_OPTION = new Option(
+  '--trigger_sources <string>',
+  'Optional. Comma-separated event sources to serve trigger endpoints for: ' +
+    'pubsub, eventarc. Nothing is served without this flag. A served ' +
+    'endpoint accepts UNAUTHENTICATED requests unless ' +
+    '--trigger_oidc_audience is also set or a verifier is configured in code.',
+);
+const TRIGGER_OIDC_AUDIENCE_OPTION = new Option(
+  '--trigger_oidc_audience <string>',
+  'Optional. Audience the Google OIDC identity token on a trigger request ' +
+    "must carry, normally this service's public URL. Without it the trigger " +
+    'endpoints accept UNAUTHENTICATED requests.',
+);
+const TRIGGER_OIDC_SERVICE_ACCOUNTS_OPTION = new Option(
+  '--trigger_oidc_service_accounts <string>',
+  'Optional. Comma-separated service account addresses allowed to call the ' +
+    'trigger endpoints. Requires --trigger_oidc_audience.',
 );
 const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
@@ -251,6 +269,9 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(TRIGGER_SOURCES_OPTION)
+    .addOption(TRIGGER_OIDC_AUDIENCE_OPTION)
+    .addOption(TRIGGER_OIDC_SERVICE_ACCOUNTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
@@ -263,7 +284,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
+          allowedHosts: splitCommaSeparated(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
@@ -271,6 +292,11 @@ export function createProgram(): Command {
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
           reloadAgents: getBoolean(options['reload_agents']),
+          triggerSources: splitCommaSeparated(options['trigger_sources']),
+          triggerOidcAudience: options['trigger_oidc_audience'],
+          triggerOidcServiceAccounts: splitCommaSeparated(
+            options['trigger_oidc_service_accounts'],
+          ),
         });
 
         await server.start();
@@ -299,6 +325,9 @@ export function createProgram(): Command {
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(TRIGGER_SOURCES_OPTION)
+    .addOption(TRIGGER_OIDC_AUDIENCE_OPTION)
+    .addOption(TRIGGER_OIDC_SERVICE_ACCOUNTS_OPTION)
     .action(async (agentsDir: string, options: Record<string, string>) => {
       const logLevel = getLogLevelFromOptions(options);
       setAdkCoreLogLevel(logLevel);
@@ -311,7 +340,7 @@ export function createProgram(): Command {
           port: parseInt(options['port'], 10),
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
+          allowedHosts: splitCommaSeparated(options['allowed_hosts']),
           sessionService: getSessionServiceFromOptions(options),
           artifactService: getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
@@ -319,6 +348,11 @@ export function createProgram(): Command {
           a2a: getBoolean(options['a2a']),
           a2aAuthToken: options['a2a_auth_token'],
           reloadAgents: getBoolean(options['reload_agents']),
+          triggerSources: splitCommaSeparated(options['trigger_sources']),
+          triggerOidcAudience: options['trigger_oidc_audience'],
+          triggerOidcServiceAccounts: splitCommaSeparated(
+            options['trigger_oidc_service_accounts'],
+          ),
         });
         await server.start();
       } catch (error) {
