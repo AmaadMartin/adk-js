@@ -14,6 +14,17 @@ import {ResumabilityConfig} from './resumability_config.js';
 const VALID_APP_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
 /**
+ * Marks options that must skip {@link validateAppName}.
+ *
+ * Module-private, so {@link createUnvalidatedApp} is the only way to set it.
+ */
+const SKIP_NAME_VALIDATION = Symbol('google.adk.app.skipNameValidation');
+
+interface UnvalidatedAppOptions extends AppOptions {
+  [SKIP_NAME_VALIDATION]: true;
+}
+
+/**
  * Ensures the provided application name is safe and intuitive.
  */
 export function validateAppName(name: string): void {
@@ -82,7 +93,9 @@ export class App {
   readonly resumabilityConfig?: ResumabilityConfig;
 
   constructor(options: AppOptions) {
-    validateAppName(options.name);
+    if (!(SKIP_NAME_VALIDATION in options)) {
+      validateAppName(options.name);
+    }
 
     if (options.rootAgent === undefined || options.rootAgent === null) {
       throw new Error('rootAgent must be provided.');
@@ -95,4 +108,23 @@ export class App {
     this.plugins = options.plugins ?? [];
     this.resumabilityConfig = options.resumabilityConfig;
   }
+}
+
+/**
+ * Builds an `App` without the strict app-name check.
+ *
+ * The `Runner` normalizes a bare `{appName, agent}` into an `App`, and that
+ * legacy form has always accepted any name. Running the validator on it would
+ * start rejecting names that ship today, so the normalization skips it.
+ * `new App({name})` still validates.
+ *
+ * Mirrors `google/adk-python`'s use of `App.model_construct` in
+ * `Runner._resolve_app`.
+ */
+export function createUnvalidatedApp(options: AppOptions): App {
+  const unvalidated: UnvalidatedAppOptions = {
+    ...options,
+    [SKIP_NAME_VALIDATION]: true,
+  };
+  return new App(unvalidated);
 }

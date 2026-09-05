@@ -23,6 +23,14 @@ export const FINISH_TASK_TOOL_NAME = 'finish_task';
  */
 export const FINISH_TASK_SUCCESS_RESULT = 'Task completed.';
 
+/**
+ * The terminal failure counterpart of {@link FINISH_TASK_SUCCESS_RESULT}.
+ *
+ * A task that reports this has finished: it will not read another user reply,
+ * so its isolation scope closes just as it does on success.
+ */
+export const FINISH_TASK_ERROR_RESULT = 'Task failed.';
+
 /** The default output schema when the task agent declares none. */
 const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
   type: Type.OBJECT,

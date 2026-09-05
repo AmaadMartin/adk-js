@@ -18,7 +18,7 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
-import {App} from '../apps/app.js';
+import {App, createUnvalidatedApp} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../artifacts/scoped_artifact_service.js';
@@ -34,6 +34,13 @@ import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
+import {
+  extractResumeInputs,
+  findUserMessageForInvocation,
+  resolveInvocationId,
+  resolveInvocationIdFromFunctionResponses,
+  validateNewMessage,
+} from '../sessions/invocation_utils.js';
 import {CompositeSessionKey, Session} from '../sessions/session.js';
 import {
   runAsyncGeneratorWithOtelContext,
@@ -48,6 +55,7 @@ import {
   RunnableRoot,
   runNodeAsInvocation,
 } from '../workflow/run_node_as_invocation.js';
+import {findActiveTaskScope} from './task_scope_utils.js';
 
 /**
  * The configuration parameters for the Runner.
@@ -106,6 +114,159 @@ export interface RunnerConfig {
 }
 
 /**
+ * Validates a runner's configuration and normalizes it to an {@link App}.
+ *
+ * Exactly one of `app` and `agent` is accepted. A bare agent or node is
+ * wrapped, so the rest of the runner has one shape to read from. Ported from
+ * `google/adk-python` `runners.py::Runner._resolve_app`.
+ *
+ * A wrapped root skips the strict app-name check, because the
+ * `{appName, agent}` form has always accepted any name. adk-js also allows no
+ * name at all here: a missing `appName` is reported when the session lookup
+ * fails, which is this repository's shipped contract.
+ *
+ * @throws {Error} If both `app` and `agent` are given, if neither is, or if
+ *   `plugins` accompanies `app`.
+ */
+function resolveApp(input: RunnerConfig): App {
+  const {app, agent, plugins} = input;
+  if (app && agent) {
+    throw new Error(
+      `Only one of app or agent may be provided, but got: ` +
+        `app=${typeName(app)}, agent=${typeName(agent)}. ` +
+        'Pass exactly one to Runner().',
+    );
+  }
+  if (!app && !agent) {
+    throw new Error(
+      'One of app or agent must be provided. Got none. ' +
+        'Pass exactly one to Runner().',
+    );
+  }
+
+  if (plugins?.length) {
+    if (app) {
+      throw new Error(
+        'When app is provided, plugins should not be provided and should be ' +
+          'provided in the app instead.',
+      );
+    }
+    logger.warn(
+      "The 'plugins' option is deprecated. Please use the 'app' option to " +
+        'provide plugins instead.',
+    );
+  }
+
+  if (app) {
+    return app;
+  }
+
+  const root = asRunnableRoot(agent!);
+  // A node root names the app when the caller did not, mirroring adk-python.
+  // An agent root does not: adk-js reports a missing app name at session
+  // lookup, and naming the app after the agent would hide that.
+  const fallbackName = isBaseAgent(root) ? '' : root.name;
+  return createUnvalidatedApp({
+    name: input.appName ?? fallbackName,
+    rootAgent: root,
+    plugins,
+  });
+}
+
+/** Names a value's class, for a diagnostic that reports what was passed. */
+function typeName(value: object): string {
+  return value.constructor?.name ?? typeof value;
+}
+
+/**
+ * Defaults a root `LlmAgent` to chat mode, and refuses a root in any other
+ * mode the runner cannot drive.
+ *
+ * `single_turn` describes an agent the graph runs once on a node input, so
+ * there is nothing for a root to be handed. Ported from `google/adk-python`
+ * `runners.py::Runner.run_async`, which mutates the agent the same way.
+ *
+ * @throws {Error} If a root `LlmAgent` declares a mode other than `chat` or
+ *   `task`.
+ */
+function normalizeRootMode(root: RunnableRoot): void {
+  if (!isLlmAgent(root)) {
+    return;
+  }
+  root.mode ??= 'chat';
+  if (root.mode !== 'chat' && root.mode !== 'task') {
+    throw new Error(
+      `LlmAgent as root agent must have mode='chat' or 'task', but got ` +
+        `mode='${root.mode}'.`,
+    );
+  }
+}
+
+/** Whether an agent is an `LlmAgent` running in task mode. */
+function isTaskModeAgent(agent: BaseAgent): boolean {
+  return isLlmAgent(agent) && agent.mode === 'task';
+}
+
+/**
+ * Whether the runner drives this root through the node runtime.
+ *
+ * adk-python splits its runner in two. An `LlmAgent` root and a bare node go
+ * through `workflow/_node_runner_utils.run_node_async`, which resolves the
+ * invocation for every message and refuses one that mixes function responses
+ * with text. Any other agent root takes the plain path, which resolves the
+ * invocation only for a resumable app and applies neither rule. Keeping that
+ * split is what lets a caller of, say, a remote A2A agent go on sending a
+ * message that carries a tool result alongside text.
+ */
+function rootRunsAsNode(root: RunnableRoot): boolean {
+  return !isBaseAgent(root) || isLlmAgent(root);
+}
+
+/**
+ * Whether the root is a chat coordinator that delegates to a task-mode
+ * sub-agent.
+ *
+ * Such a root drives the delegation itself, so the resumption picker must not
+ * step past it onto the sub-agent it is coordinating.
+ */
+function coordinatesTaskSubAgent(root: BaseAgent): boolean {
+  return (
+    isLlmAgent(root) &&
+    root.mode === 'chat' &&
+    root.subAgents.some((sub) => isLlmAgent(sub) && sub.mode === 'task')
+  );
+}
+
+/**
+ * Collects the agents that reported the end of their run within an invocation.
+ *
+ * An agent is keyed by its node path when it ran as a workflow node, and by its
+ * author name otherwise. A later `agentState` reopens the agent: it
+ * checkpointed again, so the earlier end no longer stands. Derived from the
+ * session rather than tracked on the invocation, because the runner only needs
+ * the membership test. Mirrors `google/adk-python`
+ * `invocation_context.py::populate_invocation_agent_states`.
+ */
+function endedAgentsForInvocation(
+  session: Session,
+  invocationId: string,
+): Set<string> {
+  const ended = new Set<string>();
+  for (const event of session.events) {
+    const key = event.nodeInfo?.path || event.author;
+    if (event.invocationId !== invocationId || !key) {
+      continue;
+    }
+    if (event.actions.endOfAgent) {
+      ended.add(key);
+    } else if (event.actions.agentState !== undefined) {
+      ended.delete(key);
+    }
+  }
+  return ended;
+}
+
+/**
  * A unique symbol to identify ADK agent classes.
  * Defined once and shared by all Runner instances.
  */
@@ -154,6 +315,13 @@ export class Runner {
   readonly [RUNNER_SIGNATURE_SYMBOL] = true;
   readonly appName: string;
   /**
+   * The application this runner drives.
+   *
+   * A runner built from a bare `agent` gets an `App` wrapped around it, so
+   * every runner has one whichever way it was constructed.
+   */
+  readonly app: App;
+  /**
    * The root being run: an agent, or a bare node (a `Workflow`) that the
    * runner drives directly.
    */
@@ -171,26 +339,18 @@ export class Runner {
    * @param input The configuration for the runner.
    */
   constructor(input: RunnerConfig) {
-    const appName = input.app?.name ?? input.appName;
-    const agent = input.app?.rootAgent ?? input.agent;
-    if (!agent) {
-      throw new Error(
-        'agent must be provided in runner constructor (or via app.rootAgent)',
-      );
-    }
-    this.appName = appName!;
+    this.app = resolveApp(input);
+    this.appName = input.appName ?? this.app.name;
     // A workflow is kept as itself rather than wrapped: the runner drives a
     // node directly (see `runRoot`), so there is no agent to manufacture.
-    this.agent = asRunnableRoot(agent);
-    const appPlugins = input.app?.plugins ?? [];
-    const configPlugins = input.plugins ?? [];
-    this.pluginManager = new PluginManager([...appPlugins, ...configPlugins]);
+    this.agent = this.app.rootAgent;
+    this.pluginManager = new PluginManager(this.app.plugins);
     this.artifactService = input.artifactService;
     this.sessionService = input.sessionService;
     this.memoryService = input.memoryService;
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
-      input.app?.resumabilityConfig ?? input.resumabilityConfig;
+      this.app.resumabilityConfig ?? input.resumabilityConfig;
   }
 
   /**
@@ -237,9 +397,17 @@ export class Runner {
    * Runs the agent with the given message, and returns an async generator of
    * events.
    *
+   * A message whose parts are function responses resumes the invocation that
+   * issued those calls, so a tool result rejoins the turn it answers. A plain
+   * message sent while a task agent is paused joins that task instead of
+   * starting a turn the task would never see.
+   *
    * @param params.userId The user ID of the session.
    * @param params.sessionId The session ID of the session.
-   * @param params.newMessage A new message to append to the session.
+   * @param params.invocationId An invocation to resume. Reconciled against the
+   *     function responses in `newMessage` rather than trusted.
+   * @param params.newMessage A new message to append to the session. Optional
+   *     only when `invocationId` is given and the app is resumable.
    * @param params.stateDelta An optional state delta to apply to the session.
    * @param params.runConfig The run config for the agent.
    * @yields The events generated by the agent.
@@ -248,7 +416,8 @@ export class Runner {
   async *runAsync(params: {
     userId: string;
     sessionId: string;
-    newMessage: Content;
+    invocationId?: string;
+    newMessage?: Content;
     stateDelta?: Record<string, unknown>;
     runConfig?: RunConfig;
     abortSignal?: AbortSignal;
@@ -261,6 +430,20 @@ export class Runner {
       newMessage.role = 'user';
     }
     rejectReservedFunctionCalls(newMessage);
+    normalizeRootMode(this.agent);
+    if (!newMessage && !params.invocationId) {
+      throw new Error(
+        'Running an agent requires either a newMessage or an invocationId to ' +
+          `resume a previous invocation. Session: ${sessionId}, User: ${userId}`,
+      );
+    }
+    const isResumable = Boolean(this.resumabilityConfig?.isResumable);
+    if (!newMessage && !isResumable) {
+      throw new Error(
+        'Running an agent requires a newMessage or a resumable app. ' +
+          `Session: ${sessionId}, User: ${userId}`,
+      );
+    }
 
     // =========================================================================
     // Setup the session and invocation context
@@ -306,6 +489,60 @@ export class Runner {
             }
           }
 
+          // =====================================================================
+          // Decide which invocation this run belongs to
+          // =====================================================================
+          const resumeInputs = extractResumeInputs(newMessage);
+          const runsAsNode = rootRunsAsNode(this.agent);
+          if (runsAsNode) {
+            validateNewMessage(newMessage, resumeInputs);
+          }
+          const activeTaskScope = findActiveTaskScope(session);
+
+          let invocationId = params.invocationId;
+          // A message that joins a paused task borrows that task's invocation
+          // id so the task agent sees it, but it is still the user's next turn
+          // rather than a replay of the turn that opened the task.
+          let continuesPausedTask = false;
+          if (newMessage && (runsAsNode || isResumable)) {
+            if (invocationId) {
+              invocationId = resolveInvocationId(
+                session,
+                newMessage,
+                invocationId,
+              );
+            } else {
+              invocationId = resolveInvocationIdFromFunctionResponses(
+                session,
+                newMessage,
+              );
+              if (!invocationId && runsAsNode && activeTaskScope) {
+                invocationId = activeTaskScope.invocationId;
+                continuesPausedTask = true;
+              }
+            }
+          }
+
+          const isResumedInvocation = Boolean(
+            isResumable && invocationId && !continuesPausedTask,
+          );
+          // The turn the run continues, recovered so a resume runs the agent
+          // against the message it was already working on.
+          const existingUserContent =
+            invocationId && !continuesPausedTask
+              ? findUserMessageForInvocation(session.events, invocationId)
+              : undefined;
+          if (isResumedInvocation) {
+            if (!session.events.length) {
+              throw new Error(`Session ${sessionId} has no events to resume.`);
+            }
+            if (!newMessage && !existingUserContent) {
+              throw new Error(
+                `No user message available for resuming invocation: ${invocationId}`,
+              );
+            }
+          }
+
           const invocationContext = new InvocationContext({
             artifactService: this.artifactService
               ? new ScopedArtifactService(
@@ -318,39 +555,50 @@ export class Runner {
             sessionService: this.sessionService,
             memoryService: this.memoryService,
             credentialService: this.credentialService,
-            invocationId: newInvocationContextId(),
+            invocationId: invocationId || newInvocationContextId(),
             agent: isBaseAgent(this.agent) ? this.agent : undefined,
             session,
-            userContent: newMessage,
+            userContent: existingUserContent ?? newMessage,
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
             pluginManager: this.pluginManager,
             abortSignal: params.abortSignal,
           });
 
-          // =========================================================================
-          // Preprocess plugins on user message
-          // =========================================================================
-          const pluginUserMessage =
-            await this.pluginManager.runOnUserMessageCallback({
-              userMessage: newMessage,
-              invocationContext,
-            });
+          // One user event per invocation per turn: a retry under an existing
+          // invocation id must not duplicate the turn, while a tool result and
+          // a reply to a paused task are both genuinely new content.
+          const isNewTurn = Boolean(
+            newMessage &&
+            (resumeInputs || continuesPausedTask || !existingUserContent),
+          );
 
-          if (params.abortSignal?.aborted) {
-            return;
-          }
+          if (isNewTurn && newMessage) {
+            // =====================================================================
+            // Preprocess plugins on user message
+            // =====================================================================
+            const pluginUserMessage =
+              await this.pluginManager.runOnUserMessageCallback({
+                userMessage: newMessage,
+                invocationContext,
+              });
 
-          if (pluginUserMessage) {
-            newMessage = pluginUserMessage as Content;
-          }
+            if (params.abortSignal?.aborted) {
+              return;
+            }
 
-          // =========================================================================
-          // Append user message to session
-          // =========================================================================
-          if (newMessage) {
+            if (pluginUserMessage) {
+              newMessage = pluginUserMessage;
+            }
+
+            // =====================================================================
+            // Append user message to session
+            // =====================================================================
             if (!newMessage.parts?.length) {
               throw new Error('No parts in the newMessage.');
+            }
+            if (newMessage.parts.some((part) => part.functionCall)) {
+              throw new Error('User message cannot contain function calls.');
             }
 
             // Directly saves the artifacts (if applicable) in the user message and
@@ -367,19 +615,19 @@ export class Runner {
                 return;
               }
             }
-            // Append the user message to the session with optional state delta.
-            await this.sessionService.appendEvent({
-              session,
-              event: createEvent({
-                invocationId: invocationContext.invocationId,
-                author: 'user',
-                actions: stateDelta
-                  ? createEventActions({stateDelta})
-                  : undefined,
-                content: newMessage,
-                customMetadata: params.customMetadata,
-              }),
+            const userEvent = createEvent({
+              invocationId: invocationContext.invocationId,
+              author: 'user',
+              actions: stateDelta
+                ? createEventActions({stateDelta})
+                : undefined,
+              content: newMessage,
+              customMetadata: params.customMetadata,
             });
+            // A paused task agent only sees events inside its isolation scope,
+            // so a reply that is not stamped with that scope never reaches it.
+            userEvent.isolationScope = activeTaskScope?.isolationScope;
+            await this.sessionService.appendEvent({session, event: userEvent});
             if (params.abortSignal?.aborted) {
               return;
             }
@@ -391,86 +639,95 @@ export class Runner {
           // Only meaningful for an agent root: this resolves an event author
           // against the agent tree, and a node subtree is not in that tree.
           if (isBaseAgent(this.agent)) {
-            invocationContext.agent = this.determineAgentForResumption(
+            invocationContext.agent = coordinatesTaskSubAgent(this.agent)
+              ? this.agent
+              : this.determineAgentForResumption(session, this.agent);
+          }
+
+          // An agent that already reported the end of its run in this
+          // invocation has nothing left to do, so resuming onto it would rerun
+          // finished work.
+          if (
+            isResumedInvocation &&
+            invocationContext.agent &&
+            endedAgentsForInvocation(
               session,
-              this.agent,
-            );
+              invocationContext.invocationId,
+            ).has(invocationContext.agent.name)
+          ) {
+            return;
           }
 
           // =========================================================================
           // Run the agent with the plugins (aka hooks to apply in the lifecycle)
           // =========================================================================
-          if (newMessage) {
-            // =========================================================================
-            // Run the agent with the plugins (aka hooks to apply in the lifecycle)
-            // =========================================================================
-            // Step 1: Run the before_run callbacks to see if we should early exit.
-            const beforeRunCallbackResponse =
-              await this.pluginManager.runBeforeRunCallback({
-                invocationContext,
-              });
+          // Step 1: Run the before_run callbacks to see if we should early exit.
+          const beforeRunCallbackResponse =
+            await this.pluginManager.runBeforeRunCallback({
+              invocationContext,
+            });
+          if (params.abortSignal?.aborted) {
+            return;
+          }
+
+          if (beforeRunCallbackResponse) {
+            const earlyExitEvent = createEvent({
+              invocationId: invocationContext.invocationId,
+              author: 'model',
+              content: beforeRunCallbackResponse,
+            });
+            // Live call audio content should not be saved to the session, as
+            // it is in adk-python. Not implemented here yet.
+            await this.sessionService.appendEvent({
+              session,
+              event: earlyExitEvent,
+            });
             if (params.abortSignal?.aborted) {
               return;
             }
 
-            if (beforeRunCallbackResponse) {
-              const earlyExitEvent = createEvent({
-                invocationId: invocationContext.invocationId,
-                author: 'model',
-                content: beforeRunCallbackResponse,
-              });
-              // TODO: b/447446338 - In the future, do *not* save live call audio
-              // content to session This is a feature in Python ADK
-              await this.sessionService.appendEvent({
-                session,
-                event: earlyExitEvent,
-              });
+            yield earlyExitEvent;
+          } else {
+            // Step 2: Otherwise continue with normal execution
+            for await (const event of this.runRoot(invocationContext)) {
               if (params.abortSignal?.aborted) {
                 return;
               }
 
-              yield earlyExitEvent;
-            } else {
-              // Step 2: Otherwise continue with normal execution
-              for await (const event of this.runRoot(invocationContext)) {
-                if (params.abortSignal?.aborted) {
-                  return;
-                }
-
-                // Step 3: Run the on_event callbacks before persisting so callback
-                // changes are stored in the session and match the streamed event.
-                const modifiedEvent =
-                  await this.pluginManager.runOnEventCallback({
-                    invocationContext,
-                    event,
-                  });
-                const outputEvent = modifiedEvent
-                  ? {
-                      ...modifiedEvent,
-                      id: event.id,
-                      invocationId: event.invocationId,
-                      timestamp: event.timestamp,
-                      author: modifiedEvent.author || event.author,
-                      branch: modifiedEvent.branch ?? event.branch,
-                    }
-                  : event;
-                if (!event.partial) {
-                  await this.sessionService.appendEvent({
-                    session,
-                    event: outputEvent,
-                  });
-                }
-                if (params.abortSignal?.aborted) {
-                  return;
-                }
-
-                yield outputEvent;
+              // Step 3: Run the on_event callbacks before persisting so callback
+              // changes are stored in the session and match the streamed event.
+              const modifiedEvent = await this.pluginManager.runOnEventCallback(
+                {
+                  invocationContext,
+                  event,
+                },
+              );
+              const outputEvent = modifiedEvent
+                ? {
+                    ...modifiedEvent,
+                    id: event.id,
+                    invocationId: event.invocationId,
+                    timestamp: event.timestamp,
+                    author: modifiedEvent.author || event.author,
+                    branch: modifiedEvent.branch ?? event.branch,
+                  }
+                : event;
+              if (!event.partial) {
+                await this.sessionService.appendEvent({
+                  session,
+                  event: outputEvent,
+                });
               }
-              // Step 4: Run the after_run callbacks to optionally modify the context.
-              await this.pluginManager.runAfterRunCallback({invocationContext});
               if (params.abortSignal?.aborted) {
                 return;
               }
+
+              yield outputEvent;
+            }
+            // Step 4: Run the after_run callbacks to optionally modify the context.
+            await this.pluginManager.runAfterRunCallback({invocationContext});
+            if (params.abortSignal?.aborted) {
+              return;
             }
           }
         },
@@ -488,7 +745,9 @@ export class Runner {
    * Runs whatever this runner was given as its root.
    *
    * An agent is run through `runAsync`, as always. A bare node — a `Workflow`
-   * handed to the runner directly — is driven by {@link runNodeAsInvocation}.
+   * handed to the runner directly — is driven by {@link runNodeAsInvocation},
+   * and so is a task-mode root: the node runtime is what watches for
+   * `finish_task` and promotes the task's result onto the event stream.
    *
    * Only the execution differs. Everything around it (the run callbacks, event
    * persistence, cancellation) is shared, so the node path cannot drift from
@@ -499,11 +758,11 @@ export class Runner {
   private async *runRoot(
     invocationContext: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    if (isBaseAgent(this.agent)) {
-      yield* requireAgent(invocationContext).runAsync(invocationContext);
+    if (!isBaseAgent(this.agent) || isTaskModeAgent(this.agent)) {
+      yield* runNodeAsInvocation(this.agent, invocationContext);
       return;
     }
-    yield* runNodeAsInvocation(this.agent, invocationContext);
+    yield* requireAgent(invocationContext).runAsync(invocationContext);
   }
 
   /**

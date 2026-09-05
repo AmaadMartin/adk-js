@@ -1489,7 +1489,7 @@ describe('Runner reserved function call rejection', () => {
     expect(session?.events).toEqual([]);
   });
 
-  it('accepts the function response that answers such a call', async () => {
+  it('lets the function response that answers such a call past the gate', async () => {
     const {error} = await send({
       role: 'user',
       parts: [
@@ -1503,15 +1503,23 @@ describe('Runner reserved function call rejection', () => {
       ],
     });
 
-    expect(error).toBeUndefined();
+    // The gate does not fire. The runner then resolves the invocation the
+    // response answers, and this session holds no such call.
+    expect(error?.message).not.toContain('may not contain');
+    expect(error?.message).toContain(
+      'Function call not found for function response ids: gate-1',
+    );
   });
 
-  it('accepts an ordinary tool call part', async () => {
+  it('lets an ordinary tool call part past the gate', async () => {
     const {error} = await send({
       role: 'user',
       parts: [{functionCall: {id: 'call-1', name: 'wire_transfer', args: {}}}],
     });
 
-    expect(error).toBeUndefined();
+    // The gate does not fire. A user message may carry no function call at
+    // all, so the generic rule refuses it.
+    expect(error?.message).not.toContain('may not contain');
+    expect(error?.message).toBe('User message cannot contain function calls.');
   });
 });

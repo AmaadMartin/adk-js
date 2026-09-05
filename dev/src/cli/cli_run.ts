@@ -260,10 +260,10 @@ async function runInteractively(
     throw new Error('cli_run requires a rootAgent or an app.');
   }
   let currentAgent: RunnableRoot = currentRoot;
+  const app = options.app;
   let runner = new Runner({
-    app: options.app,
-    appName: options.app?.name ?? currentAgent.name,
-    agent: options.app?.rootAgent ?? currentAgent,
+    ...(app ? {app} : {agent: currentAgent}),
+    appName: app?.name ?? currentAgent.name,
     artifactService: options.artifactService,
     sessionService: options.sessionService,
     memoryService: options.memoryService,
