@@ -155,6 +155,19 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  EvalCriterion,
+  ResponseEvaluator,
+  VertexEvalMetric,
+} from './evaluation/response_evaluator.js';
+export type {
+  EvalBackend,
+  EvalDatasetRow,
+  EvalRunResult,
+  EvalTurn,
+  EvaluateOptions,
+  ToolUse,
+} from './evaluation/response_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
