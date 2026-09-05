@@ -1,0 +1,534 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  BaseComputer,
+  ComputerEnvironment,
+  ComputerState,
+  Context,
+  InvocationContext,
+  PluginManager,
+  ScrollDirection,
+  createSession,
+  isComputerState,
+} from '@google/adk';
+import {describe, expect, it} from 'vitest';
+
+import {
+  MOCK_PAGE_URL,
+  MOCK_SCREENSHOT,
+  MockComputer as SharedMockComputer,
+  createToolContext,
+} from './computer_use_test_utils.js';
+
+const PAGE_URL = 'https://example.com';
+const SEARCH_URL = 'https://search.example.com';
+const SCREENSHOT = new Uint8Array([137, 80, 78, 71]);
+const SCROLL_DIRECTIONS: ScrollDirection[] = ['up', 'down', 'left', 'right'];
+
+/** A computer that implements every abstract member with a fixed result. */
+class MockComputer extends BaseComputer {
+  async screenSize(): Promise<[number, number]> {
+    return [1920, 1080];
+  }
+
+  async environment(): Promise<ComputerEnvironment> {
+    return ComputerEnvironment.ENVIRONMENT_BROWSER;
+  }
+
+  async openWebBrowser(): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async clickAt(_params: {x: number; y: number}): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async hoverAt(_params: {x: number; y: number}): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async typeTextAt(_params: {
+    x: number;
+    y: number;
+    text: string;
+    pressEnter?: boolean;
+    clearBeforeTyping?: boolean;
+  }): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async scrollDocument(_params: {
+    direction: ScrollDirection;
+  }): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async scrollAt(_params: {
+    x: number;
+    y: number;
+    direction: ScrollDirection;
+    magnitude: number;
+  }): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async wait(_params: {seconds: number}): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async goBack(): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async goForward(): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async search(): Promise<ComputerState> {
+    return {url: SEARCH_URL};
+  }
+
+  async navigate(params: {url: string}): Promise<ComputerState> {
+    return {url: params.url};
+  }
+
+  async keyCombination(_params: {keys: string[]}): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async dragAndDrop(_params: {
+    x: number;
+    y: number;
+    destinationX: number;
+    destinationY: number;
+  }): Promise<ComputerState> {
+    return {url: PAGE_URL};
+  }
+
+  async currentState(): Promise<ComputerState> {
+    return {url: PAGE_URL, screenshot: SCREENSHOT};
+  }
+}
+
+/** A computer that overrides all three lifecycle hooks. */
+class LifecycleComputer extends MockComputer {
+  initialized = false;
+  closed = false;
+  prepared = false;
+
+  override async initialize(): Promise<void> {
+    this.initialized = true;
+  }
+
+  override async close(): Promise<void> {
+    this.closed = true;
+  }
+
+  override async prepare(_context: Context): Promise<void> {
+    this.prepared = true;
+  }
+}
+
+/** A computer whose `currentState()` reports a caller-chosen state. */
+class StateComputer extends MockComputer {
+  constructor(private readonly state: ComputerState) {
+    super();
+  }
+
+  override async currentState(): Promise<ComputerState> {
+    return this.state;
+  }
+}
+
+function createContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      session: createSession({id: 'test-session', appName: 'test-app'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
+
+describe('ComputerEnvironment', () => {
+  it('keeps the browser value the wire expects', () => {
+    expect(ComputerEnvironment.ENVIRONMENT_BROWSER).toBe('ENVIRONMENT_BROWSER');
+  });
+
+  it('keeps the unspecified value the wire expects', () => {
+    expect(ComputerEnvironment.ENVIRONMENT_UNSPECIFIED).toBe(
+      'ENVIRONMENT_UNSPECIFIED',
+    );
+  });
+
+  it('declares exactly two environments', () => {
+    expect(Object.values(ComputerEnvironment)).toEqual([
+      'ENVIRONMENT_UNSPECIFIED',
+      'ENVIRONMENT_BROWSER',
+    ]);
+  });
+});
+
+describe('ComputerState', () => {
+  it('survives a structured clone with its bytes intact', () => {
+    // structuredClone is the transport for the binary field; JSON.stringify
+    // turns a Uint8Array into an index-keyed object.
+    const state: ComputerState = {url: PAGE_URL, screenshot: SCREENSHOT};
+
+    const clone = structuredClone(state);
+
+    expect(clone.url).toBe(PAGE_URL);
+    expect(clone.screenshot).toBeInstanceOf(Uint8Array);
+    expect(clone.screenshot).toEqual(SCREENSHOT);
+  });
+
+  // Both properties are optional, so a backend reports any of the four
+  // combinations. These cases drive each one through a computer.
+  it('reports both properties absent', async () => {
+    const state = await new StateComputer({}).currentState();
+
+    expect(state.screenshot).toBeUndefined();
+    expect(state.url).toBeUndefined();
+  });
+
+  it('reports a screenshot on its own', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+    }).currentState();
+
+    expect(state.screenshot).toEqual(SCREENSHOT);
+    expect(state.url).toBeUndefined();
+  });
+
+  it('reports a url on its own', async () => {
+    const state = await new StateComputer({url: PAGE_URL}).currentState();
+
+    expect(state.screenshot).toBeUndefined();
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('reports both properties together', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+      url: PAGE_URL,
+    }).currentState();
+
+    expect(state.screenshot).toEqual(SCREENSHOT);
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('exposes no property beyond the two', async () => {
+    const state = await new StateComputer({
+      screenshot: SCREENSHOT,
+      url: PAGE_URL,
+    }).currentState();
+
+    expect(Object.keys(state).sort()).toEqual(['screenshot', 'url']);
+  });
+});
+
+describe('BaseComputer', () => {
+  it('leaves the abstract members without an implementation', () => {
+    // TypeScript's `abstract` is erased at compile time, so Python's
+    // "cannot instantiate" test has no runtime analogue.
+    expect(BaseComputer.prototype.screenSize).toBeUndefined();
+    expect(BaseComputer.prototype.openWebBrowser).toBeUndefined();
+    expect(BaseComputer.prototype.clickAt).toBeUndefined();
+    expect(BaseComputer.prototype.hoverAt).toBeUndefined();
+    expect(BaseComputer.prototype.currentState).toBeUndefined();
+  });
+
+  it('implements the three lifecycle hooks', () => {
+    expect(typeof BaseComputer.prototype.prepare).toBe('function');
+    expect(typeof BaseComputer.prototype.initialize).toBe('function');
+    expect(typeof BaseComputer.prototype.close).toBe('function');
+  });
+
+  it('resolves the default initialize()', async () => {
+    await expect(new MockComputer().initialize()).resolves.toBeUndefined();
+  });
+
+  it('resolves the default close()', async () => {
+    await expect(new MockComputer().close()).resolves.toBeUndefined();
+  });
+
+  it('resolves the default prepare() and leaves the context alone', async () => {
+    const context = createContext();
+
+    await expect(new MockComputer().prepare(context)).resolves.toBeUndefined();
+
+    expect(context.state.toRecord()).toEqual({});
+    expect(context.eventActions.stateDelta).toEqual({});
+  });
+
+  it('runs an overriding initialize() and close()', async () => {
+    const computer = new LifecycleComputer();
+
+    expect(computer.initialized).toBe(false);
+    expect(computer.closed).toBe(false);
+
+    await computer.initialize();
+    await computer.close();
+
+    expect(computer.initialized).toBe(true);
+    expect(computer.closed).toBe(true);
+  });
+
+  it('runs an overriding prepare()', async () => {
+    const computer = new LifecycleComputer();
+
+    await computer.prepare(createContext());
+
+    expect(computer.prepared).toBe(true);
+  });
+
+  it('reports the screen size as a width and height pair', async () => {
+    const size = await new MockComputer().screenSize();
+
+    expect(Array.isArray(size)).toBe(true);
+    expect(size).toHaveLength(2);
+    expect(size).toEqual([1920, 1080]);
+  });
+
+  it('reports the environment', async () => {
+    await expect(new MockComputer().environment()).resolves.toBe(
+      ComputerEnvironment.ENVIRONMENT_BROWSER,
+    );
+  });
+
+  it('opens the web browser', async () => {
+    const state = await new MockComputer().openWebBrowser();
+
+    expect(state.url).toBe(PAGE_URL);
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('clicks at a coordinate', async () => {
+    const state = await new MockComputer().clickAt({x: 100, y: 200});
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('hovers at a coordinate', async () => {
+    const state = await new MockComputer().hoverAt({x: 150, y: 250});
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('types text with the default press-enter and clear behaviour', async () => {
+    const state = await new MockComputer().typeTextAt({
+      x: 100,
+      y: 200,
+      text: 'Hello World',
+    });
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('types text with press-enter and clear turned off', async () => {
+    const state = await new MockComputer().typeTextAt({
+      x: 100,
+      y: 200,
+      text: 'Hello',
+      pressEnter: false,
+      clearBeforeTyping: false,
+    });
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('scrolls the document in every direction', async () => {
+    const computer = new MockComputer();
+
+    for (const direction of SCROLL_DIRECTIONS) {
+      const state = await computer.scrollDocument({direction});
+
+      expect(state.url).toBe(PAGE_URL);
+    }
+  });
+
+  it('scrolls at a coordinate', async () => {
+    const state = await new MockComputer().scrollAt({
+      x: 100,
+      y: 200,
+      direction: 'down',
+      magnitude: 5,
+    });
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('waits for a number of seconds', async () => {
+    const state = await new MockComputer().wait({seconds: 5});
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('navigates back', async () => {
+    const state = await new MockComputer().goBack();
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('navigates forward', async () => {
+    const state = await new MockComputer().goForward();
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('jumps to the search engine', async () => {
+    const state = await new MockComputer().search();
+
+    expect(state.url).toBe(SEARCH_URL);
+  });
+
+  it('navigates to a url', async () => {
+    const url = 'https://test.example.com';
+
+    const state = await new MockComputer().navigate({url});
+
+    expect(state.url).toBe(url);
+  });
+
+  it('presses a key combination', async () => {
+    const state = await new MockComputer().keyCombination({
+      keys: ['ctrl', 'c'],
+    });
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('drags and drops', async () => {
+    const state = await new MockComputer().dragAndDrop({
+      x: 100,
+      y: 200,
+      destinationX: 300,
+      destinationY: 400,
+    });
+
+    expect(state.url).toBe(PAGE_URL);
+  });
+
+  it('reports the current state with a screenshot', async () => {
+    const state = await new MockComputer().currentState();
+
+    expect(state.url).toBe(PAGE_URL);
+    expect(state.screenshot).toEqual(SCREENSHOT);
+  });
+});
+
+describe('isComputerState', () => {
+  it('accepts a state with a url', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT, url: 'a'})).toBe(true);
+  });
+
+  it('accepts a state without a url', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT})).toBe(true);
+  });
+
+  it('accepts a state whose url is explicitly undefined', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT, url: undefined})).toBe(
+      true,
+    );
+  });
+
+  it('rejects an object with no screenshot', () => {
+    expect(isComputerState({url: 'https://example.com'})).toBe(false);
+  });
+
+  it('rejects a screenshot that is not bytes', () => {
+    expect(isComputerState({screenshot: 'not-bytes'})).toBe(false);
+  });
+
+  it('rejects a state whose url is not a string', () => {
+    expect(isComputerState({screenshot: MOCK_SCREENSHOT, url: 5})).toBe(false);
+  });
+
+  it('rejects non-objects', () => {
+    expect(isComputerState(null)).toBe(false);
+    expect(isComputerState('state')).toBe(false);
+  });
+});
+
+// The suite above drives a mock that answers every action with the same URL,
+// so it proves an action is reachable. This one drives the shared mock, which
+// writes its arguments into the URL it returns, so it proves the arguments
+// reach the implementation.
+describe('BaseComputer subclass dispatch', () => {
+  const computer = new SharedMockComputer();
+
+  it('reports its screen size and environment', async () => {
+    expect(await computer.screenSize()).toEqual([1920, 1080]);
+    expect(await computer.environment()).toBe(
+      ComputerEnvironment.ENVIRONMENT_BROWSER,
+    );
+  });
+
+  it('dispatches every action to the subclass', async () => {
+    expect((await computer.openWebBrowser()).url).toBe(MOCK_PAGE_URL);
+    expect((await computer.clickAt({x: 1, y: 2})).url).toBe(
+      `${MOCK_PAGE_URL}/click/1/2`,
+    );
+    expect((await computer.hoverAt({x: 3, y: 4})).url).toBe(
+      `${MOCK_PAGE_URL}/hover/3/4`,
+    );
+    expect(
+      (
+        await computer.typeTextAt({
+          x: 5,
+          y: 6,
+          text: 'hi',
+          pressEnter: false,
+          clearBeforeTyping: false,
+        })
+      ).url,
+    ).toBe(`${MOCK_PAGE_URL}/type/5/6/hi/false/false`);
+    expect((await computer.scrollDocument({direction: 'down'})).url).toBe(
+      `${MOCK_PAGE_URL}/scroll/down`,
+    );
+    expect(
+      (await computer.scrollAt({x: 7, y: 8, direction: 'up', magnitude: 9}))
+        .url,
+    ).toBe(`${MOCK_PAGE_URL}/scroll/7/8/up/9`);
+    expect((await computer.wait({seconds: 2})).url).toBe(
+      `${MOCK_PAGE_URL}/wait/2`,
+    );
+    expect((await computer.goBack()).url).toBe(`${MOCK_PAGE_URL}/back`);
+    expect((await computer.goForward()).url).toBe(`${MOCK_PAGE_URL}/forward`);
+    expect((await computer.search()).url).toBe(`${MOCK_PAGE_URL}/search`);
+    expect((await computer.navigate({url: 'https://a.test/'})).url).toBe(
+      'https://a.test/',
+    );
+    expect((await computer.keyCombination({keys: ['control', 'c']})).url).toBe(
+      `${MOCK_PAGE_URL}/keys/control+c`,
+    );
+    expect(
+      (
+        await computer.dragAndDrop({
+          x: 1,
+          y: 2,
+          destinationX: 3,
+          destinationY: 4,
+        })
+      ).url,
+    ).toBe(`${MOCK_PAGE_URL}/drag/1/2/3/4`);
+    expect((await computer.currentState()).url).toBe(MOCK_PAGE_URL);
+  });
+
+  it('records the lifecycle calls the toolset makes', async () => {
+    const lifecycleComputer = new SharedMockComputer();
+    const toolContext = createToolContext();
+
+    await lifecycleComputer.initialize();
+    await lifecycleComputer.prepare(toolContext);
+    await lifecycleComputer.close();
+
+    expect(lifecycleComputer.initializeCalled).toBe(1);
+    expect(lifecycleComputer.prepareCalls).toEqual([toolContext]);
+    expect(lifecycleComputer.closeCalled).toBe(1);
+  });
+});
