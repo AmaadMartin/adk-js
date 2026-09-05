@@ -14,9 +14,15 @@ import {isRecord} from '../utils/value_utils.js';
 /** Path of the runtime config, relative to the served web assets directory. */
 const RUNTIME_CONFIG_PATH = ['assets', 'config', 'runtime-config.json'];
 
-/** Reported when only one of the two logo options is set. */
+/**
+ * Reported when only one of the two logo options is set.
+ *
+ * The flags are spelled with underscores, as this CLI declares them, and not
+ * with the hyphens adk-python uses: an operator who copies a name out of this
+ * message must get one `adk web` accepts.
+ */
 export const INCOMPLETE_LOGO_CONFIG_MESSAGE =
-  'Both --logo-text and --logo-image-url must be defined when using logo ' +
+  'Both --logo_text and --logo_image_url must be defined when using logo ' +
   'config.';
 
 /** The logo the dev UI draws in place of the ADK one. */
