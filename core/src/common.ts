@@ -229,6 +229,29 @@ export type {
   SamplingResult,
   UnstructuredSamplingResult,
 } from './optimization/data_types.js';
+export {
+  MISSING_GEPA_ENGINE_MESSAGE,
+  requireGepaEngine,
+} from './optimization/gepa_engine.js';
+export type {
+  EvaluationBatch,
+  GepaAdapter,
+  GepaEngine,
+  GepaOptimizeParams,
+  GepaPrompt,
+  GepaRunResult,
+  ReflectionLm,
+} from './optimization/gepa_engine.js';
+export {
+  AGENT_PROMPT_NAME,
+  AgentGepaAdapter,
+  GEPARootAgentPromptOptimizer,
+} from './optimization/gepa_root_agent_prompt_optimizer.js';
+export type {
+  AgentGepaAdapterParams,
+  GEPARootAgentPromptOptimizerConfig,
+  GEPARootAgentPromptOptimizerResult,
+} from './optimization/gepa_root_agent_prompt_optimizer.js';
 export {Sampler, isSampler} from './optimization/sampler.js';
 export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {
