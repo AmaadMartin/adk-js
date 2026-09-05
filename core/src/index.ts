@@ -43,13 +43,6 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
-// Also available as `@google/adk/sessions/firestore`. The `@google-cloud/
-// firestore` import inside is type-only plus a lazy `import()`, so this stays
-// safe for applications that never install the package.
-export {
-  FirestoreSessionService,
-  type FirestoreSessionServiceOptions,
-} from './integrations/firestore/firestore_session_service.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
