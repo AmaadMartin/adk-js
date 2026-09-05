@@ -106,7 +106,7 @@ const createObjectParameters = z.object({
     .optional()
     .describe(
       'The local filesystem path of the file to upload. The path is not ' +
-        'sandboxed: any file this process can read can be uploaded.',
+        'sandboxed. Every file this process can read can be uploaded.',
     ),
 });
 
@@ -169,7 +169,7 @@ export interface CreateObjectArgs {
   data?: string;
   /**
    * The local filesystem path of the file to upload. The path is not
-   * sandboxed: any file this process can read can be uploaded.
+   * sandboxed. Every file this process can read can be uploaded.
    */
   source_file_path?: string;
 }

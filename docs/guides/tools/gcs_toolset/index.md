@@ -123,7 +123,7 @@ tool then returns a confirmation message rather than the content.
 
 `create_object` takes a `source_file_path` and `get_object_data` takes a
 `destination_file_path`. Both come from the model, and neither is contained:
-`source_file_path` uploads any file the process can read, and
+`source_file_path` uploads every file the process can read, and
 `destination_file_path` writes anywhere the process can write. This matches
 adk-python. Run the agent with an operating-system account that can only reach
 what it should, and prefer `data` over `source_file_path` where you can.
