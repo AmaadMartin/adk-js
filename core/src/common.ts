@@ -155,6 +155,40 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export type {ConversationScenario} from './evaluation/conversation_scenarios.js';
+export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export type {
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+} from './evaluation/eval_case.js';
+export {
+  isBaseCriterion,
+  parseBaseCriterion,
+} from './evaluation/eval_metrics.js';
+export type {BaseCriterion, CriterionType} from './evaluation/eval_metrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export {
+  EvalStatus,
+  Evaluator,
+  emptyEvaluationResult,
+} from './evaluation/evaluator.js';
+export type {
+  EvaluationResult,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {getEvalStatus} from './evaluation/llm_as_judge_utils.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
@@ -344,6 +378,7 @@ export type {
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {getTextFromContent} from './utils/content_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';
