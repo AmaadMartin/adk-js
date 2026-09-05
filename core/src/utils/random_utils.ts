@@ -18,21 +18,14 @@ const UINT32_RANGE = 2 ** 32;
  * unpredictable values.
  */
 export class SeededRandomGenerator {
-  private state: number;
-
-  /**
-   * @param seed The initial seed. Omit it to start from an arbitrary state, the
-   *     way `Math.random` does.
-   */
-  constructor(seed?: number) {
-    this.state = seed ?? Math.floor(Math.random() * UINT32_RANGE);
-    this.state >>>= 0;
-  }
+  /** An arbitrary starting state, the way `Math.random` gives one. */
+  private state = Math.floor(Math.random() * UINT32_RANGE);
 
   /**
    * Restarts the sequence from `seed`.
    *
-   * @param seed The seed to restart from.
+   * @param seed The seed to restart from. It is read as a 32-bit unsigned
+   *     integer, so a negative or fractional seed truncates toward zero.
    */
   seed(seed: number): void {
     this.state = seed >>> 0;

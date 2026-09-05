@@ -181,7 +181,9 @@ describe('EnvironmentSimulationEngine injection probability', () => {
     // draw never lands on the boundary, so the test reproduces the draw the
     // seed produces and uses it as the probability.
     const seed = 42;
-    const drawForSeed = new SeededRandomGenerator(seed).next();
+    const generator = new SeededRandomGenerator();
+    generator.seed(seed);
+    const drawForSeed = generator.next();
     const engine = engineFor({
       toolName: 'test_tool',
       injectionConfigs: [
