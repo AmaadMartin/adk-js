@@ -260,6 +260,64 @@ export abstract class BaseSessionService {
 }
 
 /**
+ * Builds the comparator that orders a listed page of sessions.
+ *
+ * Sessions run oldest-first unless `order` is `'desc'`. Ties break on user ID
+ * and then session ID, ascending in both directions, so that a list is stable
+ * across calls and a paginated sweep cannot repeat or skip one.
+ *
+ * Every service that lists sessions uses this, so two backends holding the
+ * same sessions return them in the same order.
+ */
+export function compareSessions(
+  order: ListSessionsRequest['order'],
+): (a: Session, b: Session) => number {
+  const direction = order === 'desc' ? -1 : 1;
+  return (a, b) =>
+    direction * (a.lastUpdateTime - b.lastUpdateTime) ||
+    a.userId.localeCompare(b.userId) ||
+    a.id.localeCompare(b.id);
+}
+
+/**
+ * Slices a sorted session list into the page the request asked for.
+ *
+ * With no `limit` the whole list comes back as one page, and `limit` then
+ * reports the total. `page` takes precedence over `offset`.
+ *
+ * @param sessions The full result, already ordered by {@link compareSessions}.
+ * @param request The pagination fields of the list request.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  {limit, offset, page}: ListSessionsRequest,
+): ListSessionsResponse {
+  const totalItems = sessions.length;
+  if (limit === undefined) {
+    return {
+      sessions: offset ? sessions.slice(offset) : sessions,
+      page: 1,
+      limit: totalItems,
+      totalItems,
+      totalPages: totalItems === 0 ? 0 : 1,
+    };
+  }
+
+  const effectiveOffset =
+    page !== undefined ? (page - 1) * limit : (offset ?? 0);
+  const effectivePage =
+    page ?? (limit === 0 ? 1 : Math.floor(effectiveOffset / limit) + 1);
+
+  return {
+    sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
+    page: effectivePage,
+    limit,
+    totalItems,
+    totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
+  };
+}
+
+/**
  * Appends an event to an event list, replacing an entry that already carries
  * the same id.
  *

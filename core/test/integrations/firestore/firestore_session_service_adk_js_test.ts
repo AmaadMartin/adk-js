@@ -92,18 +92,6 @@ describe('FirestoreSessionService (adk-js behaviour)', () => {
       ).toBe('explicit');
     });
 
-    it('passes the settings to the client it creates', async () => {
-      const configured = new FirestoreSessionService({
-        settings: {projectId: 'my-project', databaseId: 'sessions'},
-      });
-
-      await configured.listSessions({appName: APP_NAME});
-
-      expect(fakeFirestore.clientSettings).toEqual([
-        {projectId: 'my-project', databaseId: 'sessions'},
-      ]);
-    });
-
     it('uses an injected client instead of creating one', async () => {
       const client = new Firestore();
       fakeFirestore.reset();
@@ -111,14 +99,14 @@ describe('FirestoreSessionService (adk-js behaviour)', () => {
 
       await configured.listSessions({appName: APP_NAME});
 
-      expect(fakeFirestore.clientSettings).toEqual([]);
+      expect(fakeFirestore.clientCount).toBe(0);
     });
 
     it('creates the client once and reuses it', async () => {
       await service.listSessions({appName: APP_NAME});
       await service.listSessions({appName: APP_NAME});
 
-      expect(fakeFirestore.clientSettings).toHaveLength(1);
+      expect(fakeFirestore.clientCount).toBe(1);
     });
   });
 

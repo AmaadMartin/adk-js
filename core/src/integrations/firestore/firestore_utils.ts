@@ -22,30 +22,27 @@ export const SESSIONS_COLLECTION = 'sessions';
 export const EVENTS_COLLECTION = 'events';
 
 /** Holds one document of app-scoped state per app. */
-export const APP_STATE_COLLECTION = 'app_states';
+const APP_STATE_COLLECTION = 'app_states';
 
 /** Holds one document of user-scoped state per app and user. */
-export const USER_STATE_COLLECTION = 'user_states';
+const USER_STATE_COLLECTION = 'user_states';
 
 /** The intermediate collection under an app in the session and user trees. */
-export const USERS_COLLECTION = 'users';
+const USERS_COLLECTION = 'users';
 
 /** How many writes Firestore accepts in one batch. */
 export const FIRESTORE_MAX_BATCH_WRITES = 500;
 
 const MILLIS_PER_SECOND = 1000;
 
-/** A Firestore `Timestamp`, matched by shape rather than by identity. */
-interface MillisConvertible {
-  toMillis(): number;
-}
-
-/** A `Date`, matched by shape rather than by identity. */
-interface TimeConvertible {
-  getTime(): number;
-}
-
-function hasMethod<K extends string>(
+/**
+ * Narrows a value to one carrying `name` as a no-argument number method.
+ *
+ * Matching by shape rather than with `instanceof` is deliberate: a `Timestamp`
+ * built by a second copy of `@google-cloud/firestore` in the same process
+ * fails an identity check against this copy's class.
+ */
+function hasNumberMethod<K extends string>(
   value: unknown,
   name: K,
 ): value is Record<K, () => number> {
@@ -54,14 +51,6 @@ function hasMethod<K extends string>(
     value !== null &&
     typeof (value as Record<string, unknown>)[name] === 'function'
   );
-}
-
-function isMillisConvertible(value: unknown): value is MillisConvertible {
-  return hasMethod(value, 'toMillis');
-}
-
-function isTimeConvertible(value: unknown): value is TimeConvertible {
-  return hasMethod(value, 'getTime');
 }
 
 /**
@@ -78,10 +67,10 @@ export function toEpochMillis(value: unknown): number {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value * MILLIS_PER_SECOND : 0;
   }
-  if (isMillisConvertible(value)) {
+  if (hasNumberMethod(value, 'toMillis')) {
     return value.toMillis();
   }
-  if (isTimeConvertible(value)) {
+  if (hasNumberMethod(value, 'getTime')) {
     return value.getTime();
   }
   return 0;
@@ -94,7 +83,7 @@ export function toEpochMillis(value: unknown): number {
  * signature yields `string | Buffer`, so the documents it really emits have to
  * be narrowed rather than cast.
  */
-export function isQueryDocumentSnapshot(
+function isQueryDocumentSnapshot(
   chunk: unknown,
 ): chunk is QueryDocumentSnapshot {
   return (
