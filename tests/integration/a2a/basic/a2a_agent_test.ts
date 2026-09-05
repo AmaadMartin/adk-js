@@ -16,6 +16,10 @@ describe('A2A: Remote Agent Basic', () => {
   let server: AdkTsApiServer;
 
   beforeAll(async () => {
+    // The recorded events are the consolidated event sequence. The remote
+    // agent runs in a child process that inherits this environment, so the
+    // variable is the only way to reach it.
+    process.env.ADK_DISABLE_PROGRESSIVE_SSE_STREAMING = '1';
     server = new AdkTsApiServer({
       agentsDir: path.join(__dirname, 'remote_a2a/'),
       a2a: true,
@@ -25,6 +29,7 @@ describe('A2A: Remote Agent Basic', () => {
   }, 60000);
 
   afterAll(async () => {
+    delete process.env.ADK_DISABLE_PROGRESSIVE_SSE_STREAMING;
     await server.stop();
   });
 

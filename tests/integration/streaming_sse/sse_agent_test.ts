@@ -6,13 +6,15 @@
 
 import {
   Event,
+  FeatureName,
   FunctionTool,
   InMemoryRunner,
   LlmAgent,
+  overrideFeatureEnabled,
   StreamingMode,
 } from '@google/adk';
 import {createUserContent, FinishReason} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {
   GeminiWithMockResponses,
@@ -26,74 +28,89 @@ const mockForecastTool = new FunctionTool({
   execute: (args) => `Forecast chart for ${args.location} shown.`,
 });
 
-const sseAgent = new LlmAgent({
-  name: 'sse_integration_agent',
-  model: 'gemini-2.5-flash',
-  instruction: 'You must call showForecastChart for San Francisco.',
-  tools: [mockForecastTool],
-});
+/** Mock streaming responses representing a full tool back-and-forth. */
+const MODEL_RESPONSES: RawGenerateContentResponse[] = [
+  // LLM Call 1: mixed response containing text and tool call
+  {
+    candidates: [
+      {
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'Let me show the forecast. '},
+            {
+              functionCall: {
+                name: 'showForecastChart',
+                args: {location: 'San Francisco'},
+              },
+            },
+          ],
+        },
+        finishReason: FinishReason.STOP,
+      },
+    ],
+  },
+  // LLM Call 2: post-tool final text answer
+  {
+    candidates: [
+      {
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'Here is the forecast: it is sunny in San Francisco.'},
+          ],
+        },
+        finishReason: FinishReason.STOP,
+      },
+    ],
+  },
+];
+
+const USER_ID = 'test_user';
+
+/** Runs the forecast agent once in SSE mode and collects the events. */
+async function runForecastAgent(): Promise<{
+  results: Event[];
+  runner: InMemoryRunner;
+  sessionId: string;
+  appName: string;
+}> {
+  const sseAgent = new LlmAgent({
+    name: 'sse_integration_agent',
+    model: new GeminiWithMockResponses(MODEL_RESPONSES),
+    instruction: 'You must call showForecastChart for San Francisco.',
+    tools: [mockForecastTool],
+  });
+
+  const appName = sseAgent.name;
+  const runner = new InMemoryRunner({agent: sseAgent, appName});
+  const session = await runner.sessionService.createSession({
+    appName,
+    userId: USER_ID,
+  });
+
+  const results: Event[] = [];
+  for await (const event of runner.runAsync({
+    userId: USER_ID,
+    sessionId: session.id,
+    newMessage: createUserContent('Show me the forecast.'),
+    runConfig: {streamingMode: StreamingMode.SSE},
+  })) {
+    results.push(event);
+  }
+
+  return {results, runner, sessionId: session.id, appName};
+}
 
 describe('SSE Streaming Model Response Integration', () => {
+  afterEach(() => {
+    overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, undefined);
+  });
+
   it('should preserve tool calls in session history event and successfully finish execution under StreamingMode.SSE', async () => {
-    // Predefine mock streaming responses representing a full tool back-and-forth
-    const modelResponses: RawGenerateContentResponse[] = [
-      // LLM Call 1: mixed response containing text and tool call
-      {
-        candidates: [
-          {
-            content: {
-              role: 'model',
-              parts: [
-                {text: 'Let me show the forecast. '},
-                {
-                  functionCall: {
-                    name: 'showForecastChart',
-                    args: {location: 'San Francisco'},
-                  },
-                },
-              ],
-            },
-            finishReason: FinishReason.STOP,
-          },
-        ],
-      },
-      // LLM Call 2: post-tool final text answer
-      {
-        candidates: [
-          {
-            content: {
-              role: 'model',
-              parts: [
-                {text: 'Here is the forecast: it is sunny in San Francisco.'},
-              ],
-            },
-            finishReason: FinishReason.STOP,
-          },
-        ],
-      },
-    ];
+    overrideFeatureEnabled(FeatureName.PROGRESSIVE_SSE_STREAMING, false);
 
-    // Setup agent with custom mock Gemini Llm connection
-    sseAgent.model = new GeminiWithMockResponses(modelResponses);
-
-    // Setup runner and session
-    const userId = 'test_user';
-    const appName = sseAgent.name;
-    const runner = new InMemoryRunner({agent: sseAgent, appName});
-    const session = await runner.sessionService.createSession({
-      appName,
-      userId,
-    });
-
-    const results: Event[] = [];
-    for await (const event of runner.runAsync({
-      userId,
-      sessionId: session.id,
-      newMessage: createUserContent('Show me the forecast.'),
-      runConfig: {streamingMode: StreamingMode.SSE},
-    })) {
-      results.push(event);
-    }
+    const {results, runner, sessionId, appName} = await runForecastAgent();
 
     // Validate events yielded by the generator:
     // 0. Consolidated model text response event (non-progressive)
@@ -156,8 +173,8 @@ describe('SSE Streaming Model Response Integration', () => {
     // Fetch session history from DB and verify that the tool call is correctly saved
     const dbSession = await runner.sessionService.getSession({
       appName,
-      userId,
-      sessionId: session.id,
+      userId: USER_ID,
+      sessionId,
     });
     expect(dbSession).toBeDefined();
 
@@ -174,6 +191,29 @@ describe('SSE Streaming Model Response Integration', () => {
     expect(dbToolCallEvent.content?.parts?.[0]?.functionCall).toBeDefined();
     expect(dbToolCallEvent.content?.parts?.[0]?.functionCall?.name).toBe(
       'showForecastChart',
+    );
+  });
+
+  it('should flush the first chunk as a partial event under the progressive default', async () => {
+    const {results} = await runForecastAgent();
+
+    // The progressive strategy flushes the first chunk as it arrives, so the
+    // run yields one more event than the consolidated strategy does.
+    expect(results.length).toBe(6);
+
+    const flushedChunk = results[0];
+    expect(flushedChunk.partial).toBe(true);
+    expect(flushedChunk.content?.parts?.[0]?.text).toContain(
+      'Let me show the forecast.',
+    );
+    expect(flushedChunk.content?.parts?.[1]?.functionCall?.name).toBe(
+      'showForecastChart',
+    );
+
+    const consolidatedChunk = results[2];
+    expect(consolidatedChunk.partial).toBe(false);
+    expect(consolidatedChunk.content?.parts?.[0]?.text).toContain(
+      'Let me show the forecast.',
     );
   });
 });
