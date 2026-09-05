@@ -38,11 +38,9 @@ const REQUIRE_CONFIRMATION_MESSAGE =
 
 @experimental
 export class RunSkillInlineScriptTool extends BaseTool {
-  static readonly TOOL_NAME = RUN_SKILL_INLINE_SCRIPT_TOOL_NAME;
-
   constructor(private toolset: SkillToolset) {
     super({
-      name: toolset.toolName(RunSkillInlineScriptTool.TOOL_NAME),
+      name: toolset.toolName(RUN_SKILL_INLINE_SCRIPT_TOOL_NAME),
       description:
         'Executes an inline script provided directly in the request.',
     });

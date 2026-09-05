@@ -14,11 +14,9 @@ import {SkillToolset} from './skill_toolset.js';
 
 @experimental
 export class ListSkillsTool extends SkillTool {
-  static readonly TOOL_NAME = LIST_SKILLS_TOOL_NAME;
-
   constructor(toolset: SkillToolset) {
     super(toolset, {
-      name: toolset.toolName(ListSkillsTool.TOOL_NAME),
+      name: toolset.toolName(LIST_SKILLS_TOOL_NAME),
       description:
         'Lists all available skills with their names and descriptions.',
     });

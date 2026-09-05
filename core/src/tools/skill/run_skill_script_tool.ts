@@ -15,11 +15,7 @@ import {
 } from '../../code_executors/code_execution_utils.js';
 import {BaseEnvironment} from '../../environment/base_environment.js';
 import {Script, Skill} from '../../skills/skill.js';
-import {
-  asRecord,
-  formatError,
-  isFileNotFoundError,
-} from '../../utils/error_utils.js';
+import {formatError, isFileNotFoundError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -30,7 +26,6 @@ import {materializeFiles} from '../../utils/file_utils.js';
 import {logger} from '../../utils/logger.js';
 import {RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
-import {detectSkillToolError} from './skill_error_detection.js';
 import {
   countInvocationFailure,
   SCRIPT_NOT_FOUND_COUNTER_PREFIX,
@@ -55,27 +50,63 @@ const REQUIRE_CONFIRMATION_MESSAGE =
 /** The failure envelope `run_skill_script` returns instead of throwing. */
 interface SkillScriptError {
   error: string;
-  /** The field name adk-python uses, and the one the model is told to read. */
   error_code: SkillErrorCode;
-  /** The name adk-js shipped first. Carries the same value. */
-  errorCode: SkillErrorCode;
 }
 
-/** Builds a failure envelope carrying the code under both field names. */
+/** Builds a failure envelope, matching the key adk-python and the other
+ * skill tools use. */
 function skillScriptError(
   error: string,
   code: SkillErrorCode,
 ): SkillScriptError {
-  return {error, error_code: code, errorCode: code};
+  return {error, error_code: code};
 }
+
+/** The parameters `run_skill_script` declares on both execution paths. */
+const COMMON_SCRIPT_PARAMETERS = {
+  skill_name: {
+    type: Type.STRING,
+    description: 'The name of the skill.',
+  },
+  script_path: {
+    type: Type.STRING,
+    description: "The relative path to the script (e.g., 'scripts/setup.js').",
+  },
+};
+
+/** The parameters the model builds an argument list from, code-executor only. */
+const SCRIPT_ARGUMENT_PARAMETERS = {
+  args: {
+    anyOf: [
+      {type: Type.OBJECT},
+      {type: Type.ARRAY, items: {type: Type.STRING}},
+    ],
+    description:
+      'Optional arguments to pass to the script as key-value pairs' +
+      ' (long options) or as a list of strings. If specified as a' +
+      ' list, it is treated as the complete list of arguments, and' +
+      " 'short_options' and 'positional_args' must not be provided.",
+  },
+  short_options: {
+    type: Type.OBJECT,
+    description:
+      'Optional short options (single hyphen) to pass to the script' +
+      " as key-value pairs. Must not be provided if 'args' is a list.",
+  },
+  positional_args: {
+    type: Type.ARRAY,
+    items: {type: Type.STRING},
+    description:
+      'Optional positional arguments to pass to the script. Must not' +
+      " be provided if 'args' is a list.",
+  },
+};
 
 @experimental
 export class RunSkillScriptTool extends SkillTool {
-  static readonly TOOL_NAME = RUN_SKILL_SCRIPT_TOOL_NAME;
-
   constructor(toolset: SkillToolset) {
     super(toolset, {
-      name: toolset.toolName(RunSkillScriptTool.TOOL_NAME),
+      name: toolset.toolName(RUN_SKILL_SCRIPT_TOOL_NAME),
       description: "Executes a script from a skill's scripts/ directory.",
     });
   }
@@ -93,73 +124,26 @@ export class RunSkillScriptTool extends SkillTool {
   }
 
   override _getDeclaration(): FunctionDeclaration {
-    if (this.toolset.environment) {
-      return {
-        name: this.name,
-        description: this.description,
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            skill_name: {
-              type: Type.STRING,
-              description: 'The name of the skill.',
-            },
-            script_path: {
-              type: Type.STRING,
-              description:
-                "The relative path to the script (e.g., 'scripts/setup.js').",
-            },
-            command: {
-              type: Type.STRING,
-              description: 'The command to execute in the environment.',
-            },
+    // The environment path takes a whole command line, so it offers none of
+    // the argument-building parameters: the model composes the command itself.
+    const variableParameters = this.toolset.environment
+      ? {
+          command: {
+            type: Type.STRING,
+            description: 'The command to execute in the environment.',
           },
-          required: ['skill_name', 'script_path', 'command'],
-        },
-      };
-    }
+        }
+      : SCRIPT_ARGUMENT_PARAMETERS;
 
     return {
       name: this.name,
       description: this.description,
       parameters: {
         type: Type.OBJECT,
-        properties: {
-          skill_name: {
-            type: Type.STRING,
-            description: 'The name of the skill.',
-          },
-          script_path: {
-            type: Type.STRING,
-            description:
-              "The relative path to the script (e.g., 'scripts/setup.js').",
-          },
-          args: {
-            anyOf: [
-              {type: Type.OBJECT},
-              {type: Type.ARRAY, items: {type: Type.STRING}},
-            ],
-            description:
-              'Optional arguments to pass to the script as key-value pairs' +
-              ' (long options) or as a list of strings. If specified as a' +
-              ' list, it is treated as the complete list of arguments, and' +
-              " 'short_options' and 'positional_args' must not be provided.",
-          },
-          short_options: {
-            type: Type.OBJECT,
-            description:
-              'Optional short options (single hyphen) to pass to the script' +
-              " as key-value pairs. Must not be provided if 'args' is a list.",
-          },
-          positional_args: {
-            type: Type.ARRAY,
-            items: {type: Type.STRING},
-            description:
-              'Optional positional arguments to pass to the script. Must not' +
-              " be provided if 'args' is a list.",
-          },
-        },
-        required: ['skill_name', 'script_path'],
+        properties: {...COMMON_SCRIPT_PARAMETERS, ...variableParameters},
+        required: this.toolset.environment
+          ? ['skill_name', 'script_path', 'command']
+          : ['skill_name', 'script_path'],
       },
     };
   }
@@ -348,16 +332,6 @@ export class RunSkillScriptTool extends SkillTool {
         SkillErrorCode.EXECUTION_ERROR,
       );
     }
-  }
-
-  detectErrorInResponse(response: unknown): string | undefined {
-    const errorType = detectSkillToolError(response);
-    if (errorType) {
-      return errorType;
-    }
-    return asRecord(response)?.['status'] === 'error'
-      ? SkillErrorCode.SKILL_SCRIPT_EXECUTION_ERROR
-      : undefined;
   }
 }
 

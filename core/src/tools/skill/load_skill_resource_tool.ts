@@ -10,7 +10,6 @@ import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {RunAsyncToolRequest, ToolProcessLlmRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
-import {detectSkillToolError} from './skill_error_detection.js';
 import {
   countInvocationFailure,
   RESOURCE_NOT_FOUND_COUNTER_PREFIX,
@@ -24,11 +23,9 @@ const BINARY_FILE_DETECTED_MSG =
 
 @experimental
 export class LoadSkillResourceTool extends SkillTool {
-  static readonly TOOL_NAME = LOAD_SKILL_RESOURCE_TOOL_NAME;
-
   constructor(toolset: SkillToolset) {
     super(toolset, {
-      name: toolset.toolName(LoadSkillResourceTool.TOOL_NAME),
+      name: toolset.toolName(LOAD_SKILL_RESOURCE_TOOL_NAME),
       description:
         'Loads a resource file (from references/, assets/, or scripts/) from within a skill.',
     });
@@ -155,10 +152,6 @@ export class LoadSkillResourceTool extends SkillTool {
       path: resourcePath,
       content,
     };
-  }
-
-  detectErrorInResponse(response: unknown): string | undefined {
-    return detectSkillToolError(response);
   }
 
   override async processLlmRequest(

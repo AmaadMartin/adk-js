@@ -256,7 +256,6 @@ describe('SkillToolset driven by a Runner', () => {
     expect(out[0].content?.parts?.[0].functionResponse?.response).toEqual({
       error: 'Skill script command was not confirmed and was rejected.',
       error_code: 'CONFIRMATION_REJECTED',
-      errorCode: 'CONFIRMATION_REJECTED',
     });
     // Nothing ran and nothing was written.
     await expect(

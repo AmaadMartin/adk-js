@@ -223,11 +223,17 @@ describe('skill_toolset parity: system instruction', () => {
   });
 
   it('test_tool_classes_define_tool_name_constants', () => {
-    expect(ListSkillsTool.TOOL_NAME).toBe('list_skills');
-    expect(SearchSkillsTool.TOOL_NAME).toBe('search_skills');
-    expect(LoadSkillTool.TOOL_NAME).toBe('load_skill');
-    expect(LoadSkillResourceTool.TOOL_NAME).toBe('load_skill_resource');
-    expect(RunSkillScriptTool.TOOL_NAME).toBe('run_skill_script');
+    // adk-python reads these off the classes. Here they are asserted on the
+    // built tools, which is the name the model actually sees.
+    const toolset = new SkillToolset([createSkill('skill1')], {
+      registry: new StubRegistry(),
+    });
+
+    expect(new ListSkillsTool(toolset).name).toBe('list_skills');
+    expect(new SearchSkillsTool(toolset).name).toBe('search_skills');
+    expect(new LoadSkillTool(toolset).name).toBe('load_skill');
+    expect(new LoadSkillResourceTool(toolset).name).toBe('load_skill_resource');
+    expect(new RunSkillScriptTool(toolset).name).toBe('run_skill_script');
   });
 
   it('drops the script steps but keeps the numbering contiguous', () => {
@@ -654,9 +660,9 @@ describe('skill_toolset parity: environment', () => {
     const result = (await new RunSkillScriptTool(toolset).runAsync({
       args: {skill_name: 'skill1', script_path: 'run.py'},
       toolContext: createContext(),
-    })) as {error: string; errorCode: string};
+    })) as {error: string; error_code: string};
 
-    expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+    expect(result.error_code).toBe('INVALID_ARGUMENTS');
     expect(result.error).toContain("Argument 'command' is required");
   });
 
@@ -703,9 +709,9 @@ describe('skill_toolset parity: environment', () => {
     const result = (await tool.runAsync({
       args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
       toolContext: createConfirmedContext(),
-    })) as {error: string; errorCode: string};
+    })) as {error: string; error_code: string};
 
-    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error_code).toBe('EXECUTION_ERROR');
     expect(result.error).toContain('Failed to execute script');
     expect(result.error).toContain('RuntimeError: Sandbox connection lost');
   });
@@ -723,9 +729,9 @@ describe('skill_toolset parity: environment', () => {
     const result = (await new RunSkillScriptTool(toolset).runAsync({
       args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
       toolContext: createConfirmedContext(),
-    })) as {error: string; errorCode: string};
+    })) as {error: string; error_code: string};
 
-    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error_code).toBe('EXECUTION_ERROR');
     expect(result.error).toContain(
       'RuntimeError: Failed to check file existence',
     );
@@ -744,9 +750,9 @@ describe('skill_toolset parity: environment', () => {
     const result = (await new RunSkillScriptTool(toolset).runAsync({
       args: {skill_name: 'skill1', script_path: 'run.py', command: 'python3 x'},
       toolContext: createConfirmedContext(),
-    })) as {error: string; errorCode: string};
+    })) as {error: string; error_code: string};
 
-    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(result.error_code).toBe('EXECUTION_ERROR');
     expect(result.error).toContain('RuntimeError: Disk full');
   });
 
@@ -895,9 +901,9 @@ describe('skill_toolset parity: script arguments and status', () => {
       args: ['arg1', 'arg2'],
       short_options: {v: true},
       positional_args: ['pos1'],
-    })) as {error: string; errorCode: string};
+    })) as {error: string; error_code: string};
 
-    expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+    expect(result.error_code).toBe('INVALID_ARGUMENTS');
     expect(result.error).toContain(
       "Cannot specify 'short_options' or 'positional_args'",
     );
@@ -911,9 +917,9 @@ describe('skill_toolset parity: script arguments and status', () => {
       const result = (await runScript(executor, {
         script_path: 'run.py',
         args: badArgs,
-      })) as {errorCode: string};
+      })) as {error_code: string};
 
-      expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+      expect(result.error_code).toBe('INVALID_ARGUMENTS');
       expect(executor.calls).toBe(0);
     }
   });
@@ -925,9 +931,9 @@ describe('skill_toolset parity: script arguments and status', () => {
       const result = (await runScript(executor, {
         script_path: 'run.py',
         short_options: badShortOptions,
-      })) as {errorCode: string};
+      })) as {error_code: string};
 
-      expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+      expect(result.error_code).toBe('INVALID_ARGUMENTS');
       expect(executor.calls).toBe(0);
     }
   });
@@ -939,9 +945,9 @@ describe('skill_toolset parity: script arguments and status', () => {
       const result = (await runScript(executor, {
         script_path: 'run.py',
         positional_args: badPositionalArgs,
-      })) as {errorCode: string};
+      })) as {error_code: string};
 
-      expect(result.errorCode).toBe('INVALID_ARGUMENTS');
+      expect(result.error_code).toBe('INVALID_ARGUMENTS');
       expect(executor.calls).toBe(0);
     }
   });
@@ -986,9 +992,9 @@ describe('skill_toolset parity: script arguments and status', () => {
 
     const result = (await runScript(executor, {
       script_path: 'build.rb',
-    })) as {error: string; errorCode: string};
+    })) as {error: string; error_code: string};
 
-    expect(result.errorCode).toBe('UNSUPPORTED_SCRIPT_TYPE');
+    expect(result.error_code).toBe('UNSUPPORTED_SCRIPT_TYPE');
     expect(result.error).toContain("Unsupported script type '.rb'");
     expect(executor.calls).toBe(0);
   });
@@ -998,10 +1004,10 @@ describe('skill_toolset parity: script arguments and status', () => {
 
     const result = (await runScript(executor, {script_path: 'noext'})) as {
       error: string;
-      errorCode: string;
+      error_code: string;
     };
 
-    expect(result.errorCode).toBe('UNSUPPORTED_SCRIPT_TYPE');
+    expect(result.error_code).toBe('UNSUPPORTED_SCRIPT_TYPE');
     expect(result.error).toContain('Unsupported script type (no extension)');
   });
 
@@ -1116,15 +1122,15 @@ describe('skill_toolset parity: invocation-scoped retry guards', () => {
     const args = {skill_name: 'skill1', script_path: 'scripts/nope.py'};
 
     const first = (await tool.runAsync({args, toolContext: context})) as {
-      errorCode: string;
+      error_code: string;
     };
     const second = (await tool.runAsync({args, toolContext: context})) as {
       error: string;
-      errorCode: string;
+      error_code: string;
     };
 
-    expect(first.errorCode).toBe('SCRIPT_NOT_FOUND');
-    expect(second.errorCode).toBe('SCRIPT_NOT_FOUND_FATAL');
+    expect(first.error_code).toBe('SCRIPT_NOT_FOUND');
+    expect(second.error_code).toBe('SCRIPT_NOT_FOUND_FATAL');
     expect(second.error).toContain('Do not retry any script path');
     expect(second.error).toContain('failure #2');
   });
@@ -1142,9 +1148,9 @@ describe('skill_toolset parity: invocation-scoped retry guards', () => {
     const second = (await tool.runAsync({
       args: {skill_name: 'skill1', script_path: 'two.py'},
       toolContext: context,
-    })) as {errorCode: string};
+    })) as {error_code: string};
 
-    expect(second.errorCode).toBe('SCRIPT_NOT_FOUND_FATAL');
+    expect(second.error_code).toBe('SCRIPT_NOT_FOUND_FATAL');
   });
 
   it('test_execute_script_failures_isolated_per_invocation', async () => {
@@ -1156,14 +1162,14 @@ describe('skill_toolset parity: invocation-scoped retry guards', () => {
     const first = (await tool.runAsync({
       args,
       toolContext: createContext(),
-    })) as {errorCode: string};
+    })) as {error_code: string};
     const second = (await tool.runAsync({
       args,
       toolContext: createContext({invocationId: 'other_invocation'}),
-    })) as {errorCode: string};
+    })) as {error_code: string};
 
-    expect(first.errorCode).toBe('SCRIPT_NOT_FOUND');
-    expect(second.errorCode).toBe('SCRIPT_NOT_FOUND');
+    expect(first.error_code).toBe('SCRIPT_NOT_FOUND');
+    expect(second.error_code).toBe('SCRIPT_NOT_FOUND');
   });
 
   it('test_execute_script_counter_uses_temp_prefix', async () => {
