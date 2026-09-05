@@ -169,6 +169,8 @@ export {
   populateClientFunctionCallId,
   pruneThoughts,
   stringifyContent,
+  transformToCamelCaseEvent,
+  transformToSnakeCaseEvent,
 } from './events/event.js';
 export type {
   CreateEventParams,
