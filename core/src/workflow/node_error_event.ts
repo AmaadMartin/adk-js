@@ -41,6 +41,20 @@ export function claimNodeErrorReport(
   return true;
 }
 
+/**
+ * Drops a claim so the same error object can be reported again.
+ *
+ * A node that retries throws the same error object on each attempt and owes
+ * the stream one event per attempt. Releasing between attempts keeps that
+ * possible, while an unreleased claim still stops an outer node — or
+ * `Workflow.reportNodeError` — from repeating a failure it only propagated.
+ */
+export function releaseNodeErrorReport(error: unknown): void {
+  if (typeof error === 'object' && error !== null) {
+    reportedInvocationIds.delete(error);
+  }
+}
+
 export function createNodeErrorEvent(
   params: CreateNodeErrorEventParams,
 ): NodeErrorEvent {
@@ -56,6 +70,13 @@ export function createNodeErrorEvent(
 }
 
 function errorCodeOf(error: unknown): string {
+  // An API client's own canonical status ('PERMISSION_DENIED') is the most
+  // specific code available. The string check matters: several HTTP clients
+  // expose a numeric `status`, which is a status code, not a canonical status.
+  const status = (error as {status?: unknown} | null | undefined)?.status;
+  if (typeof status === 'string') {
+    return status;
+  }
   const code = (error as {code?: unknown} | null | undefined)?.code;
   if (typeof code === 'string' || typeof code === 'number') {
     return String(code);

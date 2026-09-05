@@ -102,8 +102,35 @@ export class NodeContext {
   /** The structured output produced by the node during its run. */
   output: unknown = undefined;
 
+  /**
+   * Whether an event carrying this node's output has already been pushed.
+   *
+   * The runner emits a node's output at the end of its run when no event
+   * carried it. This says one already did, so nothing is left to emit.
+   * Mirrors adk-python's `Context._output_emitted`.
+   */
+  outputEmitted = false;
+
+  /**
+   * Whether an event carrying this node's route has already been pushed.
+   *
+   * The counterpart of {@link outputEmitted}, for {@link route}. Assigning a
+   * route clears it, so a route set after one was emitted is emitted again.
+   * Mirrors adk-python's `Context._route_emitted`.
+   */
+  routeEmitted = false;
+
+  private routeValue?: RouteValue | RouteValue[];
+
   /** The route key(s) emitted by the node, if any (array = multi-route). */
-  route?: RouteValue | RouteValue[];
+  get route(): RouteValue | RouteValue[] | undefined {
+    return this.routeValue;
+  }
+
+  set route(value: RouteValue | RouteValue[] | undefined) {
+    this.routeValue = value;
+    this.routeEmitted = false;
+  }
 
   /** Interrupt ids the node is currently blocked on (HITL). */
   interruptIds: string[] = [];

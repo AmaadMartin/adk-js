@@ -7,6 +7,7 @@
 import {context, type Span, SpanStatusCode, trace} from '@opentelemetry/api';
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent, Event} from '../events/event.js';
+import {mergeEventActions} from '../events/event_actions.js';
 import {traceNodeExecution, tracer} from '../telemetry/tracing.js';
 import {formatError} from '../utils/error_utils.js';
 import {BaseNode} from './base_node.js';
@@ -20,7 +21,12 @@ import {
   NodeTimeoutError,
 } from './errors.js';
 import {NodeContext} from './node_context.js';
-import {claimNodeErrorReport, isNodeErrorEvent} from './node_error_event.js';
+import {
+  claimNodeErrorReport,
+  createNodeErrorEvent,
+  isNodeErrorEvent,
+  releaseNodeErrorReport,
+} from './node_error_event.js';
 import {createNodeState, NodeState} from './node_state.js';
 import {NodeStatus} from './node_status.js';
 import {getRetryDelaySeconds, shouldRetryNode} from './utils/retry_utils.js';
@@ -183,6 +189,10 @@ async function runChildNode({
           isolationScope,
         });
 
+  // Scoped to this run: an event may redirect the branch its successors
+  // inherit, and `childIc` is often the parent's own context (see BranchRef).
+  const branchRef: BranchRef = {value: branch, initial: branch};
+
   const child = new NodeContext({
     invocationContext: childIc,
     channel: parent.channel,
@@ -244,7 +254,7 @@ async function runChildNode({
     let succeeded = false;
     let inputRecorded = false;
     while (!succeeded) {
-      resetState(child);
+      resetState(child, branchRef);
       child.attemptCount = nodeState.attemptCount;
       try {
         inputRecorded = await runAttempt({
@@ -252,7 +262,7 @@ async function runChildNode({
           child,
           input,
           nodeName,
-          branch,
+          branch: branchRef,
           isolationScope,
           nodePath,
           runId,
@@ -277,6 +287,26 @@ async function runChildNode({
         if (isDynamicNodeFailError(err)) {
           throw err;
         }
+        // Report the failure here, so a node run through ctx.runNode outside a
+        // Workflow still records it. The claim keeps it to one event: an outer
+        // node the error only passed through finds it already claimed. A node
+        // whose signal fired was cancelled — by the invocation, or by a sibling
+        // failure shutting the workflow down — and did not fail on its own
+        // account, whatever error its body raised on the way out.
+        const cancelled = effectiveAbortSignal?.aborted ?? false;
+        if (!cancelled && claimNodeErrorReport(err, child.invocationId)) {
+          child.channel.push(
+            createNodeErrorEvent({
+              error: err,
+              attemptCount: nodeState.attemptCount,
+              author: nodeName,
+              invocationId: child.invocationId,
+              nodeInfo: {path: nodePath},
+              branch: branchRef.value,
+              isolationScope,
+            }),
+          );
+        }
         // Check retry eligibility with the attempt that just failed, compute
         // its backoff delay, THEN advance the counter (matches Python
         // semantics).
@@ -287,6 +317,8 @@ async function runChildNode({
         ) {
           throw err;
         }
+        // This node runs again and owes an event for the next failure too.
+        releaseNodeErrorReport(err);
         const delaySeconds = getRetryDelaySeconds({retryConfig, nodeState});
         nodeState.attemptCount += 1;
         await delay(delaySeconds * 1000, effectiveAbortSignal);
@@ -294,7 +326,13 @@ async function runChildNode({
     }
 
     if (!inputRecorded && child.interruptIds.length > 0) {
-      recordInputForResume({child, nodeName, branch, isolationScope, input});
+      recordInputForResume({
+        child,
+        nodeName,
+        branch: branchRef,
+        isolationScope,
+        input,
+      });
     }
 
     traceNodeExecution({
@@ -316,9 +354,19 @@ async function runChildNode({
       }
     }
 
+    flushOutputAndDeltas({
+      child,
+      nodeName,
+      branch: branchRef,
+      isolationScope,
+    });
+
     if (options.useAsOutput) {
       parent.output = child.output;
+      // The setter clears `routeEmitted`, so restore what the child recorded:
+      // the child's own event already carried the route.
       parent.route = child.route;
+      parent.routeEmitted = child.routeEmitted;
       parent.outputDelegated = true;
     }
 
@@ -415,8 +463,8 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
 
 /**
  * Reset per-attempt state so a retry starts clean. This covers everything a
- * failed attempt can leave behind on the child context: its output/route,
- * interrupt ids, AND its state writes. A node that calls `ctx.state.set(...)`
+ * failed attempt can leave behind: its output/route, interrupt ids, its state
+ * writes, AND any branch it redirected. A node that calls `ctx.state.set(...)`
  * and then throws would otherwise leave the failed attempt's writes in the
  * delta, to be committed alongside the successful attempt's. `NodeContext`
  * builds its `State` over this exact `stateDelta` object once (in its
@@ -428,14 +476,129 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
  *
  * @param childNodeContext Node context to reset
  */
-function resetState(childNodeContext: NodeContext): void {
+function resetState(childNodeContext: NodeContext, branch: BranchRef): void {
   childNodeContext.output = undefined;
+  childNodeContext.outputEmitted = false;
+  childNodeContext.outputDelegated = false;
+  // The setter clears `routeEmitted`.
   childNodeContext.route = undefined;
   childNodeContext.interruptIds = [];
   childNodeContext.reportedError = undefined;
-  for (const key of Object.keys(childNodeContext.actions.stateDelta)) {
-    delete childNodeContext.actions.stateDelta[key];
+  branch.value = branch.initial;
+  clearInPlace(childNodeContext.actions.stateDelta);
+  clearInPlace(childNodeContext.actions.artifactDelta);
+}
+
+/**
+ * Empties a delta map without replacing it. `NodeContext` builds its `State`
+ * over the very `stateDelta` object it was constructed with, so reassigning
+ * would detach the two.
+ */
+function clearInPlace(delta: Record<string, unknown>): void {
+  for (const key of Object.keys(delta)) {
+    delete delta[key];
   }
+}
+
+/** Whether a delta map holds anything to flush. */
+function hasEntries(delta: Record<string, unknown>): boolean {
+  return Object.keys(delta).length > 0;
+}
+
+/**
+ * Moves the node's pending state and artifact deltas onto an outgoing event.
+ *
+ * A node writes through `ctx.state` and `ctx.actions.artifactDelta`, which
+ * accumulate on the context. Nothing else drains them, so without this a plain
+ * node's writes never reach the session. Mirrors adk-python's
+ * `NodeRunner._flush_deltas`.
+ *
+ * The event's own value wins for a key both carry, which is what `FunctionNode`
+ * already does when it attaches its pending keys.
+ */
+function flushDeltasOnto(event: Event, child: NodeContext): void {
+  const {stateDelta, artifactDelta} = child.actions;
+  if (!hasEntries(stateDelta) && !hasEntries(artifactDelta)) {
+    return;
+  }
+  // The event is the later source, so its own value wins for a key both carry.
+  event.actions = mergeEventActions([
+    {stateDelta, artifactDelta},
+    event.actions ?? {},
+  ]);
+  clearInPlace(stateDelta);
+  clearInPlace(artifactDelta);
+}
+
+interface FlushOutputAndDeltasParams {
+  child: NodeContext;
+  nodeName: string;
+  branch: BranchRef;
+  isolationScope: string | undefined;
+}
+
+/**
+ * Emits the node's output, route and deltas when no event it yielded carried
+ * them.
+ *
+ * A node that sets `ctx.output` rather than yielding it, or that only writes
+ * state, would otherwise finish without producing an event at all. Mirrors
+ * adk-python's `NodeRunner._flush_output_and_deltas`.
+ *
+ * adk-python tests `is not None`; adk-js treats `undefined` as "no output" and
+ * `null` as a legitimate output value, so this tests `!== undefined`.
+ */
+function flushOutputAndDeltas({
+  child,
+  nodeName,
+  branch,
+  isolationScope,
+}: FlushOutputAndDeltasParams): void {
+  const hasDeferredOutput =
+    child.output !== undefined &&
+    !child.outputEmitted &&
+    !child.outputDelegated;
+  const hasUnflushedRoute = child.route !== undefined && !child.routeEmitted;
+  const hasDeltas =
+    hasEntries(child.actions.stateDelta) ||
+    hasEntries(child.actions.artifactDelta);
+  if (!hasDeferredOutput && !hasUnflushedRoute && !hasDeltas) {
+    return;
+  }
+
+  const event = createEvent({
+    output: hasDeferredOutput ? child.output : undefined,
+    route: hasUnflushedRoute ? child.route : undefined,
+  });
+  flushDeltasOnto(event, child);
+  enrichEvent({event, child, nodeName, branch, isolationScope});
+  child.channel.push(event);
+  if (hasDeferredOutput) {
+    child.outputEmitted = true;
+  }
+  if (hasUnflushedRoute) {
+    child.routeEmitted = true;
+  }
+}
+
+/**
+ * The branch in force for the rest of a node's run.
+ *
+ * An event can redirect the branch its successors inherit, so the value has to
+ * outlive the single {@link enrichEvent} call that changes it. It is held in a
+ * holder rather than on `child.invocationContext`, because `runChildNode`
+ * reuses the parent's `InvocationContext` when nothing differs — mutating it
+ * there would leak a child's branch into the parent.
+ */
+interface BranchRef {
+  /** The branch in force right now. An event can redirect it. */
+  value: string | undefined;
+  /**
+   * The branch the run started on. A retry restores it, so a redirect a failed
+   * attempt made is discarded with the rest of that attempt's state — matching
+   * adk-python, which builds a fresh child context per attempt.
+   */
+  readonly initial: string | undefined;
 }
 
 interface RunOnceParams {
@@ -443,7 +606,7 @@ interface RunOnceParams {
   child: NodeContext;
   input: unknown;
   nodeName: string;
-  branch: string | undefined;
+  branch: BranchRef;
   isolationScope: string | undefined;
 }
 
@@ -478,6 +641,8 @@ async function runOnce({
 }: RunOnceParams): Promise<boolean> {
   let inputRecorded = false;
   const consume = (event: Event): void => {
+    // Captured before enrichEvent stamps the node's name over an unset author.
+    const rawAuthor = event.author;
     enrichEvent({event, child, nodeName, branch, isolationScope});
     // An event can carry a state delta that never went through `ctx.state`,
     // so the schema is enforced here too rather than only on the setter.
@@ -495,9 +660,20 @@ async function runOnce({
         event.output = undefined;
         event.content = undefined;
       }
+    } else if (event.nodeInfo?.messageAsOutput) {
+      child.output = event.content;
     }
-    if (event.route !== undefined) {
-      child.route = event.route;
+    // A structured parent must not bubble up a route or transfer its nested
+    // sub-agent already handled, so only the node's own events decide these.
+    if (!rawAuthor || rawAuthor === nodeName) {
+      if (event.route !== undefined) {
+        // Assign first: the setter clears routeEmitted.
+        child.route = event.route;
+        child.routeEmitted = true;
+      }
+      if (event.actions?.transferToAgent !== undefined) {
+        child.actions.transferToAgent = event.actions.transferToAgent;
+      }
     }
     if (event.errorCode !== undefined && !isNodeErrorEvent(event)) {
       child.reportedError = {
@@ -521,7 +697,18 @@ async function runOnce({
       };
       inputRecorded = true;
     }
+    // A partial event is a streaming fragment; its deltas belong to the final
+    // event of the turn, not to the fragment.
+    if (!event.partial) {
+      flushDeltasOnto(event, child);
+    }
     child.channel.push(event);
+    if (event.output !== undefined) {
+      child.outputEmitted = true;
+    }
+    if (event.nodeInfo?.messageAsOutput) {
+      child.outputDelegated = true;
+    }
   };
 
   const parentSignal = child.invocationContext.abortSignal;
@@ -617,7 +804,7 @@ async function runOnce({
 interface RecordInputForResumeParams {
   child: NodeContext;
   nodeName: string;
-  branch: string | undefined;
+  branch: BranchRef;
   isolationScope: string | undefined;
   input: unknown;
 }
@@ -640,7 +827,7 @@ function recordInputForResume({
   const event = createEvent({
     author: nodeName,
     invocationId: child.invocationId,
-    branch,
+    branch: branch.value,
     longRunningToolIds: [...child.interruptIds],
     actions: {agentState: {input}},
   });
@@ -652,7 +839,7 @@ interface EnrichEventParams {
   event: Event;
   child: NodeContext;
   nodeName: string;
-  branch: string | undefined;
+  branch: BranchRef;
   isolationScope: string | undefined;
 }
 
@@ -663,6 +850,10 @@ interface EnrichEventParams {
  * them unset, so a node can override them. `path` is different: it is
  * engine-owned and always set to the child's real node path — a node must not be
  * able to misreport where it ran.
+ *
+ * A branch the node set on the event also redirects `branch` for the rest of
+ * the run: an empty string clears the branch, and any other value becomes the
+ * one later events inherit.
  */
 function enrichEvent({
   event,
@@ -682,8 +873,13 @@ function enrichEvent({
   if (event.output !== undefined) {
     event.nodeInfo.outputFor = [child.nodePath, ...child.outputForAncestors];
   }
-  if (branch !== undefined && event.branch === undefined) {
-    event.branch = branch;
+  if (event.branch === undefined) {
+    event.branch = branch.value;
+  } else if (event.branch === '') {
+    event.branch = undefined;
+    branch.value = undefined;
+  } else {
+    branch.value = event.branch;
   }
   if (isolationScope !== undefined && event.isolationScope === undefined) {
     event.isolationScope = isolationScope;
