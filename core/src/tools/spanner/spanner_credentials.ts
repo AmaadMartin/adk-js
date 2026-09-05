@@ -34,7 +34,7 @@ interface SpannerOAuthClientCredentials {
  */
 function createTokenAuthClient(
   token: SpannerAccessToken,
-  oauthClient: SpannerOAuthClientCredentials = {},
+  oauthClient: SpannerOAuthClientCredentials,
 ): OAuth2Client {
   const client = new OAuth2Client(oauthClient);
   client.setCredentials({
