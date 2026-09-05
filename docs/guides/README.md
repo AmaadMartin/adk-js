@@ -231,6 +231,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Session state and its scopes](sessions/state/index.md) - Session state and
   the app:, user: and temp: prefixes that decide what is shared and what is
   stored.
+- [SqliteSessionService](sessions/sqlite_session_service/index.md) - Durable
+  sessions in one local SQLite file, in the layout adk-python reads.
 - [The legacy v0 session schema](sessions/legacy_v0_schema/index.md) - Reading
   and writing a sessions database that adk-python 1.19.0 to 1.21.0 created,
   including the restricted decoder for its pickled event actions.

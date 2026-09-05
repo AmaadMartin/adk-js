@@ -57,6 +57,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@modelcontextprotocol/sdk',
   '@toolbox-sdk/core',
   'express',
+  'sqlite3',
 ];
 
 describe('core/package.json install weight', () => {
@@ -88,13 +89,14 @@ describe('core/package.json install weight', () => {
     '@modelcontextprotocol/sdk',
     '@toolbox-sdk/core',
     'express',
+    'sqlite3',
   ])(
     '%s is still a devDependency so the repo can build and test against it',
     (name) => {
-      // The peers whose types `core/src` references, and the one SQL driver
-      // the database tests actually run against. The other four drivers are
-      // interchangeable alternatives to `@mikro-orm/sqlite` and are not
-      // needed to build or test this package.
+      // The peers whose types `core/src` references, and the two SQL drivers
+      // the session tests actually run against. The other four MikroORM
+      // drivers are interchangeable alternatives to `@mikro-orm/sqlite` and
+      // are not needed to build or test this package.
       expect(pkg.devDependencies).toHaveProperty(name);
     },
   );

@@ -97,6 +97,8 @@ export {ENTITIES as SESSION_STORAGE_ENTITIES} from './sessions/db/schema.js';
 export {migrate} from './sessions/migration/migrate_from_sqlalchemy_pickle.js';
 export type {MigrateOptions} from './sessions/migration/migrate_from_sqlalchemy_pickle.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
+export {SqliteSessionService} from './sessions/sqlite_session_service.js';
+export type {GetUserStateRequest} from './sessions/sqlite_session_service.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
 export type {
   VertexAiCreateSessionRequest,
