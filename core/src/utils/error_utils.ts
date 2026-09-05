@@ -159,3 +159,17 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Whether `err` is a Node "no such file or directory" failure.
+ *
+ * Node reports a missing path as an `Error` carrying `code: 'ENOENT'` rather
+ * than as a distinct class, so a caller that needs Python's
+ * `FileNotFoundError` branch has to narrow on that property.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return `true` when the value carries `code === 'ENOENT'`.
+ */
+export function isFileNotFoundError(err: unknown): boolean {
+  return asRecord(err)?.['code'] === 'ENOENT';
+}

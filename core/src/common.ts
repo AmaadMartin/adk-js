@@ -370,6 +370,22 @@ export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
+export {EditFileTool} from './tools/environment/edit_file_tool.js';
+export {
+  EnvironmentToolset,
+  type EnvironmentToolsetOptions,
+} from './tools/environment/environment_toolset.js';
+export {
+  ExecuteTool,
+  ExecuteToolErrorCode,
+  type ExecuteToolOptions,
+} from './tools/environment/execute_tool.js';
+export {
+  ReadFileTool,
+  type ReadFileToolOptions,
+} from './tools/environment/read_file_tool.js';
+export {WriteFileTool} from './tools/environment/write_file_tool.js';
+
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
