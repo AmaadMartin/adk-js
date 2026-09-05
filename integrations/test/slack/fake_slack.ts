@@ -92,7 +92,7 @@ export class FakeSlack {
     if (!this.app) {
       const {port} = this.server.address() as AddressInfo;
       this.app = new App({
-        token: 'xoxb-fake-token',
+        token: 'fake-bot-token',
         botId: 'B00000000',
         botUserId: 'U00000000',
         tokenVerificationEnabled: false,
