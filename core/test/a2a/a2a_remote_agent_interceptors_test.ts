@@ -20,15 +20,19 @@ import {
   Event as AdkEvent,
   createEvent,
   createSession,
-  executeAfterRequestInterceptors,
-  executeBeforeCardRequestInterceptors,
-  executeBeforeRequestInterceptors,
   InvocationContext,
-  isA2AMessage,
   PluginManager,
   RemoteA2AAgent,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+// The chain drivers are internal, matching adk-python's `a2a/agent/utils.py`,
+// so they are imported by path rather than through the package barrel.
+import {
+  executeAfterRequestInterceptors,
+  executeBeforeCardRequestInterceptors,
+  executeBeforeRequestInterceptors,
+  isA2AMessage,
+} from '../../src/a2a/a2a_remote_agent_interceptors.js';
 import {createRecordingClient, RecordingTransport} from './a2a_client_fakes.js';
 
 function createContext(state: Record<string, unknown> = {}): InvocationContext {
