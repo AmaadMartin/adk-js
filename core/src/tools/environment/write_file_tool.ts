@@ -10,8 +10,6 @@ import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
-const TOOL_ERROR = 'TOOL_ERROR';
-
 /** Create or overwrite a file in the environment. */
 @experimental
 export class WriteFileTool extends BaseTool {
@@ -59,26 +57,5 @@ export class WriteFileTool extends BaseTool {
       return {status: 'error', error: formatError(e)};
     }
     return {status: 'ok', message: `Wrote ${filePath}`};
-  }
-
-  /**
-   * The error type to record on this call's telemetry span, or `undefined`
-   * when the response is not a failure.
-   *
-   * The tool reports a failure by returning `{status: 'error'}` rather than by
-   * throwing, which is otherwise indistinguishable from a success in a trace.
-   * An `error` key on its own is not a failure: the environment tools carry the
-   * outcome in `status`.
-   */
-  detectErrorInResponse(response: unknown): string | undefined {
-    if (
-      typeof response === 'object' &&
-      response !== null &&
-      'status' in response &&
-      response.status === 'error'
-    ) {
-      return TOOL_ERROR;
-    }
-    return undefined;
   }
 }

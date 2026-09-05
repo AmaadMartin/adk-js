@@ -138,14 +138,4 @@ describe('WriteFileTool', () => {
       'The full file content to write.',
     );
   });
-
-  it('classifies a null response as no error', () => {
-    expect(new WriteFileTool(env).detectErrorInResponse(null)).toBeUndefined();
-  });
-
-  it('classifies a response that is not an object as no error', () => {
-    expect(
-      new WriteFileTool(env).detectErrorInResponse('error'),
-    ).toBeUndefined();
-  });
 });
