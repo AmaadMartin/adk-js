@@ -103,7 +103,6 @@ export class SkillToolset extends BaseToolset {
   public codeExecutor?: BaseCodeExecutor;
   public registry?: SkillRegistry;
   private readonly scriptOutputDir?: string;
-  private readonly allowInlineScripts?: boolean;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
   private tempOutputDir?: Promise<string>;
@@ -121,7 +120,6 @@ export class SkillToolset extends BaseToolset {
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
     this.scriptOutputDir = options.scriptOutputDir;
-    this.allowInlineScripts = options.allowInlineScripts;
 
     this.tools = [
       new ListSkillsTool(this),
@@ -132,7 +130,7 @@ export class SkillToolset extends BaseToolset {
 
     // Inline-script execution is opt-in: only expose the tool when explicitly
     // enabled, so agents are secure-by-default.
-    if (this.allowInlineScripts) {
+    if (options.allowInlineScripts) {
       this.tools.push(new RunSkillInlineScriptTool(this));
     }
 
