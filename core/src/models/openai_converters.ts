@@ -464,7 +464,7 @@ export function buildCreateParams(
   if (systemInstruction) {
     messages.push({role: 'system', content: systemInstruction});
   }
-  for (const content of llmRequest.contents ?? []) {
+  for (const content of llmRequest.contents) {
     messages.push(...contentToOpenAiMessages(content));
   }
 

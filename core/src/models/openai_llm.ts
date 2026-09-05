@@ -30,8 +30,13 @@ const DEFAULT_OPENAI_MODEL = 'gpt-4o';
 /** The generated-token ceiling used when the request sets none. */
 const DEFAULT_MAX_TOKENS = 4096;
 
-/** The OpenAI SDK, loaded on first use. */
-const OPENAI_SDK: OptionalPeer = {
+/**
+ * The OpenAI SDK, loaded on first use.
+ *
+ * Exported so that a test can pin the message a caller sees when the package
+ * is not installed, which is the only signal that the load failed.
+ */
+export const OPENAI_SDK: OptionalPeer = {
   packageName: 'openai',
   feature: 'OpenAILlm (GPT models via the OpenAI API)',
 };
