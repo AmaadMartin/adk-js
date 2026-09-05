@@ -12,4 +12,8 @@ export {
   createApiServerApp,
 } from './server/api_server_factory.js';
 export type {ApiServerOptions} from './server/api_server_factory.js';
+// The two names a caller needs in order to write the `triggerAuthVerifier`
+// server option. The rest of the trigger module is internal to the server.
+export {HttpError} from './server/trigger_routes.js';
+export type {TriggerVerifier} from './server/trigger_routes.js';
 export type {BaseAgentLoader} from './utils/base_agent_loader.js';

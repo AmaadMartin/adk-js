@@ -124,7 +124,7 @@ function getApiServerOptions(
     host: options['host'],
     port: parseInt(options['port'], 10),
     allowOrigins: options['allow_origins'],
-    allowedHosts: getAllowedHosts(options['allowed_hosts']),
+    allowedHosts: splitCommaSeparated(options['allowed_hosts']),
     ...resolveServices({
       baseDir: getAbsolutePath(agentsDir),
       sessionServiceUri: options['session_service_uri'],
@@ -139,24 +139,29 @@ function getApiServerOptions(
     reloadAgents: getBoolean(options['reload_agents']),
     urlPrefix: options['url_prefix'],
     autoCreateSession: getBoolean(options['auto_create_session']),
+    triggerSources: splitCommaSeparated(options['trigger_sources']),
+    triggerOidcAudience: options['trigger_oidc_audience'],
+    triggerOidcServiceAccounts: splitCommaSeparated(
+      options['trigger_oidc_service_accounts'],
+    ),
   };
 }
 
 /**
- * Splits the comma-separated --allowed_hosts value into a list, dropping
+ * Splits a comma-separated option value into a list, dropping
  * empty/whitespace-only entries. An unset or empty option yields undefined
- * rather than [], so it composes with ServerOptions.allowedHosts?: string[]
+ * rather than [], so it composes with an optional `string[]` server option
  * without callers needing to special-case "no value provided".
  */
-function getAllowedHosts(option?: string): string[] | undefined {
+function splitCommaSeparated(option?: string): string[] | undefined {
   if (!option) {
     return undefined;
   }
-  const hosts = option
+  const values = option
     .split(',')
-    .map((host) => host.trim())
+    .map((value) => value.trim())
     .filter(Boolean);
-  return hosts.length > 0 ? hosts : undefined;
+  return values.length > 0 ? values : undefined;
 }
 
 const AGENT_DIR_ARGUMENT = new Argument(
@@ -234,6 +239,24 @@ const AUTO_CREATE_SESSION_OPTION = new Option(
   "Optional. Automatically create a session if it doesn't exist when " +
     'calling /run or /run_sse, instead of answering 404. Default: false',
 ).default(false);
+const TRIGGER_SOURCES_OPTION = new Option(
+  '--trigger_sources <string>',
+  'Optional. Comma-separated event sources to serve trigger endpoints for: ' +
+    'pubsub, eventarc. Nothing is served without this flag. A served ' +
+    'endpoint accepts UNAUTHENTICATED requests unless ' +
+    '--trigger_oidc_audience is also set or a verifier is configured in code.',
+);
+const TRIGGER_OIDC_AUDIENCE_OPTION = new Option(
+  '--trigger_oidc_audience <string>',
+  'Optional. Audience the Google OIDC identity token on a trigger request ' +
+    "must carry, normally this service's public URL. Without it the trigger " +
+    'endpoints accept UNAUTHENTICATED requests.',
+);
+const TRIGGER_OIDC_SERVICE_ACCOUNTS_OPTION = new Option(
+  '--trigger_oidc_service_accounts <string>',
+  'Optional. Comma-separated service account addresses allowed to call the ' +
+    'trigger endpoints. Requires --trigger_oidc_audience.',
+);
 const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
@@ -324,6 +347,9 @@ function addServerCommand(
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(TRIGGER_SOURCES_OPTION)
+    .addOption(TRIGGER_OIDC_AUDIENCE_OPTION)
+    .addOption(TRIGGER_OIDC_SERVICE_ACCOUNTS_OPTION)
     .addOption(URL_PREFIX_OPTION)
     .addOption(ENABLE_FEATURES_OPTION)
     .addOption(DISABLE_FEATURES_OPTION)

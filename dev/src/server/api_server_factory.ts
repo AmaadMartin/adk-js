@@ -21,6 +21,7 @@ import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {createServerLogger} from '../utils/logger.js';
 import {AdkApiServer} from './adk_api_server.js';
+import {TriggerVerifier} from './trigger_routes.js';
 
 const DEFAULT_HOST = 'localhost';
 const DEFAULT_PORT = 8000;
@@ -103,6 +104,27 @@ export interface ApiServerOptions {
    * not exist, instead of answering 404. Defaults to false.
    */
   autoCreateSession?: boolean;
+  /**
+   * Trigger sources to serve, from `VALID_TRIGGER_SOURCES`. Nothing is mounted
+   * when this is omitted, and a mounted endpoint accepts UNAUTHENTICATED work
+   * unless `triggerOidcAudience` or `triggerAuthVerifier` is also set.
+   */
+  triggerSources?: string[];
+  /**
+   * Audience the Google OIDC identity token on a trigger request must carry,
+   * normally this service's public URL. Setting it turns on verification.
+   */
+  triggerOidcAudience?: string;
+  /**
+   * Service account addresses allowed to call the trigger endpoints. Requires
+   * `triggerOidcAudience`.
+   */
+  triggerOidcServiceAccounts?: string[];
+  /**
+   * Verifies a trigger request in place of the built-in OIDC verifier. Throw
+   * an `HttpError` from it to reject with a specific status.
+   */
+  triggerAuthVerifier?: TriggerVerifier;
   /** Logger the server and the factory log through. */
   logger?: Logger;
   /** Level the logger reports at. Defaults to `LogLevel.INFO`. */
@@ -150,6 +172,10 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     reloadAgents: options.reloadAgents ?? false,
     urlPrefix: options.urlPrefix,
     autoCreateSession: options.autoCreateSession,
+    triggerSources: options.triggerSources,
+    triggerOidcAudience: options.triggerOidcAudience,
+    triggerOidcServiceAccounts: options.triggerOidcServiceAccounts,
+    triggerAuthVerifier: options.triggerAuthVerifier,
     logger,
     logLevel: options.logLevel,
   });

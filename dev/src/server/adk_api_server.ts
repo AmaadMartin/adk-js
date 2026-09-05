@@ -61,6 +61,12 @@ import {
 } from './dns_rebinding_guard.js';
 import {withoutEvalSessions} from './eval_sessions.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
+import {
+  GoogleOidcVerifier,
+  TriggerRouter,
+  TriggerServerContext,
+  TriggerVerifier,
+} from './trigger_routes.js';
 
 /**
  * Environment variable holding the shared bearer token used to authenticate
@@ -129,6 +135,27 @@ interface ServerOptions {
    * but redirects the server generates are built with it.
    */
   urlPrefix?: string;
+  /**
+   * Trigger sources to serve, from `VALID_TRIGGER_SOURCES`. Nothing is mounted
+   * when this is omitted, and a mounted endpoint accepts UNAUTHENTICATED work
+   * unless `triggerOidcAudience` or `triggerAuthVerifier` is also set.
+   */
+  triggerSources?: string[];
+  /**
+   * Audience the Google OIDC identity token on a trigger request must carry,
+   * normally this service's public URL. Setting it turns on verification.
+   */
+  triggerOidcAudience?: string;
+  /**
+   * Service account addresses allowed to call the trigger endpoints. Requires
+   * `triggerOidcAudience`.
+   */
+  triggerOidcServiceAccounts?: string[];
+  /**
+   * Verifies a trigger request in place of the built-in OIDC verifier. Throw
+   * an `HttpError` from it to reject with a specific status.
+   */
+  triggerAuthVerifier?: TriggerVerifier;
 }
 
 export class AdkApiServer {
@@ -178,6 +205,10 @@ export class AdkApiServer {
   private readonly logger: Logger;
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
+  private readonly triggerSources?: string[];
+  private readonly triggerOidcAudience?: string;
+  private readonly triggerOidcServiceAccounts?: string[];
+  private readonly triggerAuthVerifier?: TriggerVerifier;
   private initPromise?: Promise<void>;
   private a2aPromise?: Promise<void>;
 
@@ -213,6 +244,19 @@ export class AdkApiServer {
     // to the authenticator, which rejects a token that is not usable.
     this.a2aAuthToken =
       options.a2aAuthToken || process.env[A2A_AUTH_TOKEN_ENV_VAR] || undefined;
+    if (
+      options.triggerOidcServiceAccounts?.length &&
+      !options.triggerOidcAudience &&
+      !options.triggerAuthVerifier
+    ) {
+      throw new Error(
+        'triggerOidcServiceAccounts requires triggerOidcAudience to be set.',
+      );
+    }
+    this.triggerSources = options.triggerSources;
+    this.triggerOidcAudience = options.triggerOidcAudience;
+    this.triggerOidcServiceAccounts = options.triggerOidcServiceAccounts;
+    this.triggerAuthVerifier = options.triggerAuthVerifier;
     this.app = express();
   }
 
@@ -1162,6 +1206,62 @@ export class AdkApiServer {
         }
       }
     });
+
+    this.initTriggers(app);
+  }
+
+  /**
+   * Mounts the opt-in `/apps/:appName/trigger/*` routes. Registered last so
+   * they sit behind the JSON body parser, and only when the operator named a
+   * source: an unmounted path 404s, which is what "triggers disabled" means.
+   */
+  private initTriggers(app: express.Application): void {
+    if (!this.triggerSources?.length) {
+      return;
+    }
+
+    // Built once, outside the request path, so one OAuth2Client caches
+    // Google's signing certificates across requests.
+    const oidcVerifier = this.triggerOidcAudience
+      ? new GoogleOidcVerifier(
+          this.triggerOidcAudience,
+          this.triggerOidcServiceAccounts,
+        )
+      : undefined;
+    const verifier =
+      this.triggerAuthVerifier ??
+      (oidcVerifier ? (req: Request) => oidcVerifier.verify(req) : undefined);
+
+    // triggerAuthVerifier wins, which leaves any configured allowlist with
+    // nothing enforcing it. Say so rather than letting the operator believe
+    // the trigger endpoints are restricted to those principals.
+    if (this.triggerAuthVerifier && this.triggerOidcServiceAccounts?.length) {
+      this.logger.warn(
+        'triggerOidcServiceAccounts is ignored because triggerAuthVerifier ' +
+          'is set: the custom verifier decides who may call the trigger ' +
+          'endpoints.',
+      );
+    }
+
+    const context: TriggerServerContext = {
+      logger: this.logger,
+      withRunner: async <T>(
+        appName: string,
+        fn: (runner: Runner) => Promise<T>,
+      ): Promise<T> => {
+        await using agentFile = await this.agentLoader.getAgentFile(appName);
+        const loaded = await agentFile.load();
+        // `return await` is load-bearing: a bare `return` runs the
+        // `await using` disposal before the returned promise settles, which
+        // unlinks the compiled bundle while the agent is still running.
+        return await fn(await this.getRunner(loaded, appName));
+      },
+    };
+
+    new TriggerRouter(context, {
+      triggerSources: this.triggerSources,
+      verifier,
+    }).register(app);
   }
 
   /**

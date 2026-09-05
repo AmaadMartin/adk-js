@@ -95,6 +95,15 @@ vi.mock('@google/adk', async (importOriginal) => {
   };
 });
 
+/**
+ * The options the mocked AdkApiServer constructor was called with. `vi.mocked`
+ * keeps the real constructor's parameter type, so a missing or misspelled
+ * server option is a compile error rather than a silent `undefined`.
+ */
+function serverOptions() {
+  return vi.mocked(AdkApiServer).mock.calls[0][0];
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -244,6 +253,41 @@ describe('CLI Entrypoint', () => {
       ).rejects.toMatchObject({code: 'commander.unknownOption'});
       expect(AdkApiServer).not.toHaveBeenCalled();
     });
+
+    it('leaves the trigger options undefined when the flags are absent', async () => {
+      await parse(['web']);
+
+      const args = serverOptions();
+      expect(args.triggerSources).toBeUndefined();
+      expect(args.triggerOidcAudience).toBeUndefined();
+      expect(args.triggerOidcServiceAccounts).toBeUndefined();
+    });
+
+    it('should split --trigger_sources on commas', async () => {
+      await parse(['web', '--trigger_sources', 'pubsub, eventarc,']);
+
+      const args = serverOptions();
+      expect(args.triggerSources).toEqual(['pubsub', 'eventarc']);
+    });
+
+    it('should pass the trigger OIDC options', async () => {
+      await parse([
+        'web',
+        '--trigger_sources',
+        'pubsub',
+        '--trigger_oidc_audience',
+        'https://svc.example.run.app',
+        '--trigger_oidc_service_accounts',
+        'a@project.iam, b@project.iam',
+      ]);
+
+      const args = serverOptions();
+      expect(args.triggerOidcAudience).toBe('https://svc.example.run.app');
+      expect(args.triggerOidcServiceAccounts).toEqual([
+        'a@project.iam',
+        'b@project.iam',
+      ]);
+    });
   });
 
   describe('command: api_server', () => {
@@ -291,6 +335,38 @@ describe('CLI Entrypoint', () => {
 
       const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.autoCreateSession).toBe(false);
+    });
+
+    it('leaves the trigger options undefined when the flags are absent', async () => {
+      await parse(['api_server']);
+
+      const args = serverOptions();
+      expect(args.triggerSources).toBeUndefined();
+      expect(args.triggerOidcAudience).toBeUndefined();
+      expect(args.triggerOidcServiceAccounts).toBeUndefined();
+    });
+
+    it('should split --trigger_sources on commas', async () => {
+      await parse(['api_server', '--trigger_sources', 'pubsub,eventarc']);
+
+      const args = serverOptions();
+      expect(args.triggerSources).toEqual(['pubsub', 'eventarc']);
+    });
+
+    it('should pass the trigger OIDC options', async () => {
+      await parse([
+        'api_server',
+        '--trigger_sources',
+        'pubsub',
+        '--trigger_oidc_audience',
+        'https://svc.example.run.app',
+        '--trigger_oidc_service_accounts',
+        'a@project.iam',
+      ]);
+
+      const args = serverOptions();
+      expect(args.triggerOidcAudience).toBe('https://svc.example.run.app');
+      expect(args.triggerOidcServiceAccounts).toEqual(['a@project.iam']);
     });
   });
 
