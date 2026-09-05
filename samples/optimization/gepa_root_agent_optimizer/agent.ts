@@ -64,17 +64,19 @@ const EXPECTED_PHRASES: Record<string, string[]> = {
   'holdout-1': ['order', 'confirm', 'refund', 'window'],
 };
 
+/** Every skill an agent exposes through a skill toolset. */
+function skillsOf(agent: LlmAgent): Skill[] {
+  return agent.tools
+    .filter(isSkillToolset)
+    .flatMap((toolset) => Object.values(toolset.skills));
+}
+
 /** The text a candidate agent is scored on: its instruction and its skills. */
 function candidateText(agent: LlmAgent): string {
-  const parts = [requireStaticInstruction(agent)];
-  for (const tool of agent.tools) {
-    if (!isSkillToolset(tool)) {
-      continue;
-    }
-    for (const skill of Object.values(tool.skills)) {
-      parts.push(skill.instructions);
-    }
-  }
+  const parts = [
+    requireStaticInstruction(agent),
+    ...skillsOf(agent).map((skill) => skill.instructions),
+  ];
   return parts.join('\n').toLowerCase();
 }
 
@@ -182,15 +184,12 @@ export const startingAgent = new LlmAgent({
 
 /** Reports a candidate agent's instruction and each skill's instructions. */
 function describeAgent(agent: LlmAgent): string {
-  const lines = [`agent: ${requireStaticInstruction(agent)}`];
-  for (const tool of agent.tools) {
-    if (!isSkillToolset(tool)) {
-      continue;
-    }
-    for (const skill of Object.values(tool.skills)) {
-      lines.push(`skill ${skill.frontmatter.name}: ${skill.instructions}`);
-    }
-  }
+  const lines = [
+    `agent: ${requireStaticInstruction(agent)}`,
+    ...skillsOf(agent).map(
+      (skill) => `skill ${skill.frontmatter.name}: ${skill.instructions}`,
+    ),
+  ];
   return lines.join(' | ');
 }
 
