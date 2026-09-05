@@ -15,6 +15,7 @@ import {
   CodeExecutionLanguage,
   CodeExecutionResult,
   convertCodeExecutionParts,
+  executionFailed,
   extractCodeAndTruncateContent,
   File,
 } from '../../code_executors/code_execution_utils.js';
@@ -494,7 +495,7 @@ async function postProcessCodeExecutionResult(
   });
 
   // Handle code execution error retry
-  if (codeExecutionResult.stderr) {
+  if (executionFailed(codeExecutionResult)) {
     codeExecutorContext.incrementErrorCount(invocationContext.invocationId);
   } else {
     codeExecutorContext.resetErrorCount(invocationContext.invocationId);
