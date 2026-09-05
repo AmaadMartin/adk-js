@@ -77,7 +77,7 @@ describe('the retrieve request', () => {
     );
 
     expect(client.authProviders).toEqual([AUTH_PROVIDER_NAME]);
-    expect(client.requests[0]).toEqual({
+    expect(client.requests[0]).toStrictEqual({
       userId: 'user',
       scopes: ['scope-a', 'scope-b'],
       continueUri: 'https://agent.example.com/oauth/continue',
@@ -93,7 +93,7 @@ describe('the retrieve request', () => {
       createContext(),
     );
 
-    expect(client.requests[0]).toEqual({userId: 'user'});
+    expect(client.requests[0]).toStrictEqual({userId: 'user'});
   });
 });
 
