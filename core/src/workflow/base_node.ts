@@ -203,7 +203,7 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
    * enforced for Zod schemas; a genai `Schema` is left unvalidated (see
    * `parseWithSchema`).
    *
-   * A validated value is flattened with {@link toSerializable} so what lands on
+   * A validated value is flattened with `toSerializable` so what lands on
    * an `Event` is persistable and survives a resume. A node with no
    * `outputSchema` keeps its output exactly as yielded, matching the
    * reference's `validate_node_data`, which returns the data untouched when no
