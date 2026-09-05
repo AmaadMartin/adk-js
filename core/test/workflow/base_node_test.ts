@@ -13,6 +13,10 @@ import {
   START,
   toContent,
 } from '../../src/workflow/base_node.js';
+import {
+  isNodeSchemaValidationError,
+  NodeSchemaValidationError,
+} from '../../src/workflow/errors.js';
 import {node} from '../../src/workflow/node.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {isWorkflow, Workflow} from '../../src/workflow/workflow.js';
@@ -168,5 +172,25 @@ describe('node output flattening', () => {
     });
     const {events} = await driveNode(node);
     expect(events.at(-1)?.output).toEqual({values: ['a', 'b']});
+  });
+
+  it('names the node when flattening a hostile output fails', async () => {
+    const hostile = {
+      get boom(): unknown {
+        throw new Error('nope');
+      },
+    };
+    const node = new FunctionNode('hostile', () => hostile, {
+      outputSchema: z.any(),
+    });
+    try {
+      await driveNode(node);
+      expect.unreachable('expected a NodeSchemaValidationError');
+    } catch (e) {
+      expect(isNodeSchemaValidationError(e)).toBe(true);
+      const err = e as NodeSchemaValidationError;
+      expect(err.nodeName).toBe('hostile');
+      expect(err.direction).toBe('output');
+    }
   });
 });
