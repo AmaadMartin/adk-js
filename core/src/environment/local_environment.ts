@@ -96,27 +96,35 @@ async function settledWithin(
  * cleanly. The escalation to `SIGKILL` does not depend on the command itself
  * having exited: a descendant that ignores `SIGTERM` still holds the pipes
  * open, which is what keeps `closed` from settling.
+ *
+ * Both grace periods buy time for the process group to drain, so a platform
+ * without one skips them: nothing there can reach a survivor holding the
+ * pipes, whatever the wait.
  */
 async function killCommand(
   child: ChildProcessWithoutNullStreams,
   closed: Promise<void>,
 ): Promise<void> {
   signalCommand(child, 'SIGTERM');
-  if (await settledWithin(closed, TERMINATE_GRACE_MS)) {
-    return;
+
+  if (USE_PROCESS_GROUP) {
+    if (await settledWithin(closed, TERMINATE_GRACE_MS)) {
+      return;
+    }
+
+    signalCommand(child, 'SIGKILL');
+    if (await settledWithin(closed, TERMINATE_GRACE_MS)) {
+      return;
+    }
+
+    // A descendant escaped the group by starting one of its own.
+    logger.warn('Gave up reading output from a killed command.');
   }
 
-  signalCommand(child, 'SIGKILL');
-  if (await settledWithin(closed, TERMINATE_GRACE_MS)) {
-    return;
-  }
-
-  // A descendant escaped the group by starting one of its own, and still holds
-  // the pipes. Release the read ends rather than wait for it; whatever the
-  // command wrote before that point has already been buffered.
+  // Release the read ends rather than wait for whoever still holds them.
+  // Whatever the command wrote before this point has already been buffered.
   child.stdout.destroy();
   child.stderr.destroy();
-  logger.warn('Gave up reading output from a killed command.');
 }
 
 /**
@@ -193,10 +201,9 @@ async function resolvePathInWorkingDir(
  * - The child inherits the whole of `process.env`, so any secret in the parent
  *   environment is visible to the command.
  * - Windows has no process group, so only the spawned shell is signalled there
- *   and a process it forked can survive. Such a survivor holds the output pipes
- *   for up to two grace periods before {@link execute} gives up on them, and
- *   keeps the working directory locked, so a {@link close} following a timeout
- *   can fail to remove a temporary workspace.
+ *   and a process it forked can survive. Anything such a survivor writes after
+ *   the kill is lost, and it keeps the working directory locked, so a
+ *   {@link close} following a timeout can fail to remove a temporary workspace.
  * - File paths are confined to the working directory by a symlink-resolved
  *   check that is still not a sandbox (see {@link readFile} and
  *   {@link writeFile}).

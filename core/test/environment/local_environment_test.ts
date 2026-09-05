@@ -43,8 +43,11 @@ const TERMINATE_GRACE_MS = 5_000;
  */
 const ESCALATED_BY_MS = 9_000;
 
+/** How long the commands used by the teardown tests outlive both graces. */
+const OUTLIVES_TEARDOWN_MS = 20_000;
+
 /** Budget for a test that waits out both grace periods, plus slack. */
-const GIVE_UP_TIMEOUT_MS = 40_000;
+const TEARDOWN_TEST_TIMEOUT_MS = 40_000;
 
 const decoder = new TextDecoder();
 
@@ -449,14 +452,17 @@ describe('LocalEnvironment', () => {
       SPAWN_TIMEOUT_MS,
     );
 
-    it(
+    // The SIGTERM-then-SIGKILL ladder only exists where there is a process
+    // group to signal. Windows terminates on the first signal, so it has no
+    // escalation and no second grace period to observe.
+    it.skipIf(os.platform() === 'win32')(
       'escalates to SIGKILL when the command ignores SIGTERM',
       async () => {
         await env.writeFile(
           'ignore_sigterm.cjs',
           [
             "process.on('SIGTERM', () => {});",
-            `setTimeout(() => {}, ${GIVE_UP_TIMEOUT_MS});`,
+            `setTimeout(() => {}, ${OUTLIVES_TEARDOWN_MS});`,
           ].join('\n'),
         );
         const startedAt = Date.now();
@@ -472,7 +478,7 @@ describe('LocalEnvironment', () => {
         expect(elapsed).toBeGreaterThanOrEqual(TERMINATE_GRACE_MS);
         expect(elapsed).toBeLessThan(ESCALATED_BY_MS);
       },
-      GIVE_UP_TIMEOUT_MS,
+      TEARDOWN_TEST_TIMEOUT_MS,
     );
 
     it.skipIf(os.platform() === 'win32')(
@@ -488,7 +494,7 @@ describe('LocalEnvironment', () => {
             "process.stdout.write('before');",
             'spawn(',
             '  process.execPath,',
-            `  ['-e', 'setTimeout(() => {}, ${GIVE_UP_TIMEOUT_MS})'],`,
+            `  ['-e', 'setTimeout(() => {}, ${OUTLIVES_TEARDOWN_MS})'],`,
             "  {stdio: 'inherit', detached: true},",
             ').unref();',
           ].join('\n'),
@@ -505,7 +511,7 @@ describe('LocalEnvironment', () => {
           2 * TERMINATE_GRACE_MS,
         );
       },
-      GIVE_UP_TIMEOUT_MS,
+      TEARDOWN_TEST_TIMEOUT_MS,
     );
 
     it(
@@ -526,7 +532,7 @@ describe('LocalEnvironment', () => {
         const controller = new AbortController();
         const reason = new Error('caller went away');
         const running = env.execute(
-          `${NODE} -e "setTimeout(() => {}, ${GIVE_UP_TIMEOUT_MS})"`,
+          `${NODE} -e "setTimeout(() => {}, ${OUTLIVES_TEARDOWN_MS})"`,
           undefined,
           controller.signal,
         );
