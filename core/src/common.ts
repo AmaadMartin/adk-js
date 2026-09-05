@@ -219,6 +219,21 @@ export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
 export {
+  AgentOptimizer,
+  isAgentOptimizer,
+} from './optimization/agent_optimizer.js';
+export type {OptimizeParams} from './optimization/agent_optimizer.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export {Sampler, isSampler} from './optimization/sampler.js';
+export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
+export {SimplePromptOptimizer} from './optimization/simple_prompt_optimizer.js';
+export type {SimplePromptOptimizerConfig} from './optimization/simple_prompt_optimizer.js';
+export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   ScopedFailureTracker,
