@@ -8,7 +8,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {AuthCredentialTypes} from '../../auth/auth_credential.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
-import {GcsAuthClient, GcsAuthorizedUser, GcsCredentials} from './client.js';
+import {GcsAuthorizedUser, GcsCredentials} from './client.js';
 
 /** Session-state key under which a resolved Cloud Storage token is cached. */
 export const GCS_TOKEN_CACHE_KEY = 'gcs_token_cache';
@@ -26,22 +26,22 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
  * valid, which TypeScript cannot express, so the toolset constructor enforces
  * it at runtime:
  *
- *   1. `authClient` alone — one identity for every end user.
+ *   1. `applicationDefaultCredentials` alone — one identity for every end
+ *      user.
  *   2. `clientId` and `clientSecret` (and optionally `scopes`) — each end user
  *      goes through the OAuth authorization-code flow.
  */
 export interface GcsCredentialsConfig {
   /**
-   * An auth client the caller already built: Application Default Credentials,
-   * a service-account key, or workload identity. Every end user then shares
-   * this one identity, so set it only when it may read every user's data.
+   * Authenticate every call as the agent's own identity, read from
+   * Application Default Credentials by `@google-cloud/storage`.
    *
-   * The client must come from the `google-auth-library` that
-   * `@google-cloud/storage` resolves. A client built from this package's own
-   * copy is a different major version, and storage authenticates no request
-   * with it.
+   * Every end user then shares this one identity, so set it only when that
+   * identity may read every user's data. This is the deployment adk-python's
+   * `credentials` field documents first: an agent running on Google Cloud
+   * whose service account already reaches the buckets.
    */
-  authClient?: GcsAuthClient;
+  applicationDefaultCredentials?: boolean;
   /** The OAuth client id to use. */
   clientId?: string;
   /** The OAuth client secret to use. */
@@ -61,15 +61,17 @@ export interface GcsOAuthClient {
  * The one credential source {@link validateGcsCredentialsConfig} accepted,
  * with the fields that source needs known to be present.
  */
-export type GcsCredentialSource = {authClient: GcsAuthClient} | GcsOAuthClient;
+export type GcsCredentialSource =
+  | {applicationDefaultCredentials: true}
+  | GcsOAuthClient;
 
 /**
  * Reduces a config to the single credential source it names.
  *
- * The messages match adk-python's
- * `BaseGoogleCredentialsConfig.__post_init__`, because they reach the
- * developer who wrote the config. They keep adk-python's `snake_case` field
- * names.
+ * This is adk-python's `BaseGoogleCredentialsConfig.__post_init__` rule. The
+ * messages name the adk-js options rather than the Python ones, because they
+ * reach the developer who wrote the config, and adk-python's own test asserts
+ * only that the config is rejected.
  *
  * @param config The config as the developer wrote it.
  * @return The credential source, narrowed so its fields are no longer
@@ -79,20 +81,21 @@ export type GcsCredentialSource = {authClient: GcsAuthClient} | GcsOAuthClient;
 export function validateGcsCredentialsConfig(
   config: GcsCredentialsConfig,
 ): GcsCredentialSource {
-  const {authClient, clientId, clientSecret, scopes} = config;
-  if (authClient) {
+  const {applicationDefaultCredentials, clientId, clientSecret, scopes} =
+    config;
+  if (applicationDefaultCredentials) {
     if (clientId || clientSecret || scopes) {
       throw new Error(
-        'If credentials are provided, external_access_token_key, client_id,' +
-          ' client_secret, and scopes must not be provided.',
+        'If applicationDefaultCredentials is set, clientId, clientSecret and' +
+          ' scopes must not be provided.',
       );
     }
-    return {authClient};
+    return {applicationDefaultCredentials: true};
   }
   if (!clientId || !clientSecret) {
     throw new Error(
-      'Must provide one of credentials, external_access_token_key, or' +
-        ' client_id and client_secret pair.',
+      'Must provide either applicationDefaultCredentials, or a clientId and' +
+        ' clientSecret pair.',
     );
   }
   return {clientId, clientSecret, scopes: scopes ?? GCS_DEFAULT_SCOPES};
@@ -127,16 +130,16 @@ export class GcsCredentialsManager {
    * must still complete the OAuth flow. In that case the manager has already
    * asked for the credential through `context.requestCredential`.
    *
-   * @param context The calling tool's context. Only a configured `authClient`
-   *   resolves without one; the OAuth flow reads session state.
+   * @param context The calling tool's context. Only Application Default
+   *   Credentials resolve without one; the OAuth flow reads session state.
    * @throws Error if the configuration needs a context and there is none, or
    *   if the completed OAuth flow returned no refresh token.
    */
   async getCredentials(context?: Context): Promise<GcsCredentials | undefined> {
     const source = this.source;
-    if ('authClient' in source) {
-      // google-auth-library refreshes on use, so there is nothing to renew.
-      return {authClient: source.authClient};
+    if ('applicationDefaultCredentials' in source) {
+      // Storage reads and refreshes the identity itself.
+      return {applicationDefaultCredentials: true};
     }
     if (!context) {
       throw new Error(

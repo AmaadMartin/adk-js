@@ -7,7 +7,7 @@
 /** Cloud Storage tools (experimental). */
 
 export {GcsAdminToolset, type GcsAdminToolsetOptions} from './admin_toolset.js';
-export {GCS_USER_AGENT, type GcsAuthClient} from './client.js';
+export {GCS_USER_AGENT} from './client.js';
 export {
   GCS_DEFAULT_SCOPES,
   GCS_TOKEN_CACHE_KEY,
