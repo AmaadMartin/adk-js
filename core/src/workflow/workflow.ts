@@ -563,7 +563,12 @@ export class Workflow extends BaseNode {
         runId,
         useSubBranch: trigger.useSubBranch,
         overrideBranch: trigger.branch,
-        overrideIsolationScope: trigger.isolationScope,
+        overrideIsolationScope: isolationScopeForNode(
+          node,
+          trigger,
+          childNodePath(ctx, nodeName),
+          runId,
+        ),
         useAsOutput: this.graph!.terminalNodeNames.has(nodeName),
       },
     }).then(
@@ -909,6 +914,30 @@ function childNodePath(ctx: NodeContext, nodeName: string): string {
 /** Whether `node` is an agent that runs as a multi-turn task. */
 function isTaskModeNode(node: BaseNode): boolean {
   return isLlmAgent(node) && node.mode === 'task';
+}
+
+/**
+ * The isolation scope a node about to run reads and writes its turns under.
+ *
+ * A trigger that names a scope wins, so a replayed run continues in the scope
+ * it first ran under. Otherwise a task-mode agent gets a scope of its own: it
+ * holds a multi-turn conversation, and without one it reads every peer node's
+ * turns as if they were its own. The scope carries the whole node path, not
+ * just the name, so two nested workflows that reuse a node name stay apart.
+ *
+ * Port of `_compute_isolation_scope_for_node` in `google/adk-python`
+ * `src/google/adk/workflow/_workflow.py`.
+ */
+function isolationScopeForNode(
+  node: BaseNode,
+  trigger: Trigger,
+  nodePath: string,
+  runId: string,
+): string | undefined {
+  if (trigger.isolationScope !== undefined) {
+    return trigger.isolationScope;
+  }
+  return isTaskModeNode(node) ? `${nodePath}@${runId}` : undefined;
 }
 
 /**
