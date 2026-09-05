@@ -1885,6 +1885,7 @@ describe('VertexAiSessionService', () => {
             name: 'reasoningEngines/12345/sessions/append-session/events/server-assigned-id',
             invocationId: 'inv_event_id_rt',
             author: 'user',
+            timestamp: '2024-12-12T12:12:13.000Z',
             rawEvent,
           },
         ],
@@ -1897,6 +1898,11 @@ describe('VertexAiSessionService', () => {
       });
 
       expect(reloaded?.events[0].id).toBe('server-assigned-id');
+      // The stored payload keeps its own id, but the server's timestamp still
+      // replaces the one it was written with.
+      expect(reloaded?.events[0].timestamp).toBe(
+        Date.parse('2024-12-12T12:12:13.000Z'),
+      );
     });
 
     it('test_create_session_with_custom_config', async () => {
