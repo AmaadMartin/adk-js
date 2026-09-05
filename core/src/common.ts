@@ -69,6 +69,8 @@ export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
+export {TranscriptionManager} from './agents/transcription_manager.js';
+export type {TranscriptionStats} from './agents/transcription_manager.js';
 export {
   getPendingUserInputRequests,
   getUserInputRequests,
