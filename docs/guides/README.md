@@ -33,3 +33,9 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Workflow
+
+- [BaseNode names, paths and serialization](workflow/base_node/index.md) - The
+  node name rule, resolving a node's position in the tree, and the flattening
+  applied to schema-validated data.
