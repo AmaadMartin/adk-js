@@ -7,6 +7,7 @@
 import {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
+  isEnterpriseWebSearchTool,
   LlmRequest,
 } from '@google/adk';
 import {Tool} from '@google/genai';
@@ -143,5 +144,23 @@ describe('EnterpriseWebSearchTool', () => {
 
   it('has a global instance ENTERPRISE_WEB_SEARCH', () => {
     expect(ENTERPRISE_WEB_SEARCH).toBeInstanceOf(EnterpriseWebSearchTool);
+  });
+
+  describe('isEnterpriseWebSearchTool', () => {
+    it('accepts an EnterpriseWebSearchTool', () => {
+      expect(isEnterpriseWebSearchTool(new EnterpriseWebSearchTool())).toBe(
+        true,
+      );
+    });
+
+    it('rejects a look-alike object', () => {
+      expect(isEnterpriseWebSearchTool({name: 'enterprise_web_search'})).toBe(
+        false,
+      );
+    });
+
+    it('rejects undefined', () => {
+      expect(isEnterpriseWebSearchTool(undefined)).toBe(false);
+    });
   });
 });

@@ -51,6 +51,27 @@ export function applyEnterpriseWebSearch(llmRequest: LlmRequest): void {
   );
 }
 
+const ENTERPRISE_WEB_SEARCH_TOOL_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.enterpriseWebSearchTool',
+);
+
+/**
+ * Type guard to check if an object is an instance of EnterpriseWebSearchTool.
+ * @param obj The object to check.
+ * @returns True if the object is an instance of EnterpriseWebSearchTool, false
+ *     otherwise.
+ */
+export function isEnterpriseWebSearchTool(
+  obj: unknown,
+): obj is EnterpriseWebSearchTool {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    ENTERPRISE_WEB_SEARCH_TOOL_SIGNATURE_SYMBOL in obj &&
+    obj[ENTERPRISE_WEB_SEARCH_TOOL_SIGNATURE_SYMBOL] === true
+  );
+}
+
 /**
  * A Gemini 2+ built-in tool that grounds responses on public web data via
  * Vertex AI Search with Enterprise (Sec4) compliance.
@@ -59,6 +80,9 @@ export function applyEnterpriseWebSearch(llmRequest: LlmRequest): void {
  * perform local code execution.
  */
 export class EnterpriseWebSearchTool extends BuiltInTool {
+  /** A unique symbol to identify ADK Enterprise Web Search tool class. */
+  readonly [ENTERPRISE_WEB_SEARCH_TOOL_SIGNATURE_SYMBOL] = true;
+
   constructor() {
     super({
       name: 'enterprise_web_search',

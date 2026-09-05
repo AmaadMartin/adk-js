@@ -49,10 +49,32 @@ export interface SearchEngineParams extends BaseVertexAiSearchToolParams {
 
 export type VertexAiSearchToolParams = DataStoreParams | SearchEngineParams;
 
+const VERTEX_AI_SEARCH_TOOL_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.vertexAiSearchTool',
+);
+
+/**
+ * Type guard to check if an object is an instance of VertexAiSearchTool.
+ * @param obj The object to check.
+ * @returns True if the object is an instance of VertexAiSearchTool, false
+ *     otherwise.
+ */
+export function isVertexAiSearchTool(obj: unknown): obj is VertexAiSearchTool {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    VERTEX_AI_SEARCH_TOOL_SIGNATURE_SYMBOL in obj &&
+    obj[VERTEX_AI_SEARCH_TOOL_SIGNATURE_SYMBOL] === true
+  );
+}
+
 /**
  * A built-in tool using Vertex AI Search.
  */
 export class VertexAiSearchTool extends BuiltInTool {
+  /** A unique symbol to identify ADK Vertex AI Search tool class. */
+  readonly [VERTEX_AI_SEARCH_TOOL_SIGNATURE_SYMBOL] = true;
+
   readonly dataStoreId?: string;
   readonly dataStoreSpecs?: VertexAISearchDataStoreSpec[];
   readonly searchEngineId?: string;

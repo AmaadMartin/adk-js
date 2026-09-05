@@ -290,6 +290,7 @@ export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
+  isEnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
@@ -311,7 +312,12 @@ export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
 } from './tools/google_maps_grounding_tool.js';
-export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
+export {
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  isGoogleSearchTool,
+} from './tools/google_search_tool.js';
+export type {GoogleSearchToolParams} from './tools/google_search_tool.js';
 export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
@@ -333,7 +339,10 @@ export {
 } from './tools/tool_confirmation.js';
 export type {IntentMismatchReason} from './tools/tool_confirmation.js';
 export {URL_CONTEXT, UrlContextTool} from './tools/url_context_tool.js';
-export {VertexAiSearchTool} from './tools/vertex_ai_search_tool.js';
+export {
+  VertexAiSearchTool,
+  isVertexAiSearchTool,
+} from './tools/vertex_ai_search_tool.js';
 export type {
   DataStoreParams,
   SearchEngineParams,

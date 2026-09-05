@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
+import {
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  isGoogleSearchTool,
+  LlmRequest,
+} from '@google/adk';
 import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -96,5 +101,30 @@ describe('GoogleSearchTool', () => {
 
   it('has a global instance GOOGLE_SEARCH', () => {
     expect(GOOGLE_SEARCH).toBeInstanceOf(GoogleSearchTool);
+  });
+
+  describe('bypassMultiToolsLimit', () => {
+    it('defaults to false', () => {
+      expect(new GoogleSearchTool().bypassMultiToolsLimit).toBe(false);
+    });
+
+    it('is true when the caller asks for it', () => {
+      const tool = new GoogleSearchTool({bypassMultiToolsLimit: true});
+      expect(tool.bypassMultiToolsLimit).toBe(true);
+    });
+  });
+
+  describe('isGoogleSearchTool', () => {
+    it('accepts a GoogleSearchTool', () => {
+      expect(isGoogleSearchTool(new GoogleSearchTool())).toBe(true);
+    });
+
+    it('rejects a look-alike object', () => {
+      expect(isGoogleSearchTool({name: 'google_search'})).toBe(false);
+    });
+
+    it('rejects undefined', () => {
+      expect(isGoogleSearchTool(undefined)).toBe(false);
+    });
   });
 });
