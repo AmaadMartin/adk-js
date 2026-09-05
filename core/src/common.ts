@@ -546,6 +546,10 @@ export {
 export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
 export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
+export {
+  PRE_BUILT_BEHAVIORS,
+  getDefaultPersonaRegistry,
+} from './evaluation/simulation/pre_built_personas.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   DEFAULT_MAX_ALLOWED_INVOCATIONS,
@@ -560,6 +564,11 @@ export type {
   NextUserMessage,
   UserSimulator,
 } from './evaluation/simulation/user_simulator.js';
+export {
+  UserPersonaRegistry,
+  getBehaviorInstructionsStr,
+  getViolationRubricsStr,
+} from './evaluation/simulation/user_simulator_personas.js';
 export type {
   UserBehavior,
   UserPersona,
