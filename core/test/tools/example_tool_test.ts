@@ -44,6 +44,15 @@ class FixedExampleProvider extends BaseExampleProvider {
   }
 }
 
+class AsyncExampleProvider extends BaseExampleProvider {
+  constructor(private readonly examples: Example[]) {
+    super();
+  }
+  override async getExamples(_query: string): Promise<Example[]> {
+    return this.examples;
+  }
+}
+
 /**
  * Builds a `toolContext` stub exposing only the `userContent` used by
  * ExampleTool, cast to `Context` (mirrors `StubToolContext` in
@@ -95,6 +104,20 @@ describe('ExampleTool', () => {
 
     expect(getExamplesSpy).toHaveBeenCalledWith('What is 2+2?');
     expect(llmRequest.config?.systemInstruction).toContain('What is 2+2?');
+  });
+
+  it('appends instructions from a provider that resolves its examples', async () => {
+    const tool = new ExampleTool(new AsyncExampleProvider([SIMPLE_EXAMPLE]));
+    const toolContext = makeToolContext({
+      role: 'user',
+      parts: [{text: 'What is 2+2?'}],
+    });
+    const llmRequest = makeLlmRequest('gemini-2.0-flash');
+
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config?.systemInstruction).toContain('<EXAMPLES>');
+    expect(llmRequest.config?.systemInstruction).toContain('4');
   });
 
   it('forwards llmRequest.model to buildExampleSi (function-call fence style)', async () => {
