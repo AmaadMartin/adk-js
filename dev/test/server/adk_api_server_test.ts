@@ -501,6 +501,18 @@ describe('AdkWebServer', () => {
       expect((await listSessionIds()).sort()).toEqual(['mine', 'yours']);
     });
 
+    it('still serves an evaluation session asked for by id', async () => {
+      const sessionId = `${EVAL_SESSION_ID_PREFIX}run1`;
+      await createSessions(sessionId);
+
+      const response = await client.get<Session>(
+        `/apps/testApp/users/testUser/sessions/${sessionId}`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.id).toBe(sessionId);
+    });
+
     it('keeps the paginated envelope the session service returned', async () => {
       await createSessions('mine', `${EVAL_SESSION_ID_PREFIX}run1`);
 
