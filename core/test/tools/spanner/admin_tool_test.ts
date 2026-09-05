@@ -46,16 +46,19 @@ function toolset(): SpannerAdminToolset {
   return new SpannerAdminToolset({credentialsConfig: testCredentialsConfig()});
 }
 
-/** How many event-loop turns a tool call may take to arm its timeout timer. */
-const MAX_TICKS_TO_ARM_TIMER = 100;
+/**
+ * How long a tool call may take to arm its timeout timer.
+ *
+ * A wall-clock bound rather than a tick count: the call awaits the credentials
+ * and the peer dependency first, and a loaded full-suite run needs more
+ * event-loop turns for that than the file does on its own.
+ */
+const ARM_TIMER_DEADLINE_MS = 2000;
 
 /** Yields to the real event loop until the tool call arms its timeout timer. */
 async function waitForArmedTimer(): Promise<void> {
-  for (
-    let tick = 0;
-    tick < MAX_TICKS_TO_ARM_TIMER && vi.getTimerCount() === 0;
-    tick++
-  ) {
+  const deadline = Date.now() + ARM_TIMER_DEADLINE_MS;
+  while (vi.getTimerCount() === 0 && Date.now() < deadline) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   expect(vi.getTimerCount()).toBe(1);
