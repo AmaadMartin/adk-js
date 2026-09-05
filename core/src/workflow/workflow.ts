@@ -925,6 +925,10 @@ function isTaskModeNode(node: BaseNode): boolean {
  * turns as if they were its own. The scope carries the whole node path, not
  * just the name, so two nested workflows that reuse a node name stay apart.
  *
+ * A node that declares its own `isolationScope` keeps it. That declaration is
+ * an adk-js feature with no counterpart in the reference, and the node runner
+ * already applies it, so this returns nothing and lets it through.
+ *
  * Port of `_compute_isolation_scope_for_node` in `google/adk-python`
  * `src/google/adk/workflow/_workflow.py`.
  */
@@ -937,7 +941,9 @@ function isolationScopeForNode(
   if (trigger.isolationScope !== undefined) {
     return trigger.isolationScope;
   }
-  return isTaskModeNode(node) ? `${nodePath}@${runId}` : undefined;
+  const needsTaskScope =
+    isTaskModeNode(node) && node.isolationScope === undefined;
+  return needsTaskScope ? `${nodePath}@${runId}` : undefined;
 }
 
 /**
