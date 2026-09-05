@@ -19,13 +19,13 @@ import {
   ToolSimulationConfigParams,
   createEnvironmentSimulationConfig,
   createInjectionConfig,
-  createMockStrategy,
   createToolSimulationConfig,
   getLogger,
   setLogger,
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {createMockStrategy} from '../../../src/tools/environment_simulation/environment_simulation_engine.js';
 
 import {
   FAKE_SIMULATION_MODEL,

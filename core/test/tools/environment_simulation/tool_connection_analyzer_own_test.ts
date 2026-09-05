@@ -10,13 +10,9 @@
  * prompt carries.
  */
 
-import {
-  Logger,
-  ToolConnectionAnalyzer,
-  getLogger,
-  setLogger,
-} from '@google/adk';
+import {Logger, getLogger, setLogger} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {ToolConnectionAnalyzer} from '../../../src/tools/environment_simulation/tool_connection_analyzer.js';
 
 import {
   CONTENTLESS_MODEL,

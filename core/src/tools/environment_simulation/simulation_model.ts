@@ -6,7 +6,6 @@
 
 import {GenerateContentConfig} from '@google/genai';
 
-import {BaseLlm} from '../../models/base_llm.js';
 import {LLMRegistry} from '../../models/registry.js';
 
 /**
@@ -19,7 +18,6 @@ import {LLMRegistry} from '../../models/registry.js';
 export class SimulationModel {
   private readonly model: string;
   private readonly modelConfig: GenerateContentConfig;
-  private llm?: BaseLlm;
 
   /**
    * @param model The model to call.
@@ -31,23 +29,12 @@ export class SimulationModel {
   }
 
   /**
-   * Resolves the model on first use, and reuses it after that.
-   *
-   * Resolution is deferred because `Gemini` demands an API key in its
-   * constructor. A simulation that only injects canned responses never calls a
-   * model, and must not need a credential to be built.
-   *
-   * @returns The resolved model.
-   */
-  private resolveLlm(): BaseLlm {
-    if (!this.llm) {
-      this.llm = LLMRegistry.newLlm(this.model);
-    }
-    return this.llm;
-  }
-
-  /**
    * Sends `prompt` to the model and collects everything it says.
+   *
+   * The model is resolved here rather than in the constructor, because
+   * `Gemini` demands an API key in its own constructor. A simulation that only
+   * injects canned responses never calls a model, and must not need a
+   * credential to be built.
    *
    * adk-python passes a second `generation_config` holding
    * `response_mime_type: 'application/json'`. `LlmRequest` has one config slot,
@@ -66,9 +53,8 @@ export class SimulationModel {
     };
 
     let text = '';
-    for await (const response of this.resolveLlm().generateContentAsync(
-      request,
-    )) {
+    const llm = LLMRegistry.newLlm(this.model);
+    for await (const response of llm.generateContentAsync(request)) {
       for (const part of response.content?.parts ?? []) {
         if (part.text) {
           text += part.text;
