@@ -12,6 +12,7 @@ import {
   A2APartToGenAIPartConverter,
   GenAIPartToA2APartConverter,
   toA2APart,
+  toA2AParts,
   toGenAIPart,
 } from './part_converter_utils.js';
 
@@ -68,8 +69,10 @@ export function toA2AArtifactUpdateEventsFromArtifactMap(
   contextId: string,
   genAiPartConverter: GenAIPartToA2APartConverter = toA2APart,
 ): A2AEvent[] {
-  const parts = (adkEvent.content?.parts ?? []).map((part) =>
-    genAiPartConverter(part, adkEvent.longRunningToolIds ?? []),
+  const parts = toA2AParts(
+    adkEvent.content?.parts,
+    adkEvent.longRunningToolIds,
+    genAiPartConverter,
   );
   if (parts.length === 0) {
     return [];

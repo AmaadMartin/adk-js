@@ -234,6 +234,42 @@ describe('toA2AArtifactUpdateEventsFromArtifactMap', () => {
     expect(genAiPartConverter).toHaveBeenCalledTimes(1);
   });
 
+  it('drops a part its converter returns undefined for', () => {
+    const event = onlyArtifactUpdate(
+      toA2AArtifactUpdateEventsFromArtifactMap(
+        createEvent({
+          author: 'model',
+          content: {role: 'model', parts: [{text: 'secret'}, {text: 'public'}]},
+          actions: createEventActions(),
+        }),
+        new Map(),
+        TASK_ID,
+        CONTEXT_ID,
+        (part) =>
+          part.text === 'secret'
+            ? undefined
+            : {kind: 'text', text: part.text ?? ''},
+      ),
+    );
+
+    expect(event.artifact.parts).toEqual([{kind: 'text', text: 'public'}]);
+  });
+
+  it('publishes nothing when its converter drops every part', () => {
+    const agentsArtifacts = new Map<string, string>();
+
+    const events = toA2AArtifactUpdateEventsFromArtifactMap(
+      modelEvent('secret', true),
+      agentsArtifacts,
+      TASK_ID,
+      CONTEXT_ID,
+      () => undefined,
+    );
+
+    expect(events).toEqual([]);
+    expect(agentsArtifacts.size).toBe(0);
+  });
+
   it('falls back to toA2APart when no converter is supplied', () => {
     const event = onlyArtifactUpdate(
       toA2AArtifactUpdateEventsFromArtifactMap(
