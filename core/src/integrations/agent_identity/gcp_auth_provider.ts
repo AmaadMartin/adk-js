@@ -6,6 +6,7 @@
 
 import {Context} from '../../agents/context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {AuthScheme} from '../../auth/auth_schemes.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {BaseAuthProvider} from '../../auth/base_auth_provider.js';
 import {experimental} from '../../utils/experimental.js';
@@ -32,24 +33,11 @@ export interface GcpAuthProviderOptions {
   iamConnectorProvider?: CredentialsProvider;
 }
 
-/**
- * True when `scheme` is a {@link GcpAuthProviderScheme}.
- *
- * The parameter is `unknown` because the `AuthScheme` union does not yet admit
- * a custom scheme, so a comparison against it would not type-check.
- */
+/** True when `scheme` is a {@link GcpAuthProviderScheme}. */
 export function isGcpAuthProviderScheme(
-  scheme: unknown,
+  scheme: AuthScheme,
 ): scheme is GcpAuthProviderScheme {
-  if (typeof scheme !== 'object' || scheme === null) {
-    return false;
-  }
-  return (
-    'type' in scheme &&
-    scheme.type === GCP_AUTH_PROVIDER_SCHEME_TYPE &&
-    'name' in scheme &&
-    typeof scheme.name === 'string'
-  );
+  return scheme.type === GCP_AUTH_PROVIDER_SCHEME_TYPE;
 }
 
 /**
@@ -86,13 +74,9 @@ export class GcpAuthProvider implements BaseAuthProvider {
     authConfig: AuthConfig,
     context?: Context,
   ): Promise<AuthCredential> {
-    // `unknown`, because narrowing the declared `AuthScheme` union against a
-    // type it does not contain collapses it to `never`.
-    const authScheme: unknown = authConfig.authScheme;
+    const authScheme = authConfig.authScheme;
     if (!isGcpAuthProviderScheme(authScheme)) {
-      throw new Error(
-        `Expected GcpAuthProviderScheme, got ${authConfig.authScheme.type}`,
-      );
+      throw new Error(`Expected GcpAuthProviderScheme, got ${authScheme.type}`);
     }
 
     if (CONNECTOR_RESOURCE_NAME_PATTERN.test(authScheme.name)) {

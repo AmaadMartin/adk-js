@@ -186,16 +186,14 @@ describe('isGcpAuthProviderScheme', () => {
     expect(isGcpAuthProviderScheme(createAuthScheme())).toBe(true);
   });
 
-  it.each([
-    ['null', null],
-    ['a string', 'gcpAuthProviderScheme'],
-    ['another scheme type', {type: 'apiKey', name: 'x-api-key'}],
-    ['a scheme with no name', {type: 'gcpAuthProviderScheme'}],
+  it.each<[string, AuthScheme]>([
+    ['an API key scheme', {type: 'apiKey', name: 'x-api-key', in: 'header'}],
+    ['an HTTP scheme', {type: 'http', scheme: 'bearer'}],
     [
-      'a scheme whose name is not a string',
+      'an OpenID Connect scheme',
       {
-        type: 'gcpAuthProviderScheme',
-        name: 42,
+        type: 'openIdConnect',
+        openIdConnectUrl: 'https://example.com/.well-known',
       },
     ],
   ])('rejects %s', (_label, candidate) => {

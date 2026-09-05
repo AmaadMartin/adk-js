@@ -49,7 +49,6 @@ credential:
 import {
   AuthCredential,
   AuthProviderRegistry,
-  AuthScheme,
   Context,
   GcpAuthProvider,
   GcpAuthProviderScheme,
@@ -64,15 +63,15 @@ async function fetchCredential(
 ): Promise<AuthCredential> {
   const provider = new GcpAuthProvider();
   return provider.getAuthCredential(
-    {authScheme: scheme as unknown as AuthScheme, credentialKey: 'jira'},
+    {authScheme: scheme, credentialKey: 'jira'},
     context,
   );
 }
 ```
 
-The cast is needed because the `AuthScheme` union describes OpenAPI security
-schemes and does not yet admit a custom scheme. `AgentRegistry` performs the
-same conversion when it builds a scheme.
+`GcpAuthProviderScheme` is a member of the `AuthScheme` union, so it needs no
+cast. Use `isGcpAuthProviderScheme` to narrow an `AuthScheme` you did not build
+yourself.
 
 ADK does not resolve a `gcpAuthProviderScheme` on its own yet: nothing in the
 framework reads `AuthProviderRegistry`. Your application asks the provider for

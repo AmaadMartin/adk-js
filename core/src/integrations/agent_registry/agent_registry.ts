@@ -27,7 +27,6 @@ import {
   ConnectionUriFilter,
   ConnectionUriResult,
   Endpoint,
-  GcpAuthProviderScheme,
   ListAgentsResponse,
   ListBindingsResponse,
   ListEndpointsResponse,
@@ -293,7 +292,7 @@ export class AgentRegistry {
                 type: 'gcpAuthProviderScheme',
                 name: authProvider,
                 continueUri: options?.continueUri,
-              } as GcpAuthProviderScheme as unknown as AuthScheme;
+              };
               break;
             }
           }

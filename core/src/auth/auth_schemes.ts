@@ -5,6 +5,7 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
+import {GcpAuthProviderScheme} from '../integrations/agent_registry/types.js';
 
 type Oauth2Flow = OpenAPIV3.OAuth2SecurityScheme['flows'];
 
@@ -24,12 +25,13 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
- * OpenIdConnectWithConfig.
+ * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
+ * OpenIdConnectWithConfig, and the GCP Agent Identity scheme.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | GcpAuthProviderScheme;
 
 /**
  * Represents the OAuth2 flow (or grant type).
