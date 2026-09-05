@@ -21,7 +21,6 @@ import {
   isApp,
   Logger,
   LogLevel,
-  maybeInstallRequestMetricsMiddleware,
   RunConfig,
   RunnableRoot,
   Runner,
@@ -243,11 +242,6 @@ export class AdkApiServer {
         context.with(getPropagatedContext(req.headers), next);
       });
     }
-
-    // Drives metric export from the request path on Agent Engine. No builder
-    // is supplied yet, so this is inert until adk-js ports adk-python's
-    // `telemetry/_agent_engine_metric_exporter.py`.
-    maybeInstallRequestMetricsMiddleware(app, {otelToCloud: this.otelToCloud});
 
     // Registered before any route (including /health, /, /version) so the
     // DNS-rebinding guard applies to every endpoint, not just the ones
