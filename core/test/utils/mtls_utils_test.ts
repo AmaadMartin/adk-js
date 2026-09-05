@@ -27,6 +27,7 @@ import {
   getApiEndpoint,
   getWithClientCert,
   loadDefaultClientCerts,
+  shouldUseMtlsEndpoint,
   useClientCertEffective,
 } from '../../src/utils/mtls_utils.js';
 
@@ -245,6 +246,57 @@ describe('useClientCertEffective', () => {
     process.env['GOOGLE_API_USE_CLIENT_CERTIFICATE'] = value;
 
     expect(useClientCertEffective()).toBe(false);
+  });
+});
+
+describe('shouldUseMtlsEndpoint', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('reports true for always, whatever the certificate setting', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'false');
+
+    expect(shouldUseMtlsEndpoint()).toBe(true);
+  });
+
+  it('reports false for never, whatever the certificate setting', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'never');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    expect(shouldUseMtlsEndpoint()).toBe(false);
+  });
+
+  it.each([
+    ['true', true],
+    ['false', false],
+  ])('defers to the certificate setting %s for auto', (value, expected) => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', value);
+
+    expect(shouldUseMtlsEndpoint()).toBe(expected);
+  });
+
+  it('treats an unset setting as auto', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    expect(shouldUseMtlsEndpoint()).toBe(true);
+  });
+
+  it('treats an unrecognised setting as auto', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'sometimes');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    expect(shouldUseMtlsEndpoint()).toBe(true);
+  });
+
+  it('reads the setting case insensitively', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'ALWAYS');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'false');
+
+    expect(shouldUseMtlsEndpoint()).toBe(true);
   });
 });
 

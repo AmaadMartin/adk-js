@@ -9,9 +9,36 @@ import {AgentCard, TransportProtocol} from '@a2a-js/sdk';
 export const AGENT_REGISTRY_BASE_URL =
   'https://agentregistry.googleapis.com/v1alpha';
 
+/**
+ * Mutual-TLS variant of {@link AGENT_REGISTRY_BASE_URL}. The two must always
+ * name the same API version.
+ */
+export const AGENT_REGISTRY_MTLS_BASE_URL =
+  'https://agentregistry.mtls.googleapis.com/v1alpha';
+
 // Telemetry owns the span-attribute name; re-exported here so the existing
 // import path keeps working.
 export {GCP_MCP_SERVER_DESTINATION_ID} from '../../telemetry/tracing.js';
+
+/** Search mode accepted by the registry `:search` verbs. */
+export type SearchType = 'KEYWORD' | 'SEMANTIC';
+
+/** Options common to `searchAgents` and `searchMcpServers`. */
+export interface SearchOptions {
+  searchString?: string;
+  searchType?: SearchType;
+  filterStr?: string;
+  orderBy?: string;
+  pageSize?: number;
+  pageToken?: string;
+}
+
+/** Per-request overrides for `AgentRegistry.makeRequest`. */
+export interface MakeRequestOptions {
+  method?: 'GET' | 'POST';
+  /** JSON request body. Sent only for POST. */
+  body?: unknown;
+}
 
 export enum ProtocolType {
   TYPE_UNSPECIFIED = 'TYPE_UNSPECIFIED',
@@ -92,6 +119,8 @@ export interface AgentSkillMetadata {
 }
 
 export interface AgentInfo {
+  /** Stable identifier of the agent, matched against IAM binding targets. */
+  agentId?: string;
   displayName?: string;
   description?: string;
   version?: string;

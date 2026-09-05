@@ -252,6 +252,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Tools
 
 - [adkToMcpToolType and geminiToJsonSchema](tools/mcp_conversion_utils/index.md) - Convert an ADK tool into an MCP tool descriptor so an MCP server can advertise it.
+- [AgentRegistry](tools/agent_registry/index.md) - Resolving a registered MCP server or A2A agent into a ready-to-use ADK component, with its endpoint and credentials already resolved.
 - [AgentTool](tools/agent_tool/index.md) - Exposing an agent to another agent as a callable tool: the isolation of the nested run, the arguments it accepts, the run settings it inherits, and when the sub-runner is released.
 - [APIHubClient](tools/apihub_client/index.md) - Reading an OpenAPI spec out of Google Cloud API Hub, from a resource path or a Console URL.
 - [ApplicationIntegrationToolset](tools/application_integration_toolset/index.md) - Turn a Google Cloud Application Integration integration, or an Integration Connectors connection, into agent tools.

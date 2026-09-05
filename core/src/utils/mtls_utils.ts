@@ -76,6 +76,29 @@ export function chooseApiEndpoint(
 }
 
 /**
+ * Reports whether a Google API call should go to the mutual-TLS host.
+ *
+ * `GOOGLE_API_USE_MTLS_ENDPOINT` decides: `always` picks the mutual-TLS host,
+ * `never` picks the default one, and `auto` defers to
+ * {@link useClientCertEffective}. An unset or unrecognised setting means
+ * `auto`.
+ *
+ * This is the counterpart of `chooseApiEndpoint` for a caller that holds no
+ * certificate yet, and that builds its own URL rather than picking between
+ * two.
+ */
+export function shouldUseMtlsEndpoint(): boolean {
+  switch (readMtlsEndpointSetting()) {
+    case MtlsEndpointSetting.ALWAYS:
+      return true;
+    case MtlsEndpointSetting.NEVER:
+      return false;
+    default:
+      return useClientCertEffective();
+  }
+}
+
+/**
  * Reports whether a URL names a `*.googleapis.com` host that carries no
  * mutual-TLS infix.
  *
