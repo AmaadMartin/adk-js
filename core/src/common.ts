@@ -917,6 +917,10 @@ export {
   GoogleMapsGroundingTool,
 } from './tools/google_maps_grounding_tool.js';
 export {
+  GoogleSearchAgentTool,
+  createGoogleSearchAgent,
+} from './tools/google_search_agent_tool.js';
+export {
   GOOGLE_SEARCH,
   GoogleSearchTool,
   isGoogleSearchTool,

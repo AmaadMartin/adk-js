@@ -243,6 +243,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ExampleTool.fromConfig](tools/example_tool/index.md) - Building an ExampleTool from a configuration record, and naming an example provider that user code exports.
 - [FunctionTool parameters and the sync-callable runner](tools/function_tool/index.md) - How a tool's parameter declaration is built, and how a host keeps a blocking tool body off the event loop.
 - [GoogleApiToolset](tools/google_api_toolset/index.md) - Turning a Google API Discovery document into callable tools, and the credentials they run under.
+- [GoogleSearchAgentTool](tools/google_search_agent/index.md) - Running Google
+  Search in a sub-agent so it can sit beside your agent's other tools.
 - [GoogleSearchTool](tools/google_search/index.md) - Grounding a Gemini model's
   answers in Google Search, and the requests the tool accepts.
 - [GoogleTool](tools/google_tool/index.md) - Handcrafting a Google API tool, and the OAuth handshake and token cache it manages for you.
