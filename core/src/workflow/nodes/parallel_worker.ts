@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseNode} from '../base_node.js';
+import {BaseNode, START} from '../base_node.js';
 import {isNodeInterruptedError} from '../errors.js';
 import {RunnableNode} from '../graph.js';
 import {NodeContext} from '../node_context.js';
+import {RetryConfig} from '../retry_config.js';
 import {buildNode} from '../utils/workflow_graph_utils.js';
 
 /**
@@ -25,6 +26,10 @@ export interface ParallelWorkerConfig {
    * `DEFAULT_MAX_PARALLEL_WORKERS` (8); pass `Infinity` for unbounded.
    */
   maxParallelWorkers?: number;
+  /** Retry configuration for the fan-out as a whole. */
+  retryConfig?: RetryConfig;
+  /** Maximum time, in seconds, for the whole fan-out to complete. */
+  timeout?: number;
 }
 
 /**
@@ -43,11 +48,11 @@ export interface ParallelWorkerConfig {
  * node — which is also where the worker's own name comes from.
  *
  * Notes:
- * - **retry/timeout live on the inner node.** `retryConfig`/`timeout` passed to
- *   `buildNode` apply to the wrapped node (per item); the ParallelWorker itself
- *   carries neither, so the two levels don't compose. Wrapping the value
- *   yourself — `new ParallelWorker(node(myAgent, {timeout: 5}))` — is how those
- *   options are set.
+ * - **Two levels of retry/timeout.** `retryConfig`/`timeout` in
+ *   {@link ParallelWorkerConfig} apply to the fan-out as a whole. The same
+ *   options passed to `buildNode` apply to the wrapped node, once per item;
+ *   set those by wrapping the value yourself —
+ *   `new ParallelWorker(node(myAgent, {timeout: 5}))`.
  * - **All-or-nothing.** If any item throws, the first error is rethrown and the
  *   already-computed sibling outputs are discarded. Make individual items
  *   failure-tolerant if partial results matter.
@@ -66,7 +71,17 @@ export class ParallelWorker extends BaseNode {
 
   constructor(inner: RunnableNode, config: ParallelWorkerConfig = {}) {
     const built = buildNode(inner);
-    super({name: built.name, rerunOnResume: true});
+    // Checked on the built node so the `'START'` literal a JavaScript caller
+    // can still pass lands here too: `buildNode` maps it to the sentinel.
+    if (built === START) {
+      throw new Error('ParallelWorker cannot wrap a START node.');
+    }
+    super({
+      name: built.name,
+      rerunOnResume: true,
+      retryConfig: config.retryConfig,
+      timeout: config.timeout,
+    });
     if (
       config.maxParallelWorkers !== undefined &&
       config.maxParallelWorkers < 1

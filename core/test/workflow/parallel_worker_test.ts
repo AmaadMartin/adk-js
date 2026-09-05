@@ -8,6 +8,8 @@ import {describe, expect, it} from 'vitest';
 import {Event} from '../../src/events/event.js';
 import {Runner} from '../../src/runner/runner.js';
 import {InMemorySessionService} from '../../src/sessions/in_memory_session_service.js';
+import {START} from '../../src/workflow/base_node.js';
+import {isNodeTimeoutError} from '../../src/workflow/errors.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
 import {JoinNode} from '../../src/workflow/nodes/join_node.js';
@@ -81,6 +83,65 @@ describe('ParallelWorker', () => {
     expect(() => new ParallelWorker(inner, {maxParallelWorkers: 0})).toThrow(
       /greater than or equal to 1/,
     );
+  });
+
+  it('rejects a START node in the constructor', () => {
+    expect(() => new ParallelWorker(START)).toThrow(
+      'ParallelWorker cannot wrap a START node.',
+    );
+  });
+
+  it('accepts retryConfig and timeout and passes them to BaseNode', () => {
+    const inner = new FunctionNode('x', (_c, v) => v);
+    const retryConfig = {maxAttempts: 3};
+    const worker = new ParallelWorker(inner, {retryConfig, timeout: 30});
+
+    expect(worker.timeout).toBe(30);
+    expect(worker.retryConfig).toBe(retryConfig);
+    // BaseNode derives this from retryConfig, so it proves the option reached
+    // the base class rather than only a field on the subclass.
+    expect(worker.preparedRetryConfig).toBeDefined();
+  });
+
+  it('retries the whole fan-out when the worker declares a retryConfig', async () => {
+    let attempts = 0;
+    const inner = new FunctionNode('flaky', (_c, n: number) => {
+      if (n === 1) {
+        attempts++;
+        if (attempts === 1) {
+          throw new Error('first attempt fails');
+        }
+      }
+      return n * 2;
+    });
+    const worker = new ParallelWorker(inner, {
+      retryConfig: {maxAttempts: 2, initialDelay: 0, jitter: 0},
+    });
+
+    const {output} = await driveNode(worker, [1, 2]);
+
+    expect(output).toEqual([2, 4]);
+    expect(attempts).toBe(2);
+  });
+
+  it('fails the fan-out with NodeTimeoutError when the worker timeout fires', async () => {
+    const inner = new FunctionNode('slow', async (ctx: NodeContext, n) => {
+      await new Promise<void>((resolve) => {
+        ctx.abortSignal?.addEventListener('abort', () => resolve(), {
+          once: true,
+        });
+        setTimeout(resolve, 1000);
+      });
+      return n;
+    });
+    const worker = new ParallelWorker(inner, {timeout: 0.05});
+
+    const err = await driveNode(worker, [1, 2]).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(isNodeTimeoutError(err)).toBe(true);
   });
 
   it('propagates the first error from a failing item', async () => {
