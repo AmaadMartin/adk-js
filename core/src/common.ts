@@ -286,6 +286,14 @@ export type {
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
+export {
+  BaseComputer,
+  ComputerEnvironment,
+} from './tools/computer_use/base_computer.js';
+export type {
+  ComputerState,
+  ScrollDirection,
+} from './tools/computer_use/base_computer.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,
