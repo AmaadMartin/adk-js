@@ -4,16 +4,80 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {LlmRequest, LlmResponse} from '@google/adk';
+import {FunctionCall, FunctionResponse} from '@google/genai';
 import {z} from 'zod';
+
+/**
+ * Runtime validation for a conformance recordings file, in the two shapes this
+ * package reads one.
+ *
+ * `RecordingsSchema` validates a recordings object whose keys are already
+ * camelCase, which is what `toCamelKeys` hands the conformance test loader.
+ * `parseRecordings` validates the snake_case file itself, and converts the
+ * structural keys as it goes.
+ */
+
+/**
+ * Accepts any non-null object and carries the SDK type statically.
+ *
+ * A hand-written Zod schema for an SDK payload would duplicate the SDK's own
+ * type definitions, and would reject a valid recording every time the SDK adds
+ * a field.
+ */
+const objectOfType = <T>() =>
+  z.custom<T>((v) => typeof v === 'object' && v !== null, {
+    message: 'Expected an object',
+  });
+
+/** Paired LLM request and response. */
+export const LlmRecordingSchema = z.strictObject({
+  llmRequest: objectOfType<LlmRequest>().optional(),
+  /** adk-js records one response; adk-python records the streamed list. */
+  llmResponse: objectOfType<LlmResponse>().optional(),
+  /**
+   * Every response the model produced for `llmRequest`, in arrival order. SSE
+   * delivers a turn as a run of partial responses followed by the complete
+   * one, so a streaming recording needs a list. adk-python's
+   * `LlmRecording.llm_responses` is the same field, and its schema forbids any
+   * other name for it.
+   */
+  llmResponses: z.array(objectOfType<LlmResponse>()).optional(),
+});
+
+/** Paired tool call and response. */
+export const ToolRecordingSchema = z.strictObject({
+  toolCall: objectOfType<FunctionCall>().optional(),
+  toolResponse: objectOfType<FunctionResponse>().optional(),
+});
+
+/** Single interaction recording, ordered by request timestamp. */
+export const RecordingSchema = z.strictObject({
+  userMessageIndex: z.number().int(),
+  agentName: z.string(),
+  llmRecording: LlmRecordingSchema.optional(),
+  toolRecording: ToolRecordingSchema.optional(),
+});
+
+/** All recordings in chronological order. */
+export const RecordingsSchema = z.strictObject({
+  /** Absent means no recordings, matching adk-python's `default_factory`. */
+  recordings: z.array(RecordingSchema).default([]),
+});
+
+export type LlmRecording = z.infer<typeof LlmRecordingSchema>;
+export type ToolRecording = z.infer<typeof ToolRecordingSchema>;
+export type Recording = z.infer<typeof RecordingSchema>;
+export type Recordings = z.infer<typeof RecordingsSchema>;
 
 /**
  * Runtime validation for the recordings file that adk-python's conformance
  * recorder writes, ported from
  * `src/google/adk/cli/plugins/recordings_schema.py`.
  *
- * This is deliberately not `test_types.ts`'s `Recordings`. That interface holds
- * a single `llmResponse` where the file carries a list of `llm_responses`, so
- * the two shapes are not interchangeable and nothing casts between them.
+ * This is deliberately not `RecordingsSchema` above. That schema reads keys
+ * that are already camelCase, where this one reads the snake_case file, so the
+ * two entry points are not interchangeable and nothing casts between them.
  */
 
 /**

@@ -15,7 +15,7 @@ import {
   toSnakeKeys,
   writeYamlFile,
 } from '../../src/conformance/yaml_writer.js';
-import {Recordings} from '../../src/integration/test_types.js';
+import {Recordings} from '../../src/integration/recordings_schema.js';
 
 const RECORDINGS_FIXTURE = {
   recordings: [

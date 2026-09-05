@@ -21,7 +21,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {ConformanceRecordingPlugin} from '../../src/integration/conformance_recording_plugin.js';
-import {Recordings} from '../../src/integration/test_types.js';
+import {Recordings} from '../../src/integration/recordings_schema.js';
 
 const STATE_NOT_INITIALIZED =
   'Recording state not initialized. Ensure beforeRunCallback created it.';

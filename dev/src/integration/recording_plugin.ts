@@ -11,7 +11,7 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {Recording} from './test_types.js';
+import {Recording} from './recordings_schema.js';
 
 /**
  * Collects what `ReplayPlugin` later reads back.

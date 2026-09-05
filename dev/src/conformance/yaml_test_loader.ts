@@ -9,12 +9,8 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {
-  Recordings,
-  TestCaseSpec,
-  TestInfo,
-  TestSpec,
-} from '../integration/test_types.js';
+import {RecordingsSchema} from '../integration/recordings_schema.js';
+import {TestCaseSpec, TestInfo, TestSpec} from '../integration/test_types.js';
 import {generatedFilePaths} from './generated_file_utils.js';
 import {toCamelKeys} from './yaml_writer.js';
 
@@ -74,7 +70,11 @@ export async function loadTestInfo(
   return {
     ...testCase,
     session: await loadYamlMapping<Session>(sessionFile, 'Session'),
-    recordings: await loadYamlMapping<Recordings>(recordingsFile, 'Recording'),
+    // The file is validated, not cast: a misspelled key is a broken fixture,
+    // and replay would fail on it far from the cause.
+    recordings: RecordingsSchema.parse(
+      await loadYamlMapping<unknown>(recordingsFile, 'Recording'),
+    ),
   };
 }
 

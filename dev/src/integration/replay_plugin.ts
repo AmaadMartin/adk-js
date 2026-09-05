@@ -11,7 +11,43 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {Recording} from './test_types.js';
+import {LlmRecording, Recording} from './recordings_schema.js';
+
+function hasLlmResponse(recording: Recording): boolean {
+  const llmRecording = recording.llmRecording;
+  return Boolean(
+    llmRecording?.llmResponse ?? llmRecording?.llmResponses?.length,
+  );
+}
+
+/**
+ * Returns the response a recording replays.
+ *
+ * Both recorders write `llmResponses`, the list of responses streamed for one
+ * request; older adk-js recordings carry a single `llmResponse` instead. A
+ * streamed turn is recorded as its run of partial responses followed by the
+ * complete one, so the complete entry is the turn's result.
+ *
+ * A beforeModelCallback answers one model call with one response, so a
+ * recording holding several complete responses is a shape this replayer cannot
+ * serve.
+ */
+function recordedLlmResponse(recording: LlmRecording): LlmResponse {
+  if (recording.llmResponse) {
+    return recording.llmResponse;
+  }
+  const responses = recording.llmResponses!;
+  const complete = responses.filter((response) => !response.partial);
+  if (complete.length > 1) {
+    throw new Error(
+      `Cannot replay a recording holding ${complete.length} llmResponses: ` +
+        'one model call is answered with one response.',
+    );
+  }
+  // A recording of partials alone has no complete entry, so fall back to the
+  // last response the model produced.
+  return complete[0] ?? responses[responses.length - 1];
+}
 
 export class ReplayPlugin extends BasePlugin {
   constructor(
@@ -32,7 +68,7 @@ export class ReplayPlugin extends BasePlugin {
       (r) =>
         r.userMessageIndex === this.context.userMessageIndex &&
         r.agentName === agentName &&
-        r.llmRecording?.llmResponses?.length &&
+        hasLlmResponse(r) &&
         // replay internal flag to mark event as consumed
         !(r as unknown as {_consumed: boolean})._consumed,
     );
@@ -46,10 +82,7 @@ export class ReplayPlugin extends BasePlugin {
     const rec = this.recordings[index];
     (rec as unknown as {_consumed: boolean})._consumed = true;
 
-    // A streamed turn is recorded as its run of partial responses followed by
-    // the complete one, so the last entry is the turn's result.
-    const responses = rec.llmRecording!.llmResponses!;
-    return responses[responses.length - 1];
+    return recordedLlmResponse(rec.llmRecording!);
   }
 
   override async beforeToolCallback(params: {

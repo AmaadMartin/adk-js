@@ -20,7 +20,7 @@ import * as path from 'node:path';
 import {toCamelKeys, writeYamlFile} from '../conformance/yaml_writer.js';
 import {isFileExists} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
-import {Recording, Recordings, ToolRecording} from './test_types.js';
+import {Recording, Recordings, ToolRecording} from './recordings_schema.js';
 
 const logger = new AdkLogger({label: 'Recording', colorize: {all: true}});
 

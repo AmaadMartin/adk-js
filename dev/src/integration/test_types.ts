@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, LlmResponse, Session} from '@google/adk';
+import {Session} from '@google/adk';
 import {
   Blob,
   CodeExecutionResult,
@@ -12,13 +12,12 @@ import {
   ExecutableCode,
   FileData,
   FinishReason,
-  FunctionCall,
-  FunctionResponse,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
   PartMediaResolution,
   VideoMetadata,
 } from '@google/genai';
+import {Recordings} from './recordings_schema.js';
 
 // The User message to replay. Either text or content will be filled in
 export interface UserMessage {
@@ -40,35 +39,6 @@ export interface TestSpec {
   initialState?: Record<string, unknown>;
   // Sequence of user messages to send to the agent during test execution.
   userMessages?: UserMessage[];
-}
-
-export interface LlmRecording {
-  llmRequest?: LlmRequest;
-  /**
-   * Every response the model produced for `llmRequest`, in arrival order. SSE
-   * delivers a turn as a run of partial responses, so a streaming recording
-   * needs a list. adk-python's `LlmRecording.llm_responses` is the same field,
-   * and its schema forbids any other name for it.
-   */
-  llmResponses?: LlmResponse[];
-}
-
-export interface ToolRecording {
-  toolCall?: FunctionCall;
-  toolResponse?: FunctionResponse;
-}
-
-export interface Recording {
-  userMessageIndex: number;
-  agentName: string;
-
-  // only one of these will be filled in
-  llmRecording?: LlmRecording;
-  toolRecording?: ToolRecording;
-}
-
-export interface Recordings {
-  recordings: Recording[];
 }
 
 // A test case on disk, before its recorded fixtures are read.
