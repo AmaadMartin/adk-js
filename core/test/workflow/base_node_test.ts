@@ -8,6 +8,8 @@ import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod';
 import {
+  BaseNode,
+  findStaticNodePath,
   isBaseNode,
   isContent,
   START,
@@ -157,6 +159,54 @@ describe('node name validation', () => {
 
   it('accepts the START sentinel name', () => {
     expect(START.name).toBe('__START__');
+  });
+});
+
+describe('findStaticNodePath child discovery', () => {
+  /** A node keeping its children in whatever container the test hands it. */
+  class Holder extends FnNode {
+    constructor(
+      name: string,
+      readonly held: unknown,
+    ) {
+      super(name, echo);
+    }
+  }
+
+  /** A non-node class instance, standing in for a `Graph`. */
+  class Opaque {
+    constructor(readonly inner: BaseNode) {}
+  }
+
+  it('finds a child held in an array, a Set, a Map or a plain object', () => {
+    const inArray = new FnNode('in-array', echo);
+    const inSet = new FnNode('in-set', echo);
+    const inMap = new FnNode('in-map', echo);
+    const inObject = new FnNode('in-object', echo);
+
+    expect(findStaticNodePath(new Holder('r', [inArray]), inArray)).toBe(
+      'r.in-array',
+    );
+    expect(findStaticNodePath(new Holder('r', new Set([inSet])), inSet)).toBe(
+      'r.in-set',
+    );
+    expect(
+      findStaticNodePath(new Holder('r', new Map([['k', inMap]])), inMap),
+    ).toBe('r.in-map');
+    expect(findStaticNodePath(new Holder('r', {k: inObject}), inObject)).toBe(
+      'r.in-object',
+    );
+  });
+
+  it('finds a child held directly on a property', () => {
+    const child = new FnNode('child', echo);
+    expect(findStaticNodePath(new Holder('r', child), child)).toBe('r.child');
+  });
+
+  it('does not walk into a class instance that is not a node', () => {
+    const hidden = new FnNode('hidden', echo);
+    const root = new Holder('r', new Opaque(hidden));
+    expect(findStaticNodePath(root, hidden)).toBeUndefined();
   });
 });
 
