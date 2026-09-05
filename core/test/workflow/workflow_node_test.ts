@@ -17,9 +17,11 @@
  * `test_parallel_worker_invalid_max_parallel_workers_less_than_one` by
  * `parallel_worker_test.ts` 'rejects maxParallelWorkers < 1').
  *
- * Python asserts against private state (`_inner_node`, `_inner_node._node`).
- * Those assertions are made here through the public surface instead: `clone()`
- * for the copy the worker wraps, and the fan-out output for the run.
+ * adk-js has no `model_copy`: a node is copied by `node(existingNode, {...})`,
+ * so the two `model_copy` tests are ported against that. Python's assertions
+ * against private state (`_inner_node`, `_inner_node._node`) are made through
+ * the public surface instead — the fan-out output for the copy the worker
+ * wraps, and the `protected createParallelWorker()` seam for the worker.
  */
 
 import {describe, expect, it} from 'vitest';
@@ -182,7 +184,7 @@ describe('workflow node — ported from adk-python test_workflow_node.py', () =>
     expect(funcNode.rerunOnResume).toBe(true);
   });
 
-  it('test_node_subclassing_model_copy_preserves_identity', () => {
+  it('test_node_subclassing_model_copy_preserves_identity', async () => {
     const nodeInst = new CustomNode({
       name: 'subclass',
       parallelWorker: true,
@@ -190,17 +192,19 @@ describe('workflow node — ported from adk-python test_workflow_node.py', () =>
     });
     expect(nodeInst.parallelWorker).toBe(true);
 
-    const cloned = nodeInst.clone();
-    expect(cloned).toBeInstanceOf(CustomNode);
-    expect(cloned.customVal).toBe('barrier');
-    expect(cloned.parallelWorker).toBe(true);
+    const copied = node(nodeInst, {name: 'copied'});
+    expect(copied).toBeInstanceOf(CustomNode);
+    expect(copied).not.toBe(nodeInst);
 
-    // Python reads `cloned._inner_node._node`; this is the copy the worker
-    // wraps, taken the same way `createParallelWorker` takes it.
-    const innerCopy = cloned.clone({parallelWorker: false});
-    expect(innerCopy).toBeInstanceOf(CustomNode);
-    expect(innerCopy.customVal).toBe('barrier');
-    expect(innerCopy.parallelWorker).toBe(false);
+    // Python reads `cloned._inner_node._node` for the class, the field and the
+    // cleared flag. Running the copy shows all three: only a `CustomNode` copy
+    // carrying `custom_val` produces this output, and only a copy with the flag
+    // cleared produces it once per item instead of recursing.
+    const {output} = await driveNode(copied, ['x', 'y']);
+    expect(output).toEqual([
+      'subclass: barrier -> x',
+      'subclass: barrier -> y',
+    ]);
   });
 
   it('test_node_subclassing_execution_with_parallel_worker', async () => {
@@ -258,14 +262,15 @@ describe('workflow node — ported from adk-python test_workflow_node.py', () =>
     expect(nodeInst.parallelWorker).toBe(true);
     expect(nodeInst.maxParallelWorkers).toBe(5);
 
-    const cloned = nodeInst.clone();
-    expect(cloned).toBeInstanceOf(CustomNode);
-    expect(cloned.parallelWorker).toBe(true);
-    expect(cloned.maxParallelWorkers).toBe(5);
-    expect(cloned.clone({parallelWorker: false}).parallelWorker).toBe(false);
+    const copied = node(nodeInst, {name: 'copied'});
+    if (!(copied instanceof CustomNode)) {
+      expect.fail('node() did not copy the subclass');
+    }
+    expect(copied.parallelWorker).toBe(true);
+    expect(copied.maxParallelWorkers).toBe(5);
 
-    // Python reads `cloned._inner_node.max_parallel_workers`; the worker is
-    // built through the `protected` seam instead of reaching into the memo.
+    // Python reads `cloned._inner_node.max_parallel_workers`; the worker comes
+    // from the `protected` seam here rather than from a private field.
     const worker = new InspectableNode({
       name: 'subclass',
       parallelWorker: true,
