@@ -298,6 +298,24 @@ describe('BigQueryCredentialsManager', () => {
     expect(authConfig.credentialKey).toEqual(`bigquery_oauth_${CLIENT_ID}`);
   });
 
+  it('reads the unsuffixed credential key when there is no client id', async () => {
+    // An authorized client built from tokens alone carries no client id, so
+    // the key cannot be derived from one.
+    const config = new BigQueryCredentialsConfig({
+      credentials: new OAuth2Client(),
+    });
+    const toolContext = createToolContext();
+    storeAuthResponse(toolContext, 'bigquery_oauth', {
+      accessToken: 'keyless-access-token',
+    });
+
+    const result = await new BigQueryCredentialsManager(
+      config,
+    ).getValidCredentials(toolContext);
+
+    expect(result?.credentials.access_token).toEqual('keyless-access-token');
+  });
+
   it('keeps two client ids on separate credential keys', async () => {
     const toolContext = createToolContext();
     const requestCredential = vi.spyOn(toolContext, 'requestCredential');
