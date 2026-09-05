@@ -173,3 +173,48 @@ describe('CustomMetricEvaluator', () => {
     );
   });
 });
+
+describe('CustomMetricEvaluator specifier resolution', () => {
+  let modulePath: string;
+
+  beforeEach(async () => {
+    const workDir = await mkdtemp(path.join(tmpdir(), 'adk-custom-metric-'));
+    modulePath = path.join(workDir, 'metrics.mjs');
+    await writeFile(modulePath, RECORDING_MODULE, 'utf-8');
+  });
+
+  it('resolves a relative specifier against the working directory', async () => {
+    const relative = `./${path.relative(process.cwd(), modulePath)}`;
+    const evaluator = new CustomMetricEvaluator(METRIC, `${relative}#score`);
+
+    const result = await evaluator.evaluateInvocations([]);
+
+    expect(result.overallScore).toBe(0.5);
+  });
+
+  it('resolves an absolute file path that carries no URL scheme', async () => {
+    const evaluator = new CustomMetricEvaluator(METRIC, `${modulePath}#score`);
+
+    const result = await evaluator.evaluateInvocations([]);
+
+    expect(result.overallScore).toBe(0.5);
+  });
+
+  it('reports the working directory as the base it tried', async () => {
+    const evaluator = new CustomMetricEvaluator(METRIC, './absent.mjs#score');
+    const expected = pathToFileURL(path.join(process.cwd(), 'absent.mjs')).href;
+
+    await expect(evaluator.evaluateInvocations([])).rejects.toThrowError(
+      `Could not import custom metric function from ./absent.mjs#score ` +
+        `(tried ${expected})`,
+    );
+  });
+
+  it('leaves a bare specifier to Node package resolution', async () => {
+    const evaluator = new CustomMetricEvaluator(METRIC, 'absent-package#score');
+
+    await expect(evaluator.evaluateInvocations([])).rejects.toThrowError(
+      '(tried absent-package)',
+    );
+  });
+});

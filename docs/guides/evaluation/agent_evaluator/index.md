@@ -215,6 +215,13 @@ JavaScript specifier cannot support, so this SDK marks the export explicitly.
 }
 ```
 
+A relative or absolute path resolves against the working directory of the
+process running the eval, so `./metrics.js` names a file of your own project
+and a checked-in config stays portable. Run the eval from your project root, as
+you would a test. A bare specifier such as `my-metrics-package` is left to
+Node's package resolution instead. When an import fails, the error names both
+the path you wrote and the location it tried.
+
 The function receives the metric, the actual invocations, the expected ones and
 the conversation scenario, and returns an `EvaluationResult` or a promise of
 one. The metric it receives carries no threshold: the function decides the

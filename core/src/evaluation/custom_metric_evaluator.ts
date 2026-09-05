@@ -11,6 +11,8 @@
  * `src/google/adk/evaluation/custom_metric_evaluator.py`.
  */
 
+import {isAbsolute, resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {ConversationScenario, Invocation} from './eval_case.js';
 import {EvalMetric} from './eval_metrics.js';
@@ -28,12 +30,31 @@ export type CustomMetricFunction = (
 const EXPORT_SEPARATOR = '#';
 
 /**
+ * Returns the specifier to hand to `import()`.
+ *
+ * A relative or absolute path names a file of the caller's own project, so it
+ * resolves against the working directory. Handed to `import()` unchanged it
+ * would instead resolve against this file inside the installed ADK package,
+ * where no file of the caller's is. adk-python resolves the same names through
+ * `sys.path`, which normally carries the project root.
+ *
+ * A bare specifier is left alone, so Node resolves it as a package.
+ */
+function resolveSpecifier(specifier: string): string {
+  if (specifier.startsWith('.') || isAbsolute(specifier)) {
+    return pathToFileURL(resolve(specifier)).href;
+  }
+  return specifier;
+}
+
+/**
  * Loads the scoring function a path names.
  *
  * The path is `<specifier>#<exportName>`, or a bare specifier whose default
  * export is the function. adk-python splits a dotted Python path on its last
  * `.`; a JavaScript module specifier contains dots, so this SDK marks the
- * export explicitly instead.
+ * export explicitly instead. A path specifier resolves against the working
+ * directory; see {@link resolveSpecifier}.
  *
  * Importing the specifier executes the module. It comes from the developer's
  * own eval config, at the same trust level as the agent module the eval run
@@ -55,12 +76,14 @@ async function getMetricFunction(
       ? 'default'
       : customFunctionPath.slice(separatorIndex + 1);
 
+  const resolved = resolveSpecifier(specifier);
   let module: Record<string, unknown>;
   try {
-    module = (await import(specifier)) as Record<string, unknown>;
+    module = (await import(resolved)) as Record<string, unknown>;
   } catch (err: unknown) {
     throw new InputValidationError(
-      `Could not import custom metric function from ${customFunctionPath}`,
+      `Could not import custom metric function from ${customFunctionPath} ` +
+        `(tried ${resolved})`,
       {cause: err},
     );
   }
