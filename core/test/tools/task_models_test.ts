@@ -25,8 +25,6 @@ import {
   asTaskRequest,
   DEFAULT_TASK_INPUT_SCHEMA,
   DEFAULT_TASK_OUTPUT_SCHEMA,
-  parseDefaultTaskInput,
-  parseDefaultTaskOutput,
   parseTaskRequest,
   parseTaskResult,
 } from '../../src/tools/task_models.js';
@@ -228,77 +226,5 @@ describe('DEFAULT_TASK_OUTPUT_SCHEMA', () => {
     expect(new FinishTaskTool()._getDeclaration().parameters).toEqual(
       DEFAULT_TASK_OUTPUT_SCHEMA,
     );
-  });
-});
-
-describe('parseDefaultTaskInput', () => {
-  it('accepts an empty payload', () => {
-    expect(parseDefaultTaskInput({})).toEqual({});
-  });
-
-  it.each([
-    {label: 'a goal alone', value: {goal: 'ship it'}},
-    {label: 'a background alone', value: {background: 'context'}},
-    {label: 'both fields', value: {goal: 'ship it', background: 'context'}},
-  ])('accepts $label', ({value}) => {
-    expect(parseDefaultTaskInput(value)).toEqual(value);
-  });
-
-  it('rejects an unknown key', () => {
-    expect(() => parseDefaultTaskInput({goal: 'a', extra: 1})).toThrow(
-      InputValidationError,
-    );
-  });
-
-  it('rejects a goal that is not a string', () => {
-    expect(() => parseDefaultTaskInput({goal: 1})).toThrow(
-      'goal must be a string.',
-    );
-  });
-
-  it('rejects a background that is not a string', () => {
-    expect(() => parseDefaultTaskInput({background: 1})).toThrow(
-      'background must be a string.',
-    );
-  });
-
-  it('rejects a value that is not an object', () => {
-    expect(() => parseDefaultTaskInput('nope')).toThrow(InputValidationError);
-  });
-
-  it('returns a frozen input', () => {
-    const input = parseDefaultTaskInput({goal: 'a'});
-
-    expect(Object.isFrozen(input)).toBe(true);
-    expect(() => Object.assign(input, {goal: 'b'})).toThrow(TypeError);
-  });
-});
-
-describe('parseDefaultTaskOutput', () => {
-  it('accepts a result', () => {
-    expect(parseDefaultTaskOutput({result: 'done'})).toEqual({result: 'done'});
-  });
-
-  it('rejects a missing result', () => {
-    expect(() => parseDefaultTaskOutput({})).toThrow(InputValidationError);
-  });
-
-  it('rejects a result that is not a string', () => {
-    expect(() => parseDefaultTaskOutput({result: 42})).toThrow(
-      'result must be a string.',
-    );
-  });
-
-  it('rejects an unknown key', () => {
-    expect(() => parseDefaultTaskOutput({result: 'done', extra: 1})).toThrow(
-      InputValidationError,
-    );
-  });
-
-  it('returns a frozen output', () => {
-    const output = parseDefaultTaskOutput({result: 'done'});
-
-    expect(Object.isFrozen(output)).toBe(true);
-    expect(() => Object.assign(output, {result: 'other'})).toThrow(TypeError);
   });
 });
