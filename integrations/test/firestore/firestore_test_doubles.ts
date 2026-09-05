@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {expect} from 'vitest';
 import type {
   FirestoreBatch,
   FirestoreClient,
@@ -104,7 +105,9 @@ function matches(
     case '>=':
       return comparable(stored) >= comparable(value);
     default:
-      throw new Error(`FakeFirestore does not implement operator ${operator}`);
+      return expect.fail(
+        `FakeFirestore does not implement operator ${operator}`,
+      );
   }
 }
 
