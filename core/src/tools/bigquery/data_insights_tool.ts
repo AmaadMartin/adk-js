@@ -19,7 +19,7 @@ import {FunctionTool} from '../function_tool.js';
 
 import {BigQueryToolDeps} from './client.js';
 import {
-  getGdaEndpoint,
+  GDA_DEFAULT_ENDPOINT,
   getGdaHeaders,
   postGdaStream,
 } from './gda_stream_util.js';
@@ -60,7 +60,7 @@ export const ASK_DATA_INSIGHTS_PARAMETERS = z.object({
     .describe('The BigQuery tables the question may be answered from.'),
 });
 
-/** What {@link askDataInsights} returns when the API answered. */
+/** What the `ask_data_insights` tool returns when the API answered. */
 export interface AskDataInsightsResult {
   status: 'SUCCESS';
   /** One entry per step the API took: generated SQL, rows, the answer. */
@@ -85,7 +85,7 @@ export async function askDataInsights(
   return runBigQueryTool(async () => {
     const headers = await getGdaHeaders(GDA_CLIENT_ID, deps.credentialsConfig);
     const url =
-      `${getGdaEndpoint(GDA_LOCATION)}/v1/projects/${input.project_id}` +
+      `${GDA_DEFAULT_ENDPOINT}/v1/projects/${input.project_id}` +
       `/locations/${GDA_LOCATION}:chat`;
 
     const payload = {

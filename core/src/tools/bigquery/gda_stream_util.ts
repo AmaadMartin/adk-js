@@ -14,6 +14,8 @@
 
 import {GoogleAuth} from 'google-auth-library';
 
+import {asRecord} from '../../utils/error_utils.js';
+
 import {
   BigQueryCredentialsConfig,
   resolveBigQueryScopes,
@@ -22,9 +24,6 @@ import {
 /** The global Conversational Analytics endpoint. */
 export const GDA_DEFAULT_ENDPOINT =
   'https://geminidataanalytics.googleapis.com';
-
-/** The regional endpoints published for the `eu` and `us` multi-regions. */
-const GDA_REP_LOCATIONS = new Set(['eu', 'us']);
 
 /** What the API replies with when it has retrieved rows. */
 export interface GdaDataRetrieved {
@@ -35,30 +34,6 @@ export interface GdaDataRetrieved {
         summary: string;
       }
     | string;
-}
-
-/**
- * Returns the Conversational Analytics endpoint for a location.
- *
- * @param location The location of the data agent, or absent for `global`.
- * @param apiEndpoint An explicit endpoint that overrides the location.
- * @return The endpoint origin, without a trailing slash.
- */
-export function getGdaEndpoint(
-  location?: string,
-  apiEndpoint?: string,
-): string {
-  if (apiEndpoint) {
-    return apiEndpoint.includes('://') ? apiEndpoint : `https://${apiEndpoint}`;
-  }
-  const loc = (location ?? '').toLowerCase().trim();
-  if (!loc || loc === 'global') {
-    return GDA_DEFAULT_ENDPOINT;
-  }
-  if (GDA_REP_LOCATIONS.has(loc)) {
-    return `https://geminidataanalytics.${loc}.rep.googleapis.com`;
-  }
-  return `https://geminidataanalytics-${loc}.googleapis.com`;
 }
 
 /**
@@ -123,13 +98,6 @@ async function* readLines(
   }
 }
 
-/** Narrows a value to a plain object, or `undefined` when it is not one. */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 /** The rows a system message carried, with the schema describing them. */
 interface GdaDataResult {
   rows: unknown[];
@@ -173,11 +141,12 @@ function formatDataRetrieved(
   const headers = resultHeaders(data);
   const shown = Math.min(data.rows.length, maxRows);
 
-  const rows = data.rows
-    .slice(0, shown)
-    .flatMap((row) =>
-      asRecord(row) ? [headers.map((header) => asRecord(row)?.[header])] : [],
-    );
+  const rows = data.rows.slice(0, shown).flatMap((row) => {
+    // A row the API sent as anything but an object is dropped, as
+    // adk-python's `isinstance(r, dict)` check drops it.
+    const record = Array.isArray(row) ? undefined : asRecord(row);
+    return record ? [headers.map((header) => record[header])] : [];
+  });
 
   return {
     'Data Retrieved': {

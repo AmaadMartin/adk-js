@@ -10,13 +10,9 @@
  * (branch `main`).
  */
 
-import {
-  BIGQUERY_DEFAULT_SCOPE,
-  BIGQUERY_SCOPES,
-  BIGQUERY_TOKEN_CACHE_KEY,
-  resolveBigQueryScopes,
-} from '@google/adk';
+import {BIGQUERY_SCOPES} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {resolveBigQueryScopes} from '../../../src/tools/bigquery/bigquery_credentials.js';
 
 describe('BigQueryCredentialsConfig', () => {
   it('test_valid_client_id_secret_pair_default_scope', () => {
@@ -43,14 +39,10 @@ describe('BigQueryCredentialsConfig', () => {
     expect(resolveBigQueryScopes()).toEqual(BIGQUERY_SCOPES);
   });
 
-  it('publishes the scopes and the token cache key adk-python uses', () => {
+  it('publishes the scopes adk-python requests', () => {
     expect(BIGQUERY_SCOPES).toEqual([
       'https://www.googleapis.com/auth/bigquery',
       'https://www.googleapis.com/auth/dataplex.read-write',
     ]);
-    expect(BIGQUERY_DEFAULT_SCOPE).toEqual([
-      'https://www.googleapis.com/auth/bigquery',
-    ]);
-    expect(BIGQUERY_TOKEN_CACHE_KEY).toBe('bigquery_token_cache');
   });
 });

@@ -13,6 +13,7 @@
 
 import {z} from 'zod';
 
+import {errorStatusCode} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {FunctionTool} from '../function_tool.js';
@@ -73,7 +74,7 @@ export interface SearchCatalogEntry {
   location: string;
 }
 
-/** What {@link searchCatalog} returns when the search ran. */
+/** What the `search_catalog` tool returns when the search ran. */
 export interface SearchCatalogResult {
   status: 'SUCCESS';
   results: SearchCatalogEntry[];
@@ -133,16 +134,6 @@ export function constructSearchQuery(
   parts.push('system=BIGQUERY');
 
   return parts.filter((part) => !!part).join(' AND ');
-}
-
-/** Whether an error came back from the Dataplex API rather than from us. */
-function isApiCallError(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    typeof err.code === 'number'
-  );
 }
 
 /**
@@ -206,7 +197,9 @@ export async function searchCatalog(
       return {status: 'SUCCESS', results} as const;
     } catch (err: unknown) {
       logger.debug('search_catalog tool: search failed', err);
-      if (isApiCallError(err)) {
+      // A numeric status means the Dataplex API refused the call, rather
+      // than something failing on our side.
+      if (errorStatusCode(err) !== undefined) {
         return bigQueryToolError(`Dataplex API Error: ${String(err)}`);
       }
       throw err;

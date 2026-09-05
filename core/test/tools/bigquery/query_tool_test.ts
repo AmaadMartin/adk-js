@@ -11,20 +11,24 @@
  */
 
 import {
-  analyzeContribution,
   BIGQUERY_SESSION_INFO_KEY,
+  createBigQueryToolConfig,
+  WriteMode,
+  type BigQueryToolConfig,
+} from '@google/adk';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {
   BigQueryClientCache,
   BQ_USER_AGENT,
-  createBigQueryToolConfig,
+  type BigQueryToolDeps,
+} from '../../../src/tools/bigquery/client.js';
+import {
+  analyzeContribution,
   detectAnomalies,
   executeSql,
   forecast,
-  WriteMode,
-  type BigQueryToolConfig,
-  type BigQueryToolDeps,
-} from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {validateSubquery} from '../../../src/tools/bigquery/query_tool.js';
+  validateSubquery,
+} from '../../../src/tools/bigquery/query_tool.js';
 import {
   bigQueryState,
   resetBigQueryState,

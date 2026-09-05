@@ -31,11 +31,27 @@ const MAX_HTTP_STATUS = 599;
  * Narrows an arbitrary value to an indexable record, or `undefined` when it is
  * not a non-null object. Used to safely inspect duck-typed error shapes without
  * resorting to `any`.
+ *
+ * @param value The value to narrow.
+ * @return The value as a record, or `undefined`.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * Returns the numeric status code a duck-typed error carries, or `undefined`
+ * when it carries none. Both an HTTP status from a REST client and a gRPC
+ * status from a GAPIC client arrive as a numeric `code`.
+ *
+ * @param err The thrown value.
+ * @return The status code, or `undefined`.
+ */
+export function errorStatusCode(err: unknown): number | undefined {
+  const code = asRecord(err)?.['code'];
+  return typeof code === 'number' ? code : undefined;
 }
 
 /** Returns the first argument that is a string, or `undefined` if none are. */
