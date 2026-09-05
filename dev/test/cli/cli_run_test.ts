@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, BaseSessionService, Runner} from '@google/adk';
+import {BaseAgent, BaseSessionService, LlmAgent, Runner} from '@google/adk';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
@@ -143,6 +143,35 @@ describe('cli_run', () => {
         events: [],
       }),
     }) as unknown as BaseSessionService;
+
+  // The spy patches a process-global static; `restoreAllMocks` in afterEach
+  // puts the real setter back.
+  it('applies defaultLlmModel to LlmAgent', async () => {
+    const setDefaultModel = vi
+      .spyOn(LlmAgent, 'setDefaultModel')
+      .mockImplementation(() => {});
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      sessionService: createMockSessionService(),
+      defaultLlmModel: 'model-x',
+    });
+
+    expect(setDefaultModel).toHaveBeenCalledExactlyOnceWith('model-x');
+  });
+
+  it('leaves the default model alone without the option', async () => {
+    const setDefaultModel = vi
+      .spyOn(LlmAgent, 'setDefaultModel')
+      .mockImplementation(() => {});
+
+    await runAgent({
+      agentPath: 'agent.ts',
+      sessionService: createMockSessionService(),
+    });
+
+    expect(setDefaultModel).not.toHaveBeenCalled();
+  });
 
   it('keeps the REPL alive when a turn fails', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});

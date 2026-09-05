@@ -299,6 +299,27 @@ describe('CLI Entrypoint', () => {
         }),
       );
     });
+
+    it('forwards --default_llm_model to runAgent', async () => {
+      await parse([
+        'run',
+        'agent.ts',
+        '--default_llm_model',
+        'gemini-2.5-flash',
+      ]);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({defaultLlmModel: 'gemini-2.5-flash'}),
+      );
+    });
+
+    it('leaves defaultLlmModel unset without the flag', async () => {
+      await parse(['run', 'agent.ts']);
+
+      expect(
+        (runAgent as Mock).mock.calls[0][0].defaultLlmModel,
+      ).toBeUndefined();
+    });
   });
 
   describe('command: deploy cloud_run', () => {
