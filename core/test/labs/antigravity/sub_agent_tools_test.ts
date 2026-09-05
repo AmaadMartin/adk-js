@@ -35,7 +35,7 @@ class EchoAgent extends BaseAgent {
   }
 
   protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-    throw new Error('not used');
+    // Never driven: these agents exist for the text path only.
   }
 }
 
@@ -81,7 +81,7 @@ describe('makeSubAgentTool', () => {
       }
 
       protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-        throw new Error('not used');
+        // Never driven: these agents exist for the text path only.
       }
     }
     const child = new ChattyAgent({
@@ -108,7 +108,7 @@ describe('makeSubAgentTool', () => {
       }
 
       protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-        throw new Error('not used');
+        // Never driven: these agents exist for the text path only.
       }
     }
     const child = new TwoPartAgent({
@@ -138,7 +138,7 @@ describe('makeSubAgentTool', () => {
       }
 
       protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-        throw new Error('not used');
+        // Never driven: these agents exist for the text path only.
       }
     }
     const child = new SilentAgent({
@@ -165,7 +165,7 @@ describe('makeSubAgentTool', () => {
       }
 
       protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-        throw new Error('not used');
+        // Never driven: these agents exist for the text path only.
       }
     }
     // Events come back authored 'inner', never 'pipeline'. Filtering on the
@@ -197,7 +197,7 @@ describe('makeSubAgentTool', () => {
       }
 
       protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-        throw new Error('not used');
+        // Never driven: these agents exist for the text path only.
       }
     }
     const child = new BlockedAgent({
@@ -215,13 +215,14 @@ describe('makeSubAgentTool', () => {
   it('test_a_failing_child_propagates', async () => {
     /** Always fails, to prove failures are not swallowed. */
     class AngryAgent extends BaseAgent {
-      // eslint-disable-next-line require-yield -- the AsyncGenerator return type is BaseAgent's contract, and this agent only ever throws.
-      protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {
+      // Not a generator: the return type is BaseAgent's contract, and this
+      // agent only ever throws.
+      protected runAsyncImpl(): AsyncGenerator<Event, void, void> {
         throw new Error('child exploded');
       }
 
       protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-        throw new Error('not used');
+        // Never driven: these agents exist for the text path only.
       }
     }
     const child = new AngryAgent({

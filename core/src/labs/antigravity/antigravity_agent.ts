@@ -165,7 +165,13 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
     }
   }
 
-  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+  /**
+   * Refuses a live run.
+   *
+   * Deliberately not a generator: there is nothing to stream, and a generator
+   * whose body only throws is what `require-yield` exists to reject.
+   */
+  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
     throw new Error(
       'AntigravityAgent does not support live (audio/video) runs: the ' +
         'Antigravity harness drives a text trajectory. Use runAsync instead.',

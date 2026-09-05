@@ -61,7 +61,7 @@ class StubChild extends BaseAgent {
   }
 
   protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
-    throw new Error('not used');
+    // Never driven: these agents exist for the text path only.
   }
 }
 
