@@ -51,6 +51,9 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
 - [Configuring the Gemini model](models/gemini_config/index.md) - Choosing
   the endpoint, API version, client and retries, and handling an exhausted
   quota.
+- [ConformanceTestGemini](models/conformance_replay/index.md) - Replaying
+  recorded LLM responses, and verifying that the runtime asked for what was
+  recorded.
 - [Live responses](models/live_responses/index.md) - Reading a Gemini Live run:
   which response field carries what, how grounding accumulates, and how Gemini
   3.x differs.
