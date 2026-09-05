@@ -12,7 +12,6 @@ import {
   Invocation,
   MultiTurnVertexAiEvalFacade,
   resolveVertexAiEvalClientConfig,
-  SingleTurnVertexAiEvalFacade,
   VertexAiEvalClient,
   VertexAiEvalRequest,
   VertexEvaluationResult,
@@ -71,207 +70,6 @@ const SCENARIO: ConversationScenario = {
   startingPrompt: 'book me a table',
   conversationPlan: 'ask for a table, then change the time',
 };
-
-describe('SingleTurnVertexAiEvalFacade', () => {
-  it('rejects a call without expected invocations when the metric needs them', async () => {
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 0.5,
-      metricName: 'COHERENCE',
-      expectedInvocationsRequired: true,
-      client: new FakeEvalClient([]),
-    });
-
-    await expect(
-      facade.evaluateInvocations([invocation('q', 'a')]),
-    ).rejects.toThrow('expectedInvocations is needed by this metric.');
-  });
-
-  it('rejects invocation lists of different lengths', async () => {
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 0.5,
-      metricName: 'COHERENCE',
-      client: new FakeEvalClient([]),
-    });
-
-    await expect(
-      facade.evaluateInvocations(
-        [invocation('q', 'a')],
-        [invocation('q', 'a'), invocation('q2', 'a2')],
-      ),
-    ).rejects.toThrow(
-      'actualInvocations and expectedInvocations must have the same length; got 1 and 2.',
-    );
-  });
-
-  it('sends one request per invocation, with the metric name', async () => {
-    const client = new FakeEvalClient([scored(4), scored(2)]);
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 3,
-      metricName: 'COHERENCE',
-      client,
-    });
-
-    const result = await facade.evaluateInvocations(
-      [invocation('q1', 'a1'), invocation('q2', 'a2')],
-      [invocation('q1', 'golden1'), invocation('q2', 'golden2')],
-    );
-
-    expect(client.requests).toHaveLength(2);
-    expect(client.requests[0]).toEqual({
-      dataset: {
-        evalDataset: [{prompt: 'q1', reference: 'golden1', response: 'a1'}],
-      },
-      metrics: [{name: 'COHERENCE'}],
-    });
-    expect(result.perInvocationResults.map((r) => r.evalStatus)).toEqual([
-      EvalStatus.PASSED,
-      EvalStatus.FAILED,
-    ]);
-    expect(result.overallScore).toBe(3);
-    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
-  });
-
-  it('omits the reference when no expected invocations are given', async () => {
-    const client = new FakeEvalClient([scored(4)]);
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 3,
-      metricName: 'COHERENCE',
-      client,
-    });
-
-    const result = await facade.evaluateInvocations([
-      invocation('what is the capital of France?', 'Paris.'),
-    ]);
-
-    expect(client.requests[0].dataset.evalDataset?.[0]).toEqual({
-      prompt: 'what is the capital of France?',
-      reference: undefined,
-      response: 'Paris.',
-    });
-    expect(result.perInvocationResults[0].expectedInvocation).toBeUndefined();
-  });
-
-  it('does not score an invocation whose mean score is not a finite number', async () => {
-    const client = new FakeEvalClient([
-      scored(Number.NaN),
-      scored(Number.POSITIVE_INFINITY),
-      {summaryMetrics: []},
-      {},
-    ]);
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 3,
-      metricName: 'COHERENCE',
-      client,
-    });
-
-    const result = await facade.evaluateInvocations([
-      invocation('q1', 'a1'),
-      invocation('q2', 'a2'),
-      invocation('q3', 'a3'),
-      invocation('q4', 'a4'),
-    ]);
-
-    expect(result.perInvocationResults.map((r) => r.score)).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
-    expect(result.overallScore).toBeUndefined();
-    expect(result.overallEvalStatus).toBe(EvalStatus.NOT_EVALUATED);
-    expect(result.perInvocationResults).toHaveLength(4);
-  });
-
-  it('averages over the scored invocations only', async () => {
-    const client = new FakeEvalClient([
-      scored(4),
-      {summaryMetrics: []},
-      scored(2),
-    ]);
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 3,
-      metricName: 'COHERENCE',
-      client,
-    });
-
-    const result = await facade.evaluateInvocations([
-      invocation('q1', 'a1'),
-      invocation('q2', 'a2'),
-      invocation('q3', 'a3'),
-    ]);
-
-    expect(result.overallScore).toBe(3);
-    expect(result.perInvocationResults.map((r) => r.evalStatus)).toEqual([
-      EvalStatus.PASSED,
-      EvalStatus.NOT_EVALUATED,
-      EvalStatus.FAILED,
-    ]);
-  });
-
-  it('returns an unevaluated result for empty invocation lists', async () => {
-    const client = new FakeEvalClient([]);
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 3,
-      metricName: 'COHERENCE',
-      client,
-    });
-
-    const result = await facade.evaluateInvocations([], []);
-
-    expect(result).toEqual({
-      overallEvalStatus: EvalStatus.NOT_EVALUATED,
-      perInvocationResults: [],
-    });
-    expect(client.requests).toHaveLength(0);
-  });
-
-  it('sends an empty string for content that carries no text', async () => {
-    const client = new FakeEvalClient([scored(4)]);
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 3,
-      metricName: 'COHERENCE',
-      client,
-    });
-
-    await facade.evaluateInvocations([
-      {
-        invocationId: 'inv1',
-        userContent: {parts: [{functionCall: {name: 'tool_1', args: {}}}]},
-        finalResponse: {},
-        creationTimestamp: 0,
-      },
-    ]);
-
-    expect(client.requests[0].dataset.evalDataset?.[0]).toEqual({
-      prompt: '',
-      reference: undefined,
-      response: '',
-    });
-  });
-
-  it('accepts and ignores a conversation scenario', async () => {
-    const client = new FakeEvalClient([scored(4)]);
-    const facade = new SingleTurnVertexAiEvalFacade({
-      threshold: 3,
-      metricName: 'COHERENCE',
-      client,
-    });
-
-    const result = await facade.evaluateInvocations(
-      [invocation('q1', 'a1')],
-      undefined,
-      SCENARIO,
-    );
-
-    expect(client.requests[0]).toEqual({
-      dataset: {
-        evalDataset: [{prompt: 'q1', reference: undefined, response: 'a1'}],
-      },
-      metrics: [{name: 'COHERENCE'}],
-    });
-    expect(result.overallScore).toBe(4);
-  });
-});
 
 describe('resolveVertexAiEvalClientConfig', () => {
   afterEach(() => {
@@ -358,13 +156,13 @@ describe('resolveVertexAiEvalClientConfig', () => {
   it('constructs a facade without reading the environment', () => {
     stubEnvironment({});
 
-    const facade = new SingleTurnVertexAiEvalFacade({
+    const facade = new MultiTurnVertexAiEvalFacade({
       threshold: 0.8,
-      metricName: 'COHERENCE',
+      metricName: 'CONVERSATIONAL_COHERENCE',
       client: new FakeEvalClient([]),
     });
 
-    expect(facade).toBeInstanceOf(SingleTurnVertexAiEvalFacade);
+    expect(facade).toBeInstanceOf(MultiTurnVertexAiEvalFacade);
   });
 
   it('resolves the configuration from the environment it is given', () => {
@@ -626,21 +424,5 @@ describe('MultiTurnVertexAiEvalFacade', () => {
     await facadeWith(withoutScenario).evaluateInvocations(conversation());
 
     expect(withScenario.requests).toEqual(withoutScenario.requests);
-  });
-
-  it('scores a conversation even when the metric declares golden invocations required', async () => {
-    // The reference checks expectedInvocationsRequired in the single-turn
-    // facade only, so a multi-turn metric scores without golden invocations.
-    const client = new FakeEvalClient([scored(0.9)]);
-    const facade = new MultiTurnVertexAiEvalFacade({
-      threshold: 0.8,
-      metricName: 'CONVERSATIONAL_COHERENCE',
-      expectedInvocationsRequired: true,
-      client,
-    });
-
-    const result = await facade.evaluateInvocations(conversation());
-
-    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
   });
 });
