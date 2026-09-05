@@ -12,8 +12,10 @@ import {BaseTool} from '../../tools/base_tool.js';
 import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 
-/** Options for a {@link ToolNode}. */
-export interface ToolNodeConfig extends Partial<Omit<BaseNodeConfig, 'name'>> {
+/** Options for a {@link ToolNode}. `rerunOnResume` is pinned; see there. */
+export interface ToolNodeConfig extends Partial<
+  Omit<BaseNodeConfig, 'name' | 'rerunOnResume'>
+> {
   /** Optional name override; defaults to the tool's name. */
   name?: string;
 }
@@ -38,6 +40,14 @@ export interface ToolNodeConfig extends Partial<Omit<BaseNodeConfig, 'name'>> {
  * that returns nothing — including a long-running tool deferring its response
  * — yields a bare event carrying whatever it recorded, or no event at all when
  * it recorded nothing.
+ *
+ * The constructor pins `rerunOnResume` to `false`, so `ToolNodeConfig` omits
+ * the key: a tool call is a side effect, and a resumed workflow replays the
+ * recorded output instead of calling the tool again. `_ToolNode.__init__`
+ * pins the same value and takes no `rerun_on_resume` argument, and
+ * adk-python's `build_node` drops the argument for a `BaseTool`.
+ * `cloneWithOverrides` assigns the key after construction and still sets it,
+ * as Python's `model_copy(update=...)` does.
  */
 export class ToolNode extends BaseNode {
   readonly tool: BaseTool;
@@ -45,7 +55,7 @@ export class ToolNode extends BaseNode {
   constructor(tool: BaseTool, config: ToolNodeConfig = {}) {
     // Spread first so an explicit `undefined` name in `config` can't clobber
     // the fallback (which BaseNode requires to be non-empty).
-    super({...config, name: config.name ?? tool.name});
+    super({...config, name: config.name ?? tool.name, rerunOnResume: false});
     this.tool = tool;
   }
 
@@ -113,12 +123,12 @@ export class ToolNode extends BaseNode {
  * and emits an actions-only event (no function-response part) for a
  * long-running tool that defers its response; both mean "no response".
  *
- * A tool that returns the object `{result: null}` reads as "no response" too.
- * adk-python's `_tool_node` tests `response is not None` against the raw return
- * and so keeps the two apart, but the wrap above erases the difference before
- * this function runs. Separating them needs a second return channel on
- * {@link handleFunctionCallList}, which merges N calls into one event and has
- * no well-defined per-call result to expose.
+ * So a tool returning the object `{result: null}` reads as "no response" too,
+ * where adk-python's `_tool_node` keeps the two apart by testing the raw
+ * return. Telling them apart needs a second return channel on
+ * {@link handleFunctionCallList}, which merges N calls into one event.
+ * `NodeTool` is the one in-repo tool that returns `{result: null}`, and it
+ * means "the wrapped node produced no output", so both readings agree.
  */
 function toolResponse(event: Event): Record<string, unknown> | undefined {
   const response = getFunctionResponses(event)[0]?.response;

@@ -115,6 +115,16 @@ const falsyLongRunningTool = new FunctionTool({
   isLongRunning: true,
 });
 
+const throwingLongRunningTool = new FunctionTool({
+  name: 'throwingLongRunningTool',
+  description: 'long running tool that throws',
+  parameters: z.object({}),
+  execute: async () => {
+    throw new Error('long running tool error message content');
+  },
+  isLongRunning: true,
+});
+
 function callFor(tool: BaseTool): FunctionCall {
   return {id: randomIdForTestingOnly(), name: tool.name, args: {}};
 }
@@ -658,6 +668,39 @@ describe('handleFunctionCallList', () => {
       afterToolCallbacks: [],
     });
     expect(event).toBeNull();
+  });
+
+  it('should report the error when a long-running tool throws', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(throwingLongRunningTool)],
+      toolsDict: {throwingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      error:
+        "Error in tool 'throwingLongRunningTool': long running tool error message content",
+    });
+  });
+
+  it('should use the plugin response when a long-running tool throws', async () => {
+    const plugin = new TestPlugin('testPlugin');
+    plugin.onToolErrorCallbackResponse = {result: 'handled'};
+    pluginManager.registerPlugin(plugin);
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(throwingLongRunningTool)],
+      toolsDict: {throwingLongRunningTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event?.content?.parts?.[0].functionResponse?.response).toEqual({
+      result: 'handled',
+    });
   });
 
   it('should emit a response part only for the long-running tool that returned something', async () => {

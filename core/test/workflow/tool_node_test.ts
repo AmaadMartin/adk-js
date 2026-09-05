@@ -15,11 +15,13 @@ import {createIc, driveNode} from './test_helpers.js';
 /** A tool that records the args it was called with and echoes them back. */
 class EchoTool extends BaseTool {
   lastArgs?: Record<string, unknown>;
+  lastFunctionCallId?: string;
   constructor() {
     super({name: 'echo', description: 'echoes its args'});
   }
-  async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
+  async runAsync({args, toolContext}: RunAsyncToolRequest): Promise<unknown> {
     this.lastArgs = args;
+    this.lastFunctionCallId = toolContext.functionCallId;
     return {echoed: args};
   }
 }
@@ -87,8 +89,8 @@ describe('ToolNode execution', () => {
     expect(tool.lastArgs).toEqual({city: 'ams'});
     expect(output).toEqual({echoed: {city: 'ams'}});
     // The event carries a canonical functionResponse part (visible to history).
-    const responses = getFunctionResponses(events.at(-1)!);
-    expect(responses[0]?.name).toBe('echo');
+    expect(events).toHaveLength(1);
+    expect(getFunctionResponses(events[0])[0]?.name).toBe('echo');
   });
 
   it('propagates tool context state writes onto the emitted event', async () => {
@@ -129,7 +131,8 @@ describe('ToolNode long-running tools', () => {
 
     expect(tool.lastArgs).toEqual({id: 1});
     expect(output).toEqual({ticket: 7});
-    expect(getFunctionResponses(events.at(-1)!)[0]?.name).toBe('long');
+    expect(events).toHaveLength(1);
+    expect(getFunctionResponses(events[0])[0]?.name).toBe('long');
   });
 
   it('emits a state-delta-only event when it defers its response', async () => {
@@ -153,6 +156,21 @@ describe('ToolNode long-running tools', () => {
 
     expect(events).toEqual([]);
     expect(output).toBeUndefined();
+  });
+
+  it('reports the error when a long-running tool throws', async () => {
+    const tool = new RecordingTool({
+      name: 'long_boom',
+      isLongRunning: true,
+      throws: 'long tool exploded',
+    });
+    const {events, output} = await driveNode(new ToolNode(tool));
+
+    expect(events).toHaveLength(1);
+    expect(getFunctionResponses(events[0])[0]?.response).toEqual({
+      error: 'long tool exploded',
+    });
+    expect(output).toEqual({error: 'long tool exploded'});
   });
 
   it('carries an artifact delta onto the state-delta-only event', async () => {
@@ -193,11 +211,7 @@ describe('ToolNode tools that return nothing', () => {
   });
 
   // Known divergence from adk-python, pinned so it cannot change unnoticed.
-  // `_tool_node.py` tests `response is not None` against the tool's raw return,
-  // so the dict `{'result': None}` is a response there and yields
-  // `Event(output={'result': None})`. Here `handleFunctionCallList` wraps a
-  // nullish return as `{result: <nullish>}` before ToolNode sees it, so by then
-  // the two are one payload and both take the no-response path.
+  // See `toolResponse()` in tool_node.ts for why the two are indistinguishable.
   it('cannot tell {result: null} from no response at all', async () => {
     const returned = new RecordingTool({name: 'r1', returns: {result: null}});
     const nothing = new RecordingTool({name: 'r2'});
@@ -228,21 +242,15 @@ describe('ToolNode rerunOnResume', () => {
     expect(new ToolNode(new EchoTool()).rerunOnResume).toBe(false);
   });
 
-  // adk-python's `_ToolNode` passes `rerun_on_resume=False`, which `BaseNode`
-  // already gives us. `rerunOnResume` is in OVERRIDABLE_KEYS, so the three
-  // routes below are supported calls and must agree.
-  it('honours an explicit override on the constructor', () => {
-    expect(
-      new ToolNode(new EchoTool(), {rerunOnResume: true}).rerunOnResume,
-    ).toBe(true);
-  });
-
-  it('honours an explicit override through node()', () => {
+  // `BuildNodeOptions` still carries the key, so this call compiles.
+  it('drops an override passed through node()', () => {
     expect(node(new EchoTool(), {rerunOnResume: true}).rerunOnResume).toBe(
-      true,
+      false,
     );
   });
 
+  // `cloneWithOverrides` assigns the key after construction, so the pin in the
+  // ToolNode constructor does not reach this route. See ToolNode's class doc.
   it('honours an explicit override on an already-built ToolNode', () => {
     expect(
       node(new ToolNode(new EchoTool()), {rerunOnResume: true}).rerunOnResume,
@@ -283,5 +291,84 @@ describe('ToolNode argument coercion', () => {
     await expect(driveNode(new ToolNode(new EchoTool()), 5)).rejects.toThrow(
       TypeError,
     );
+  });
+});
+
+/**
+ * Ported from `google/adk-python`
+ * `tests/unittests/workflow/test_tool_node.py` (ref `main`).
+ *
+ * Each `it(...)` keeps the Python test name verbatim, snake_case included, so
+ * the two suites line up under grep. Python's mock tool returns its args, so
+ * its assertions read the node output; `EchoTool` wraps its return, so these
+ * read the args the tool received, which is the same coercion.
+ */
+describe('ToolNode parity with adk-python', () => {
+  const argsFor = async (nodeInput?: unknown) => {
+    const tool = new EchoTool();
+    await driveNode(new ToolNode(tool), nodeInput);
+    return tool.lastArgs;
+  };
+
+  it('test_tool_node_accepts_dict', async () => {
+    const input = {param_a: 1, param_b: 'value'};
+    expect(await argsFor(input)).toEqual(input);
+  });
+
+  it('test_tool_node_accepts_none', async () => {
+    expect(await argsFor(null)).toEqual({});
+  });
+
+  it.each(['', '   ', '\n\t'])(
+    'test_tool_node_accepts_empty_string (%j)',
+    async (emptyInput) => {
+      expect(await argsFor(emptyInput)).toEqual({});
+    },
+  );
+
+  it('test_tool_node_accepts_json_string', async () => {
+    const args = await argsFor('{"param_a": 1, "param_b": "value"}');
+    expect(args).toEqual({param_a: 1, param_b: 'value'});
+  });
+
+  it('test_tool_node_accepts_content_with_json_string', async () => {
+    const content = {
+      role: 'user',
+      parts: [{text: '{"param_a": 1, "param_b": "value"}'}],
+    };
+    expect(await argsFor(content)).toEqual({param_a: 1, param_b: 'value'});
+  });
+
+  it('test_tool_node_rejects_non_dict_json_string', async () => {
+    await expect(argsFor('[1, 2, 3]')).rejects.toThrow(
+      /The input to ToolNode must be an object of tool arguments/,
+    );
+  });
+
+  it('test_tool_node_rejects_invalid_json_string', async () => {
+    await expect(argsFor('not a json')).rejects.toThrow(
+      /The input to ToolNode must be an object of tool arguments/,
+    );
+  });
+
+  it('test_tool_node_rejects_non_dict_content', async () => {
+    const content = {role: 'user', parts: [{text: 'not a json'}]};
+    await expect(argsFor(content)).rejects.toThrow(
+      /The input to ToolNode must be an object of tool arguments/,
+    );
+  });
+
+  it('test_tool_node_function_call_id_uses_platform_id_provider', async () => {
+    // adk-python mints the id through its `platform.uuid` provider, which a
+    // test can swap for a deterministic one. adk-js has no such seam: the id
+    // is `${nodePath}:${runId}`, which is already replay-stable, so the ported
+    // assertion is that two runs at the same path see the same id.
+    const first = new EchoTool();
+    const second = new EchoTool();
+    await driveNode(new ToolNode(first));
+    await driveNode(new ToolNode(second));
+
+    expect(first.lastFunctionCallId).toBe('echo:echo');
+    expect(second.lastFunctionCallId).toBe(first.lastFunctionCallId);
   });
 });
