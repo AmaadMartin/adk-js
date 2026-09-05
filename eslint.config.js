@@ -25,6 +25,12 @@ export default defineConfig([
       },
     },
     rules: {
+      // `js/recommended` re-enables the base rules that `tseslint.configs
+      // .recommended` turned off above, so each one is turned off again here
+      // and replaced by its TypeScript-aware version. The base `no-redeclare`
+      // reports every function overload signature as a redeclaration.
+      "no-redeclare": "off",
+      "@typescript-eslint/no-redeclare": "error",
       "no-unused-vars": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
