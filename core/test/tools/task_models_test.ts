@@ -228,8 +228,8 @@ describe('DEFAULT_TASK_OUTPUT_SCHEMA', () => {
     );
   });
 
-  it('is what FinishTaskTool declares when given no output schema', () => {
-    expect(new FinishTaskTool()._getDeclaration().parameters).toEqual(
+  it('is the very schema FinishTaskTool declares when given none', () => {
+    expect(new FinishTaskTool()._getDeclaration().parameters).toBe(
       DEFAULT_TASK_OUTPUT_SCHEMA,
     );
   });
