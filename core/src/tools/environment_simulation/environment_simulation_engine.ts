@@ -36,7 +36,7 @@ import {ToolConnectionMap} from './tool_connection_map.js';
  * is that one seed makes the draw reproducible, not the value CPython returns
  * for it.
  */
-export type RandomGenerator = () => number;
+type RandomGenerator = () => number;
 
 /** Builds a generator that returns the same sequence for the same seed. */
 function createSeededRandom(seed: number): RandomGenerator {
@@ -79,7 +79,7 @@ function sleepSeconds(seconds: number): Promise<void> {
  * @returns The strategy to mock with.
  * @throws {InputValidationError} When `mockStrategyType` names no strategy.
  */
-export function createMockStrategy(params: {
+function createMockStrategy(params: {
   mockStrategyType: MockStrategy;
   model: string;
   modelConfig: GenerateContentConfig;
