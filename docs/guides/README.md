@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Evaluation
+
+- [MultiTurnTrajectoryQualityV1Evaluator](evaluation/multi_turn_trajectory_quality_evaluator/index.md) - Scoring the path an agent took across a whole conversation, with the Vertex AI multi-turn trajectory quality metric.
+
 ### Tools
 
 #### Retrieval
