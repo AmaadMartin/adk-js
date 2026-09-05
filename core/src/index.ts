@@ -24,6 +24,26 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {SandboxClient} from './integrations/vmaas/sandbox_client.js';
+export type {
+  CdpBatchResult,
+  CdpCommand,
+  SandboxClientOptions,
+  SandboxCommandSender,
+  SandboxJson,
+  SandboxScrollDirection,
+} from './integrations/vmaas/sandbox_client.js';
+export {AgentEngineSandboxComputer} from './integrations/vmaas/sandbox_computer.js';
+export type {
+  AccessTokenProvider,
+  AgentEngineSandboxApi,
+  AgentEngineSandboxComputerOptions,
+} from './integrations/vmaas/sandbox_computer.js';
+export {
+  SandboxError,
+  SandboxErrorCode,
+  isSandboxError,
+} from './integrations/vmaas/sandbox_errors.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
