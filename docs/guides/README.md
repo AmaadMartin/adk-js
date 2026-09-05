@@ -15,6 +15,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Agents
 
 - [Agent Identity](agents/identity/index.md) - What the framework tells the model about the agent, and how a single-turn agent opts out.
+- [AudioCacheManager](agents/audio_cache_manager/index.md) - Buffering a live run's audio chunks and writing each buffer out as one artifact.
 - [CodeConfig and AgentRefConfig](agents/common_configs/index.md) - Naming a value defined in code, or another agent, from a configuration document.
 - [Context caching](agents/context_caching/index.md) - Reusing a processed
   request prefix across turns, and what the request carries to make that

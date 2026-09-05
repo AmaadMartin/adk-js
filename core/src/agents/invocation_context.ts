@@ -394,14 +394,16 @@ export class InvocationContext {
   activeNonBlockingToolTasks?: Record<string, Task<void>>;
 
   /**
-   * Caches input audio chunks before flushing to session and artifact
-   * services.
+   * Buffers incoming user audio chunks for this invocation, before an
+   * `AudioCacheManager` flushes them to the artifact service. Unset until the
+   * first chunk arrives.
    */
   inputRealtimeCache?: RealtimeCacheEntry[];
 
   /**
-   * Caches output audio chunks before flushing to session and artifact
-   * services.
+   * Buffers outgoing model audio chunks for this invocation, before an
+   * `AudioCacheManager` flushes them to the artifact service. Unset until the
+   * first chunk arrives.
    */
   outputRealtimeCache?: RealtimeCacheEntry[];
 

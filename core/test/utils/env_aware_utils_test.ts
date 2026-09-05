@@ -14,7 +14,11 @@ import {
   type MockInstance,
 } from 'vitest';
 import {randomUUID as shimRandomUUID} from '../../src/utils/crypto_shim.js';
-import {getBooleanEnvVar, randomUUID} from '../../src/utils/env_aware_utils.js';
+import {
+  base64DecodeBytes,
+  getBooleanEnvVar,
+  randomUUID,
+} from '../../src/utils/env_aware_utils.js';
 import type {Logger} from '../../src/utils/logger.js';
 
 describe('env_aware_utils', () => {
@@ -58,6 +62,43 @@ describe('env_aware_utils', () => {
 
     it('should return false for undefined', () => {
       expect(getBooleanEnvVar('NON_EXISTENT_VAR')).toBe(false);
+    });
+  });
+
+  describe('base64DecodeBytes', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('should decode an empty string to no bytes', () => {
+      expect(base64DecodeBytes('')).toEqual(new Uint8Array(0));
+    });
+
+    it('should decode a padded string', () => {
+      // 'YQ==' is one byte, so it carries two padding characters.
+      expect(Array.from(base64DecodeBytes('YQ=='))).toEqual([0x61]);
+    });
+
+    it('should decode an unpadded string', () => {
+      expect(Array.from(base64DecodeBytes('YWJj'))).toEqual([0x61, 0x62, 0x63]);
+    });
+
+    it('should preserve bytes that are not valid UTF-8', () => {
+      const bytes = Uint8Array.from([0x00, 0x80, 0xff, 0xfe]);
+      const encoded = Buffer.from(bytes).toString('base64');
+
+      expect(Array.from(base64DecodeBytes(encoded))).toEqual(Array.from(bytes));
+    });
+
+    it('should decode through atob in a browser', () => {
+      const bytes = Uint8Array.from([0x00, 0x80, 0xff]);
+      vi.stubGlobal('window', {
+        atob: (data: string) =>
+          String.fromCharCode(...Buffer.from(data, 'base64')),
+      });
+
+      const encoded = Buffer.from(bytes).toString('base64');
+      expect(Array.from(base64DecodeBytes(encoded))).toEqual(Array.from(bytes));
     });
   });
 

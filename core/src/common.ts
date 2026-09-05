@@ -24,6 +24,12 @@ export type {
 } from './agents/agent_config.js';
 export {inferAgentOrigin, stampAgentOrigin} from './agents/agent_origin.js';
 export type {AgentOrigin} from './agents/agent_origin.js';
+export {AudioCacheManager} from './agents/audio_cache_manager.js';
+export type {
+  AudioCacheStats,
+  AudioCacheType,
+  FlushCachesOptions,
+} from './agents/audio_cache_manager.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,

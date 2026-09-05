@@ -7,8 +7,8 @@
 import {Blob} from '@google/genai';
 
 /**
- * A cached realtime audio chunk, held on the invocation before it is flushed
- * to the session and artifact services.
+ * A cached realtime audio chunk, held on the invocation context until an
+ * `AudioCacheManager` flushes it to the artifact service.
  */
 export interface RealtimeCacheEntry {
   /**
@@ -17,14 +17,16 @@ export interface RealtimeCacheEntry {
   role: string;
 
   /**
-   * The audio data chunk.
+   * The audio data chunk. Its `data` field is a base64 string, as everywhere
+   * in `@google/genai`.
    */
   data: Blob;
 
   /**
-   * When the chunk was received, in seconds since the Unix epoch — the same
-   * unit as adk-python's `time.time()`, so a value written by either SDK means
-   * the same thing. Produce it as `Date.now() / 1000`.
+   * When the chunk was received, in milliseconds since the Unix epoch — the
+   * same unit as an adk-js event timestamp, because `AudioCacheManager` copies
+   * this value onto the event it emits for the flushed artifact. adk-python
+   * stores seconds here, because its own events use seconds.
    */
   timestamp: number;
 }

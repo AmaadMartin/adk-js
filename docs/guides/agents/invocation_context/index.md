@@ -330,9 +330,8 @@ starts the invocation.
 ### Realtime audio caches
 
 `inputRealtimeCache` and `outputRealtimeCache` buffer audio chunks before a
-flush to the session and artifact services. Nothing in `adk-js` writes to them
-yet; they are the storage the live flow needs, and they match the shape
-`adk-python` uses.
+flush to the artifact service. `AudioCacheManager` writes to them, and they
+match the shape `adk-python` uses.
 
 Both caches are `undefined` until something assigns an array, matching
 `adk-python`, whose audio cache manager assigns `[]` lazily and reassigns `[]`
@@ -344,16 +343,17 @@ import {RealtimeCacheEntry} from '@google/adk';
 const entry: RealtimeCacheEntry = {
   role: 'user',
   data: {mimeType: 'audio/pcm', data: audioBase64},
-  timestamp: Date.now() / 1000,
+  timestamp: Date.now(),
 };
 
 context.inputRealtimeCache ??= [];
 context.inputRealtimeCache.push(entry);
 ```
 
-`timestamp` is seconds since the Unix epoch, not milliseconds. It matches
-`adk-python`'s `time.time()`, so a value written by either SDK means the same
-thing. Produce it as `Date.now() / 1000`.
+`timestamp` is milliseconds since the Unix epoch, not seconds. It matches an
+`adk-js` event timestamp, because `AudioCacheManager` copies the value onto the
+event it emits for the flushed artifact. `adk-python` stores seconds here,
+because its own events use seconds.
 
 ### Background tool tasks
 
