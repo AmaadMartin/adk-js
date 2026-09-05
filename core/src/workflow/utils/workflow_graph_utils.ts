@@ -74,6 +74,31 @@ export function isPlainObject(value: unknown): boolean {
 }
 
 /**
+ * Rejects a parallel-worker option pair that cannot produce a worker.
+ *
+ * Mirrors the two checks `google/adk-python` `workflow/_node.py` makes, so the
+ * call that got the pair wrong is the one that throws — whether it arrived
+ * through {@link buildNode}, through the `node(options)` factory form, or
+ * through a `WorkflowNode` constructor.
+ */
+export function assertParallelWorkerOptions(options: {
+  parallelWorker?: boolean;
+  maxParallelWorkers?: number;
+}): void {
+  if (options.maxParallelWorkers === undefined) {
+    return;
+  }
+  if (!options.parallelWorker) {
+    throw new Error(
+      'maxParallelWorkers can only be set when parallelWorker is true.',
+    );
+  }
+  if (options.maxParallelWorkers < 1) {
+    throw new Error('maxParallelWorkers must be greater than or equal to 1.');
+  }
+}
+
+/**
  * Returns whether a value can be converted into a workflow node via
  * {@link buildNode}: the `'START'` sentinel, an existing {@link BaseNode}, or a
  * value matched by a registered {@link NodeBuilder}.
@@ -98,11 +123,7 @@ export function buildNode(
   nodeLike: NodeLike,
   options: BuildNodeOptions = {},
 ): BaseNode {
-  if (options.maxParallelWorkers !== undefined && !options.parallelWorker) {
-    throw new Error(
-      'maxParallelWorkers can only be set when parallelWorker is true.',
-    );
-  }
+  assertParallelWorkerOptions(options);
 
   const built = buildInnerNode(nodeLike, options);
 
@@ -187,6 +208,49 @@ const NODE_DECLARED_KEYS = ['authConfig'] as const satisfies ReadonlyArray<
 >;
 
 /**
+ * Every key {@link BuildNodeOptions} accepts, used by
+ * {@link isBuildNodeOptions} to tell an options literal from a node-like value.
+ */
+const BUILD_NODE_OPTION_KEYS = new Set<string>([
+  ...OVERRIDABLE_KEYS,
+  ...NODE_DECLARED_KEYS,
+  ...(['parallelWorker', 'maxParallelWorkers'] as const satisfies ReadonlyArray<
+    keyof BuildNodeOptions
+  >),
+]);
+
+/**
+ * Returns whether a value is a {@link BuildNodeOptions} literal.
+ *
+ * Used by `node()` to tell its two call forms apart. Every own key must be a
+ * known option name: a plain object carrying anything else is a caller's
+ * mistake, and has to reach {@link buildNode} so it is rejected as an
+ * unsupported node-like value rather than silently read as options.
+ */
+export function isBuildNodeOptions(value: unknown): value is BuildNodeOptions {
+  return (
+    isPlainObject(value) &&
+    Object.getOwnPropertyNames(value).every((key) =>
+      BUILD_NODE_OPTION_KEYS.has(key),
+    )
+  );
+}
+
+/**
+ * Returns a shallow copy of `source` that keeps its prototype — so the copy is
+ * still an instance of its class, with its own fields — and replaces the given
+ * own properties.
+ */
+export function copyNodeWithPrototype<T extends BaseNode>(
+  source: T,
+  overrides: object,
+): T {
+  const copy = Object.create(Object.getPrototypeOf(source) as object) as T;
+  Object.assign(copy, source, overrides);
+  return copy;
+}
+
+/**
  * Returns a copy of `node` with the given node properties replaced, or `node`
  * itself when nothing is being overridden.
  *
@@ -242,10 +306,7 @@ function cloneWithOverrides(
     overrides['name'] = name;
   }
 
-  const clone = Object.create(
-    Object.getPrototypeOf(node) as object,
-  ) as BaseNode;
-  Object.assign(clone, node, overrides);
+  const clone = copyNodeWithPrototype(node, overrides);
   if ('retryConfig' in overrides) {
     Object.assign(clone, {
       preparedRetryConfig: options.retryConfig
