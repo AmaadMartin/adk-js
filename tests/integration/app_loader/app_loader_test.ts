@@ -132,9 +132,10 @@ exports.rootAgent = new NodeModulesAgent();`,
     expect(apps).toContain('standalone_app');
 
     const agentsAndApps = await loader.listAgents();
-    expect(agentsAndApps).toHaveLength(6);
+    expect(agentsAndApps).toHaveLength(7);
     expect(agentsAndApps).toContain('service_alpha');
     expect(agentsAndApps).toContain('service_beta');
+    expect(agentsAndApps).toContain('service_helpers');
     // Before a Workflow could be a root this was not an error, it was a
     // silence: the file exported nothing matching `isBaseAgent`, so the
     // directory simply did not show up.
@@ -166,6 +167,14 @@ exports.rootAgent = new NodeModulesAgent();`,
 
     expect(isBaseAgent(rootAgent)).toBe(true);
     expect(rootAgent.name).toBe('index_agent');
+  });
+
+  it('should fall through an entrypoint that holds no agent', async () => {
+    const agentFile = await loader.getAgentFile('service_helpers');
+    const rootAgent = await agentFile.loadAgent();
+
+    expect(isBaseAgent(rootAgent)).toBe(true);
+    expect(rootAgent.name).toBe('helpers_agent');
   });
 
   it('should synthesize App when loadApp() is called on BaseAgent file', async () => {

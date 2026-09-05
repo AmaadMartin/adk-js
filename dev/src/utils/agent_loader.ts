@@ -61,6 +61,12 @@ const MAX_NODE_MODULES_LOOKUP_LEVELS = 10;
 const LOCATION_TOKEN_PATTERN = /import\.meta|__dirname|__filename/;
 
 /**
+ * Entrypoint file names an agent directory can use, in the order the loader
+ * tries them.
+ */
+const DIRECTORY_ENTRY_FILE_NAMES = ['app', 'agent', 'index'];
+
+/**
  * Supported JS/TS file module types.
  */
 export enum FileModuleType {
@@ -487,7 +493,8 @@ export class AgentFile {
  * - agents_dir/{agentOrAppName}/index.[js | ts | mjs | cjs]
  *
  * A directory that holds more than one of these resolves to the first match in
- * the order app, agent, index.
+ * the order app, agent, index. A match that exports no agent is a helper
+ * module of that name, so the loader tries the next one.
  *
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
@@ -727,24 +734,35 @@ export class AgentLoader {
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
-    // `index` last: a barrel `index.ts` beside an `agent.ts` still resolves to
-    // `agent.ts`.
-    const possibleEntryFile =
-      subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext)) ??
-      subFiles.find((f) => f.isFile && f.name === 'index' && isJsFile(f.ext));
 
-    if (!possibleEntryFile) {
-      return;
-    }
+    for (const entryName of DIRECTORY_ENTRY_FILE_NAMES) {
+      const entryFile = subFiles.find(
+        (f) => f.isFile && f.name === entryName && isJsFile(f.ext),
+      );
 
-    const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-    try {
-      await agentFile.load();
-      this.preloadedAgents[dir.name] = agentFile;
-    } catch (e) {
-      await agentFile.dispose();
-      this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
+      if (!entryFile) {
+        continue;
+      }
+
+      const agentFile = new AgentFile(entryFile.path, this.options);
+      try {
+        await agentFile.load();
+        this.preloadedAgents[dir.name] = agentFile;
+        return;
+      } catch (e) {
+        await agentFile.dispose();
+
+        // A candidate that exports no agent is a helper module of the same
+        // name, so keep looking. Any other error means this file *is* the
+        // agent and it is broken — report it rather than hide it behind a
+        // lower-precedence file.
+        if (e instanceof AgentFileLoadingError) {
+          continue;
+        }
+
+        this.recordLoadFailure(dir.name, entryFile.path, e);
+        return;
+      }
     }
   }
 
