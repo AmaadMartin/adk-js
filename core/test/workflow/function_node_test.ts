@@ -11,7 +11,11 @@ import {createEvent, Event} from '../../src/events/event.js';
 import {AsyncQueue} from '../../src/utils/async_queue.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
-import {REQUEST_CREDENTIAL_FUNCTION_CALL_NAME} from '../../src/workflow/utils/hitl_utils.js';
+import {RequestInput} from '../../src/workflow/request_input.js';
+import {
+  REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
+  REQUEST_INPUT_FUNCTION_CALL_NAME,
+} from '../../src/workflow/utils/hitl_utils.js';
 import {createIc, driveNode} from './test_helpers.js';
 
 describe('FunctionNode result handling', () => {
@@ -81,6 +85,7 @@ describe('FunctionNode auth gate', () => {
   it('interrupts with a credential request when none is available', async () => {
     const node = new FunctionNode('needsAuth', () => 'ran', {
       authConfig: apiKeyConfig(),
+      rerunOnResume: true,
     });
     const {events, output} = await driveNode(node, 'x');
 
@@ -94,6 +99,7 @@ describe('FunctionNode auth gate', () => {
   it('proceeds when the credential is supplied via resumeInputs', async () => {
     const node = new FunctionNode('needsAuth', () => 'ran', {
       authConfig: apiKeyConfig(),
+      rerunOnResume: true,
     });
     const channel = new AsyncQueue<Event>();
     const root = new NodeContext({
@@ -105,5 +111,88 @@ describe('FunctionNode auth gate', () => {
     });
     const child = await root.runNode(node, 'x', {useAsOutput: true});
     expect(child.output).toBe('ran');
+  });
+});
+
+/**
+ * Exposes the protected `toEvent` so the direct-caller path can be exercised.
+ * `BaseNode.run` converts a yielded `RequestInput` before `toEvent` sees one,
+ * so a subclass is the only caller that reaches that branch.
+ */
+class ToEventProbe extends FunctionNode {
+  convert(ctx: NodeContext, data: unknown): Event | null {
+    return this.toEvent(ctx, data);
+  }
+}
+
+describe('FunctionNode RequestInput handling', () => {
+  it('converts a RequestInput handed straight to toEvent', async () => {
+    const probe = new ToEventProbe('probe', () => null);
+    const {ctx} = await driveNode(probe, 'x');
+
+    const event = probe.convert(
+      ctx,
+      new RequestInput({interruptId: 'direct-1', message: 'Approve?'}),
+    );
+
+    const fc = event?.content?.parts?.[0]?.functionCall;
+    expect(fc?.name).toBe(REQUEST_INPUT_FUNCTION_CALL_NAME);
+    expect(fc?.id).toBe('direct-1');
+  });
+
+  it('emits an interrupt event for a returned RequestInput', async () => {
+    // `FunctionNodeResult` carries `RequestInput`, so no cast is needed here.
+    const node = new FunctionNode(
+      'ask',
+      () => new RequestInput({interruptId: 'ask-1', message: 'Approve?'}),
+    );
+
+    const {events} = await driveNode(node, 'x');
+
+    const fc = events[0]?.content?.parts?.[0]?.functionCall;
+    expect(fc?.name).toBe(REQUEST_INPUT_FUNCTION_CALL_NAME);
+    expect(fc?.id).toBe('ask-1');
+    expect(events[0].longRunningToolIds).toContain('ask-1');
+  });
+
+  it('keeps a pending state delta on the event after the interrupt', async () => {
+    // The RequestInput branch runs before the delta is drained, so the write
+    // still reaches the next emitted event rather than being swallowed.
+    const node = new FunctionNode('ask', function* (ctx) {
+      ctx.state.set('k', 1);
+      yield new RequestInput({interruptId: 'ask-2'});
+      yield 'after';
+    });
+
+    const {events} = await driveNode(node, 'x');
+
+    expect(events).toHaveLength(2);
+    expect(events[1].output).toBe('after');
+    expect(events[1].actions.stateDelta).toEqual({k: 1});
+  });
+});
+
+describe('FunctionNode construction', () => {
+  it('takes its name from the wrapped function when none is given', () => {
+    const greet = () => 'hi';
+
+    expect(new FunctionNode(greet).name).toBe('greet');
+    expect(new FunctionNode(greet, {description: 'd'}).description).toBe('d');
+  });
+
+  it('prefers an explicit name over the function name', () => {
+    const greet = () => 'hi';
+
+    expect(new FunctionNode('welcome', greet).name).toBe('welcome');
+    expect(new FunctionNode(greet, {name: 'welcome'}).name).toBe('welcome');
+  });
+
+  it('rejects a handler with no resolvable name', () => {
+    // An arrow inside an array literal gets no inferred name, so `.name` is ''.
+    const [anonymous] = [() => 'hi'];
+
+    expect(() => new FunctionNode(anonymous)).toThrow(
+      'FunctionNode must have a name',
+    );
   });
 });
