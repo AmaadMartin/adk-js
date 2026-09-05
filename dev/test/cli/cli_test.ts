@@ -244,6 +244,41 @@ describe('CLI Entrypoint', () => {
       ).rejects.toMatchObject({code: 'commander.unknownOption'});
       expect(AdkApiServer).not.toHaveBeenCalled();
     });
+
+    it('should pass the logo options when both are set', async () => {
+      await parse([
+        'web',
+        '--logo_text',
+        'Acme',
+        '--logo_image_url',
+        'https://acme.example/logo.png',
+      ]);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.logoText).toBe('Acme');
+      expect(args.logoImageUrl).toBe('https://acme.example/logo.png');
+    });
+
+    it('should split --extra_plugins on commas', async () => {
+      await parse(['web', '--extra_plugins', './a.js#One, ./b.js#Two']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.extraPlugins).toEqual(['./a.js#One', './b.js#Two']);
+    });
+
+    it('should leave extraPlugins unset without the flag', async () => {
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.extraPlugins).toBeUndefined();
+    });
+
+    it('should pass defaultLlmModel when --default_llm_model is set', async () => {
+      await parse(['web', '--default_llm_model', 'gemini-2.5-flash']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.defaultLlmModel).toBe('gemini-2.5-flash');
+    });
   });
 
   describe('command: api_server', () => {
@@ -291,6 +326,48 @@ describe('CLI Entrypoint', () => {
 
       const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.autoCreateSession).toBe(false);
+    });
+
+    it('should reject --logo_text, which web owns', async () => {
+      // adk-python decorates only `web` with the logo options, because they
+      // brand the dev UI that api_server does not serve.
+      const apiServer = program.commands.find(
+        (command) => command.name() === 'api_server',
+      )!;
+      apiServer.exitOverride();
+      apiServer.configureOutput({writeErr: () => {}});
+
+      await expect(
+        parse(['api_server', '--logo_text', 'Acme']),
+      ).rejects.toMatchObject({code: 'commander.unknownOption'});
+      expect(AdkApiServer).not.toHaveBeenCalled();
+    });
+
+    it('should reject --logo_image_url, which web owns', async () => {
+      const apiServer = program.commands.find(
+        (command) => command.name() === 'api_server',
+      )!;
+      apiServer.exitOverride();
+      apiServer.configureOutput({writeErr: () => {}});
+
+      await expect(
+        parse(['api_server', '--logo_image_url', 'https://acme.example/x.png']),
+      ).rejects.toMatchObject({code: 'commander.unknownOption'});
+      expect(AdkApiServer).not.toHaveBeenCalled();
+    });
+
+    it('should pass extraPlugins when --extra_plugins is set', async () => {
+      await parse(['api_server', '--extra_plugins', './audit.js#AuditPlugin']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.extraPlugins).toEqual(['./audit.js#AuditPlugin']);
+    });
+
+    it('should pass defaultLlmModel when --default_llm_model is set', async () => {
+      await parse(['api_server', '--default_llm_model', 'gemini-2.5-flash']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.defaultLlmModel).toBe('gemini-2.5-flash');
     });
   });
 
