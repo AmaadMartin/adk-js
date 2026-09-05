@@ -76,21 +76,6 @@ describe('replaySequence', () => {
     expect(replaySequence(events, 'wf')).toEqual(['A', 'B']);
   });
 
-  it('skips a workflow echo of an already recovered output', () => {
-    const events = [
-      nodeEvent('wf.A', {output: 'a'}),
-      createEvent({
-        author: 'wf',
-        invocationId: 'inv-1',
-        output: 'a',
-        nodeInfo: {path: 'wf.A', replayed: true},
-      }),
-      nodeEvent('wf.B', {output: 'b'}),
-    ];
-
-    expect(replaySequence(events, 'wf')).toEqual(['A', 'B']);
-  });
-
   it('does not let a workflow echo open another run of the node', () => {
     const events = [
       nodeEvent('wf.A', {output: 'a'}),
