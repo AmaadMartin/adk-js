@@ -83,40 +83,45 @@ const UNSERIALIZABLE_TOOL = 'UnserializableTool';
  * The emitted payload keys are `snake_case` because they are the wire contract
  * that downstream OpenTelemetry consumers read. They match adk-python's output
  * byte for byte, so they do not follow the repository's `camelCase` style.
+ *
+ * These are `type` aliases rather than `interface`s so that they carry an
+ * implicit index signature and are assignable to `AnyValue` directly. An
+ * `interface` is not, which would force a deep copy through {@link toAnyValue}
+ * on data these builders have already normalized.
  */
-interface TextPart {
+type TextPart = {
   content: string;
   type: 'text';
-}
+};
 
-interface BlobPart {
+type BlobPart = {
   mime_type: string;
   /** Base64, because `@google/genai` encodes `Blob.data` as a string. */
   data: string;
   type: 'blob';
-}
+};
 
-interface FileDataPart {
+type FileDataPart = {
   mime_type: string;
   uri: string;
   type: 'file_data';
-}
+};
 
-interface ToolCallPart {
+type ToolCallPart = {
   id: string;
   name: string;
   arguments: AnyValueMap | null;
   type: 'tool_call';
-}
+};
 
-interface ToolCallResponsePart {
+type ToolCallResponsePart = {
   id: string;
   response: AnyValueMap | null;
   type: 'tool_call_response';
-}
+};
 
 /** One entry of an emitted message's `parts` list. */
-export type SemconvPart =
+type SemconvPart =
   | TextPart
   | BlobPart
   | FileDataPart
@@ -124,38 +129,46 @@ export type SemconvPart =
   | ToolCallResponsePart;
 
 /** One entry of `gen_ai.input.messages`. */
-export interface InputMessage {
+type InputMessage = {
   role: string;
   parts: SemconvPart[];
-}
+};
 
 /** One entry of `gen_ai.output.messages`. */
-export interface OutputMessage {
+type OutputMessage = {
   role: string;
   parts: SemconvPart[];
   finish_reason: string;
-}
+};
 
 /** A declared function, reported with its JSON schema. */
-export interface FunctionToolDefinition {
+type FunctionToolDefinition = {
   name: string;
   description: string | null;
   parameters: AnyValueMap | null;
   type: 'function';
-}
+};
 
 /** A built-in tool, reported by name only. */
-export interface GenericToolDefinition {
+type GenericToolDefinition = {
   name: string;
   type: string;
-}
+};
 
 /** One entry of `gen_ai.tool.definitions`. */
-export type ToolDefinition = FunctionToolDefinition | GenericToolDefinition;
+type ToolDefinition = FunctionToolDefinition | GenericToolDefinition;
 
 /**
  * A tool descriptor that is not a `@google/genai` `Tool`, such as the plain
  * object the Model Context Protocol SDK produces at runtime.
+ *
+ * The schema arrives under three spellings. `@modelcontextprotocol/sdk` emits
+ * `inputSchema`, and a `@google/genai` `FunctionDeclaration` uses `parameters`.
+ * `input_schema` is what a descriptor that did not come from the TypeScript SDK
+ * carries: a tool definition loaded from JSON, proxied from a Python MCP
+ * server, or handed straight to `GenerateContentConfig.tools` by a caller
+ * bypassing ADK. Reading all three costs one field and keeps the reported
+ * schema equal to adk-python's, which reads the same three.
  */
 export interface DumpedTool {
   name?: unknown;
@@ -167,8 +180,16 @@ export interface DumpedTool {
 
 /**
  * The two token counts `@google/genai` 2.9.0 does not declare on
- * `GenerateContentResponseUsageMetadata`. adk-python reads them defensively,
- * because the Anthropic paths set them by hand.
+ * `GenerateContentResponseUsageMetadata`.
+ *
+ * A `BaseLlm` that is not Gemini can still report them: Anthropic bills cache
+ * writes separately from cache reads, so a model implementation wrapping it
+ * sets `cacheCreationInputTokens` by hand. Neither count is read off a Gemini
+ * response, and no model shipped in this repository sets either one today, so
+ * both buckets stay absent until such a model exists. Declaring them keeps that
+ * a typed field rather than a cast at the call site, and keeps the emitted
+ * attribute set equal to adk-python's `TokenUsage.to_attributes()`, which reads
+ * both the same way.
  */
 export interface ExtendedUsageMetadata extends GenerateContentResponseUsageMetadata {
   cacheCreationInputTokens?: number;
@@ -178,9 +199,8 @@ export interface ExtendedUsageMetadata extends GenerateContentResponseUsageMetad
 /**
  * The telemetry decisions this module reads.
  *
- * Declared here rather than imported: the `TelemetryConfig` that will supply
- * these is on the `parity` branch, not on `main`. It satisfies this interface
- * structurally, so wiring the two together needs no change to either.
+ * Structural rather than a class, so any object carrying the three decisions
+ * satisfies it, including one that exposes them as getters.
  */
 export interface ExperimentalSemconvConfig {
   readonly shouldUseExperimentalGenaiSemconv: boolean;
@@ -220,7 +240,7 @@ function isMap(value: object): value is Map<unknown, unknown> {
 }
 
 /** Whether `value` is a plain object rather than a class instance. */
-function isPlainObject(value: object): boolean {
+function isPlainObject(value: object): value is Record<string, unknown> {
   const prototype = Object.getPrototypeOf(value) as object | null;
   return prototype === Object.prototype || prototype === null;
 }
@@ -325,10 +345,16 @@ function toRole(role: string | undefined): string {
 /**
  * Whether the model reported why generation stopped.
  *
- * Ported from adk-python `src/google/adk/telemetry/_finish_reason.py`, which is
- * a separate parity task. The proto3 zero value is truthy, so an unset field
- * otherwise reads as a reason of its own, and a turn that ended normally is
- * published as a failed one.
+ * `FINISH_REASON_UNSPECIFIED` is the proto3 zero value, so the field carries it
+ * when the model set nothing, and it is a truthy string in the TypeScript enum.
+ * Counting it as a reason of its own publishes a turn that ended normally as a
+ * failed one. Excluding it here is what makes the caller omit
+ * `gen_ai.response.finish_reasons` instead of emitting a value for it.
+ *
+ * adk-python draws the same distinction, in `telemetry/_finish_reason.py`. Its
+ * test `test_response_attributes_treat_unspecified_finish_reason_as_unreported`
+ * pins both halves: the attribute is absent, and the output message still
+ * carries `finish_reason: ''`. The ported test of the same name pins them here.
  */
 function isReportedFinishReason(
   finishReason: FinishReason | undefined,
@@ -480,9 +506,9 @@ function cleanParameters(parameters: unknown): AnyValueMap | null {
 /**
  * Reports a tool descriptor that is not a `@google/genai` `Tool`.
  *
- * The parameter schema is read under all three spellings, because Model
- * Context Protocol SDK versions disagree on which one they produce. An unknown
- * spelling is not an error: the tool is still reported, without parameters.
+ * The parameter schema is read under the three spellings {@link DumpedTool}
+ * documents. An unknown spelling is not an error: the tool is still reported,
+ * without parameters.
  */
 export function toolDefinitionFromDumpedTool(
   tool: DumpedTool,
@@ -763,14 +789,12 @@ export function setOperationDetailsAttributesFromRequest(
   attributes: AnyValueMap,
   llmRequest: LlmRequest,
 ): void {
-  attributes[GEN_AI_INPUT_MESSAGES] = toAnyValue(
-    llmRequest.contents.map(toInputMessage),
+  attributes[GEN_AI_INPUT_MESSAGES] = llmRequest.contents.map(toInputMessage);
+  attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = toSystemInstructions(
+    llmRequest.config?.systemInstruction,
   );
-  attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = toAnyValue(
-    toSystemInstructions(llmRequest.config?.systemInstruction),
-  );
-  attributes[GEN_AI_TOOL_DEFINITIONS] = toAnyValue(
-    resolveToolDefinitions(llmRequest.config?.tools ?? []),
+  attributes[GEN_AI_TOOL_DEFINITIONS] = resolveToolDefinitions(
+    llmRequest.config?.tools ?? [],
   );
 }
 
@@ -799,10 +823,9 @@ export function setOperationDetailsAttributesFromResponse(
   const outputMessage = toOutputMessage(llmResponse);
   if (outputMessage) {
     const recorded = details[GEN_AI_OUTPUT_MESSAGES];
-    const arrived = toAnyValue(outputMessage);
     details[GEN_AI_OUTPUT_MESSAGES] = Array.isArray(recorded)
-      ? [...recorded, arrived]
-      : [arrived];
+      ? [...recorded, outputMessage]
+      : [outputMessage];
   }
 }
 

@@ -269,6 +269,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Telemetry
 
+- [Experimental GenAI semantic conventions](telemetry/experimental_semconv/index.md) - Emitting the experimental OpenTelemetry GenAI attributes and the completion-details log record.
 - [Google Cloud telemetry export](telemetry/google_cloud/index.md) - Sending an
   agent's traces, metrics and log records to Google Cloud over OTLP.
 - [SqliteSpanExporter](telemetry/sqlite_span_exporter/index.md) - Persisting OpenTelemetry spans to a local SQLite file and reading them back by session.

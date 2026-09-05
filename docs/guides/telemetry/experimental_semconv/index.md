@@ -26,25 +26,23 @@ Three properties are worth knowing before you use it:
   model call.
 - **It never mutates its inputs.** The builders are pure. Only the four entry
   points write, and only into the maps you hand them.
-- **It is internal.** The module is not exported from `@google/adk`, and nothing
-  in the LLM flow calls it yet. Wiring it into the flow needs the port of
-  adk-python's `tracing.py`, which is separate work.
+- **Nothing in the LLM flow calls it yet.** You drive it yourself. Wiring it into
+  the flow needs the port of adk-python's `tracing.py`, which is separate work.
 
 ## Get started
 
-A caller inside `core/src` imports the module by relative path, builds the two
-attribute maps, then emits them against a span and an OpenTelemetry logger.
+Build the two attribute maps, then emit them against a span and an OpenTelemetry
+logger.
 
 ```ts
-import {logs} from '@opentelemetry/api-logs';
-import type {AnyValueMap} from '@opentelemetry/api-logs';
-import {trace} from '@opentelemetry/api';
-
 import {
   maybeLogCompletionDetails,
   setOperationDetailsAttributesFromRequest,
   setOperationDetailsAttributesFromResponse,
-} from '../telemetry/_experimental_semconv.js';
+} from '@google/adk';
+import {trace} from '@opentelemetry/api';
+import {logs} from '@opentelemetry/api-logs';
+import type {AnyValueMap} from '@opentelemetry/api-logs';
 
 const details: AnyValueMap = {};
 const common: AnyValueMap = {};
@@ -60,6 +58,9 @@ maybeLogCompletionDetails(
   telemetryConfig,
 );
 ```
+
+[`samples/telemetry/experimental_semconv/agent.ts`](../../../../samples/telemetry/experimental_semconv/agent.ts)
+runs this from a plugin against a real model.
 
 For a request that carries one user message, one system instruction, one
 declared function and the Google Search tool, the two maps hold this:
@@ -119,16 +120,23 @@ response carries content.
 
 Call the response setter once per response. A turn that arrives as several
 streamed chunks accumulates into `gen_ai.output.messages`, one message per
-chunk, in arrival order. Only the chunk that ends the turn reports a finish
-reason: the proto3 zero value `FINISH_REASON_UNSPECIFIED` means unreported, so
-it leaves `gen_ai.response.finish_reasons` out rather than publishing a healthy
-turn as a failed one.
+chunk, in arrival order.
+
+Only the chunk that ends the turn reports a finish reason. `@google/genai`
+types `FinishReason` as a string enum, so its proto3 zero value
+`FINISH_REASON_UNSPECIFIED` is truthy and cannot be told from a real reason by
+a truthiness check. It means the model set nothing, so this module treats it as
+unreported: `gen_ai.response.finish_reasons` is left out entirely, and the
+output message carries `finish_reason: ''`. A healthy turn is therefore never
+published as a failed one. adk-python behaves the same way, and the ported test
+`test_response_attributes_treat_unspecified_finish_reason_as_unreported` pins
+both halves.
 
 ## Content capture
 
-`maybeLogCompletionDetails` reads three booleans off the config you pass it. Any
-object with these three properties satisfies `ExperimentalSemconvConfig`, so the
-`TelemetryConfig` on the `parity` branch will supply them without an import.
+`maybeLogCompletionDetails` reads three booleans off the config you pass it.
+`ExperimentalSemconvConfig` is structural, so any object carrying these three
+properties satisfies it, including a class that exposes them as getters.
 
 | Property                              | Effect                                      |
 | ------------------------------------- | ------------------------------------------- |

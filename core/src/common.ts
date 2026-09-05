@@ -948,6 +948,14 @@ export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {
+  COMPLETION_DETAILS_EVENT_NAME,
+  maybeLogCompletionDetails,
+  setOperationDetailsAttributesFromRequest,
+  setOperationDetailsAttributesFromResponse,
+  setOperationDetailsCommonAttributes,
+  type ExperimentalSemconvConfig,
+} from './telemetry/_experimental_semconv.js';
+export {
   ContentCapturingMode,
   TelemetryConfig,
   createTelemetryConfig,

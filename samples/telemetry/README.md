@@ -1,7 +1,7 @@
 # Telemetry samples
 
 Runnable TypeScript agents that show how to wire ADK's telemetry surfaces. One
-directory per feature, each exporting a `rootAgent` that runs with the ADK CLI.
+directory per feature, each exporting an agent that runs with the ADK CLI.
 
 ## Running
 
@@ -19,6 +19,10 @@ Unlike the workflow samples, these are not executed in CI, only type-checked.
 
 ## Samples
 
+- [`experimental_semconv`](experimental_semconv/agent.ts) - Reports every model
+  call in the experimental OpenTelemetry GenAI semantic conventions, and prints
+  the completion-details log record. Needs a Gemini API key. See the
+  [guide](../../docs/guides/telemetry/experimental_semconv/index.md).
 - [`sqlite_span_exporter`](sqlite_span_exporter/agent.ts) - Persists spans to a
   local SQLite file with `SqliteSpanExporter`. Runs offline, and needs the
   optional `@mikro-orm/sqlite` peer. See the
