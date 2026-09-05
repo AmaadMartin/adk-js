@@ -119,10 +119,21 @@ function scanForInputRequiredEvents(
   }
 
   if (inputRequiredParts.length > 0) {
+    const parts = toA2AParts(inputRequiredParts, [
+      ...inputRequiredFunctionCallIds,
+    ]);
+    // An input-required event with no parts is unanswerable, so fail the task
+    // rather than publish one.
+    if (parts.length === 0) {
+      throw new Error(
+        'Long-running function calls produced no A2A response parts',
+      );
+    }
+
     return createTaskInputRequiredEvent({
       taskId: context.requestContext.taskId,
       contextId: context.requestContext.contextId,
-      parts: toA2AParts(inputRequiredParts, [...inputRequiredFunctionCallIds]),
+      parts,
       metadata: getA2ASessionMetadata(context),
     });
   }
