@@ -87,6 +87,22 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Framework-internal, and not public API — external code must leave this
+   * false. It is deliberately not a constructor option: only a tool ADK ships
+   * assigns it, in its own constructor.
+   *
+   * When true, the framework builds no `FunctionResponse` for a call whose
+   * `runAsync` resolves to nothing, because another orchestrator answers the
+   * call later. A `runAsync` that resolves to a value is handled normally.
+   *
+   * {@link isLongRunning} skips the same auto-built response, and additionally
+   * records the call on `event.longRunningToolIds`, which drives A2A
+   * conversion, plugin logging and interrupt tracking. This marker records
+   * nothing.
+   */
+  defersResponse = false;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
