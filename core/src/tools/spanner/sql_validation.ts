@@ -73,6 +73,42 @@ export function validateIdentifier(value: string, paramName: string): void {
   }
 }
 
+/** How long a Spanner database id may be. */
+const DATABASE_ID_MAX_LENGTH = 30;
+
+/**
+ * The database ids Spanner accepts.
+ *
+ * `CreateDatabaseRequest.create_statement` documents the grammar as
+ * `[a-z][a-z0-9_\-]*[a-z0-9]`, between 2 and 30 characters. The identifier
+ * grammar above is the wrong control here: it refuses the hyphen this one
+ * allows, and Spanner database ids commonly carry one.
+ */
+const SPANNER_DATABASE_ID_RE = /^[a-z][a-z0-9_-]*[a-z0-9]$/;
+
+/**
+ * Rejects a database id Spanner would not accept.
+ *
+ * The id is quoted into a `CREATE DATABASE` statement, so refusing anything
+ * outside the grammar also keeps a backtick out of that statement.
+ *
+ * @param value The database id.
+ * @param paramName The parameter the value came from, named in the error.
+ * @throws Error if the id is outside Spanner's database id grammar.
+ */
+export function validateDatabaseId(value: string, paramName: string): void {
+  if (
+    value.length > DATABASE_ID_MAX_LENGTH ||
+    !SPANNER_DATABASE_ID_RE.test(value)
+  ) {
+    throw new Error(
+      `Invalid Spanner database id for ${paramName}: ${JSON.stringify(value)}.` +
+        ' A database id must match [a-z][a-z0-9_-]*[a-z0-9] and be between 2' +
+        ` and ${DATABASE_ID_MAX_LENGTH} characters long.`,
+    );
+  }
+}
+
 /**
  * Rejects a column list holding anything that is not a safe SQL identifier.
  *
