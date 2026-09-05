@@ -11,11 +11,17 @@ import {
   Event,
   State,
 } from '@google/adk';
-import {MikroORM} from '@mikro-orm/core';
+import {EntityManager, LockMode, MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
-import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {sessionLockMode} from '../../src/sessions/db/dialect.js';
+import {
+  dialectOf,
+  getDatabaseBackend,
+  validateDatabaseSchemaVersion,
+} from '../../src/sessions/db/operations.js';
+import {ENTITIES, StorageSession} from '../../src/sessions/db/schema.js';
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -739,5 +745,98 @@ describe('isDatabaseConnectionString', () => {
       false,
     ); // Has = and ; but no common keys
     expect(isDatabaseConnectionString('Server=myServer')).toBe(false); // Missing semicolon implies not a full connection string or just a weird config
+  });
+});
+
+describe('DatabaseSessionService row-level locking gate', () => {
+  let service: DatabaseSessionService;
+
+  beforeEach(async () => {
+    service = new DatabaseSessionService({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      allowGlobalContext: true,
+    });
+    await service.init();
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await service.close();
+  });
+
+  /**
+   * The lock mode `appendEvent` looks the session row up with. adk-python's
+   * `test_append_event_locks_only_scopes_with_deltas` also drives sqlite, so
+   * it too can only observe that no lock is requested.
+   *
+   * @returns The requested lock mode, or undefined when none was requested.
+   */
+  async function sessionLookupLockMode(): Promise<LockMode | undefined> {
+    const session = await service.createSession({
+      appName: 'lock-app',
+      userId: 'lock-user',
+      sessionId: 'lock-session',
+    });
+
+    const findOne = vi.spyOn(EntityManager.prototype, 'findOne');
+    await service.appendEvent({
+      session,
+      event: createEvent({author: 'user', invocationId: 'lock-invocation'}),
+    });
+
+    const lookup = findOne.mock.calls.find(
+      ([entity]) => entity === StorageSession,
+    );
+    if (!lookup) {
+      expect.fail('appendEvent did not look the session row up');
+    }
+    return lookup[2]?.lockMode;
+  }
+
+  it('test_append_event_locks_only_scopes_with_deltas[no_state_delta]', async () => {
+    expect(await sessionLookupLockMode()).toBeUndefined();
+  });
+
+  it('asks the same lock mode the sqlite backend maps to', async () => {
+    expect(sessionLockMode('sqlite')).toBeUndefined();
+    expect(await sessionLookupLockMode()).toBe(sessionLockMode('sqlite'));
+  });
+
+  it('reads the live backend name rather than a constant', async () => {
+    const orm = await MikroORM.init({
+      dbName: ':memory:',
+      driver: SqliteDriver,
+      entities: ENTITIES,
+      allowGlobalContext: true,
+    });
+    try {
+      expect(getDatabaseBackend(orm)).toBe('sqlite');
+      expect(sessionLockMode(getDatabaseBackend(orm))).toBeUndefined();
+    } finally {
+      await orm.close();
+    }
+  });
+});
+
+describe('dialectOf', () => {
+  it('normalizes the name knex gives the sqlite dialect', () => {
+    expect(dialectOf({getKnex: () => ({client: {dialect: 'sqlite3'}})})).toBe(
+      'sqlite',
+    );
+  });
+
+  it('passes a dialect name through unchanged', () => {
+    expect(
+      dialectOf({getKnex: () => ({client: {dialect: 'postgresql'}})}),
+    ).toBe('postgresql');
+  });
+
+  it('names no backend for a connection without a knex handle', () => {
+    expect(dialectOf({})).toBe('');
+  });
+
+  it('names no backend for a knex client naming no dialect', () => {
+    expect(dialectOf({getKnex: () => ({client: {}})})).toBe('');
   });
 });

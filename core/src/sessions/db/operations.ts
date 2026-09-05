@@ -14,6 +14,17 @@ import {
   StorageMetadata,
 } from './schema.js';
 
+/** Backend name this module normalizes the sqlite dialect to. */
+const SQLITE_BACKEND = 'sqlite';
+
+/** Dialect name the sqlite driver reports through knex. */
+const SQLITE_KNEX_DIALECT = 'sqlite3';
+
+/** A driver connection that exposes the knex instance underneath it. */
+interface KnexBackedConnection {
+  getKnex(): {client?: {dialect?: unknown}};
+}
+
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
   return {
@@ -22,8 +33,47 @@ function driverPeer(packageName: string, scheme: string) {
   };
 }
 
+function isKnexBackedConnection(value: object): value is KnexBackedConnection {
+  return 'getKnex' in value && typeof value.getKnex === 'function';
+}
+
+/**
+ * Returns the backend name a driver connection reports.
+ *
+ * adk-python reads `engine.dialect.name`, which spells sqlite `sqlite`. knex
+ * spells it `sqlite3`, so that one name is normalized.
+ *
+ * @param connection The driver connection to read the dialect from.
+ * @returns The backend name, or an empty string for a connection exposing no
+ *   knex handle and for one naming no dialect.
+ */
+export function dialectOf(connection: object): string {
+  if (!isKnexBackedConnection(connection)) {
+    return '';
+  }
+
+  const dialect = connection.getKnex().client?.dialect;
+  if (typeof dialect !== 'string') {
+    return '';
+  }
+  return dialect === SQLITE_KNEX_DIALECT ? SQLITE_BACKEND : dialect;
+}
+
+/**
+ * Returns the backend name the open database reports.
+ *
+ * @param orm The initialized MikroORM instance.
+ * @returns The backend name, as {@link dialectOf} normalizes it.
+ */
+export function getDatabaseBackend(orm: MikroORM): string {
+  return dialectOf(orm.em.getConnection());
+}
+
 /**
  * Parses a database connection URI and returns MikroORM Options.
+ *
+ * A backend that drops the time zone on a datetime column is opened on UTC, so
+ * that the stored wall clock does not follow the Node process's local zone.
  *
  * @param uri The database connection URI (e.g., "postgres://user:password@host:port/database")
  * @returns MikroORM Options configured for the database
@@ -68,6 +118,9 @@ export async function getConnectionOptionsFromUri(
     throw new Error(`Unsupported database URI: ${redactUriPassword(uri)}`);
   }
 
+  // simplicity: every backend the chain above accepts drops the zone, so UTC
+  // is unconditional. A zone-aware backend, such as Cloud Spanner, would need
+  // its own answer here; adk-js ships no driver for one.
   if (uri.startsWith('sqlite://')) {
     return {
       entities: ENTITIES,
@@ -76,6 +129,7 @@ export async function getConnectionOptionsFromUri(
           ? ':memory:'
           : uri.substring('sqlite://'.length),
       driver,
+      forceUtcTimezone: true,
     } as MikroORMOptions;
   }
 
@@ -83,6 +137,7 @@ export async function getConnectionOptionsFromUri(
     entities: ENTITIES,
     clientUrl: uri,
     driver,
+    forceUtcTimezone: true,
   } as MikroORMOptions;
 }
 
