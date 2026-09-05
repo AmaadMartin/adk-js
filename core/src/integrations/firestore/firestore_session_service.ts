@@ -45,6 +45,7 @@ import {makeJsonSafeState} from '../../sessions/session_util.js';
 import {State} from '../../sessions/state.js';
 import {randomUUID} from '../../utils/env_aware_utils.js';
 import {formatError} from '../../utils/error_utils.js';
+import {toJsonObject} from '../../utils/json_utils.js';
 import {KeyedMutex} from '../../utils/keyed_mutex.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
@@ -137,7 +138,7 @@ function decodeStoredState(raw: unknown): Record<string, unknown> {
   return {};
 }
 
-/** True when a scoped bucket has anything to write. */
+/** True when a scoped bucket holds at least one entry. */
 function hasEntries(bucket: Record<string, unknown>): boolean {
   return Object.keys(bucket).length > 0;
 }
@@ -672,7 +673,10 @@ export class FirestoreSessionService extends BaseSessionService {
         revision: newRevision,
       });
       t.set(sessionRef.collection(EVENTS_COLLECTION).doc(event.id), {
-        event_data: transformToSnakeCaseEvent(event),
+        // Firestore rejects a document holding `undefined`, and every optional
+        // field an event leaves unset is one. The JSON round trip drops them,
+        // which is what adk-python's `model_dump(exclude_none=True)` does.
+        event_data: toJsonObject(transformToSnakeCaseEvent(event)),
         timestamp: FieldValue.serverTimestamp(),
         appName: session.appName,
         userId: session.userId,

@@ -480,6 +480,26 @@ describe('FirestoreSessionService (adk-js behaviour)', () => {
       ).rejects.toThrow('Session s1 is currently being deleted.');
     });
 
+    it('writes no undefined field, which Firestore rejects', async () => {
+      seedSession('s1');
+      const session = createSession({
+        id: 's1',
+        appName: APP_NAME,
+        userId: USER_ID,
+      });
+      // `branch` is one of several optional fields an event leaves unset.
+      const event = createEvent({author: 'user'});
+      expect(event).toHaveProperty('branch');
+      expect(event.branch).toBeUndefined();
+
+      await service.appendEvent({session, event});
+
+      const persisted = fakeFirestore.getDocument(
+        `${sessionPath('s1')}/events/${event.id}`,
+      );
+      expect(persisted?.['event_data']).not.toHaveProperty('branch');
+    });
+
     it('treats a document written before revisions as revision zero', async () => {
       fakeFirestore.setDocument(sessionPath('s1'), {
         id: 's1',
