@@ -101,6 +101,21 @@ describe('ToolSpecMockStrategy model answers it cannot use', () => {
   });
 });
 
+describe('ToolSpecMockStrategy fenced answers', () => {
+  it('unwraps a fence whose answer ends with a newline', async () => {
+    const strategy = createStrategy('```json\n{"ticketId": "T-12"}\n```\n');
+
+    const result = await strategy.mock({
+      tool: new UncallableTool('create_ticket'),
+      args: {},
+      context: createToolContext(),
+      stateStore: {},
+    });
+
+    expect(result).toEqual({ticketId: 'T-12'});
+  });
+});
+
 describe('ToolSpecMockStrategy state store writes', () => {
   it('records a parameter whose value is the number zero', async () => {
     const strategy = createStrategy('{"ticketId": 0, "status": "open"}');
@@ -206,6 +221,92 @@ describe('ToolSpecMockStrategy state store writes', () => {
       ticketId: {'T-10': result},
       userId: {'U-1': result},
     });
+  });
+});
+
+describe('ToolSpecMockStrategy hostile parameter names', () => {
+  // A parameter name comes from the analyzer model's JSON, so it can be any
+  // string. In JavaScript some strings reach the prototype chain instead of
+  // the object, which would leak simulation state process-wide.
+
+  it('records a parameter named __proto__ without touching Object.prototype', async () => {
+    const strategy = createStrategy('{"__proto__": "P-1"}');
+    const stateStore: SimulationStateStore = {};
+
+    const result = await strategy.mock({
+      tool: new UncallableTool('create_ticket'),
+      args: {},
+      context: createToolContext(),
+      toolConnectionMap: creatorMap('__proto__', 'create_ticket'),
+      stateStore,
+    });
+
+    expect(Object.keys(stateStore)).toEqual(['__proto__']);
+    expect(Object.hasOwn(stateStore, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(stateStore)).toBe(Object.prototype);
+    const entities = Object.getOwnPropertyDescriptor(
+      stateStore,
+      '__proto__',
+    )?.value;
+    expect(entities).toEqual({'P-1': result});
+    expect(Object.getOwnPropertyDescriptor({}, 'P-1')).toBeUndefined();
+  });
+
+  it('records a value named __proto__ without touching Object.prototype', async () => {
+    const strategy = createStrategy('{"ticketId": "__proto__"}');
+    const stateStore: SimulationStateStore = {};
+
+    const result = await strategy.mock({
+      tool: new UncallableTool('create_ticket'),
+      args: {},
+      context: createToolContext(),
+      toolConnectionMap: creatorMap('ticketId', 'create_ticket'),
+      stateStore,
+    });
+
+    expect(Object.keys(stateStore['ticketId'])).toEqual(['__proto__']);
+    expect(
+      Object.getOwnPropertyDescriptor(stateStore['ticketId'], '__proto__')
+        ?.value,
+    ).toEqual(result);
+    expect(Object.getOwnPropertyDescriptor({}, 'ticketId')).toBeUndefined();
+  });
+
+  it('does not find a parameter named constructor on every object', async () => {
+    const strategy = createStrategy('{"ticketId": "T-13"}');
+    const stateStore: SimulationStateStore = {};
+
+    await strategy.mock({
+      tool: new UncallableTool('create_ticket'),
+      args: {},
+      context: createToolContext(),
+      toolConnectionMap: creatorMap('constructor', 'create_ticket'),
+      stateStore,
+    });
+
+    // The response declares no `constructor` of its own, so there is nothing
+    // to key an entry by and the store stays empty. An unguarded search finds
+    // the inherited `Object` constructor instead, and writes the response onto
+    // `Object` itself, keyed by that function's own source text.
+    expect(stateStore).toEqual({});
+    expect(Object.hasOwn(stateStore, 'constructor')).toBe(false);
+    expect(Object.hasOwn(Object, String(Object))).toBe(false);
+  });
+
+  it('records a parameter the response does declare as constructor', async () => {
+    const strategy = createStrategy('{"constructor": "C-1"}');
+    const stateStore: SimulationStateStore = {};
+
+    const result = await strategy.mock({
+      tool: new UncallableTool('create_ticket'),
+      args: {},
+      context: createToolContext(),
+      toolConnectionMap: creatorMap('constructor', 'create_ticket'),
+      stateStore,
+    });
+
+    expect(stateStore).toEqual({constructor: {'C-1': result}});
+    expect(Object.getOwnPropertyDescriptor(Object, 'C-1')).toBeUndefined();
   });
 });
 

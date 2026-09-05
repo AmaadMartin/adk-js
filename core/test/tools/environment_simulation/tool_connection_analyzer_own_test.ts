@@ -113,6 +113,24 @@ describe('ToolConnectionAnalyzer malformed answers', () => {
   });
 });
 
+describe('ToolConnectionAnalyzer fenced answers', () => {
+  it('reads a fence whose answer ends with a newline', async () => {
+    scriptModel(
+      '```json\n' +
+        '{"statefulParameters": [{"parameterName": "ticketId",' +
+        ' "creatingTools": ["create_ticket"], "consumingTools": []}]}\n' +
+        '```\n',
+    );
+
+    const result = await createAnalyzer().analyze([
+      new UncallableTool('create_ticket'),
+    ]);
+
+    expect(result.statefulParameters).toHaveLength(1);
+    expect(result.statefulParameters[0].parameterName).toBe('ticketId');
+  });
+});
+
 describe('ToolConnectionAnalyzer prompt', () => {
   it('carries the declaration of every declared tool', async () => {
     scriptModel('{"statefulParameters": []}');

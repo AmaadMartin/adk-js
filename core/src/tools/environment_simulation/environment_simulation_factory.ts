@@ -5,6 +5,7 @@
  */
 
 import {SingleBeforeToolCallback} from '../../agents/llm_agent.js';
+import {experimental} from '../../utils/experimental.js';
 import {EnvironmentSimulationConfig} from './environment_simulation_config.js';
 import {EnvironmentSimulationEngine} from './environment_simulation_engine.js';
 import {EnvironmentSimulationPlugin} from './environment_simulation_plugin.js';
@@ -18,6 +19,7 @@ import {EnvironmentSimulationPlugin} from './environment_simulation_plugin.js';
  * WARNING: This feature is **experimental** and its API or behavior may change
  * in future releases.
  */
+@experimental
 export class EnvironmentSimulationFactory {
   /**
    * Builds a before-tool callback that simulates one agent's tools.

@@ -178,8 +178,8 @@ the configuration you supply.
 
 ## Failure modes
 
-A simulation degrades rather than breaking the turn. Nothing here throws at the
-agent, with one exception noted below.
+A simulation answers with an error object rather than breaking the turn, in
+every case below.
 
 | Situation                                       | What happens                                                                                   |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -190,9 +190,11 @@ agent, with one exception noted below.
 | The model's answer is JSON but not an object    | `{status: 'error', errorMessage: 'Generated mock response was not a JSON object.', llmOutput}` |
 | The analysis cannot be read                     | A warning, and mocking continues without stateful consistency.                                 |
 
-The exception is `simulationModel` naming a model no registry entry matches.
-That is a configuration error, and it surfaces as a thrown `Error` on the first
-call that needs the model.
+Two things do throw, both out of `simulate` and into the tool call. A
+`simulationModel` that no registry entry matches is a configuration error, and
+it surfaces on the first call that needs the model. A model call that fails —
+a rate limit, a network error — propagates as the model client raised it,
+because nothing here retries or swallows it. adk-python behaves the same way.
 
 Both the analyzer and the mock strategy strip a Markdown code fence before
 parsing, because a model asked for raw JSON often wraps it in one.

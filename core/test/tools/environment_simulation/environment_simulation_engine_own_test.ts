@@ -110,6 +110,29 @@ describe('EnvironmentSimulationEngine argument matching', () => {
     expect(result).toBeUndefined();
   });
 
+  it('does not match an inherited property name', async () => {
+    // `'toString' in args` holds for every object, and the inherited function
+    // equals itself, so a rule naming it would fire on every call. A rule key
+    // is compared against the call's own arguments only.
+    const engine = engineFor({
+      toolName: 'search',
+      injectionConfigs: [
+        createInjectionConfig({
+          matchArgs: {toString: Object.prototype.toString},
+          injectedResponse: {injected: true},
+        }),
+      ],
+    });
+
+    const result = await engine.simulate({
+      tool: new UncallableTool('search'),
+      args: {query: 'cats'},
+      context: createToolContext(),
+    });
+
+    expect(result).toBeUndefined();
+  });
+
   it('fires a rule that names a subset of the arguments', async () => {
     const engine = engineFor({
       toolName: 'search',
@@ -220,6 +243,42 @@ describe('EnvironmentSimulationEngine injection probability', () => {
     });
 
     expect(result).toEqual({errorCode: 404, errorMessage: 'no such ticket'});
+  });
+
+  it('tries the next rule when a matching rule injects an empty response', async () => {
+    // adk-python reads an empty dict as falsy and falls through, and the
+    // config module already counts an empty response as unset. The config
+    // factories reject one, so this only reaches a hand-built config.
+    const engine = new EnvironmentSimulationEngine({
+      toolSimulationConfigs: [
+        {
+          toolName: 'test_tool',
+          injectionConfigs: [
+            {
+              injectionProbability: 1,
+              injectedLatencySeconds: 0,
+              injectedResponse: {},
+            },
+            {
+              injectionProbability: 1,
+              injectedLatencySeconds: 0,
+              injectedResponse: {second: true},
+            },
+          ],
+          mockStrategyType: MockStrategy.MOCK_STRATEGY_UNSPECIFIED,
+        },
+      ],
+      simulationModel: FAKE_SIMULATION_MODEL,
+      simulationModelConfiguration: {},
+    });
+
+    const result = await engine.simulate({
+      tool: new UncallableTool('test_tool'),
+      args: {},
+      context: createToolContext(),
+    });
+
+    expect(result).toEqual({second: true});
   });
 
   it('replays the same decisions for two engines built from one seeded config', async () => {

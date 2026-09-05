@@ -118,11 +118,40 @@ function buildMockPrompt(params: MockParams, toolSchemaJson: string): string {
 }
 
 /**
+ * Sets `key` on `record` as an own data property.
+ *
+ * Both the parameter names and the parameter values come from model output, so
+ * a key can be `__proto__`, which plain assignment routes to the prototype
+ * instead of creating a property. Python has no such key, so the reference
+ * needs no equivalent.
+ *
+ * @param record The object to write into.
+ * @param key The property name, which may be any string.
+ * @param value The value to store.
+ */
+function setOwnProperty<T>(
+  record: Record<string, T>,
+  key: string,
+  value: T,
+): void {
+  Object.defineProperty(record, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+/**
  * Searches a nested value for the first entry stored under `targetKey`.
  *
  * An object is searched before its nested values, and an array is searched in
  * order. `null` counts as absent, matching adk-python, but `0`, `false` and the
  * empty string are values a tool can legitimately return and count as found.
+ *
+ * Only own properties count. `targetKey` comes from model output, so an
+ * inherited name such as `constructor` would otherwise be "found" on every
+ * object.
  *
  * @param data The value to search.
  * @param targetKey The key to look for.
@@ -141,7 +170,7 @@ function findValueByKey(data: unknown, targetKey: string): unknown {
   if (!isJsonObject(data)) {
     return undefined;
   }
-  if (targetKey in data) {
+  if (Object.hasOwn(data, targetKey)) {
     return data[targetKey];
   }
   for (const value of Object.values(data)) {
@@ -178,12 +207,14 @@ function recordCreatedEntities(params: {
     if (value === undefined || value === null) {
       continue;
     }
-    let entities = stateStore[parameter.parameterName];
+    let entities = Object.hasOwn(stateStore, parameter.parameterName)
+      ? stateStore[parameter.parameterName]
+      : undefined;
     if (!entities) {
       entities = {};
-      stateStore[parameter.parameterName] = entities;
+      setOwnProperty(stateStore, parameter.parameterName, entities);
     }
-    entities[String(value)] = mockResponse;
+    setOwnProperty(entities, String(value), mockResponse);
   }
 }
 
@@ -215,12 +246,14 @@ export class ToolSpecMockStrategy extends BaseMockStrategy {
   /**
    * Generates a mock response for one tool call.
    *
-   * This never throws: an answer the strategy cannot use becomes an error
-   * object the agent can react to, the way a failing tool would.
+   * An answer the strategy cannot use becomes an error object the agent can
+   * react to, the way a failing tool would. A failed model call is not
+   * answered here: it propagates, as it does in adk-python.
    *
    * @param params The tool call to answer.
    * @returns The model's JSON object, or an error object naming what went
    *     wrong.
+   * @throws {Error} When the model call itself fails.
    */
   async mock(params: MockParams): Promise<Record<string, unknown>> {
     const declaration = params.tool._getDeclaration();

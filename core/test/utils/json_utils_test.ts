@@ -40,6 +40,21 @@ describe('parseFencedJson', () => {
     expect(parseFencedJson('```\n{"a": 1}\n```')).toEqual({a: 1});
   });
 
+  it('strips a fence whose answer ends with a newline', () => {
+    // The ordinary shape of a fenced model answer. adk-python's `$` matches
+    // just before a trailing newline and JavaScript's does not, so the fence
+    // has to be reachable after trimming.
+    expect(parseFencedJson('```json\n{"a": 1}\n```\n')).toEqual({a: 1});
+  });
+
+  it('strips a fence padded with whitespace on both sides', () => {
+    expect(parseFencedJson('\n  ```json\n{"a": 1}\n```  \n')).toEqual({a: 1});
+  });
+
+  it('strips a fence whose answer ends with a carriage return', () => {
+    expect(parseFencedJson('```json\n{"a": 1}\n```\r\n')).toEqual({a: 1});
+  });
+
   it('trims surrounding whitespace', () => {
     expect(parseFencedJson('  \n{"a": 1}\n  ')).toEqual({a: 1});
   });

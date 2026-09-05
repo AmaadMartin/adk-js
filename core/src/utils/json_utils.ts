@@ -33,6 +33,7 @@ export function isJsonObject(value: unknown): value is Record<string, unknown> {
  */
 export function parseFencedJson(text: string): unknown {
   const withoutFence = text
+    .trim()
     .replace(OPENING_CODE_FENCE, '')
     .replace(CLOSING_CODE_FENCE, '')
     .trim();

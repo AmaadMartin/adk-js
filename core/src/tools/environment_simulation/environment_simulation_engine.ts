@@ -66,7 +66,9 @@ export function createMockStrategy(
  *
  * adk-python compares entries, not whole objects, so a rule that names one
  * argument still fires on a call that passes several. Values are compared
- * structurally, so an object-valued rule is reachable.
+ * structurally, so an object-valued rule is reachable. Only own arguments
+ * count, so a rule naming an inherited property such as `constructor` does not
+ * match every call.
  *
  * @param args The arguments the agent passed to the tool.
  * @param matchArgs The entries the rule requires.
@@ -77,7 +79,7 @@ function matchesArgs(
   matchArgs: Record<string, unknown>,
 ): boolean {
   return Object.entries(matchArgs).every(
-    ([key, value]) => key in args && isEqual(args[key], value),
+    ([key, value]) => Object.hasOwn(args, key) && isEqual(args[key], value),
   );
 }
 
@@ -94,6 +96,10 @@ function sleep(seconds: number): Promise<void> {
  * adk-python spells the error keys `error_code` and `error_message`. adk-js
  * spells every key it produces itself in camelCase, following the config
  * module.
+ *
+ * An empty `injectedResponse` returns nothing, so the engine tries the next
+ * rule. An empty dict is falsy in Python, and the config module already counts
+ * an empty response as unset for the same reason.
  */
 function injectedValue(
   injectionConfig: InjectionConfig,
@@ -104,7 +110,11 @@ function injectedValue(
       errorMessage: injectionConfig.injectedError.errorMessage,
     };
   }
-  return injectionConfig.injectedResponse;
+  const {injectedResponse} = injectionConfig;
+  if (injectedResponse && Object.keys(injectedResponse).length > 0) {
+    return injectedResponse;
+  }
+  return undefined;
 }
 
 /**
