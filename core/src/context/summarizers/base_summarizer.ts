@@ -16,7 +16,9 @@ export interface BaseSummarizer {
    * Summarizes the given events into a CompactedEvent.
    *
    * @param events The events to summarize.
-   * @returns A promise resolving to the CompactedEvent representation of the events.
+   * @returns A promise resolving to the CompactedEvent representation of the
+   *     events, or `null` when the summarizer declines to summarize them. A
+   *     caller that receives `null` must leave the session unchanged.
    */
-  summarize(events: Event[]): Promise<CompactedEvent>;
+  summarize(events: Event[]): Promise<CompactedEvent | null>;
 }
