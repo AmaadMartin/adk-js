@@ -4,31 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ChildProcessWithoutNullStreams, spawn} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {experimental} from '../utils/experimental.js';
+import {realpathNonStrict} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
+import {
+  killCommand,
+  toExitCode,
+  USE_PROCESS_GROUP,
+} from '../utils/process_utils.js';
 import {BaseEnvironment, ExecutionResult} from './base_environment.js';
 
 /** Prefix for the temporary workspace created when no `workingDir` is given. */
 const TEMP_WORKSPACE_PREFIX = 'adk_workspace_';
-
-/**
- * Whether a command can lead its own process group.
- *
- * Windows has no process group to signal, and `detached` there opens a console
- * window instead. Only the command itself can be reached on that platform.
- */
-const USE_PROCESS_GROUP = os.platform() !== 'win32';
-
-/**
- * How long to wait for a command to exit after `SIGTERM` before escalating to
- * `SIGKILL`, and then for its output pipes to close, so that tearing a command
- * down cannot itself block forever.
- */
-const TERMINATE_GRACE_MS = 5_000;
 
 /** Options for {@link LocalEnvironment}. */
 export interface LocalEnvironmentOptions {
@@ -41,118 +32,6 @@ export interface LocalEnvironmentOptions {
   workingDir?: string;
   /** Extra variables merged over `process.env` for every executed command. */
   envVars?: Record<string, string>;
-}
-
-/** The name of a signal that can terminate a command, e.g. `'SIGKILL'`. */
-type SignalName = keyof typeof os.constants.signals;
-
-/** Maps Node's `(code, signal)` pair to Python's negative-signal convention. */
-function toExitCode(code: number | null, signal: SignalName | null): number {
-  return signal === null ? (code ?? 0) : -os.constants.signals[signal];
-}
-
-/** Signals a command and everything it spawned, tolerating an empty group. */
-function signalCommand(
-  child: ChildProcessWithoutNullStreams,
-  signal: 'SIGTERM' | 'SIGKILL',
-): void {
-  if (USE_PROCESS_GROUP && child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, signal);
-    } catch (e: unknown) {
-      // An already-empty group reports ESRCH, which is not an error here.
-      logger.debug(`Could not signal the command process group: ${e}`);
-    }
-  }
-  child.kill(signal);
-}
-
-/** Waits up to `ms` for `promise` to settle, and reports whether it did. */
-async function settledWithin(
-  promise: Promise<unknown>,
-  ms: number,
-): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), ms);
-  });
-  try {
-    return await Promise.race([
-      promise.then(
-        () => true,
-        () => true,
-      ),
-      expired,
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Kills a command and its descendants, and waits for its output pipes.
- *
- * `SIGTERM` comes first, so the command and its children get a chance to exit
- * cleanly. The escalation to `SIGKILL` does not depend on the command itself
- * having exited: a descendant that ignores `SIGTERM` still holds the pipes
- * open, which is what keeps `closed` from settling.
- *
- * Both grace periods buy time for the process group to drain, so a platform
- * without one skips them: nothing there can reach a survivor holding the
- * pipes, whatever the wait.
- */
-async function killCommand(
-  child: ChildProcessWithoutNullStreams,
-  closed: Promise<void>,
-): Promise<void> {
-  signalCommand(child, 'SIGTERM');
-
-  if (USE_PROCESS_GROUP) {
-    if (await settledWithin(closed, TERMINATE_GRACE_MS)) {
-      return;
-    }
-
-    signalCommand(child, 'SIGKILL');
-    if (await settledWithin(closed, TERMINATE_GRACE_MS)) {
-      return;
-    }
-
-    // A descendant escaped the group by starting one of its own.
-    logger.warn('Gave up reading output from a killed command.');
-  }
-
-  // Release the read ends rather than wait for whoever still holds them.
-  // Whatever the command wrote before this point has already been buffered.
-  child.stdout.destroy();
-  child.stderr.destroy();
-
-  // With the pipes released, 'close' reports the exit status the result needs.
-  // The wait is bounded, so teardown still cannot block forever.
-  await settledWithin(closed, TERMINATE_GRACE_MS);
-}
-
-/**
- * Resolves every symlink in `target` that exists, like Python's non-strict
- * `Path.resolve()`.
- *
- * A component that does not exist yet cannot be resolved, so the deepest
- * existing ancestor is resolved and the remainder is appended lexically.
- */
-async function realpathNonStrict(target: string): Promise<string> {
-  const remainder: string[] = [];
-  let current = target;
-  for (;;) {
-    try {
-      return path.join(await fs.realpath(current), ...remainder);
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) {
-        return target;
-      }
-      remainder.unshift(path.basename(current));
-      current = parent;
-    }
-  }
 }
 
 /**
@@ -285,18 +164,22 @@ export class LocalEnvironment extends BaseEnvironment {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let removeAbortListener: (() => void) | undefined;
 
-    const interrupted = new Promise<'timeout' | 'abort'>((resolve) => {
-      if (timeoutSeconds !== undefined) {
-        timer = setTimeout(() => resolve('timeout'), timeoutSeconds * 1000);
-      }
-      if (abortSignal !== undefined) {
-        const abort = abortSignal;
-        const listener = () => resolve('abort');
-        abort.addEventListener('abort', listener, {once: true});
-        removeAbortListener = () =>
-          abort.removeEventListener('abort', listener);
-      }
-    });
+    // The abort case carries its reason rather than re-deriving it later, so
+    // the throw below cannot depend on `abortSignal` still being in scope.
+    const interrupted = new Promise<'timeout' | {abortReason: unknown}>(
+      (resolve) => {
+        if (timeoutSeconds !== undefined) {
+          timer = setTimeout(() => resolve('timeout'), timeoutSeconds * 1000);
+        }
+        if (abortSignal !== undefined) {
+          const abort = abortSignal;
+          const listener = () => resolve({abortReason: abort.reason});
+          abort.addEventListener('abort', listener, {once: true});
+          removeAbortListener = () =>
+            abort.removeEventListener('abort', listener);
+        }
+      },
+    );
 
     try {
       const interruption = await Promise.race([
@@ -305,8 +188,8 @@ export class LocalEnvironment extends BaseEnvironment {
       ]);
       if (interruption !== undefined) {
         await killCommand(child, closed);
-        if (interruption === 'abort') {
-          throw abortSignal?.reason;
+        if (interruption !== 'timeout') {
+          throw interruption.abortReason;
         }
       }
       return {
