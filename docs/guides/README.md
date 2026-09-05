@@ -1,6 +1,8 @@
 # ADK Developer Guides
 
-This directory contains specific developer guides for the ADK TypeScript implementation. For the official ADK documentation, visit [adk.dev](https://adk.dev/). For the generated API reference, run `npm run docs`.
+This directory contains specific developer guides for the ADK TypeScript implementation. For the official ADK documentation, visit [adk.dev](https://adk.dev/), built from [google/adk-docs](https://github.com/google/adk-docs). For the generated API reference, run `npm run docs`.
+
+These pages are the exception: per-feature guides kept beside the code. Maintainers may prefer these on adk.dev instead, and moving them is a file move.
 
 A guide covers one code unit in more depth than the published documentation carries, for a developer calling it from their own application. Guides mirror the source path under `core/src/`, so `core/src/tools/retrieval/files_retrieval.ts` is documented at `tools/retrieval/files_retrieval/index.md`.
 
