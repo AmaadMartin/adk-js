@@ -148,13 +148,58 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  EvalStatus,
+  PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  getConfigCustomFunctionPath,
+  getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+  parseBaseCriterion,
+  parseEvalMetric,
+  parseEvalMetricResult,
+  parseHallucinationsCriterion,
+  parseInterval,
+  parseJudgeModelOptions,
+  parseLlmAsAJudgeCriterion,
+  parseLlmBackedUserSimulatorCriterion,
+  parseMetricInfo,
+  parseMetricValueInfo,
+  parseRubricsBasedCriterion,
+  parseToolTrajectoryCriterion,
+  setConfigCustomFunctionPath,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  HallucinationsCriterion,
+  Interval,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+  Rubric,
+  RubricContent,
+  RubricScore,
+  RubricsBasedCriterion,
+  Threshold,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export {parseRubric, parseRubricScore} from './evaluation/eval_rubrics.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
