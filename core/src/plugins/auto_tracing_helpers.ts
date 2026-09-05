@@ -170,8 +170,14 @@ export function createCaps(bounds: Partial<Caps> = {}): Caps {
   };
 }
 
+/** The tag {@link safeRepr} recognizes a {@link StreamResult} by. */
+const STREAM_RESULT_TAG = 'StreamResult';
+
 /** Capped sample plus true yield count for a wrapped generator. */
 export class StreamResult {
+  /** Realm-safe brand, so the renderer need not use `instanceof`. */
+  readonly [Symbol.toStringTag] = STREAM_RESULT_TAG;
+
   constructor(
     private readonly items: readonly unknown[],
     private readonly caps: Caps,
@@ -366,6 +372,11 @@ function renderObject(
 ): string {
   if (isCredentialLike(value)) {
     return `<${typeLabel(value)}>`;
+  }
+  if (hasTag(value, STREAM_RESULT_TAG)) {
+    // Its own rendering already puts every sampled item through safeRepr, so
+    // describing it field by field would only restate the count it reports.
+    return String(value);
   }
   state.nodes -= 1;
   if (state.nodes < 0 || depth >= MAX_RENDER_DEPTH || state.active.has(value)) {
@@ -608,13 +619,19 @@ function invoke<R>(
   return fn.apply(thisArg, args);
 }
 
-function markWrapper(
+/**
+ * Names and marks a wrapper, then reports it under the wrapped function's own
+ * type. The assertion is the one place the signature is restated: a wrapper
+ * forwards every argument and every result untouched, so it behaves as `F`,
+ * but `F` is opaque to the generic body that builds it.
+ */
+function markWrapper<F extends TracedFunction>(
   wrapper: TracedFunction,
-  fn: TracedFunction,
-): TracedFunction {
+  fn: F,
+): F {
   Object.defineProperty(wrapper, 'name', {value: fn.name, configurable: true});
   Object.defineProperty(wrapper, AUTO_TRACING_WRAPPED, {value: true});
-  return wrapper;
+  return wrapper as F;
 }
 
 /** Whether `value` is a function this module has already wrapped. */
@@ -631,12 +648,12 @@ export function isTraced(value: unknown): boolean {
  * non-recording tracer gets `fn` back unchanged, so nothing pays for a span
  * that will never be exported.
  */
-export function buildTracingWrapper(params: {
-  fn: TracedFunction;
+export function buildTracingWrapper<F extends TracedFunction>(params: {
+  fn: F;
   tracer: Tracer;
   caps: Caps;
   ownerName?: string;
-}): TracedFunction {
+}): F {
   const {fn, tracer, caps, ownerName} = params;
   if (!tracerWillRecord(tracer)) {
     return fn;
