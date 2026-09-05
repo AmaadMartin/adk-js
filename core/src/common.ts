@@ -150,6 +150,7 @@ export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
+export {NotImplementedError} from './errors/not_implemented_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
@@ -197,7 +198,10 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {addEventsToMemory, addMemory} from './memory/base_memory_service.js';
 export type {
+  AddEventsToMemoryRequest,
+  AddMemoryRequest,
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
