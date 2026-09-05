@@ -21,12 +21,6 @@ export const DEFAULT_MAX_VARCHAR_LENGTH = 256;
 /** Fractional-second digits a timestamp column keeps. */
 const TIMESTAMP_FRACTIONAL_DIGITS = 6;
 
-/** How a backend spells a timestamp column that keeps a time zone. */
-const TIME_ZONE_AWARE_TIMESTAMP = 'timestamptz';
-
-/** How the same backend spells the timezone-naive column. */
-const NAIVE_TIMESTAMP = 'timestamp';
-
 /**
  * Rewrites a timestamp declaration that keeps a time zone into the naive one.
  *
@@ -44,9 +38,7 @@ const NAIVE_TIMESTAMP = 'timestamp';
  * @returns The declaration, with any time zone dropped.
  */
 function withoutTimeZone(declaration: string): string {
-  return declaration.startsWith(TIME_ZONE_AWARE_TIMESTAMP)
-    ? NAIVE_TIMESTAMP + declaration.slice(TIME_ZONE_AWARE_TIMESTAMP.length)
-    : declaration;
+  return declaration.replace(/^timestamptz/, 'timestamp');
 }
 
 /**

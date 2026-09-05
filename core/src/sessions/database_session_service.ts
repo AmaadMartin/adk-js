@@ -453,11 +453,6 @@ export class DatabaseSessionService extends BaseSessionService {
     this.legacySchema = true;
   }
 
-  /** The event entity registered for the layout the open database holds. */
-  private eventEntity(): StorageEventEntity {
-    return this.legacySchema ? StorageEventV0 : StorageEvent;
-  }
-
   async createSession({
     appName,
     userId,
@@ -884,13 +879,8 @@ export class DatabaseSessionService extends BaseSessionService {
       }
       session.lastUpdateTime = storageUpdateTime;
     } else if (storageUpdateTime !== session.lastUpdateTime) {
-      if (
-        !(await sessionMatchesStorageRevision(
-          txEm,
-          this.eventEntity(),
-          session,
-        ))
-      ) {
+      const eventEntity = this.legacySchema ? StorageEventV0 : StorageEvent;
+      if (!(await sessionMatchesStorageRevision(txEm, eventEntity, session))) {
         throw new StaleSessionError(STALE_SESSION_ERROR_MESSAGE);
       }
       session.lastUpdateTime = storageUpdateTime;
