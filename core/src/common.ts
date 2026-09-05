@@ -801,6 +801,13 @@ export {
 export {GlobalInstructionPlugin} from './plugins/global_instruction_plugin.js';
 export {LoggingPlugin} from './plugins/logging_plugin.js';
 export {
+  MultimodalToolResultsPlugin,
+  PARTS_RETURNED_BY_TOOLS_ID,
+  SESSION_PARTS_RETURNED_BY_TOOLS_ID,
+  type MultimodalToolResultsPluginOptions,
+  type MultimodalToolResultsRetention,
+} from './plugins/multimodal_tool_results_plugin.js';
+export {
   DEFAULT_PLUGIN_CLOSE_TIMEOUT_SECONDS,
   PluginManager,
 } from './plugins/plugin_manager.js';
