@@ -122,6 +122,18 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Releases the resources this plugin holds, such as network connections or
+   * file handles.
+   *
+   * `PluginManager.close()` calls this once for every registered plugin. The
+   * default does nothing, so a plugin that holds no resource needs no
+   * override. An override must be idempotent.
+   */
+  async close(): Promise<void> {
+    return;
+  }
+
+  /**
    * Callback executed when a user message is received before an invocation
    * starts.
    *
@@ -480,6 +492,23 @@ export abstract class BasePlugin {
     toolContext: Context;
     error: Error;
   }): Promise<Record<string, unknown> | undefined> {
+    return;
+  }
+
+  /**
+   * Callback executed when an error escapes a runner invocation.
+   *
+   * This callback only notifies. The runner re-throws the error once every
+   * registered plugin is notified, so a plugin cannot suppress it.
+   *
+   * @param params.invocationContext The context for the entire invocation.
+   * @param params.error The error raised during the invocation.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async onRunErrorCallback(params: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
     return;
   }
 }
