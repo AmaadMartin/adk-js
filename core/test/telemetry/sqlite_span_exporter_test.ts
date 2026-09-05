@@ -4,551 +4,944 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/**
- * The adk-python test suite for `SqliteSpanExporter`, ported test for test.
- *
- * Source: `tests/unittests/telemetry/test_sqlite_span_exporter.py` on
- * google/adk-python `main`. Every `it(...)` keeps the Python function name
- * verbatim so that either suite can be found from the other by name. The
- * adk-js-specific cases live in `sqlite_span_exporter_adk_js_test.ts`.
- *
- * Three assertions could not be ported literally, and each says why at the
- * test: `test_shutdown_closes_connection` (the reference reads a private
- * field), `test_export_handles_spans_with_none_attributes` and
- * `test_deserialize_handles_invalid_json` (the reference calls a private
- * query helper), and `test_non_serializable_attributes_use_fallback` (JS has
- * no unserializable `AttributeValue`).
- */
-
-import {SqliteSpanExporter} from '@google/adk';
-import {MikroORM, RequiredEntityData} from '@mikro-orm/core';
-import {SqliteDriver} from '@mikro-orm/sqlite';
 import {
-  Attributes,
-  HrTime,
-  SpanKind,
-  SpanStatusCode,
-  TraceFlags,
-} from '@opentelemetry/api';
+  getLogger,
+  Logger,
+  LogLevel,
+  setLogger,
+  SqliteSpanExporter,
+} from '@google/adk';
+import {Attributes, context, HrTime, trace} from '@opentelemetry/api';
 import {ExportResult, ExportResultCode} from '@opentelemetry/core';
-import {emptyResource} from '@opentelemetry/resources';
-import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
+import {
+  BasicTracerProvider,
+  SimpleSpanProcessor,
+} from '@opentelemetry/sdk-trace-base';
 import {existsSync} from 'node:fs';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {ensureDatabaseCreated} from '../../src/sessions/db/operations.js';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {StorageSpan} from '../../src/telemetry/db/schema.js';
+import {describeError} from '../../src/telemetry/sqlite_span_exporter.js';
+import type * as optionalPeer from '../../src/utils/optional_peer.js';
+import type {OptionalPeer} from '../../src/utils/optional_peer.js';
+import {
+  CONVERSATION_ID_ATTRIBUTE,
+  createReadableSpan,
+  exportSpans,
+  SESSION_ID_ATTRIBUTE,
+  withDatabase,
+} from './sqlite_span_exporter_test_utils.js';
 
-const SESSION_ID_ATTRIBUTE = 'gcp.vertex.agent.session_id';
-const INVOCATION_ID_ATTRIBUTE = 'gcp.vertex.agent.invocation_id';
-const CONVERSATION_ID_ATTRIBUTE = 'gen_ai.conversation.id';
+const OPTIONAL_PEER_MODULE = '../../src/utils/optional_peer.js';
 
-const DEFAULT_SPAN_ID = 0x00000000000abc12;
-const DEFAULT_TRACE_ID = 0x000000000000000000000000000def45;
+/** Collects everything ADK logs, so tests can assert on it. */
+class RecordingLogger implements Logger {
+  readonly lines: string[] = [];
 
-/**
- * The reference's `trace_id=0xABCDEF123456789`, written out.
- *
- * Python integers are arbitrary precision; this one is above
- * `Number.MAX_SAFE_INTEGER`, so a JS numeric literal would round it.
- */
-const ROUND_TRIP_TRACE_ID = '00000000000000000abcdef123456789';
-
-/**
- * Formats a numeric id as OpenTelemetry JS models it.
- *
- * The reference writes `format(span_id, '016x')` on the way to the database,
- * so the same literals produce the same bytes on disk. Keeping the numeric
- * literals here keeps each test readable against its Python original.
- */
-function spanId(value: number): string {
-  return value.toString(16).padStart(16, '0');
-}
-
-function traceId(value: number): string {
-  return value.toString(16).padStart(32, '0');
-}
-
-/** Python's `start_time=1000`: an epoch nanosecond count as an `HrTime`. */
-function unixNanos(nanos: number): HrTime {
-  return [0, nanos];
-}
-
-interface CreateSpanOptions {
-  spanId?: string;
-  traceId?: string;
-  parentSpanId?: string;
-  name?: string;
-  attributes?: Attributes;
-  startTime?: HrTime;
-  endTime?: HrTime;
+  log(level: LogLevel, ...args: unknown[]): void {
+    this.lines.push(args.map(String).join(' '));
+  }
+  debug(...args: unknown[]): void {
+    this.log(LogLevel.DEBUG, ...args);
+  }
+  info(...args: unknown[]): void {
+    this.log(LogLevel.INFO, ...args);
+  }
+  warn(...args: unknown[]): void {
+    this.log(LogLevel.WARN, ...args);
+  }
+  error(...args: unknown[]): void {
+    this.log(LogLevel.ERROR, ...args);
+  }
+  setLogLevel(): void {}
 }
 
 /**
- * The reference's `_create_span` helper.
- *
- * Every `ReadableSpan` field is populated, so the literal satisfies the
- * interface on its own and no cast is needed.
+ * The data definition from `sqlite_span_exporter.py` in `google/adk-python`,
+ * reproduced verbatim so these tests read a file adk-python could have written.
  */
-function createReadableSpan(options: CreateSpanOptions = {}): ReadableSpan {
-  const {
-    spanId: id = spanId(DEFAULT_SPAN_ID),
-    traceId: trace = traceId(DEFAULT_TRACE_ID),
-    parentSpanId,
-    name = 'test_span',
-    attributes = {},
-    startTime = unixNanos(1000),
-    endTime = unixNanos(2000),
-  } = options;
+const PYTHON_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS spans (
+     span_id TEXT PRIMARY KEY,
+     trace_id TEXT NOT NULL,
+     parent_span_id TEXT,
+     name TEXT NOT NULL,
+     start_time_unix_nano INTEGER,
+     end_time_unix_nano INTEGER,
+     session_id TEXT,
+     invocation_id TEXT,
+     attributes_json TEXT
+   )`,
+  'CREATE INDEX IF NOT EXISTS spans_session_id_idx ON spans(session_id)',
+  'CREATE INDEX IF NOT EXISTS spans_trace_id_idx ON spans(trace_id)',
+];
 
-  const spanContext = {
-    traceId: trace,
-    spanId: id,
-    traceFlags: TraceFlags.SAMPLED,
-    isRemote: false,
-  };
+/** A wall-clock epoch nanosecond value, far above `Number.MAX_SAFE_INTEGER`. */
+const PYTHON_START_NANOS = '1788563807232000000';
 
-  return {
-    name,
-    kind: SpanKind.INTERNAL,
-    spanContext: () => spanContext,
-    parentSpanContext: parentSpanId
-      ? {...spanContext, spanId: parentSpanId}
-      : undefined,
-    startTime,
-    endTime,
-    duration: [0, endTime[1] - startTime[1]],
-    status: {code: SpanStatusCode.UNSET},
-    attributes,
-    links: [],
-    events: [],
-    ended: true,
-    resource: emptyResource(),
-    instrumentationScope: {name: 'test', version: '0.0.0'},
-    droppedAttributesCount: 0,
-    droppedEventsCount: 0,
-    droppedLinksCount: 0,
-  };
+interface PythonSpanRow {
+  spanId: string;
+  traceId: string;
+  name: string;
+  startTimeUnixNano: string;
+  sessionId: string;
+  attributesJson: string;
 }
 
-/** Promisified `export`, since the JS interface reports through a callback. */
-function exportSpans(
-  exporter: SqliteSpanExporter,
-  spans: ReadableSpan[],
-): Promise<ExportResult> {
-  return new Promise<ExportResult>((resolve) => {
-    exporter.export(spans, resolve);
+/** Creates the adk-python table at `dbPath` and inserts one span row into it. */
+async function seedPythonDatabase(
+  dbPath: string,
+  row: PythonSpanRow,
+): Promise<void> {
+  await withDatabase(dbPath, async (orm) => {
+    const execute = (sql: string, params?: unknown[]) =>
+      orm.em.getConnection().execute(sql, params);
+    for (const statement of PYTHON_SCHEMA_SQL) {
+      await execute(statement);
+    }
+    await execute(
+      `INSERT OR REPLACE INTO spans (span_id, trace_id, parent_span_id, name,
+         start_time_unix_nano, end_time_unix_nano, session_id, invocation_id,
+         attributes_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.spanId,
+        row.traceId,
+        null,
+        row.name,
+        row.startTimeUnixNano,
+        row.startTimeUnixNano,
+        row.sessionId,
+        null,
+        row.attributesJson,
+      ],
+    );
   });
 }
 
-describe('SqliteSpanExporter ported from adk-python', () => {
+/**
+ * Reads the stored spans the way adk-python does, oldest first.
+ *
+ * The timestamp is cast to text because the driver rounds an integer column to
+ * a JavaScript double, which cannot hold epoch nanoseconds.
+ */
+async function readPythonDatabase(
+  dbPath: string,
+): Promise<Array<{spanId: string; startTimeUnixNano: string}>> {
+  return withDatabase(dbPath, async (orm) => {
+    const rows = await orm.em.getConnection().execute(
+      `SELECT span_id, cast(start_time_unix_nano as text) AS nanos
+         FROM spans ORDER BY span_id`,
+    );
+    if (!Array.isArray(rows)) {
+      expect.fail('expected the raw query to return rows');
+    }
+    return rows.map((row) => {
+      const {span_id: spanId, nanos} = row as {span_id: string; nanos: string};
+      return {spanId, startTimeUnixNano: nanos};
+    });
+  });
+}
+
+/** Converts an OpenTelemetry `HrTime` to epoch nanoseconds. */
+function hrTimeToNanos(hrTime: HrTime): bigint {
+  return BigInt(hrTime[0]) * 1_000_000_000n + BigInt(hrTime[1]);
+}
+
+describe('SqliteSpanExporter', () => {
   let tempDir: string;
   let dbPath: string;
-  let exporter: SqliteSpanExporter;
+  let exporters: SqliteSpanExporter[];
+
+  function createExporter(path = dbPath): SqliteSpanExporter {
+    const exporter = new SqliteSpanExporter({dbPath: path});
+    exporters.push(exporter);
+    return exporter;
+  }
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'adk-sqlite-span-exporter-ref-'));
+    tempDir = await mkdtemp(join(tmpdir(), 'adk-sqlite-span-exporter-'));
     dbPath = join(tempDir, 'test.db');
-    exporter = new SqliteSpanExporter({dbPath});
+    exporters = [];
   });
 
   afterEach(async () => {
-    await exporter.shutdown();
+    for (const exporter of exporters) {
+      await exporter.shutdown();
+    }
     await rm(tempDir, {recursive: true, force: true});
   });
 
-  /** Reads the rows the exporter wrote, through a connection of its own. */
-  async function readRows(): Promise<StorageSpan[]> {
-    const orm = await MikroORM.init({
-      dbName: dbPath,
-      driver: SqliteDriver,
-      entities: [StorageSpan],
-    });
-    try {
-      return await orm.em.fork().find(StorageSpan, {});
-    } finally {
-      await orm.close();
-    }
-  }
+  describe('export', () => {
+    it('returns success for a single span and creates the database file', async () => {
+      const exporter = createExporter();
 
-  /** Writes a row the exporter would never produce, bypassing the mapper. */
-  async function writeRow(row: RequiredEntityData<StorageSpan>): Promise<void> {
-    const orm = await MikroORM.init({
-      dbName: dbPath,
-      driver: SqliteDriver,
-      entities: [StorageSpan],
-    });
-    try {
-      // The exporter opens the database lazily, so the table may not exist
-      // yet. The reference's constructor creates it eagerly.
-      await ensureDatabaseCreated(orm);
-      const em = orm.em.fork();
-      em.create(StorageSpan, row);
-      await em.flush();
-    } finally {
-      await orm.close();
-    }
-  }
+      const result = await exportSpans(exporter, [
+        createReadableSpan({
+          name: 'test_operation',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
+        }),
+      ]);
 
-  it('test_export_single_span_returns_success', async () => {
-    const span = createReadableSpan({
-      name: 'test_operation',
-      attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      expect(existsSync(dbPath)).toBe(true);
     });
 
-    const result = await exportSpans(exporter, [span]);
+    it('returns success for an empty batch without touching the database', async () => {
+      const exporter = createExporter();
 
-    expect(result.code).toBe(ExportResultCode.SUCCESS);
-    expect(existsSync(dbPath)).toBe(true);
+      const result = await exportSpans(exporter, []);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      expect(existsSync(dbPath)).toBe(false);
+    });
+
+    it('persists every span of a batch', async () => {
+      const exporter = createExporter();
+      const spans = Array.from({length: 10}, (_, i) =>
+        createReadableSpan({
+          spanId: `000000000000000${i}`,
+          name: `span_${i}`,
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'batch-session'},
+        }),
+      );
+
+      const result = await exportSpans(exporter, spans);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      const retrieved = await exporter.getAllSpansForSession('batch-session');
+      expect(retrieved.map((span) => span.name).sort()).toEqual(
+        spans.map((span) => span.name).sort(),
+      );
+    });
+
+    it('stores an empty attributes object as an empty JSON object', async () => {
+      const exporter = createExporter();
+
+      await exportSpans(exporter, [
+        createReadableSpan({
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-empty'},
+        }),
+      ]);
+
+      const [retrieved] = await exporter.getAllSpansForSession('session-empty');
+      expect(retrieved.attributes).toEqual({
+        [SESSION_ID_ATTRIBUTE]: 'session-empty',
+      });
+    });
+
+    it('replaces the previous row when the same span id is exported twice', async () => {
+      const exporter = createExporter();
+      const attributes = {[SESSION_ID_ATTRIBUTE]: 'session-dup'};
+
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000000000999',
+          name: 'first_version',
+          attributes: {...attributes, version: 1},
+        }),
+      ]);
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000000000999',
+          name: 'second_version',
+          attributes: {...attributes, version: 2},
+        }),
+      ]);
+
+      const retrieved = await exporter.getAllSpansForSession('session-dup');
+      expect(retrieved).toHaveLength(1);
+      expect(retrieved[0].name).toBe('second_version');
+      expect(retrieved[0].attributes['version']).toBe(2);
+    });
+
+    it('keeps the last version of a span id repeated within one batch', async () => {
+      const exporter = createExporter();
+      const attributes = {[SESSION_ID_ATTRIBUTE]: 'session-batch-dup'};
+
+      const result = await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000000000abc',
+          name: 'first',
+          attributes,
+        }),
+        createReadableSpan({
+          spanId: '0000000000000def',
+          name: 'other',
+          attributes,
+        }),
+        createReadableSpan({
+          spanId: '0000000000000abc',
+          name: 'middle',
+          attributes,
+        }),
+        createReadableSpan({
+          spanId: '0000000000000abc',
+          name: 'last',
+          attributes,
+        }),
+      ]);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      const retrieved =
+        await exporter.getAllSpansForSession('session-batch-dup');
+      expect(retrieved.map((span) => span.name).sort()).toEqual([
+        'last',
+        'other',
+      ]);
+    });
+
+    it('indexes a span that only carries the conversation id attribute', async () => {
+      const exporter = createExporter();
+
+      await exportSpans(exporter, [
+        createReadableSpan({
+          attributes: {[CONVERSATION_ID_ATTRIBUTE]: 'conv-session-123'},
+        }),
+      ]);
+
+      const retrieved =
+        await exporter.getAllSpansForSession('conv-session-123');
+      expect(retrieved).toHaveLength(1);
+      expect(retrieved[0].attributes[CONVERSATION_ID_ATTRIBUTE]).toBe(
+        'conv-session-123',
+      );
+    });
+
+    it('prefers the session id attribute over the conversation id attribute', async () => {
+      const exporter = createExporter();
+
+      await exportSpans(exporter, [
+        createReadableSpan({
+          attributes: {
+            [SESSION_ID_ATTRIBUTE]: 'session-preferred',
+            [CONVERSATION_ID_ATTRIBUTE]: 'conv-ignored',
+          },
+        }),
+      ]);
+
+      expect(
+        await exporter.getAllSpansForSession('session-preferred'),
+      ).toHaveLength(1);
+      expect(await exporter.getAllSpansForSession('conv-ignored')).toEqual([]);
+    });
+
+    it('stores a span whose session id attribute is not a string without indexing it', async () => {
+      const exporter = createExporter();
+
+      const result = await exportSpans(exporter, [
+        createReadableSpan({
+          traceId: '000000000000000000000000000000aa',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 42},
+        }),
+      ]);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      expect(await exporter.getAllSpansForSession('42')).toEqual([]);
+    });
+
+    it('reports failure without throwing when the database file is not a database', async () => {
+      const corruptPath = join(tempDir, 'corrupt.db');
+      await writeFile(corruptPath, 'not a database');
+      const exporter = createExporter(corruptPath);
+
+      const result = await exportSpans(exporter, [createReadableSpan()]);
+
+      expect(result.code).toBe(ExportResultCode.FAILED);
+      expect(result.error?.message).toContain(
+        'Failed to export spans to SQLite',
+      );
+
+      // The failed open must not leave the file handle behind: Windows refuses
+      // to unlink a file that is still open.
+      await exporter.shutdown();
+      await expect(rm(corruptPath)).resolves.toBeUndefined();
+    });
+
+    it('reopens the database on the next export once the fault is cleared', async () => {
+      const corruptPath = join(tempDir, 'retry.db');
+      await writeFile(corruptPath, 'not a database');
+      const exporter = createExporter(corruptPath);
+      const span = createReadableSpan({
+        attributes: {[SESSION_ID_ATTRIBUTE]: 'session-retry'},
+      });
+
+      const failed = await exportSpans(exporter, [span]);
+      expect(failed.code).toBe(ExportResultCode.FAILED);
+
+      // Clearing the fault must be enough: a memoized failure would keep
+      // reporting FAILED forever.
+      await rm(corruptPath);
+      const retried = await exportSpans(exporter, [span]);
+
+      expect(retried.code).toBe(ExportResultCode.SUCCESS);
+      expect(
+        await exporter.getAllSpansForSession('session-retry'),
+      ).toHaveLength(1);
+    });
+
+    it('reports a failure without logging the span payload that caused it', async () => {
+      const strictPath = join(tempDir, 'strict.db');
+      // A NOT NULL column the exporter does not know about makes every insert
+      // fail, and safe-mode schema updates never drop it.
+      await withDatabase(strictPath, (orm) =>
+        orm.em
+          .getConnection()
+          .execute(
+            'create table `spans` (`span_id` text not null, `trace_id` text ' +
+              'not null, `name` text not null, `extra_required` text not ' +
+              'null, primary key (`span_id`))',
+          ),
+      );
+
+      const recorder = new RecordingLogger();
+      const previousLogger = getLogger();
+      setLogger(recorder);
+      let result: ExportResult;
+      try {
+        result = await exportSpans(createExporter(strictPath), [
+          createReadableSpan({
+            attributes: {
+              [SESSION_ID_ATTRIBUTE]: 'session-secret',
+              'gcp.vertex.agent.llm_request': 'SUPER_SECRET_PROMPT',
+            },
+          }),
+        ]);
+      } finally {
+        setLogger(previousLogger);
+      }
+
+      expect(result.code).toBe(ExportResultCode.FAILED);
+      expect(recorder.lines).toEqual([
+        'Failed to export spans to SQLite: NotNullConstraintViolationException (SQLITE_CONSTRAINT)',
+      ]);
+      // OpenTelemetry stringifies every property it can reach on this error,
+      // `cause` included, so none of them may carry the attributes.
+      expect(result.error?.cause).toBeUndefined();
+      for (const property of Object.getOwnPropertyNames(result.error)) {
+        expect(
+          String(Reflect.get(Object(result.error), property)),
+        ).not.toContain('SUPER_SECRET_PROMPT');
+      }
+    });
+
+    it('initializes once when two exports are issued concurrently', async () => {
+      const exporter = createExporter();
+      const attributes = {[SESSION_ID_ATTRIBUTE]: 'session-concurrent'};
+
+      const results = await Promise.all([
+        exportSpans(exporter, [
+          createReadableSpan({spanId: '0000000000000001', attributes}),
+        ]),
+        exportSpans(exporter, [
+          createReadableSpan({spanId: '0000000000000002', attributes}),
+        ]),
+      ]);
+
+      expect(results.map((result) => result.code)).toEqual([
+        ExportResultCode.SUCCESS,
+        ExportResultCode.SUCCESS,
+      ]);
+      expect(
+        await exporter.getAllSpansForSession('session-concurrent'),
+      ).toHaveLength(2);
+    });
   });
 
-  it('test_export_empty_list_returns_success', async () => {
-    const result = await exportSpans(exporter, []);
+  describe('getAllSpansForSession', () => {
+    it('returns only the spans of the requested session', async () => {
+      const exporter = createExporter();
 
-    expect(result.code).toBe(ExportResultCode.SUCCESS);
-  });
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000000000111',
+          traceId: '00000000000000000000000000aaa111',
+          name: 'span1',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
+        }),
+        createReadableSpan({
+          spanId: '0000000000000222',
+          traceId: '00000000000000000000000000aaa222',
+          name: 'span2',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
+        }),
+        createReadableSpan({
+          spanId: '0000000000000333',
+          traceId: '00000000000000000000000000bbb333',
+          name: 'span3',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-456'},
+        }),
+      ]);
 
-  it('test_get_all_spans_for_session_returns_matching_spans', async () => {
-    const span1 = createReadableSpan({
-      spanId: spanId(0x111),
-      traceId: traceId(0xaaa111),
-      attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
-      name: 'span1',
-    });
-    const span2 = createReadableSpan({
-      spanId: spanId(0x222),
-      traceId: traceId(0xaaa222),
-      attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
-      name: 'span2',
-    });
-    const span3 = createReadableSpan({
-      spanId: spanId(0x333),
-      traceId: traceId(0xbbb333),
-      attributes: {[SESSION_ID_ATTRIBUTE]: 'session-456'},
-      name: 'span3',
-    });
-
-    await exportSpans(exporter, [span1, span2, span3]);
-
-    const result = await exporter.getAllSpansForSession('session-123');
-
-    expect(result).toHaveLength(2);
-    const names = result.map((span) => span.name);
-    expect(names).toContain('span1');
-    expect(names).toContain('span2');
-    expect(names).not.toContain('span3');
-  });
-
-  it('test_get_all_spans_for_session_includes_sibling_spans_without_session_id', async () => {
-    const parentSpan = createReadableSpan({
-      spanId: spanId(0x100),
-      traceId: traceId(0xaaa),
-      name: 'invocation',
-      attributes: {},
-    });
-    const childSpan = createReadableSpan({
-      spanId: spanId(0x200),
-      traceId: traceId(0xaaa),
-      parentSpanId: spanId(0x100),
-      name: 'call_llm',
-      attributes: {[SESSION_ID_ATTRIBUTE]: 'session-789'},
-    });
-    const siblingSpan = createReadableSpan({
-      spanId: spanId(0x300),
-      traceId: traceId(0xaaa),
-      parentSpanId: spanId(0x100),
-      name: 'tool_call',
-      attributes: {},
-    });
-    const unrelatedSpan = createReadableSpan({
-      spanId: spanId(0x400),
-      traceId: traceId(0xbbb),
-      name: 'unrelated',
-      attributes: {},
+      const names = (await exporter.getAllSpansForSession('session-123')).map(
+        (span) => span.name,
+      );
+      expect(names.sort()).toEqual(['span1', 'span2']);
     });
 
-    await exportSpans(exporter, [
-      parentSpan,
-      childSpan,
-      siblingSpan,
-      unrelatedSpan,
-    ]);
+    it('includes trace siblings that carry no session id', async () => {
+      const exporter = createExporter();
+      const traceId = '00000000000000000000000000000aaa';
 
-    const result = await exporter.getAllSpansForSession('session-789');
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000000000100',
+          traceId,
+          name: 'invocation',
+        }),
+        createReadableSpan({
+          spanId: '0000000000000200',
+          traceId,
+          parentSpanId: '0000000000000100',
+          name: 'call_llm',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-789'},
+        }),
+        createReadableSpan({
+          spanId: '0000000000000300',
+          traceId,
+          parentSpanId: '0000000000000100',
+          name: 'tool_call',
+        }),
+        createReadableSpan({
+          spanId: '0000000000000400',
+          traceId: '00000000000000000000000000000bbb',
+          name: 'unrelated',
+        }),
+      ]);
 
-    expect(result).toHaveLength(3);
-    const names = result.map((span) => span.name);
-    expect(names).toContain('invocation');
-    expect(names).toContain('call_llm');
-    expect(names).toContain('tool_call');
-    expect(names).not.toContain('unrelated');
-  });
-
-  it('test_get_all_spans_for_unknown_session_returns_empty_list', async () => {
-    await exportSpans(exporter, [
-      createReadableSpan({
-        attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
-      }),
-    ]);
-
-    const result = await exporter.getAllSpansForSession('unknown-session');
-
-    expect(result).toEqual([]);
-  });
-
-  it('test_round_trip_preserves_span_attributes', async () => {
-    // The reference also round-trips `"dict.value": {"nested": "data"}`.
-    // OpenTelemetry JS types an attribute as a primitive or an array of one,
-    // so a nested object cannot be set here and is covered instead by the
-    // dropped-entry case in `db/span_mapper_test.ts`.
-    const originalAttributes: Attributes = {
-      [SESSION_ID_ATTRIBUTE]: 'session-123',
-      [INVOCATION_ID_ATTRIBUTE]: 'invocation-456',
-      [CONVERSATION_ID_ATTRIBUTE]: 'conv-789',
-      'custom.attribute': 'test_value',
-      'numeric.value': 42,
-      'boolean.value': true,
-      'list.value': [1, 2, 3],
-    };
-
-    const originalSpan = createReadableSpan({
-      spanId: spanId(0x12345678),
-      traceId: ROUND_TRIP_TRACE_ID,
-      name: 'test_operation',
-      attributes: originalAttributes,
-      startTime: unixNanos(1000000),
-      endTime: unixNanos(2000000),
+      const names = (await exporter.getAllSpansForSession('session-789')).map(
+        (span) => span.name,
+      );
+      expect(names.sort()).toEqual(['call_llm', 'invocation', 'tool_call']);
     });
 
-    await exportSpans(exporter, [originalSpan]);
+    it('returns an empty array for an unknown session', async () => {
+      const exporter = createExporter();
 
-    const retrievedSpans = await exporter.getAllSpansForSession('session-123');
+      await exportSpans(exporter, [
+        createReadableSpan({
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-123'},
+        }),
+      ]);
 
-    expect(retrievedSpans).toHaveLength(1);
-    const retrieved = retrievedSpans[0];
-
-    expect(retrieved.name).toBe('test_operation');
-    expect(retrieved.spanContext().spanId).toBe(spanId(0x12345678));
-    expect(retrieved.spanContext().traceId).toBe(ROUND_TRIP_TRACE_ID);
-    expect(retrieved.startTime).toEqual(unixNanos(1000000));
-    expect(retrieved.endTime).toEqual(unixNanos(2000000));
-    expect(retrieved.attributes).toEqual(originalAttributes);
-  });
-
-  it('test_spans_with_parent_context_exported_correctly', async () => {
-    const parentSpan = createReadableSpan({
-      spanId: spanId(0xaaa),
-      traceId: traceId(0x123),
-      name: 'parent',
-      attributes: {[SESSION_ID_ATTRIBUTE]: 'session-001'},
-    });
-    const childSpan = createReadableSpan({
-      spanId: spanId(0xbbb),
-      traceId: traceId(0x123),
-      parentSpanId: spanId(0xaaa),
-      name: 'child',
-      attributes: {[SESSION_ID_ATTRIBUTE]: 'session-001'},
+      expect(await exporter.getAllSpansForSession('unknown-session')).toEqual(
+        [],
+      );
     });
 
-    await exportSpans(exporter, [parentSpan, childSpan]);
+    it('preserves name, ids, timestamps and attributes across a round trip', async () => {
+      const exporter = createExporter();
+      const attributes: Attributes = {
+        [SESSION_ID_ATTRIBUTE]: 'session-123',
+        'gcp.vertex.agent.invocation_id': 'invocation-456',
+        [CONVERSATION_ID_ATTRIBUTE]: 'conv-789',
+        'custom.attribute': 'test_value',
+        'numeric.value': 42,
+        'boolean.value': true,
+        'list.value': ['a', 'b'],
+      };
 
-    const retrievedSpans = await exporter.getAllSpansForSession('session-001');
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000012345678',
+          traceId: '0000000000000000000abcdef1234567',
+          name: 'test_operation',
+          attributes,
+          startTime: [1, 500],
+          endTime: [2, 750],
+        }),
+      ]);
 
-    expect(retrievedSpans).toHaveLength(2);
-
-    const child = retrievedSpans.find((span) => span.name === 'child');
-    const parent = retrievedSpans.find((span) => span.name === 'parent');
-    if (!child || !parent) {
-      expect.fail('expected both the parent and the child span');
-    }
-    // The reference reads `child.parent`; OpenTelemetry JS 2.x renamed the
-    // field to `parentSpanContext`.
-    expect(child.parentSpanContext?.spanId).toBe(spanId(0xaaa));
-    expect(child.parentSpanContext?.traceId).toBe(traceId(0x123));
-    expect(parent.parentSpanContext).toBeUndefined();
-  });
-
-  it('test_shutdown_closes_connection', async () => {
-    await exportSpans(exporter, [
-      createReadableSpan({
-        attributes: {[SESSION_ID_ATTRIBUTE]: 'session-close'},
-      }),
-    ]);
-
-    // The reference asserts `exporter._conn is None`. Reaching a private
-    // member from a test is not allowed here, so this pins the behaviour that
-    // field exists for: the connection is released, and a later call reopens
-    // it lazily.
-    await expect(exporter.shutdown()).resolves.toBeUndefined();
-    await expect(exporter.shutdown()).resolves.toBeUndefined();
-
-    const reopened = await exporter.getAllSpansForSession('session-close');
-    expect(reopened).toHaveLength(1);
-  });
-
-  it('test_force_flush_returns_true', async () => {
-    // `SpanExporter.forceFlush` returns `Promise<void>` in OpenTelemetry JS
-    // and takes no timeout, so resolving is the whole contract.
-    await expect(exporter.forceFlush()).resolves.toBeUndefined();
-  });
-
-  it('test_export_handles_spans_with_none_attributes', async () => {
-    // `ReadableSpan.attributes` is not nullable in OpenTelemetry JS, so the
-    // empty object is the analogue of the reference's `attributes=None`.
-    const span = createReadableSpan({attributes: {}});
-
-    const result = await exportSpans(exporter, [span]);
-
-    expect(result.code).toBe(ExportResultCode.SUCCESS);
-
-    // The reference reads the row through the private `_query`. Reading it
-    // through a separate connection asserts the on-disk schema instead, which
-    // is the contract shared with adk-python.
-    await exporter.shutdown();
-    const rows = await readRows();
-    expect(rows).toHaveLength(1);
-    expect(JSON.parse(rows[0].attributesJson ?? '')).toEqual({});
-  });
-
-  it('test_duplicate_span_id_replaces_previous_row', async () => {
-    await exportSpans(exporter, [
-      createReadableSpan({
-        spanId: spanId(0x999),
-        name: 'first_version',
-        attributes: {version: 1, [SESSION_ID_ATTRIBUTE]: 'session-dup'},
-      }),
-    ]);
-
-    await exportSpans(exporter, [
-      createReadableSpan({
-        spanId: spanId(0x999),
-        name: 'second_version',
-        attributes: {version: 2, [SESSION_ID_ATTRIBUTE]: 'session-dup'},
-      }),
-    ]);
-
-    const retrievedSpans = await exporter.getAllSpansForSession('session-dup');
-    expect(retrievedSpans).toHaveLength(1);
-    expect(retrievedSpans[0].name).toBe('second_version');
-    expect(retrievedSpans[0].attributes['version']).toBe(2);
-  });
-
-  it('test_non_serializable_attributes_use_fallback', async () => {
-    // The reference builds an arbitrary Python object and expects the
-    // per-value sentinel `"<not serializable>"`. TypeScript has no
-    // unserializable `AttributeValue`, and `JSON.stringify` has no per-value
-    // substitution hook, so the JS analogue is a value that makes the whole
-    // encode throw. The exporter then stores `'{}'` for the span, which drops
-    // the siblings the reference would have kept.
-    const attributes: Attributes = {
-      [SESSION_ID_ATTRIBUTE]: 'session-nonser',
-      normal_attr: 'value',
-    };
-    Object.defineProperty(attributes, 'non_serializable', {
-      enumerable: true,
-      get(): string {
-        throw new TypeError('this value cannot be serialized');
-      },
+      const [retrieved] = await exporter.getAllSpansForSession('session-123');
+      expect(retrieved.name).toBe('test_operation');
+      expect(retrieved.spanContext().spanId).toBe('0000000012345678');
+      expect(retrieved.spanContext().traceId).toBe(
+        '0000000000000000000abcdef1234567',
+      );
+      expect(retrieved.startTime).toEqual([1, 500]);
+      expect(retrieved.endTime).toEqual([2, 750]);
+      expect(retrieved.duration).toEqual([1, 250]);
+      expect(retrieved.attributes).toEqual(attributes);
     });
 
-    const result = await exportSpans(exporter, [
-      createReadableSpan({attributes}),
-    ]);
+    it('preserves nanosecond precision beyond Number.MAX_SAFE_INTEGER', async () => {
+      const exporter = createExporter();
+      const startTime: HrTime = [1750000000, 123456789];
 
-    expect(result.code).toBe(ExportResultCode.SUCCESS);
+      await exportSpans(exporter, [
+        createReadableSpan({
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-precise'},
+          startTime,
+          endTime: [1750000001, 987654321],
+        }),
+      ]);
 
-    const retrievedSpans =
-      await exporter.getAllSpansForSession('session-nonser');
-    expect(retrievedSpans).toHaveLength(1);
-    expect(retrievedSpans[0].attributes).toEqual({});
+      const [retrieved] =
+        await exporter.getAllSpansForSession('session-precise');
+      expect(retrieved.startTime).toEqual(startTime);
+      expect(retrieved.endTime).toEqual([1750000001, 987654321]);
+    });
+
+    it('restores the parent span context of a child and leaves a root without one', async () => {
+      const exporter = createExporter();
+      const traceId = '00000000000000000000000000000123';
+      const attributes = {[SESSION_ID_ATTRIBUTE]: 'session-001'};
+
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000000000aaa',
+          traceId,
+          name: 'parent',
+          attributes,
+        }),
+        createReadableSpan({
+          spanId: '0000000000000bbb',
+          traceId,
+          parentSpanId: '0000000000000aaa',
+          name: 'child',
+          attributes,
+        }),
+      ]);
+
+      const retrieved = await exporter.getAllSpansForSession('session-001');
+      const child = retrieved.find((span) => span.name === 'child');
+      const parent = retrieved.find((span) => span.name === 'parent');
+      if (!child || !parent) {
+        expect.fail('expected both the parent and the child span');
+      }
+      expect(child.parentSpanContext?.spanId).toBe('0000000000000aaa');
+      expect(child.parentSpanContext?.traceId).toBe(traceId);
+      expect(parent.parentSpanContext).toBeUndefined();
+    });
+
+    it('orders spans numerically by start time', async () => {
+      const exporter = createExporter();
+      const attributes = {[SESSION_ID_ATTRIBUTE]: 'session-order'};
+
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '0000000000000300',
+          startTime: [1, 750000000],
+          attributes,
+        }),
+        createReadableSpan({
+          spanId: '0000000000000100',
+          startTime: [0, 999],
+          attributes,
+        }),
+        createReadableSpan({
+          spanId: '0000000000000200',
+          startTime: [1, 0],
+          attributes,
+        }),
+      ]);
+
+      const spanIds = (await exporter.getAllSpansForSession('session-order'))
+        .map((span) => span.spanContext().spanId)
+        .join(',');
+      expect(spanIds).toBe(
+        '0000000000000100,0000000000000200,0000000000000300',
+      );
+    });
+
+    it('tolerates a row written without timestamps or valid attributes', async () => {
+      const traceId = '000000000000000000000000000000ff';
+      const exporter = createExporter();
+      await exportSpans(exporter, [
+        createReadableSpan({
+          traceId,
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-raw'},
+        }),
+      ]);
+      await exporter.shutdown();
+
+      await withDatabase(dbPath, async (orm) => {
+        const em = orm.em.fork();
+        em.create(StorageSpan, {
+          spanId: '00000000000000ff',
+          traceId,
+          name: '',
+          sessionId: 'session-raw',
+          attributesJson: 'not valid json',
+        });
+        await em.flush();
+      });
+
+      const retrieved = await exporter.getAllSpansForSession('session-raw');
+      const raw = retrieved.find(
+        (span) => span.spanContext().spanId === '00000000000000ff',
+      );
+      if (!raw) {
+        expect.fail('expected the externally written row to be returned');
+      }
+      expect(retrieved[0]).toBe(raw);
+      expect(raw.name).toBe('');
+      expect(raw.startTime).toEqual([0, 0]);
+      expect(raw.endTime).toEqual([0, 0]);
+      expect(raw.duration).toEqual([0, 0]);
+      expect(raw.attributes).toEqual({});
+    });
+
+    it('creates the database file and its parent directory on first use', async () => {
+      const nested = join(tempDir, 'traces', 'run-1');
+      const exporter = createExporter(join(nested, 'spans.db'));
+
+      const result = await exportSpans(exporter, [
+        createReadableSpan({
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-nested'},
+        }),
+      ]);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      expect(
+        await exporter.getAllSpansForSession('session-nested'),
+      ).toHaveLength(1);
+    });
+
+    it('keeps an in-memory database readable for the life of the exporter', async () => {
+      const exporter = createExporter(':memory:');
+
+      const result = await exportSpans(exporter, [
+        createReadableSpan({
+          name: 'in_memory',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-memory'},
+        }),
+      ]);
+
+      expect(result.code).toBe(ExportResultCode.SUCCESS);
+      const retrieved = await exporter.getAllSpansForSession('session-memory');
+      expect(retrieved.map((span) => span.name)).toEqual(['in_memory']);
+    });
+
+    it('reads spans written by a previous exporter on the same file', async () => {
+      const first = createExporter();
+      await exportSpans(first, [
+        createReadableSpan({
+          name: 'persisted',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-restart'},
+        }),
+      ]);
+      await first.shutdown();
+
+      const second = createExporter();
+      const retrieved = await second.getAllSpansForSession('session-restart');
+      expect(retrieved.map((span) => span.name)).toEqual(['persisted']);
+    });
   });
 
-  it('test_export_multiple_spans_in_batch', async () => {
-    const spans = Array.from({length: 10}, (_, i) =>
-      createReadableSpan({
-        spanId: spanId(i),
-        name: `span_${i}`,
-        attributes: {[SESSION_ID_ATTRIBUTE]: 'batch-session'},
-      }),
+  describe('adk-python database compatibility', () => {
+    it('reads a table created by the adk-python data definition', async () => {
+      await seedPythonDatabase(dbPath, {
+        spanId: '00000000000abc12',
+        traceId: '000000000000000000000000000def45',
+        name: 'call_llm',
+        startTimeUnixNano: PYTHON_START_NANOS,
+        sessionId: 'py-session',
+        attributesJson: JSON.stringify({[SESSION_ID_ATTRIBUTE]: 'py-session'}),
+      });
+
+      const [span] = await createExporter().getAllSpansForSession('py-session');
+      if (!span) {
+        expect.fail('the adk-python row was not returned');
+      }
+      expect(span.name).toBe('call_llm');
+      expect(span.spanContext().spanId).toBe('00000000000abc12');
+      expect(hrTimeToNanos(span.startTime)).toBe(BigInt(PYTHON_START_NANOS));
+      expect(span.attributes).toEqual({[SESSION_ID_ATTRIBUTE]: 'py-session'});
+    });
+
+    it('leaves a row written by adk-python readable after adopting the file', async () => {
+      await seedPythonDatabase(dbPath, {
+        spanId: '00000000000abc12',
+        traceId: '000000000000000000000000000def45',
+        name: 'py_span',
+        startTimeUnixNano: PYTHON_START_NANOS,
+        sessionId: 'shared-session',
+        attributesJson: JSON.stringify({
+          [SESSION_ID_ATTRIBUTE]: 'shared-session',
+        }),
+      });
+
+      const exporter = createExporter();
+      await exportSpans(exporter, [
+        createReadableSpan({
+          spanId: '00000000000abc34',
+          traceId: '000000000000000000000000000def45',
+          name: 'js_span',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'shared-session'},
+          startTime: [1788563807, 232000123],
+        }),
+      ]);
+      await exporter.shutdown();
+
+      const rows = await readPythonDatabase(dbPath);
+      expect(rows).toEqual([
+        {spanId: '00000000000abc12', startTimeUnixNano: PYTHON_START_NANOS},
+        {spanId: '00000000000abc34', startTimeUnixNano: '1788563807232000123'},
+      ]);
+    });
+  });
+
+  describe('lifecycle', () => {
+    it('resolves forceFlush', async () => {
+      await expect(createExporter().forceFlush()).resolves.toBeUndefined();
+    });
+
+    it('reopens the database after shutdown and tolerates a second shutdown', async () => {
+      const exporter = createExporter();
+      await exportSpans(exporter, [
+        createReadableSpan({
+          name: 'before_shutdown',
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-shutdown'},
+        }),
+      ]);
+
+      await exporter.shutdown();
+      await expect(exporter.shutdown()).resolves.toBeUndefined();
+
+      const retrieved =
+        await exporter.getAllSpansForSession('session-shutdown');
+      expect(retrieved.map((span) => span.name)).toEqual(['before_shutdown']);
+    });
+
+    it('releases the connection when shutdown races an in-flight open', async () => {
+      const exporter = createExporter();
+
+      const pendingExport = exportSpans(exporter, [
+        createReadableSpan({
+          attributes: {[SESSION_ID_ATTRIBUTE]: 'session-race'},
+        }),
+      ]);
+      await exporter.shutdown();
+      await pendingExport;
+
+      // Whether that export landed is a race and not the point; the handle
+      // being released is. Windows refuses to unlink a file that is still open.
+      await expect(rm(dbPath, {force: true})).resolves.toBeUndefined();
+    });
+
+    it('does not reject when shutdown races an open that fails', async () => {
+      const corruptPath = join(tempDir, 'racing.db');
+      await writeFile(corruptPath, 'not a database');
+      const exporter = createExporter(corruptPath);
+
+      const pendingExport = exportSpans(exporter, [createReadableSpan()]);
+      await expect(exporter.shutdown()).resolves.toBeUndefined();
+
+      expect((await pendingExport).code).toBe(ExportResultCode.FAILED);
+      await expect(rm(corruptPath)).resolves.toBeUndefined();
+    });
+
+    it('is a no-op to shut down an exporter that never opened the database', async () => {
+      await expect(createExporter().shutdown()).resolves.toBeUndefined();
+      expect(existsSync(dbPath)).toBe(false);
+    });
+
+    it('names the feature and the install command when the driver is missing', async () => {
+      const missing: Error & {code?: string} = new Error(
+        "Cannot find package '@mikro-orm/sqlite' imported from /app/index.js",
+      );
+      missing.code = 'ERR_MODULE_NOT_FOUND';
+      // Vitest reports a rejecting module factory as a mocking error of its
+      // own, which would hide the code the loader keys on. Failing the load
+      // thunk instead keeps the real loader running, with the descriptor the
+      // exporter passes it.
+      vi.doMock(OPTIONAL_PEER_MODULE, async () => {
+        const actual =
+          await vi.importActual<typeof optionalPeer>(OPTIONAL_PEER_MODULE);
+        return {
+          ...actual,
+          loadOptionalPeer: (peer: OptionalPeer) =>
+            actual.loadOptionalPeer(peer, () => Promise.reject(missing)),
+        };
+      });
+      vi.resetModules();
+      try {
+        const {SqliteSpanExporter: Reloaded} =
+          await import('../../src/telemetry/sqlite_span_exporter.js');
+
+        // `export` reports only a redacted description, so the actionable
+        // message reaches the caller through the read path.
+        await expect(
+          new Reloaded({dbPath}).getAllSpansForSession('session-missing-peer'),
+        ).rejects.toThrow(
+          /SqliteSpanExporter requires the optional peer dependency[\s\S]*npm install @mikro-orm\/sqlite/,
+        );
+      } finally {
+        vi.doUnmock(OPTIONAL_PEER_MODULE);
+        vi.resetModules();
+      }
+    });
+  });
+
+  describe('through an OpenTelemetry tracer provider', () => {
+    it('persists a real parent and child span exported by a SimpleSpanProcessor', async () => {
+      const exporter = createExporter();
+      const provider = new BasicTracerProvider({
+        spanProcessors: [new SimpleSpanProcessor(exporter)],
+      });
+      const tracer = provider.getTracer('sqlite-span-exporter-test');
+
+      const parent = tracer.startSpan('invocation');
+      parent.setAttribute(SESSION_ID_ATTRIBUTE, 'session-otel');
+      const child = tracer.startSpan(
+        'call_llm',
+        undefined,
+        trace.setSpan(context.active(), parent),
+      );
+      child.end();
+      parent.end();
+      await provider.forceFlush();
+      await provider.shutdown();
+
+      const retrieved = await exporter.getAllSpansForSession('session-otel');
+      const names = retrieved.map((span) => span.name);
+      expect(names.sort()).toEqual(['call_llm', 'invocation']);
+
+      const persistedChild = retrieved.find((span) => span.name === 'call_llm');
+      if (!persistedChild) {
+        expect.fail('expected the child span to be persisted');
+      }
+      expect(persistedChild.spanContext().spanId).toMatch(/^[0-9a-f]{16}$/);
+      expect(persistedChild.spanContext().traceId).toMatch(/^[0-9a-f]{32}$/);
+      expect(persistedChild.parentSpanContext?.spanId).toBe(
+        parent.spanContext().spanId,
+      );
+    });
+  });
+});
+
+describe('describeError', () => {
+  it('names the error and appends a SQLite driver code', () => {
+    expect(
+      describeError(Object.assign(new Error('x'), {code: 'SQLITE_BUSY'})),
+    ).toBe('Error (SQLITE_BUSY)');
+  });
+
+  it('keeps an extended SQLite driver code', () => {
+    expect(
+      describeError(
+        Object.assign(new Error('x'), {code: 'SQLITE_CONSTRAINT_NOTNULL'}),
+      ),
+    ).toBe('Error (SQLITE_CONSTRAINT_NOTNULL)');
+  });
+
+  it('omits a code that is not a SQLite driver code', () => {
+    expect(describeError(Object.assign(new TypeError('x'), {code: 42}))).toBe(
+      'TypeError',
     );
-
-    const result = await exportSpans(exporter, spans);
-
-    expect(result.code).toBe(ExportResultCode.SUCCESS);
-
-    const retrievedSpans =
-      await exporter.getAllSpansForSession('batch-session');
-    expect(retrievedSpans).toHaveLength(10);
-    const names = new Set(retrievedSpans.map((span) => span.name));
-    expect(names).toEqual(
-      new Set(Array.from({length: 10}, (_, i) => `span_${i}`)),
-    );
+    expect(
+      describeError(Object.assign(new Error('x'), {code: 'insert into spans'})),
+    ).toBe('Error');
   });
 
-  it('test_export_with_alternative_session_id_attribute', async () => {
-    await exportSpans(exporter, [
-      createReadableSpan({
-        attributes: {[CONVERSATION_ID_ATTRIBUTE]: 'conv-session-123'},
-      }),
-    ]);
-
-    const result = await exporter.getAllSpansForSession('conv-session-123');
-
-    expect(result).toHaveLength(1);
-    expect(result[0].attributes[CONVERSATION_ID_ATTRIBUTE]).toBe(
-      'conv-session-123',
-    );
+  it('falls back to a name for an error-like object without one', () => {
+    expect(describeError({message: 'SUPER_SECRET_PROMPT'})).toBe('Error');
   });
 
-  it('test_deserialize_handles_invalid_json', async () => {
-    // The reference inserts through `_get_connection` and reads back through
-    // the private `_query` and `_row_to_readable_span`. Writing the row on a
-    // separate connection and reading it through the public API covers the
-    // same decode path without reaching into the exporter.
-    await writeRow({
-      spanId: 'abc123',
-      traceId: 'def456',
-      name: 'test',
-      sessionId: 'session-invalid-json',
-      attributesJson: 'not valid json',
-    });
-
-    const spans = await exporter.getAllSpansForSession('session-invalid-json');
-
-    expect(spans).toHaveLength(1);
-    expect(spans[0].name).toBe('test');
-    expect(spans[0].attributes).toEqual({});
-  });
-
-  it('test_get_spans_ordered_by_start_time', async () => {
-    const attributes = {[SESSION_ID_ATTRIBUTE]: 'session-order'};
-    const spans = [
-      createReadableSpan({
-        spanId: spanId(0x300),
-        startTime: unixNanos(3000),
-        attributes,
-      }),
-      createReadableSpan({
-        spanId: spanId(0x100),
-        startTime: unixNanos(1000),
-        attributes,
-      }),
-      createReadableSpan({
-        spanId: spanId(0x200),
-        startTime: unixNanos(2000),
-        attributes,
-      }),
-    ];
-
-    await exportSpans(exporter, spans);
-
-    const result = await exporter.getAllSpansForSession('session-order');
-
-    expect(result).toHaveLength(3);
-    expect(result[0].spanContext().spanId).toBe(spanId(0x100));
-    expect(result[1].spanContext().spanId).toBe(spanId(0x200));
-    expect(result[2].spanContext().spanId).toBe(spanId(0x300));
+  it('describes a non-object by its type', () => {
+    expect(describeError('SUPER_SECRET_PROMPT')).toBe('string');
+    expect(describeError(null)).toBe('object');
   });
 });
