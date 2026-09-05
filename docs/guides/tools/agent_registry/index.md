@@ -85,19 +85,25 @@ bindings lookup that fails, returns nothing, or matches no target leaves the
 server unauthenticated and logs a warning; it does not throw.
 
 A registered A2A agent can carry a binding too, and `getRemoteA2AAgent` reads
-it the same way. The resolved scheme and the credential you passed are readable
-on the agent:
+it the same way. The agent it returns presents `authCredential` as a header on
+every request it makes:
 
 ```ts
 const agent = await registry.getRemoteA2AAgent('my-agent', {
-  continueUri: 'https://my-app.example/continue',
+  authCredential: {
+    authType: AuthCredentialTypes.HTTP,
+    http: {scheme: 'Bearer', credentials: {token: accessToken}},
+  },
 });
 
 agent.authScheme; // the provider the agent's binding names
 ```
 
-`RemoteA2AAgent` does not apply the scheme to its outgoing calls yet. Read the
-scheme, obtain the credential, and pass an already-authenticated `client`.
+A credential that still needs an exchange to become a token is not presented,
+and neither is an API key whose scheme puts it in the query rather than a
+header. An auth provider binding names a provider and carries no credential of
+its own, so read `agent.authScheme`, obtain a token for that provider, and pass
+it as `authCredential`.
 
 For an MCP server on a `*.googleapis.com` host reached over https, and only
 when no auth scheme and no credential apply, the registry attaches its own
