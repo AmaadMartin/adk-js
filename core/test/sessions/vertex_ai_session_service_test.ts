@@ -11,8 +11,9 @@ import {
   State,
   VertexAiSessionService,
 } from '@google/adk';
-import {Session} from '@google/adk/sessions/session.js';
+import {createSession, Session} from '@google/adk/sessions/session.js';
 import {ApiError} from '@google/genai';
+import {ApiClient} from '@google/genai/vertex_internal';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   isFastForwardable,
@@ -31,6 +32,17 @@ vi.mock('nodejs-vertexai', () => ({
 }));
 
 const clientConstructor = vi.hoisted(() => vi.fn());
+const sessionsConstructor = vi.hoisted(() => vi.fn());
+
+// Express mode cannot use the ADC `Client`, so the service builds the Agent
+// Engine `Sessions` client itself. Capture the ApiClient it is handed.
+vi.mock('@google-cloud/vertexai/build/src/genai/sessions.js', () => ({
+  Sessions: class {
+    constructor(apiClient: unknown) {
+      sessionsConstructor(apiClient);
+    }
+  },
+}));
 
 // The service imports Client from the package root, so the mock must target
 // the root. Keep the other root exports for the rest of the module graph.
@@ -48,6 +60,7 @@ vi.mock('@google-cloud/vertexai', async (importOriginal) => ({
 afterEach(() => {
   vi.unstubAllEnvs();
   clientConstructor.mockClear();
+  sessionsConstructor.mockClear();
 });
 
 import {
@@ -176,14 +189,38 @@ describe('VertexAiSessionService', () => {
       ['an expressModeApiKey option', {expressModeApiKey: 'test-api-key'}],
       ['an API key from the environment', {}],
       ['an API key and only a project', {projectId: 'test-project'}],
-    ])('throws for %s instead of dropping the key', (_, options) => {
-      expect(() => new VertexAiSessionService(options)).toThrow(
-        'Vertex AI Express Mode',
-      );
+    ])('builds an API-key client for %s', (_, options) => {
+      expect(() => new VertexAiSessionService(options)).not.toThrow();
       expect(clientConstructor).not.toHaveBeenCalled();
     });
 
-    it('keeps using project and location when an API key is also in the environment', () => {
+    it('authenticates the sessions client with the API key', async () => {
+      new VertexAiSessionService({expressModeApiKey: 'test-api-key'});
+
+      expect(sessionsConstructor).toHaveBeenCalledTimes(1);
+      const apiClient = sessionsConstructor.mock.calls[0][0] as ApiClient;
+      expect(apiClient.getApiKey()).toBe('test-api-key');
+      expect(apiClient.isVertexAI()).toBe(true);
+      // The key has to reach the auth object, not just the client options, or
+      // requests go out unauthenticated. No credentials are read: NodeAuth
+      // returns the key header without constructing GoogleAuth.
+      const headers = await apiClient.getAuthHeaders();
+      expect(headers.get('x-goog-api-key')).toBe('test-api-key');
+    });
+
+    it('prefers the API key over project and location', () => {
+      new VertexAiSessionService({
+        projectId: 'test-project',
+        location: 'us-central1',
+      });
+
+      expect(sessionsConstructor).toHaveBeenCalledTimes(1);
+      expect(clientConstructor).not.toHaveBeenCalled();
+    });
+
+    it('builds a project client when no API key is available', () => {
+      vi.stubEnv('GOOGLE_API_KEY', undefined);
+
       new VertexAiSessionService({
         projectId: 'test-project',
         location: 'us-central1',
@@ -193,6 +230,7 @@ describe('VertexAiSessionService', () => {
         project: 'test-project',
         location: 'us-central1',
       });
+      expect(sessionsConstructor).not.toHaveBeenCalled();
     });
 
     it('never builds a client when sessions are injected', () => {
@@ -391,6 +429,98 @@ describe('VertexAiSessionService', () => {
       );
       expect(mockClient.createInternal).not.toHaveBeenCalled();
     });
+
+    describe('config passthrough', () => {
+      it('forwards config the named fields do not cover', async () => {
+        await service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+          config: {waitForCompletion: false, displayName: 'triage'},
+        });
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          userId: 'testUser',
+          config: {waitForCompletion: false, displayName: 'triage'},
+        });
+      });
+
+      it('lets config override ttl and sessionState', async () => {
+        await service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+          state: {foo: 'bar'},
+          ttl: '7200s',
+          config: {ttl: '60s', sessionState: {foo: 'overridden'}},
+        });
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          userId: 'testUser',
+          config: {ttl: '60s', sessionState: {foo: 'overridden'}},
+        });
+      });
+
+      it.each([
+        [
+          'config supplies both',
+          {config: {ttl: '60s', expireTime: '2025-10-01T00:00:00Z'}},
+        ],
+        [
+          'config supplies expireTime against a named ttl',
+          {ttl: '7200s', config: {expireTime: '2025-10-01T00:00:00Z'}},
+        ],
+        [
+          'config supplies ttl against a named expireTime',
+          {expireTime: '2025-10-01T00:00:00Z', config: {ttl: '60s'}},
+        ],
+      ])(
+        'rejects ttl and expireTime together when %s',
+        async (_label, request) => {
+          await expect(
+            service.createSession({
+              appName: '12345',
+              userId: 'testUser',
+              ...request,
+            }),
+          ).rejects.toThrow(
+            "Cannot specify both 'ttl' and 'expireTime' simultaneously.",
+          );
+          expect(mockClient.createInternal).not.toHaveBeenCalled();
+        },
+      );
+
+      it('lets config replace ttl with expireTime', async () => {
+        await service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+          ttl: '7200s',
+          config: {ttl: undefined, expireTime: '2025-10-01T00:00:00Z'},
+        });
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith(
+          expect.objectContaining({
+            config: expect.objectContaining({
+              expireTime: '2025-10-01T00:00:00Z',
+            }),
+          }),
+        );
+      });
+
+      it('changes nothing about the request when config is absent', async () => {
+        await service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+          state: {foo: 'bar'},
+        });
+
+        expect(mockClient.createInternal).toHaveBeenCalledWith({
+          name: 'reasoningEngines/12345',
+          userId: 'testUser',
+          config: {sessionState: {foo: 'bar'}},
+        });
+      });
+    });
   });
 
   describe('getSession', () => {
@@ -550,6 +680,79 @@ describe('VertexAiSessionService', () => {
 
       expect(session?.events).toHaveLength(1);
       expect(session?.events[0].id).toBe('e2');
+    });
+
+    describe('event pagination', () => {
+      const page = (names: string[], nextPageToken?: string) => ({
+        sessionEvents: names.map((name) => ({
+          name,
+          timestamp: '2026-04-09T13:00:00Z',
+        })),
+        ...(nextPageToken ? {nextPageToken} : {}),
+      });
+
+      it('repeats the afterTimestamp filter on every page', async () => {
+        const afterTimestamp = 1600000000000;
+        mockClient.events.listInternal
+          .mockResolvedValueOnce(page(['e1'], 'page-2'))
+          .mockResolvedValueOnce(page(['e2']));
+
+        await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+          config: {afterTimestamp},
+        });
+
+        const filter = `timestamp>="${new Date(afterTimestamp).toISOString()}"`;
+        expect(mockClient.events.listInternal).toHaveBeenNthCalledWith(2, {
+          name: 'reasoningEngines/12345/sessions/my-session-id',
+          config: {filter, pageToken: 'page-2'},
+        });
+      });
+
+      it('slices numRecentEvents after every page is collected', async () => {
+        mockClient.events.listInternal
+          .mockResolvedValueOnce(page(['e1', 'e2'], 'page-2'))
+          .mockResolvedValueOnce(page(['e3']));
+
+        const session = await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+          config: {numRecentEvents: 2},
+        });
+
+        expect(session?.events.map((event) => event.id)).toEqual(['e2', 'e3']);
+      });
+
+      it('stops after one call when the first page has no next token', async () => {
+        mockClient.events.listInternal.mockResolvedValueOnce(page(['e1']));
+
+        const session = await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        });
+
+        expect(session?.events).toHaveLength(1);
+        expect(mockClient.events.listInternal).toHaveBeenCalledTimes(1);
+      });
+
+      it('keeps a page without events', async () => {
+        mockClient.events.listInternal
+          .mockResolvedValueOnce(page(['e1'], 'page-2'))
+          .mockResolvedValueOnce({nextPageToken: 'page-3'})
+          .mockResolvedValueOnce(page(['e2']));
+
+        const session = await service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        });
+
+        expect(session?.events.map((event) => event.id)).toEqual(['e1', 'e2']);
+      });
     });
 
     it('returns undefined if session does not exist (code 5)', async () => {
@@ -1485,6 +1688,235 @@ describe('VertexAiSessionService', () => {
           service.appendEvent({session: appendSession(), event}),
         ).rejects.toBe(failure);
         expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+      });
+
+      it('retries a rate-limited retry of the rawEvent-free payload', async () => {
+        const loggerSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+        const sentRawEvent: boolean[] = [];
+        mockClient.events.append.mockImplementation(
+          async (params: {config?: {rawEvent?: unknown}}) => {
+            sentRawEvent.push(params.config?.rawEvent !== undefined);
+            if (sentRawEvent.length === 1) {
+              throw new ApiError({message: 'Unknown name', status: 400});
+            }
+            if (sentRawEvent.length === 2) {
+              throw new ApiError({message: 'Resource exhausted', status: 429});
+            }
+            return {};
+          },
+        );
+        const event = createEvent({
+          timestamp: 1620000000000,
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        });
+        vi.useFakeTimers();
+
+        const appended = service.appendEvent({session: appendSession(), event});
+        await Promise.all([appended, vi.runAllTimersAsync()]);
+        vi.useRealTimers();
+
+        await expect(appended).resolves.toBe(event);
+        expect(sentRawEvent).toEqual([true, false, false]);
+        loggerSpy.mockRestore();
+      });
+
+      it('waits for nothing when the append succeeds', async () => {
+        // Answers the objection that a retry pause becomes a latency floor on
+        // every call: the pause is on the failure path only.
+        vi.useFakeTimers();
+        const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+        const event = createEvent({
+          timestamp: 1620000000000,
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        });
+
+        await service.appendEvent({session: appendSession(), event});
+        vi.useRealTimers();
+
+        expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+        expect(setTimeoutSpy).not.toHaveBeenCalled();
+      });
+
+      it('retries a rate-limited append with the same request object', async () => {
+        mockClient.events.append
+          .mockRejectedValueOnce(
+            new ApiError({message: 'Resource exhausted', status: 429}),
+          )
+          .mockResolvedValueOnce({});
+        const event = createEvent({
+          timestamp: 1620000000000,
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        });
+        vi.useFakeTimers();
+
+        const appended = service.appendEvent({session: appendSession(), event});
+        await Promise.all([appended, vi.runAllTimersAsync()]);
+        vi.useRealTimers();
+
+        await expect(appended).resolves.toBe(event);
+        const [first, second] = mockClient.events.append.mock.calls;
+        expect(second[0]).toBe(first[0]);
+      });
+
+      it('retries a rate limit reported as a gRPC code', async () => {
+        mockClient.events.append
+          .mockRejectedValueOnce({code: 429, message: 'Resource exhausted'})
+          .mockResolvedValueOnce({});
+        const event = createEvent({
+          timestamp: 1620000000000,
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        });
+        vi.useFakeTimers();
+
+        const appended = service.appendEvent({session: appendSession(), event});
+        await Promise.all([appended, vi.runAllTimersAsync()]);
+        vi.useRealTimers();
+
+        await expect(appended).resolves.toBe(event);
+        expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
+  describe('apiClientHttpOptionsOverride', () => {
+    const httpOptions = {timeout: 5000, headers: {'x-goog-user-project': 'p'}};
+
+    class OverridingService extends VertexAiSessionService {
+      protected override apiClientHttpOptionsOverride() {
+        return httpOptions;
+      }
+    }
+
+    let overriding: OverridingService;
+
+    beforeEach(() => {
+      overriding = new OverridingService({
+        sessions: mockClient as unknown as Sessions,
+      });
+    });
+
+    it('sends the options on both createSession requests', async () => {
+      mockClient.createInternal.mockResolvedValueOnce({
+        name: 'operations/op-1',
+        done: false,
+      });
+
+      await overriding.createSession({appName: '12345', userId: 'testUser'});
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({httpOptions}),
+        }),
+      );
+      expect(mockClient.getSessionOperationInternal).toHaveBeenCalledWith({
+        operationName: 'operations/op-1',
+        config: {httpOptions},
+      });
+    });
+
+    it('lets the caller create config override the options', async () => {
+      const callerOptions = {timeout: 1};
+
+      await overriding.createSession({
+        appName: '12345',
+        userId: 'testUser',
+        config: {httpOptions: callerOptions},
+      });
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({httpOptions: callerOptions}),
+        }),
+      );
+    });
+
+    it('sends the options on both getSession requests', async () => {
+      await overriding.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(mockClient.get).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/my-session-id',
+        config: {httpOptions},
+      });
+      expect(mockClient.events.listInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/my-session-id',
+        config: {httpOptions},
+      });
+    });
+
+    it('sends the options when getSession skips the event list', async () => {
+      await overriding.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+        config: {numRecentEvents: 0},
+      });
+
+      expect(mockClient.get).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/my-session-id',
+        config: {httpOptions},
+      });
+    });
+
+    it('sends the options on the listSessions request', async () => {
+      await overriding.listSessions({appName: '12345', userId: 'testUser'});
+
+      expect(mockClient.listInternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({httpOptions}),
+        }),
+      );
+    });
+
+    it('sends the options on the deleteSession request', async () => {
+      await overriding.deleteSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(mockClient.delete).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/my-session-id',
+        config: {httpOptions},
+      });
+    });
+
+    it('sends the options on the appendEvent request', async () => {
+      const session = createSession({
+        id: 'override-session',
+        appName: '12345',
+        userId: 'testUser',
+      });
+      const event = createEvent({
+        timestamp: 1620000000000,
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      });
+
+      await overriding.appendEvent({session, event});
+
+      expect(mockClient.events.append).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({httpOptions}),
+        }),
+      );
+    });
+
+    it('sends no options when the hook returns undefined', async () => {
+      await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(mockClient.get).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/my-session-id',
+      });
+      expect(mockClient.events.listInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345/sessions/my-session-id',
+        config: {},
       });
     });
   });
