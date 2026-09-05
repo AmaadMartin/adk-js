@@ -470,9 +470,11 @@ export class Workflow extends BaseNode {
     trigger: Trigger,
   ): void {
     const existing = loop.nodes.get(nodeName);
-    // Fresh NodeState for each run, preserving the run counter.
+    // Fresh NodeState for each run, preserving the run counter and the scope
+    // the node's earlier runs wrote their events under.
     const state = createNodeState({
       runCounter: existing?.runCounter ?? 0,
+      isolationScope: existing?.isolationScope,
     });
     state.input = trigger.input;
     state.status = NodeStatus.RUNNING;
@@ -566,6 +568,7 @@ export class Workflow extends BaseNode {
         overrideIsolationScope: isolationScopeForNode(
           node,
           trigger,
+          nodeState,
           childNodePath(ctx, nodeName),
           runId,
         ),
@@ -925,6 +928,15 @@ function isTaskModeNode(node: BaseNode): boolean {
  * turns as if they were its own. The scope carries the whole node path, not
  * just the name, so two nested workflows that reuse a node name stay apart.
  *
+ * The scope is derived once and then held on the node state. A graph that
+ * routes back to a task agent runs it again under a new run id, and re-deriving
+ * the scope there would leave the agent reading none of its own earlier turns:
+ * an event is visible only inside the scope it was written under. adk-python
+ * does re-derive it, and compensates in its content filter, which excludes
+ * untagged events and rebuilds the agent's opening turn. adk-js keeps untagged
+ * events shared, so the same scope carried forward is what gives the agent a
+ * whole conversation.
+ *
  * A node that declares its own `isolationScope` keeps it. That declaration is
  * an adk-js feature with no counterpart in the reference, and the node runner
  * already applies it, so this returns nothing and lets it through.
@@ -935,15 +947,18 @@ function isTaskModeNode(node: BaseNode): boolean {
 function isolationScopeForNode(
   node: BaseNode,
   trigger: Trigger,
+  nodeState: NodeState,
   nodePath: string,
   runId: string,
 ): string | undefined {
   if (trigger.isolationScope !== undefined) {
     return trigger.isolationScope;
   }
-  const needsTaskScope =
-    isTaskModeNode(node) && node.isolationScope === undefined;
-  return needsTaskScope ? `${nodePath}@${runId}` : undefined;
+  if (!isTaskModeNode(node) || node.isolationScope !== undefined) {
+    return undefined;
+  }
+  nodeState.isolationScope ??= `${nodePath}@${runId}`;
+  return nodeState.isolationScope;
 }
 
 /**

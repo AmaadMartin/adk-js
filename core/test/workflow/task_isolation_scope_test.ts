@@ -11,14 +11,16 @@
  * `src/google/adk/workflow/_workflow.py` at `25f5214c`.
  */
 
-import {Type} from '@google/genai';
+import {Content, Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {LlmAgent} from '../../src/agents/llm_agent.js';
 import {createEvent, Event} from '../../src/events/event.js';
 import {BaseLlm} from '../../src/models/base_llm.js';
 import type {BaseLlmConnection} from '../../src/models/base_llm_connection.js';
+import type {LlmRequest} from '../../src/models/llm_request.js';
 import type {LlmResponse} from '../../src/models/llm_response.js';
 import {LLMRegistry} from '../../src/models/registry.js';
+import {InMemoryRunner} from '../../src/runner/in_memory_runner.js';
 import {DEFAULT_ROUTE} from '../../src/workflow/graph.js';
 import {node} from '../../src/workflow/node.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
@@ -44,6 +46,29 @@ class OneShotTaskLlm extends BaseLlm {
 }
 LLMRegistry.register(OneShotTaskLlm);
 
+/** Finishes like {@link OneShotTaskLlm}, reporting the history it was given. */
+class RecordingTaskLlm extends BaseLlm {
+  static override readonly supportedModels = [/recording-task-.*/];
+  static onRequest: ((contents: Content[]) => void) | undefined;
+
+  override async *generateContentAsync(
+    llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    RecordingTaskLlm.onRequest?.(llmRequest.contents ?? []);
+    yield {
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'finish_task', args: {name: 'Ada'}}}],
+      },
+    } as LlmResponse;
+  }
+
+  override connect(): Promise<BaseLlmConnection> {
+    throw new Error('not supported');
+  }
+}
+LLMRegistry.register(RecordingTaskLlm);
+
 function taskAgent(
   name: string,
   model: string,
@@ -59,6 +84,29 @@ function taskAgent(
       type: Type.OBJECT,
       properties: {name: {type: Type.STRING}},
     },
+  });
+}
+
+/** A graph whose check node routes back to the task agent exactly once. */
+function retryGraph(model: string): Workflow {
+  const intake = taskAgent('intake', model);
+  let checks = 0;
+  const check = node(
+    () =>
+      checks++ === 0
+        ? createEvent({route: 'retry', content: {role: 'user', parts: []}})
+        : 'accepted',
+    {name: 'check'},
+  );
+  return new Workflow({
+    name: 'flow',
+    edges: [
+      ['START', intake, check],
+      [
+        check,
+        {retry: intake, [DEFAULT_ROUTE]: node(() => 'end', {name: 'end'})},
+      ],
+    ],
   });
 }
 
@@ -114,33 +162,54 @@ describe('task-mode node isolation scope', () => {
     expect(scopesOf(events, 'intake')).toEqual(['shared-thread']);
   }, 30000);
 
-  it('gives a re-triggered task agent a fresh scope', async () => {
-    const intake = taskAgent('intake', 'one-shot-task-5');
-    let checks = 0;
-    const check = node(
-      () =>
-        checks++ === 0
-          ? createEvent({route: 'retry', content: {role: 'user', parts: []}})
-          : 'accepted',
-      {name: 'check'},
+  it('keeps one scope when the graph routes back to a task agent', async () => {
+    const {events} = await driveWorkflow(retryGraph('one-shot-task-5'), 'go');
+
+    // Two activations, one scope. An event is readable only inside the scope
+    // it was written under, so a second scope would hide the first attempt.
+    expect(events.filter((e) => e.author === 'intake').length).toBeGreaterThan(
+      1,
     );
-    const wf = new Workflow({
-      name: 'flow',
-      edges: [
-        ['START', intake, check],
-        [
-          check,
-          {retry: intake, [DEFAULT_ROUTE]: node(() => 'end', {name: 'end'})},
-        ],
-      ],
+    expect(scopesOf(events, 'intake')).toEqual(['flow.intake@1']);
+  }, 30000);
+
+  it('still shows a re-triggered task agent its own earlier turns', async () => {
+    const seen: Content[][] = [];
+    RecordingTaskLlm.onRequest = (contents) => seen.push(contents);
+    // The real Runner, so the session accumulates the events the second
+    // activation has to read back.
+    const runner = new InMemoryRunner({
+      agent: retryGraph('recording-task-1'),
+      appName: 'app',
     });
+    const session = await runner.sessionService.createSession({
+      appName: 'app',
+      userId: 'u',
+    });
+    try {
+      for await (const _event of runner.runAsync({
+        userId: 'u',
+        sessionId: session.id,
+        newMessage: {role: 'user', parts: [{text: 'go'}]},
+      })) {
+        // drain
+      }
+    } finally {
+      RecordingTaskLlm.onRequest = undefined;
+    }
 
-    const {events} = await driveWorkflow(wf, 'go');
-
-    expect(scopesOf(events, 'intake')).toEqual([
-      'flow.intake@1',
-      'flow.intake@2',
-    ]);
+    // The agent's own finish_task call from the first attempt is in the history
+    // the second activation reads. A per-activation scope would hide it, and
+    // leave the agent the user's turns with its own replies cut out.
+    expect(seen).toHaveLength(2);
+    const callsIn = (contents: Content[]): string[] =>
+      contents.flatMap((c) =>
+        (c.parts ?? []).flatMap((p) =>
+          p.functionCall?.name ? [p.functionCall.name] : [],
+        ),
+      );
+    expect(callsIn(seen[0])).toEqual([]);
+    expect(callsIn(seen[1])).toContain('finish_task');
   }, 30000);
 
   it('withholds a task agent turn from an unscoped peer node', async () => {
