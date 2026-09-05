@@ -10,6 +10,7 @@ import {
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
 } from '../../events/event.js';
+import {serializeEventActions} from '../../events/event_actions.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
 export const SCHEMA_VERSION_1_JSON = '1';
@@ -24,7 +25,12 @@ export const STORAGE_KEY_COLUMN_LENGTH = 191;
  */
 class CamelCaseToSnakeCaseJsonType extends JsonType {
   convertToDatabaseValue(value: Event): string {
-    return JSON.stringify(transformToSnakeCaseEvent(value));
+    return JSON.stringify(
+      transformToSnakeCaseEvent({
+        ...value,
+        actions: serializeEventActions(value.actions),
+      }),
+    );
   }
 
   convertToJSValue(value: string | Record<string, unknown>): Event {

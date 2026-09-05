@@ -5,7 +5,6 @@
  */
 
 import {
-  AuthConfig,
   createEvent,
   createEventActions,
   getFunctionCalls,
@@ -78,8 +77,9 @@ describe('Event Utils', () => {
         actions: createEventActions({
           requestedAuthConfigs: {
             'tool-id': {
+              authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
               credentialKey: 'testKey',
-            } as unknown as AuthConfig,
+            },
           },
         }),
       });
@@ -417,6 +417,138 @@ describe('Event Utils', () => {
       expect(restored.actions?.agentState).toEqual({
         input: {userId: 42, camelKey: 'v'},
       });
+    });
+  });
+
+  describe('createEvent route', () => {
+    it('copies a top-level route onto actions.route', () => {
+      const event = createEvent({route: 'next'});
+      expect(event.route).toBe('next');
+      expect(event.actions.route).toBe('next');
+    });
+
+    it('overrides actions.route with the top-level route', () => {
+      const event = createEvent({route: 'top', actions: {route: 'nested'}});
+      expect(event.actions.route).toBe('top');
+    });
+
+    it('copies a falsy route key rather than treating it as unset', () => {
+      const event = createEvent({route: false});
+      expect(event.actions.route).toBe(false);
+    });
+
+    it('copies a multi-route array', () => {
+      const event = createEvent({route: ['a', 'b']});
+      expect(event.actions.route).toEqual(['a', 'b']);
+    });
+
+    it('keeps actions.route when no top-level route is supplied', () => {
+      const event = createEvent({actions: {route: 'nested'}});
+      expect(event.actions.route).toBe('nested');
+    });
+
+    it('leaves both undefined when neither is supplied', () => {
+      const event = createEvent();
+      expect(event.route).toBeUndefined();
+      expect(event.actions.route).toBeUndefined();
+    });
+  });
+
+  describe('parity field round-trip serialization', () => {
+    it('keeps setModelResponse keys verbatim and snake_cases the field names', () => {
+      const original = createEvent({
+        id: '123',
+        invocationId: 'inv1',
+        actions: createEventActions({
+          transferReason: 'billing question',
+          route: 'approved',
+          setModelResponse: {some_key: 1, otherKey: 2},
+        }),
+      });
+
+      const snake = transformToSnakeCaseEvent(original);
+      const actions = snake['actions'] as Record<string, unknown>;
+      expect(actions['transfer_reason']).toBe('billing question');
+      expect(actions['route']).toBe('approved');
+      expect(actions['set_model_response']).toEqual({
+        some_key: 1,
+        otherKey: 2,
+      });
+
+      const restored = transformToCamelCaseEvent(snake);
+      expect(restored.actions.transferReason).toBe('billing question');
+      expect(restored.actions.route).toBe('approved');
+      expect(restored.actions.setModelResponse).toEqual({
+        some_key: 1,
+        otherKey: 2,
+      });
+    });
+
+    it('promotes a route written by a Python runner onto the top-level field', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        invocation_id: 'inv1',
+        actions: {state_delta: {}, route: 'approved'},
+      });
+      expect(restored.route).toBe('approved');
+      expect(restored.actions.route).toBe('approved');
+    });
+
+    it('promotes a falsy route key rather than treating it as unset', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        actions: {state_delta: {}, route: false},
+      });
+      expect(restored.route).toBe(false);
+    });
+
+    it('keeps an existing top-level route when actions carries another', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        route: 'top',
+        actions: {state_delta: {}, route: 'nested'},
+      });
+      expect(restored.route).toBe('top');
+    });
+
+    it('leaves the top-level route unset when actions carries none', () => {
+      const restored = transformToCamelCaseEvent({
+        id: '123',
+        actions: {state_delta: {}},
+      });
+      expect(restored.route).toBeUndefined();
+    });
+
+    it('round-trips compaction and rewindBeforeInvocationId under their Python names', () => {
+      const original = createEvent({
+        id: '123',
+        actions: createEventActions({
+          rewindBeforeInvocationId: 'inv1',
+          compaction: {
+            startTimestamp: 1000,
+            endTimestamp: 2000,
+            compactedContent: {role: 'model', parts: [{text: 'a summary'}]},
+          },
+        }),
+      });
+
+      const snake = transformToSnakeCaseEvent(original);
+      const actions = snake['actions'] as Record<string, unknown>;
+      expect(actions['rewind_before_invocation_id']).toBe('inv1');
+      expect(actions['compaction']).toEqual({
+        start_timestamp: 1000,
+        end_timestamp: 2000,
+        compacted_content: {role: 'model', parts: [{text: 'a summary'}]},
+      });
+
+      const restored = transformToCamelCaseEvent(snake);
+      expect(restored.actions.rewindBeforeInvocationId).toBe('inv1');
+      expect(restored.actions.compaction).toEqual(original.actions.compaction);
+    });
+
+    it('leaves the top-level route unset for a payload with no actions', () => {
+      const restored = transformToCamelCaseEvent({id: '123'});
+      expect(restored.route).toBeUndefined();
     });
   });
 

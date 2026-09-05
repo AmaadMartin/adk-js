@@ -48,6 +48,24 @@ export interface AuthConfig {
 }
 
 /**
+ * Returns whether a value has the shape of an {@link AuthConfig}.
+ *
+ * The check is structural: it confirms the two required properties are
+ * present, not that the scheme or the credential key hold usable values.
+ *
+ * @param value The value to check.
+ * @returns `true` when the value can be treated as an {@link AuthConfig}.
+ */
+export function isAuthConfig(value: unknown): value is AuthConfig {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'authScheme' in value &&
+    'credentialKey' in value
+  );
+}
+
+/**
  * The arguments for the special long running function tool that is used to
  * request end user credentials.
  */

@@ -702,6 +702,35 @@ describe('DatabaseSessionService', () => {
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
     });
   });
+
+  describe('non-serializable session state', () => {
+    it('persists an event whose stateDelta holds a function', async () => {
+      const session = await service.createSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'serializable-session',
+      });
+      const event = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({
+          stateDelta: {ok: 2, cb: () => 1},
+        }),
+      });
+
+      await service.appendEvent({session, event});
+
+      const loaded = await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 'serializable-session',
+      });
+      expect(loaded?.events.length).toBe(1);
+      expect(loaded?.events[0].actions.stateDelta['ok']).toBe(2);
+      expect(loaded?.events[0].actions.stateDelta['cb']).toEqual(
+        expect.stringContaining('Function'),
+      );
+    });
+  });
 });
 
 describe('isDatabaseConnectionString', () => {

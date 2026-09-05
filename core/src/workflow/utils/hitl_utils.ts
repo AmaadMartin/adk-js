@@ -21,7 +21,7 @@ import {
   AuthCredentialTypes,
 } from '../../auth/auth_credential.js';
 import {AuthHandler} from '../../auth/auth_handler.js';
-import {AuthConfig} from '../../auth/auth_tool.js';
+import {AuthConfig, isAuthConfig} from '../../auth/auth_tool.js';
 import {bindCredentialResponse} from '../../auth/credential_response_binding.js';
 import {createEvent, Event} from '../../events/event.js';
 import {State} from '../../sessions/state.js';
@@ -270,7 +270,7 @@ export async function processAuthResume({
   state,
 }: ProcessAuthResumeParams): Promise<void> {
   let responseConfig: AuthConfig | undefined;
-  if (isAuthConfigLike(responseData)) {
+  if (isAuthConfig(responseData)) {
     // A full config from the web UI flow answers the request; it does not get
     // to restate it. Same reconciliation the LLM-agent resume path applies.
     responseConfig = bindCredentialResponse(authConfig, responseData);
@@ -290,15 +290,6 @@ export async function processAuthResume({
     return;
   }
   await new AuthHandler(responseConfig).parseAndStoreAuthResponse(state);
-}
-
-function isAuthConfigLike(value: unknown): value is AuthConfig {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'authScheme' in value &&
-    'credentialKey' in value
-  );
 }
 
 function buildCredentialFromValue(
