@@ -5,9 +5,10 @@
  */
 
 /**
- * Ported from adk-python@main, `tests/unittests/integrations/agent_identity/
- * test_iam_connector_credentials_provider.py`. The `it()` names keep the
- * Python test names.
+ * The `it()` names of the first describe are the adk-python test names, ported
+ * from `tests/unittests/integrations/agent_identity/
+ * test_iam_connector_credentials_provider.py` at adk-python@main. The describes
+ * after it cover paths the reference tests do not reach.
  */
 
 import {
@@ -442,5 +443,108 @@ describe('IamConnectorCredentialsProvider', () => {
 
     expect(credential.http?.credentials.token).toBe('valid-token');
     expect(client.requests).toHaveLength(3);
+  });
+});
+
+describe('the retrieve request', () => {
+  it('always asks the service not to force a refresh', async () => {
+    const client = new FakeConnectorClient(() => bearerOperation());
+    const provider = new IamConnectorCredentialsProvider({client});
+
+    await provider.getAuthCredential(createConnectorScheme(), createContext());
+
+    expect(client.connectors).toEqual([CONNECTOR_NAME]);
+    expect(client.requests[0]).toStrictEqual({
+      userId: 'user',
+      forceRefresh: false,
+      scopes: ['test-scope'],
+      continueUri: 'https://example.com/continue',
+    });
+  });
+
+  it('omits the scopes and continue URI the scheme does not set', async () => {
+    const client = new FakeConnectorClient(() => bearerOperation());
+    const provider = new IamConnectorCredentialsProvider({client});
+    const authScheme = createConnectorScheme({
+      scopes: undefined,
+      continueUri: undefined,
+    });
+
+    await provider.getAuthCredential(authScheme, createContext());
+
+    expect(client.requests[0]).toStrictEqual({
+      userId: 'user',
+      forceRefresh: false,
+    });
+  });
+});
+
+describe('an operation the provider cannot serve', () => {
+  it.each([
+    ['carries no metadata at all', {}],
+    ['reports only a create time', {createTime: '2026-01-01T00:00:00Z'}],
+    ['reports a rejected consent', {consentRejected: {}}],
+  ])('rejects an operation that %s', async (_label, metadata) => {
+    const provider = new IamConnectorCredentialsProvider({
+      client: new FakeConnectorClient(() => pendingOperation(metadata)),
+    });
+
+    await expect(
+      provider.getAuthCredential(createConnectorScheme(), createContext()),
+    ).rejects.toThrow(
+      'IAM Connector Credentials service returned an unsupported state.',
+    );
+  });
+});
+
+describe('polling', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reports an operation that fails while polling, without wrapping it', async () => {
+    const provider = new IamConnectorCredentialsProvider({
+      client: new FakeConnectorClient((callIndex) =>
+        callIndex === 0
+          ? pendingOperation({consentPending: {}})
+          : {done: true, error: {code: 13, message: 'OAuth server error'}},
+      ),
+    });
+    vi.useFakeTimers();
+
+    const pending = provider
+      .getAuthCredential(createConnectorScheme(), createContext())
+      .catch((reason: unknown) => reason);
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = await pending;
+
+    if (!(error instanceof Error)) {
+      expect.fail('expected the provider to reject with an Error');
+    }
+    expect(error.message).toBe('Operation failed: OAuth server error');
+    expect(error.cause).toBeUndefined();
+  });
+
+  it('reports a completed poll that carries no credentials', async () => {
+    const provider = new IamConnectorCredentialsProvider({
+      client: new FakeConnectorClient((callIndex) =>
+        callIndex === 0 ? pendingOperation({consentPending: {}}) : {done: true},
+      ),
+    });
+    vi.useFakeTimers();
+
+    const pending = provider
+      .getAuthCredential(createConnectorScheme(), createContext())
+      .catch((reason: unknown) => reason);
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = await pending;
+
+    if (!(error instanceof Error)) {
+      expect.fail('expected the provider to reject with an Error');
+    }
+    expect(error.message).toBe(
+      'IAM Connector Credentials operation completed without a response.',
+    );
+    expect(error.cause).toBeUndefined();
   });
 });
