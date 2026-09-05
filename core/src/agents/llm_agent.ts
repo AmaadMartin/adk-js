@@ -652,7 +652,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    */
   get finishTaskTool(): FinishTaskTool {
     if (!this._finishTaskTool) {
-      this._finishTaskTool = new FinishTaskTool(this.outputSchema);
+      this._finishTaskTool = FinishTaskTool.forAgent(this);
     }
     return this._finishTaskTool;
   }
