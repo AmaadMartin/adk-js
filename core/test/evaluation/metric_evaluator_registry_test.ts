@@ -226,3 +226,77 @@ describe('registerCustomMetricsFromConfig', () => {
     );
   });
 });
+
+describe('MetricEvaluatorRegistry.getRegisteredMetrics', () => {
+  it('describes every standard metric the registry seeds', () => {
+    const registry = new MetricEvaluatorRegistry();
+
+    expect(
+      registry
+        .getRegisteredMetrics()
+        .map((info) => info.metricName)
+        .sort(),
+    ).toEqual([
+      PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+      PrebuiltMetrics.RESPONSE_MATCH_SCORE,
+      PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
+    ]);
+  });
+
+  it('carries the value range each metric is scored on', () => {
+    const registry = new MetricEvaluatorRegistry();
+
+    const info = registry
+      .getRegisteredMetrics()
+      .find(
+        (candidate) =>
+          candidate.metricName === PrebuiltMetrics.RESPONSE_EVALUATION_SCORE,
+      );
+
+    expect(info?.metricValueInfo.interval).toMatchObject({
+      minValue: 1.0,
+      maxValue: 5.0,
+    });
+  });
+
+  it('omits a metric registered without a description of itself', () => {
+    const registry = new MetricEvaluatorRegistry();
+
+    registry.registerEvaluator(
+      'undescribed_metric',
+      (evalMetric) => new MarkerEvaluator(evalMetric),
+    );
+
+    expect(
+      registry.getRegisteredMetrics().map((info) => info.metricName),
+    ).not.toContain('undescribed_metric');
+  });
+
+  it('describes a metric registered with a description of itself', () => {
+    const registry = new MetricEvaluatorRegistry();
+    const metricInfo = {
+      metricName: 'described_metric',
+      metricValueInfo: {interval: {minValue: 0, maxValue: 1}},
+    };
+
+    registry.registerEvaluator(
+      'described_metric',
+      (evalMetric) => new MarkerEvaluator(evalMetric),
+      {getMetricInfo: () => metricInfo},
+    );
+
+    expect(registry.getRegisteredMetrics()).toContain(metricInfo);
+  });
+
+  it('carries the descriptions into a fork', () => {
+    const forked = new MetricEvaluatorRegistry().fork();
+
+    expect(forked.getRegisteredMetrics()).toHaveLength(3);
+  });
+
+  it('describes the same metrics on the default registry', () => {
+    expect(
+      defaultMetricEvaluatorRegistry().getRegisteredMetrics(),
+    ).toHaveLength(3);
+  });
+});

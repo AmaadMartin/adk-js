@@ -382,6 +382,22 @@ describe('CLI Entrypoint', () => {
       const args = vi.mocked(AdkApiServer).mock.calls[0][0];
       expect(args.defaultLlmModel).toBe('gemini-2.5-flash');
     });
+
+    it('should build the eval managers from --eval_storage_uri', async () => {
+      await parse(['api_server', '--eval_storage_uri', 'gs://my-eval-bucket']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.evalSetsManager).toBeDefined();
+      expect(args.evalSetResultsManager).toBeDefined();
+    });
+
+    it('should leave the eval managers unset without the flag', async () => {
+      await parse(['api_server']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.evalSetsManager).toBeUndefined();
+      expect(args.evalSetResultsManager).toBeUndefined();
+    });
   });
 
   describe('command: create', () => {
