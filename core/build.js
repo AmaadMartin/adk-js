@@ -59,6 +59,10 @@ function build({
     sourcemap: bundle,
     packages: 'external',
     logLevel: 'info',
+    // The node target predates dynamic `import()`, so esbuild downlevels it to
+    // `require()`. `AgentEvaluator` imports a caller-supplied agent module that
+    // way, and `require()` loads neither a `file://` URL nor an ES module.
+    ...(platform === 'node' ? {supported: {'dynamic-import': true}} : {}),
   };
 
   if (platform === 'browser' && bundle) {
