@@ -17,7 +17,8 @@ import dotenv from 'dotenv';
 import {Application} from 'express';
 import * as path from 'node:path';
 
-import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {AgentFileOptions} from '../utils/agent_loader.js';
+import {ServerAgentLoader} from '../utils/base_agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {createServerLogger} from '../utils/logger.js';
 import {AdkApiServer} from './adk_api_server.js';
@@ -33,7 +34,7 @@ export interface ApiServerOptions {
   /** Serve the dev UI and the dev-only endpoints. */
   web: boolean;
   /** Loader for agent instances. Defaults to one reading `agentsDir`. */
-  agentLoader?: AgentLoader;
+  agentLoader?: ServerAgentLoader;
   /** How the default loader compiles and bundles an agent file. */
   agentFileLoadOptions?: AgentFileOptions;
   /**

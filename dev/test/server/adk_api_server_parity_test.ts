@@ -27,7 +27,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 import {DEFAULT_APP_NAME_ENV_VAR} from '../../src/server/default_app_rewrite.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {ServerAgentLoader} from '../../src/utils/base_agent_loader.js';
 
 const APP_NAME = 'test_app';
 const USER_ID = 'test_user';
@@ -54,7 +54,7 @@ const REPORTING_AGENT = new PluginReportingAgent({
   description: 'reports the plugins it runs under',
 });
 
-function loaderFor(appNames: string[]): AgentLoader {
+function loaderFor(appNames: string[]): ServerAgentLoader {
   return {
     listAgents: () => Promise.resolve(appNames),
     loadAgent: () => Promise.resolve(REPORTING_AGENT),
@@ -65,7 +65,7 @@ function loaderFor(appNames: string[]): AgentLoader {
           return;
         },
       }),
-  } as unknown as AgentLoader;
+  };
 }
 
 interface RunResponse {
@@ -266,7 +266,7 @@ describe('api_server parity', () => {
 
   it('rejects a logo with only one of its two values', () => {
     expect(() => new AdkApiServer({agentsDir, logoText: 'Acme'})).toThrow(
-      'Both --logo-text and --logo-image-url must be defined',
+      'Both --logo_text and --logo_image_url must be defined',
     );
   });
 
