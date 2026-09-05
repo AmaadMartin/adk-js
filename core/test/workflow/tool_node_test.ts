@@ -228,21 +228,19 @@ describe('ToolNode rerunOnResume', () => {
     expect(new ToolNode(new EchoTool()).rerunOnResume).toBe(false);
   });
 
-  // adk-python's `_ToolNode` passes `rerun_on_resume=False`, which `BaseNode`
-  // already gives us. `rerunOnResume` is in OVERRIDABLE_KEYS, so the three
-  // routes below are supported calls and must agree.
-  it('honours an explicit override on the constructor', () => {
-    expect(
-      new ToolNode(new EchoTool(), {rerunOnResume: true}).rerunOnResume,
-    ).toBe(true);
-  });
-
-  it('honours an explicit override through node()', () => {
+  // `BuildNodeOptions` still carries the key, so this call compiles. The node
+  // pins the value anyway, which is what adk-python does: its `build_node`
+  // passes only `tool`, `name`, `retry_config` and `timeout` to `_ToolNode`,
+  // so `node(tool, rerun_on_resume=True)` does not rerun there either.
+  it('drops an override passed through node()', () => {
     expect(node(new EchoTool(), {rerunOnResume: true}).rerunOnResume).toBe(
-      true,
+      false,
     );
   });
 
+  // The pin only reaches the constructor. `cloneWithOverrides` assigns the key
+  // onto a copy of an already-built node, and adk-python's `model_copy(update=
+  // ...)` has the same hole, so this route keeps the override on both sides.
   it('honours an explicit override on an already-built ToolNode', () => {
     expect(
       node(new ToolNode(new EchoTool()), {rerunOnResume: true}).rerunOnResume,

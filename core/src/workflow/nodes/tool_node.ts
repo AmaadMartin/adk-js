@@ -12,8 +12,15 @@ import {BaseTool} from '../../tools/base_tool.js';
 import {BaseNode, BaseNodeConfig, isContent} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 
-/** Options for a {@link ToolNode}. */
-export interface ToolNodeConfig extends Partial<Omit<BaseNodeConfig, 'name'>> {
+/**
+ * Options for a {@link ToolNode}.
+ *
+ * `rerunOnResume` is absent on purpose: the node pins it to `false`, so
+ * accepting the key would silently discard it. See {@link ToolNode}.
+ */
+export interface ToolNodeConfig extends Partial<
+  Omit<BaseNodeConfig, 'name' | 'rerunOnResume'>
+> {
   /** Optional name override; defaults to the tool's name. */
   name?: string;
 }
@@ -38,6 +45,13 @@ export interface ToolNodeConfig extends Partial<Omit<BaseNodeConfig, 'name'>> {
  * that returns nothing — including a long-running tool deferring its response
  * — yields a bare event carrying whatever it recorded, or no event at all when
  * it recorded nothing.
+ *
+ * `rerunOnResume` is pinned to `false` and cannot be built as `true`: a tool
+ * call is a side effect, so a resumed workflow replays the recorded output
+ * instead of calling the tool again. `_ToolNode.__init__` pins the same value
+ * and takes no `rerun_on_resume` argument, and adk-python's `build_node` drops
+ * the argument for a `BaseTool`, so `node(tool, {rerunOnResume: true})` yields
+ * a node that does not rerun there either.
  */
 export class ToolNode extends BaseNode {
   readonly tool: BaseTool;
@@ -45,7 +59,7 @@ export class ToolNode extends BaseNode {
   constructor(tool: BaseTool, config: ToolNodeConfig = {}) {
     // Spread first so an explicit `undefined` name in `config` can't clobber
     // the fallback (which BaseNode requires to be non-empty).
-    super({...config, name: config.name ?? tool.name});
+    super({...config, name: config.name ?? tool.name, rerunOnResume: false});
     this.tool = tool;
   }
 
