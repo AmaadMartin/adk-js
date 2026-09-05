@@ -473,7 +473,7 @@ describe('MultiTurnVertexAiEvalFacade', () => {
   });
 
   it('reports nothing at all when the service returns no score', async () => {
-    for (const unscored of [{summaryMetrics: []}, scored(Number.NaN)]) {
+    for (const unscored of [{summaryMetrics: []}, {}, scored(Number.NaN)]) {
       const client = new FakeEvalClient([unscored]);
 
       const result =
@@ -611,6 +611,23 @@ describe('MultiTurnVertexAiEvalFacade', () => {
           intermediateResponses: [['agent1', [{text: 'thinking'}]]],
         },
       }),
+      turn({id: 'inv2', query: 'q2', response: 'r2'}),
+    ];
+
+    await facadeWith(client).evaluateInvocations(invocations);
+
+    const turns = client.requests[0].dataset.evalCases?.[0].agentData.turns;
+    expect(turns?.[0].events).toEqual([
+      {author: 'user', content: {parts: [{text: 'q1'}]}},
+      {author: 'agent', content: {parts: [{text: 'r1'}]}},
+    ]);
+    expect(turns?.[1].events).toHaveLength(2);
+  });
+
+  it('maps a turn that recorded no intermediate events as user then agent', async () => {
+    const client = new FakeEvalClient([scored(0.9)]);
+    const invocations = [
+      turn({id: 'inv1', query: 'q1', response: 'r1'}),
       turn({id: 'inv2', query: 'q2', response: 'r2'}),
     ];
 

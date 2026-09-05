@@ -365,38 +365,32 @@ export class MultiTurnVertexAiEvalFacade extends VertexAiEvalFacade {
       return emptyEvaluationResult();
     }
 
-    const perInvocationResults: PerInvocationResult[] = actualInvocations
-      .slice(0, -1)
-      .map((actual, index) => ({
-        actualInvocation: actual,
-        expectedInvocation: expectedInvocations?.[index],
-        score: undefined,
-        evalStatus: EvalStatus.NOT_EVALUATED,
-      }));
-
     const result = await this.client.evaluate({
       dataset: {evalCases: [{agentData: getAgentData(actualInvocations)}]},
       metrics: [{name: this.metricName}],
     });
 
-    const lastTurn = actualInvocations.length - 1;
     const score = getScore(result);
-    perInvocationResults.push({
-      actualInvocation: actualInvocations[lastTurn],
-      expectedInvocation: expectedInvocations?.[lastTurn],
-      score,
-      evalStatus: getEvalStatus(score, this.threshold),
-    });
-
     if (score === undefined) {
       // Parity with adk-python: an unscored conversation reports nothing at
-      // all, and the per-invocation results accumulated above are discarded.
+      // all, rather than a list of unevaluated turns.
       return emptyEvaluationResult();
     }
 
+    const evalStatus = getEvalStatus(score, this.threshold);
+    const lastTurn = actualInvocations.length - 1;
+    const perInvocationResults: PerInvocationResult[] = actualInvocations.map(
+      (actual, index) => ({
+        actualInvocation: actual,
+        expectedInvocation: expectedInvocations?.[index],
+        score: index === lastTurn ? score : undefined,
+        evalStatus: index === lastTurn ? evalStatus : EvalStatus.NOT_EVALUATED,
+      }),
+    );
+
     return {
       overallScore: score,
-      overallEvalStatus: getEvalStatus(score, this.threshold),
+      overallEvalStatus: evalStatus,
       perInvocationResults,
     };
   }

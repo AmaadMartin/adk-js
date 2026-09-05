@@ -12,6 +12,7 @@
  * `FinalResponseMatchV2Evaluator`, `HallucinationsV1Evaluator`,
  * `SafetyEvaluatorV1`, `RubricBasedToolUseV1Evaluator`,
  * `RubricBasedFinalResponseQualityV1Evaluator`,
+ * `MultiTurnTaskSuccessV1Evaluator`,
  * `MultiTurnToolUseQualityV1Evaluator` and
  * `MultiTurnTrajectoryQualityV1Evaluator` evaluators that stand on it,
  * the metric info providers that describe each prebuilt metric,
@@ -138,6 +139,8 @@ export {
   SafetyEvaluatorV1MetricInfoProvider,
   TrajectoryEvaluatorMetricInfoProvider,
 } from './metric_info_providers.js';
+export {MultiTurnTaskSuccessV1Evaluator} from './multi_turn_task_success_evaluator.js';
+export type {MultiTurnTaskSuccessV1EvaluatorOptions} from './multi_turn_task_success_evaluator.js';
 export {MultiTurnToolUseQualityV1Evaluator} from './multi_turn_tool_use_quality_evaluator.js';
 export type {MultiTurnToolUseQualityV1EvaluatorOptions} from './multi_turn_tool_use_quality_evaluator.js';
 export {MultiTurnTrajectoryQualityV1Evaluator} from './multi_turn_trajectory_quality_evaluator.js';
