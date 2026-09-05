@@ -147,6 +147,28 @@ const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
 `;
 
+const namedAgentJsContent = (agentName: string) => `
+const {BaseAgent} = require('@google/adk');
+
+class FakeNamedAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.rootAgent = new FakeNamedAgent('${agentName}');`;
+
+const indexAppJsContent = `
+const {App, BaseAgent} = require('@google/adk');
+
+class FakeAgentForIndexApp extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+const agent = new FakeAgentForIndexApp('agent_for_index_app');
+exports.app = new App({ name: 'index_app', rootAgent: agent });
+`;
+
 describe('AgentLoader', () => {
   let tempAgentsDir: string;
   let tempLoaderDir: string;
@@ -951,6 +973,130 @@ describe('AgentLoader', () => {
       expect(agents).not.toContain('.hidden');
 
       await loader.disposeAll();
+    });
+
+    /**
+     * `index` is Node's entrypoint for a directory, so a directory holding only
+     * `index.ts` is an agent. This mirrors adk-python's package layout, case
+     * (b) of its AgentLoader.
+     */
+    describe('directory whose entrypoint is index', () => {
+      const writeDirFile = async (
+        dirName: string,
+        fileName: string,
+        content: string,
+      ) => {
+        const dir = path.join(tempAgentsDir, dirName);
+        await fs.mkdir(dir, {recursive: true});
+        await fs.writeFile(path.join(dir, fileName), content);
+      };
+
+      it('discovers the directory as an agent', async () => {
+        await writeDirFile(
+          'pkg_agent',
+          'index.js',
+          namedAgentJsContent('index_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listAgents()).toContain('pkg_agent');
+        const loaded = await (await loader.getAgentFile('pkg_agent')).load();
+        expect(loaded.name).toBe('index_agent');
+
+        await loader.disposeAll();
+      });
+
+      it('lists it via listApps() when index exports an App', async () => {
+        await writeDirFile('pkg_app', 'index.js', indexAppJsContent);
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listApps()).toContain('pkg_app');
+        const loaded = await (await loader.getAppFile('pkg_app')).load();
+        expect(isApp(loaded)).toBe(true);
+        expect((loaded as App).name).toBe('index_app');
+
+        await loader.disposeAll();
+      });
+
+      it('prefers agent over index in the same directory', async () => {
+        await writeDirFile(
+          'barrel_dir',
+          'index.js',
+          namedAgentJsContent('from_index'),
+        );
+        await writeDirFile(
+          'barrel_dir',
+          'agent.js',
+          namedAgentJsContent('from_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const loaded = await (await loader.getAgentFile('barrel_dir')).load();
+
+        expect(loaded.name).toBe('from_agent');
+        await loader.disposeAll();
+      });
+
+      it('prefers app over index in the same directory', async () => {
+        await writeDirFile(
+          'barrel_app_dir',
+          'index.js',
+          namedAgentJsContent('from_index'),
+        );
+        await writeDirFile('barrel_app_dir', 'app.js', appJsContent);
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const loaded = await (await loader.getAppFile('barrel_app_dir')).load();
+
+        expect(isApp(loaded)).toBe(true);
+        expect((loaded as App).name).toBe('test_app');
+        await loader.disposeAll();
+      });
+
+      it('records a load failure when index throws while constructing', async () => {
+        await writeDirFile(
+          'broken_pkg',
+          'index.js',
+          `throw new Error('boom during construction');`,
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const failures = await loader.listLoadFailures();
+
+        expect(failures).toHaveLength(1);
+        expect(failures[0].name).toBe('broken_pkg');
+        expect(failures[0].filePath).toContain('index.js');
+        expect(failures[0].error.message).toContain('boom during construction');
+        await loader.disposeAll();
+      });
+
+      it('skips the directory quietly when index exports no agent', async () => {
+        await writeDirFile('helpers_pkg', 'index.js', 'exports.foo = "bar";');
+        const loader = new AgentLoader(tempAgentsDir);
+
+        expect(await loader.listAgents()).not.toContain('helpers_pkg');
+        expect(await loader.listLoadFailures()).toEqual([]);
+        await loader.disposeAll();
+      });
+
+      it('ignores index inside node_modules and dot directories', async () => {
+        await writeDirFile(
+          'node_modules',
+          'index.js',
+          namedAgentJsContent('node_modules_index_agent'),
+        );
+        await writeDirFile(
+          '.hidden_pkg',
+          'index.js',
+          namedAgentJsContent('hidden_index_agent'),
+        );
+        const loader = new AgentLoader(tempAgentsDir);
+
+        const agents = await loader.listAgents();
+
+        expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
+        await loader.disposeAll();
+      });
     });
   });
 });
