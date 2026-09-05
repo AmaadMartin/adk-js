@@ -13,9 +13,9 @@
  * service, which this build of `@google/adk` does not ship.
  *
  * `LocalEvalService` is the implementation that will call
- * {@link setEvalRuntime}, once it is ported. It owns the metric evaluator
- * registry and the user simulator, which is why {@link EvalServiceParams}
- * carries the eval config whole rather than the metrics alone.
+ * {@link setEvalRuntime}, once it is ported. It owns the user simulator, and
+ * {@link EvalServiceParams} carries the eval config whole rather than the
+ * metrics alone, because the service also reads its live-model settings.
  *
  * The runtime is installed process-wide, and deliberately so: adk-python
  * resolves the same service through a lazy module import, and a test author
@@ -31,6 +31,7 @@ import {MISSING_EVAL_DEPENDENCIES_MESSAGE} from './constants.js';
 import {EvalConfig} from './eval_config.js';
 import {EvalSetResultsManager} from './eval_set_results_manager.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
+import {MetricEvaluatorRegistry} from './metric_evaluator_registry.js';
 
 /** Everything the eval runtime needs to build a service for one run. */
 export interface EvalServiceParams {
@@ -48,6 +49,15 @@ export interface EvalServiceParams {
    * `userSimulatorConfig` and `liveModelConfig`, which the runtime owns.
    */
   evalConfig: EvalConfig;
+
+  /**
+   * Resolves a metric name to the evaluator that scores it.
+   *
+   * A fork private to this run, already carrying the custom metrics the
+   * config declares, so registering them leaves the process-wide default
+   * registry untouched.
+   */
+  metricEvaluatorRegistry?: MetricEvaluatorRegistry;
 
   /** Loads the artifacts the eval cases reach for. */
   artifactService?: BaseArtifactService;

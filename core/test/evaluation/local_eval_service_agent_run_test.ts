@@ -228,7 +228,7 @@ describe('AgentEvaluator over an installed LocalEvalRuntime', () => {
         numRuns: 1,
         printDetailedResults: false,
       }),
-    ).rejects.toThrow(/my_custom_metric.*Failed/);
+    ).rejects.toThrow(/my_custom_metric.*was not evaluated/);
   });
 
   it('persists the results through the manager the caller supplied', async () => {

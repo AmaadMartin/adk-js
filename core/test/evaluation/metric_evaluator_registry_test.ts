@@ -5,6 +5,7 @@
  */
 
 import {
+  CustomMetricEvaluator,
   defaultMetricEvaluatorRegistry,
   EvalMetric,
   EvalStatus,
@@ -15,6 +16,7 @@ import {
   MetricEvaluatorRegistry,
   NotFoundError,
   PrebuiltMetrics,
+  registerCustomMetricsFromConfig,
   ResponseEvaluator,
   TrajectoryEvaluator,
 } from '@google/adk';
@@ -129,6 +131,98 @@ describe('MetricEvaluatorRegistry', () => {
     );
     expect(defaultMetricEvaluatorRegistry()).not.toBe(
       new MetricEvaluatorRegistry(),
+    );
+  });
+});
+
+describe('MetricEvaluatorRegistry.fork', () => {
+  it('carries every registration the source registry holds', () => {
+    const source = new MetricEvaluatorRegistry();
+    source.registerEvaluator(
+      'inherited_metric',
+      (evalMetric) => new MarkerEvaluator(evalMetric),
+    );
+
+    const forked = source.fork();
+
+    expect(
+      forked.getEvaluator({metricName: 'inherited_metric', threshold: 1.0}),
+    ).toBeInstanceOf(MarkerEvaluator);
+    expect(forked.getEvaluator(TRAJECTORY_METRIC)).toBeInstanceOf(
+      TrajectoryEvaluator,
+    );
+  });
+
+  it('hides a later registration on the fork from the source', () => {
+    const source = new MetricEvaluatorRegistry();
+    const forked = source.fork();
+
+    forked.registerEvaluator(
+      'fork_only_metric',
+      (evalMetric) => new MarkerEvaluator(evalMetric),
+    );
+
+    expect(() =>
+      source.getEvaluator({metricName: 'fork_only_metric', threshold: 1.0}),
+    ).toThrow(NotFoundError);
+  });
+
+  it('hides a later registration on the source from the fork', () => {
+    const source = new MetricEvaluatorRegistry();
+    const forked = source.fork();
+
+    source.registerEvaluator(
+      'source_only_metric',
+      (evalMetric) => new MarkerEvaluator(evalMetric),
+    );
+
+    expect(() =>
+      forked.getEvaluator({metricName: 'source_only_metric', threshold: 1.0}),
+    ).toThrow(NotFoundError);
+  });
+
+  it('replaces a standard metric the source overrode', () => {
+    const source = new MetricEvaluatorRegistry();
+    source.registerEvaluator(
+      PrebuiltMetrics.TOOL_TRAJECTORY_AVG_SCORE,
+      (evalMetric) => new MarkerEvaluator(evalMetric),
+    );
+
+    expect(source.fork().getEvaluator(TRAJECTORY_METRIC)).toBeInstanceOf(
+      MarkerEvaluator,
+    );
+  });
+});
+
+describe('registerCustomMetricsFromConfig', () => {
+  it('registers an evaluator for every custom metric of the config', () => {
+    const registry = registerCustomMetricsFromConfig(
+      {
+        criteria: {},
+        customMetrics: {
+          first_metric: {codeConfig: {name: './metrics.js#first'}},
+          second_metric: {codeConfig: {name: './metrics.js#second'}},
+        },
+      },
+      new MetricEvaluatorRegistry(),
+    );
+
+    expect(
+      registry.getEvaluator({metricName: 'first_metric', threshold: 0.5}),
+    ).toBeInstanceOf(CustomMetricEvaluator);
+    expect(
+      registry.getEvaluator({metricName: 'second_metric', threshold: 0.5}),
+    ).toBeInstanceOf(CustomMetricEvaluator);
+  });
+
+  it('returns the registry untouched when the config declares none', () => {
+    const registry = new MetricEvaluatorRegistry();
+
+    expect(registerCustomMetricsFromConfig({criteria: {}}, registry)).toBe(
+      registry,
+    );
+    expect(registry.getEvaluator(TRAJECTORY_METRIC)).toBeInstanceOf(
+      TrajectoryEvaluator,
     );
   });
 });

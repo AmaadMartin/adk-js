@@ -135,9 +135,21 @@ score a sub-agent; the app is still surfaced.
 
 ## Eval data on disk
 
-`evaluate` accepts one file or a directory. A directory is searched
-recursively for `*.test.json` files, which are then processed one at a time in
-sorted order.
+`evaluate` accepts one file, a directory, or an explicit list of files. A
+directory is searched recursively for `*.test.json` files, which are then
+processed one at a time in sorted order. A list is taken as the files
+themselves, in the order given, and every entry must already exist.
+
+```ts
+await AgentEvaluator.evaluate({
+  agentModule,
+  evalDatasetFilePathOrDir: [
+    './weather_agent/evalset/simple.test.json',
+    './weather_agent/evalset/multi_turn.test.json',
+  ],
+  numRuns: 2,
+});
+```
 
 Each file holds either an eval set in the current schema, or eval data in ADK's
 original `[{query, reference, expected_tool_use}]` format. Data in the original
@@ -169,6 +181,11 @@ A passing run resolves and returns nothing. A failing run throws
 threshold and the mean score. A run whose inference crashed produces no metric
 results at all, and is reported separately by eval case id.
 
+A metric that produced no score at all gets a different line, saying it _was
+not evaluated_. This is what an unreachable judge model looks like: the
+threshold was never checked, so the agent did not regress and the logs hold the
+reason the metric could not run. The run still fails.
+
 With `printDetailedResults` left at its default, each metric also logs a
 summary line and a table of its invocations through `logger.info`. Set it to
 `false` to silence that; the thrown message then tells you how to turn it back
@@ -181,3 +198,56 @@ with a single header row. Parent directories are created.
 Set `evalSetResultsManager` together with `appName` to persist the whole result
 of the run. The eval service saves the results before `AgentEvaluator` throws,
 so a failing run is still recorded.
+
+## Custom metrics
+
+An eval config can declare a metric scored by a function you wrote. Name it as
+`<module specifier>#<export name>`; a bare specifier resolves to the module's
+default export. adk-python splits a dotted Python path on its last `.`, which a
+JavaScript specifier cannot support, so this SDK marks the export explicitly.
+
+```json
+{
+  "criteria": {"brevity": 0.5},
+  "custom_metrics": {
+    "brevity": {"code_config": {"name": "./metrics.js#scoreBrevity"}}
+  }
+}
+```
+
+The function receives the metric, the actual invocations, the expected ones and
+the conversation scenario, and returns an `EvaluationResult` or a promise of
+one. The metric it receives carries no threshold: the function decides the
+score, and `AgentEvaluator` decides whether that score passes.
+
+`AgentEvaluator` registers these metrics into a fork of the default registry,
+so a run's registrations last only for that run. Evaluators you registered on
+the default registry yourself stay resolvable inside the fork. Importing the
+specifier executes the module, at the same trust level as the agent module the
+run already imports.
+
+## Migrating off `criteria`
+
+`evaluateEvalSet` still accepts a `criteria` option mapping a metric name to a
+threshold. It is deprecated. When you pass it, `AgentEvaluator` logs a warning,
+maps it onto an `EvalConfig` and ignores any `evalConfig` you passed alongside
+it. Move to `evalConfig`, which also carries custom metrics and live-model
+settings.
+
+```ts
+// Deprecated.
+await AgentEvaluator.evaluateEvalSet({
+  agentModule,
+  evalSet,
+  criteria: {'tool_trajectory_avg_score': 1.0},
+});
+
+// Preferred.
+await AgentEvaluator.evaluateEvalSet({
+  agentModule,
+  evalSet,
+  evalConfig: {criteria: {'tool_trajectory_avg_score': 1.0}},
+});
+```
+
+A call that gives neither is rejected with `` `evalConfig` is required. ``

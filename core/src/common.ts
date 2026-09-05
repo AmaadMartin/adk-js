@@ -346,12 +346,22 @@ export type {
   EvalDumpOptions,
   EvalModel,
   EvalModelOptions,
+  ExtraKeysPolicy,
 } from './evaluation/common.js';
 export {
   DEFAULT_LIVE_TIMEOUT_SECONDS,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
 } from './evaluation/constants.js';
-export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export {CustomMetricEvaluator} from './evaluation/custom_metric_evaluator.js';
+export type {CustomMetricFunction} from './evaluation/custom_metric_evaluator.js';
+export {
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+  isIntermediateData,
+  isInvocationEvents,
+  validateEvalCase,
+} from './evaluation/eval_case.js';
 export type {
   ConversationScenario,
   EvalCase,
@@ -361,6 +371,9 @@ export type {
   InvocationEvent,
   InvocationEvents,
   SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
 } from './evaluation/eval_case.js';
 export {
   DEFAULT_EVAL_CONFIG,
@@ -454,12 +467,23 @@ export type {
   EvalCaseResponses,
   EvalRow,
 } from './evaluation/evaluation_generator.js';
+export {
+  BASE_CRITERION_TYPE,
+  emptyEvaluationResult,
+  getCriterionType,
+  getEvalStatus,
+  getTextFromContent,
+  validateBaseCriterion,
+  validateInvocationLengths,
+} from './evaluation/evaluator.js';
 export type {
   CriterionType,
   EvaluationResult,
   Evaluator,
+  EvaluatorClass,
   PerInvocationResult,
 } from './evaluation/evaluator.js';
+export {RougeEvaluator} from './evaluation/final_response_match_v1.js';
 export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
 export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
 export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
@@ -470,6 +494,7 @@ export type {LocalEvalServiceOptions} from './evaluation/local_eval_service.js';
 export {
   MetricEvaluatorRegistry,
   defaultMetricEvaluatorRegistry,
+  registerCustomMetricsFromConfig,
 } from './evaluation/metric_evaluator_registry.js';
 export type {MetricEvaluatorFactory} from './evaluation/metric_evaluator_registry.js';
 export {
@@ -486,6 +511,10 @@ export {
   SafetyEvaluatorV1MetricInfoProvider,
   TrajectoryEvaluatorMetricInfoProvider,
 } from './evaluation/metric_info_providers.js';
+export {ResponseEvaluator} from './evaluation/response_evaluator.js';
+export type {ResponseEvaluatorOptions} from './evaluation/response_evaluator.js';
+export {rouge1Score, tokenizeForRouge} from './evaluation/rouge_scorer.js';
+export type {RougeScore} from './evaluation/rouge_scorer.js';
 export {getPerTurnUserSimulatorQualityPrompt} from './evaluation/simulation/per_turn_user_simulator_quality_prompts.js';
 export {PerTurnUserSimulatorQualityV1} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
 export type {PerTurnUserSimulatorQualityV1Options} from './evaluation/simulation/per_turn_user_simulator_quality_v1.js';
@@ -505,6 +534,28 @@ export type {
 export {UserSimulatorProvider} from './evaluation/simulation/user_simulator_provider.js';
 export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
 export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
+export {
+  MultiTurnVertexAiEvalFacade,
+  SingleTurnVertexAiEvalFacade,
+  VertexAiEvalFacade,
+  resolveVertexAiEvalClientConfig,
+} from './evaluation/vertex_ai_eval_facade.js';
+export type {
+  VertexAgentConfig,
+  VertexAgentData,
+  VertexAgentEvent,
+  VertexAggregatedMetricResult,
+  VertexAiEvalClient,
+  VertexAiEvalClientConfig,
+  VertexAiEvalFacadeOptions,
+  VertexAiEvalRequest,
+  VertexConversationTurn,
+  VertexEvalCase,
+  VertexEvalCaseRow,
+  VertexEvalMetricSpec,
+  VertexEvaluationDataset,
+  VertexEvaluationResult,
+} from './evaluation/vertex_ai_eval_facade.js';
 export {
   createCompactedEvent,
   isCompactedEvent,

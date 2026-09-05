@@ -98,6 +98,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Evaluation
 
+- [AgentEvaluator](evaluation/agent_evaluator/index.md) - Running an agent over recorded eval data from your own test suite, and reading the verdict it produces.
 - [AppDetails](evaluation/app_details/index.md) - The eval system's projection
   of a running app: its agents, their instructions, and the tools each
   declared.

@@ -7,6 +7,8 @@
 import {NotFoundError} from '../errors/not_found_error.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
+import {CustomMetricEvaluator} from './custom_metric_evaluator.js';
+import {EvalConfig} from './eval_config.js';
 import {EvalMetric, PrebuiltMetrics} from './eval_metrics.js';
 import {Evaluator} from './evaluator.js';
 import {ResponseEvaluator} from './response_evaluator.js';
@@ -52,6 +54,23 @@ export class MetricEvaluatorRegistry {
     }
     this.factories.set(metricName, factory);
   }
+
+  /**
+   * Returns an isolated copy of this registry.
+   *
+   * The copy starts out with everything registered here, so evaluators that a
+   * caller registered on the default registry stay resolvable. Registrations
+   * made afterwards on either registry are invisible to the other, which is
+   * what makes it safe to register the custom metrics of a single eval run
+   * without mutating process-wide state.
+   */
+  fork(): MetricEvaluatorRegistry {
+    const forked = new MetricEvaluatorRegistry();
+    for (const [metricName, factory] of this.factories) {
+      forked.factories.set(metricName, factory);
+    }
+    return forked;
+  }
 }
 
 /**
@@ -82,7 +101,7 @@ function registerStandardMetrics(registry: MetricEvaluatorRegistry): void {
 let defaultRegistry: MetricEvaluatorRegistry | undefined;
 
 /**
- * Returns the registry a {@link LocalEvalService} uses when given none.
+ * Returns the registry an eval service uses when given none.
  *
  * Built on first use rather than at module load. This module hangs off the
  * package barrel, so constructing an `@experimental` class here would warn
@@ -91,4 +110,31 @@ let defaultRegistry: MetricEvaluatorRegistry | undefined;
  */
 export function defaultMetricEvaluatorRegistry(): MetricEvaluatorRegistry {
   return (defaultRegistry ??= new MetricEvaluatorRegistry());
+}
+
+/**
+ * Registers the custom metrics an eval config declares.
+ *
+ * A config with no custom metrics leaves the registry untouched. Register into
+ * a {@link MetricEvaluatorRegistry.fork} so the run's registrations do not
+ * reach process-wide state.
+ *
+ * @param evalConfig The config whose `customMetrics` entries to register.
+ * @param registry The registry to register them in.
+ * @returns The registry the metrics were registered in.
+ */
+export function registerCustomMetricsFromConfig(
+  evalConfig: EvalConfig,
+  registry: MetricEvaluatorRegistry,
+): MetricEvaluatorRegistry {
+  for (const [metricName, config] of Object.entries(
+    evalConfig.customMetrics ?? {},
+  )) {
+    registry.registerEvaluator(
+      metricName,
+      (evalMetric) =>
+        new CustomMetricEvaluator(evalMetric, config.codeConfig.name),
+    );
+  }
+  return registry;
 }
