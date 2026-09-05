@@ -10,7 +10,7 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ### Environment
 
-- [E2BEnvironment](environment/e2b_environment/index.md) - A remote sandbox workspace for file CRUD, shell execution, and on-demand software installs.
+- [E2BEnvironment](environments/e2b_environment/index.md) - A remote sandbox workspace for file CRUD, shell execution, and on-demand software installs.
 
 ### Tools
 
