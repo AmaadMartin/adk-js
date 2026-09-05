@@ -212,6 +212,16 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
 };
 
 /**
+ * `add-session` names the eval set in the request rather than addressing it,
+ * so an eval set that does not exist is a bad request and not a missing
+ * resource. adk-python answers 400 there too.
+ */
+const ADD_SESSION_STATUS_BY_ERROR_NAME: Record<string, number> = {
+  ...STATUS_BY_ERROR_NAME,
+  NotFoundError: 400,
+};
+
+/**
  * Reads the `name` an ADK error class sets on itself. Matched by name and not
  * with `instanceof`, so an error thrown by a second copy of `@google/adk` in
  * the same process still maps to its status.
@@ -304,10 +314,18 @@ class EvalRouteHandlers {
       creationTimestamp: Date.now() / 1000,
     };
 
-    await this.answer(res, async () => {
-      await this.deps.evalSetsManager.addEvalCase(appName, evalSetId, evalCase);
-      return evalCase;
-    });
+    await this.answer(
+      res,
+      async () => {
+        await this.deps.evalSetsManager.addEvalCase(
+          appName,
+          evalSetId,
+          evalCase,
+        );
+        return evalCase;
+      },
+      ADD_SESSION_STATUS_BY_ERROR_NAME,
+    );
   }
 
   async listEvalsInEvalSet(req: Request, res: Response): Promise<void> {
@@ -521,11 +539,12 @@ class EvalRouteHandlers {
   private async answer(
     res: Response,
     body: () => Promise<EvalSet | EvalCase | EvalSetResult | void>,
+    statusByErrorName: Record<string, number> = STATUS_BY_ERROR_NAME,
   ): Promise<void> {
     try {
       res.json((await body()) ?? {});
     } catch (error: unknown) {
-      const status = STATUS_BY_ERROR_NAME[errorName(error) ?? ''] ?? 500;
+      const status = statusByErrorName[errorName(error) ?? ''] ?? 500;
       this.fail(res, status, errorMessage(error));
     }
   }
