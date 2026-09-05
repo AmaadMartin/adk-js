@@ -4,15 +4,46 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {OAuth2Client} from 'google-auth-library';
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {AuthCredentialTypes} from '../../auth/auth_credential.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
-import {
-  createTokenAuthClient,
-  SpannerAccessToken,
-  SpannerAuthClient,
-} from './client.js';
+import {SpannerAuthClient} from './client.js';
+
+/** An OAuth access token, as cached in session state. */
+export interface SpannerAccessToken {
+  accessToken: string;
+  refreshToken?: string;
+  /** Epoch milliseconds at which `accessToken` expires, if known. */
+  expiresAt?: number;
+}
+
+/** The OAuth client a refresh token is renewed against. */
+interface SpannerOAuthClientCredentials {
+  clientId?: string;
+  clientSecret?: string;
+}
+
+/**
+ * Builds an auth client that presents `token` to Spanner.
+ *
+ * @param token The access token, and the refresh token when there is one.
+ * @param oauthClient The OAuth client the refresh token is renewed against.
+ * @return The auth client.
+ */
+function createTokenAuthClient(
+  token: SpannerAccessToken,
+  oauthClient: SpannerOAuthClientCredentials = {},
+): OAuth2Client {
+  const client = new OAuth2Client(oauthClient);
+  client.setCredentials({
+    access_token: token.accessToken,
+    refresh_token: token.refreshToken,
+    expiry_date: token.expiresAt,
+  });
+  return client;
+}
 
 /** Key under which a resolved Spanner token is cached in tool context state. */
 export const SPANNER_TOKEN_CACHE_KEY = 'spanner_token_cache';
@@ -37,12 +68,11 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
  *   3. `clientId` and `clientSecret` (and optionally `scopes`) — each end user
  *      goes through the OAuth authorization-code flow.
  *
- * `@google/adk/tools/spanner` publishes this as `SpannerCredentialsConfig`,
- * the name adk-python uses. Its `authClient` is typed off the Spanner client's
- * own options, because `@google-cloud/spanner` types that field with the copy
- * of `google-auth-library` that `google-gax` pins.
+ * `authClient` is typed off the Spanner client's own options, because
+ * `@google-cloud/spanner` types that field with the copy of
+ * `google-auth-library` that `google-gax` pins.
  */
-export interface SpannerToolsetCredentialsConfig {
+export interface SpannerCredentialsConfig {
   /**
    * An auth client the caller already built: Application Default Credentials,
    * a service-account key, or workload identity. Every end user then shares
@@ -73,7 +103,7 @@ export interface SpannerToolsetCredentialsConfig {
  * @throws Error if the config names no credential source, or more than one.
  */
 export function validateSpannerCredentialsConfig(
-  config: SpannerToolsetCredentialsConfig,
+  config: SpannerCredentialsConfig,
 ): void {
   const {authClient, externalAccessTokenKey, clientId, clientSecret, scopes} =
     config;
@@ -131,7 +161,7 @@ function scopeDescriptions(scopes: readonly string[]): Record<string, string> {
 export class SpannerCredentialsManager {
   private readonly scopes: readonly string[];
 
-  constructor(private readonly config: SpannerToolsetCredentialsConfig) {
+  constructor(private readonly config: SpannerCredentialsConfig) {
     this.scopes = config.scopes ?? SPANNER_DEFAULT_SCOPES;
   }
 
@@ -165,10 +195,7 @@ export class SpannerCredentialsManager {
     return this.runOAuthFlow(context);
   }
 
-  private readExternalToken(
-    context: Context,
-    key: string,
-  ): Promise<SpannerAuthClient> {
+  private readExternalToken(context: Context, key: string): SpannerAuthClient {
     const accessToken = context.state.get<string>(key);
     if (!accessToken) {
       throw new Error(
@@ -230,7 +257,7 @@ export class SpannerCredentialsManager {
     };
   }
 
-  private buildClient(token: SpannerAccessToken): Promise<SpannerAuthClient> {
+  private buildClient(token: SpannerAccessToken): SpannerAuthClient {
     const {clientId, clientSecret} = this.config;
     return createTokenAuthClient(token, {clientId, clientSecret});
   }

@@ -5,7 +5,6 @@
  */
 
 import type {Spanner} from '@google-cloud/spanner';
-import {OAuth2Client} from 'google-auth-library';
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
@@ -37,40 +36,6 @@ export type SpannerAuthClient = NonNullable<
 interface SpannerClientOptions extends SpannerConstructorOptions {
   libName: string;
   libVersion: string;
-}
-
-/** An OAuth access token, as cached in session state. */
-export interface SpannerAccessToken {
-  accessToken: string;
-  refreshToken?: string;
-  /** Epoch milliseconds at which `accessToken` expires, if known. */
-  expiresAt?: number;
-}
-
-/** The OAuth client a refresh token is renewed against. */
-export interface SpannerOAuthClientCredentials {
-  clientId?: string;
-  clientSecret?: string;
-}
-
-/**
- * Builds an auth client that presents `token` to Spanner.
- *
- * @param token The access token, and the refresh token when there is one.
- * @param oauthClient The OAuth client the refresh token is renewed against.
- * @return The auth client.
- */
-export async function createTokenAuthClient(
-  token: SpannerAccessToken,
-  oauthClient: SpannerOAuthClientCredentials = {},
-): Promise<OAuth2Client> {
-  const client = new OAuth2Client(oauthClient);
-  client.setCredentials({
-    access_token: token.accessToken,
-    refresh_token: token.refreshToken,
-    expiry_date: token.expiresAt,
-  });
-  return client;
 }
 
 /**
@@ -203,7 +168,8 @@ export function withDatabaseAdminClient<T>(
 }
 
 /**
- * Waits for one long-running operation, giving up after `timeoutMs`.
+ * Waits for one long-running operation, giving up after
+ * {@link OPERATION_TIMEOUT_MS}.
  *
  * The bound matters because a tool call blocks the agent turn: an instance
  * that never finishes provisioning would otherwise hold it open forever. On
@@ -212,12 +178,10 @@ export function withDatabaseAdminClient<T>(
  * tool has answered.
  *
  * @param operation The operation the create call returned.
- * @param timeoutMs How long to wait.
  * @throws Error if the operation fails, or does not finish in time.
  */
 export async function waitForOperation(
   operation: SpannerLongRunningOperation,
-  timeoutMs: number = OPERATION_TIMEOUT_MS,
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
@@ -229,10 +193,11 @@ export async function waitForOperation(
           timedOut = true;
           reject(
             new Error(
-              `The Spanner operation did not complete within ${timeoutMs} ms.`,
+              'The Spanner operation did not complete within' +
+                ` ${OPERATION_TIMEOUT_MS} ms.`,
             ),
           );
-        }, timeoutMs);
+        }, OPERATION_TIMEOUT_MS);
       }),
     ]);
   } finally {

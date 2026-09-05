@@ -10,9 +10,9 @@ import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 // Not part of the public entry point: the toolset constructor is the only
 // caller, so these are imported from the source they live in.
-import {SpannerAccessToken} from '../../../src/tools/spanner/client.js';
 import {
   SPANNER_TOKEN_CACHE_KEY,
+  SpannerAccessToken,
   SpannerCredentialsManager,
   validateSpannerCredentialsConfig,
 } from '../../../src/tools/spanner/spanner_credentials.js';
