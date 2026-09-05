@@ -58,6 +58,11 @@ the official ADK documentation, visit [adk.dev](https://adk.dev/).
   which response field carries what, how grounding accumulates, and how Gemini
   3.x differs.
 
+### Sessions
+
+- [DatabaseSessionService](sessions/database_session_service/index.md) - Storing
+  sessions in a SQL database, and tuning the MikroORM connection behind them.
+
 ### Tools
 
 - [adkToMcpToolType and geminiToJsonSchema](tools/mcp_conversion_utils/index.md) -
