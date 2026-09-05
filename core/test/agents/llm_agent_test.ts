@@ -12,6 +12,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -26,6 +27,7 @@ import {
   LlmResponse,
   LongRunningFunctionTool,
   PluginManager,
+  ReadonlyContext,
   RunAsyncToolRequest,
   Runner,
   Session,
@@ -1427,5 +1429,77 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+class FailingToolset extends BaseToolset {
+  constructor() {
+    super([]);
+  }
+
+  getTools(_context?: ReadonlyContext): Promise<BaseTool[]> {
+    return Promise.reject(new Error('transport closed'));
+  }
+
+  async close(): Promise<void> {}
+}
+
+class WorkingToolset extends BaseToolset {
+  constructor(private readonly tool: BaseTool) {
+    super([]);
+  }
+
+  async getTools(_context?: ReadonlyContext): Promise<BaseTool[]> {
+    return [this.tool];
+  }
+
+  async close(): Promise<void> {}
+}
+
+describe('LlmAgent toolset load failures', () => {
+  it('keeps the other tools and names the failed toolset in an error log', async () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    onTestFinished(() => errorSpy.mockRestore());
+    const survivor = new FunctionTool({
+      name: 'survivor',
+      description: 'A tool from the toolset that loaded.',
+      parameters: z3.object({}),
+      execute: async () => ({result: 'ok'}),
+    });
+    const agent = new LlmAgent({
+      name: 'resilient_agent',
+      tools: [new FailingToolset(), new WorkingToolset(survivor)],
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools).toEqual([survivor]);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    const [message, cause] = errorSpy.mock.calls[0];
+    expect(message).toContain('FailingToolset');
+    expect(message).toContain('<unknown>');
+    expect(cause).toBeInstanceOf(Error);
+  });
+
+  it('names the agent when a readonly context is available', async () => {
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    onTestFinished(() => errorSpy.mockRestore());
+    const agent = new LlmAgent({
+      name: 'named_agent',
+      tools: [new FailingToolset()],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_toolset',
+      session: createSession({id: 'sess_toolset', appName: 'app'}),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const tools = await agent.canonicalTools(
+      new ReadonlyContext(invocationContext),
+    );
+
+    expect(tools).toEqual([]);
+    expect(errorSpy.mock.calls[0][0]).toContain('named_agent');
   });
 });
