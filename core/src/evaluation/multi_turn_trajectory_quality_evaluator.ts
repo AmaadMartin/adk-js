@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {ConversationScenario} from './conversation_scenarios.js';
-import {Invocation} from './eval_case.js';
 import {EvalMetric, getMetricThreshold} from './eval_metrics.js';
-import {EvaluationResult, Evaluator} from './evaluator.js';
 import {
   MultiTurnVertexAiEvalFacade,
   VertexAiEvalClient,
@@ -33,10 +30,11 @@ export interface MultiTurnTrajectoryQualityV1EvaluatorOptions {
  * the agent reached the goal. This metric asks how the agent got there, so a
  * redundant tool call or a detour lowers the score.
  *
- * The class delegates the scoring to the `MULTI_TURN_TRAJECTORY_QUALITY`
- * metric of the Vertex AI Gen AI evaluation service. Scores range over [0, 1],
- * and a score closer to 1 is more desirable. This is a reference-free metric,
- * so golden invocations are optional.
+ * The class binds {@link MultiTurnVertexAiEvalFacade} to the
+ * `MULTI_TURN_TRAJECTORY_QUALITY` metric of the Vertex AI Gen AI evaluation
+ * service. Scores range over [0, 1], and a score closer to 1 is more
+ * desirable. This is a reference-free metric, so golden invocations are
+ * optional.
  *
  * The `V1` suffix conveys that there could be other versions of the metric,
  * and that those versions could use a different strategy.
@@ -44,29 +42,15 @@ export interface MultiTurnTrajectoryQualityV1EvaluatorOptions {
  * The service has no JavaScript SDK, so the caller supplies the transport and
  * owns authentication.
  */
-export class MultiTurnTrajectoryQualityV1Evaluator implements Evaluator {
-  private readonly delegate: Evaluator;
-
+export class MultiTurnTrajectoryQualityV1Evaluator extends MultiTurnVertexAiEvalFacade {
   /**
    * @throws InputValidationError if the metric carries no threshold.
    */
   constructor(options: MultiTurnTrajectoryQualityV1EvaluatorOptions) {
-    this.delegate = new MultiTurnVertexAiEvalFacade({
+    super({
       threshold: getMetricThreshold(options.evalMetric),
       metricName: MULTI_TURN_TRAJECTORY_QUALITY_METRIC_NAME,
       client: options.evalClient,
     });
-  }
-
-  async evaluateInvocations(
-    actualInvocations: Invocation[],
-    expectedInvocations?: Invocation[],
-    conversationScenario?: ConversationScenario,
-  ): Promise<EvaluationResult> {
-    return this.delegate.evaluateInvocations(
-      actualInvocations,
-      expectedInvocations,
-      conversationScenario,
-    );
   }
 }
