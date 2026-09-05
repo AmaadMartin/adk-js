@@ -32,14 +32,6 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
- * Accepted entrypoint basenames for an agent directory, in resolution order.
- *
- * `index` comes last so a barrel `index.ts` beside an `agent.ts` keeps
- * resolving to `agent.ts`.
- */
-const DIR_ENTRYPOINT_BASENAMES = ['app', 'agent', 'index'];
-
-/**
  * Supported JS/TS file module types.
  */
 export enum FileModuleType {
@@ -592,7 +584,12 @@ export class AgentLoader {
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
-    const possibleEntryFile = findDirEntryFile(subFiles);
+    // `index` last: a barrel `index.ts` beside an `agent.ts` still resolves to
+    // `agent.ts`.
+    const possibleEntryFile =
+      subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
+      subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext)) ??
+      subFiles.find((f) => f.isFile && f.name === 'index' && isJsFile(f.ext));
 
     if (!possibleEntryFile) {
       return;
@@ -627,18 +624,6 @@ export class AgentLoader {
 
 function isJsFile(fileExt?: string): boolean {
   return !!fileExt && JS_FILES_EXTENSIONS.includes(fileExt);
-}
-
-function findDirEntryFile(subFiles: FileMetadata[]): FileMetadata | undefined {
-  for (const basename of DIR_ENTRYPOINT_BASENAMES) {
-    const entryFile = subFiles.find(
-      (f) => f.isFile && f.name === basename && isJsFile(f.ext),
-    );
-    if (entryFile) {
-      return entryFile;
-    }
-  }
-  return undefined;
 }
 
 async function getDirFiles(dir: string): Promise<FileMetadata[]> {
