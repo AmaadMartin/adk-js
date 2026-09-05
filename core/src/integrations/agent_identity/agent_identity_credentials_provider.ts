@@ -13,7 +13,6 @@ import {
 import {getFunctionCalls, getFunctionResponses} from '../../events/event.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {GcpAuthProviderScheme} from '../agent_registry/types.js';
 import {
   AgentIdentityCredentialsClient,
   RestAgentIdentityCredentialsClient,
@@ -21,6 +20,7 @@ import {
   RetrieveCredentialsResponse,
   RetrieveCredentialsSuccess,
 } from './agent_identity_credentials_client.js';
+import {GcpAuthProviderScheme} from './gcp_auth_provider_scheme.js';
 
 /** How long to wait between polls while the service reports `pending`. */
 const NON_INTERACTIVE_TOKEN_POLL_INTERVAL_MS = 1000;
@@ -30,19 +30,6 @@ const NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS = 10000;
 
 /** The argument that carries the tool call a credential request belongs to. */
 const FUNCTION_CALL_ID_ARG = 'functionCallId';
-
-/**
- * A backend that turns a {@link GcpAuthProviderScheme} into a credential.
- *
- * {@link GcpAuthProvider} routes to one of these on the shape of the scheme's
- * resource name.
- */
-export interface CredentialsProvider {
-  getAuthCredential(
-    authScheme: GcpAuthProviderScheme,
-    context?: Context,
-  ): Promise<AuthCredential>;
-}
 
 /** Options for {@link AgentIdentityCredentialsProvider}. */
 export interface AgentIdentityCredentialsProviderOptions {
@@ -93,7 +80,7 @@ function retrievalFailure(
  * A header of `Authorization: Bearer` becomes a bearer credential. Any other
  * header name is sent verbatim, alongside `X-GOOG-API-KEY`.
  */
-export function constructAuthCredential(
+function constructAuthCredential(
   success: RetrieveCredentialsSuccess,
 ): AuthCredential {
   const {header, token} = success;
@@ -175,7 +162,7 @@ export function isConsentCompleted(context: Context): boolean {
  * Credentials service.
  */
 @experimental
-export class AgentIdentityCredentialsProvider implements CredentialsProvider {
+export class AgentIdentityCredentialsProvider {
   private client?: AgentIdentityCredentialsClient;
 
   constructor(options?: AgentIdentityCredentialsProviderOptions) {
