@@ -33,3 +33,7 @@ Client-side retrieval tools. The agent calls a one-argument search function, you
 #### OpenAPI Tool
 
 - [OpenAPI tool](tools/openapi_tool/index.md) - Turning an OpenAPI specification into one tool per operation, selecting the operations an agent gets, and configuring the credential the requests carry.
+
+### Workflows
+
+- [Resumable workflow checkpoints](workflow/resumable_checkpoints/index.md) - Recording a workflow's progress on a resumable session, and reading it back.
