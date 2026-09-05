@@ -10,48 +10,47 @@
  * The `it()` names keep the Python test names.
  */
 
-import {
-  AuthCredential,
-  AuthCredentialTypes,
-  AuthScheme,
-  Context,
-  CredentialsProvider,
-  GcpAuthProvider,
-  GcpAuthProviderScheme,
-} from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {AuthCredentialTypes, AuthScheme, GcpAuthProvider} from '@google/adk';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {isGcpAuthProviderScheme} from '../../../src/integrations/agent_identity/gcp_auth_provider.js';
 import {
+  AUTH_PROVIDER_NAME,
+  bearerSuccess,
   createAuthConfig,
   createAuthScheme,
   createContext,
 } from './agent_identity_fixtures.js';
 
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: vi.fn(() => ({
+    getClient: () =>
+      Promise.resolve({
+        getRequestHeaders: () =>
+          Promise.resolve(new Headers({authorization: 'Bearer fake-token'})),
+      }),
+  })),
+}));
+
 const CONNECTOR_NAME =
   'projects/test-project/locations/test-location/connectors/test-connector';
 
-const CREDENTIAL: AuthCredential = {
-  authType: AuthCredentialTypes.HTTP,
-  http: {scheme: 'Bearer', credentials: {token: 'delegate-token'}},
-};
-
-/** Records the arguments the router forwarded. */
-class RecordingProvider implements CredentialsProvider {
-  readonly calls: Array<{
-    authScheme: GcpAuthProviderScheme;
-    context?: Context;
-  }> = [];
-
-  async getAuthCredential(
-    authScheme: GcpAuthProviderScheme,
-    context?: Context,
-  ): Promise<AuthCredential> {
-    this.calls.push({authScheme, context});
-    return CREDENTIAL;
-  }
-}
+const RETRIEVE_URL =
+  `https://agentidentitycredentials.googleapis.com/v1/` +
+  `${AUTH_PROVIDER_NAME}/credentials:retrieve`;
 
 describe('GcpAuthProvider', () => {
+  let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('test_supported_auth_schemes', () => {
     const provider = new GcpAuthProvider();
 
@@ -75,46 +74,6 @@ describe('GcpAuthProvider', () => {
   });
 
   it('test_get_auth_credential_routes_to_iam_connector_service_provider', async () => {
-    const iamConnectorProvider = new RecordingProvider();
-    const agentIdentityProvider = new RecordingProvider();
-    const provider = new GcpAuthProvider({
-      iamConnectorProvider,
-      agentIdentityProvider,
-    });
-    const authScheme = createAuthScheme({name: CONNECTOR_NAME});
-    const context = createContext();
-
-    const result = await provider.getAuthCredential(
-      createAuthConfig(authScheme),
-      context,
-    );
-
-    expect(result).toEqual(CREDENTIAL);
-    expect(iamConnectorProvider.calls).toEqual([{authScheme, context}]);
-    expect(agentIdentityProvider.calls).toHaveLength(0);
-  });
-
-  it('test_get_auth_credential_routes_to_agent_identity_service_provider', async () => {
-    const iamConnectorProvider = new RecordingProvider();
-    const agentIdentityProvider = new RecordingProvider();
-    const provider = new GcpAuthProvider({
-      iamConnectorProvider,
-      agentIdentityProvider,
-    });
-    const authScheme = createAuthScheme();
-    const context = createContext();
-
-    const result = await provider.getAuthCredential(
-      createAuthConfig(authScheme),
-      context,
-    );
-
-    expect(result).toEqual(CREDENTIAL);
-    expect(agentIdentityProvider.calls).toEqual([{authScheme, context}]);
-    expect(iamConnectorProvider.calls).toHaveLength(0);
-  });
-
-  it('rejects a connector resource name when no connector delegate is injected', async () => {
     const provider = new GcpAuthProvider();
 
     await expect(
@@ -123,9 +82,30 @@ describe('GcpAuthProvider', () => {
         createContext(),
       ),
     ).rejects.toThrow(
-      `IAM Connector auth providers are not supported yet; pass an ` +
-        `iamConnectorProvider to handle '${CONNECTOR_NAME}'.`,
+      `IAM Connector auth providers are not supported yet: '${CONNECTOR_NAME}'.`,
     );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('test_get_auth_credential_routes_to_agent_identity_service_provider', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(bearerSuccess('routed-token')), {
+        status: 200,
+      }),
+    );
+    const provider = new GcpAuthProvider();
+
+    const result = await provider.getAuthCredential(
+      createAuthConfig(createAuthScheme()),
+      createContext(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(RETRIEVE_URL);
+    expect(result).toEqual({
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'Bearer', credentials: {token: 'routed-token'}},
+    });
   });
 });
 

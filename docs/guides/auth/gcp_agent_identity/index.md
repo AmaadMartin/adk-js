@@ -163,27 +163,6 @@ Set `AGENT_IDENTITY_CREDENTIALS_TARGET_HOST` to send requests somewhere other
 than `agentidentitycredentials.googleapis.com`. The provider reads it when it
 builds its client.
 
-You can replace the whole backend, which is how the unit tests drive the router
-without a network:
-
-```ts
-import {
-  AuthCredentialTypes,
-  CredentialsProvider,
-  GcpAuthProvider,
-} from '@google/adk';
-
-const agentIdentityProvider: CredentialsProvider = {
-  async getAuthCredential() {
-    return {
-      authType: AuthCredentialTypes.HTTP,
-      http: {scheme: 'Bearer', credentials: {token: 'test-token'}},
-    };
-  },
-};
-const provider = new GcpAuthProvider({agentIdentityProvider});
-```
-
 ## Failure modes
 
 Every failure rejects with an `Error`.
@@ -191,6 +170,7 @@ Every failure rejects with an `Error`.
 | Condition                                     | Message                                                                                                   |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | The scheme is not a `gcpAuthProviderScheme`   | `Expected GcpAuthProviderScheme, got <type>`                                                              |
+| The scheme names an IAM connector             | `IAM Connector auth providers are not supported yet: '<name>'.`                                           |
 | No context, or no user id                     | `GcpAuthProvider requires a context with a valid user_id.`                                                |
 | The service call failed                       | `Failed to retrieve credential for user '<id>' on provider '<name>'.`, with the original error as `cause` |
 | The user refused consent                      | `Operation failed: User consent rejected.`                                                                |
@@ -201,13 +181,8 @@ Every failure rejects with an `Error`.
 
 ## IAM connector resource names
 
-A scheme naming `projects/<p>/locations/<l>/connectors/<c>` routes to a separate
-delegate. adk-js has no IAM Connector Credentials client, so the provider
-rejects unless you pass your own:
-
-```ts
-new GcpAuthProvider({iamConnectorProvider: myConnectorProvider});
-```
+adk-js has no IAM Connector Credentials client, so a scheme naming
+`projects/<p>/locations/<l>/connectors/<c>` rejects.
 
 ## Testing it against the real service
 

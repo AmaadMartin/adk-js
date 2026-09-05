@@ -31,19 +31,6 @@ const NON_INTERACTIVE_TOKEN_POLL_TIMEOUT_MS = 10000;
 /** The argument that carries the tool call a credential request belongs to. */
 const FUNCTION_CALL_ID_ARG = 'functionCallId';
 
-/**
- * A backend that turns a {@link GcpAuthProviderScheme} into a credential.
- *
- * {@link GcpAuthProvider} routes to one of these on the shape of the scheme's
- * resource name.
- */
-export interface CredentialsProvider {
-  getAuthCredential(
-    authScheme: GcpAuthProviderScheme,
-    context?: Context,
-  ): Promise<AuthCredential>;
-}
-
 /** Options for {@link AgentIdentityCredentialsProvider}. */
 export interface AgentIdentityCredentialsProviderOptions {
   /** A ready client to use, instead of the default REST client. */
@@ -93,7 +80,7 @@ function retrievalFailure(
  * A header of `Authorization: Bearer` becomes a bearer credential. Any other
  * header name is sent verbatim, alongside `X-GOOG-API-KEY`.
  */
-export function constructAuthCredential(
+function constructAuthCredential(
   success: RetrieveCredentialsSuccess,
 ): AuthCredential {
   const {header, token} = success;
@@ -175,7 +162,7 @@ export function isConsentCompleted(context: Context): boolean {
  * Credentials service.
  */
 @experimental
-export class AgentIdentityCredentialsProvider implements CredentialsProvider {
+export class AgentIdentityCredentialsProvider {
   private client?: AgentIdentityCredentialsClient;
 
   constructor(options?: AgentIdentityCredentialsProviderOptions) {
