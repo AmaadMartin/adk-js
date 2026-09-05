@@ -590,6 +590,44 @@ describe('ParallelWorker parity with adk-python', () => {
     }
   });
 
+  it('gives up on items that ignore an aborted invocation', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const stuck = deferred();
+    const started = [deferred(), deferred()];
+    try {
+      // Neither item reads ctx.abortSignal, so no claimant ever reaches the
+      // top of its loop to notice the abort. Only winding down from the signal
+      // itself bounds this.
+      const inner = new FunctionNode('stuck', async (_c, n: number) => {
+        started[n].resolve();
+        await stuck.promise;
+        return n;
+      });
+
+      const controller = new AbortController();
+      const run = driveNode(
+        new ParallelWorker(inner),
+        [0, 1],
+        createIc({}, controller.signal),
+      );
+      await Promise.all([started[0].promise, started[1].promise]);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      const {output} = await run;
+      // Torn down mid-flight, so no partial list.
+      expect(output).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('2 item(s) did not stop within 5s'),
+      );
+    } finally {
+      stuck.resolve();
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('warns and stops waiting when the invocation is cancelled during the drain', async () => {
     const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const stuck = deferred();
