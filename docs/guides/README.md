@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Optimization
+
+- [LocalEvalSampler](optimization/local_eval_sampler/index.md) - Scoring a candidate agent against your ADK eval sets, so an optimizer can rank it.
+
 ### Tools
 
 #### Retrieval
