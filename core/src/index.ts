@@ -16,6 +16,10 @@ export {
   AgentEngineSandboxCodeExecutor,
   type AgentEngineSandboxCodeExecutorOptions,
 } from './code_executors/agent_engine_sandbox_code_executor.js';
+export {
+  CloudRunSandboxCodeExecutor,
+  type CloudRunSandboxCodeExecutorOptions,
+} from './code_executors/cloud_run_sandbox_code_executor.js';
 export {CodeExecutionLanguage} from './code_executors/code_execution_utils.js';
 export {
   UnsafeLocalCodeExecutor,
