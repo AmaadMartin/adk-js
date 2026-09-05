@@ -7,6 +7,7 @@
 import {context, trace} from '@opentelemetry/api';
 import {Event} from '../events/event.js';
 import {tracer, traceWorkflowInvocation} from '../telemetry/tracing.js';
+import {chainAbortController} from '../utils/abort_utils.js';
 import {experimental} from '../utils/experimental.js';
 import {BaseNode, BaseNodeConfig} from './base_node.js';
 import {commonPrefixOf} from './branch_path.js';
@@ -185,7 +186,7 @@ export class Workflow extends BaseNode {
     // abort signal. It is aborted when a node fails (see cleanupPending) so any
     // in-flight siblings stop cooperatively instead of running to completion,
     // and disposed in the finally so we don't leak the parent-abort listener.
-    const abort = createWorkflowAbort(ctx.invocationContext.abortSignal);
+    const abort = chainAbortController(ctx.invocationContext.abortSignal);
     ctx.scheduler = new DynamicNodeScheduler(
       dynamicState,
       abort.controller.signal,
@@ -708,30 +709,4 @@ export function isWorkflow(value: unknown): value is Workflow {
     WORKFLOW_SIGNATURE_SYMBOL in value &&
     value[WORKFLOW_SIGNATURE_SYMBOL] === true
   );
-}
-
-/**
- * Creates the workflow-scoped {@link AbortController} that cancels in-flight
- * nodes when the workflow shuts down on error. It is chained to the invocation's
- * own abort signal (if any) so an invocation-level cancel still propagates to
- * nodes; `dispose` detaches that listener to avoid a leak.
- */
-function createWorkflowAbort(parentSignal?: AbortSignal): {
-  controller: AbortController;
-  dispose: () => void;
-} {
-  const controller = new AbortController();
-  if (!parentSignal) {
-    return {controller, dispose: () => {}};
-  }
-  if (parentSignal.aborted) {
-    controller.abort();
-    return {controller, dispose: () => {}};
-  }
-  const onParentAbort = () => controller.abort();
-  parentSignal.addEventListener('abort', onParentAbort, {once: true});
-  return {
-    controller,
-    dispose: () => parentSignal.removeEventListener('abort', onParentAbort),
-  };
 }
