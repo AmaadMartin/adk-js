@@ -4,11 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionCall, FunctionResponse} from '@google/genai';
+import {ContentUnion, FunctionCall, FunctionResponse} from '@google/genai';
 
 import {LlmResponse} from '../models/llm_response.js';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
+import {toUserContent} from '../utils/content_utils.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {
+  nodeNameFromPath,
+  parentRunIdFromPath,
+  runIdFromPath,
+} from '../utils/node_path_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
 import {createEventActions, EventActions} from './event_actions.js';
 
@@ -160,6 +167,18 @@ export interface Event extends LlmResponse {
  */
 export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
   actions?: Partial<EventActions>;
+
+  /**
+   * Convenience alias for `content` that also accepts a string, a part, or a
+   * list of parts. Mutually exclusive with `content`.
+   */
+  message?: ContentUnion;
+
+  /** Convenience alias for `actions.stateDelta`. */
+  state?: Record<string, unknown>;
+
+  /** Convenience alias for `nodeInfo.path`. */
+  nodePath?: string;
 }
 
 /**
@@ -167,19 +186,98 @@ export interface CreateEventParams extends Omit<Partial<Event>, 'actions'> {
  *
  * @param params The partial event to create the event from.
  * @returns The event.
+ * @throws InputValidationError if both `message` and `content` are given.
  */
 export function createEvent(params: CreateEventParams = {}): Event {
+  const {message, state, nodePath, ...rest} = params;
+  if (message !== undefined && rest.content !== undefined) {
+    throw new InputValidationError(
+      "'message' and 'content' are mutually exclusive. Use one or the other.",
+    );
+  }
+
   return {
-    ...params,
+    ...rest,
+    ...(message !== undefined ? {content: toUserContent(message)} : {}),
+    ...(nodePath !== undefined
+      ? {nodeInfo: {...rest.nodeInfo, path: nodePath}}
+      : {}),
     [EVENT_SIGNATURE_SYMBOL]: true,
     id: params.id || createNewEventId(),
     invocationId: params.invocationId || '',
     author: params.author,
-    actions: createEventActions(params.actions),
+    actions: createEventActions(
+      state !== undefined ? {...rest.actions, stateDelta: state} : rest.actions,
+    ),
     longRunningToolIds: params.longRunningToolIds || [],
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
   };
+}
+
+/**
+ * Returns the run id of the node that emitted the event.
+ *
+ * Mirrors `google/adk-python` `NodeInfo.run_id`.
+ *
+ * @returns The run id, or `''` when the node path carries none.
+ */
+export function getNodeRunId(nodeInfo?: NodeInfo): string {
+  return runIdFromPath(nodeInfo?.path);
+}
+
+/**
+ * Returns the run id of the node that scheduled the emitting node, which lets
+ * a resumed run rebuild dynamic node state from session events.
+ *
+ * Mirrors `google/adk-python` `NodeInfo.parent_run_id`.
+ *
+ * @returns The parent run id, or `undefined` when there is no parent segment,
+ *     or the parent segment carries no run id.
+ */
+export function getParentNodeRunId(nodeInfo?: NodeInfo): string | undefined {
+  return parentRunIdFromPath(nodeInfo?.path);
+}
+
+/**
+ * Returns the emitting node's name, without its run id.
+ *
+ * Mirrors `google/adk-python` `NodeInfo.name`.
+ */
+export function getNodeInfoName(nodeInfo?: NodeInfo): string {
+  return nodeNameFromPath(nodeInfo?.path);
+}
+
+/**
+ * Returns the name of the node that generated the event.
+ *
+ * An event that carries an agent-state snapshot or marks the end of an agent
+ * reports the agent's lifecycle rather than a node's output, so it has no node
+ * name. Mirrors `google/adk-python` `Event.node_name`.
+ */
+export function getEventNodeName(event: Event): string {
+  const {agentState, endOfAgent} = event.actions;
+  if (endOfAgent || (agentState && Object.keys(agentState).length > 0)) {
+    return '';
+  }
+  return getNodeInfoName(event.nodeInfo);
+}
+
+/**
+ * Sets the event's user-facing message from a string, a part, a list of parts,
+ * or a `Content`.
+ *
+ * The message is stored in `content`, which is where readers take it from.
+ * Mirrors the `Event.message` setter in `google/adk-python`.
+ *
+ * @param event The event to update in place.
+ * @param value The new message, or `null`/`undefined` to clear the content.
+ */
+export function setEventMessage(
+  event: Event,
+  value: ContentUnion | null | undefined,
+): void {
+  event.content = value == null ? undefined : toUserContent(value);
 }
 
 /**
@@ -424,14 +522,24 @@ export function transformToCamelCaseEvent(
 /**
  * Transforms a camelCased event object to a snake_cased Event object.
  *
+ * `long_running_tool_ids` is emitted deduplicated and sorted: `adk-python`
+ * holds these ids in a set, so an unchanged event must serialize identically
+ * every time and a client that diffs serialized events sees no spurious change.
+ *
  * @param event The camelCased event object.
  * @returns The snake_cased Event object.
  */
 export function transformToSnakeCaseEvent(
   event: Event,
 ): Record<string, unknown> {
-  return toSnakeCase(event, PRESERVE_KEYS_CAMEL_CASE) as Record<
+  const transformed = toSnakeCase(event, PRESERVE_KEYS_CAMEL_CASE) as Record<
     string,
     unknown
   >;
+  if (event.longRunningToolIds) {
+    transformed['long_running_tool_ids'] = [
+      ...new Set(event.longRunningToolIds),
+    ].sort();
+  }
+  return transformed;
 }
