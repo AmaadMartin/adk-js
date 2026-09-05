@@ -197,10 +197,7 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
-export {
-  AntigravityAgent,
-  PARENT_REQUIRES_SINGLE_TURN_MESSAGE,
-} from './labs/antigravity/antigravity_agent.js';
+export {AntigravityAgent} from './labs/antigravity/antigravity_agent.js';
 export type {
   AntigravityAgentMode,
   AntigravityAgentOptions,
@@ -215,7 +212,6 @@ export type {
   AntigravityStep,
   AntigravityStepSource,
   AntigravityStepStatus,
-  AntigravityStepTarget,
   AntigravityStepType,
   AntigravityTool,
   AntigravityToolCall,

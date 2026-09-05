@@ -40,13 +40,6 @@ export type AntigravityStepStatus =
   | 'CANCELED'
   | 'UNKNOWN';
 
-/** Who a trajectory step is addressed to. */
-export type AntigravityStepTarget =
-  | 'TARGET_USER'
-  | 'TARGET_ENVIRONMENT'
-  | 'TARGET_UNSPECIFIED'
-  | 'UNKNOWN';
-
 /**
  * How a connection establishes its conversation.
  *
@@ -66,12 +59,6 @@ export interface AntigravityToolCall {
   args?: Record<string, unknown>;
   /** The call id, when the runtime assigned one. */
   id?: string;
-  /** The id of the step this call belongs to. */
-  stepId?: string;
-  /** A normalized filesystem path, for file tools. */
-  canonicalPath?: string;
-  /** The MCP server this tool belongs to, when it is one. */
-  serverName?: string;
 }
 
 /** The outcome of one tool call, as the post-tool-call hook receives it. */
@@ -80,48 +67,34 @@ export interface AntigravityToolResult {
   name: string;
   /** The id of the call this answers. */
   id?: string;
-  /** The id of the step this result belongs to. */
-  stepId?: string;
   /** The tool's return value, as any JSON-serializable value. */
   result?: unknown;
   /** The failure message, when the call failed. */
   error?: string;
-  /** The MCP server this tool belongs to, when it is one. */
-  serverName?: string;
 }
 
 /**
  * One action in the Antigravity agent's trajectory.
  *
- * Every field is optional here where the SDK gives it a default, and the
- * converter reads a missing field as that default (`''`, `0`, `[]`,
- * `'UNKNOWN'`).
+ * Only the fields this package reads are declared; an adapter carrying more of
+ * the SDK's step (the trajectory ids, the depth, the target, the structured
+ * output) extends this interface with them. Every field is optional where the
+ * SDK gives it a default, and the converter reads a missing field as that
+ * default (`''`, `0`, `[]`, `'UNKNOWN'`).
  */
 export interface AntigravityStep {
-  /** The step's own id. */
-  id?: string;
   /** The step's position in the trajectory. */
   stepIndex?: number;
-  /** The trajectory this step belongs to. */
-  trajectoryId?: string;
-  /** The trajectory that spawned this one, for a nested agent. */
-  parentTrajectoryId?: string;
-  /** How deeply nested this step is; `0` for the root conversation. */
-  depth?: number;
   /** What kind of step this is. */
   type?: AntigravityStepType;
   /** What produced the step. */
   source?: AntigravityStepSource;
-  /** Who the step is addressed to. */
-  target?: AntigravityStepTarget;
   /** How the step is progressing. */
   status?: AntigravityStepStatus;
   /** The step's cumulative output. */
   content?: string;
   /** The output added since the previous update of this step. */
   contentDelta?: string;
-  /** The model's cumulative reasoning. */
-  thinking?: string;
   /** The reasoning added since the previous update of this step. */
   thinkingDelta?: string;
   /** The tool calls this step carries. */
@@ -133,8 +106,6 @@ export interface AntigravityStep {
    * a partial streaming chunk.
    */
   isCompleteResponse?: boolean;
-  /** The structured output extracted from a finish step. */
-  structuredOutput?: unknown;
 }
 
 /**

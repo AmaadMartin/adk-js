@@ -44,12 +44,6 @@ import {
 
 const CONVERSATION_ID_STATE_KEY_PREFIX = '_antigravity_conversation_id_';
 
-/** The error an {@link AntigravityAgent} throws when an ADK parent adopts it. */
-export const PARENT_REQUIRES_SINGLE_TURN_MESSAGE =
-  'AntigravityAgent may only be an ADK sub-agent when it sets ' +
-  "mode: 'single_turn', where the ADK parent composes a self-contained " +
-  'request. Otherwise it must run as an ADK root agent.';
-
 /**
  * The composition mode an {@link AntigravityAgent} runs in under an ADK parent.
  *
@@ -131,16 +125,6 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
    */
   get mode(): AntigravityAgentMode | undefined {
     return this.config.mode;
-  }
-
-  /**
-   * Whether `config` runs the harness as a local subprocess.
-   *
-   * A seam an adapter can widen when its own configuration spells the local
-   * connection differently.
-   */
-  protected isLocalConfig(config: AntigravityAgentConfig): boolean {
-    return isLocalAntigravityConfig(config);
   }
 
   protected async *runAsyncImpl(
@@ -254,25 +238,36 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
           }
         }
       }
-      if (!recorded && active.agent.conversation.history.length > 0) {
-        const delta = this.idDeltaIfChanged(ctx, active, storedId);
-        if (delta) {
-          yield delta;
-        }
-      }
+      yield* this.recordIdIfPending(ctx, active, storedId, recorded);
     } catch (error: unknown) {
       // A harness error mid-turn leaves a resumable conversation behind, so the
-      // block after the loop never runs on that path; the id is persisted here
+      // line after the loop never runs on that path; the id is persisted here
       // before re-raising, or the next turn orphans it. A consumer that
       // abandons the generator lands on `finally`, never here, so no yield can
       // answer it.
-      if (!recorded && active.agent.conversation.history.length > 0) {
-        const delta = this.idDeltaIfChanged(ctx, active, storedId);
-        if (delta) {
-          yield delta;
-        }
-      }
+      yield* this.recordIdIfPending(ctx, active, storedId, recorded);
       throw error;
+    }
+  }
+
+  /**
+   * Persists the conversation id of a turn that ended without recording one.
+   *
+   * Yields nothing when an event already carried the id, when the conversation
+   * has no history, or when the id has not changed.
+   */
+  private async *recordIdIfPending(
+    ctx: InvocationContext,
+    active: ActiveConversation,
+    storedId: string | undefined,
+    recorded: boolean,
+  ): AsyncGenerator<Event, void, void> {
+    if (recorded || active.agent.conversation.history.length === 0) {
+      return;
+    }
+    const delta = this.idDeltaIfChanged(ctx, active, storedId);
+    if (delta) {
+      yield delta;
     }
   }
 
@@ -419,7 +414,7 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
     }
     // A local config with no saveDir mints a fresh temporary directory per
     // connection, so every turn writes somewhere the next turn will not look.
-    if (!this.isLocalConfig(this.antigravityConfig)) {
+    if (!isLocalAntigravityConfig(this.antigravityConfig)) {
       return;
     }
     if (this.antigravityConfig.saveDir) {
@@ -442,7 +437,7 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
     // backend that quietly does the same cannot be told apart without SDK
     // support, so this is gated to the local config to avoid falsely failing
     // every remote resume.
-    if (!this.isLocalConfig(this.antigravityConfig)) {
+    if (!isLocalAntigravityConfig(this.antigravityConfig)) {
       return false;
     }
     return active.agent.conversation.history.length === 0;
@@ -521,7 +516,12 @@ function guardParentAdoption(agent: AntigravityAgent): void {
     get: () => parent,
     set: (value: BaseAgent | undefined) => {
       if (value !== undefined && agent.mode !== 'single_turn') {
-        throw new Error(PARENT_REQUIRES_SINGLE_TURN_MESSAGE);
+        throw new Error(
+          'AntigravityAgent may only be an ADK sub-agent when it sets ' +
+            "mode: 'single_turn', where the ADK parent composes a " +
+            'self-contained request. Otherwise it must run as an ADK root ' +
+            'agent.',
+        );
       }
       parent = value;
     },

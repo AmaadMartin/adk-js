@@ -25,6 +25,7 @@ import {
   createSession,
   Event,
   InvocationContext,
+  LocalAntigravityAgentConfig,
   PluginManager,
   SdkAgent,
   SdkConversation,
@@ -472,20 +473,17 @@ describe('AntigravityAgent save_dir warning', () => {
     expect(warnings()).not.toContain('saveDir');
   });
 
-  it('test_another_local_config_subclass_also_warns', () => {
-    // An adapter whose configuration spells the local connection differently
-    // widens the seam, and warns for the same reason the default one does.
-    class OtherLocalAgent extends AntigravityAgent {
-      protected override isLocalConfig(
-        config: AntigravityAgentConfig,
-      ): boolean {
-        return config.connection === 'local_openai';
-      }
+  it("warns for an adapter's own local config, not just a bare one", () => {
+    // The warning follows the discriminator, so every local configuration gets
+    // it — not only one shaped exactly like the bare interface.
+    interface OpenAiLocalConfig extends LocalAntigravityAgentConfig {
+      model: string;
     }
+    const config: OpenAiLocalConfig = {connection: 'local', model: 'llama3'};
 
-    new OtherLocalAgent({
+    new AntigravityAgent({
       name: 'agy',
-      antigravityConfig: {connection: 'local_openai'},
+      antigravityConfig: config,
       agentFactory: () => new FakeSdkAgent(),
     });
 
@@ -1184,11 +1182,9 @@ function hookKinds(config: AntigravityAgentConfig): string[] {
 /** The ACTIVE step the harness fabricates when it asks us to run a tool. */
 function clientToolActiveStep(): AntigravityStep {
   return {
-    id: 'call_3',
     stepIndex: 1,
     type: 'TOOL_CALL',
     source: 'MODEL',
-    target: 'TARGET_ENVIRONMENT',
     status: 'ACTIVE',
     toolCalls: [{name: 'reviewer', args: {request: 'go'}, id: 'call_3'}],
   };
@@ -1200,7 +1196,6 @@ function clientToolDoneStep(): AntigravityStep {
     stepIndex: 1,
     type: 'TOOL_CALL',
     source: 'MODEL',
-    target: 'TARGET_ENVIRONMENT',
     status: 'DONE',
     content: 'Calling custom tool "reviewer"',
     toolCalls: [],
