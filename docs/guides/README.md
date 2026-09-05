@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Telemetry
+
+- [Agent Engine telemetry](telemetry/agent_engine/index.md) - Joining a run onto the caller's trace on Vertex AI Agent Engine, and exporting metrics from the request path.
+
 ### Tools
 
 #### Retrieval
