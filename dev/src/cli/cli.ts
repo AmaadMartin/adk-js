@@ -133,6 +133,7 @@ async function getApiServerOptions(
     allowOrigins: options['allow_origins'],
     allowedHosts: splitCommaSeparated(options['allowed_hosts']),
     extraPlugins: splitCommaSeparated(options['extra_plugins']),
+    evalStorageUri: options['eval_storage_uri'],
     logoText: options['logo_text'],
     logoImageUrl: options['logo_image_url'],
     ...(await resolveServicesWithRegistry({
@@ -277,6 +278,12 @@ const DEFAULT_LLM_MODEL_OPTION = new Option(
   'Optional. Sets the default LLM model used when the agent does not set a ' +
     'model explicitly.',
 );
+const EVAL_STORAGE_URI_OPTION = new Option(
+  '--eval_storage_uri <string>',
+  'Optional. The URI of the storage holding the eval sets and eval results. ' +
+    "Supported URIs: 'gs://<bucket name>'. Defaults to files under the " +
+    'agents directory.',
+);
 const EXTRA_PLUGINS_OPTION = new Option(
   '--extra_plugins <string>',
   'Optional. Fully qualified name of a plugin to attach to every served ' +
@@ -396,7 +403,8 @@ function addServerCommand(
     .addOption(MEMORY_SERVICE_URI_OPTION)
     .addOption(USE_LOCAL_STORAGE_OPTION)
     .addOption(NO_USE_LOCAL_STORAGE_OPTION)
-    .addOption(EXTRA_PLUGINS_OPTION);
+    .addOption(EXTRA_PLUGINS_OPTION)
+    .addOption(EVAL_STORAGE_URI_OPTION);
 
   if (server.autoCreateSession) {
     serverCommand.addOption(AUTO_CREATE_SESSION_OPTION);
