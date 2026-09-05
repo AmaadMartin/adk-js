@@ -24,35 +24,44 @@ import {
   getA2AEventMetadataFromActions,
   getA2ASessionMetadata,
 } from './metadata_converter_utils.js';
-import {toA2AParts, toGenAIParts} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2APart,
+  toA2AParts,
+  toGenAIParts,
+} from './part_converter_utils.js';
+
+/**
+ * The text a failed task reports when the ADK event named an error code but no
+ * message. Matches `DEFAULT_ERROR_MESSAGE` in adk-python's
+ * `a2a/converters/from_adk_event.py`.
+ */
+const DEFAULT_ERROR_MESSAGE = 'An error occurred during processing';
 
 /**
  * Processes a list of ADK events and determines the final task status update event.
- * If any of the ADK events contain an error, a TaskFailedEvent is returned immediately.
+ * If any of the ADK events contain an error, a TaskFailedEvent is returned, built from the last such event.
  * If there are no errors, it checks for any input required events. If found, it returns a TaskInputRequiredEvent.
  * If there are no input required events, it returns a TaskCompletedEvent.
  *
  * @param adkEvents - The list of ADK events to process.
  * @param context - The executor context containing relevant information for processing the events.
+ * @param genAiPartConverter - Converts a GenAI part to an A2A part. Defaults to {@link toA2APart}.
  * @returns A TaskStatusUpdateEvent representing the final status of the task after processing the ADK events.
  */
 export function getFinalTaskStatusUpdate(
   adkEvents: AdkEvent[],
   context: ExecutorContext,
+  genAiPartConverter: GenAIPartToA2APartConverter = toA2APart,
 ): TaskStatusUpdateEvent {
   const finalEventActions = createEventActions();
+  let erroredEvent: AdkEvent | undefined;
 
   for (const adkEvent of adkEvents) {
+    // The last error decides the terminal event, so keep scanning rather than
+    // returning here: the actions of the events that follow it still count.
     if (adkEvent.errorCode || adkEvent.errorMessage) {
-      return createTaskFailedEvent({
-        taskId: context.requestContext.taskId,
-        contextId: context.requestContext.contextId,
-        error: new Error(adkEvent.errorMessage || adkEvent.errorCode),
-        metadata: {
-          ...getA2AEventMetadata(adkEvent, context),
-          ...getA2AEventMetadataFromActions(finalEventActions),
-        },
-      });
+      erroredEvent = adkEvent;
     }
 
     finalEventActions.escalate =
@@ -63,7 +72,23 @@ export function getFinalTaskStatusUpdate(
     }
   }
 
-  const inputRequiredEvent = scanForInputRequiredEvents(adkEvents, context);
+  if (erroredEvent) {
+    return createTaskFailedEvent({
+      taskId: context.requestContext.taskId,
+      contextId: context.requestContext.contextId,
+      error: new Error(erroredEvent.errorMessage || DEFAULT_ERROR_MESSAGE),
+      metadata: {
+        ...getA2AEventMetadata(erroredEvent, context),
+        ...getA2AEventMetadataFromActions(finalEventActions),
+      },
+    });
+  }
+
+  const inputRequiredEvent = scanForInputRequiredEvents(
+    adkEvents,
+    context,
+    genAiPartConverter,
+  );
   if (inputRequiredEvent) {
     return {
       ...inputRequiredEvent,
@@ -87,6 +112,7 @@ export function getFinalTaskStatusUpdate(
 function scanForInputRequiredEvents(
   adkEvents: AdkEvent[],
   context: ExecutorContext,
+  genAiPartConverter: GenAIPartToA2APartConverter,
 ): TaskStatusUpdateEvent | undefined {
   const inputRequiredParts: GenAIPart[] = [];
   const inputRequiredFunctionCallIds = new Set<string>();
@@ -119,10 +145,21 @@ function scanForInputRequiredEvents(
   }
 
   if (inputRequiredParts.length > 0) {
+    const a2aParts = toA2AParts(
+      inputRequiredParts,
+      [...inputRequiredFunctionCallIds],
+      genAiPartConverter,
+    );
+    if (a2aParts.length === 0) {
+      throw new Error(
+        'Long-running function calls produced no A2A response parts',
+      );
+    }
+
     return createTaskInputRequiredEvent({
       taskId: context.requestContext.taskId,
       contextId: context.requestContext.contextId,
-      parts: toA2AParts(inputRequiredParts, [...inputRequiredFunctionCallIds]),
+      parts: a2aParts,
       metadata: getA2ASessionMetadata(context),
     });
   }
