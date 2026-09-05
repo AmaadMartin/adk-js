@@ -38,6 +38,46 @@ The service answers in one of four states, and the provider maps each one:
 - **Pending.** The provider polls once a second for ten seconds, then rejects.
 - **Consent rejected.** The provider rejects.
 
+## The scheme
+
+| Field         | Required | Meaning                                        |
+| ------------- | -------- | ---------------------------------------------- |
+| `type`        | yes      | Always `'gcpAuthProviderScheme'`.              |
+| `name`        | yes      | The auth provider resource to use.             |
+| `scopes`      | no       | The OAuth2 scopes to request.                  |
+| `continueUri` | no       | Where the user lands after consent. See below. |
+
+The `type` literal and the resource `name` are the whole minimum. That is a
+two-legged configuration: the agent acts as itself, and no user consents to
+anything.
+
+```ts
+import {GcpAuthProviderScheme} from '@google/adk';
+
+const twoLegged: GcpAuthProviderScheme = {
+  type: 'gcpAuthProviderScheme',
+  name: 'projects/my-project/locations/global/authProviders/spotify-2lo',
+};
+```
+
+Add `scopes` and `continueUri` for a three-legged configuration, where the agent
+acts on behalf of a user who grants consent. The scheme at the top of this page
+is one.
+
+`continueUri` is not the standard OAuth2 redirect URI. It re-authenticates the
+user to prevent a phishing attack, and it finalises the managed OAuth flow. You
+host it, not Google, preferably alongside the agent client's web server. A
+two-legged configuration never redirects a user, so it needs none.
+
+### Differences from adk-python
+
+The Python class is a pydantic model and this is a TypeScript interface, so two
+things do not carry over. `type` has no default, so every construction site
+writes the literal. Python's model config sets `extra="allow"`, which keeps
+fields the model does not declare; the interface drops them, because preserving
+them would need an index signature that turns off type checking for every
+consumer.
+
 ## Get started
 
 Register the provider once, under the scheme's `type`, then ask it for a
