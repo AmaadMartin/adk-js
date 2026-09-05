@@ -71,6 +71,12 @@ describe('node() options-only form', () => {
       'maxParallelWorkers can only be set when parallelWorker is true.',
     );
   });
+
+  it('rejects a fan-out over the START sentinel', () => {
+    expect(() => node({parallelWorker: true})('START')).toThrow(
+      'ParallelWorker cannot wrap a START node.',
+    );
+  });
 });
 
 describe('WorkflowNode parallel worker', () => {
