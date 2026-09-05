@@ -21,6 +21,7 @@ describe('VertexAiMemoryBankService Integration', () => {
   let mockMemories: {
     createInternal: ReturnType<typeof vi.fn>;
     generateInternal: ReturnType<typeof vi.fn>;
+    ingestEventsInternal: ReturnType<typeof vi.fn>;
     retrieveInternal: ReturnType<typeof vi.fn>;
   };
 
@@ -32,6 +33,9 @@ describe('VertexAiMemoryBankService Integration', () => {
       generateInternal: vi
         .fn()
         .mockResolvedValue({name: 'operations/generate-op', done: true}),
+      ingestEventsInternal: vi
+        .fn()
+        .mockResolvedValue({name: 'operations/ingest-op', done: true}),
       retrieveInternal: vi.fn().mockResolvedValue({
         retrievedMemories: [
           {
@@ -116,7 +120,7 @@ describe('VertexAiMemoryBankService Integration', () => {
 
     await runner.memoryService!.addSessionToMemory(memorySession);
 
-    expect(mockMemories.generateInternal).toHaveBeenCalled();
+    expect(mockMemories.ingestEventsInternal).toHaveBeenCalled();
 
     const session = await runner.sessionService.createSession({
       appName: 'test_memory_app',
@@ -155,5 +159,76 @@ describe('VertexAiMemoryBankService Integration', () => {
         },
       }),
     );
+  });
+
+  it('ingests a session and returns the stored metadata on search', async () => {
+    mockMemories.retrieveInternal.mockResolvedValue({
+      retrievedMemories: [
+        {
+          memory: {
+            fact: 'Your favorite color is green.',
+            updateTime: '2026-04-21T12:00:00Z',
+            metadata: {
+              source: {stringValue: 'onboarding'},
+              verified: {boolValue: true},
+            },
+          },
+        },
+      ],
+    });
+
+    const runner = new Runner({
+      appName: 'test_memory_app',
+      agent: new LlmAgent({
+        name: 'memory_agent',
+        description: 'Answers questions from memory.',
+        tools: [LOAD_MEMORY],
+      }),
+      sessionService: new InMemorySessionService(),
+      memoryService: new VertexAiMemoryBankService({
+        agentEngineId: 'test-engine-id',
+        client: {
+          agentEnginesInternal: {memories: mockMemories},
+        } as unknown as Client,
+      }),
+    });
+
+    const session = await runner.sessionService.createSession({
+      appName: 'test_memory_app',
+      userId: 'test_user',
+    });
+    await runner.sessionService.appendEvent({
+      session,
+      event: createEvent({
+        author: 'user',
+        content: createUserContent('My favorite color is green.'),
+        timestamp: 12345000,
+      }),
+    });
+
+    await runner.memoryService!.addSessionToMemory(session);
+
+    expect(mockMemories.ingestEventsInternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'reasoningEngines/test-engine-id',
+        scope: {app_name: 'test_memory_app', user_id: 'test_user'},
+        directContentsSource: {
+          events: [
+            expect.objectContaining({eventTime: '1970-01-01T03:25:45.000Z'}),
+          ],
+        },
+      }),
+    );
+
+    const response = await runner.memoryService!.searchMemory({
+      appName: 'test_memory_app',
+      userId: 'test_user',
+      query: 'favorite color',
+    });
+
+    expect(response.memories[0].customMetadata).toEqual({
+      source: 'onboarding',
+      verified: true,
+    });
   });
 });
