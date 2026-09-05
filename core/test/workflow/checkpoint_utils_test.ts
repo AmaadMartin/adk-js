@@ -77,7 +77,13 @@ describe('workflow checkpoint events', () => {
     const event = createReplayedOutputEvent(origin, 'wf.a', 'A(x)');
 
     expect(event.output).toBe('A(x)');
-    expect(event.nodeInfo).toEqual({path: 'wf.a'});
+    expect(event.nodeInfo).toEqual({path: 'wf.a', replayed: true});
     expect(event.actions.agentState).toBeUndefined();
+  });
+
+  it('marks the replayed output so rehydration does not read it as a run', () => {
+    const event = createReplayedOutputEvent(origin, 'wf.a', 'A(x)');
+
+    expect(event.nodeInfo?.replayed).toBe(true);
   });
 });

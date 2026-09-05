@@ -76,11 +76,19 @@ export function createEndOfAgentEvent(origin: WorkflowEventOrigin): Event {
 /**
  * Builds the event that re-surfaces a fast-forwarded node's cached output, so a
  * resumable stream still records the value the node produced.
+ *
+ * Marked `replayed`, because no node ran to produce it. Rehydration skips it;
+ * unmarked, a later resume reads it as another run of that node and hands a
+ * fresh activation a stale output.
  */
 export function createReplayedOutputEvent(
   origin: WorkflowEventOrigin,
   nodePath: string,
   output: unknown,
 ): Event {
-  return createEvent({...origin, output, nodeInfo: {path: nodePath}});
+  return createEvent({
+    ...origin,
+    output,
+    nodeInfo: {path: nodePath, replayed: true},
+  });
 }
