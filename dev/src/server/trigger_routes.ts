@@ -78,6 +78,13 @@ const TRANSIENT_ERROR_SUBSTRINGS = [
   'quota',
 ];
 
+/**
+ * `Bearer <token>`, matched case-insensitively. Only a space separates the two,
+ * as in the reference's `partition(" ")`, and the token must be non-empty once
+ * trimmed.
+ */
+const BEARER_TOKEN_PATTERN = /^bearer +(.+)$/i;
+
 /** The CloudEvents attributes Eventarc sends as `ce-*` request headers. */
 const CLOUD_EVENT_ATTRIBUTES = ['id', 'type', 'source', 'specversion'] as const;
 
@@ -178,7 +185,7 @@ type EventarcTriggerRequest = z.infer<typeof eventarcTriggerRequestSchema>;
 /** The `{data, attributes}` object serialized into the agent's message. */
 interface TriggerPayload {
   data: unknown;
-  attributes: Record<string, string | null>;
+  attributes: Record<string, unknown>;
 }
 
 /**
@@ -245,16 +252,6 @@ function wrappedPubSubMessage(
   return message && 'data' in message ? message : undefined;
 }
 
-/** Returns the `attributes` map of a wrapped Pub/Sub message. */
-function wrappedAttributes(
-  message: Record<string, unknown>,
-): Record<string, string | null> {
-  const attributes = asRecord(message['attributes']);
-  return attributes === undefined
-    ? {}
-    : (attributes as Record<string, string | null>);
-}
-
 /**
  * Builds the payload the Eventarc endpoint sends to the agent, in the same
  * branch order as the reference: a Pub/Sub wrapper in the body, then a
@@ -278,7 +275,7 @@ function buildEventarcPayload(
     if (wrapped) {
       return {
         data: decodeTriggerDataOrRaw(wrapped['data']),
-        attributes: wrappedAttributes(wrapped),
+        attributes: asRecord(wrapped['attributes']) ?? {},
       };
     }
     return {data: body.data, attributes: cloudEventAttributes(req, body)};
@@ -316,11 +313,10 @@ export class GoogleOidcVerifier {
 
   /** Rejects with an {@link HttpError} when the request is not authorized. */
   async verify(req: Request): Promise<void> {
-    const header = req.get('authorization') ?? '';
-    const separator = header.indexOf(' ');
-    const scheme = separator === -1 ? header : header.slice(0, separator);
-    const token = separator === -1 ? '' : header.slice(separator + 1).trim();
-    if (scheme.toLowerCase() !== 'bearer' || !token) {
+    const token = BEARER_TOKEN_PATTERN.exec(
+      req.get('authorization') ?? '',
+    )?.[1].trim();
+    if (!token) {
       throw new HttpError(
         UNAUTHORIZED_STATUS,
         'Missing or malformed Authorization bearer token.',
@@ -383,14 +379,6 @@ export interface TriggerRouterOptions {
    * are ignored with a warning.
    */
   triggerSources?: string[];
-  /** Concurrent agent invocations allowed across all trigger requests. */
-  maxConcurrent?: number;
-  /** Retries of a transient failure, on top of the first attempt. */
-  maxRetries?: number;
-  /** Backoff base delay, in seconds. */
-  retryBaseDelay?: number;
-  /** Backoff cap, in seconds. */
-  retryMaxDelay?: number;
   /**
    * Runs before the handler; throwing rejects the request. Without one the
    * trigger endpoints accept unauthenticated work, so the deployment platform
@@ -426,24 +414,20 @@ export class TriggerRouter {
       this.logger,
     );
     this.semaphore = new Semaphore(
-      options.maxConcurrent ??
-        numberFromEnv(TRIGGER_MAX_CONCURRENT_ENV_VAR, DEFAULT_MAX_CONCURRENT),
+      numberFromEnv(TRIGGER_MAX_CONCURRENT_ENV_VAR, DEFAULT_MAX_CONCURRENT),
     );
-    this.maxRetries =
-      options.maxRetries ??
-      numberFromEnv(TRIGGER_MAX_RETRIES_ENV_VAR, DEFAULT_MAX_RETRIES);
-    this.retryBaseDelay =
-      options.retryBaseDelay ??
-      numberFromEnv(
-        TRIGGER_RETRY_BASE_DELAY_ENV_VAR,
-        DEFAULT_RETRY_BASE_DELAY_SECONDS,
-      );
-    this.retryMaxDelay =
-      options.retryMaxDelay ??
-      numberFromEnv(
-        TRIGGER_RETRY_MAX_DELAY_ENV_VAR,
-        DEFAULT_RETRY_MAX_DELAY_SECONDS,
-      );
+    this.maxRetries = numberFromEnv(
+      TRIGGER_MAX_RETRIES_ENV_VAR,
+      DEFAULT_MAX_RETRIES,
+    );
+    this.retryBaseDelay = numberFromEnv(
+      TRIGGER_RETRY_BASE_DELAY_ENV_VAR,
+      DEFAULT_RETRY_BASE_DELAY_SECONDS,
+    );
+    this.retryMaxDelay = numberFromEnv(
+      TRIGGER_RETRY_MAX_DELAY_ENV_VAR,
+      DEFAULT_RETRY_MAX_DELAY_SECONDS,
+    );
   }
 
   /** Registers a route for each enabled trigger source. */
@@ -660,7 +644,7 @@ function resolveTriggerSources(
   const unknown = [...new Set(requested.filter((name) => !isValid(name)))];
   if (unknown.length > 0) {
     log.warn(
-      `Unknown trigger source(s) ignored: ${[...unknown].sort().join(', ')}. ` +
+      `Unknown trigger source(s) ignored: ${unknown.sort().join(', ')}. ` +
         `Valid sources: ${VALID_TRIGGER_SOURCES.join(', ')}`,
     );
   }

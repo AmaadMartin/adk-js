@@ -274,6 +274,47 @@ describe('TestTriggerOidcVerification', () => {
     },
   );
 
+  it.each([
+    {id: 'no space after the scheme', header: 'Bearer'},
+    {id: 'whitespace-only token', header: 'Bearer    '},
+    {id: 'tab instead of a space', header: 'Bearer\tabc.def.ghi'},
+    {id: 'scheme only, lowercase', header: 'bearer'},
+  ])('rejects a malformed Authorization header [$id]', async ({header}) => {
+    // The reference splits on a literal space, so a tab is not a separator and
+    // a token that is empty once trimmed is not a token.
+    const verifyIdToken = vi.spyOn(OAuth2Client.prototype, 'verifyIdToken');
+    const {url} = await startOidcServer();
+
+    const response = await post(url, PUBSUB_PATH, PUBSUB_PAYLOAD, {
+      Authorization: header,
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe(
+      'Missing or malformed Authorization bearer token.',
+    );
+    // Rejected before any network call to Google.
+    expect(verifyIdToken).not.toHaveBeenCalled();
+  });
+
+  it('accepts a lowercase scheme and extra separating spaces', async () => {
+    const tokens: string[] = [];
+    vi.spyOn(OAuth2Client.prototype, 'verifyIdToken').mockImplementation(
+      (options) => {
+        tokens.push(String(options.idToken));
+        return Promise.resolve(new LoginTicket(undefined, makePayload()));
+      },
+    );
+    const {url} = await startOidcServer();
+
+    const response = await post(url, PUBSUB_PATH, PUBSUB_PAYLOAD, {
+      Authorization: 'bearer   abc.def.ghi',
+    });
+
+    expect(response.status).toBe(200);
+    expect(tokens).toEqual(['abc.def.ghi']);
+  });
+
   it.each(TRIGGER_ENDPOINTS)(
     'test_rejects_invalid_token [$id]',
     async ({path, payload}) => {
