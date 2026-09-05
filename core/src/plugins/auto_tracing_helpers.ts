@@ -743,10 +743,9 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
       this: unknown,
       ...args: never[]
     ): Promise<unknown> {
-      const receiver = this;
       return tracer.startActiveSpan(displayName, async (span) => {
         try {
-          const result = await invoke(target, receiver, args);
+          const result = await invoke(target, this, args);
           finish(span, args, result, undefined);
           return result;
         } catch (error: unknown) {
@@ -761,10 +760,9 @@ export function buildTracingWrapper<F extends TracedFunction>(params: {
 
   const target = fn;
   return markWrapper(function (this: unknown, ...args: never[]): unknown {
-    const receiver = this;
     return tracer.startActiveSpan(displayName, (span) => {
       try {
-        const result = invoke(target, receiver, args);
+        const result = invoke(target, this, args);
         finish(span, args, result, undefined);
         return result;
       } catch (error: unknown) {
