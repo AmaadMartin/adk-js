@@ -37,10 +37,6 @@ Three parts make up a run, and two of them are yours.
 Only the root agent changes. Sub-agent instructions are left alone, and the
 optimizer warns when the agent has any.
 
-The sibling `GEPARootAgentPromptOptimizer` optimizes the core instruction
-alone. Use it when your agent exposes no skills; the two classes are separate
-and neither wraps the other.
-
 ADK Python imports the PyPI package `gepa` here. npm has no first-party
 equivalent, so adk-js declares the engine contract instead of importing one:
 `GepaEngine`, `GepaAdapter`, `EvaluationBatch`, `GepaOptimizeParams` and
@@ -88,9 +84,7 @@ which would silently score a function's source text.
 
 ## Configuration
 
-Every field is optional and matches the ADK Python defaults. They differ from
-`GEPARootAgentPromptOptimizer`'s on purpose: the two modules declare different
-defaults in ADK Python, and this port keeps each one's.
+Every field is optional and carries this module's ADK Python default.
 
 | Field                     | Default                   | What it does                                                    |
 | ------------------------- | ------------------------- | --------------------------------------------------------------- |

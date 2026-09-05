@@ -256,28 +256,12 @@ export type {
   GepaRunResult,
   ReflectionLm,
 } from './optimization/gepa_engine.js';
-export {
-  GEPARootAgentOptimizer,
-  RootAgentGepaAdapter,
-  SKILL_KEY_PREFIX,
-  skillComponentKey,
-} from './optimization/gepa_root_agent_optimizer.js';
-export type {
-  GEPARootAgentOptimizerConfig,
-  GEPARootAgentOptimizerResult,
-  RootAgentGepaAdapterParams,
-} from './optimization/gepa_root_agent_optimizer.js';
+export {requireStaticInstruction} from './optimization/gepa_utils.js';
 export {
   AGENT_PROMPT_NAME,
-  AgentGepaAdapter,
-  GEPARootAgentPromptOptimizer,
-} from './optimization/gepa_root_agent_prompt_optimizer.js';
-export type {
-  AgentGepaAdapterParams,
-  GEPARootAgentPromptOptimizerConfig,
-  GEPARootAgentPromptOptimizerResult,
-} from './optimization/gepa_root_agent_prompt_optimizer.js';
-export {requireStaticInstruction} from './optimization/gepa_utils.js';
+  SKILL_KEY_PREFIX,
+  skillComponentKey,
+} from './optimization/instruction_proposal.js';
 export {Sampler, isSampler} from './optimization/sampler.js';
 export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
 export {
@@ -438,7 +422,6 @@ export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
-export {SkillToolset, isSkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
