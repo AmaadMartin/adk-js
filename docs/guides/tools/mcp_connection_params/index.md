@@ -36,9 +36,9 @@ Connect to a remote MCP server and fail fast if it does not answer within
 import {MCPToolset} from '@google/adk';
 
 const toolset = new MCPToolset({
-  type: 'StdioConnectionParams',
-  serverParams: {command: process.execPath, args: ['./my_mcp_server.mjs']},
-  timeout: 5,
+  type: 'StreamableHTTPConnectionParams',
+  url: 'https://mcp.example.com/mcp',
+  timeout: 15,
 });
 
 const tools = await toolset.getTools();
@@ -56,13 +56,13 @@ import {MCPToolset} from '@google/adk';
 
 const toolset = new MCPToolset({
   type: 'StdioConnectionParams',
-  serverParams: {
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-everything'],
-  },
+  serverParams: {command: process.execPath, args: ['./my_mcp_server.mjs']},
   timeout: 5,
 });
 ```
+
+`timeout: 0` is not "no limit": it is a zero-length budget, and the handshake
+fails immediately. Omit the field to get the SDK default.
 
 ## Keeping the server session alive
 

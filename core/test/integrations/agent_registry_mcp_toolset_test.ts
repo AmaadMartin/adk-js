@@ -31,7 +31,9 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
 }));
 
 vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: vi.fn().mockImplementation(() => ({})),
+  StreamableHTTPClientTransport: vi.fn().mockImplementation(() => ({
+    terminateSession: vi.fn().mockResolvedValue(undefined),
+  })),
 }));
 
 const BASE_PARAMS: StreamableHTTPConnectionParams = {
