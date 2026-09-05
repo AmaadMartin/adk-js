@@ -279,7 +279,7 @@ export class Workflow extends BaseNode {
     if (output !== undefined) {
       // An entry that hands back a child's result is reporting the value that
       // child already emitted, so the workflow must not announce it a second
-      // time. One it computed itself has never been emitted, and does need an
+      // time. One it computed itself was never emitted, and does need an
       // event of its own.
       if (childEmitted(dynamicState, output)) {
         ctx.outputDelegated = true;
