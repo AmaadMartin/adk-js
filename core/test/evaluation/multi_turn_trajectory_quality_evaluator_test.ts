@@ -283,4 +283,69 @@ describe('MultiTurnTrajectoryQualityV1Evaluator', () => {
     );
     expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
   });
+
+  it('forwards a conversation scenario without changing the request', async () => {
+    const scenario: ConversationScenario = {
+      startingPrompt: 'Book me a flight.',
+      conversationPlan: 'Ask for a window seat, then confirm.',
+    };
+    const withScenario = new FakeEvalClient([scored(0.9)]);
+    const withoutScenario = new FakeEvalClient([scored(0.9)]);
+    const evalMetric = {
+      metricName: PrebuiltMetrics.MULTI_TURN_TRAJECTORY_QUALITY_V1,
+      criterion: {threshold: 0.8},
+    };
+    const invocations = [invocation('q1', 'r1'), invocation('q2', 'r2')];
+
+    const scenarioResult = await new MultiTurnTrajectoryQualityV1Evaluator({
+      evalMetric,
+      evalClient: withScenario,
+    }).evaluateInvocations(invocations, undefined, scenario);
+    const plainResult = await new MultiTurnTrajectoryQualityV1Evaluator({
+      evalMetric,
+      evalClient: withoutScenario,
+    }).evaluateInvocations(invocations);
+
+    expect(withScenario.requests).toEqual(withoutScenario.requests);
+    expect(scenarioResult).toEqual(plainResult);
+  });
+
+  it('pairs every turn with its golden invocation', async () => {
+    const expected = [invocation('q1', 'golden1'), invocation('q2', 'golden2')];
+    const evaluator = new MultiTurnTrajectoryQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TRAJECTORY_QUALITY_V1,
+        criterion: {threshold: 0.8},
+      },
+      evalClient: new FakeEvalClient([scored(0.9)]),
+    });
+
+    const result = await evaluator.evaluateInvocations(
+      [invocation('q1', 'r1'), invocation('q2', 'r2')],
+      expected,
+    );
+
+    expect(
+      result.perInvocationResults.map(
+        (perInvocation) => perInvocation.expectedInvocation,
+      ),
+    ).toEqual(expected);
+  });
+
+  it('propagates a rejection from the client', async () => {
+    const failure = new Error('service unavailable');
+    const evaluator = new MultiTurnTrajectoryQualityV1Evaluator({
+      evalMetric: {
+        metricName: PrebuiltMetrics.MULTI_TURN_TRAJECTORY_QUALITY_V1,
+        criterion: {threshold: 0.8},
+      },
+      evalClient: {
+        evaluate: () => Promise.reject(failure),
+      },
+    });
+
+    await expect(
+      evaluator.evaluateInvocations([invocation('q1', 'r1')]),
+    ).rejects.toBe(failure);
+  });
 });

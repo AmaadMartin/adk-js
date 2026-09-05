@@ -452,6 +452,16 @@ describe('MultiTurnVertexAiEvalFacade', () => {
     ]);
   });
 
+  it('passes a conversation scored exactly at the threshold', async () => {
+    const client = new FakeEvalClient([scored(0.8)]);
+
+    const result = await facadeWith(client).evaluateInvocations(conversation());
+
+    expect(result.overallScore).toBe(0.8);
+    expect(result.overallEvalStatus).toBe(EvalStatus.PASSED);
+    expect(result.perInvocationResults[1].evalStatus).toBe(EvalStatus.PASSED);
+  });
+
   it('fails the last turn when the score is below the threshold', async () => {
     const client = new FakeEvalClient([scored(0.5)]);
 

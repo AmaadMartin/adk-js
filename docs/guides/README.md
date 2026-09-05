@@ -137,6 +137,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [MultiTurnTrajectoryQualityV1Evaluator](evaluation/multi_turn_trajectory_quality_v1/index.md) -
   Scoring the path an agent took across a whole conversation, not just whether
   it reached the goal.
+- [MultiTurnTrajectoryQualityV1Evaluator](evaluation/multi_turn_trajectory_quality_evaluator/index.md) - Scoring the path an agent took across a whole conversation, with the Vertex AI multi-turn trajectory quality metric.
 - [PerTurnUserSimulatorQualityV1](evaluation/per_turn_user_simulator_quality_v1/index.md) - Grading the simulated user that drove an eval case: the starting prompt, the conversation plan, and where the conversation should have ended.
 - [Pre-built user personas](evaluation/pre_built_personas/index.md) - The user
   personas ADK ships, the behaviors they are built from, and how to compose and
