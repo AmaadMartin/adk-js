@@ -710,9 +710,7 @@ function enrichEvent({
     event.nodeInfo.outputFor = [child.nodePath, ...child.outputForAncestors];
   }
   if (event.branch === undefined) {
-    if (branch.value !== undefined) {
-      event.branch = branch.value;
-    }
+    event.branch = branch.value;
   } else if (event.branch === '') {
     event.branch = undefined;
     branch.value = undefined;
