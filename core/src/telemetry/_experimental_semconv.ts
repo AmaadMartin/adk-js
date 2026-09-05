@@ -163,6 +163,14 @@ type ToolDefinition = FunctionToolDefinition | GenericToolDefinition;
 /**
  * A tool descriptor that is not a `@google/genai` `Tool`, such as the plain
  * object the Model Context Protocol SDK produces at runtime.
+ *
+ * The schema arrives under three spellings. `@modelcontextprotocol/sdk` emits
+ * `inputSchema`, and a `@google/genai` `FunctionDeclaration` uses `parameters`.
+ * `input_schema` is what a descriptor that did not come from the TypeScript SDK
+ * carries: a tool definition loaded from JSON, proxied from a Python MCP
+ * server, or handed straight to `GenerateContentConfig.tools` by a caller
+ * bypassing ADK. Reading all three costs one field and keeps the reported
+ * schema equal to adk-python's, which reads the same three.
  */
 export interface DumpedTool {
   name?: unknown;
@@ -174,8 +182,16 @@ export interface DumpedTool {
 
 /**
  * The two token counts `@google/genai` 2.9.0 does not declare on
- * `GenerateContentResponseUsageMetadata`. adk-python reads them defensively,
- * because the Anthropic paths set them by hand.
+ * `GenerateContentResponseUsageMetadata`.
+ *
+ * A `BaseLlm` that is not Gemini can still report them: Anthropic bills cache
+ * writes separately from cache reads, so a model implementation wrapping it
+ * sets `cacheCreationInputTokens` by hand. Neither count is read off a Gemini
+ * response, and no model shipped in this repository sets either one today, so
+ * both buckets stay absent until such a model exists. Declaring them keeps that
+ * a typed field rather than a cast at the call site, and keeps the emitted
+ * attribute set equal to adk-python's `TokenUsage.to_attributes()`, which reads
+ * both the same way.
  */
 export interface ExtendedUsageMetadata extends GenerateContentResponseUsageMetadata {
   cacheCreationInputTokens?: number;
@@ -324,10 +340,16 @@ function toRole(role: string | undefined): string {
 /**
  * Whether the model reported why generation stopped.
  *
- * Ported from adk-python `src/google/adk/telemetry/_finish_reason.py`, which is
- * a separate parity task. The proto3 zero value is truthy, so an unset field
- * otherwise reads as a reason of its own, and a turn that ended normally is
- * published as a failed one.
+ * `FINISH_REASON_UNSPECIFIED` is the proto3 zero value, so the field carries it
+ * when the model set nothing, and it is a truthy string in the TypeScript enum.
+ * Counting it as a reason of its own publishes a turn that ended normally as a
+ * failed one. Excluding it here is what makes the caller omit
+ * `gen_ai.response.finish_reasons` instead of emitting a value for it.
+ *
+ * adk-python draws the same distinction, in `telemetry/_finish_reason.py`. Its
+ * test `test_response_attributes_treat_unspecified_finish_reason_as_unreported`
+ * pins both halves: the attribute is absent, and the output message still
+ * carries `finish_reason: ''`. The ported test of the same name pins them here.
  */
 function isReportedFinishReason(
   finishReason: FinishReason | undefined,
@@ -479,9 +501,9 @@ function cleanParameters(parameters: unknown): AnyValueMap | null {
 /**
  * Reports a tool descriptor that is not a `@google/genai` `Tool`.
  *
- * The parameter schema is read under all three spellings, because Model
- * Context Protocol SDK versions disagree on which one they produce. An unknown
- * spelling is not an error: the tool is still reported, without parameters.
+ * The parameter schema is read under the three spellings {@link DumpedTool}
+ * documents. An unknown spelling is not an error: the tool is still reported,
+ * without parameters.
  */
 export function toolDefinitionFromDumpedTool(
   tool: DumpedTool,
