@@ -5,16 +5,24 @@
  */
 
 import {
+  BaseSessionService,
   createEvent,
+  EvalCase,
+  EvalSet,
+  EvalSetResult,
+  EvalSetResultsManager,
+  EvalSetsManager,
   Event,
   InMemoryArtifactService,
   InMemoryMemoryService,
   InMemorySessionService,
+  InputValidationError,
   InvocationContext,
   LlmAgent,
   LocalEvalSetResultsManager,
   LocalEvalSetsManager,
   MISSING_EVAL_DEPENDENCIES_MESSAGE,
+  Session,
   setEvalRuntime,
 } from '@google/adk';
 import * as fs from 'node:fs';
@@ -223,6 +231,16 @@ describe('eval routes', () => {
       const again = await createEvalSet();
 
       expect(again.status).toBe(400);
+    });
+
+    it('accepts the snake_case body the dev UI bundle posts', async () => {
+      const created = await post<{evalSetId: string}>(
+        `/dev/apps/${APP_NAME}/eval-sets`,
+        {eval_set: {eval_set_id: 'from_the_ui', eval_cases: []}},
+      );
+
+      expect(created.status).toBe(200);
+      expect(created.body.evalSetId).toBe('from_the_ui');
     });
 
     it('creates an eval set from the legacy route', async () => {
@@ -513,6 +531,23 @@ describe('eval routes', () => {
       ).toEqual(['second_case']);
     });
 
+    it('scores only the eval cases evalCaseIds names', async () => {
+      setEvalRuntime(new StubEvalRuntime());
+      await createEvalSet();
+      await createSourceSession();
+      await addSession(EVAL_SET_ID, 'first_case');
+      await addSession(EVAL_SET_ID, 'second_case');
+
+      const response = await post<{runEvalResults: Array<{evalId: string}>}>(
+        `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/run`,
+        {evalCaseIds: ['first_case']},
+      );
+
+      expect(
+        response.body.runEvalResults.map((result) => result.evalId),
+      ).toEqual(['first_case']);
+    });
+
     it('returns a bare list from the legacy run route', async () => {
       setEvalRuntime(new StubEvalRuntime());
       await createEvalSet();
@@ -648,7 +683,9 @@ describe('eval route registration', () => {
     );
 
     expect(
-      fs.existsSync(path.join(agentsDir, APP_NAME, `${EVAL_SET_ID}.evalset.json`)),
+      fs.existsSync(
+        path.join(agentsDir, APP_NAME, `${EVAL_SET_ID}.evalset.json`),
+      ),
     ).toBe(true);
   });
 
@@ -688,5 +725,212 @@ describe('eval route registration', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.metricsInfo).toHaveLength(3);
+  });
+});
+
+/** The failure a dependency raises when a test wants an unexpected one. */
+const DISK_FAILURE = 'the eval store is unreachable';
+
+/** Rejects every read, standing in for a corrupt file or an unreachable bucket. */
+class FailingEvalSetsManager implements EvalSetsManager {
+  getEvalSet(): Promise<EvalSet | undefined> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  createEvalSet(): Promise<EvalSet> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  listEvalSets(): Promise<string[]> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  getEvalCase(): Promise<EvalCase | undefined> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  addEvalCase(): Promise<void> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  updateEvalCase(): Promise<void> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  deleteEvalCase(): Promise<void> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+}
+
+/** Rejects with an ADK error class, to show the guard maps it to a status. */
+class RejectingEvalSetsManager extends FailingEvalSetsManager {
+  override getEvalCase(): Promise<EvalCase | undefined> {
+    return Promise.reject(new InputValidationError('bad app name'));
+  }
+}
+
+/** Rejects every read of a stored eval result. */
+class FailingEvalSetResultsManager implements EvalSetResultsManager {
+  saveEvalSetResult(): Promise<void> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  getEvalSetResult(): Promise<EvalSetResult> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+
+  listEvalSetResults(): Promise<string[]> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+}
+
+/** Fails to import the agent module, as a broken agent file does. */
+class FailingSessionService extends InMemorySessionService {
+  override getSession(): Promise<Session | undefined> {
+    return Promise.reject(new Error(DISK_FAILURE));
+  }
+}
+
+describe('eval routes, unexpected failures', () => {
+  let agentsDir: string;
+  let servers: AdkApiServer[];
+
+  beforeEach(() => {
+    agentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adk-eval-failures-'));
+    fs.mkdirSync(path.join(agentsDir, APP_NAME));
+    servers = [];
+  });
+
+  afterEach(async () => {
+    for (const server of servers) {
+      await server.stop();
+    }
+    fs.rmSync(agentsDir, {recursive: true, force: true});
+  });
+
+  async function startServer(
+    overrides: {
+      evalSetsManager?: EvalSetsManager;
+      evalSetResultsManager?: EvalSetResultsManager;
+      sessionService?: BaseSessionService;
+      agentLoader?: AgentLoader;
+    } = {},
+  ): Promise<string> {
+    const server = new AdkApiServer({
+      agentsDir,
+      serveDebugUI: true,
+      agentLoader: overrides.agentLoader ?? loaderFor(ROOT_AGENT),
+      sessionService: overrides.sessionService ?? new InMemorySessionService(),
+      memoryService: new InMemoryMemoryService(),
+      artifactService: new InMemoryArtifactService(),
+      evalSetsManager:
+        overrides.evalSetsManager ?? new FailingEvalSetsManager(),
+      evalSetResultsManager:
+        overrides.evalSetResultsManager ?? new FailingEvalSetResultsManager(),
+    });
+    servers.push(server);
+    await server.start();
+    return server.url;
+  }
+
+  it.each([
+    ['GET', `/dev/apps/${APP_NAME}/eval_sets/${EVAL_SET_ID}/evals`],
+    ['GET', `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/eval-cases/case`],
+    ['GET', `/dev/apps/${APP_NAME}/eval-results`],
+    ['GET', `/dev/apps/${APP_NAME}/eval-results/result_id`],
+    ['GET', `/dev/apps/${APP_NAME}/eval_results`],
+    ['POST', `/dev/apps/${APP_NAME}/eval-sets`],
+    ['POST', `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/run`],
+    ['PUT', `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/eval-cases/case`],
+    [
+      'DELETE',
+      `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/eval-cases/case`,
+    ],
+  ])(
+    'answers 500 for %s %s when the store is unreachable',
+    async (method, url) => {
+      const baseUrl = await startServer();
+
+      const response = await request<{error: string}>(
+        baseUrl,
+        method,
+        url,
+        method === 'GET' ? undefined : {evalSet: {evalSetId: EVAL_SET_ID}},
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.body.error).toContain(DISK_FAILURE);
+    },
+  );
+
+  it('answers 500 when the session lookup of add-session fails', async () => {
+    const baseUrl = await startServer({
+      sessionService: new FailingSessionService(),
+    });
+
+    const response = await request<{error: string}>(
+      baseUrl,
+      'POST',
+      `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/add-session`,
+      {evalId: 'case', sessionId: 'session', userId: USER_ID},
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.body.error).toContain(DISK_FAILURE);
+  });
+
+  it('answers 500 when the agent of add-session cannot be loaded', async () => {
+    const sessionService = new InMemorySessionService();
+    await sessionService.createSession({
+      appName: APP_NAME,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      state: {},
+    });
+    const baseUrl = await startServer({
+      sessionService,
+      agentLoader: {
+        listAgents: () => Promise.resolve([APP_NAME]),
+        loadAgent: () => Promise.reject(new Error('agent module is broken')),
+      } as unknown as AgentLoader,
+    });
+
+    const response = await request<{error: string}>(
+      baseUrl,
+      'POST',
+      `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/add-session`,
+      {evalId: 'case', sessionId: SESSION_ID, userId: USER_ID},
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.body.error).toContain('agent module is broken');
+  });
+
+  it('maps an ADK error class a handler did not expect to its status', async () => {
+    const baseUrl = await startServer({
+      evalSetsManager: new RejectingEvalSetsManager(),
+    });
+
+    const response = await request<{error: string}>(
+      baseUrl,
+      'GET',
+      `/dev/apps/${APP_NAME}/eval-sets/${EVAL_SET_ID}/eval-cases/case`,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('bad app name');
+  });
+
+  it('keeps serving after a handler rejects', async () => {
+    const baseUrl = await startServer();
+
+    await request(baseUrl, 'GET', `/dev/apps/${APP_NAME}/eval-results`);
+    const afterwards = await request<{version: string}>(
+      baseUrl,
+      'GET',
+      '/version',
+    );
+
+    expect(afterwards.status).toBe(200);
   });
 });

@@ -32,9 +32,17 @@ import {AgentLoader} from '../utils/agent_loader.js';
 import {createEmptyState} from '../utils/agent_state.js';
 import {errorMessage} from '../utils/error_utils.js';
 
-/** Body of `POST /dev/apps/:appName/eval-sets`. */
+/**
+ * Body of `POST /dev/apps/:appName/eval-sets`, in either spelling.
+ *
+ * The dev UI bundle this package serves posts snake_case here, alone among
+ * the eval payloads. adk-python accepts both because its request models set
+ * `alias_generator=to_camel` with `populate_by_name=True`, so this reader
+ * does too rather than rejecting the UI's own request.
+ */
 export interface CreateEvalSetRequest {
-  evalSet: {evalSetId: string};
+  evalSet?: {evalSetId?: string};
+  eval_set?: {eval_set_id?: string};
 }
 
 /** Body of `GET /dev/apps/:appName/eval-sets`. */
@@ -61,6 +69,9 @@ export interface ListMetricsInfoResponse {
 
 /** Body of `POST /dev/apps/:appName/eval-sets/:evalSetId/run`. */
 export interface RunEvalRequest {
+  /** The cases to score. Every case in the set when both spellings are absent. */
+  evalCaseIds?: string[];
+  /** @deprecated Use {@link evalCaseIds}, which adk-python prefers too. */
   evalIds?: string[];
   evalMetrics?: EvalMetric[];
 }
@@ -106,37 +117,53 @@ export function registerEvalRoutes(
   options: {serveDebugUI: boolean},
 ): void {
   const handlers = new EvalRouteHandlers(deps);
+  const on = (handle: EvalHandler) => guarded(handle, deps.logger);
 
   // The paths adk-js already registered, which answered 501. They stay on
   // every server, because a client may already be calling them.
-  app.post('/apps/:appName/eval_sets/:evalSetId', (req, res) =>
-    handlers.createEvalSetLegacy(req, res),
+  app.post(
+    '/apps/:appName/eval_sets/:evalSetId',
+    on((req, res) => handlers.createEvalSetLegacy(req, res)),
   );
-  app.get('/apps/:appName/eval_sets', (req, res) =>
-    handlers.listEvalSetsLegacy(req, res),
+  app.get(
+    '/apps/:appName/eval_sets',
+    on((req, res) => handlers.listEvalSetsLegacy(req, res)),
   );
-  app.post('/apps/:appName/eval_sets/:evalSetId/add_session', (req, res) =>
-    handlers.addSessionToEvalSet(req, res),
+  app.post(
+    '/apps/:appName/eval_sets/:evalSetId/add_session',
+    on((req, res) => handlers.addSessionToEvalSet(req, res)),
   );
-  app.get('/apps/:appName/eval_sets/:evalSetId/evals', (req, res) =>
-    handlers.listEvalsInEvalSet(req, res),
+  app.get(
+    '/apps/:appName/eval_sets/:evalSetId/evals',
+    on((req, res) => handlers.listEvalsInEvalSet(req, res)),
   );
-  app.get(LEGACY_EVAL_CASE_PATH, (req, res) => handlers.getEval(req, res));
-  app.put(LEGACY_EVAL_CASE_PATH, (req, res) => handlers.updateEval(req, res));
-  app.delete(LEGACY_EVAL_CASE_PATH, (req, res) =>
-    handlers.deleteEval(req, res),
+  app.get(
+    LEGACY_EVAL_CASE_PATH,
+    on((req, res) => handlers.getEval(req, res)),
   );
-  app.post('/apps/:appName/eval_sets/:evalSetId/run_eval', (req, res) =>
-    handlers.runEvalLegacy(req, res),
+  app.put(
+    LEGACY_EVAL_CASE_PATH,
+    on((req, res) => handlers.updateEval(req, res)),
   );
-  app.get('/apps/:appName/eval_results/:evalResultId', (req, res) =>
-    handlers.getEvalResult(req, res),
+  app.delete(
+    LEGACY_EVAL_CASE_PATH,
+    on((req, res) => handlers.deleteEval(req, res)),
   );
-  app.get('/apps/:appName/eval_results', (req, res) =>
-    handlers.listEvalResultsLegacy(req, res),
+  app.post(
+    '/apps/:appName/eval_sets/:evalSetId/run_eval',
+    on((req, res) => handlers.runEvalLegacy(req, res)),
   );
-  app.get('/apps/:appName/eval_metrics', (req, res) =>
-    handlers.listMetricsInfo(req, res),
+  app.get(
+    '/apps/:appName/eval_results/:evalResultId',
+    on((req, res) => handlers.getEvalResult(req, res)),
+  );
+  app.get(
+    '/apps/:appName/eval_results',
+    on((req, res) => handlers.listEvalResultsLegacy(req, res)),
+  );
+  app.get(
+    '/apps/:appName/eval_metrics',
+    on((req, res) => handlers.listMetricsInfo(req, res)),
   );
 
   if (!options.serveDebugUI) {
@@ -145,53 +172,103 @@ export function registerEvalRoutes(
 
   // The paths the developer UI asks under. adk-python serves only these, from
   // its `DevServer`, so `adk api_server` does not grow them here either.
-  app.post('/dev/apps/:appName/eval-sets', (req, res) =>
-    handlers.createEvalSet(req, res),
+  app.post(
+    '/dev/apps/:appName/eval-sets',
+    on((req, res) => handlers.createEvalSet(req, res)),
   );
-  app.post('/dev/apps/:appName/eval_sets/:evalSetId', (req, res) =>
-    handlers.createEvalSetLegacy(req, res),
+  app.post(
+    '/dev/apps/:appName/eval_sets/:evalSetId',
+    on((req, res) => handlers.createEvalSetLegacy(req, res)),
   );
-  app.get('/dev/apps/:appName/eval-sets', (req, res) =>
-    handlers.listEvalSets(req, res),
+  app.get(
+    '/dev/apps/:appName/eval-sets',
+    on((req, res) => handlers.listEvalSets(req, res)),
   );
-  app.get('/dev/apps/:appName/eval_sets', (req, res) =>
-    handlers.listEvalSetsLegacy(req, res),
+  app.get(
+    '/dev/apps/:appName/eval_sets',
+    on((req, res) => handlers.listEvalSetsLegacy(req, res)),
   );
   app.post(
     [
       '/dev/apps/:appName/eval-sets/:evalSetId/add-session',
       '/dev/apps/:appName/eval_sets/:evalSetId/add_session',
     ],
-    (req, res) => handlers.addSessionToEvalSet(req, res),
+    on((req, res) => handlers.addSessionToEvalSet(req, res)),
   );
-  app.get('/dev/apps/:appName/eval_sets/:evalSetId/evals', (req, res) =>
-    handlers.listEvalsInEvalSet(req, res),
+  app.get(
+    '/dev/apps/:appName/eval_sets/:evalSetId/evals',
+    on((req, res) => handlers.listEvalsInEvalSet(req, res)),
   );
-  app.get(DEV_EVAL_CASE_PATHS, (req, res) => handlers.getEval(req, res));
-  app.put(DEV_EVAL_CASE_PATHS, (req, res) => handlers.updateEval(req, res));
-  app.delete(DEV_EVAL_CASE_PATHS, (req, res) => handlers.deleteEval(req, res));
-  app.post('/dev/apps/:appName/eval-sets/:evalSetId/run', (req, res) =>
-    handlers.runEval(req, res),
+  app.get(
+    DEV_EVAL_CASE_PATHS,
+    on((req, res) => handlers.getEval(req, res)),
   );
-  app.post('/dev/apps/:appName/eval_sets/:evalSetId/run_eval', (req, res) =>
-    handlers.runEvalLegacy(req, res),
+  app.put(
+    DEV_EVAL_CASE_PATHS,
+    on((req, res) => handlers.updateEval(req, res)),
+  );
+  app.delete(
+    DEV_EVAL_CASE_PATHS,
+    on((req, res) => handlers.deleteEval(req, res)),
+  );
+  app.post(
+    '/dev/apps/:appName/eval-sets/:evalSetId/run',
+    on((req, res) => handlers.runEval(req, res)),
+  );
+  app.post(
+    '/dev/apps/:appName/eval_sets/:evalSetId/run_eval',
+    on((req, res) => handlers.runEvalLegacy(req, res)),
   );
   app.get(
     [
       '/dev/apps/:appName/eval-results/:evalResultId',
       '/dev/apps/:appName/eval_results/:evalResultId',
     ],
-    (req, res) => handlers.getEvalResult(req, res),
+    on((req, res) => handlers.getEvalResult(req, res)),
   );
-  app.get('/dev/apps/:appName/eval-results', (req, res) =>
-    handlers.listEvalResults(req, res),
+  app.get(
+    '/dev/apps/:appName/eval-results',
+    on((req, res) => handlers.listEvalResults(req, res)),
   );
-  app.get('/dev/apps/:appName/eval_results', (req, res) =>
-    handlers.listEvalResultsLegacy(req, res),
+  app.get(
+    '/dev/apps/:appName/eval_results',
+    on((req, res) => handlers.listEvalResultsLegacy(req, res)),
   );
-  app.get('/dev/apps/:appName/metrics-info', (req, res) =>
-    handlers.listMetricsInfo(req, res),
+  app.get(
+    '/dev/apps/:appName/metrics-info',
+    on((req, res) => handlers.listMetricsInfo(req, res)),
   );
+}
+
+/** One eval route, before it is guarded. */
+type EvalHandler = (req: Request, res: Response) => void | Promise<void>;
+
+/**
+ * Answers the request when a handler rejects, instead of letting the
+ * rejection escape.
+ *
+ * Express 4 discards the promise a handler returns, this server registers no
+ * error middleware, and Node exits on an unhandled rejection. So a handler
+ * that awaits anything -- reading a corrupt eval set file, importing an agent
+ * module, reaching Cloud Storage -- would otherwise leave the request hanging
+ * and take the process down with it.
+ */
+function guarded(handle: EvalHandler, logger: Logger): express.RequestHandler {
+  return (req: Request, res: Response) => {
+    void (async () => {
+      try {
+        await handle(req, res);
+      } catch (error: unknown) {
+        const message = errorMessage(error);
+        logger.error(message);
+        if (!res.headersSent) {
+          res
+            .status(STATUS_BY_ERROR_NAME[errorName(error) ?? ''] ?? 500)
+            .json({error: message});
+        }
+      }
+    })();
+  };
 }
 
 /** The path adk-js already answered for one eval case. */
@@ -240,8 +317,8 @@ class EvalRouteHandlers {
   constructor(private readonly deps: EvalRouteDependencies) {}
 
   async createEvalSet(req: Request, res: Response): Promise<void> {
-    const body = req.body as CreateEvalSetRequest;
-    const evalSetId = body?.evalSet?.evalSetId;
+    const body = req.body as CreateEvalSetRequest | undefined;
+    const evalSetId = body?.evalSet?.evalSetId ?? body?.eval_set?.eval_set_id;
     if (!evalSetId) {
       this.fail(res, 400, 'evalSet.evalSetId is required.');
       return;
@@ -463,7 +540,7 @@ class EvalRouteHandlers {
     for await (const inference of evalService.performInference({
       appName,
       evalSetId: evalSet.evalSetId,
-      evalCaseIds: request.evalIds,
+      evalCaseIds: request.evalCaseIds ?? request.evalIds,
       inferenceConfig: {useLive: false},
     })) {
       inferenceResults.push(inference);
