@@ -299,6 +299,39 @@ describe('CLI Entrypoint', () => {
         }),
       );
     });
+
+    it('forwards --state, --timeout and --jsonl to runAgent', async () => {
+      await parse([
+        'run',
+        'agent.ts',
+        '--state',
+        '{"tier":"gold"}',
+        '--timeout',
+        '30s',
+        '--jsonl',
+      ]);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentPath: 'agent.ts',
+          state: '{"tier":"gold"}',
+          timeout: '30s',
+          jsonl: true,
+        }),
+      );
+    });
+
+    it('leaves --state, --timeout and --jsonl unset by default', async () => {
+      await parse(['run', 'agent.ts']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: undefined,
+          timeout: undefined,
+          jsonl: false,
+        }),
+      );
+    });
   });
 
   describe('command: deploy cloud_run', () => {
