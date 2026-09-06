@@ -1,0 +1,9 @@
+{
+  "name": "adk-deploy-fixture-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@google/adk": "latest"
+  }
+}
