@@ -16,6 +16,7 @@ import {
   IntentMismatchError,
   IntentMismatchReason,
   ToolConfirmation,
+  unwrapConfirmationResponse,
 } from '../../tools/tool_confirmation.js';
 import {isSegmentPrefix} from '../../utils/branch_trie.js';
 import {logger} from '../../utils/logger.js';
@@ -239,15 +240,14 @@ function collectApprovals(
  * `confirmed` has to be exactly `true`. Every reader of the field tests it for
  * truthiness, so anything else truthy approves the call — and `"false"` is a
  * string, which is what an HTML form sends for a box the user left unchecked.
- * Approval is the one decision that must never be inferred.
+ * Approval is the one decision that must never be inferred. That coercion is
+ * why this path does not call {@link ToolConfirmation.fromResponseDict}, which
+ * refuses a non-boolean `confirmed` outright; both fail closed.
  */
 function parseToolConfirmation(
   response: Record<string, unknown>,
 ): ToolConfirmation {
-  const fields =
-    Object.keys(response).length === 1 && 'response' in response
-      ? (JSON.parse(response['response'] as string) as Record<string, unknown>)
-      : response;
+  const fields = unwrapConfirmationResponse(response);
 
   return new ToolConfirmation({
     hint: fields['hint'] as string,

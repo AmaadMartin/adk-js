@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {z} from 'zod';
+import {InputValidationError} from '../errors/input_validation_error.js';
+import {isRecord} from '../utils/object_utils.js';
+
 /**
  * Represents a tool confirmation configuration.
  * @experimental  (Experimental, subject to change)
@@ -34,6 +38,105 @@ export class ToolConfirmation {
     this.confirmed = confirmed;
     this.payload = payload;
   }
+
+  /**
+   * Parses a confirmation out of a function-response object.
+   *
+   * A client may answer a gate in either of two shapes: the fields directly,
+   * or the ADK client's `{response: '<json>'}` envelope. Both parse to the
+   * same confirmation.
+   *
+   * Validation is strict. A key outside `hint`, `confirmed` and `payload` is
+   * refused rather than dropped, so a client that misspells a field learns
+   * that the field never took effect.
+   *
+   * @param response The decoded response of a confirmation function response.
+   * @return The confirmation the client sent.
+   * @throws InputValidationError If the envelope does not decode, or the
+   *     fields do not match the confirmation shape.
+   */
+  static fromResponseDict(response: Record<string, unknown>): ToolConfirmation {
+    const result = confirmationFieldsSchema.safeParse(
+      unwrapConfirmationResponse(response),
+    );
+    if (!result.success) {
+      throw new InputValidationError(
+        `ToolConfirmation received ${describeIssues(result.error)}.`,
+        {cause: result.error},
+      );
+    }
+    return new ToolConfirmation(result.data);
+  }
+}
+
+/**
+ * The fields a confirmation response may carry, and nothing else.
+ *
+ * `payload` stays opaque: the reference model declares it `Optional[Any]` and
+ * passes it through untouched, so nothing here inspects or rewrites it.
+ *
+ * The reference also configures a camelCase alias generator. That is a no-op
+ * for these three single-word names — the alias equals the field name — so
+ * there is no key mapping to port.
+ *
+ * `hint` declares no default because the constructor already applies one.
+ */
+const confirmationFieldsSchema = z.strictObject({
+  hint: z.string().optional(),
+  confirmed: z.boolean().default(false),
+  payload: z.unknown().optional(),
+});
+
+/**
+ * Unwraps the ADK client's `{response: '<json>'}` envelope.
+ *
+ * A lone `response` key is the envelope, and its value is a JSON string
+ * carrying the real fields. Any other shape already is the fields, so a
+ * `response` key next to other keys is not an envelope.
+ *
+ * @param response The decoded response of a confirmation function response.
+ * @return The confirmation fields, still unvalidated.
+ * @throws InputValidationError If the envelope does not decode to an object.
+ */
+export function unwrapConfirmationResponse(
+  response: Record<string, unknown>,
+): Record<string, unknown> {
+  const keys = Object.keys(response);
+  return keys.length === 1 && keys[0] === 'response'
+    ? decodeConfirmationEnvelope(response['response'])
+    : response;
+}
+
+function decodeConfirmationEnvelope(value: unknown): Record<string, unknown> {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(String(value));
+  } catch (e: unknown) {
+    throw new InputValidationError(
+      'ToolConfirmation envelope is not valid JSON.',
+      {cause: e},
+    );
+  }
+  if (!isRecord(decoded)) {
+    throw new InputValidationError(
+      'ToolConfirmation envelope must decode to an object.',
+    );
+  }
+  return decoded;
+}
+
+/**
+ * Names what the confirmation fields got wrong, without quoting any value —
+ * the response is caller-controlled and must not reach a log.
+ */
+function describeIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) =>
+      issue.code === 'unrecognized_keys'
+        ? `unknown key(s): ${issue.keys.join(', ')}`
+        : `an invalid '${issue.path.join('.')}': ${issue.message}`,
+    )
+    .join('; ');
 }
 
 /**
