@@ -146,6 +146,18 @@ function mergeExtraRequestArgs(
   return Object.assign(body, defined);
 }
 
+/** Loads the `openai` package on first use and constructs a client. */
+async function newOpenAiClient(options: {
+  apiKey?: string;
+  baseURL?: string;
+}): Promise<OpenAiResponsesClient> {
+  const {default: OpenAIClient} = await loadOptionalPeer(
+    OPENAI_PEER,
+    () => import('openai'),
+  );
+  return new OpenAIClient(options);
+}
+
 /** Collects the function tools declared on a request. */
 function requestTools(
   llmRequest: LlmRequest,
@@ -332,11 +344,7 @@ export class OpenAiResponsesLlm extends BaseLlm {
 
   /** Builds the client to use when the caller injected none. */
   protected async createClient(): Promise<OpenAiResponsesClient> {
-    const {default: OpenAIClient} = await loadOptionalPeer(
-      OPENAI_PEER,
-      () => import('openai'),
-    );
-    return new OpenAIClient({apiKey: await this.resolveApiKey()});
+    return newOpenAiClient({apiKey: await this.resolveApiKey()});
   }
 
   /** Returns the client, building and caching it on first use. */
@@ -378,16 +386,11 @@ export class AzureOpenAiResponsesLlm extends OpenAiResponsesLlm {
   }
 
   protected override async createClient(): Promise<OpenAiResponsesClient> {
-    const {default: OpenAIClient} = await loadOptionalPeer(
-      OPENAI_PEER,
-      () => import('openai'),
-    );
-    const apiKey = await this.resolveApiKey();
-    return this.azureEndpoint
-      ? new OpenAIClient({
-          apiKey,
-          baseURL: `${this.azureEndpoint.replace(/\/+$/, '')}/openai/v1/`,
-        })
-      : new OpenAIClient({apiKey});
+    return newOpenAiClient({
+      apiKey: await this.resolveApiKey(),
+      baseURL: this.azureEndpoint
+        ? `${this.azureEndpoint.replace(/\/+$/, '')}/openai/v1/`
+        : undefined,
+    });
   }
 }

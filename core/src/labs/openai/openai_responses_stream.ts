@@ -20,17 +20,13 @@ import {
   loadsJsonObject,
   messageContentParts,
   reasoningParts,
-  ReportedUsage,
   responseToLlmResponse,
-  toUsageMetadata,
 } from './openai_responses_response.js';
 
 /** One output item of the response, as the stream builds it up. */
 interface StreamOutputItem {
   type?: string;
   doneItem?: OpenAI.Responses.ResponseOutputItem;
-  /** Text that arrived without a content index. */
-  text: string;
   /** Text by content index. */
   textParts: Map<number, string>;
   /** Reasoning that arrived without a summary index. */
@@ -58,17 +54,16 @@ interface ReasoningBoundary {
 /** Returns an empty accumulator entry for one output item. */
 function newOutputItem(): StreamOutputItem {
   return {
-    text: '',
     textParts: new Map(),
     reasoning: '',
     reasoningParts: new Map(),
   };
 }
 
-/** Joins the unindexed text with the indexed fragments, in index order. */
-function assembledText(text: string, parts: Map<number, string>): string {
+/** Joins the indexed fragments of a text field, in index order. */
+function assembledText(parts: Map<number, string>): string {
   const indexes = [...parts.keys()].sort((a, b) => a - b);
-  return text + indexes.map((index) => parts.get(index)).join('');
+  return indexes.map((index) => parts.get(index)).join('');
 }
 
 /** Converts an accumulated function call into an ADK function-call part. */
@@ -97,7 +92,6 @@ export class StreamAccumulator {
   private response?: OpenAI.Responses.Response;
   private model?: string;
   private responseId?: string;
-  private usage?: ReportedUsage;
   private failed = false;
   private reasoningOpen = false;
 
@@ -200,7 +194,6 @@ export class StreamAccumulator {
       case 'response.completed':
       case 'response.incomplete':
         this.response = event.response;
-        this.usage = event.response.usage ?? this.usage;
         return [];
       case 'response.failed':
       case 'error':
@@ -248,7 +241,6 @@ export class StreamAccumulator {
       finishReason: FinishReason.STOP,
       interactionId: this.responseId,
       modelVersion: this.model,
-      usageMetadata: toUsageMetadata(this.usage),
     };
   }
 
@@ -269,11 +261,11 @@ export class StreamAccumulator {
     }
     const itemType = doneItem?.type ?? item.type;
     if (itemType === 'reasoning') {
-      const text = assembledText(item.reasoning, item.reasoningParts);
+      const text = item.reasoning + assembledText(item.reasoningParts);
       return text ? [{text, thought: true}] : [];
     }
     if (itemType === 'message') {
-      const text = assembledText(item.text, item.textParts);
+      const text = assembledText(item.textParts);
       return text ? [{text}] : [];
     }
     const call = this.functionCalls.get(key);

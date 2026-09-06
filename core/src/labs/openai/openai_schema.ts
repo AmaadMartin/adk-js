@@ -7,16 +7,19 @@
 /**
  * JSON Schema helpers for the OpenAI labs models.
  *
- * Ports `google/adk/labs/openai/_openai_schema.py` together with the
- * `lowercase_schema_types` helper it calls. Both stay internal to this module
- * because the OpenAI Responses model is their only consumer in adk-js.
+ * Ports `enforce_strict_openai_schema` from adk-python
+ * `src/google/adk/labs/openai/_openai_schema.py`, and `lowercase_schema_types`
+ * from `src/google/adk/utils/_schema_utils.py`, which that module imports.
+ * Both stay internal here, because the OpenAI Responses model is their only
+ * consumer in adk-js. The Python spellings of the schema keywords are dropped:
+ * JSON Schema and `@google/genai`'s `Schema` are both camelCase, so no input
+ * reaching this module can carry them.
  */
 
 /** Schema keywords whose value is an object of named subschemas. */
 const NAMED_SUBSCHEMA_KEYS = [
   '$defs',
   'definitions',
-  'defs',
   'dependentSchemas',
   'patternProperties',
   'properties',
@@ -25,7 +28,6 @@ const NAMED_SUBSCHEMA_KEYS = [
 /** Schema keywords whose value is a single subschema. */
 const SINGLE_SUBSCHEMA_KEYS = [
   'additionalProperties',
-  'additional_properties',
   'contains',
   'else',
   'if',
@@ -37,15 +39,7 @@ const SINGLE_SUBSCHEMA_KEYS = [
 ] as const;
 
 /** Schema keywords whose value is a list of subschemas. */
-const LIST_SUBSCHEMA_KEYS = [
-  'allOf',
-  'all_of',
-  'anyOf',
-  'any_of',
-  'oneOf',
-  'one_of',
-  'prefixItems',
-] as const;
+const LIST_SUBSCHEMA_KEYS = ['allOf', 'anyOf', 'oneOf', 'prefixItems'] as const;
 
 /** Returns true when `value` is a plain JSON object. */
 export function isJsonObject(value: unknown): value is Record<string, unknown> {
