@@ -1649,6 +1649,34 @@ describe('AdkWebServer', () => {
       );
     });
 
+    it('should return 400 when the raw body is JSON null', async () => {
+      const res = await fetch(`${server.url}/api/reasoning_engine`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json,application/json',
+        },
+        body: 'null',
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as {error: string};
+      expect(data.error).toContain('appName is required');
+    });
+
+    it('should return 400 when the raw body is a JSON primitive', async () => {
+      const res = await fetch(`${server.url}/api/reasoning_engine`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json,application/json',
+        },
+        body: '"hello"',
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as {error: string};
+      expect(data.error).toContain('appName is required');
+    });
+
     it('should return 400 if appName is missing', async () => {
       try {
         await client.post('/api/reasoning_engine', {
