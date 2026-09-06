@@ -291,6 +291,8 @@ export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
+export {EnvironmentSimulationPlugin} from './tools/environment_simulation/environment_simulation_plugin.js';
+export type {ToolCallSimulator} from './tools/environment_simulation/environment_simulation_plugin.js';
 export {ExampleTool} from './tools/example_tool.js';
 export {EXIT_LOOP, ExitLoopTool} from './tools/exit_loop_tool.js';
 export {
