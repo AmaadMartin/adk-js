@@ -34,9 +34,9 @@ const OUTPUT_FORMATS: Record<string, 'esm' | 'cjs'> = {
 async function transpileTypeScript(
   filePath: string,
   outputExtension: string,
+  outputDir: string,
 ): Promise<string> {
   const sourceDir = path.dirname(filePath);
-  const outputDir = await createTempDir('adk_module_utils');
   const outfile = path.join(
     outputDir,
     path.parse(filePath).name + outputExtension,
@@ -58,25 +58,34 @@ async function transpileTypeScript(
 }
 
 /**
- * Imports a module file for its side effects, compiling TypeScript first.
+ * Imports a module file, compiling TypeScript first.
  *
- * The import is uncached: a file imported twice in one process runs twice.
+ * Node caches a module by URL, so importing the same JavaScript file twice
+ * runs it once.
  *
  * @param filePath Absolute path of a `.ts`, `.mts`, `.cts`, `.js`, `.mjs` or
  *     `.cjs` file.
+ * @returns The exports of the file.
  */
-export async function importModuleFile(filePath: string): Promise<void> {
+export async function importModuleFile(
+  filePath: string,
+): Promise<Record<string, unknown>> {
   const outputExtension =
     TYPESCRIPT_OUTPUT_EXTENSIONS[path.parse(filePath).ext];
   if (!outputExtension) {
-    await import(`${pathToFileURL(filePath).href}?t=${Date.now()}`);
-    return;
+    return import(pathToFileURL(filePath).href);
   }
 
-  const compiled = await transpileTypeScript(filePath, outputExtension);
+  // The directory is created here so that a failed compile releases it too.
+  const outputDir = await createTempDir('adk_module_utils');
   try {
-    await import(`${pathToFileURL(compiled).href}?t=${Date.now()}`);
+    const compiled = await transpileTypeScript(
+      filePath,
+      outputExtension,
+      outputDir,
+    );
+    return await import(pathToFileURL(compiled).href);
   } finally {
-    await fs.rm(path.dirname(compiled), {recursive: true, force: true});
+    await fs.rm(outputDir, {recursive: true, force: true});
   }
 }

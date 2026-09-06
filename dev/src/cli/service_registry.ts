@@ -50,7 +50,6 @@ import {
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {pathToFileURL} from 'node:url';
 import {z} from 'zod';
 
 import {isFileExists, isFolderExists} from '../utils/file_utils.js';
@@ -179,11 +178,18 @@ export function getServiceRegistry(): ServiceRegistry {
   return registry;
 }
 
-/** Resolves a relative specifier against the directory that declared it. */
-function toModuleSpecifier(declared: string, dir: string): string {
-  return declared.startsWith('.')
-    ? pathToFileURL(path.resolve(dir, declared)).href
-    : declared;
+/**
+ * A relative specifier names a file beside the YAML and may be TypeScript, so
+ * it goes through the compiling loader. A bare one is a package name, which
+ * only the module resolver can find.
+ */
+function importDeclaredModule(
+  specifier: string,
+  dir: string,
+): Promise<Record<string, unknown>> {
+  return specifier.startsWith('.')
+    ? importModuleFile(path.resolve(dir, specifier))
+    : import(specifier);
 }
 
 /**
@@ -197,9 +203,7 @@ async function createFactoryFromClassPath<T>(
   dir: string,
 ): Promise<ServiceFactory<T>> {
   const [specifier, exportName] = declared.split(EXPORT_NAME_SEPARATOR);
-  const module: Record<string, unknown> = await import(
-    toModuleSpecifier(specifier, dir)
-  );
+  const module = await importDeclaredModule(specifier, dir);
   const exported = module[exportName ?? 'default'];
   if (typeof exported !== 'function') {
     throw new Error(
