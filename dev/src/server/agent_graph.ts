@@ -38,6 +38,7 @@ const DARK_GREEN = '#0F5223';
 const LIGHT_GREEN = '#69CB87';
 const LIGHT_GRAY = '#cccccc';
 const WHITE = '#ffffff';
+const DARK_BACKGROUND = '#333537';
 
 const WORKFLOW_START_NODE_NAME = '__START__';
 
@@ -628,15 +629,17 @@ function shouldBuildAgentCluster(toolOrAgent: BaseAgent | BaseTool): boolean {
  *
  * @param rootAgent The root agent of the agent tree.
  * @param highlightsPairs An array of pairs of agent names to highlight.
+ * @param darkMode Whether to draw the graph on the dark theme background.
  * @return A graphviz graph of the agent tree.
  */
 export async function getAgentGraph(
   rootAgent: RunnableRoot,
   highlightsPairs: Array<[string, string]>,
+  darkMode = true,
 ): Promise<Digraph> {
   const graph = new Digraph(rootAgent.name, /* strict= */ true, {
     rankdir: 'LR',
-    bgcolor: '#333537',
+    bgcolor: darkMode ? DARK_BACKGROUND : WHITE,
   });
 
   await buildGraph(graph, rootAgent, highlightsPairs);
@@ -649,13 +652,15 @@ export async function getAgentGraph(
  *
  * @param rootAgent The root agent of the agent tree.
  * @param highlightsPairs An array of pairs of agent names to highlight.
+ * @param darkMode Whether to draw the graph on the dark theme background.
  * @return A graphviz graph in DOT format of the agent tree as a string.
  */
 export async function getAgentGraphAsDot(
   rootAgent: RunnableRoot,
   highlightsPairs: Array<[string, string]>,
+  darkMode = true,
 ): Promise<string> {
-  const graph = await getAgentGraph(rootAgent, highlightsPairs);
+  const graph = await getAgentGraph(rootAgent, highlightsPairs, darkMode);
 
   return toDot(graph);
 }

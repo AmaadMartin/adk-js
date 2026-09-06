@@ -21,6 +21,7 @@ import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {createServerLogger} from '../utils/logger.js';
 import {AdkApiServer} from './adk_api_server.js';
+import {DevServer} from './dev_server.js';
 import {TriggerVerifier} from './trigger_routes.js';
 
 const DEFAULT_HOST = 'localhost';
@@ -148,7 +149,13 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
   // has to set the level itself or logLevel cannot suppress what it reports.
   logger.setLogLevel(options.logLevel ?? LogLevel.INFO);
 
-  return new AdkApiServer({
+  // `web` asks for the dev-only endpoint surface as well as the dev UI, and
+  // those endpoints live on `DevServer`. `adk api_server` gets the plain
+  // server, so the endpoints that write into the agents directory stay out of
+  // a production deployment.
+  const ServerClass = options.web ? DevServer : AdkApiServer;
+
+  return new ServerClass({
     agentsDir,
     agentLoader: options.agentLoader,
     agentFileLoadOptions: options.agentFileLoadOptions,

@@ -106,6 +106,10 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [BaseSummarizer](context/summarizer/index.md) - The strategy a context compactor uses to summarize a window of events, and how a summarizer declines to compact.
 - [LlmSummarizer](context/llm_summarizer/index.md) - The built-in summarizer: what it puts in the prompt, how it renders tool traffic, and what the compacted event carries.
 
+### Dev
+
+- [DevServer](dev/dev_server/index.md) - The HTTP server behind `adk web`, and the dev-only endpoints it adds to `AdkApiServer`.
+
 ### Evaluation
 
 - [AgentEvaluator](evaluation/agent_evaluator/index.md) - Running an agent over recorded eval data from your own test suite, and reading the verdict it produces.
