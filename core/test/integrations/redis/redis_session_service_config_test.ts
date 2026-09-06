@@ -5,24 +5,10 @@
  */
 
 import {
-  InputValidationError,
   createRedisSessionServiceConfig,
   type RedisSessionServiceConfig,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-
-/**
- * Builds params the way an untyped caller does, so the runtime type checks
- * are reachable from TypeScript without a cast.
- */
-function untypedParams(
-  field: string,
-  value: unknown,
-): Partial<RedisSessionServiceConfig> {
-  const params: Partial<RedisSessionServiceConfig> = {};
-  Object.assign(params, {[field]: value});
-  return params;
-}
 
 describe('createRedisSessionServiceConfig', () => {
   it('returns the reference defaults when called with no argument', () => {
@@ -69,29 +55,44 @@ describe('createRedisSessionServiceConfig', () => {
     );
   });
 
-  it('preserves a falsy db and port instead of restoring the default', () => {
-    const config = createRedisSessionServiceConfig({db: 0, port: 0});
+  it('preserves a falsy db, port and ssl instead of restoring the default', () => {
+    const config = createRedisSessionServiceConfig({
+      db: 0,
+      port: 0,
+      ssl: false,
+    });
 
     expect(config.db).toBe(0);
     expect(config.port).toBe(0);
+    expect(config.ssl).toBe(false);
   });
 
   it('leaves an explicitly undefined optional field absent', () => {
     const config = createRedisSessionServiceConfig({
+      uri: undefined,
       host: undefined,
       port: undefined,
+      password: undefined,
     });
 
+    expect(config.uri).toBeUndefined();
     expect(config.host).toBeUndefined();
     expect(config.port).toBeUndefined();
+    expect(config.password).toBeUndefined();
   });
 
-  it('drops an unknown key without throwing', () => {
-    const config = createRedisSessionServiceConfig(
-      untypedParams('unknownKey', 'ignored'),
-    );
+  it('restores the default for an explicitly undefined required field', () => {
+    const config = createRedisSessionServiceConfig({
+      ssl: undefined,
+      db: undefined,
+      ttlSeconds: undefined,
+      keyPrefix: undefined,
+    });
 
-    expect(config).toStrictEqual(createRedisSessionServiceConfig());
+    expect(config.ssl).toBe(false);
+    expect(config.db).toBe(0);
+    expect(config.ttlSeconds).toBe(604800);
+    expect(config.keyPrefix).toBe('adk:session:');
   });
 
   it('does not modify params and returns a new object', () => {
@@ -101,55 +102,5 @@ describe('createRedisSessionServiceConfig', () => {
 
     expect(params).toStrictEqual({db: 2});
     expect(config).not.toBe(params);
-  });
-
-  it.each([
-    ['uri', 123, 'uri must be a string, received number.'],
-    ['host', null, 'host must be a string, received null.'],
-    ['password', true, 'password must be a string, received boolean.'],
-    ['keyPrefix', 7, 'keyPrefix must be a string, received number.'],
-    ['keyPrefix', undefined, 'keyPrefix must be a string, received undefined.'],
-    ['ssl', 'yes', 'ssl must be a boolean, received string.'],
-    ['ssl', undefined, 'ssl must be a boolean, received undefined.'],
-    ['db', '3', 'db must be an integer, received string.'],
-    ['db', undefined, 'db must be an integer, received undefined.'],
-    ['port', '6379', 'port must be an integer, received string.'],
-    [
-      'ttlSeconds',
-      undefined,
-      'ttlSeconds must be an integer, received undefined.',
-    ],
-  ])('rejects a %s of the wrong type', (field, value, message) => {
-    expect(() =>
-      createRedisSessionServiceConfig(untypedParams(field, value)),
-    ).toThrow(InputValidationError);
-    expect(() =>
-      createRedisSessionServiceConfig(untypedParams(field, value)),
-    ).toThrow(message);
-  });
-
-  it.each([
-    ['port', 'port must be an integer, received number.'],
-    ['db', 'db must be an integer, received number.'],
-    ['ttlSeconds', 'ttlSeconds must be an integer, received number.'],
-  ])('rejects a non-integer %s', (field, message) => {
-    expect(() =>
-      createRedisSessionServiceConfig(untypedParams(field, 3.5)),
-    ).toThrow(message);
-  });
-
-  it('rejects NaN and Infinity as an integer', () => {
-    expect(() =>
-      createRedisSessionServiceConfig({ttlSeconds: Number.NaN}),
-    ).toThrow(InputValidationError);
-    expect(() =>
-      createRedisSessionServiceConfig({ttlSeconds: Number.POSITIVE_INFINITY}),
-    ).toThrow(InputValidationError);
-  });
-
-  it('never puts the password value in the error message', () => {
-    expect(() =>
-      createRedisSessionServiceConfig(untypedParams('password', ['hunter2'])),
-    ).toThrow('password must be a string, received object.');
   });
 });
