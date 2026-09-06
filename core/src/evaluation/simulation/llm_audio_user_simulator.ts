@@ -85,16 +85,7 @@ export const llmAudioUserSimulatorConfigModel: EvalModel<LlmAudioUserSimulatorCo
       audioModel: z.string().default(DEFAULT_USER_SIMULATOR_AUDIO_MODEL),
       audioModelConfiguration: z
         .custom<GenerateContentConfig>()
-        .default(() => ({
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: DEFAULT_USER_SIMULATOR_VOICE_NAME,
-              },
-            },
-            languageCode: DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
-          },
-        })),
+        .default(defaultAudioModelConfiguration),
       includeTextWithAudio: z.boolean().default(true),
     },
     {name: 'LlmAudioUserSimulatorConfig', extraKeys: 'allow'},
@@ -122,6 +113,9 @@ const DEFAULT_AUDIO_MIME_TYPE = 'audio/pcm';
 
 /**
  * Builds the audio configuration a simulator uses when its config omits one.
+ *
+ * Both the schema default and the constructor's own fallback call this, so the
+ * voice and the language are declared once.
  *
  * A factory and not a shared constant, because
  * {@link addDefaultRetryOptionsIfNotPresent} writes the retry policy into the

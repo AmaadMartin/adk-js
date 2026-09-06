@@ -24,6 +24,13 @@ import {
   type UserSimulator,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {pcm} from '../../utils/pcm_fixtures.js';
+import {
+  audioResponse,
+  decode,
+  ScriptedUserSimulator,
+  textMessage,
+} from './audio_simulator_fixtures.js';
 import {FakeLlm} from './fake_llm.js';
 
 const INPUT_EVENTS: Event[] = [
@@ -33,55 +40,6 @@ const INPUT_EVENTS: Event[] = [
     invocationId: 'inv1',
   }),
 ];
-
-/** Encodes bytes the way `@google/genai` carries them in `Blob.data`. */
-function encode(bytes: Uint8Array | string): string {
-  return Buffer.from(bytes).toString('base64');
-}
-
-function decode(data: string | undefined): Uint8Array {
-  return new Uint8Array(Buffer.from(data ?? '', 'base64'));
-}
-
-/** Builds little-endian signed 16-bit PCM bytes from integer samples. */
-function pcm(samples: number[]): Uint8Array {
-  const bytes = new Uint8Array(samples.length * 2);
-  const view = new DataView(bytes.buffer);
-  samples.forEach((sample, index) => view.setInt16(index * 2, sample, true));
-  return bytes;
-}
-
-/** Builds an audio LLM response carrying one `inlineData` audio part. */
-function audioResponse(
-  data: Uint8Array | string = 'AUDIO_BYTES',
-  mimeType = 'audio/pcm',
-) {
-  return {
-    content: {
-      parts: [{inlineData: {mimeType, data: encode(data)}}],
-      role: 'user',
-    },
-  };
-}
-
-/** A wrapped simulator that replays one scripted result per call. */
-class ScriptedUserSimulator implements UserSimulator {
-  callCount = 0;
-
-  constructor(private readonly results: NextUserMessage[]) {}
-
-  async getNextUserMessage(_events: Event[]): Promise<NextUserMessage> {
-    this.callCount++;
-    return this.results[Math.min(this.callCount - 1, this.results.length - 1)];
-  }
-}
-
-function textMessage(text: string): NextUserMessage {
-  return {
-    status: UserSimulatorStatus.SUCCESS,
-    userMessage: {parts: [{text}], role: 'user'},
-  };
-}
 
 /** Builds a simulator wrapping a scripted text simulator and a fake model. */
 function buildSimulator(params: {
