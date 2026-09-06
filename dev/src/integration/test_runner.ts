@@ -150,11 +150,29 @@ function userMessageToContent(msg: UserMessage): Content {
   throw new Error('Either Content text or content field is required');
 }
 
-function validateSession(actual: Session, expected: Session) {
+/**
+ * Asserts the replayed events match the recorded ones one event at a time, so a
+ * failure names the event that diverged instead of diffing the whole session.
+ * The failure messages match those of adk-python's conformance replay.
+ */
+export function validateSession(actual: Session, expected: Session) {
   const actualEvents = actual.events.map(normalizeEvent);
-  const expectedEvents = expected.events.map(normalizeEvent);
+  const recordedEvents = expected.events.map(normalizeEvent);
 
-  assert.deepStrictEqual(actualEvents, expectedEvents);
+  assert.strictEqual(
+    actualEvents.length,
+    recordedEvents.length,
+    `Event count mismatch - Actual: ${actualEvents.length}, ` +
+      `Recorded: ${recordedEvents.length}`,
+  );
+
+  for (let i = 0; i < actualEvents.length; i++) {
+    assert.deepStrictEqual(
+      actualEvents[i],
+      recordedEvents[i],
+      `event ${i} mismatch:`,
+    );
+  }
 }
 
 function normalizeEvent(event: Event): FilteredEvent {
