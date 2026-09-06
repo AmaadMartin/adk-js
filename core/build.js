@@ -61,6 +61,16 @@ function build({
     logLevel: 'info',
   };
 
+  if (platform === 'node') {
+    // esbuild downlevels `import()` to `require()` for the `node10.4` target,
+    // which cannot load an ES module or a `file://` URL. Every Node runtime
+    // that loads this output supports dynamic import, and
+    // `resolveFullyQualifiedName` needs it to load a module a config file
+    // names. The browser targets keep the downlevel: Chrome 58, Firefox 57
+    // and Safari 11 predate dynamic import.
+    buildOptions.supported = {'dynamic-import': true};
+  }
+
   if (platform === 'browser' && bundle) {
     buildOptions.alias = {
       'node:async_hooks': './src/utils/async_hooks_shim.ts',
