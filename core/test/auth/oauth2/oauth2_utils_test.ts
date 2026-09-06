@@ -12,6 +12,7 @@ import {
   createOAuth2TokenRequestBody,
   fetchOAuth2Tokens,
   getTokenEndpoint,
+  isOAuth2EndpointNotAllowedError,
   isTokenExpired,
   parseAuthorizationCode,
   RefreshTokenParams,
@@ -170,6 +171,23 @@ describe('oauth2_utils', () => {
         ),
       ).rejects.toThrow('SSRF protection');
       expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('rejects a blocked host with OAuth2EndpointNotAllowedError', async () => {
+      await expect(
+        fetchOAuth2Tokens(
+          'https://169.254.169.254/token',
+          new URLSearchParams(),
+        ),
+      ).rejects.toSatisfy(isOAuth2EndpointNotAllowedError);
+    });
+
+    it('does not classify a transport failure as a blocked endpoint', async () => {
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(
+        fetchOAuth2Tokens('https://example.com/token', new URLSearchParams()),
+      ).rejects.not.toSatisfy(isOAuth2EndpointNotAllowedError);
     });
   });
 

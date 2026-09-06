@@ -11,7 +11,7 @@ import {
   OAuth2CredentialExchanger,
   OAuthGrantType,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   determineGrantType,
   exchangeAuthorizationCode,
@@ -19,7 +19,8 @@ import {
 } from '../../../src/auth/oauth2/oauth2_credential_exchanger.js';
 import * as oauth2Utils from '../../../src/auth/oauth2/oauth2_utils.js';
 
-vi.mock('../../../src/auth/oauth2/oauth2_utils.js', () => ({
+vi.mock('../../../src/auth/oauth2/oauth2_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof oauth2Utils>()),
   getTokenEndpoint: vi.fn(),
   fetchOAuth2Tokens: vi.fn(),
   parseAuthorizationCode: vi.fn(),
@@ -27,6 +28,12 @@ vi.mock('../../../src/auth/oauth2/oauth2_utils.js', () => ({
 }));
 
 describe('OAuth2CredentialExchanger', () => {
+  // Cleared so a guard case can assert that no token request was issued
+  // without seeing the calls made by an earlier case.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   describe('exchange', () => {
     it('throws CredentialExchangeError if authScheme is missing', async () => {
       const exchanger = new OAuth2CredentialExchanger();
@@ -110,6 +117,31 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.wasExchanged).toBe(true);
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
+
+    it('returns the unexchanged credential when the delegated authorization code exchange fails', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme = {
+        flows: {
+          authorizationCode: {},
+        },
+      } as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new Error('Service Unavailable'),
+      );
+
+      const result = await exchanger.exchange({authCredential, authScheme});
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+    });
   });
 
   describe('determineGrantType', () => {
@@ -165,7 +197,7 @@ describe('OAuth2CredentialExchanger', () => {
   });
 
   describe('exchangeClientCredentials', () => {
-    it('throws CredentialExchangeError if token endpoint is missing', async () => {
+    it('returns the unexchanged credential if token endpoint is missing', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
       } as AuthCredential;
@@ -173,12 +205,18 @@ describe('OAuth2CredentialExchanger', () => {
 
       vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(undefined);
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
-    it('throws CredentialExchangeError if clientId or clientSecret is missing', async () => {
+    it('returns the unexchanged credential if clientId or clientSecret is missing', async () => {
       const authCredential = {oauth2: {}} as AuthCredential;
       const authScheme = {} as AuthScheme;
 
@@ -186,9 +224,15 @@ describe('OAuth2CredentialExchanger', () => {
         'https://example.com/token',
       );
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
     it('calls fetchOAuth2Tokens and returns updated credential', async () => {
@@ -215,7 +259,7 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails', async () => {
+    it('returns the unexchanged credential if fetchOAuth2Tokens fails', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
       } as AuthCredential;
@@ -228,12 +272,38 @@ describe('OAuth2CredentialExchanger', () => {
         new Error('Network error'),
       );
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).toHaveBeenCalled();
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails with non-Error', async () => {
+    it('rethrows when the SSRF guard rejects the token endpoint', async () => {
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret'},
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://169.254.169.254/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new oauth2Utils.OAuth2EndpointNotAllowedError(
+          'SSRF protection: not allowed.',
+        ),
+      );
+
+      await expect(
+        exchangeClientCredentials({authCredential, authScheme}),
+      ).rejects.toThrow(oauth2Utils.OAuth2EndpointNotAllowedError);
+    });
+
+    it('returns the unexchanged credential if fetchOAuth2Tokens fails with non-Error', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret'},
       } as AuthCredential;
@@ -246,14 +316,20 @@ describe('OAuth2CredentialExchanger', () => {
         'String error',
       );
 
-      await expect(
-        exchangeClientCredentials({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeClientCredentials({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).toHaveBeenCalled();
     });
   });
 
   describe('exchangeAuthorizationCode', () => {
-    it('throws CredentialExchangeError if token endpoint is missing', async () => {
+    it('returns the unexchanged credential if token endpoint is missing', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
       } as AuthCredential;
@@ -261,12 +337,18 @@ describe('OAuth2CredentialExchanger', () => {
 
       vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(undefined);
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
-    it('throws CredentialExchangeError if required fields are missing', async () => {
+    it('returns the unexchanged credential if required fields are missing', async () => {
       const authCredential = {oauth2: {clientId: 'id'}} as AuthCredential;
       const authScheme = {} as AuthScheme;
 
@@ -274,9 +356,15 @@ describe('OAuth2CredentialExchanger', () => {
         'https://example.com/token',
       );
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
     it('parses code from authResponseUri if authCode is missing', async () => {
@@ -307,7 +395,7 @@ describe('OAuth2CredentialExchanger', () => {
       );
     });
 
-    it('throws if no code found in authResponseUri', async () => {
+    it('returns the unexchanged credential if no code found in authResponseUri', async () => {
       const authCredential = {
         oauth2: {
           clientId: 'id',
@@ -322,9 +410,15 @@ describe('OAuth2CredentialExchanger', () => {
       );
       vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue(undefined);
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
     it('calls fetchOAuth2Tokens and returns updated credential', async () => {
@@ -348,7 +442,7 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails', async () => {
+    it('returns the unexchanged credential if fetchOAuth2Tokens fails', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
       } as AuthCredential;
@@ -361,12 +455,38 @@ describe('OAuth2CredentialExchanger', () => {
         new Error('Network error'),
       );
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).toHaveBeenCalled();
     });
 
-    it('throws CredentialExchangeError if fetchOAuth2Tokens fails with non-Error', async () => {
+    it('rethrows when the SSRF guard rejects the token endpoint', async () => {
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://169.254.169.254/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockRejectedValue(
+        new oauth2Utils.OAuth2EndpointNotAllowedError(
+          'SSRF protection: not allowed.',
+        ),
+      );
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow(oauth2Utils.OAuth2EndpointNotAllowedError);
+    });
+
+    it('returns the unexchanged credential if fetchOAuth2Tokens fails with non-Error', async () => {
       const authCredential = {
         oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
       } as AuthCredential;
@@ -379,9 +499,15 @@ describe('OAuth2CredentialExchanger', () => {
         'String error',
       );
 
-      await expect(
-        exchangeAuthorizationCode({authCredential, authScheme}),
-      ).rejects.toThrow(CredentialExchangeError);
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).toHaveBeenCalled();
     });
 
     it('throws CredentialExchangeError if state in authResponseUri does not match expected state', async () => {
@@ -403,6 +529,85 @@ describe('OAuth2CredentialExchanger', () => {
       await expect(
         exchangeAuthorizationCode({authCredential, authScheme}),
       ).rejects.toThrow('State mismatch detected');
+    });
+
+    it('reports a state mismatch as a mismatch rather than a parse failure', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback?code=abc&state=wrong',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow(
+        new CredentialExchangeError(
+          'State mismatch detected. Potential CSRF attack.',
+        ),
+      );
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
+    });
+
+    it('throws when the auth response carries no state at all', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'https://callback?code=abc',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      await expect(
+        exchangeAuthorizationCode({authCredential, authScheme}),
+      ).rejects.toThrow(
+        new CredentialExchangeError(
+          'State mismatch detected. Potential CSRF attack.',
+        ),
+      );
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
+    });
+
+    it('returns the unexchanged credential if authResponseUri cannot be parsed for state validation', async () => {
+      const authCredential = {
+        oauth2: {
+          clientId: 'id',
+          clientSecret: 'secret',
+          authResponseUri: 'not a url',
+          state: 'expected-state',
+        },
+      } as AuthCredential;
+      const authScheme = {} as AuthScheme;
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.parseAuthorizationCode).mockReturnValue('abc');
+
+      const result = await exchangeAuthorizationCode({
+        authCredential,
+        authScheme,
+      });
+
+      expect(result.wasExchanged).toBe(false);
+      expect(result.credential).toBe(authCredential);
+      expect(result.credential.oauth2?.accessToken).toBeUndefined();
+      expect(oauth2Utils.fetchOAuth2Tokens).not.toHaveBeenCalled();
     });
 
     it('succeeds if state in authResponseUri matches expected state', async () => {
