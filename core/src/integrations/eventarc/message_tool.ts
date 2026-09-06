@@ -305,15 +305,6 @@ function toJson(data: unknown, message: string): string {
   return serialized;
 }
 
-/** Renders a value as text, reporting a failure as a serialization failure. */
-function toText(data: unknown): string {
-  try {
-    return String(data);
-  } catch (err: unknown) {
-    throw new Error(`Failed to serialize data: ${formatError(err)}`);
-  }
-}
-
 /** The content type adk-python infers for a payload the caller did not type. */
 function inferContentType(data: unknown): string {
   if (isBytes(data)) {
@@ -352,9 +343,11 @@ function toEventPayload(data: unknown, declared?: string): EventPayload {
           textData: toJson(data, 'Failed to serialize data to JSON'),
         };
   }
+  // `String` is total for every non-object value that reaches here, so
+  // adk-python's `str()` failure branch has no counterpart.
   return isJsonContainer(data)
     ? {contentType, textData: toJson(data, 'Failed to serialize data')}
-    : {contentType, textData: toText(data)};
+    : {contentType, textData: String(data)};
 }
 
 /** Copies the caller's W3C trace context into the event's attributes. */

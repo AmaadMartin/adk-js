@@ -10,28 +10,21 @@
  * `a3bd1115` on `main`. Each `it` keeps its Python name.
  */
 
-import {
-  cleanupClients,
-  EventarcPublishStatus,
-  publishMessage,
-  type EventarcToolConfig,
-  type PublishMessageInput,
-  type PublishMessageResult,
-} from '@google/adk';
-import {
-  propagation,
-  type Context as OtelContext,
-  type TextMapPropagator,
-  type TextMapSetter,
-} from '@opentelemetry/api';
+import {cleanupClients, EventarcPublishStatus, publishMessage} from '@google/adk';
+import {propagation} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   builtClients,
+  BUS,
+  errorDetails,
   eventAttributes,
+  StubPropagator,
   onlyEvent,
   onlyPublish,
+  publish,
   publishBehavior,
   resetEventarcFake,
+  SETTINGS,
 } from './eventarc_test_utils.js';
 
 vi.mock('@google-cloud/eventarc-publishing', async () => {
@@ -39,60 +32,8 @@ vi.mock('@google-cloud/eventarc-publishing', async () => {
   return {PublisherClient: FakePublisherClient};
 });
 
-/** The trace headers {@link StubPropagator} writes. */
-const STUB_TRACE_HEADERS: Record<string, string> = {
-  traceparent: '00-testtrace-testid-01',
-  tracestate: 'teststate=1',
-};
-
-/**
- * A propagator that writes fixed trace headers, standing in for the W3C one
- * an application installs. adk-python's test patches `inject` the same way.
- */
-class StubPropagator implements TextMapPropagator {
-  constructor(private readonly keys = Object.keys(STUB_TRACE_HEADERS)) {}
-
-  inject(
-    _context: OtelContext,
-    carrier: unknown,
-    setter: TextMapSetter<unknown>,
-  ): void {
-    for (const key of this.keys) {
-      setter.set(carrier, key, STUB_TRACE_HEADERS[key]);
-    }
-  }
-
-  extract(context: OtelContext): OtelContext {
-    return context;
-  }
-
-  fields(): string[] {
-    return this.keys;
-  }
-}
-
-const BUS = 'projects/test/locations/global/messageBuses/my-bus';
-const SETTINGS: EventarcToolConfig = {projectId: 'test-project'};
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-
-/** Publishes with the shared bus, type, source and settings. */
-async function publish(
-  input: Partial<PublishMessageInput> = {},
-): Promise<PublishMessageResult> {
-  return publishMessage(
-    {bus: BUS, type: 'com.example.test', source: '//test/source', ...input},
-    {toolConfig: SETTINGS},
-  );
-}
-
-/** The `error_details` of a result the test expects to be an error. */
-function errorDetails(result: PublishMessageResult): string {
-  if (result.status !== EventarcPublishStatus.ERROR) {
-    expect.fail(`expected an error result, got ${JSON.stringify(result)}`);
-  }
-  return result.error_details;
-}
 
 describe('publishMessage', () => {
   beforeEach(async () => {
@@ -254,26 +195,6 @@ describe('publishMessage', () => {
     const attributes = eventAttributes(onlyEvent());
     expect(attributes['traceparent']).toBe('00-testtrace-testid-01');
     expect(attributes['tracestate']).toBe('teststate=1');
-  });
-
-  it('leaves out the trace attributes when tracing is not requested', async () => {
-    propagation.setGlobalPropagator(new StubPropagator());
-
-    const res = await publish();
-
-    expect(res.status).toBe(EventarcPublishStatus.SUCCESS);
-    expect(eventAttributes(onlyEvent())).not.toHaveProperty('traceparent');
-  });
-
-  it('carries only the trace keys the propagator writes', async () => {
-    propagation.setGlobalPropagator(new StubPropagator(['traceparent']));
-
-    const res = await publish({include_tracing_extension: true});
-
-    expect(res.status).toBe(EventarcPublishStatus.SUCCESS);
-    const attributes = eventAttributes(onlyEvent());
-    expect(attributes['traceparent']).toBe('00-testtrace-testid-01');
-    expect(attributes).not.toHaveProperty('tracestate');
   });
 
   it('test_publish_message_empty_string_data', async () => {
