@@ -6,8 +6,6 @@
 import {Content, Language, Outcome, Part} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 
-import {base64Encode, isBase64Encoded} from '../utils/env_aware_utils.js';
-
 export enum FileContentEncoding {
   UTF8 = 'utf-8',
   BASE64 = 'base64',
@@ -101,16 +99,6 @@ export interface CodeExecutionResult {
    * The output files from the code execution.
    * */
   outputFiles: File[];
-}
-
-/**
- * Gets the file content as a base64-encoded bytes.
- *
- * @param data The file content bytes.
- * @return The file content as a base64-encoded bytes.
- */
-export function getEncodedFileContent(data: string): string {
-  return isBase64Encoded(data) ? data : base64Encode(data);
 }
 
 // Type to be used for regex matching of code blocks.

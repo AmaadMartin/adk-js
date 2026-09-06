@@ -107,20 +107,6 @@ export function base64Decode(data: string): string {
 }
 
 /**
- * Checks if the given string is base64-encoded.
- *
- * @param data The string to check.
- * @return True if the string is base64-encoded, false otherwise.
- */
-export function isBase64Encoded(data: string): boolean {
-  try {
-    return base64Encode(base64Decode(data)) === data;
-  } catch (_e: unknown) {
-    return false;
-  }
-}
-
-/**
  * Gets the boolean value of the given environment variable.
  *
  * @param envVar The environment variable to get the value of.
