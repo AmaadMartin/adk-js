@@ -186,7 +186,10 @@ describe('LoggingPlugin parity with adk-python', () => {
   });
 
   it('test_on_event_callback_truncates_long_text_part', async () => {
+    // The id is pinned because the plugin logs it and `createEvent` generates
+    // a random one, which can itself contain the 'Z' this test looks for.
     const event = createEvent({
+      id: 'event-1',
       author: 'test-agent',
       content: {parts: [{text: 'a'.repeat(200) + 'Z'.repeat(50)}]},
     });

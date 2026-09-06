@@ -23,8 +23,18 @@ import {logger} from '../utils/logger.js';
 import {BasePlugin} from './base_plugin.js';
 
 /** Returns whether a system-instruction entry is a `Content` and not a `Part`. */
-function isContent(value: Content | Part): value is Content {
-  return 'parts' in value && Array.isArray(value.parts);
+function isContent(value: unknown): value is Content {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'parts' in value &&
+    Array.isArray(value.parts)
+  );
+}
+
+/** Returns whether a system-instruction entry can be read as a `Part`. */
+function isPartLike(value: unknown): value is Part {
+  return typeof value === 'object' && value !== null;
 }
 
 /**
@@ -345,9 +355,15 @@ export class LoggingPlugin extends BasePlugin {
         .map((entry) => this.renderSystemInstruction(entry))
         .join(' | ');
     }
-    return this.formatContent(
-      isContent(instruction) ? instruction : {parts: [instruction]},
-    );
+    if (isContent(instruction)) {
+      return this.formatContent(instruction);
+    }
+    if (isPartLike(instruction)) {
+      return this.formatContent({parts: [instruction]});
+    }
+    // `ContentUnion` forbids it, but a JavaScript caller can still pass `null`
+    // or a number. The reference falls back to `str(...)` rather than raising.
+    return stringifyForLog(instruction);
   }
 
   private formatContent(content?: Content, maxLength = 200): string {

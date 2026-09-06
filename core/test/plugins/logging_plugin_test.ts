@@ -14,10 +14,18 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {Content} from '@google/genai';
+import {Content, ContentUnion} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {LoggingPlugin} from '../../src/plugins/logging_plugin.js';
 import {resetLogger, setLogger} from '../../src/utils/logger.js';
+
+/**
+ * Builds a system instruction that `ContentUnion` forbids but a JavaScript
+ * caller can still pass, without weakening the types in the test.
+ */
+function malformedInstruction(json: string): ContentUnion {
+  return JSON.parse(json);
+}
 
 function makeMockLogger() {
   const infoCalls: string[] = [];
@@ -661,6 +669,42 @@ describe('LoggingPlugin', () => {
       ),
     ).toBe(true);
     expect(infoCalls.some((m) => m.includes('Z'))).toBe(false);
+  });
+
+  it('beforeModelCallback should not reject on a null entry in a list system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: malformedInstruction('[null, 42]')},
+    };
+
+    await expect(
+      plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      infoCalls.some((m) => m.includes("System Instruction: 'null | 42'")),
+    ).toBe(true);
+  });
+
+  it('beforeModelCallback should not reject on a primitive system instruction', async () => {
+    const plugin = new LoggingPlugin();
+    const request: LlmRequest = {
+      ...mockLlmRequest,
+      config: {systemInstruction: malformedInstruction('42')},
+    };
+
+    await expect(
+      plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      }),
+    ).resolves.toBeUndefined();
+    expect(infoCalls.some((m) => m.includes("System Instruction: '42'"))).toBe(
+      true,
+    );
   });
 
   it('beforeToolCallback should not reject on a BigInt argument', async () => {
