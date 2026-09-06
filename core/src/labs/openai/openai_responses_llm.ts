@@ -320,7 +320,7 @@ export class OpenAiResponsesLlm extends BaseLlm {
     // One sanitizer per request, so a substituted call ID is stable across the
     // contents of that request and unrelated across requests.
     const sanitizer = new CallIdSanitizer();
-    return (llmRequest.contents ?? []).flatMap((content) =>
+    return llmRequest.contents.flatMap((content) =>
       contentToResponseInputItems(content, sanitizer),
     );
   }

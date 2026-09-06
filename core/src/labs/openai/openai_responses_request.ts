@@ -259,6 +259,8 @@ export function functionDeclarationToResponseTool(
     throw new Error('FunctionDeclaration must have a name.');
   }
 
+  // `parametersJsonSchema` wins over `parameters`, including for `required`:
+  // the copy of whichever schema is used already carries its own.
   const jsonSchema = functionDeclaration.parametersJsonSchema;
   const declaredParameters = functionDeclaration.parameters;
   let parameters: Record<string, unknown>;
@@ -268,14 +270,6 @@ export function functionDeclarationToResponseTool(
     parameters = schemaToJsonObject(declaredParameters);
   } else {
     parameters = {type: 'object', properties: {}};
-  }
-
-  const required =
-    jsonSchema === undefined || jsonSchema === null
-      ? declaredParameters?.required
-      : undefined;
-  if (required?.length && !('required' in parameters)) {
-    parameters['required'] = required;
   }
 
   return {

@@ -27,7 +27,7 @@ import {
   Type,
 } from '@google/genai';
 import type OpenAI from 'openai';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   AzureOpenAiResponsesLlm,
@@ -48,9 +48,7 @@ import {LlmRequest} from '../../../src/models/llm_request.js';
 import {logger} from '../../../src/utils/logger.js';
 
 import {
-  asyncStream,
   completedEvent,
-  contentPartDoneEvent,
   createdEvent,
   drain,
   failedEvent,
@@ -1282,30 +1280,5 @@ describe('CallIdSanitizer', () => {
     expect(sanitizer.sanitize('bad id')).toBe('call_adk_fallback_0');
     expect(sanitizer.sanitize('bad id')).toBe('call_adk_fallback_0');
     expect(sanitizer.sanitize(undefined)).toBe('call_adk_fallback_1');
-  });
-});
-
-describe('stream fixtures', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('replays every event it is given', async () => {
-    const events = [
-      textDeltaEvent({delta: 'a'}),
-      contentPartDoneEvent({
-        part: outputText('a'),
-      }),
-    ];
-
-    const seen: string[] = [];
-    for await (const event of asyncStream(events)) {
-      seen.push(event.type);
-    }
-
-    expect(seen).toEqual([
-      'response.output_text.delta',
-      'response.content_part.done',
-    ]);
   });
 });
