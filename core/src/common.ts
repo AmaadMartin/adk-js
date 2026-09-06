@@ -197,6 +197,7 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export * from './integrations/agent_registry/types.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
