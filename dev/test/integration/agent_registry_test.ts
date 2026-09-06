@@ -61,6 +61,25 @@ describe('AgentRegistry', () => {
     }
   });
 
+  it('should carry the declared generateContentConfig onto the agent', () => {
+    const config = {
+      name: 'tuned_agent',
+      model: 'config_model',
+      description: 'config description',
+      instruction: 'config instruction',
+      agentClass: 'LlmAgent',
+      generateContentConfig: {temperature: 0.25},
+    } as unknown as YamlAgentConfig;
+
+    agentRegistry.registerAgentConfig('tuned_agent', config);
+    const retrieved = agentRegistry.getAgent('tuned_agent');
+
+    expect(retrieved).toBeInstanceOf(LlmAgent);
+    expect((retrieved as LlmAgent).generateContentConfig?.temperature).toBe(
+      0.25,
+    );
+  });
+
   it('should register an agent from config with callbacks', () => {
     const beforeCallback: SingleAgentCallback = async () => undefined;
     const afterCallback: SingleAgentCallback = async () => undefined;

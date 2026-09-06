@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {isLlmAgent} from '../../agents/llm_agent.js';
 import {AuthConfig} from '../../auth/auth_tool.js';
 import {SchemaLike} from '../../utils/schema.js';
 import {BaseNode, isBaseNode, START} from '../base_node.js';
@@ -98,7 +99,13 @@ export function buildNode(
   nodeLike: NodeLike,
   options: BuildNodeOptions = {},
 ): BaseNode {
-  if (options.maxParallelWorkers !== undefined && !options.parallelWorker) {
+  // An agent can ask for the wrapper itself, via `LlmAgent.parallelWorker`.
+  // An explicit option still wins, including an explicit `false`.
+  const parallelWorker =
+    options.parallelWorker ??
+    (isLlmAgent(nodeLike) && nodeLike.parallelWorker === true);
+
+  if (options.maxParallelWorkers !== undefined && !parallelWorker) {
     throw new Error(
       'maxParallelWorkers can only be set when parallelWorker is true.',
     );
@@ -106,7 +113,7 @@ export function buildNode(
 
   const built = buildInnerNode(nodeLike, options);
 
-  if (options.parallelWorker) {
+  if (parallelWorker) {
     if (nodeLike === 'START') {
       throw new Error('ParallelWorker cannot wrap a START node.');
     }

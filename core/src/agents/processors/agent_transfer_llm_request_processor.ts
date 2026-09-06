@@ -12,6 +12,7 @@ import {BaseAgent} from '../base_agent.js';
 import {Context} from '../context.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent, LlmAgent} from '../llm_agent.js';
+import {getTransferTargets} from '../transfer_targets.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
@@ -55,7 +56,7 @@ export class AgentTransferLlmRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    const transferTargets = this.getTransferTargets(invocationContext.agent);
+    const transferTargets = getTransferTargets(invocationContext.agent);
     if (!transferTargets.length) {
       return;
     }
@@ -104,29 +105,6 @@ to your parent agent.
 `;
     }
     return instructions;
-  }
-
-  private getTransferTargets(agent: LlmAgent): BaseAgent[] {
-    const targets: BaseAgent[] = [];
-    targets.push(...agent.subAgents);
-
-    if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
-      return targets;
-    }
-
-    if (!agent.disallowTransferToParent) {
-      targets.push(agent.parentAgent);
-    }
-
-    if (!agent.disallowTransferToPeers) {
-      targets.push(
-        ...agent.parentAgent.subAgents.filter(
-          (peerAgent) => peerAgent.name !== agent.name,
-        ),
-      );
-    }
-
-    return targets;
   }
 }
 
