@@ -4,8 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {type Content} from '@google/genai';
 import {trace} from '@opentelemetry/api';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  type Mock,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import {
   BaseAgent,
@@ -21,6 +30,7 @@ import {
   traceAgentInvocation,
   traceCallLlm,
   traceMergedToolCalls,
+  traceSendData,
   traceToolCall,
 } from '../../src/telemetry/tracing.js';
 
@@ -28,6 +38,100 @@ vi.hoisted(() => {
   vi.resetModules();
 });
 vi.mock('@opentelemetry/api');
+
+const CAPTURE_ENV_VAR = 'ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS';
+
+const mockSendData: Content[] = [
+  {role: 'user', parts: [{text: 'hello-trace-data'}]},
+];
+
+/** Attributes traceToolCall sets that the capture gate must never redact. */
+const UNGATED_TOOL_CALL_ATTRIBUTES = {
+  'gen_ai.operation.name': 'execute_tool',
+  'gen_ai.tool.description': 'A test tool',
+  'gen_ai.tool.name': 'test-tool',
+  'gen_ai.tool.type': 'FunctionTool',
+  'gen_ai.tool.call.id': 'test-call-id',
+  'gcp.vertex.agent.event_id': 'test-event-id',
+};
+
+interface CaptureEnvCase {
+  /** Value to pass to vi.stubEnv; `undefined` deletes the variable. */
+  envValue: string | undefined;
+  /** Whether the current implementation captures payloads for this value. */
+  captureEnabled: boolean;
+  description: string;
+}
+
+/**
+ * Every value of ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS that the current
+ * implementation distinguishes, and the payload capture it selects.
+ *
+ * `''` and `'TRUE'` are the non-obvious rows: the empty string is falsy so it
+ * takes the `|| 'true'` default, while `'TRUE'` fails the case-sensitive
+ * comparison and therefore disables capture.
+ */
+const CAPTURE_ENV_CASES: CaptureEnvCase[] = [
+  {
+    envValue: undefined,
+    captureEnabled: true,
+    description: 'captures payloads when the variable is unset',
+  },
+  {
+    envValue: '',
+    captureEnabled: true,
+    description: 'captures payloads when the variable is the empty string',
+  },
+  {
+    envValue: 'true',
+    captureEnabled: true,
+    description: "captures payloads when the variable is 'true'",
+  },
+  {
+    envValue: '1',
+    captureEnabled: true,
+    description: "captures payloads when the variable is '1'",
+  },
+  {
+    envValue: 'false',
+    captureEnabled: false,
+    description: "redacts payloads when the variable is 'false'",
+  },
+  {
+    envValue: '0',
+    captureEnabled: false,
+    description: "redacts payloads when the variable is '0'",
+  },
+  {
+    envValue: 'TRUE',
+    captureEnabled: false,
+    description: "redacts payloads when the variable is 'TRUE' (case matters)",
+  },
+  {
+    envValue: 'not-a-boolean',
+    captureEnabled: false,
+    description: 'redacts payloads when the variable is unrecognized',
+  },
+];
+
+/**
+ * Flattens everything a traced call recorded onto the span, so an assertion
+ * does not have to know whether an attribute arrived via setAttributes (bulk)
+ * or setAttribute (single). No gated key arrives via both forms.
+ */
+function collectSpanAttributes(span: {
+  setAttributes: Mock<(attributes: Record<string, unknown>) => void>;
+  setAttribute: Mock<(key: string, value: unknown) => void>;
+}): Record<string, unknown> {
+  const attributes: Record<string, unknown> = {};
+  for (const [bulk] of span.setAttributes.mock.calls) {
+    Object.assign(attributes, bulk);
+  }
+  for (const [key, value] of span.setAttribute.mock.calls) {
+    attributes[key] = value;
+  }
+  return attributes;
+}
 
 describe('Telemetry Tracing Functions', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,6 +145,9 @@ describe('Telemetry Tracing Functions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Pin the capture gate to its default so the suite does not depend on the
+    // ambient environment of the machine running it.
+    vi.stubEnv(CAPTURE_ENV_VAR, undefined);
 
     mockSpan = {
       setAttributes: vi.fn(),
@@ -103,6 +210,7 @@ describe('Telemetry Tracing Functions', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs(); // restoreAllMocks() does not unstub envs.
   });
 
   describe('traceAgentInvocation', () => {
@@ -287,6 +395,124 @@ describe('Telemetry Tracing Functions', () => {
         'gen_ai.request.max_tokens',
         expect.anything(),
       );
+    });
+  });
+
+  describe('ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS gate', () => {
+    CAPTURE_ENV_CASES.forEach(({envValue, captureEnabled, description}) => {
+      describe(description, () => {
+        beforeEach(() => {
+          vi.stubEnv(CAPTURE_ENV_VAR, envValue);
+          vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+        });
+
+        it('traceCallLlm', () => {
+          traceCallLlm({
+            invocationContext: mockInvocationContext,
+            eventId: 'test-event-id',
+            llmRequest: mockLlmRequest,
+            llmResponse: mockLlmResponse,
+          });
+
+          const attributes = collectSpanAttributes(mockSpan);
+          if (captureEnabled) {
+            expect(attributes['gcp.vertex.agent.llm_request']).toContain(
+              'test-model',
+            );
+            expect(attributes['gcp.vertex.agent.llm_response']).toContain(
+              'test-response',
+            );
+          } else {
+            expect(attributes['gcp.vertex.agent.llm_request']).toBe('{}');
+            expect(attributes['gcp.vertex.agent.llm_response']).toBe('{}');
+          }
+        });
+
+        it('traceToolCall', () => {
+          traceToolCall({
+            tool: mockTool,
+            args: {param1: 'value1'},
+            functionResponseEvent: mockEvent,
+          });
+
+          const attributes = collectSpanAttributes(mockSpan);
+          if (captureEnabled) {
+            expect(attributes['gcp.vertex.agent.tool_call_args']).toContain(
+              'param1',
+            );
+            expect(attributes['gcp.vertex.agent.tool_response']).toContain(
+              'test-result',
+            );
+          } else {
+            expect(attributes['gcp.vertex.agent.tool_call_args']).toBe('{}');
+            expect(attributes['gcp.vertex.agent.tool_response']).toBe('{}');
+          }
+        });
+
+        it('traceMergedToolCalls', () => {
+          traceMergedToolCalls({
+            responseEventId: 'merged-event-id',
+            functionResponseEvent: mockEvent,
+          });
+
+          const attributes = collectSpanAttributes(mockSpan);
+          if (captureEnabled) {
+            expect(attributes['gcp.vertex.agent.tool_response']).toContain(
+              'test-result',
+            );
+          } else {
+            expect(attributes['gcp.vertex.agent.tool_response']).toBe('{}');
+          }
+        });
+
+        it('traceSendData', () => {
+          traceSendData({
+            invocationContext: mockInvocationContext,
+            eventId: 'test-event-id',
+            data: mockSendData,
+          });
+
+          const attributes = collectSpanAttributes(mockSpan);
+          if (captureEnabled) {
+            expect(attributes['gcp.vertex.agent.data']).toContain(
+              'hello-trace-data',
+            );
+          } else {
+            expect(attributes['gcp.vertex.agent.data']).toBe('{}');
+          }
+        });
+      });
+    });
+
+    it('redacts payloads without suppressing ungated attributes', () => {
+      // Arrange / Act: same call under both sides of the gate.
+      vi.stubEnv(CAPTURE_ENV_VAR, 'true');
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      traceToolCall({
+        tool: mockTool,
+        args: {param1: 'value1'},
+        functionResponseEvent: mockEvent,
+      });
+      const withCapture = collectSpanAttributes(mockSpan);
+
+      vi.clearAllMocks();
+      vi.stubEnv(CAPTURE_ENV_VAR, 'false');
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      traceToolCall({
+        tool: mockTool,
+        args: {param1: 'value1'},
+        functionResponseEvent: mockEvent,
+      });
+      const withoutCapture = collectSpanAttributes(mockSpan);
+
+      // Assert: the gate redacts payloads...
+      expect(withCapture['gcp.vertex.agent.tool_call_args']).toContain(
+        'param1',
+      );
+      expect(withoutCapture['gcp.vertex.agent.tool_call_args']).toBe('{}');
+      // ...and leaves every other attribute identical.
+      expect(withCapture).toMatchObject(UNGATED_TOOL_CALL_ATTRIBUTES);
+      expect(withoutCapture).toMatchObject(UNGATED_TOOL_CALL_ATTRIBUTES);
     });
   });
 });
