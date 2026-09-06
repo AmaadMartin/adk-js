@@ -306,7 +306,9 @@ export function traceCallLlm({
 
   span.setAttribute(
     'gcp.vertex.agent.llm_response',
-    shouldAddRequestResponseToSpans() ? safeJsonSerialize(llmResponse) : '{}',
+    shouldAddRequestResponseToSpans()
+      ? safeJsonSerialize(summarizeInlineData(llmResponse))
+      : '{}',
   );
 
   if (llmResponse.usageMetadata) {
@@ -404,6 +406,36 @@ function buildLlmRequestForTrace(
   }));
 
   return result;
+}
+
+/**
+ * Returns `response` with inline binary parts reduced to a description.
+ *
+ * `Blob.data` is a base64 string, so serializing a part copies its payload
+ * verbatim; a live session's audio chunks would otherwise land wholesale on a
+ * span attribute. Only the mime type and byte count are kept.
+ *
+ * @param response The response to summarize.
+ * @returns A copy of `response` whose inline binary parts carry a text
+ *     description instead of the payload.
+ */
+function summarizeInlineData(response: LlmResponse): LlmResponse {
+  const content = response.content;
+  if (!content) return response;
+
+  const parts = (content.parts ?? []).map((part) => {
+    const blob = part.inlineData;
+    if (!blob) return part;
+    // Derived from the string length, not by decoding: the payload can be
+    // megabytes and `Buffer` is unavailable in the browser build.
+    const size = Math.floor(
+      ((blob.data ?? '').replace(/=+$/, '').length * 3) / 4,
+    );
+    return {
+      text: `<inline_data: ${blob.mimeType || 'unknown'}, ${size} bytes>`,
+    };
+  });
+  return {...response, content: {role: content.role, parts}};
 }
 
 /**

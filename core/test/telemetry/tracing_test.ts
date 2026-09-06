@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {FinishReason} from '@google/genai';
 import {trace} from '@opentelemetry/api';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {Mock, afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   BaseAgent,
@@ -28,6 +29,19 @@ vi.hoisted(() => {
   vi.resetModules();
 });
 vi.mock('@opentelemetry/api');
+
+interface SpanMock {
+  setAttribute: Mock;
+}
+
+/** Returns the value the span was given for `key`. */
+function attributeValue(span: SpanMock, key: string): string {
+  const call = span.setAttribute.mock.calls.find(([name]) => name === key);
+  if (!call) {
+    expect.fail(`span attribute ${key} is missing`);
+  }
+  return String(call[1]);
+}
 
 describe('Telemetry Tracing Functions', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -287,6 +301,111 @@ describe('Telemetry Tracing Functions', () => {
         'gen_ai.request.max_tokens',
         expect.anything(),
       );
+    });
+  });
+
+  describe('traceCallLlm inline data', () => {
+    // 'dGVzdF9kYXRh' is the base64 of the 9-byte 'test_data'.
+    const AUDIO_BASE64 = 'dGVzdF9kYXRh';
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function traceResponse(llmResponse: LlmResponse): string {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      traceCallLlm({
+        invocationContext: mockInvocationContext,
+        eventId: 'test-event-id',
+        llmRequest: mockLlmRequest,
+        llmResponse,
+      });
+      return attributeValue(mockSpan, 'gcp.vertex.agent.llm_response');
+    }
+
+    it('summarizes inline binary parts instead of copying the payload', () => {
+      const attribute = traceResponse({
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'hi'},
+            {inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}},
+          ],
+        },
+      });
+
+      expect(attribute).not.toContain(AUDIO_BASE64);
+      expect(attribute).not.toContain('inlineData');
+      expect(attribute).toContain('hi');
+      expect(attribute).toContain('<inline_data: audio/pcm, 9 bytes>');
+    });
+
+    it('does not mutate the response passed in', () => {
+      const llmResponse = {
+        content: {
+          role: 'model',
+          parts: [
+            {text: 'hi'},
+            {inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}},
+          ],
+        },
+      };
+      const before = structuredClone(llmResponse);
+
+      traceResponse(llmResponse);
+
+      expect(llmResponse).toEqual(before);
+      expect(llmResponse.content?.parts?.[1].inlineData?.data).toBe(
+        AUDIO_BASE64,
+      );
+    });
+
+    it('describes a blob with no mime type or data', () => {
+      const attribute = traceResponse({
+        content: {role: 'model', parts: [{inlineData: {}}]},
+      });
+
+      expect(attribute).toContain('<inline_data: unknown, 0 bytes>');
+      expect(attribute).not.toContain('inlineData');
+    });
+
+    it('counts padded base64 payloads correctly', () => {
+      // 'aGk=' is the base64 of the 2-byte 'hi'.
+      const attribute = traceResponse({
+        content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'image/png', data: 'aGk='}}],
+        },
+      });
+
+      expect(attribute).toContain('<inline_data: image/png, 2 bytes>');
+    });
+
+    it('tolerates content without parts', () => {
+      const attribute = traceResponse({
+        content: {role: 'model'},
+      });
+
+      expect(attribute).toContain('"parts":[]');
+    });
+
+    it('serializes a response with no content unchanged', () => {
+      const attribute = traceResponse({finishReason: FinishReason.STOP});
+
+      expect(JSON.parse(attribute)).toEqual({finishReason: FinishReason.STOP});
+    });
+
+    it('omits the response when content capture is disabled', () => {
+      vi.stubEnv('ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS', 'false');
+
+      const attribute = traceResponse({
+        content: {
+          role: 'model',
+          parts: [{inlineData: {mimeType: 'audio/pcm', data: AUDIO_BASE64}}],
+        },
+      });
+
+      expect(attribute).toBe('{}');
     });
   });
 });
