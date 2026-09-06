@@ -32,17 +32,21 @@
  *    crossed guidepost fires at the next request start.
  * 3. A guidepost within the floor of the last collect is muted, and the grid
  *    advances by one period.
- * 4. A lone long request collects off its own `generate_content` span starts,
- *    once {@link OVERDUE_PERIOD_FACTOR} times the period has elapsed since the
- *    reference point of the current busy period.
+ * 4. A lone long request collects off its own inference span starts, once
+ *    {@link OVERDUE_PERIOD_FACTOR} times the period has elapsed since the
+ *    reference point of the current busy period. adk-js opens that span as
+ *    `call_llm`.
  *
  * One case still loses points, and that is accepted. A request shorter than the
  * floor that drains right after a collect, and is the last request before the
  * process goes idle, loses its points: a collect now is muted by the floor, and
  * no later request arrives to carry them.
  *
- * The middleware that drives the reader from an HTTP request lifecycle is not
- * part of this module. A caller notes each request itself:
+ * The reader collects nothing on its own: apart from the collect at shutdown,
+ * every collect starts from a request hook, and point 4 needs a request in
+ * flight. The host must therefore note each request. `getGcpExporters` installs
+ * the reader on Agent Engine, but the request middleware that drives it is not
+ * part of this module.
  *
  * ```ts
  * const {reader, spanProcessor} = buildRequestDrivenMetrics(exporter);
@@ -85,11 +89,15 @@ const DEFAULT_EXPORT_TIMEOUT_MS = 30000;
 /** Multiple of the period a busy stretch must exceed before point 4 collects. */
 const OVERDUE_PERIOD_FACTOR = 1.5;
 
-/** Semantic-convention attribute carrying the GenAI operation name. */
-const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
-
-/** The GenAI operation whose span starts drive point 4. */
-const GENERATE_CONTENT_OPERATION = 'generate_content';
+/**
+ * Name of the inference span whose starts drive point 4.
+ *
+ * adk-js opens one `call_llm` span per model call, in `LlmAgent`. adk-python
+ * matches `generate_content` instead, because there the GenAI SDK's own
+ * instrumentation supplies the span; adk-js emits no such span. Callers that do
+ * have one can say so through {@link RequestDrivenMetricsOptions.inferenceSpanName}.
+ */
+const DEFAULT_INFERENCE_SPAN_NAME = 'call_llm';
 
 /**
  * The minimum spacing between two metric exports to Cloud Monitoring, shared by
@@ -112,6 +120,18 @@ export interface RequestDrivenMetricReaderOptions {
   floorMillis?: number;
   /** Monotonic clock in milliseconds. Injected by tests. */
   now?: () => number;
+}
+
+/** Options for {@link buildRequestDrivenMetrics}. */
+export interface RequestDrivenMetricsOptions extends RequestDrivenMetricReaderOptions {
+  /**
+   * Name prefix of the inference span that drives point 4.
+   *
+   * Defaults to `call_llm`, the span adk-js opens for a model call. Set it to
+   * `generate_content` when the GenAI SDK's own instrumentation supplies the
+   * span instead.
+   */
+  inferenceSpanName?: string;
 }
 
 /** The metric-export handles an application wires up. */
@@ -267,7 +287,7 @@ export class RequestDrivenMetricReader extends MetricReader {
   }
 
   /**
-   * Notes a `generate_content` span start, and answers whether to collect now.
+   * Notes an inference span start, and answers whether to collect now.
    *
    * @returns True when the caller should run {@link submitCollect}.
    */
@@ -392,18 +412,21 @@ export class RequestDrivenMetricReader extends MetricReader {
   }
 }
 
-/** Fires a fire-and-forget collect on each `generate_content` span start. */
+/** Fires a fire-and-forget collect on each inference span start. */
 class MetricsFlushingSpanProcessor implements SpanProcessor {
-  constructor(private readonly reader: RequestDrivenMetricReader) {}
+  constructor(
+    private readonly reader: RequestDrivenMetricReader,
+    private readonly spanName: string,
+  ) {}
 
   onStart(span: Span): void {
     // onStart runs inside span creation on the inference path, so a metrics
     // failure must never break the span it observes.
     try {
-      const matches =
-        span.attributes[GEN_AI_OPERATION_NAME] === GENERATE_CONTENT_OPERATION ||
-        span.name.startsWith(GENERATE_CONTENT_OPERATION);
-      if (matches && this.reader.noteGenerateContentStart()) {
+      if (
+        span.name.startsWith(this.spanName) &&
+        this.reader.noteGenerateContentStart()
+      ) {
         void this.reader.submitCollect();
       }
     } catch (e: unknown) {
@@ -437,8 +460,12 @@ class MetricsFlushingSpanProcessor implements SpanProcessor {
  */
 export function buildRequestDrivenMetrics(
   exporter: PushMetricExporter,
-  options?: RequestDrivenMetricReaderOptions,
+  options: RequestDrivenMetricsOptions = {},
 ): MetricsState {
   const reader = new RequestDrivenMetricReader(exporter, options);
-  return {reader, spanProcessor: new MetricsFlushingSpanProcessor(reader)};
+  const spanName = options.inferenceSpanName ?? DEFAULT_INFERENCE_SPAN_NAME;
+  return {
+    reader,
+    spanProcessor: new MetricsFlushingSpanProcessor(reader, spanName),
+  };
 }
