@@ -13,6 +13,10 @@ import {
   LiveServerMessage,
 } from '@google/genai';
 
+import {z} from 'zod';
+
+import {tracer} from '../telemetry/tracing.js';
+import type {ComputerUseToolAdapter} from '../tools/computer_use/computer_use_toolset.js';
 import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
@@ -21,6 +25,8 @@ import {AsyncQueue} from '../utils/async_queue.js';
 import {StreamingResponseAggregator} from '../utils/streaming_utils.js';
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {CacheMetadata} from './cache_metadata.js';
+import {GeminiContextCacheManager} from './gemini_context_cache_manager.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
 import {generateContentViaInteractions} from './interactions_utils.js';
 import {LlmRequest} from './llm_request.js';
@@ -164,8 +170,31 @@ export class Gemini extends BaseLlm {
       yield* generateContentViaInteractions(this.apiClient, llmRequest, stream);
       return;
     }
-    this.preprocessRequest(llmRequest);
+    await this.preprocessRequest(llmRequest);
     this.maybeAppendUserContent(llmRequest);
+
+    let cacheMetadata: CacheMetadata | undefined;
+    let cacheManager: GeminiContextCacheManager | undefined;
+    if (llmRequest.cacheConfig && !this.useInteractionsApi) {
+      await tracer.startActiveSpan('handle_context_caching', async (span) => {
+        try {
+          cacheManager = new GeminiContextCacheManager(this.apiClient);
+          cacheMetadata = await cacheManager.handleContextCaching(llmRequest);
+          if (cacheMetadata) {
+            span.setAttribute(
+              'cache_action',
+              cacheMetadata.cacheName ? 'active_cache' : 'fingerprint_only',
+            );
+            if (cacheMetadata.cacheName) {
+              span.setAttribute('cache_name', cacheMetadata.cacheName);
+            }
+          }
+        } finally {
+          span.end();
+        }
+      });
+    }
+
     logger.info(
       `Sending out request, model: ${llmRequest.model ?? this.model}, backend: ${this.apiBackend}, stream: ${stream}`,
     );
@@ -200,6 +229,14 @@ export class Gemini extends BaseLlm {
       }
       const finalResponse = aggregator.close();
       if (finalResponse) {
+        // Only the aggregated response reports the cache; the partials that
+        // preceded it are fragments of the same turn.
+        if (cacheMetadata && cacheManager) {
+          cacheManager.populateCacheMetadataInResponse(
+            finalResponse,
+            cacheMetadata,
+          );
+        }
         yield finalResponse;
       }
     } else {
@@ -208,7 +245,14 @@ export class Gemini extends BaseLlm {
         contents: llmRequest.contents,
         config: llmRequest.config,
       });
-      yield createLlmResponse(response);
+      const llmResponse = createLlmResponse(response);
+      if (cacheMetadata && cacheManager) {
+        cacheManager.populateCacheMetadataInResponse(
+          llmResponse,
+          cacheMetadata,
+        );
+      }
+      yield llmResponse;
     }
   }
 
@@ -347,7 +391,7 @@ export class Gemini extends BaseLlm {
     return new GeminiLlmConnection(liveSession, modelVersion, messageQueue);
   }
 
-  private preprocessRequest(llmRequest: LlmRequest): void {
+  private async preprocessRequest(llmRequest: LlmRequest): Promise<void> {
     if (this.apiBackend === GoogleLLMVariant.GEMINI_API) {
       if (llmRequest.config) {
         // Using API key from Google AI Studio to call model doesn't support
@@ -364,7 +408,55 @@ export class Gemini extends BaseLlm {
         }
       }
     }
+
+    if (
+      llmRequest.config?.tools?.some(
+        (tool) => 'computerUse' in tool && !!tool.computerUse,
+      )
+    ) {
+      llmRequest.config.systemInstruction = undefined;
+      await adaptComputerUseTool(llmRequest);
+    }
   }
+}
+
+/** The wire name of the predefined tool the adaptation replaces. */
+const WAIT_TOOL_NAME = 'wait';
+
+/** How long the adapted wait tool waits for. */
+const WAIT_SECONDS = 5;
+
+/**
+ * Builds the fixed-duration wait tool that the Gemini computer-use surface
+ * calls. The model emits `wait_5_seconds` with no arguments, so the adapted
+ * tool declares none and passes the duration to the original itself.
+ */
+const WAIT_5_SECONDS_ADAPTER: ComputerUseToolAdapter = (original) => ({
+  name: `${WAIT_TOOL_NAME}_${WAIT_SECONDS}_seconds`,
+  description:
+    `Waits for ${WAIT_SECONDS} seconds to allow unfinished webpage ` +
+    `processes to complete.`,
+  parameters: z.object({}),
+  execute: (_input, toolContext) =>
+    original({seconds: WAIT_SECONDS}, toolContext),
+});
+
+/**
+ * Renames the registered `wait` tool to the name the computer-use surface
+ * calls. Without it the model's `wait_5_seconds` call resolves to no
+ * registered tool and the turn fails.
+ *
+ * The toolset is imported lazily, as `google_llm.py` does, so that an agent
+ * with no computer-use tool never loads the computer-use subsystem.
+ */
+async function adaptComputerUseTool(llmRequest: LlmRequest): Promise<void> {
+  const {ComputerUseToolset} =
+    await import('../tools/computer_use/computer_use_toolset.js');
+  await ComputerUseToolset.adaptComputerUseTool(
+    WAIT_TOOL_NAME,
+    WAIT_5_SECONDS_ADAPTER,
+    llmRequest,
+  );
 }
 
 function removeDisplayNameIfPresent(

@@ -52,75 +52,26 @@ describe('loadWebPage', () => {
     vi.restoreAllMocks();
   });
 
-  describe('scheme and hostname rejection (no network)', () => {
-    it('rejects non-http(s) schemes without resolving or fetching', async () => {
-      const result = await loadWebPage('file:///etc/passwd');
-
-      expect(result).toBe('Failed to fetch url: file:///etc/passwd');
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(lookupMock).not.toHaveBeenCalled();
-    });
-
-    it('rejects malformed URLs', async () => {
-      const result = await loadWebPage('not a url');
-
-      expect(result).toBe('Failed to fetch url: not a url');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('rejects the localhost hostname', async () => {
-      const result = await loadWebPage('http://localhost:8080/');
-
-      expect(result).toBe('Failed to fetch url: http://localhost:8080/');
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(lookupMock).not.toHaveBeenCalled();
-    });
-
-    it('rejects *.localhost hostnames', async () => {
-      const result = await loadWebPage('http://api.localhost./');
-
-      expect(result).toBe('Failed to fetch url: http://api.localhost./');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('SSRF IP rejection', () => {
-    it('rejects loopback IPv4 literals without a DNS lookup', async () => {
-      const url =
-        'http://127.0.0.1:19876/latest/meta-data/iam/security-credentials/';
-
-      const result = await loadWebPage(url);
-
-      expect(result).toBe(`Failed to fetch url: ${url}`);
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(lookupMock).not.toHaveBeenCalled();
-    });
-
-    it('rejects shared address space (CGNAT) IPv4 literals', async () => {
-      const result = await loadWebPage('http://100.64.0.1/internal');
-
-      expect(result).toBe('Failed to fetch url: http://100.64.0.1/internal');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
+  // The exhaustive scheme, hostname and address matrix now lives beside the
+  // module that implements it, in `core/test/utils/url_safety_utils_test.ts`.
+  // What is left here is this tool's own contract: a refusal is turned into
+  // the parity failure string and nothing is ever fetched.
+  describe('unsafe urls (no network)', () => {
     it.each([
-      'http://10.1.2.3/',
-      'http://172.16.5.4/',
-      'http://192.168.1.1/',
-      'http://169.254.169.254/',
-      'http://0.0.0.0/',
-      'http://192.0.2.5/',
-      'http://198.18.0.1/',
-      'http://224.0.0.1/',
-      'http://240.0.0.1/',
-    ])('rejects non-global IPv4 literal %s', async (url) => {
+      ['a non-http(s) scheme', 'file:///etc/passwd'],
+      ['a malformed url', 'not a url'],
+      ['the localhost hostname', 'http://localhost:8080/'],
+      ['a loopback IPv4 literal', 'http://127.0.0.1:19876/latest/meta-data/'],
+      ['an IPv6 loopback literal', 'http://[::1]/'],
+    ])('refuses %s without resolving or fetching', async (_case, url) => {
       const result = await loadWebPage(url);
 
       expect(result).toBe(`Failed to fetch url: ${url}`);
       expect(fetchMock).not.toHaveBeenCalled();
+      expect(lookupMock).not.toHaveBeenCalled();
     });
 
-    it('rejects a private IP discovered via DNS resolution', async () => {
+    it('refuses a host that resolves to a private address', async () => {
       resolveTo('169.254.169.254');
 
       const url = 'http://metadata.google.internal/computeMetadata/v1/';
@@ -133,78 +84,12 @@ describe('loadWebPage', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('rejects when any of several resolved addresses is non-global', async () => {
-      resolveTo('93.184.216.34', '10.0.0.5');
-
-      const result = await loadWebPage('http://mixed.example/');
-
-      expect(result).toBe('Failed to fetch url: http://mixed.example/');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('fails closed when DNS resolves to an unparseable address', async () => {
-      resolveTo('not-an-ip');
-
-      const result = await loadWebPage('http://weird.example/');
-
-      expect(result).toBe('Failed to fetch url: http://weird.example/');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('fails closed when DNS resolves to an out-of-range IPv4', async () => {
-      resolveTo('1.2.3.999');
-
-      const result = await loadWebPage('http://weird.example/');
-
-      expect(result).toBe('Failed to fetch url: http://weird.example/');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('fails when DNS resolution returns no addresses', async () => {
-      lookupMock.mockResolvedValue([]);
-
-      const result = await loadWebPage('http://empty.example/');
-
-      expect(result).toBe('Failed to fetch url: http://empty.example/');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('fails when DNS resolution throws', async () => {
+    it('refuses when DNS resolution throws', async () => {
       lookupMock.mockRejectedValue(new Error('ENOTFOUND'));
 
       const result = await loadWebPage('http://missing.example/');
 
       expect(result).toBe('Failed to fetch url: http://missing.example/');
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('rejects IPv6 loopback literals', async () => {
-      const result = await loadWebPage('http://[::1]/');
-
-      expect(result).toBe('Failed to fetch url: http://[::1]/');
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(lookupMock).not.toHaveBeenCalled();
-    });
-
-    it.each([
-      'http://[fe80::1]/',
-      'http://[fc00::1]/',
-      'http://[ff02::1]/',
-      'http://[2001:db8::1]/',
-      'http://[::]/',
-    ])('rejects non-global IPv6 literal %s', async (url) => {
-      const result = await loadWebPage(url);
-
-      expect(result).toBe(`Failed to fetch url: ${url}`);
-      expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it('rejects an IPv4-mapped IPv6 address pointing at a private IP', async () => {
-      resolveTo('::ffff:127.0.0.1');
-
-      const result = await loadWebPage('http://mapped.example/');
-
-      expect(result).toBe('Failed to fetch url: http://mapped.example/');
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });

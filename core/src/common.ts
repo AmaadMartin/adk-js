@@ -15,6 +15,11 @@ export type {
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
 export {
+  DEFAULT_CONTEXT_CACHE_CONFIG,
+  ttlString,
+} from './agents/context_cache_config.js';
+export type {ContextCacheConfig} from './agents/context_cache_config.js';
+export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
@@ -210,6 +215,12 @@ export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
+export type {
+  ActiveCacheMetadata,
+  CacheMetadata,
+  FingerprintCacheMetadata,
+} from './models/cache_metadata.js';
+export {GeminiContextCacheManager} from './models/gemini_context_cache_manager.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
 export type {LlmRequest} from './models/llm_request.js';
@@ -286,6 +297,30 @@ export type {
 export {BaseToolset, isBaseToolset} from './tools/base_toolset.js';
 export type {ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
+export {
+  BaseComputer,
+  ComputerEnvironment,
+  isComputerState,
+} from './tools/computer_use/base_computer.js';
+export type {
+  ComputerState,
+  ScreenSize,
+  ScrollDirection,
+} from './tools/computer_use/base_computer.js';
+export {
+  ComputerUseTool,
+  isComputerUseTool,
+} from './tools/computer_use/computer_use_tool.js';
+export type {
+  ComputerUseFunction,
+  ComputerUseToolOptions,
+} from './tools/computer_use/computer_use_tool.js';
+export {ComputerUseToolset} from './tools/computer_use/computer_use_toolset.js';
+export type {
+  AdaptedComputerUseFunction,
+  ComputerUseToolAdapter,
+  ComputerUseToolsetOptions,
+} from './tools/computer_use/computer_use_toolset.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
   ENTERPRISE_WEB_SEARCH,
