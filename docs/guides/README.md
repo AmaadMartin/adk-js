@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Evaluation
+
+- [LlmAudioUserSimulator](evaluation/llm_audio_user_simulator/index.md) - Speaking a simulated user's turns, so an eval case can drive an agent that takes audio input.
+
 ### Tools
 
 #### Retrieval

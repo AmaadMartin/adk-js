@@ -25,13 +25,6 @@ export {
 } from './agents/functions.js';
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
-  InvocationContextParams,
-  WorkflowInstructionScope,
-} from './agents/invocation_context.js';
-export {LiveRequestQueue} from './agents/live_request_queue.js';
-export type {LiveRequest} from './agents/live_request_queue.js';
-export {LlmAgent as Agent, LlmAgent, isLlmAgent} from './agents/llm_agent.js';
-export type {
   AfterModelCallback,
   AfterToolCallback,
   BeforeModelCallback,
@@ -158,7 +151,20 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
-export type {Invocation} from './evaluation/eval_case.js';
+export type {
+  ConversationScenario,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+} from './evaluation/eval_case.js';
+export type {Rubric, RubricContent} from './evaluation/eval_rubrics.js';
+export type {
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
 export {
   DEFAULT_USER_SIMULATOR_AUDIO_MODEL,
   DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
@@ -169,7 +175,12 @@ export {
 } from './evaluation/simulation/llm_audio_user_simulator.js';
 export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
-export {UserSimulatorStatus} from './evaluation/simulation/user_simulator.js';
+export {
+  DEFAULT_MAX_ALLOWED_INVOCATIONS,
+  DEFAULT_USER_SIMULATOR_MODEL,
+  DEFAULT_USER_SIMULATOR_THINKING_BUDGET,
+  UserSimulatorStatus,
+} from './evaluation/simulation/user_simulator.js';
 export type {
   NextUserMessage,
   UserSimulator,
