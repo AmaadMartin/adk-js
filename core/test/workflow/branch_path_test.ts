@@ -63,6 +63,30 @@ describe('BranchPath.isDescendantOf', () => {
   });
 });
 
+describe('BranchPath.getRunIds', () => {
+  it('collects the run id of every segment that carries one', () => {
+    expect(branchPathFromString('parent@1.child@2.node').getRunIds()).toEqual(
+      new Set(['1', '2']),
+    );
+  });
+
+  it('returns an empty set for an empty path', () => {
+    expect(branchPathFromString('').getRunIds()).toEqual(new Set());
+  });
+
+  it('ignores a segment whose run id is empty', () => {
+    expect(branchPathFromString('node@').getRunIds()).toEqual(new Set());
+  });
+
+  it('reads a run id from a segment with no name', () => {
+    expect(branchPathFromString('@abc').getRunIds()).toEqual(new Set(['abc']));
+  });
+
+  it('splits on the last @ of a segment', () => {
+    expect(branchPathFromString('a@b@c').getRunIds()).toEqual(new Set(['c']));
+  });
+});
+
 describe('commonPrefixOfPaths', () => {
   it('returns an empty path for no inputs', () => {
     expect(commonPrefixOfPaths([]).getSegments()).toEqual([]);
