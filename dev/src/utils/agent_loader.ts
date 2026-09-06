@@ -607,14 +607,12 @@ export class AgentLoader {
         this.preloadedAgents[dir.name] = agentFile;
         return;
       } catch (e) {
-        // A candidate that exports no agent is a helper module of the same
-        // name, so keep looking. Any other error means this file *is* the
-        // agent and it is broken — report it rather than hide it behind a
-        // lower-precedence file.
         if (e instanceof AgentFileLoadingError) {
           continue;
         }
 
+        // Stop here rather than hide a broken agent behind a lower-precedence
+        // entrypoint.
         this.recordLoadFailure(dir.name, entryFile.path, e);
         return;
       }
