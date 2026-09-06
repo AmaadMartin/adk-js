@@ -252,4 +252,25 @@ describe('mergeEventActions', () => {
     ]);
     expect(result.stateDelta).toEqual({x: 1});
   });
+
+  it('uses last-writer-wins for rewindBeforeInvocationId', () => {
+    const result = mergeEventActions([
+      createEventActions({rewindBeforeInvocationId: 'inv-1'}),
+      createEventActions({rewindBeforeInvocationId: 'inv-2'}),
+    ]);
+    expect(result.rewindBeforeInvocationId).toBe('inv-2');
+  });
+
+  it('keeps a set rewindBeforeInvocationId when a later source omits it', () => {
+    const result = mergeEventActions([
+      createEventActions({rewindBeforeInvocationId: 'inv-1'}),
+      createEventActions({escalate: true}),
+    ]);
+    expect(result.rewindBeforeInvocationId).toBe('inv-1');
+  });
+
+  it('leaves rewindBeforeInvocationId unset when no source carries it', () => {
+    const result = mergeEventActions([createEventActions({escalate: true})]);
+    expect(result.rewindBeforeInvocationId).toBeUndefined();
+  });
 });

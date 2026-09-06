@@ -6,6 +6,7 @@
 
 import {
   AudioTranscriptionConfig,
+  Content,
   ContextWindowCompressionConfig,
   Modality,
   ProactivityConfig,
@@ -121,6 +122,15 @@ export interface RunConfig {
    * decision; interactive front-ends (e.g. `adk run`) opt in explicitly.
    */
   plainTextToolConfirmation?: boolean;
+
+  /**
+   * Transient context to include in the model input for this invocation.
+   *
+   * The runner does not persist these contents to the session. They are added
+   * only to the LLM request assembled for the current invocation, which lets a
+   * caller supply per-turn context without changing the conversation history.
+   */
+  modelInputContext?: Content[];
 
   /**
    * Request-level metadata passed from an incoming A2A request or caller.

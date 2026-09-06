@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {createUserContent} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {createRunConfig, StreamingMode} from '../../src/agents/run_config.js';
 import {logger} from '../../src/utils/logger.js';
@@ -76,5 +77,15 @@ describe('createRunConfig', () => {
     expect(() =>
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
+  });
+
+  it('carries modelInputContext through unchanged', () => {
+    const modelInputContext = [createUserContent('a retrieved document')];
+    const config = createRunConfig({modelInputContext});
+    expect(config.modelInputContext).toEqual(modelInputContext);
+  });
+
+  it('leaves modelInputContext unset by default', () => {
+    expect(createRunConfig().modelInputContext).toBeUndefined();
   });
 });

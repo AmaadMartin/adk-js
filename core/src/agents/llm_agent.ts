@@ -546,8 +546,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
       REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
-      CONTENT_REQUEST_PROCESSOR,
+      // The Interactions chain id is read by the content processor, so it must
+      // be resolved first. Matches adk-python's `single_flow.py`.
       INTERACTIONS_REQUEST_PROCESSOR,
+      CONTENT_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,
     ];
