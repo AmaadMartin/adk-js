@@ -43,10 +43,12 @@ import {
   closeServices,
   MEMORY_SERVICE_URI_OPTION,
   NO_USE_LOCAL_STORAGE_OPTION,
-  resolveServices,
+  ResolvedServices,
+  resolveServicesWithRegistry,
   resolveUseLocalStorage,
   USE_LOCAL_STORAGE_OPTION,
 } from './service_options.js';
+import {loadServicesModule} from './service_registry.js';
 
 loadDotenvFromCwd();
 
@@ -112,12 +114,17 @@ function wasSupplied(command: Command, name: string): boolean {
  * and builds the services those options ask for. The caller supplies `web`,
  * the one thing the two commands disagree on.
  */
-function getApiServerOptions(
+async function getApiServerOptions(
   agentsDir: string,
   logLevel: LogLevel,
   options: Record<string, string>,
   command: Command,
-): Omit<ApiServerOptions, 'web'> {
+): Promise<Omit<ApiServerOptions, 'web'>> {
+  const baseDir = getAbsolutePath(agentsDir);
+  const useLocalStorage = resolveUseLocalStorage(command);
+  // The declared backends are registered before any URI is resolved, so a
+  // scheme the agents directory declares is already known.
+  await loadServicesModule(baseDir);
   return {
     logLevel,
     agentsDir,
@@ -125,13 +132,13 @@ function getApiServerOptions(
     port: parseInt(options['port'], 10),
     allowOrigins: options['allow_origins'],
     allowedHosts: splitCommaSeparated(options['allowed_hosts']),
-    ...resolveServices({
-      baseDir: getAbsolutePath(agentsDir),
+    ...(await resolveServicesWithRegistry({
+      baseDir,
       sessionServiceUri: options['session_service_uri'],
       artifactServiceUri: options['artifact_service_uri'],
       memoryServiceUri: options['memory_service_uri'],
-      useLocalStorage: resolveUseLocalStorage(command),
-    }),
+      useLocalStorage,
+    })),
     otelToCloud: options['otel_to_cloud'] ? true : false,
     agentFileLoadOptions: getAgentFileOptions(options),
     a2a: getBoolean(options['a2a']),
@@ -375,7 +382,7 @@ function addServerCommand(
 
       try {
         await createApiServer({
-          ...getApiServerOptions(agentsDir, logLevel, options, command),
+          ...(await getApiServerOptions(agentsDir, logLevel, options, command)),
           web: server.serveDebugUI,
         }).start();
       } catch (error) {
@@ -540,17 +547,27 @@ export function createProgram(): Command {
         const location = resolveAgentLocation(agentPath);
         loadDotenvForAgent(location.name, location.parentDir);
 
-        const services = resolveServices({
-          baseDir: path.dirname(getAbsolutePath(agentPath)),
-          sessionServiceUri: options['session_service_uri'],
-          artifactServiceUri: options['artifact_service_uri'],
-          memoryServiceUri: options['memory_service_uri'],
-          useLocalStorage: resolveUseLocalStorage(command),
-          inMemory: getBoolean(options['in_memory']),
-        });
+        // The agent's own directory, matching where adk-python looks.
+        const baseDir = path.dirname(getAbsolutePath(agentPath));
+        // Outside the try: the two local-storage flags are a usage error, and
+        // commander reports that itself.
+        const useLocalStorage = resolveUseLocalStorage(command);
 
         let exitCode = 0;
+        let services: ResolvedServices | undefined;
         try {
+          // The declared backends are registered before any URI is resolved,
+          // so a scheme the agent directory declares is already known.
+          await loadServicesModule(baseDir);
+          services = await resolveServicesWithRegistry({
+            baseDir,
+            sessionServiceUri: options['session_service_uri'],
+            artifactServiceUri: options['artifact_service_uri'],
+            memoryServiceUri: options['memory_service_uri'],
+            useLocalStorage,
+            inMemory: getBoolean(options['in_memory']),
+          });
+
           // adk-python switches to the single-shot run on the query alone, so
           // a piped stdin still reaches the interactive prompt.
           if (query !== undefined) {
@@ -588,7 +605,9 @@ export function createProgram(): Command {
         } finally {
           // The database session service keeps a sqlite connection on the
           // event loop, so the command never exits until it is released.
-          await closeServices(services);
+          if (services) {
+            await closeServices(services);
+          }
         }
 
         if (exitCode !== 0) {

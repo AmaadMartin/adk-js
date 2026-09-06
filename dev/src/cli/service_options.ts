@@ -19,6 +19,7 @@ import {Command, Option} from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {AdkLogger} from '../utils/logger.js';
+import {getServiceRegistry} from './service_registry.js';
 
 const logger = new AdkLogger({label: 'ADK CLI', colorize: {all: true}});
 
@@ -226,6 +227,13 @@ export async function closeServices(services: ResolvedServices): Promise<void> {
   );
 }
 
+/** Services a caller already built, which replace what a URI would build. */
+interface ServiceOverrides {
+  sessionService?: BaseSessionService;
+  artifactService?: BaseArtifactService;
+  memoryService?: BaseMemoryService;
+}
+
 /**
  * Builds the session, artifact and memory services for a command.
  *
@@ -235,6 +243,52 @@ export async function closeServices(services: ResolvedServices): Promise<void> {
  */
 export function resolveServices(
   options: ResolveServicesOptions,
+): ResolvedServices {
+  return buildServices(options, {});
+}
+
+/**
+ * Builds the services, asking the registry before the built-in resolver.
+ *
+ * A scheme the user registered overrides the built-in of the same name. A URI
+ * no factory claims falls through to {@link resolveServices}, which owns
+ * `memory://`, database URLs, `gs://` and `file://`.
+ */
+export async function resolveServicesWithRegistry(
+  options: ResolveServicesOptions,
+): Promise<ResolvedServices> {
+  // The URIs the registry sees are the ones that reach the built-in resolver,
+  // including the `DATABASE_URL` fallback.
+  const inMemory = options.inMemory === true;
+  const sessionServiceUri = inMemory
+    ? undefined
+    : (options.sessionServiceUri ?? process.env['DATABASE_URL']);
+  const artifactServiceUri = inMemory ? undefined : options.artifactServiceUri;
+  const memoryServiceUri = inMemory ? undefined : options.memoryServiceUri;
+
+  const registry = getServiceRegistry();
+  const [sessionService, artifactService, memoryService] = await Promise.all([
+    sessionServiceUri
+      ? registry.createSessionService(sessionServiceUri)
+      : undefined,
+    artifactServiceUri
+      ? registry.createArtifactService(artifactServiceUri)
+      : undefined,
+    memoryServiceUri
+      ? registry.createMemoryService(memoryServiceUri)
+      : undefined,
+  ]);
+
+  return buildServices(options, {
+    sessionService,
+    artifactService,
+    memoryService,
+  });
+}
+
+function buildServices(
+  options: ResolveServicesOptions,
+  overrides: ServiceOverrides,
 ): ResolvedServices {
   const inMemory = options.inMemory === true;
   const sessionServiceUri = inMemory
@@ -257,20 +311,25 @@ export function resolveServices(
     fs.mkdirSync(storageDir, {recursive: true});
   }
 
+  // A service the registry built already answers for its URI, so the built-in
+  // resolver is not asked for one. Building both would leak the loser: a
+  // sqlite session service nobody closes keeps the command alive.
   return {
-    sessionService: buildSessionService(
-      sessionServiceUri,
-      localStorage.enabled,
-      storageDir,
-    ),
-    artifactService: buildArtifactService(
-      artifactServiceUri,
-      localStorage.enabled,
-      storageDir,
-    ),
-    memoryService: memoryServiceUri
-      ? getMemoryServiceFromUri(memoryServiceUri)
-      : new InMemoryMemoryService(),
+    sessionService:
+      overrides.sessionService ??
+      buildSessionService(sessionServiceUri, localStorage.enabled, storageDir),
+    artifactService:
+      overrides.artifactService ??
+      buildArtifactService(
+        artifactServiceUri,
+        localStorage.enabled,
+        storageDir,
+      ),
+    memoryService:
+      overrides.memoryService ??
+      (memoryServiceUri
+        ? getMemoryServiceFromUri(memoryServiceUri)
+        : new InMemoryMemoryService()),
   };
 }
 

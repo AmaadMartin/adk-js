@@ -47,6 +47,7 @@ import {
 } from '../utils/timeout_utils.js';
 import {isRecord, toMessage} from '../utils/value_utils.js';
 import {printEvent, renderUserInputRequest} from './event_printer.js';
+import {loadRunInputFile, RunInputFile} from './run_input_file.js';
 
 const REQUEST_CONFIRMATION = 'adk_request_confirmation';
 const REQUEST_INPUT = 'adk_request_input';
@@ -78,11 +79,6 @@ function parseSessionState(
 /** Whether a plain-text answer means "yes" to a confirmation request. */
 export function isPositiveResponse(value: string): boolean {
   return POSITIVE_RESPONSES.has(value.trim().toLowerCase());
-}
-
-interface InputFile {
-  state: Record<string, unknown>;
-  queries: string[];
 }
 
 /**
@@ -135,13 +131,8 @@ interface RunFromInputFileOptions {
 }
 async function runFromInputFile(
   options: RunFromInputFileOptions,
-): Promise<Session | undefined> {
-  const fileContent = await loadFileData<InputFile>(
-    getAbsolutePath(options.filePath),
-  );
-  if (!fileContent) {
-    return;
-  }
+): Promise<Session> {
+  const fileContent = await loadRunInputFile(getAbsolutePath(options.filePath));
 
   fileContent.state['_time'] = new Date().toISOString();
 
@@ -368,18 +359,19 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
 
   try {
     if (options.inputFile) {
-      session =
-        (await runFromInputFile({
-          appName,
-          userId,
-          app,
-          agent: rootAgent,
-          artifactService,
-          sessionService,
-          credentialService,
-          memoryService,
-          filePath: options.inputFile,
-        })) || session;
+      // No `|| session` fallback: an unreadable or invalid input file now
+      // throws instead of resolving undefined.
+      session = await runFromInputFile({
+        appName,
+        userId,
+        app,
+        agent: rootAgent,
+        artifactService,
+        sessionService,
+        credentialService,
+        memoryService,
+        filePath: options.inputFile,
+      });
     } else if (options.savedSessionFile) {
       const loadedSession = await loadFileData<Session>(
         options.savedSessionFile,
@@ -630,7 +622,7 @@ export async function runOnceCli(options: RunOnceOptions): Promise<number> {
   let queries: string[];
 
   if (options.replay) {
-    const inputFile = await loadFileData<InputFile>(
+    const inputFile = await loadFileData<RunInputFile>(
       getAbsolutePath(options.replay),
     );
     session = await sessionService.createSession({

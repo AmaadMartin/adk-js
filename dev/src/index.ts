@@ -15,6 +15,12 @@ export type {
   RebuildResult,
   ReplayResult,
 } from './cli/agent_test_runner.js';
+export {
+  ServiceRegistry,
+  getServiceRegistry,
+  loadServicesModule,
+} from './cli/service_registry.js';
+export type {ServiceFactory} from './cli/service_registry.js';
 export {AdkApiClient} from './server/adk_api_client.js';
 export {AdkApiServer} from './server/adk_api_server.js';
 export {AdkWebServer} from './server/adk_web_server.js';

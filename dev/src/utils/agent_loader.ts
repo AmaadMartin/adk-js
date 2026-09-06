@@ -779,7 +779,15 @@ async function getTypeFromPackageJson(dir: string): Promise<FileModuleType> {
   return getTypeFromPackageJson(parentDir);
 }
 
-async function linkProjectNodeModules(
+/**
+ * Symlinks the project's `node_modules` into a compilation output directory,
+ * so a transpiled file can still resolve the bare specifiers it kept.
+ *
+ * @param outputDir The directory holding the compiled file.
+ * @param sourceDir The directory of the source file, searched upwards for the
+ *     project root.
+ */
+export async function linkProjectNodeModules(
   outputDir: string,
   sourceDir: string,
 ): Promise<void> {
