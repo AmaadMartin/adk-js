@@ -4,18 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {lookup} from 'node:dns/promises';
-
 import {FunctionTool, LOAD_WEB_PAGE, loadWebPage} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 
-vi.mock('node:dns/promises', () => ({
-  lookup: vi.fn(),
-}));
+import {lookupMock, resolveTo} from '../utils/dns_mock_utils.js';
 
-// `lookup` is overloaded; treat the mock as a plain Mock so `mockResolvedValue`
-// accepts the `{all: true}` array-return shape used by the implementation.
-const lookupMock = lookup as unknown as Mock;
+vi.mock('node:dns/promises', async () => ({
+  lookup: (await import('../utils/dns_mock_utils.js')).lookupMock,
+}));
 
 /** Builds a minimal `Response`-like object for the stubbed global `fetch`. */
 function htmlResponse(body: string, status = 200): Response {
@@ -23,16 +19,6 @@ function htmlResponse(body: string, status = 200): Response {
     status,
     text: async () => body,
   } as unknown as Response;
-}
-
-/** Resolves any hostname to the given IP list for the DNS `lookup` mock. */
-function resolveTo(...addresses: string[]): void {
-  lookupMock.mockResolvedValue(
-    addresses.map((address) => ({
-      address,
-      family: address.includes(':') ? 6 : 4,
-    })),
-  );
 }
 
 describe('loadWebPage', () => {

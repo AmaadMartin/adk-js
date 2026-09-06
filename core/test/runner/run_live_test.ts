@@ -9,6 +9,8 @@ import {
   BaseLlm,
   BaseLlmConnection,
   BaseTool,
+  BaseToolset,
+  Context,
   Event,
   InMemoryArtifactService,
   InMemorySessionService,
@@ -18,8 +20,15 @@ import {
   LlmResponse,
   RunAsyncToolRequest,
   Runner,
+  ToolProcessLlmRequest,
 } from '@google/adk';
-import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
+import {
+  Blob,
+  Content,
+  Environment,
+  FunctionDeclaration,
+  Modality,
+} from '@google/genai';
 import {beforeEach, describe, expect, it} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
@@ -160,6 +169,42 @@ class EchoTool extends BaseTool {
   }
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
     return {echoed: request.args};
+  }
+}
+
+/** A toolset that records the order it and its tool processed the request. */
+class RecordingToolset extends BaseToolset {
+  readonly order: string[] = [];
+
+  constructor() {
+    super([]);
+  }
+
+  override async getTools(): Promise<BaseTool[]> {
+    const order = this.order;
+    class RecordedTool extends EchoTool {
+      override async processLlmRequest(
+        params: ToolProcessLlmRequest,
+      ): Promise<void> {
+        order.push('tool');
+        await super.processLlmRequest(params);
+      }
+    }
+    return [new RecordedTool()];
+  }
+
+  override async close(): Promise<void> {}
+
+  override async processLlmRequest(
+    _toolContext: Context,
+    llmRequest: LlmRequest,
+  ): Promise<void> {
+    this.order.push('toolset');
+    llmRequest.config = llmRequest.config ?? {};
+    llmRequest.config.tools = [
+      ...(llmRequest.config.tools ?? []),
+      {computerUse: {environment: Environment.ENVIRONMENT_BROWSER}},
+    ];
   }
 }
 
@@ -1111,5 +1156,32 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('Simulated outbound connection error on empty receive');
 
     expect(llm.connection!.closed).toBe(true);
+  });
+
+  it('runs a toolset before its own tools on the live path', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const toolset = new RecordingToolset();
+    const agent = new LlmAgent({name: 'agent', model: llm, tools: [toolset]});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+    })) {
+      // drain
+    }
+
+    expect(toolset.order).toEqual(['toolset', 'tool']);
+    expect(llm.llmRequestSeen!.config?.tools).toContainEqual({
+      computerUse: {environment: Environment.ENVIRONMENT_BROWSER},
+    });
   });
 });

@@ -279,6 +279,11 @@ describe('the declaration-less tool surface', () => {
   // name for them, so no function call can come back naming one.
   const NOT_MODEL_ADDRESSABLE = new Set(['ExampleTool', 'PreloadMemoryTool']);
 
+  // Registered by its toolset instead of by itself: ComputerUseToolset puts
+  // every action into `toolsDict`, and the API declares them from the
+  // `Tool.computerUse` config, so a call naming one still resolves.
+  const REGISTERED_BY_A_TOOLSET = new Set(['ComputerUseTool']);
+
   type ToolClass = (abstract new (...args: never[]) => BaseTool) & {
     name: string;
   };
@@ -329,7 +334,9 @@ describe('the declaration-less tool surface', () => {
       .filter(([, ctor]) => !declaresAFunction(ctor) && !isBuiltIn(ctor))
       .map(([name]) => name);
 
-    expect(new Set(unaddressable)).toEqual(NOT_MODEL_ADDRESSABLE);
+    expect(new Set(unaddressable)).toEqual(
+      new Set([...NOT_MODEL_ADDRESSABLE, ...REGISTERED_BY_A_TOOLSET]),
+    );
   });
 
   it('finds the built-in tools it is meant to be checking', () => {

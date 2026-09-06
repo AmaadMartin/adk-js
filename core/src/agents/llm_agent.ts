@@ -39,7 +39,7 @@ import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
-import {BaseToolset} from '../tools/base_toolset.js';
+import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
 
 import {logger} from '../utils/logger.js';
 import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
@@ -1137,6 +1137,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
     for (const toolUnion of this.tools) {
       const toolContext = new Context({invocationContext});
+      // A toolset processes the request before its own tools do, so it can set
+      // the request state they then observe.
+      if (isBaseToolset(toolUnion)) {
+        await toolUnion.processLlmRequest(toolContext, llmRequest);
+      }
       const tools = (
         await convertToolUnionToTools(
           toolUnion,
@@ -1512,6 +1517,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         invocationContext,
         eventActions: modelResponseEvent.actions,
       });
+
+      // A toolset processes the request before its own tools do, so it can set
+      // the request state they then observe.
+      if (isBaseToolset(toolUnion)) {
+        await toolUnion.processLlmRequest(toolContext, llmRequest);
+      }
 
       // process all tools from this tool union
       const tools = (
