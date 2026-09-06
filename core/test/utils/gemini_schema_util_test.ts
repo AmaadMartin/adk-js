@@ -11,11 +11,13 @@ import {
   toGeminiSchema,
 } from '../../src/utils/gemini_schema_util.js';
 
-interface MCPToolSchema {
+// A type alias, not an interface: only an alias gets the implicit index
+// signature that makes it assignable to the converter's JSON Schema input.
+type MCPToolSchema = {
   type: 'object';
   properties?: Record<string, unknown>;
   required?: string[];
-}
+};
 
 describe('toGeminiSchema', () => {
   it('converts a simple object schema with explicit type', () => {
