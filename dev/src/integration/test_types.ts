@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, LlmResponse, Session} from '@google/adk';
+import {
+  AuthConfig,
+  LlmRequest,
+  LlmResponse,
+  Session,
+  ToolConfirmation,
+} from '@google/adk';
 import {
   Blob,
   CodeExecutionResult,
@@ -72,10 +78,16 @@ export interface TestInfo {
   recordings: Recordings;
 }
 
-// an ADK EventActions missing some filtered fields.
+// An ADK AuthConfig missing some filtered fields.
 // Excluded is:
-// - requestedAuthConfigs
-// - requestedToolConfirmations
+// - exchangedAuthCredential
+export type FilteredAuthConfig = Omit<AuthConfig, 'exchangedAuthCredential'>;
+
+// An ADK EventActions whose function-call-id map keys have been replaced with
+// stable positional tokens, holding FilteredAuthConfig instead of AuthConfig.
+// The map values are plain-object copies: ToolConfirmation is a class and
+// assert.deepStrictEqual compares prototypes, but a recorded session only ever
+// yields object literals.
 export interface FilteredEventActions {
   skipSummarization?: boolean;
   stateDelta?: {
@@ -86,6 +98,12 @@ export interface FilteredEventActions {
   };
   transferToAgent?: string;
   escalate?: boolean;
+  requestedAuthConfigs?: {
+    [key: string]: FilteredAuthConfig;
+  };
+  requestedToolConfirmations?: {
+    [key: string]: ToolConfirmation;
+  };
 }
 
 // A filtered GenAI Part missing some filtered fields

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  AuthConfig,
   BaseAgent,
   Event,
   InMemorySessionService,
@@ -18,6 +19,7 @@ import {AgentRegistry} from './agent_registry.js';
 import {DummyLlm} from './dummy_llm.js';
 import {ReplayPlugin} from './replay_plugin.js';
 import {
+  FilteredAuthConfig,
   FilteredEvent,
   FilteredEventActions,
   FilteredPart,
@@ -157,7 +159,7 @@ function validateSession(actual: Session, expected: Session) {
   assert.deepStrictEqual(actualEvents, expectedEvents);
 }
 
-function normalizeEvent(event: Event): FilteredEvent {
+export function normalizeEvent(event: Event): FilteredEvent {
   const filteredEvent = event as FilteredEvent;
   filterEventFields(filteredEvent);
   removeEmptyAndUndefinedFields(
@@ -203,6 +205,72 @@ function filterEventActionsStateDelta(actions?: FilteredEventActions) {
   delete actions.stateDelta['_adk_replay_config'];
 }
 
+/**
+ * Drops `exchangedAuthCredential`: ADK mints a fresh OAuth `state` — and the
+ * `authUri` that embeds it — on every run, and the exchanged credential carries
+ * live tokens that must not be baked into a recorded session. `authScheme`,
+ * `credentialKey` and `rawAuthCredential` stay under comparison, so a missing or
+ * wrong auth request is still caught.
+ */
+function filterAuthConfigFields(config: AuthConfig): FilteredAuthConfig {
+  const filtered = {...config};
+  delete filtered.exchangedAuthCredential;
+  return filtered;
+}
+
+/** Assigns, and memoizes, the positional token standing in for a function call id. */
+function functionCallIdToken(tokens: Map<string, string>, id: string): string {
+  let token = tokens.get(id);
+  if (token === undefined) {
+    token = `<function-call-id-${tokens.size}>`;
+    tokens.set(id, token);
+  }
+  return token;
+}
+
+/**
+ * Replaces the function-call-id keys of `requestedAuthConfigs` and
+ * `requestedToolConfirmations` with stable positional tokens so the payloads
+ * stay comparable.
+ *
+ * Both maps are keyed by the function call id, which is minted fresh per run
+ * when the model does not supply one, and which the YAML loader additionally
+ * camelCases on the recorded side. The keys can therefore never match across
+ * runs; the values can, and are what the assertion is for. One token map is
+ * shared by both fields so an id used in both keeps its correlation.
+ *
+ * Each confirmation is spread into a new object because `ToolConfirmation` is a
+ * class, and `assert.deepStrictEqual` reports a class instance and an
+ * equivalent object literal as different.
+ */
+function normalizeFunctionCallIdKeys(actions?: FilteredEventActions) {
+  if (!actions) {
+    return;
+  }
+
+  const tokens = new Map<string, string>();
+
+  if (actions.requestedAuthConfigs) {
+    actions.requestedAuthConfigs = Object.fromEntries(
+      Object.entries(actions.requestedAuthConfigs).map(([id, config]) => [
+        functionCallIdToken(tokens, id),
+        filterAuthConfigFields(config),
+      ]),
+    );
+  }
+
+  if (actions.requestedToolConfirmations) {
+    actions.requestedToolConfirmations = Object.fromEntries(
+      Object.entries(actions.requestedToolConfirmations).map(
+        ([id, confirmation]) => [
+          functionCallIdToken(tokens, id),
+          {...confirmation},
+        ],
+      ),
+    );
+  }
+}
+
 function filterPartFields(part: FilteredPart) {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   delete (part as any).thoughtSignature;
@@ -220,6 +288,7 @@ function filterEventFields(event: FilteredEvent) {
   /* eslint-enable @typescript-eslint/no-explicit-any */
 
   filterEventActionsStateDelta(event.actions);
+  normalizeFunctionCallIdKeys(event.actions);
 
   if (event.content) {
     event.content.parts?.forEach(filterPartFields);
