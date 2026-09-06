@@ -13,6 +13,7 @@ import {
   convertContentToSteps,
   convertToolsConfigToInteractionsFormat,
   createInteractions,
+  describeInteractionsTools,
 } from '../models/interactions_utils.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
@@ -474,7 +475,15 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
         `stream: true, previous_interaction_id: ${previousInteractionId}, ` +
         `environment: ${JSON.stringify(environment)}`,
     );
-    logger.debug(`Interactions request: ${JSON.stringify(createParams)}`);
+    // The tools are reduced to their types: a remote MCP server's headers are
+    // minted per turn and may hold a bearer token, which must never be logged.
+    logger.debug(
+      `Interactions request: ${JSON.stringify({
+        ...createParams,
+        tools:
+          createParams.tools && describeInteractionsTools(createParams.tools),
+      })}`,
+    );
 
     const span = tracer.startSpan('managed_agent_interaction');
     try {

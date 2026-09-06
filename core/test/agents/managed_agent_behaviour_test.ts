@@ -14,6 +14,7 @@ import {
   createSession,
   Event,
   FunctionTool,
+  getLogger,
   InvocationContext,
   isManagedAgentInstance,
   isRemoteMcpServer,
@@ -22,8 +23,10 @@ import {
   PluginManager,
   RemoteMcpServer,
   Session,
+  setLogger,
   StreamingMode,
   ToolProcessLlmRequest,
+  URL_CONTEXT,
 } from '@google/adk';
 import {GoogleGenAI, Interactions} from '@google/genai';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -201,6 +204,22 @@ describe('ManagedAgent tool acceptance uses the in-model flag', () => {
     expect('tools' in (await requestBody(backend.requests[0]))).toBe(false);
   });
 
+  it('forwards the built-in url context tool', async () => {
+    const backend = fakeBackend();
+    const agent = new ManagedAgent({
+      name: 'mgr',
+      agentId: 'agents/a',
+      tools: [URL_CONTEXT],
+      apiClient: devApiClient(),
+    });
+
+    await collect(agent, userCtx('hi'));
+
+    expect((await requestBody(backend.requests[0])).tools).toEqual([
+      {type: 'url_context'},
+    ]);
+  });
+
   it('forwards a code execution tool', async () => {
     const backend = fakeBackend();
     const agent = new ManagedAgent({
@@ -251,6 +270,48 @@ describe('ManagedAgent input', () => {
     await collect(agent, ctx);
 
     expect((await requestBody(backend.requests[0])).input).toEqual([]);
+  });
+});
+
+describe('ManagedAgent request logging', () => {
+  it('never logs a header the header provider minted', async () => {
+    const lines: string[] = [];
+    const previousLogger = getLogger();
+    setLogger({
+      setLogLevel: () => {},
+      log: () => {},
+      debug: (...args: unknown[]) => lines.push(args.join(' ')),
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    });
+
+    try {
+      fakeBackend();
+      const agent = new ManagedAgent({
+        name: 'mgr',
+        agentId: 'agents/a',
+        tools: [
+          new RemoteMcpServer({
+            url: 'https://api.example.com/mcp',
+            headerProvider: () => ({Authorization: 'Bearer SECRET_TOKEN'}),
+          }),
+        ],
+        apiClient: devApiClient(),
+      });
+
+      await collect(agent, userCtx('hi'));
+    } finally {
+      setLogger(previousLogger);
+    }
+
+    const logged = lines.join('\n');
+    expect(logged).toContain('Interactions request:');
+    expect(logged).toContain('mcp_server');
+    expect(logged).not.toContain('SECRET_TOKEN');
+    expect(logged).not.toContain('Authorization');
+    // The endpoint is a credential-adjacent detail, so it stays out too.
+    expect(logged).not.toContain('api.example.com');
   });
 });
 
