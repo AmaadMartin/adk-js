@@ -426,7 +426,7 @@ async function convertToolUnionToTools(
     // model can call it (mirrors Python's Agent(tools=[node/workflow])).
     return [new NodeTool(toolUnion)];
   }
-  return await toolUnion.getTools(context);
+  return await toolUnion.getToolsWithPrefix(context);
 }
 
 /**

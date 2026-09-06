@@ -36,6 +36,23 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
 }
 
 /**
+ * Returns a copy of `tool` that answers to `prefixedName`.
+ *
+ * The copy keeps the prototype of the original, so subclass methods still
+ * work, and it shadows `_getDeclaration()` so the declaration name agrees with
+ * the tool name. Neither the original tool nor its declaration is mutated.
+ */
+function withPrefixedName(tool: BaseTool, prefixedName: string): BaseTool {
+  const copy = Object.create(Object.getPrototypeOf(tool)) as BaseTool;
+  Object.assign(copy, tool, {name: prefixedName});
+  copy._getDeclaration = () => {
+    const declaration = tool._getDeclaration();
+    return declaration ? {...declaration, name: prefixedName} : undefined;
+  };
+  return copy;
+}
+
+/**
  * Base class for toolset.
  *
  * A toolset is a collection of tools that can be used by an agent.
@@ -43,6 +60,22 @@ export function isBaseToolset(obj: unknown): obj is BaseToolset {
 export abstract class BaseToolset {
   readonly [BASE_TOOLSET_SIGNATURE_SYMBOL] = true;
 
+  /**
+   * Whether `getToolsWithPrefix()` may serve tools from its per-invocation
+   * cache. Subclasses whose tool list changes within a single invocation must
+   * set this to `false`.
+   */
+  protected useInvocationCache = true;
+
+  private cachedInvocationId?: string;
+  private cachedTools?: BaseTool[];
+
+  /**
+   * @param toolFilter Filter deciding which tools the toolset exposes.
+   * @param prefix Prepended to the name of every tool the toolset returns,
+   *     separated by an underscore. Corresponds to `tool_name_prefix` in
+   *     adk-python.
+   */
   constructor(
     readonly toolFilter: ToolPredicate | string[],
     readonly prefix?: string,
@@ -56,6 +89,42 @@ export abstract class BaseToolset {
    * @return A Promise that resolves to the list of tools.
    */
   abstract getTools(context?: ReadonlyContext): Promise<BaseTool[]>;
+
+  /**
+   * Returns the tools of this toolset with `prefix` applied to their names.
+   *
+   * This is the method the framework calls to build the tool list shown to the
+   * model. Subclasses implement `getTools()` and must not override this
+   * method; it is the equivalent of the `@final` decorator adk-python puts on
+   * `get_tools_with_prefix()`.
+   *
+   * The result is cached for the invocation that `context` belongs to, so a
+   * toolset is listed once per invocation rather than once per LLM request.
+   *
+   * @param context Context used to filter tools available to the agent. If
+   *     not defined, all tools in the toolset are returned.
+   * @return A Promise that resolves to the list of tools. Without a prefix
+   *     these are the tools `getTools()` returned; with one they are copies
+   *     whose name and function declaration carry the prefix.
+   */
+  async getToolsWithPrefix(context?: ReadonlyContext): Promise<BaseTool[]> {
+    const invocationId = context?.invocationId;
+    if (
+      this.useInvocationCache &&
+      this.cachedTools !== undefined &&
+      this.cachedInvocationId === invocationId
+    ) {
+      return this.cachedTools;
+    }
+
+    const tools = await this.getTools(context);
+    const prefix = this.prefix;
+    this.cachedTools = prefix
+      ? tools.map((tool) => withPrefixedName(tool, `${prefix}_${tool.name}`))
+      : tools;
+    this.cachedInvocationId = invocationId;
+    return this.cachedTools;
+  }
 
   /**
    * Closes the toolset.

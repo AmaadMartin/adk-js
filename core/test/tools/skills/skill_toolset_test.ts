@@ -9,10 +9,13 @@ import {
   BaseToolset,
   Context,
   InvocationContext,
+  LlmAgent,
   LlmRequest,
+  PluginManager,
   ReadonlyContext,
   Skill,
   SkillToolset,
+  createSession,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -315,6 +318,72 @@ describe('skill_toolset', () => {
       const tools2 = await toolset.getTools(context);
       expect(tools2.map((t) => t.name)).toContain('cached_tool');
       expect(mockInnerGetTools).toHaveBeenCalledTimes(1);
+    });
+
+    it('exposes its own tools unprefixed', async () => {
+      const toolset = new SkillToolset([mockSkill]);
+
+      const tools = await toolset.getToolsWithPrefix();
+
+      expect(tools.map((t) => t.name)).toEqual([
+        'list_skills',
+        'load_skill',
+        'load_skill_resource',
+        'run_skill_script',
+      ]);
+    });
+
+    it('surfaces a skill activated during the invocation', async () => {
+      class ActivatedTool extends BaseTool {
+        constructor() {
+          super({name: 'activated_tool', description: 'dummy'});
+        }
+        async runAsync() {
+          return 'dummy';
+        }
+      }
+
+      class ActivatedToolset extends BaseToolset {
+        constructor() {
+          super([]);
+        }
+        override async getTools(): Promise<BaseTool[]> {
+          return [new ActivatedTool()];
+        }
+        override async close() {}
+      }
+
+      const skillWithTools: Skill = {
+        frontmatter: {
+          name: 'skill-with-tools',
+          description: 'desc',
+          metadata: {adk_additional_tools: ['activated_tool']},
+        },
+        instructions: 'instructions',
+      };
+      const toolset = new SkillToolset([skillWithTools], {
+        additionalTools: [new ActivatedToolset()],
+      });
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+      });
+      const context = new ReadonlyContext(
+        new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test-agent'}),
+          session,
+          pluginManager: new PluginManager(),
+        }),
+      );
+
+      const before = await toolset.getToolsWithPrefix(context);
+      session.state['_adk_activated_skill_test-agent'] = ['skill-with-tools'];
+      const after = await toolset.getToolsWithPrefix(context);
+
+      expect(before.map((t) => t.name)).not.toContain('activated_tool');
+      expect(after.map((t) => t.name)).toContain('activated_tool');
     });
   });
 

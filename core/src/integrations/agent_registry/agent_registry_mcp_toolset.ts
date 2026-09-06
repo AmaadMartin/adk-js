@@ -119,14 +119,7 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
 
     // Map tool definitions to MCPTools
     const tools = listResult.tools.map((tool) => {
-      const prefixedName = this.prefix
-        ? `${this.prefix}_${tool.name}`
-        : tool.name;
-      const mcpTool = new MCPTool(
-        {...tool, name: prefixedName},
-        sessionManager,
-        tool.name,
-      );
+      const mcpTool = new MCPTool(tool, sessionManager, tool.name);
 
       // Inject gcp.mcp.server.destination.id telemetry key for tracing tools execution
       const toolWithMetadata = mcpTool as unknown as {
