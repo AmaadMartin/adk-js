@@ -24,12 +24,30 @@ export interface OpenIdConnectWithConfig
 }
 
 /**
- * AuthSchemes contains SecuritySchemes from OpenAPI 3.0 and an extra flattened
- * OpenIdConnectWithConfig.
+ * The Agent Identity authentication scheme for Google Cloud Platform.
+ */
+export interface GcpAuthProviderScheme {
+  type: 'gcpAuthProviderScheme';
+  /** The GCP Auth Provider resource name. */
+  name: string;
+  /** The OAuth2 scopes to request. */
+  scopes?: string[];
+  /**
+   * The redirect target that finalizes the managed OAuth flow. This is a
+   * reauthentication redirect, and it is distinct from the standard OAuth2
+   * redirect URI.
+   */
+  continueUri?: string;
+}
+
+/**
+ * AuthSchemes contains SecuritySchemes from OpenAPI 3.0, an extra flattened
+ * OpenIdConnectWithConfig, and the GCP Agent Identity scheme.
  */
 export type AuthScheme =
   | OpenAPIV3.SecuritySchemeObject
-  | OpenIdConnectWithConfig;
+  | OpenIdConnectWithConfig
+  | GcpAuthProviderScheme;
 
 /**
  * Represents the OAuth2 flow (or grant type).

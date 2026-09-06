@@ -382,6 +382,40 @@ describe('AgentRegistry', () => {
       });
     });
 
+    it('should expose the resolved binding scheme as a narrowable GcpAuthProviderScheme', async () => {
+      const serverDetails = {
+        mcpServerId: 'urn:mcp:1234:bigquery',
+        interfaces: [{url: 'https://example.com', protocolBinding: 'JSONRPC'}],
+      };
+      const bindingsData = {
+        bindings: [
+          {
+            target: {identifier: 'urn:mcp:1234:bigquery'},
+            authProviderBinding: {
+              authProvider: 'projects/p/locations/l/authProviders/ap-1',
+            },
+          },
+        ],
+      };
+
+      vi.spyOn(registry, 'getMcpServer').mockResolvedValue(serverDetails);
+      vi.spyOn(registry, 'makeRequest').mockImplementation(async (path) => {
+        if (path === 'bindings') return bindingsData;
+        return {};
+      });
+
+      const toolset = await registry.getMcpToolset('mcpServers/bigquery', {
+        continueUri: 'https://example.com/continue',
+      });
+
+      const scheme = toolset.authScheme;
+      if (scheme?.type !== 'gcpAuthProviderScheme') {
+        expect.fail(`expected a GcpAuthProviderScheme, got ${scheme?.type}`);
+      }
+      expect(scheme.name).toBe('projects/p/locations/l/authProviders/ap-1');
+      expect(scheme.continueUri).toBe('https://example.com/continue');
+    });
+
     it('should skip auth scheme resolution if bindings target mismatch', async () => {
       const serverDetails = {
         mcpServerId: 'urn:mcp:1234:bigquery',
