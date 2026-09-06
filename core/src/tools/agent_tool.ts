@@ -8,7 +8,6 @@ import {Content, FunctionDeclaration, Type} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
-import {Event} from '../events/event.js';
 import {InMemoryMemoryService} from '../memory/in_memory_memory_service.js';
 import {Runner} from '../runner/runner.js';
 import {InMemorySessionService} from '../sessions/in_memory_session_service.js';
@@ -168,7 +167,7 @@ export class AgentTool extends BaseTool {
       return '';
     }
 
-    let lastEvent: Event | undefined;
+    let lastContent: Content | undefined;
     for await (const event of runner.runAsync({
       userId: session.userId,
       sessionId: session.id,
@@ -190,16 +189,21 @@ export class AgentTool extends BaseTool {
         }
       }
 
-      lastEvent = event;
+      // A run can end on a content-less bookkeeping event, such as the event
+      // an after-agent callback emits when it only mutates state. Keep the
+      // last event that carried content rather than the last event.
+      if (event.content) {
+        lastContent = event.content;
+      }
     }
 
-    if (!lastEvent?.content?.parts?.length) {
+    if (!lastContent?.parts?.length) {
       return '';
     }
 
     const hasOutputSchema = isLlmAgent(this.agent) && this.agent.outputSchema;
     // Exclude thoughts from the merged text.
-    const mergedText = lastEvent.content.parts
+    const mergedText = lastContent.parts
       .filter((part) => !part.thought)
       .map((part) => part.text)
       .filter((text) => text)
