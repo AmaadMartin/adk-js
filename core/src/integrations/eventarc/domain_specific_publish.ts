@@ -249,9 +249,13 @@ function buildParameters(
 /**
  * Reduces one binding to the value it publishes.
  *
+ * An `AgentProvided` attribute with no default is a required parameter of the
+ * generated schema, so the tool rejects a call that leaves it out before this
+ * runs. adk-python needs its own guard here because it synthesises a Python
+ * signature instead.
+ *
  * @return The value, `OMIT` to leave the attribute off, or `undefined` when
  *   the binding is not configured.
- * @throws {InputValidationError} If the model omitted a value it had to give.
  */
 function resolveBinding(
   key: string,
@@ -263,18 +267,14 @@ function resolveBinding(
   if (binding === undefined) {
     return undefined;
   }
-  let value: string | typeof OMIT | AttributeResolver<string | typeof OMIT>;
+  let value:
+    | string
+    | typeof OMIT
+    | AttributeResolver<string | typeof OMIT>
+    | undefined;
   if (binding instanceof AgentProvided) {
     const supplied = args[key];
-    if (typeof supplied === 'string') {
-      value = supplied;
-    } else if (binding.default === undefined) {
-      throw new InputValidationError(
-        `Agent did not provide mandatory attribute '${key}'`,
-      );
-    } else {
-      value = binding.default;
-    }
+    value = typeof supplied === 'string' ? supplied : binding.default;
   } else {
     value = binding;
   }
