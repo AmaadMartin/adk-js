@@ -74,7 +74,8 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
-    expect(part.text).toBe('NameError: x');
+    expect(part.codeExecutionResult!.output).toBe('NameError: x');
+    expect(part.text).toBeUndefined();
   });
 
   it('returns OUTCOME_OK with stdout when no stderr', () => {
@@ -84,7 +85,8 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
-    expect(part.text).toContain('42');
+    expect(part.codeExecutionResult!.output).toContain('42');
+    expect(part.text).toBeUndefined();
   });
 
   it('includes output file names in successful result', () => {
@@ -97,8 +99,8 @@ describe('buildCodeExecutionResultPart', () => {
       ],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_OK);
-    expect(part.text).toContain('chart.png');
-    expect(part.text).toContain('data.csv');
+    expect(part.codeExecutionResult!.output).toContain('chart.png');
+    expect(part.codeExecutionResult!.output).toContain('data.csv');
   });
 
   it('includes both stdout and saved artifacts when both present', () => {
@@ -107,8 +109,8 @@ describe('buildCodeExecutionResultPart', () => {
       stderr: '',
       outputFiles: [{name: 'out.txt', content: '', mimeType: 'text/plain'}],
     });
-    expect(part.text).toContain('done');
-    expect(part.text).toContain('out.txt');
+    expect(part.codeExecutionResult!.output).toContain('done');
+    expect(part.codeExecutionResult!.output).toContain('out.txt');
   });
 
   it('prefers stderr over stdout when both are set', () => {
@@ -118,7 +120,7 @@ describe('buildCodeExecutionResultPart', () => {
       outputFiles: [],
     });
     expect(part.codeExecutionResult!.outcome).toBe(Outcome.OUTCOME_FAILED);
-    expect(part.text).toBe('error occurred');
+    expect(part.codeExecutionResult!.output).toBe('error occurred');
   });
 });
 
@@ -307,6 +309,29 @@ describe('convertCodeExecutionParts', () => {
     // last part has codeExecutionResult but length > 1, so no conversion
     expect(content.parts[1].codeExecutionResult).toBeDefined();
     expect(content.role).toBe('model');
+  });
+
+  it('round-trips a built execution result part into tool_output text', () => {
+    const content: Content = {
+      role: 'model',
+      parts: [
+        buildCodeExecutionResultPart({
+          stdout: '42',
+          stderr: '',
+          outputFiles: [],
+        }),
+      ],
+    };
+
+    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+
+    const text = content.parts![0].text!;
+    expect(text.startsWith('```tool_output\n')).toBe(true);
+    expect(text.endsWith('\n```')).toBe(true);
+    expect(text).toContain('Code execution result:\n42');
+    expect(text).not.toContain('undefined');
+    expect(content.parts![0].codeExecutionResult).toBeUndefined();
+    expect(content.role).toBe('user');
   });
 
   it('does not modify parts that are plain text', () => {

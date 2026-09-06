@@ -216,9 +216,9 @@ export function buildCodeExecutionResultPart(
 ): Part {
   if (codeExecutionResult.stderr) {
     return {
-      text: codeExecutionResult.stderr,
       codeExecutionResult: {
         outcome: Outcome.OUTCOME_FAILED,
+        output: codeExecutionResult.stderr,
       },
     };
   }
@@ -235,9 +235,9 @@ export function buildCodeExecutionResultPart(
   }
 
   return {
-    text: finalResult.join('\n\n'),
     codeExecutionResult: {
       outcome: Outcome.OUTCOME_OK,
+      output: finalResult.join('\n\n'),
     },
   };
 }
