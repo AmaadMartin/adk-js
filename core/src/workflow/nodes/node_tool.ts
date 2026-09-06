@@ -138,17 +138,19 @@ export class NodeTool extends BaseTool {
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
     const schema = this.node.inputSchema;
-    const rawInput = this.inputIsObject ? args : args['request'];
-    let nodeInput: unknown;
-    try {
-      // Zod is the analogue of Python's pydantic branch: the model's arguments
-      // are checked here so a bad call is reported to the model instead of
-      // ending the invocation. A genai `Schema` is left to `validateInput`.
-      nodeInput = isZodSchema(schema)
-        ? parseWithSchema(schema, rawInput)
-        : rawInput;
-    } catch (e: unknown) {
-      return `Error validating input for node: ${formatError(e)}`;
+    const nodeInput = this.inputIsObject ? args : args['request'];
+    if (isZodSchema(schema)) {
+      try {
+        // Zod is the analogue of Python's pydantic branch: the model's
+        // arguments are checked here so a bad call is reported to the model
+        // instead of ending the invocation. The node still receives the
+        // original value, because it parses its own input and a schema
+        // carrying a non-idempotent `.transform()` rejects an already-parsed
+        // one. A genai `Schema` is left to `validateInput` entirely.
+        parseWithSchema(schema, nodeInput);
+      } catch (e: unknown) {
+        return `Error validating input for node: ${formatError(e)}`;
+      }
     }
 
     const {nodeCtx, runId, overrideBranch} = this.prepareChildRun(toolContext);

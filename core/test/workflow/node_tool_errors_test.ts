@@ -5,10 +5,11 @@
  */
 
 /**
- * The `NodeTool` error paths the adk-python reference does not cover: the two
- * error strings a tool result carries, which errors keep propagating instead,
- * and the pre-flight checks that stay throws because they report a misconfigured
- * host rather than a failing node.
+ * The `NodeTool` input and error paths the adk-python reference does not cover:
+ * how the model's arguments are validated, the two error strings a tool result
+ * carries, which errors keep propagating instead, and the pre-flight checks
+ * that stay throws because they report a misconfigured host rather than a
+ * failing node.
  */
 
 import {
@@ -51,6 +52,29 @@ describe('NodeTool error paths', () => {
     });
     const result = await runTool(new NodeTool(target), {topic: 42});
     expect(result).toMatch(/^Error validating input for node: /);
+  });
+
+  it('parses a transforming schema once, so the node sees the transform', async () => {
+    // The up-front check must not hand the node an already-parsed value: the
+    // node parses its own input, and `.transform()` is not idempotent here.
+    const target = node(
+      (_ctx: NodeContext, input: {n: number}) => ({got: input.n}),
+      {
+        name: 'transformer',
+        inputSchema: z.object({n: z.string().transform(Number)}),
+      },
+    );
+    const result = await runTool(new NodeTool(target), {n: '21'});
+    expect(result).toEqual({got: 21});
+  });
+
+  it('parses a transforming scalar schema once', async () => {
+    const target = node((_ctx: NodeContext, input: number) => ({got: input}), {
+      name: 'scalar_transformer',
+      inputSchema: z.string().transform(Number),
+    });
+    const result = await runTool(new NodeTool(target), {request: '21'});
+    expect(result).toEqual({got: 21});
   });
 
   it('returns a run error when the node throws', async () => {
