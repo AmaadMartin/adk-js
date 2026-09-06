@@ -469,5 +469,219 @@ describe('AuthHandler', () => {
       expect(uri).toBeDefined();
       expect(uri?.oauth2?.authUri).toContain('https://token.com');
     });
+
+    it('takes the endpoint from a later flow when the implicit flow declares a blank authorizationUrl', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            implicit: {authorizationUrl: '', scopes: {read: 'Read access'}},
+            authorizationCode: {
+              authorizationUrl: 'https://auth.com',
+              tokenUrl: 'https://token.com',
+              scopes: {write: 'Write access'},
+            },
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            clientId: 'id',
+            clientSecret: 'secret',
+            redirectUri: 'https://redirect.com',
+          },
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('https://auth.com');
+    });
+
+    it('takes the scopes from the first declared flow, not from the flow that supplied the endpoint', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            implicit: {authorizationUrl: '', scopes: {read: 'Read access'}},
+            authorizationCode: {
+              authorizationUrl: 'https://auth.com',
+              tokenUrl: 'https://token.com',
+              scopes: {write: 'Write access'},
+            },
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            clientId: 'id',
+            clientSecret: 'secret',
+            redirectUri: 'https://redirect.com',
+          },
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('scope=read');
+      expect(uri?.oauth2?.authUri).not.toContain('write');
+    });
+
+    it('falls through a blank implicit flow to the clientCredentials tokenUrl', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            implicit: {authorizationUrl: '', scopes: {}},
+            clientCredentials: {tokenUrl: 'https://cc-token.com', scopes: {}},
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('https://cc-token.com');
+      expect(uri?.oauth2?.authUri).toContain('scope=&');
+    });
+
+    it('falls through a blank implicit flow to the password tokenUrl', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            implicit: {authorizationUrl: '', scopes: {}},
+            password: {tokenUrl: 'https://pw-token.com', scopes: {}},
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('https://pw-token.com');
+    });
+
+    it('resolves a password-only scheme to its tokenUrl and scopes', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            password: {
+              tokenUrl: 'https://pw-token.com',
+              scopes: {read: 'Read access'},
+            },
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('https://pw-token.com');
+      expect(uri?.oauth2?.authUri).toContain('scope=read');
+    });
+
+    it('prefers the implicit authorizationUrl over a later flow', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            implicit: {
+              authorizationUrl: 'https://implicit.com',
+              scopes: {},
+            },
+            authorizationCode: {
+              authorizationUrl: 'https://code.com',
+              tokenUrl: 'https://token.com',
+              scopes: {},
+            },
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      const uri = handler.generateAuthUri();
+
+      expect(uri?.oauth2?.authUri).toContain('https://implicit.com');
+      expect(uri?.oauth2?.authUri).not.toContain('https://code.com');
+    });
+
+    it('throws when every declared flow has a blank URL', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            implicit: {authorizationUrl: '', scopes: {}},
+            authorizationCode: {
+              authorizationUrl: '',
+              tokenUrl: '',
+              scopes: {},
+            },
+            clientCredentials: {tokenUrl: '', scopes: {}},
+            password: {tokenUrl: '', scopes: {}},
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      expect(() => handler.generateAuthUri()).toThrow(
+        'Authorization endpoint not configured in auth scheme.',
+      );
+    });
+
+    it('does not fall back to the authorizationCode tokenUrl as the authorization endpoint', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {
+          type: 'oauth2',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: '',
+              tokenUrl: 'https://token.com',
+              scopes: {},
+            },
+          },
+        },
+        rawAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'id'},
+        },
+      };
+      const handler = new AuthHandler(authConfig);
+
+      expect(() => handler.generateAuthUri()).toThrow(
+        'Authorization endpoint not configured in auth scheme.',
+      );
+    });
   });
 });

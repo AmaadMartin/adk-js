@@ -125,22 +125,20 @@ export class AuthHandler {
       scopes = authScheme.scopes || [];
     } else if (authScheme.type === 'oauth2' && authScheme.flows) {
       const flows = authScheme.flows;
-      const flow =
-        flows.implicit ||
-        flows.authorizationCode ||
-        flows.clientCredentials ||
+      authorizationEndpoint =
+        flows.implicit?.authorizationUrl ||
+        flows.authorizationCode?.authorizationUrl ||
+        flows.clientCredentials?.tokenUrl ||
+        flows.password?.tokenUrl ||
+        '';
+
+      const scopeFlow =
+        flows.implicit ??
+        flows.authorizationCode ??
+        flows.clientCredentials ??
         flows.password;
-
-      if (flow) {
-        if ('authorizationUrl' in flow && flow.authorizationUrl) {
-          authorizationEndpoint = flow.authorizationUrl;
-        } else if ('tokenUrl' in flow && flow.tokenUrl) {
-          authorizationEndpoint = flow.tokenUrl;
-        }
-
-        if (flow.scopes) {
-          scopes = Object.keys(flow.scopes);
-        }
+      if (scopeFlow?.scopes) {
+        scopes = Object.keys(scopeFlow.scopes);
       }
     }
 
