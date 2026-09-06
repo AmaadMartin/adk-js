@@ -7,6 +7,7 @@
 import {InvocationContext} from '../agents/invocation_context.js';
 import {createEvent} from '../events/event.js';
 import {ContextCompactionTrigger} from '../plugins/base_plugin.js';
+import {logger} from '../utils/logger.js';
 import {BaseContextCompactor} from './base_context_compactor.js';
 import {getActiveEvents} from './compaction_utils.js';
 import {BaseSummarizer} from './summarizers/base_summarizer.js';
@@ -79,7 +80,7 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
     } catch (error) {
       // If the summarizer fails, log the error, clear the flags, and proceed without compaction.
       // (do not block the agent run)
-      console.error('Compaction failed:', error);
+      logger.error('Compaction failed:', error);
     } finally {
       this.clearFlags(invocationContext);
     }

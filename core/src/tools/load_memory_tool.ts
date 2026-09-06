@@ -7,6 +7,7 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 
 import {appendInstructions} from '../models/llm_request.js';
+import {logger} from '../utils/logger.js';
 import {
   BaseTool,
   RunAsyncToolRequest,
@@ -63,7 +64,7 @@ export class LoadMemoryTool extends BaseTool {
         })),
       };
     } catch (e) {
-      console.error('ERROR in LoadMemoryTool runAsync:', e);
+      logger.error('LoadMemoryTool runAsync failed:', e);
       throw e;
     }
   }
