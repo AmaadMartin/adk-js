@@ -29,6 +29,27 @@ vi.mock('../../../src/utils/file_utils.js', () => ({
   materializeFiles: vi.fn().mockImplementation((files) => files),
 }));
 
+const SANDBOX_NAME =
+  'projects/p/locations/us-central1/reasoningEngines/1/sandboxEnvironments/2';
+
+/**
+ * Records a sandbox name through the caller's code executor context, the way
+ * AgentEngineSandboxCodeExecutor does after it creates a sandbox.
+ */
+class SandboxRecordingCodeExecutor extends BaseCodeExecutor {
+  shouldThrow = false;
+
+  override async executeCode(
+    params: ExecuteCodeParams,
+  ): Promise<CodeExecutionResult> {
+    params.codeExecutorContext?.setSandboxName('LANGUAGE_PYTHON', SANDBOX_NAME);
+    if (this.shouldThrow) {
+      throw new Error('Mock execution failure');
+    }
+    return {stdout: '', stderr: '', outputFiles: []};
+  }
+}
+
 class MockCodeExecutor extends BaseCodeExecutor {
   mockResult: CodeExecutionResult = {
     stdout: '',
@@ -315,6 +336,52 @@ describe('RunSkillInlineScriptTool', () => {
       'arg1',
       'arg2',
     ]);
+  });
+
+  it('publishes the code executor context delta on the tool event', async () => {
+    const executor = new SandboxRecordingCodeExecutor();
+    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+    const toolContext = createMockContext('test-agent', undefined, {
+      toolConfirmation: confirmed(),
+    });
+
+    await tool.runAsync({
+      args: {
+        script_content: 'print("hi")',
+        language: CodeExecutionLanguage.PYTHON,
+      },
+      toolContext,
+    });
+
+    expect(toolContext.actions.stateDelta['_code_execution_context']).toEqual({
+      sandbox_names: {language_python: SANDBOX_NAME},
+    });
+  });
+
+  it('publishes the code executor context delta when execution fails', async () => {
+    const executor = new SandboxRecordingCodeExecutor();
+    executor.shouldThrow = true;
+    const toolset = new SkillToolset([], {codeExecutor: executor});
+    const tool = new RunSkillInlineScriptTool(toolset);
+    const toolContext = createMockContext('test-agent', undefined, {
+      toolConfirmation: confirmed(),
+    });
+
+    const result = (await tool.runAsync({
+      args: {
+        script_content: 'print("hi")',
+        language: CodeExecutionLanguage.PYTHON,
+      },
+      toolContext,
+    })) as ToolErrorResponse;
+
+    expect(result.errorCode).toBe(
+      RunSkillInlineScriptErrorCode.EXECUTION_ERROR,
+    );
+    expect(toolContext.actions.stateDelta['_code_execution_context']).toEqual({
+      sandbox_names: {language_python: SANDBOX_NAME},
+    });
   });
 
   describe('confirmation gate', () => {

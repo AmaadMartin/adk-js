@@ -28,6 +28,27 @@ vi.mock('../../../src/utils/file_utils.js', () => ({
   materializeFiles: vi.fn(),
 }));
 
+const SANDBOX_NAME =
+  'projects/p/locations/us-central1/reasoningEngines/1/sandboxEnvironments/2';
+
+/**
+ * Records a sandbox name through the caller's code executor context, the way
+ * AgentEngineSandboxCodeExecutor does after it creates a sandbox.
+ */
+class SandboxRecordingCodeExecutor extends BaseCodeExecutor {
+  shouldThrow = false;
+
+  override async executeCode(
+    params: ExecuteCodeParams,
+  ): Promise<CodeExecutionResult> {
+    params.codeExecutorContext?.setSandboxName('LANGUAGE_PYTHON', SANDBOX_NAME);
+    if (this.shouldThrow) {
+      throw new Error('Mock execution failure');
+    }
+    return {stdout: '', stderr: '', outputFiles: []};
+  }
+}
+
 class MockCodeExecutor extends BaseCodeExecutor {
   mockResult: CodeExecutionResult = {
     stdout: '',
@@ -309,5 +330,39 @@ describe('RunSkillScriptTool', () => {
 
     expect(materializeFiles).toHaveBeenLastCalledWith([], outputDir);
     expect(result.outputDirectory).toBe(outputDir);
+  });
+
+  it('publishes the code executor context delta on the tool event', async () => {
+    const executor = new SandboxRecordingCodeExecutor();
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+    const toolContext = createMockContext();
+
+    await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext,
+    });
+
+    expect(toolContext.actions.stateDelta['_code_execution_context']).toEqual({
+      sandbox_names: {language_python: SANDBOX_NAME},
+    });
+  });
+
+  it('publishes the code executor context delta when execution fails', async () => {
+    const executor = new SandboxRecordingCodeExecutor();
+    executor.shouldThrow = true;
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+    const toolContext = createMockContext();
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext,
+    })) as ToolErrorResponse;
+
+    expect(result.errorCode).toBe('EXECUTION_ERROR');
+    expect(toolContext.actions.stateDelta['_code_execution_context']).toEqual({
+      sandbox_names: {language_python: SANDBOX_NAME},
+    });
   });
 });
