@@ -50,6 +50,13 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **License headers**: Every `.js` and `.ts` file needs the Apache-2.0 license
+   header. To check the repository:
+
+   ```bash
+   npm run license:check
+   ```
+
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
