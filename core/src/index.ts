@@ -43,6 +43,21 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+export {GcsAdminToolset} from './integrations/gcs/admin_toolset.js';
+export type {GcsAdminToolsetOptions} from './integrations/gcs/admin_toolset.js';
+export {
+  GCS_DEFAULT_SCOPES,
+  GcsCredentialsConfig,
+} from './integrations/gcs/credentials.js';
+export type {GcsCredentialsConfigOptions} from './integrations/gcs/credentials.js';
+export {GcsToolset} from './integrations/gcs/storage_toolset.js';
+export type {GcsToolsetOptions} from './integrations/gcs/toolset_base.js';
+export {
+  GCS_TOOL_NAME_PREFIX,
+  GcsCapability,
+  GcsToolStatus,
+} from './integrations/gcs/types.js';
+export type {GcsToolResult, GcsToolSettings} from './integrations/gcs/types.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
