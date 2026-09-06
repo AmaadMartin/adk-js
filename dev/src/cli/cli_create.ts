@@ -90,6 +90,15 @@ export const rootAgent = new LlmAgent({
 });
 `.trim();
 
+/**
+ * Written to `.env` when `adk create` collected no usable credential, so the
+ * scaffolded project names the variable the user still has to fill in.
+ */
+const MISSING_API_KEY_COMMENT = [
+  '# No API key was provided to `adk create`. Create one in AI Studio',
+  '# (https://aistudio.google.com/apikey) and paste it after the `=` below.',
+].join('\n');
+
 interface AgentCreationOptions {
   agentName: string;
   forceYes: boolean;
@@ -98,6 +107,18 @@ interface AgentCreationOptions {
   project: string;
   region: string;
   language: string;
+}
+
+/**
+ * Rejects an empty or whitespace-only API key. Returning a string is
+ * `@clack/prompts`' contract for "invalid — re-ask with this message", so the
+ * wizard can no longer be completed into a `.env` the runtime cannot
+ * authenticate with.
+ */
+function requireApiKey(value: string | undefined): string | undefined {
+  return value?.trim()
+    ? undefined
+    : 'An API key is required. Create one at https://aistudio.google.com/apikey';
 }
 
 async function getGcpProject(): Promise<string> {
@@ -168,6 +189,14 @@ function generateEnvFile(options: AgentCreationOptions): string {
     // `geminiInitParams` in core). GOOGLE_GENAI_API_KEY is the adk-js-specific
     // name and wins outright, so it is the unambiguous one to scaffold.
     lines.push(`GOOGLE_GENAI_API_KEY=${options.apiKey}`);
+    lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
+  } else if (!options.project || !options.region) {
+    // Vertex AI is only selected when both settings are present, so half a
+    // Vertex configuration lands on the Gemini API path and needs a key too.
+    // An empty value keeps the runtime's actionable "API key must be provided"
+    // error, which a placeholder string would turn into an opaque HTTP 400.
+    lines.push(MISSING_API_KEY_COMMENT);
+    lines.push(`GOOGLE_GENAI_API_KEY=`);
     lines.push(`GOOGLE_GENAI_USE_VERTEXAI=0`);
   }
   if (options.project) {
@@ -289,12 +318,13 @@ export async function createAgent(options: AgentCreationOptions) {
         ? ''
         : await text({
             message: 'Enter the Google API Key',
+            validate: requireApiKey,
           });
 
       if (isCancel(apiKeyResponse)) {
         process.exit(0);
       }
-      options.apiKey = apiKeyResponse;
+      options.apiKey = apiKeyResponse.trim();
     }
   }
 

@@ -136,4 +136,39 @@ describe('adk create: the generated .env is usable by the runtime', () => {
     expect(requests[0]!.url).toContain('generativelanguage.googleapis.com');
     expect(requests[0]!.apiKey).toBe(TEST_API_KEY);
   });
+
+  // `adk create -y` used to write a zero-byte `.env`. The stub that replaced it
+  // carries an empty value on purpose: a sentinel string would be truthy, so
+  // the runtime would build a client and fail with an opaque HTTP error instead
+  // of naming the variable the user has to set.
+  it('the no-credential .env still surfaces the actionable API key error', async () => {
+    // The previous test leaves its stubs in place until `afterAll`.
+    vi.unstubAllEnvs();
+
+    await createAgent({
+      agentName: 'no-creds-agent',
+      forceYes: true,
+      model: MODEL,
+      language: 'ts',
+      apiKey: '',
+      project: '',
+      region: '',
+    });
+
+    const generatedEnv = dotenv.parse(
+      await fs.readFile(path.join(workDir, 'no-creds-agent', '.env'), 'utf-8'),
+    );
+    for (const name of CREDENTIAL_ENV_VARS) {
+      vi.stubEnv(name, undefined);
+    }
+    for (const [name, value] of Object.entries(generatedEnv)) {
+      vi.stubEnv(name, value);
+    }
+
+    expect(generatedEnv['GOOGLE_GENAI_API_KEY']).toBe('');
+    expect(generatedEnv['GOOGLE_GENAI_USE_VERTEXAI']).toBe('0');
+    expect(() => new Gemini({model: MODEL})).toThrow(
+      /API key must be provided/,
+    );
+  });
 });
