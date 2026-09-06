@@ -201,9 +201,17 @@ export async function copyAgentFiles(
 
   for (const agentName of agentNames) {
     const agentFile = await agentLoader.getAgentFile(agentName);
-    const fileName = path.parse(agentFile.getFilePath()).base;
+    const filePath = agentFile.getFilePath();
 
-    await fs.cp(agentFile.getFilePath(), path.join(targetPath, fileName));
+    // AgentLoader keys a directory-shaped agent on its directory name and only
+    // accepts an `agent.*`/`app.*` entry inside it, so the directory name is
+    // what carries the agent's name through to the deployed server. A flat
+    // layout names every entry after the compiled artifact, which is `agent`
+    // for every directory-shaped agent.
+    await fs.cp(
+      filePath,
+      path.join(targetPath, agentName, `agent${path.extname(filePath)}`),
+    );
   }
 }
 
