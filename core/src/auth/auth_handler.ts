@@ -159,7 +159,7 @@ export class AuthHandler {
     url.searchParams.set('scope', scopes.join(' '));
     url.searchParams.set('state', state);
     url.searchParams.set('access_type', 'offline');
-    url.searchParams.set('prompt', 'consent');
+    url.searchParams.set('prompt', authCredential.oauth2.prompt || 'consent');
 
     const exchangedAuthCredential: AuthCredential = {
       ...authCredential,

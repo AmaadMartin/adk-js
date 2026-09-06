@@ -59,6 +59,12 @@ export interface OAuth2Auth {
   expiresAt?: number;
   expiresIn?: number;
   audience?: string;
+  /**
+   * The OAuth2 `prompt` parameter sent on the authorization request, e.g.
+   * 'consent', 'login', 'select_account' or 'none'. Defaults to 'consent' when
+   * unset.
+   */
+  prompt?: string;
   tokenEndpointAuthMethod?: string;
 }
 
