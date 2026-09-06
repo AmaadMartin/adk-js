@@ -1549,6 +1549,28 @@ describe('AdkWebServer', () => {
       expect(response.status).toBe(200);
       expect(response.body.result).toBeDefined();
     });
+
+    // startA2aServer() configures no port, so the OS assigns one.
+    it('should advertise the bound port in the agent card when the OS assigns it', async () => {
+      const url = await startA2aServer();
+      const boundPort = Number(new URL(url).port);
+      expect(boundPort).toBeGreaterThan(0);
+
+      const response = await new HttpClient(url).get<AgentCard>(
+        `/a2a/testApp/${AGENT_CARD_PATH}`,
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.data?.url).toBe(
+        `http://localhost:${boundPort}/a2a/testApp/jsonrpc`,
+      );
+      expect(
+        response.data?.additionalInterfaces?.map((iface) => iface.url),
+      ).toEqual([
+        `http://localhost:${boundPort}/a2a/testApp/jsonrpc`,
+        `http://localhost:${boundPort}/a2a/testApp/rest`,
+      ]);
+    });
   });
 
   describe('Reasoning Engine', () => {
@@ -1688,6 +1710,18 @@ describe('AdkWebServer', () => {
   });
 
   describe('Startup', () => {
+    it('should report the configured port before the server starts', () => {
+      const unstartedServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        port: 8123,
+      });
+
+      expect(unstartedServer.url).toBe('http://localhost:8123');
+    });
+
     it('should throw an error if the port is already in use', async () => {
       const portString = server.url.split(':').pop();
       const port = portString ? parseInt(portString, 10) : 0;

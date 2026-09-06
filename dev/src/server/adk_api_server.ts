@@ -101,14 +101,23 @@ export class AdkApiServer {
   private readonly host: string;
   private readonly port: number;
 
-  get url(): string {
-    if (this.server) {
-      const address = this.server.address();
-      if (address && typeof address !== 'string') {
-        return `http://${this.host}:${address.port}`;
-      }
+  /**
+   * The port the server is actually listening on.
+   *
+   * When `port: 0` is requested, the OS assigns an ephemeral port, so the
+   * configured value is only meaningful until the server has bound. Falls back
+   * to the configured port before `start()` has bound the socket.
+   */
+  private get boundPort(): number {
+    const address = this.server?.address();
+    if (address && typeof address !== 'string') {
+      return address.port;
     }
-    return `http://${this.host}:${this.port}`;
+    return this.port;
+  }
+
+  get url(): string {
+    return `http://${this.host}:${this.boundPort}`;
   }
 
   readonly app: express.Application;
@@ -212,7 +221,7 @@ export class AdkApiServer {
       await toA2a(agent, {
         protocol: 'http',
         host: this.host,
-        port: this.port,
+        port: this.boundPort,
         basePath: `/a2a/${appName}`,
         sessionService: this.sessionService,
         memoryService: this.memoryService,
