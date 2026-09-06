@@ -4,15 +4,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import {FunctionDeclaration} from '@google/genai';
 
+import {isBaseAgent} from '../../agents/base_agent.js';
+import {Context} from '../../agents/context.js';
 import {BaseTool, RunAsyncToolRequest} from '../../tools/base_tool.js';
+import {formatError} from '../../utils/error_utils.js';
+import {logger} from '../../utils/logger.js';
+import {parseWithSchema, SchemaLike, toJsonSchema} from '../../utils/schema.js';
 import {
   isZodObject,
+  isZodSchema,
   zodObjectToSchema,
 } from '../../utils/simple_zod_to_json.js';
 import {BaseNode} from '../base_node.js';
-import {runNodeFromToolContext} from '../run_node_from_tool.js';
+import {isDynamicNodeFailError, isInvocationAbortedError} from '../errors.js';
+import {NodeContext} from '../node_context.js';
+import {
+  MAX_NODE_TOOL_DEPTH,
+  runNodeFromToolContext,
+} from '../run_node_from_tool.js';
+import {isFunctionNode} from './function_node.js';
 
 /**
  * A unique symbol branding {@link NodeTool} instances (see `isNodeTool`).
@@ -20,16 +32,50 @@ import {runNodeFromToolContext} from '../run_node_from_tool.js';
 const NODE_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.workflow.nodeTool');
 
 /**
+ * Renders a node's schema as the JSON Schema a declaration carries, or
+ * `undefined` when the schema has no JSON Schema form.
+ *
+ * Zod v4 refuses to serialize a schema containing a `.transform()`. Such a
+ * schema still runs — the node validates its input with it — so the declaration
+ * leaves the field out rather than failing every call to the tool. That is what
+ * the model saw before these fields existed.
+ *
+ * The `$schema` dialect key is dropped: JSON Schema does not allow it on a
+ * nested subschema, and adk-python's `model_json_schema()` never emits one.
+ */
+function toDeclarationSchema(
+  schema: SchemaLike,
+): Record<string, unknown> | undefined {
+  let json: Record<string, unknown>;
+  try {
+    json = toJsonSchema(schema);
+  } catch (e: unknown) {
+    logger.debug(
+      `NodeTool: schema has no JSON Schema form, omitting it from the ` +
+        `declaration: ${formatError(e)}`,
+    );
+    return undefined;
+  }
+  const {$schema: _dialect, ...rest} = json;
+  return rest;
+}
+
+/**
  * A tool that executes a {@link BaseNode} (e.g. a `Workflow` or a function node)
  * on behalf of an `LlmAgent`. This is the inverse of {@link ToolNode} (which
  * exposes a tool as a workflow node): here a node/workflow is exposed to a model
  * as a callable tool.
  *
- * The wrapped node MUST declare an `inputSchema` (the tool's parameter schema is
- * derived from it). When the model calls the tool, the node runs with a
- * {@link NodeContext} bridged from the tool's agent context (sharing the
- * invocation, session, and state); the node's structured output becomes the
- * tool result.
+ * The wrapped node MUST declare an `inputSchema` (the tool's parameter schema
+ * is derived from it), unless it is a `FunctionNode`: a function node that
+ * takes no input is declared with no parameters. When the model calls the tool,
+ * the node runs with a {@link NodeContext} bridged from the tool's agent
+ * context (sharing the invocation, session, and state); the node's structured
+ * output becomes the tool result.
+ *
+ * A node that fails, or a model argument that fails the node's input schema,
+ * becomes an error string as the tool result, so the model can retry or explain
+ * rather than the invocation ending.
  *
  * Ported from `google/adk-python` `tools/_node_tool.py::NodeTool`.
  *
@@ -42,8 +88,23 @@ export class NodeTool extends BaseTool {
 
   readonly node: BaseNode;
 
+  /**
+   * Whether the model's arguments go to the node as-is. A scalar input schema
+   * is advertised wrapped under `request`, so its value is unwrapped again on
+   * the way in. A node with no input schema takes the arguments unchanged.
+   */
+  private readonly inputIsObject: boolean;
+
   constructor(node: BaseNode, name?: string, description?: string) {
-    if (!node.inputSchema) {
+    if (isBaseAgent(node)) {
+      throw new Error(
+        `Agent '${node.name}' cannot be wrapped as a NodeTool. Agents should ` +
+          'be invoked as Sub-Agents instead.',
+      );
+    }
+    // A function node with no input schema takes no input, which is a valid
+    // tool with no parameters rather than a missing declaration.
+    if (!node.inputSchema && !isFunctionNode(node)) {
       throw new Error(
         `Node '${node.name}' does not have an inputSchema defined. NodeTool ` +
           'requires an explicit input schema on the wrapped node.',
@@ -56,43 +117,90 @@ export class NodeTool extends BaseTool {
       isLongRunning: true,
     });
     this.node = node;
+    // A Zod object answers this without being serialized, which a Zod v4 schema
+    // holding a `.transform()` cannot be.
+    this.inputIsObject =
+      !node.inputSchema ||
+      isZodObject(node.inputSchema) ||
+      toDeclarationSchema(node.inputSchema)?.['type'] === 'object';
   }
 
   override _getDeclaration(): FunctionDeclaration {
+    const declaration: FunctionDeclaration = {
+      name: this.name,
+      description: this.description,
+    };
     const schema = this.node.inputSchema;
-    let parameters: Schema;
-    // Narrow inline so `zodObjectToSchema` typechecks without a cast.
-    if (schema && isZodObject(schema)) {
-      parameters = zodObjectToSchema(schema);
-    } else {
-      // The GenAI API requires object-typed parameters; wrap a scalar schema
-      // under a single `request` property.
-      parameters = {
-        type: Type.OBJECT,
-        properties: {request: {type: Type.STRING}},
-        required: ['request'],
-      };
+    if (schema) {
+      // Narrow inline so `zodObjectToSchema` typechecks without a cast.
+      if (isZodObject(schema)) {
+        declaration.parameters = zodObjectToSchema(schema);
+      } else {
+        const json = toDeclarationSchema(schema);
+        if (json) {
+          // The GenAI API accepts an object-typed parameter schema only, so a
+          // scalar goes under a single `request` property, as it does in
+          // `_node_tool.py::_get_declaration`.
+          declaration.parametersJsonSchema = this.inputIsObject
+            ? json
+            : {
+                type: 'object',
+                properties: {request: json},
+                required: ['request'],
+              };
+        }
+      }
     }
-    return {name: this.name, description: this.description, parameters};
-  }
-
-  /** Whether the node's input schema is a (Zod) object rather than a scalar. */
-  private get inputIsObject(): boolean {
-    return isZodObject(this.node.inputSchema);
+    if (this.node.outputSchema) {
+      const json = toDeclarationSchema(this.node.outputSchema);
+      if (json) {
+        declaration.responseJsonSchema = json;
+      }
+    }
+    return declaration;
   }
 
   override async runAsync({
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
+    const schema = this.node.inputSchema;
     const nodeInput = this.inputIsObject ? args : args['request'];
+    if (isZodSchema(schema)) {
+      try {
+        // Zod is the analogue of Python's pydantic branch: the model's
+        // arguments are checked here so a bad call is reported to the model
+        // instead of ending the invocation. The node still receives the
+        // original value, because it parses its own input and a schema
+        // carrying a non-idempotent `.transform()` rejects an already-parsed
+        // one. A genai `Schema` is left to `validateInput` entirely.
+        parseWithSchema(schema, nodeInput);
+      } catch (e: unknown) {
+        return `Error validating input for node: ${formatError(e)}`;
+      }
+    }
 
-    const child = await runNodeFromToolContext({
-      toolContext,
-      node: this.node,
-      input: nodeInput,
-      toolName: this.name,
-    });
+    let child: NodeContext;
+    try {
+      child = await runNodeFromToolContext({
+        toolContext,
+        node: this.node,
+        input: nodeInput,
+        toolName: this.name,
+      });
+    } catch (e: unknown) {
+      // A misconfigured host, a cancelled invocation, and a dynamic child's own
+      // failure are terminal for the whole run — reporting any of them as a
+      // tool result would let the model carry on past it.
+      if (
+        !this.hostCanRunChild(toolContext) ||
+        isInvocationAbortedError(e) ||
+        isDynamicNodeFailError(e)
+      ) {
+        throw e;
+      }
+      return `Error running node ${this.name}: ${formatError(e)}`;
+    }
 
     if (child.interruptIds.length > 0) {
       // The node paused for input. Returning undefined leaves the (long-running)
@@ -102,6 +210,25 @@ export class NodeTool extends BaseTool {
     }
 
     return child.output === undefined ? {result: null} : child.output;
+  }
+
+  /**
+   * Whether `toolContext` can host the wrapped node's run: it must carry an
+   * open invocation event queue and a function-call id, and it must be under
+   * {@link MAX_NODE_TOOL_DEPTH}.
+   *
+   * {@link runNodeFromToolContext} reports each of these itself. This method
+   * only tells `runAsync` which kind of failure it caught: a misconfigured host
+   * throws, and a failing node becomes a tool result the model reads.
+   */
+  private hostCanRunChild(toolContext: Context): boolean {
+    const ic = toolContext.invocationContext;
+    return (
+      !!ic.eventQueue &&
+      !ic.eventQueue.isClosed &&
+      !!toolContext.functionCallId &&
+      ic.nodeToolDepth < MAX_NODE_TOOL_DEPTH
+    );
   }
 }
 

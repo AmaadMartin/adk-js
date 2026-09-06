@@ -1593,6 +1593,7 @@ export {
   createNodeState,
   createSubBranch,
   findStaticNodePath,
+  isFunctionNode,
   isNodeErrorEvent,
   isNodeReportedError,
   isNodeSchemaValidationError,

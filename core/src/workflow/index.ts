@@ -30,7 +30,7 @@ export {BaseNode, START} from './base_node.js';
 export type {BaseNodeConfig} from './base_node.js';
 export {WorkflowNode, isWorkflowNode, node} from './node.js';
 export type {NodeOptions, WorkflowNodeConfig} from './node.js';
-export {FunctionNode} from './nodes/function_node.js';
+export {FunctionNode, isFunctionNode} from './nodes/function_node.js';
 export type {
   FunctionNodeConfig,
   FunctionNodeHandler,

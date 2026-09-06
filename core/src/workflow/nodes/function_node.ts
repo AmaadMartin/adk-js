@@ -26,6 +26,14 @@ import {
 } from '../utils/parameter_binding.js';
 
 /**
+ * A unique symbol branding {@link FunctionNode} instances (see
+ * {@link isFunctionNode}).
+ */
+const FUNCTION_NODE_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.workflow.functionNode',
+);
+
+/**
  * A value a {@link FunctionNodeHandler} may return or yield.
  */
 export type FunctionNodeResult<TOutput> =
@@ -94,6 +102,9 @@ export class FunctionNode<TInput = unknown, TOutput = unknown> extends BaseNode<
   TInput,
   TOutput
 > {
+  /** Brand identifying this object as a {@link FunctionNode}. */
+  readonly [FUNCTION_NODE_SIGNATURE_SYMBOL] = true;
+
   readonly authConfig?: AuthConfig;
   /** Where declared parameters are read from (`'state'` when none are). */
   readonly parameterBinding: ParameterBinding;
@@ -365,6 +376,19 @@ function inferInputSchema(config: FunctionNodeConfig): SchemaLike | undefined {
   return config.parameterBinding === 'nodeInput'
     ? config.parameters
     : parameterFieldSchema(config.parameters, NODE_INPUT_PARAMETER);
+}
+
+/**
+ * Type guard for {@link FunctionNode}. Matches on the brand rather than
+ * `instanceof` so it stays correct across package copies (mirrors `isWorkflow`).
+ */
+export function isFunctionNode(value: unknown): value is FunctionNode {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    FUNCTION_NODE_SIGNATURE_SYMBOL in value &&
+    value[FUNCTION_NODE_SIGNATURE_SYMBOL] === true
+  );
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {

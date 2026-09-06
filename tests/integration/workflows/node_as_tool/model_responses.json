@@ -1,7 +1,7 @@
 [
   {
-    "key": "d745c2462b709e3f",
-    "instructionAgnosticKey": "cd29e9d8047eef5e",
+    "key": "5931ca6744e311eb",
+    "instructionAgnosticKey": "302b12dbe416940a",
     "request": {
       "contents": [
         {
@@ -29,9 +29,7 @@
                       "description": "The customer's unique identifier."
                     }
                   },
-                  "required": [
-                    "user_id"
-                  ]
+                  "required": ["user_id"]
                 }
               },
               {
@@ -45,9 +43,10 @@
                       "description": "The customer's membership tier (e.g., VIP, Standard)."
                     }
                   },
-                  "required": [
-                    "tier"
-                  ]
+                  "required": ["tier"]
+                },
+                "responseJsonSchema": {
+                  "type": "string"
                 }
               }
             ]
@@ -100,8 +99,8 @@
     }
   },
   {
-    "key": "31758cfb2f2b5c51",
-    "instructionAgnosticKey": "9c901c45de75f6ba",
+    "key": "d9cf9a7db9ef8bd9",
+    "instructionAgnosticKey": "32fe0dcd85a731c3",
     "request": {
       "contents": [
         {
@@ -156,9 +155,7 @@
                       "description": "The customer's unique identifier."
                     }
                   },
-                  "required": [
-                    "user_id"
-                  ]
+                  "required": ["user_id"]
                 }
               },
               {
@@ -172,9 +169,10 @@
                       "description": "The customer's membership tier (e.g., VIP, Standard)."
                     }
                   },
-                  "required": [
-                    "tier"
-                  ]
+                  "required": ["tier"]
+                },
+                "responseJsonSchema": {
+                  "type": "string"
                 }
               }
             ]
@@ -227,8 +225,8 @@
     }
   },
   {
-    "key": "106beb6c3c01fe20",
-    "instructionAgnosticKey": "2c0ec1ce41d3014e",
+    "key": "15b4eacac336a1fe",
+    "instructionAgnosticKey": "44c0bdc20e27d4ef",
     "request": {
       "contents": [
         {
@@ -320,9 +318,7 @@
                       "description": "The customer's unique identifier."
                     }
                   },
-                  "required": [
-                    "user_id"
-                  ]
+                  "required": ["user_id"]
                 }
               },
               {
@@ -336,9 +332,10 @@
                       "description": "The customer's membership tier (e.g., VIP, Standard)."
                     }
                   },
-                  "required": [
-                    "tier"
-                  ]
+                  "required": ["tier"]
+                },
+                "responseJsonSchema": {
+                  "type": "string"
                 }
               }
             ]
