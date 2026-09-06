@@ -452,6 +452,17 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
   }
 }
 
+/** The genai-internal shape that carries a client's resolved location. */
+interface LocationCarrier {
+  apiClient: {getLocation(): unknown};
+}
+
+/** Whether `client` exposes the genai-internal location accessor. */
+function hasLocationAccessor(client: unknown): client is LocationCarrier {
+  const apiClient = (client as Partial<LocationCarrier> | null)?.apiClient;
+  return typeof apiClient?.getLocation === 'function';
+}
+
 /**
  * Returns the client's resolved location, or undefined when it has none.
  *
@@ -461,22 +472,14 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
  * value is read structurally, so a client that does not expose it yields
  * undefined rather than throwing.
  */
-function resolveClientLocation(client: ManagedAgentClient): string | undefined {
-  const candidate: unknown = client;
-  if (!isRecord(candidate)) {
+export function resolveClientLocation(
+  client: ManagedAgentClient,
+): string | undefined {
+  if (!hasLocationAccessor(client)) {
     return undefined;
   }
-  const apiClient = candidate['apiClient'];
-  if (!isRecord(apiClient) || typeof apiClient['getLocation'] !== 'function') {
-    return undefined;
-  }
-  const location: unknown = apiClient['getLocation']();
+  const location = client.apiClient.getLocation();
   return typeof location === 'string' ? location : undefined;
-}
-
-/** Narrows an arbitrary value to an indexable object. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 /**
