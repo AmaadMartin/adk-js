@@ -203,8 +203,7 @@ export class AdkApiServer {
       : undefined;
 
     for (const appName of appNames) {
-      const agentFile = await this.agentLoader.getAgentFile(appName);
-      const loaded = await agentFile.load();
+      const loaded = await this.agentLoader.loadAgent(appName);
       const agent = isApp(loaded) ? loaded.rootAgent : loaded;
       const adkApp = isApp(loaded) ? loaded : undefined;
       const runner = await this.getRunner(adkApp ?? agent, appName);
