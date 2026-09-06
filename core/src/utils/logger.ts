@@ -28,6 +28,14 @@ export interface Logger {
   error(...args: unknown[]): void;
 
   setLogLevel(level: LogLevel): void;
+
+  /**
+   * Whether a message at `level` would be emitted. Lets a caller skip work
+   * that only exists to produce a log line. Optional so that a custom logger
+   * written against an earlier version keeps compiling; callers must treat an
+   * absent implementation as "not enabled".
+   */
+  isEnabledFor?(level: LogLevel): boolean;
 }
 
 class SimpleLogger implements Logger {
@@ -61,6 +69,10 @@ class SimpleLogger implements Logger {
 
   setLogLevel(level: LogLevel): void {
     this.logLevel = level;
+  }
+
+  isEnabledFor(level: LogLevel): boolean {
+    return level >= this.logLevel;
   }
 
   log(level: LogLevel, ...messages: unknown[]): void {
@@ -109,6 +121,9 @@ class SimpleLogger implements Logger {
  */
 class NoOpLogger implements Logger {
   setLogLevel(_level: LogLevel): void {}
+  isEnabledFor(_level: LogLevel): boolean {
+    return false;
+  }
   log(_level: LogLevel, ..._args: unknown[]): void {}
   debug(..._args: unknown[]): void {}
   info(..._args: unknown[]): void {}
@@ -148,8 +163,12 @@ export function setLogLevel(level: LogLevel) {
 
 /**
  * The logger instance for ADK.
+ *
+ * `isEnabledFor` is required here even though {@link Logger} leaves it
+ * optional: the facade answers for a custom logger that does not implement it,
+ * so a caller never has to.
  */
-export const logger: Logger = {
+export const logger: Logger & Required<Pick<Logger, 'isEnabledFor'>> = {
   setLogLevel(level: LogLevel): void {
     currentLogger.setLogLevel(level);
   },
@@ -167,5 +186,8 @@ export const logger: Logger = {
   },
   error(...args: unknown[]): void {
     currentLogger.error(...args);
+  },
+  isEnabledFor(level: LogLevel): boolean {
+    return currentLogger.isEnabledFor?.(level) ?? false;
   },
 };
