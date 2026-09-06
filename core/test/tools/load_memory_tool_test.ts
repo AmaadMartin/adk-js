@@ -34,6 +34,14 @@ class StubToolContext {
   }
 }
 
+/**
+ * `Context` is a class, so a partial stub cannot satisfy it structurally. The
+ * cast is confined here instead of repeated at every call site.
+ */
+function stubContext(memories: MemoryEntry[]): Context {
+  return new StubToolContext(memories) as unknown as Context;
+}
+
 describe('LoadMemoryTool', () => {
   it('computes the correct declaration', () => {
     const tool = new LoadMemoryTool();
@@ -57,12 +65,12 @@ describe('LoadMemoryTool', () => {
 
   it('sets correct response on runAsync', async () => {
     const tool = new LoadMemoryTool();
-    const mockContext = new StubToolContext([
+    const mockContext = stubContext([
       {
         content: {role: 'user', parts: [{text: 'hi'}]},
         author: 'someone',
       },
-    ]) as unknown as Context;
+    ]);
 
     const result = await tool.runAsync({
       args: {query: 'hello'},
@@ -80,13 +88,50 @@ describe('LoadMemoryTool', () => {
     });
   });
 
+  it('drops text-free parts from the memory content', async () => {
+    const tool = new LoadMemoryTool();
+    const mockContext = stubContext([
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {text: 'a'},
+            {inlineData: {mimeType: 'image/png', data: 'AAAA'}},
+            {text: 'b'},
+          ],
+        },
+      },
+      {
+        content: {
+          role: 'user',
+          parts: [
+            {inlineData: {mimeType: 'image/png', data: 'AAAA'}},
+            {functionCall: {name: 'lookup', args: {}}},
+          ],
+        },
+      },
+    ]);
+
+    const result = await tool.runAsync({
+      args: {query: 'hello'},
+      toolContext: mockContext,
+    });
+
+    expect(result).toEqual({
+      memories: [
+        {content: 'a b', author: undefined, timestamp: undefined},
+        {content: '', author: undefined, timestamp: undefined},
+      ],
+    });
+  });
+
   it('has a global instance LOAD_MEMORY', () => {
     expect(LOAD_MEMORY).toBeInstanceOf(LoadMemoryTool);
   });
 
   it('throws error if memoryService is not initialized', async () => {
     const tool = new LoadMemoryTool();
-    const mockContext = new StubToolContext([]) as unknown as Context;
+    const mockContext = stubContext([]);
     (mockContext.invocationContext as {memoryService?: unknown}).memoryService =
       undefined;
 
@@ -99,7 +144,7 @@ describe('LoadMemoryTool', () => {
   });
 
   it('does not append instruction if memoryService is missing in context', async () => {
-    const toolContext = new StubToolContext([]) as unknown as Context;
+    const toolContext = stubContext([]);
     (toolContext.invocationContext as {memoryService?: unknown}).memoryService =
       undefined;
 
@@ -115,7 +160,7 @@ describe('LoadMemoryTool', () => {
   });
 
   it('appends system instructions if memoryService is present in context', async () => {
-    const toolContext = new StubToolContext([]) as unknown as Context;
+    const toolContext = stubContext([]);
 
     const llmRequest: LlmRequest = {
       contents: [],
