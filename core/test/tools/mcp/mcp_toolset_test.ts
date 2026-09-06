@@ -219,7 +219,10 @@ describe('MCPToolset', () => {
       const toolset = new MCPToolset(stdioParams);
       const contents = await toolset.readResource('res1');
 
-      expect(readResource).toHaveBeenCalledWith({uri: 'file:///res1'});
+      expect(readResource).toHaveBeenCalledWith(
+        {uri: 'file:///res1'},
+        {timeout: 5000},
+      );
       expect(contents).toEqual([{uri: 'file:///res1', text: 'hello'}]);
     });
 
