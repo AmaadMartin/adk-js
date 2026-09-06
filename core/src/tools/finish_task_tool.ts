@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Schema, Type} from '@google/genai';
+import {FunctionDeclaration, Type} from '@google/genai';
 
 import {Event} from '../events/event.js';
 import {appendInstructions} from '../models/llm_request.js';
@@ -21,6 +21,7 @@ import {
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from './base_tool.js';
+import {DEFAULT_TASK_OUTPUT_SCHEMA} from './task_models.js';
 
 /** The name of the finish_task tool. */
 export const FINISH_TASK_TOOL_NAME = 'finish_task';
@@ -85,18 +86,6 @@ export const FINISH_TASK_INSTRUCTION =
   ' the user for clarification before proceeding. Once the task is fully' +
   ' complete, call `finish_task` by itself with no accompanying text' +
   ' output.';
-
-/** The default output schema when the task agent declares none. */
-const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    result: {
-      type: Type.STRING,
-      description: 'A brief summary of what the agent accomplished.',
-    },
-  },
-  required: ['result'],
-};
 
 /**
  * JSON Schema keys that only carry meaning at the root of a document: the

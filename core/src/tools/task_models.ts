@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Schema, Type} from '@google/genai';
 import {z} from 'zod';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
@@ -137,3 +138,45 @@ export function asTaskRequest(value: unknown): TaskRequest {
   }
   return parseTaskRequest(value);
 }
+
+/**
+ * The parameters a task agent gets when it declares no input schema: `goal`
+ * and `background`, both optional.
+ *
+ * Mirrors `_DefaultTaskInput` in adk-python
+ * `agents/llm/task/_task_models.py`. adk-python declares a second, unrelated
+ * `_DefaultTaskInput` in `tools/agent_tool.py` that holds one required
+ * `request` string. The two are different shapes for different tools, so do
+ * not substitute one for the other.
+ */
+export const DEFAULT_TASK_INPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    goal: {
+      type: Type.STRING,
+      description: 'The goal or objective for the task agent.',
+    },
+    background: {
+      type: Type.STRING,
+      description: 'Additional background context for the task agent.',
+    },
+  },
+};
+
+/**
+ * The parameters {@link FinishTaskTool} declares when the task agent declares
+ * no output schema.
+ *
+ * Mirrors `_DefaultTaskOutput` in adk-python
+ * `agents/llm/task/_task_models.py`.
+ */
+export const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    result: {
+      type: Type.STRING,
+      description: 'A brief summary of what the agent accomplished.',
+    },
+  },
+  required: ['result'],
+};

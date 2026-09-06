@@ -13,10 +13,18 @@
  * tests.
  */
 
-import {InputValidationError, Logger, setLogger} from '@google/adk';
+import {
+  FinishTaskTool,
+  InputValidationError,
+  Logger,
+  setLogger,
+} from '@google/adk';
+import {Type} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {
   asTaskRequest,
+  DEFAULT_TASK_INPUT_SCHEMA,
+  DEFAULT_TASK_OUTPUT_SCHEMA,
   parseTaskRequest,
   parseTaskResult,
 } from '../../src/tools/task_models.js';
@@ -174,5 +182,49 @@ describe('asTaskRequest', () => {
 
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain(typeName);
+  });
+});
+
+describe('DEFAULT_TASK_INPUT_SCHEMA', () => {
+  it('declares goal and background as optional strings', () => {
+    expect(DEFAULT_TASK_INPUT_SCHEMA.type).toBe(Type.OBJECT);
+    expect(DEFAULT_TASK_INPUT_SCHEMA.properties?.['goal']?.type).toBe(
+      Type.STRING,
+    );
+    expect(DEFAULT_TASK_INPUT_SCHEMA.properties?.['background']?.type).toBe(
+      Type.STRING,
+    );
+    expect(DEFAULT_TASK_INPUT_SCHEMA.required).toBeUndefined();
+  });
+
+  it('carries the reference field descriptions', () => {
+    expect(DEFAULT_TASK_INPUT_SCHEMA.properties?.['goal']?.description).toBe(
+      'The goal or objective for the task agent.',
+    );
+    expect(
+      DEFAULT_TASK_INPUT_SCHEMA.properties?.['background']?.description,
+    ).toBe('Additional background context for the task agent.');
+  });
+});
+
+describe('DEFAULT_TASK_OUTPUT_SCHEMA', () => {
+  it('declares result as a required string', () => {
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.type).toBe(Type.OBJECT);
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.properties?.['result']?.type).toBe(
+      Type.STRING,
+    );
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.required).toEqual(['result']);
+  });
+
+  it('carries the reference field description', () => {
+    expect(DEFAULT_TASK_OUTPUT_SCHEMA.properties?.['result']?.description).toBe(
+      'A brief summary of what the agent accomplished.',
+    );
+  });
+
+  it('is the schema FinishTaskTool declares when given none', () => {
+    expect(new FinishTaskTool()._getDeclaration().parameters).toEqual(
+      DEFAULT_TASK_OUTPUT_SCHEMA,
+    );
   });
 });
