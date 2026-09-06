@@ -82,7 +82,9 @@ export class AdkLogger implements Logger {
       return;
     }
 
-    this.logger.log(level.toString(), messages.join(' '));
+    // The winston level names are the LogLevel member names, lowercased; see
+    // the `levels` map in the constructor.
+    this.logger.log(LogLevel[level].toLowerCase(), messages.join(' '));
   }
 
   debug(...messages: unknown[]): void {
