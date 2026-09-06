@@ -8,6 +8,9 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  InvocationContext,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -263,4 +266,85 @@ describe('ToolAuthHandler', () => {
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
   });
+
+  it('qualifies the cached slot with the credential key', async () => {
+    const context = createContext({
+      // What the client answered a credential request with.
+      'temp:jira_service_identity': {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'key',
+      },
+    });
+
+    await new ToolAuthHandler(
+      context,
+      {type: 'http', scheme: 'bearer'},
+      undefined,
+      'jira_service_identity',
+    ).prepareAuthCredentials();
+
+    // Two tools can share a scheme type and still speak for different
+    // identities, so the key keeps their slots apart.
+    const stored = context.state.get<AuthCredential>(
+      'http_jira_service_identity_existing_exchanged_credential',
+    );
+    expect(stored?.http?.credentials.token).toBe('exchanged-token');
+    expect(
+      context.state.get('http_existing_exchanged_credential'),
+    ).toBeUndefined();
+  });
+
+  it('reads back a credential cached under the qualified slot', async () => {
+    const context = createContext({
+      'http_jira_existing_exchanged_credential': {
+        authType: AuthCredentialTypes.HTTP,
+        http: {scheme: 'bearer', credentials: {token: 'user-token'}},
+      },
+    });
+
+    const result = await new ToolAuthHandler(
+      context,
+      {type: 'http', scheme: 'bearer'},
+      undefined,
+      'jira',
+    ).prepareAuthCredentials();
+
+    expect(result.authCredential?.http?.credentials.token).toBe('user-token');
+  });
+
+  it('keeps the unqualified slot when the tool names no credential key', async () => {
+    const context = createContext({
+      'temp:default_openapi_key': {
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'key',
+      },
+    });
+
+    await new ToolAuthHandler(context, {
+      type: 'http',
+      scheme: 'bearer',
+    }).prepareAuthCredentials();
+
+    // A credential cached by an earlier release is still read back.
+    const stored = context.state.get<AuthCredential>(
+      'http_existing_exchanged_credential',
+    );
+    expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
 });
+
+/** A tool context whose session state already holds `slots`. */
+function createContext(slots: Record<string, unknown> = {}): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({
+        id: 'session-1',
+        appName: 'test-app',
+        state: {...slots},
+      }),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: 'call-1',
+  });
+}
