@@ -83,12 +83,16 @@ export abstract class BaseEnvironment {
    * @param command The shell command string to execute.
    * @param timeoutSeconds Maximum execution time in seconds. `undefined` means
    *   no limit.
+   * @param abortSignal Aborting it tears down the command and its descendants,
+   *   then rejects with the signal's `reason`. `undefined` means the command
+   *   cannot be cancelled.
    * @returns The exit code, stdout, stderr, and timeout status. A non-zero exit
    *   code is reported in the result, not thrown.
    */
   abstract execute(
     command: string,
     timeoutSeconds?: number,
+    abortSignal?: AbortSignal,
   ): Promise<ExecutionResult>;
 
   /**

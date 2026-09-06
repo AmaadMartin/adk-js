@@ -5,6 +5,7 @@
  */
 
 import {LocalEnvironment} from '@google/adk';
+import {getEventListeners} from 'node:events';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -28,6 +29,25 @@ const SURVIVOR_LIFETIME_MS = 5_000;
 
 /** Upper bound on a timed-out call: comfortably short of the command itself. */
 const TIMED_OUT_BY_MS = 4_000;
+
+/**
+ * The grace `LocalEnvironment` allows between `SIGTERM` and `SIGKILL`, and
+ * again before it gives up on the output pipes. Mirrors `TERMINATE_GRACE_MS`
+ * in `core/src/environment/local_environment.ts`.
+ */
+const TERMINATE_GRACE_MS = 5_000;
+
+/**
+ * Upper bound on an escalated teardown. A successful `SIGKILL` returns one
+ * grace period in; giving up on the pipes takes two, so this separates them.
+ */
+const ESCALATED_BY_MS = 9_000;
+
+/** How long the commands used by the teardown tests outlive both graces. */
+const OUTLIVES_TEARDOWN_MS = 20_000;
+
+/** Budget for a test that waits out both grace periods, plus slack. */
+const TEARDOWN_TEST_TIMEOUT_MS = 40_000;
 
 const decoder = new TextDecoder();
 
@@ -238,6 +258,50 @@ describe('LocalEnvironment', () => {
         /ENOENT/,
       );
     });
+
+    // Windows needs an elevated account to create a symlink, so the two
+    // symlink cases below only run where an unprivileged user can.
+    it.skipIf(os.platform() === 'win32')(
+      'rejects a symlink inside the workspace that points outside it',
+      async () => {
+        await fs.writeFile(path.join(tmpRoot, 'outside.txt'), 'secret');
+        await fs.symlink(tmpRoot, path.join(workingDir, 'escape'));
+
+        await expect(env.readFile('escape/outside.txt')).rejects.toThrow(
+          /escapes working directory/,
+        );
+        await expect(env.writeFile('escape/x.txt', 'no')).rejects.toThrow(
+          /escapes working directory/,
+        );
+        await expect(fs.access(path.join(tmpRoot, 'x.txt'))).rejects.toThrow(
+          /ENOENT/,
+        );
+      },
+    );
+
+    it.skipIf(os.platform() === 'win32')(
+      'accepts a file reached through a symlinked working directory',
+      async () => {
+        // This is how macOS presents `os.tmpdir()`, so the containment check
+        // has to resolve the working directory as well as the candidate.
+        const real = path.join(tmpRoot, 'real-ws');
+        const link = path.join(tmpRoot, 'link-ws');
+        await fs.mkdir(real);
+        await fs.symlink(real, link);
+        const linked = new LocalEnvironment({workingDir: link});
+        await linked.initialize();
+
+        try {
+          await linked.writeFile('sub/file.txt', 'through the link');
+
+          expect(decoder.decode(await linked.readFile('sub/file.txt'))).toBe(
+            'through the link',
+          );
+        } finally {
+          await linked.close();
+        }
+      },
+    );
   });
 
   describe('execute', () => {
@@ -384,6 +448,121 @@ describe('LocalEnvironment', () => {
 
         expect(result.stdout).toBe('quick');
         expect(result.timedOut).toBe(false);
+      },
+      SPAWN_TIMEOUT_MS,
+    );
+
+    // The SIGTERM-then-SIGKILL ladder only exists where there is a process
+    // group to signal. Windows terminates on the first signal, so it has no
+    // escalation and no second grace period to observe.
+    it.skipIf(os.platform() === 'win32')(
+      'escalates to SIGKILL when the command ignores SIGTERM',
+      async () => {
+        await env.writeFile(
+          'ignore_sigterm.cjs',
+          [
+            "process.on('SIGTERM', () => {});",
+            `setTimeout(() => {}, ${OUTLIVES_TEARDOWN_MS});`,
+          ].join('\n'),
+        );
+        const startedAt = Date.now();
+
+        const result = await env.execute(`${NODE} ignore_sigterm.cjs`, 0.5);
+        const elapsed = Date.now() - startedAt;
+
+        expect(result.timedOut).toBe(true);
+        expect(result.exitCode).not.toBe(0);
+        // The full grace elapsed, so SIGTERM alone did not end the command,
+        // and the call still returned inside one grace period after it, so
+        // SIGKILL did rather than the give-up path.
+        expect(elapsed).toBeGreaterThanOrEqual(TERMINATE_GRACE_MS);
+        expect(elapsed).toBeLessThan(ESCALATED_BY_MS);
+      },
+      TEARDOWN_TEST_TIMEOUT_MS,
+    );
+
+    it.skipIf(os.platform() === 'win32')(
+      'gives up on the pipes and keeps the output of a descendant that escaped the group',
+      async () => {
+        // A grandchild in a process group of its own outlives both signals and
+        // holds the inherited pipes, which is the only way teardown reaches
+        // its give-up branch.
+        await env.writeFile(
+          'escape_group.cjs',
+          [
+            "const {spawn} = require('node:child_process');",
+            "process.stdout.write('before');",
+            'spawn(',
+            '  process.execPath,',
+            `  ['-e', 'setTimeout(() => {}, ${OUTLIVES_TEARDOWN_MS})'],`,
+            "  {stdio: 'inherit', detached: true},",
+            ').unref();',
+          ].join('\n'),
+        );
+        const startedAt = Date.now();
+
+        const result = await env.execute(`${NODE} escape_group.cjs`, 0.5);
+
+        expect(result.timedOut).toBe(true);
+        // Python discards the output here; adk-js buffers incrementally, so
+        // what the command wrote before the kill survives.
+        expect(result.stdout).toBe('before');
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(
+          2 * TERMINATE_GRACE_MS,
+        );
+      },
+      TEARDOWN_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'rejects with the abort reason when the signal is already aborted',
+      async () => {
+        const reason = new Error('already gone');
+
+        await expect(
+          env.execute(`${NODE} -e ""`, undefined, AbortSignal.abort(reason)),
+        ).rejects.toBe(reason);
+      },
+      SPAWN_TIMEOUT_MS,
+    );
+
+    it(
+      'rejects with the abort reason and stops the command when aborted',
+      async () => {
+        const controller = new AbortController();
+        const reason = new Error('caller went away');
+        const running = env.execute(
+          `${NODE} -e "setTimeout(() => {}, ${OUTLIVES_TEARDOWN_MS})"`,
+          undefined,
+          controller.signal,
+        );
+
+        controller.abort(reason);
+
+        await expect(running).rejects.toBe(reason);
+      },
+      SPAWN_TIMEOUT_MS,
+    );
+
+    it(
+      'ignores an abort raised after the command already finished',
+      async () => {
+        const controller = new AbortController();
+
+        const result = await env.execute(
+          `${NODE} -e "process.stdout.write('done')"`,
+          undefined,
+          controller.signal,
+        );
+
+        expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+        controller.abort();
+        expect(result).toEqual({
+          exitCode: 0,
+          stdout: 'done',
+          stderr: '',
+          timedOut: false,
+        });
       },
       SPAWN_TIMEOUT_MS,
     );
