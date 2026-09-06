@@ -41,6 +41,13 @@ vi.mock('../../src/version', () => ({
   version: '1.0.0-test',
 }));
 
+// `cli.ts` loads a .env when it is imported. Stub the loader so this suite
+// does not walk the real filesystem or read a developer's keys into the test
+// process. `cli_dotenv_test.ts` covers the startup call itself.
+vi.mock('../../src/utils/envs', () => ({
+  loadDotenvForAgent: vi.fn(),
+}));
+
 vi.mock('@google/adk', async (importOriginal) => {
   const actual = await importOriginal();
   return {

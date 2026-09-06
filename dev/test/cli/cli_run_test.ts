@@ -5,6 +5,8 @@
  */
 
 import {BaseAgent, BaseSessionService, Runner} from '@google/adk';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
@@ -311,6 +313,39 @@ describe('cli_run', () => {
     expect(loadFileData).toHaveBeenCalledWith(
       path.join(process.cwd(), 'input.json'),
     );
+  });
+
+  it('loads the agent .env before the agent file loads', async () => {
+    const envKey = 'ADK_TEST_CLI_RUN_ENV';
+    const savedEnv = {...process.env};
+    const tmpDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'adk-cli-run-envs-'),
+    );
+    let seenDuringLoad: string | undefined;
+    (mockAgentFile.load as Mock).mockImplementation(async () => {
+      seenDuringLoad = process.env[envKey];
+      return mockRootAgent;
+    });
+
+    try {
+      await fs.writeFile(
+        path.join(tmpDir, '.env'),
+        `${envKey}=from-agent-dotenv\n`,
+      );
+
+      await runAgent({
+        agentPath: path.join(tmpDir, 'agent.ts'),
+        sessionService: createMockSessionService(),
+      });
+    } finally {
+      for (const key of Object.keys(process.env)) {
+        delete process.env[key];
+      }
+      Object.assign(process.env, savedEnv);
+      await fs.rm(tmpDir, {recursive: true, force: true});
+    }
+
+    expect(seenDuringLoad).toBe('from-agent-dotenv');
   });
 
   it('propagates an unreadable --replay file instead of swallowing it', async () => {
