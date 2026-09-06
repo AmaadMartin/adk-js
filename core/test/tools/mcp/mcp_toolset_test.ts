@@ -5,7 +5,7 @@
  */
 
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
@@ -42,6 +42,17 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
 
 /** A client method stub that resolves to nothing (connect/close). */
 const noop = () => vi.fn().mockResolvedValue(undefined);
+
+/** Total `listTools()` calls across every client constructed so far. */
+function listToolsCallCount(): number {
+  let total = 0;
+  for (const result of vi.mocked(Client).mock.results) {
+    if (result.type === 'return') {
+      total += vi.mocked(result.value.listTools).mock.calls.length;
+    }
+  }
+  return total;
+}
 
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   return {
@@ -332,5 +343,119 @@ describe('MCPToolset', () => {
         );
       });
     });
+  });
+
+  describe('tool list cache', () => {
+    const TTL_SECONDS = 60;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.mocked(Client).mockClear();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('does not cache by default', async () => {
+      const toolset = new MCPToolset(stdioParams);
+
+      await toolset.getTools();
+      await toolset.getTools();
+
+      expect(listToolsCallCount()).toBe(2);
+      expect(vi.mocked(Client)).toHaveBeenCalledTimes(2);
+    });
+
+    it('serves the second call from the cache', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, TTL_SECONDS);
+
+      const first = await toolset.getTools();
+      const second = await toolset.getTools();
+
+      expect(listToolsCallCount()).toBe(1);
+      expect(second.map((tool) => tool.name)).toEqual(
+        first.map((tool) => tool.name),
+      );
+    });
+
+    it('does not open a session on a cache hit', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, TTL_SECONDS);
+
+      await toolset.getTools();
+      await toolset.getTools();
+
+      expect(vi.mocked(Client)).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-lists after the ttl elapses', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, TTL_SECONDS);
+
+      await toolset.getTools();
+      vi.advanceTimersByTime(TTL_SECONDS * 1000 + 1000);
+      await toolset.getTools();
+
+      expect(listToolsCallCount()).toBe(2);
+    });
+
+    it('treats the ttl boundary as expired', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, TTL_SECONDS);
+
+      await toolset.getTools();
+      vi.advanceTimersByTime(TTL_SECONDS * 1000);
+      await toolset.getTools();
+
+      expect(listToolsCallCount()).toBe(2);
+    });
+
+    it('still prefixes and filters on a cache hit', async () => {
+      const allowed = new Set(['myprefix_test-tool']);
+      const toolset = new MCPToolset(
+        stdioParams,
+        (tool) => allowed.has(tool.name),
+        'myprefix',
+        TTL_SECONDS,
+      );
+      const context = {} as ReadonlyContext;
+
+      const first = await toolset.getTools(context);
+      allowed.clear();
+      allowed.add('myprefix_other-tool');
+      const second = await toolset.getTools(context);
+
+      expect(listToolsCallCount()).toBe(1);
+      expect(first.map((tool) => tool.name)).toEqual(['myprefix_test-tool']);
+      expect(second.map((tool) => tool.name)).toEqual(['myprefix_other-tool']);
+    });
+
+    it('does not share a cached list between toolsets', async () => {
+      const first = new MCPToolset(stdioParams, [], undefined, TTL_SECONDS);
+      const second = new MCPToolset(stdioParams, [], undefined, TTL_SECONDS);
+
+      await first.getTools();
+      await second.getTools();
+
+      expect(listToolsCallCount()).toBe(2);
+    });
+
+    it('re-lists after close', async () => {
+      const toolset = new MCPToolset(stdioParams, [], undefined, TTL_SECONDS);
+
+      await toolset.getTools();
+      await toolset.close();
+      await toolset.getTools();
+
+      expect(listToolsCallCount()).toBe(2);
+    });
+
+    it.each([0, -1, Number.NaN])(
+      'rejects a ttl of %s',
+      (toolListCacheTtlSeconds) => {
+        expect(
+          () =>
+            new MCPToolset(stdioParams, [], undefined, toolListCacheTtlSeconds),
+        ).toThrow(/must be positive/);
+      },
+    );
   });
 });
