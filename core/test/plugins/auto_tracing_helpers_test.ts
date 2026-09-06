@@ -11,6 +11,14 @@
  * original Python test name so a reviewer can find its counterpart.
  */
 
+import {Attributes} from '@opentelemetry/api';
+import {
+  AlwaysOffSampler,
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from '@opentelemetry/sdk-trace-base';
+import {afterAll, beforeEach, describe, expect, it} from 'vitest';
 import {
   Caps,
   DEFAULT_MAX_RECORDED_YIELDS,
@@ -23,15 +31,7 @@ import {
   nameValuePairs,
   positionalParamNames,
   recordIoOnSpan,
-} from '@google/adk';
-import {Attributes, ProxyTracerProvider} from '@opentelemetry/api';
-import {
-  AlwaysOffSampler,
-  BasicTracerProvider,
-  InMemorySpanExporter,
-  SimpleSpanProcessor,
-} from '@opentelemetry/sdk-trace-base';
-import {afterAll, beforeEach, describe, expect, it} from 'vitest';
+} from '../../src/plugins/auto_tracing_helpers.js';
 
 const CAPS: Caps = {
   maxReprLen: DEFAULT_MAX_REPR_LEN,
@@ -234,15 +234,6 @@ describe('auto tracing helpers — StreamResult', () => {
 });
 
 describe('auto tracing helpers — wrapper construction', () => {
-  it('test_build_tracing_wrapper_returns_original_for_noop_tracer', () => {
-    const noopTracer = new ProxyTracerProvider().getTracer('noop');
-
-    const wrapped = buildTracingWrapper(syncShape, noopTracer, CAPS);
-
-    expect(wrapped).toBe(syncShape);
-    expect(isTracingWrapper(syncShape)).toBe(false);
-  });
-
   it('test_build_tracing_wrapper_preserves_callable_shape', () => {
     const cases: ReadonlyArray<[TracedFunction, string]> = [
       [syncShape, 'sync'],

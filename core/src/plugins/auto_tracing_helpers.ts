@@ -884,8 +884,10 @@ function selectWrapper(
  * and `length`. Parameter names are resolved here, once, rather than on every
  * call.
  *
- * A tracer that will not record is handed back its own function, so an
- * application that has not installed a tracer pays nothing.
+ * The caller decides whether wrapping is worth it. {@link AutoTracingPlugin}
+ * asks {@link tracerWillRecord} once, when it is constructed, and instruments
+ * nothing when the answer is no; asking again here would start a throwaway
+ * probe span for every function it wraps.
  */
 export function buildTracingWrapper(
   fn: TracedFunction,
@@ -893,9 +895,6 @@ export function buildTracingWrapper(
   caps: Caps,
   ownerName?: string,
 ): TracedFunction {
-  if (!tracerWillRecord(tracer)) {
-    return fn;
-  }
   const recorder: CallRecorder = {paramNames: positionalParamNames(fn), caps};
   const wrapper = selectWrapper(
     fn,

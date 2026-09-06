@@ -215,7 +215,7 @@ export class AutoTracingPlugin extends BasePlugin {
       return;
     }
     const state: WalkState = {seen: new Set<object>(), budget: MAX_WALK_NODES};
-    this.walk(params.invocationContext?.agent, 0, state);
+    this.walk(params.invocationContext.agent, 0, state);
     for (const target of this.extraTargets) {
       this.walk(target, 0, state);
     }

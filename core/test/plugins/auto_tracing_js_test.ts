@@ -20,19 +20,11 @@ import {
   AutoTracingPlugin,
   AutoTracingPluginOptions,
   BaseAgent,
-  Caps,
-  DEFAULT_MAX_RECORDED_YIELDS,
-  DEFAULT_MAX_REPR_LEN,
   Event,
   InvocationContext,
   LogLevel,
   PluginManager,
-  TracedFunction,
   createSession,
-  isCredentialArgName,
-  isTracingWrapper,
-  positionalParamNames,
-  safeRepr,
   setLogLevel,
 } from '@google/adk';
 import {Attributes, ProxyTracerProvider} from '@opentelemetry/api';
@@ -42,6 +34,16 @@ import {
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 import {afterAll, beforeEach, describe, expect, it} from 'vitest';
+import {
+  Caps,
+  DEFAULT_MAX_RECORDED_YIELDS,
+  DEFAULT_MAX_REPR_LEN,
+  TracedFunction,
+  isCredentialArgName,
+  isTracingWrapper,
+  positionalParamNames,
+  safeRepr,
+} from '../../src/plugins/auto_tracing_helpers.js';
 
 setLogLevel(LogLevel.ERROR);
 

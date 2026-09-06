@@ -228,23 +228,6 @@ export {
   type ToolFailureResponse,
 } from './plugins/_reflect_retry_utils.js';
 export {
-  DEFAULT_MAX_RECORDED_YIELDS,
-  DEFAULT_MAX_REPR_LEN,
-  StreamResult,
-  buildTracingWrapper,
-  displayNameFor,
-  isCredentialArgName,
-  isTracingWrapper,
-  nameValuePairs,
-  positionalParamNames,
-  recordIoOnSpan,
-  safeRepr,
-  tracerWillRecord,
-  type Caps,
-  type NamedArg,
-  type TracedFunction,
-} from './plugins/auto_tracing_helpers.js';
-export {
   AutoTracingPlugin,
   DEFAULT_MAX_WALK_DEPTH,
   type AutoTracingPluginOptions,
