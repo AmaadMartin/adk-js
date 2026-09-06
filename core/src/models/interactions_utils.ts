@@ -14,6 +14,8 @@ import {
   Part,
   Tool,
 } from '@google/genai';
+import type {ReadonlyContext} from '../agents/readonly_context.js';
+import type {RemoteMcpServer} from '../tools/remote_mcp_server.js';
 import {logger} from '../utils/logger.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
@@ -943,4 +945,48 @@ export async function* generateContentViaInteractions(
     logger.info('Interaction response received from the model.');
     yield convertInteractionToLlmResponse(interaction);
   }
+}
+
+/**
+ * Builds the `mcp_server` tool param the Interactions API accepts from a
+ * {@link RemoteMcpServer} and the turn it runs in.
+ *
+ * The param is built by hand rather than through `types.McpServer` so that
+ * `allowed_tools` survives, and so the "not supported in Vertex AI"
+ * restriction on `Tool.mcpServers` does not apply.
+ *
+ * The static headers are copied first, then the `headerProvider` output is
+ * assigned over the copy, so the provider wins on a key conflict. An error
+ * from the provider propagates: a failed token mint must be loud, not a
+ * silently missing header.
+ *
+ * @param server The server description.
+ * @param context The context of the turn being built for.
+ * @return The tool param.
+ */
+export async function buildMcpServerParam(
+  server: RemoteMcpServer,
+  context: ReadonlyContext,
+): Promise<Interactions.Tool.MCPServer> {
+  const headers: Record<string, string> = {...server.headers};
+  if (server.headerProvider !== undefined) {
+    Object.assign(headers, await server.headerProvider(context));
+  }
+
+  const param: Interactions.Tool.MCPServer = {
+    type: 'mcp_server',
+    url: server.url,
+  };
+  // Guarded on `undefined`, not on truthiness: an empty name and an empty
+  // allowed-tools list are meaningful and are forwarded.
+  if (server.name !== undefined) {
+    param.name = server.name;
+  }
+  if (Object.keys(headers).length > 0) {
+    param.headers = headers;
+  }
+  if (server.allowedTools !== undefined) {
+    param.allowed_tools = [{tools: [...server.allowedTools]}];
+  }
+  return param;
 }
