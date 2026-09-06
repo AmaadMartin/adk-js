@@ -20,7 +20,8 @@ A node's **path** places it in the tree. An event carries the path of the node
 that produced it, with a run id on each segment, so two runs of the same node
 have different paths. `findStaticNodePath` gives you the path without the run
 ids, which is what you want when you are asking "which node in the graph is
-this", not "which run of it".
+this", not "which run of it". A name is not unique on its own: two
+sub-workflows can each mount a node called `worker`.
 
 A node's **output** is persisted. It lands on an `Event`, the event lands in
 the session, and a resumed run replays it from there. A value that only exists
@@ -62,6 +63,10 @@ node(() => 'ok', {name: 'summarize-draft'}); // fine
 node(() => 'ok', {name: 'summarize draft'}); // throws
 ```
 
+The rule is Unicode: the first character is any `ID_Start` character, `$` or
+`_`, and a later character may also be a digit, a `-` or a `$`. So `café` and
+`日本語` pass, and an emoji does not.
+
 The rejection names the value, so the fix is visible in the message:
 
 ```
@@ -70,8 +75,12 @@ identifier. It should start with a letter (a-z, A-Z) or an underscore (_),
 and can only contain letters, digits (0-9), underscores, and hyphens.
 ```
 
+An empty or blank name keeps its own message, `Node name must be a non-empty
+string.`, because that case has a clearer cause.
+
 This is the same rule agent names already obey, which is why an agent — itself
-a node — passes it unchanged.
+a node — passes it unchanged. An agent name is stricter in one way: `BaseAgent`
+also rejects the reserved name `user`.
 
 Two node kinds derive a default name from something else: `ToolNode` uses the
 tool's name, and `node(fn)` uses the function's name. A tool whose name holds a
@@ -114,6 +123,10 @@ findStaticNodePath(root, workerB); // 'root.team_b.worker'
 findStaticNodePath(root, new Team('orphan')); // undefined
 ```
 
+adk-python's `find_static_node_path` joins with `/`. adk-js joins with `.`
+because every path it emits is dot-separated, including `BranchPath` and the
+node runner's `nodePath`.
+
 Two limits are worth knowing. A node is discovered through the properties of
 its parent, one container deep: a node held in an array, `Set`, `Map` or plain
 object field is found, but a node nested two containers down is not. And a
@@ -142,11 +155,32 @@ const tagger = node(() => ({tags: new Set(['ts', 'workflow'])}), {
 // run replays it.
 ```
 
-A `Set` becomes an array, a `Map` becomes a plain object, a value with a
-`toJSON()` method is dumped through it, and any other class instance becomes a
-plain object of its own properties. The result is a new value, so do not rely
-on the event holding the object the node yielded.
+`toSerializable(value)` does the flattening:
+
+| Input                                         | Result                               |
+| :-------------------------------------------- | :----------------------------------- |
+| a primitive, a function                       | returned unchanged                   |
+| an array                                      | a new array of flattened items       |
+| a `Set`                                       | an array                             |
+| a `Map`                                       | a plain object with stringified keys |
+| a value carrying `toJSON()`, such as a `Date` | the result of `toJSON()`             |
+| a plain object, or any other class instance   | a plain object of its own properties |
+
+The result is a new value, so do not rely on the event holding the object the
+node yielded. A circular structure terminates: the reference that closes the
+cycle comes back as it is. A `toJSON()` that throws leaves its own value
+unflattened, and the rest of the tree is still flattened.
 
 A node with no `outputSchema` is untouched: its output reaches the event
 exactly as yielded, whatever its type. Genai `Content` is untouched too, with
 or without a schema.
+
+## Limitations
+
+- `findStaticNodePath` does not descend a nested container, and it does not look
+  inside a non-node wrapper. A node reachable only through a `Workflow`'s graph
+  is therefore not found. adk-python has the same blind spot.
+- The static path is built from names, so two sibling nodes sharing both a name
+  and a parent are still indistinguishable.
+- `toSerializable` runs only when an `outputSchema` is set. A node without one
+  can still put a live object on its event.

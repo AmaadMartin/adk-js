@@ -9,6 +9,7 @@ import {createEvent, Event, isEvent} from '../events/event.js';
 import {isContent} from '../utils/content_utils.js';
 import {validateIdentifierName} from '../utils/identifier_utils.js';
 import {parseWithSchema, SchemaLike} from '../utils/schema.js';
+import {toSerializable} from '../utils/serialization_utils.js';
 import {NodeSchemaValidationError} from './errors.js';
 import type {NodeContext} from './node_context.js';
 import {isRequestInput} from './request_input.js';
@@ -203,8 +204,9 @@ export abstract class BaseNode<TInput = unknown, TOutput = unknown> {
    * enforced for Zod schemas; a genai `Schema` is left unvalidated (see
    * `parseWithSchema`).
    *
-   * A validated value is flattened with `toSerializable` so what lands on
-   * an `Event` is persistable and survives a resume. A node with no
+   * A validated output is flattened with `toSerializable` so a value the
+   * schema produced — a `Date`, a `Set`, a class instance a `.transform()`
+   * built — survives the session store and a resume. A node with no
    * `outputSchema` keeps its output exactly as yielded, matching the
    * reference's `validate_node_data`, which returns the data untouched when no
    * schema is set.
@@ -269,93 +271,6 @@ export function isBaseNode(value: unknown): value is BaseNode {
 }
 
 /**
- * Returns the static (run-id-free) path of `target` within `root`, or
- * `undefined` when `target` is not reachable from `root`.
- *
- * The path is the chain of node names from `root` down to `target`, joined by
- * `.`, so it identifies a node's position in the tree independently of any
- * particular run. Two nodes sharing a name resolve to different paths, because
- * the match is on identity rather than on the name.
- *
- * Children are discovered from a node's own enumerable properties, so a node
- * held in an array, `Set`, `Map` or plain-object field is traversed as well.
- * Containers are inspected one level deep: a node nested inside a container
- * inside a container is not found, matching the reference implementation.
- *
- * Mirrors `google/adk-python`
- * `workflow/_base_node.py::find_static_node_path`, which joins with `/`; adk-js
- * paths are dot-separated throughout (see `BranchPath`), so this joins with
- * `.`.
- */
-export function findStaticNodePath(
-  root: BaseNode,
-  target: BaseNode,
-): string | undefined {
-  return collectNodePath(root, target, new Set<BaseNode>())?.join('.');
-}
-
-/**
- * Depth-first walk returning the chain of node names from `curr` to `target`.
- *
- * `visited` makes the walk terminate on a cyclic graph, such as a child holding
- * a back-reference to its parent.
- */
-function collectNodePath(
-  curr: BaseNode,
-  target: BaseNode,
-  visited: Set<BaseNode>,
-): string[] | undefined {
-  if (visited.has(curr)) {
-    return undefined;
-  }
-  visited.add(curr);
-  if (curr === target) {
-    return [curr.name];
-  }
-  for (const value of Object.values(curr)) {
-    const childPath = findPathInValue(value, target, visited);
-    if (childPath) {
-      return [curr.name, ...childPath];
-    }
-  }
-  return undefined;
-}
-
-/** Searches one property value: a node itself, or the nodes it holds. */
-function findPathInValue(
-  value: unknown,
-  target: BaseNode,
-  visited: Set<BaseNode>,
-): string[] | undefined {
-  if (isBaseNode(value)) {
-    return collectNodePath(value, target, visited);
-  }
-  for (const item of containerValues(value)) {
-    if (isBaseNode(item)) {
-      const path = collectNodePath(item, target, visited);
-      if (path) {
-        return path;
-      }
-    }
-  }
-  return undefined;
-}
-
-/** The direct members of a container value, or nothing for a non-container. */
-function containerValues(value: unknown): Iterable<unknown> {
-  if (Array.isArray(value) || value instanceof Set) {
-    return value;
-  }
-  if (value instanceof Map) {
-    return value.values();
-  }
-  if (typeof value === 'object' && value !== null) {
-    return Object.values(value);
-  }
-  return [];
-}
-
-/**
  * The sentinel node marking the entry point of a workflow graph. It is never
  * executed — the orchestrator seeds triggers for its successors directly.
  *
@@ -392,94 +307,6 @@ export function toContent(val: unknown): Content | undefined {
   } catch {
     return createModelContent(valueToText(val));
   }
-}
-
-/** An object that knows how to dump itself, the way `JSON.stringify` asks. */
-interface JsonSerializable {
-  toJSON(): unknown;
-}
-
-/**
- * Recursively converts a validated value into plain, persistable data.
- *
- * A schema may hand back something richer than JSON: a `Set`, a `Map`, a
- * `Date`, or a class instance built by `z.instanceof()` or `.transform()`.
- * Such a value survives in memory but not through a session store, so a
- * resumed run would replay an empty object. This flattens it: a `Set` becomes
- * an array, a `Map` becomes a plain object, an object with `toJSON()` is
- * dumped, and any other object becomes a plain object of its own enumerable
- * properties.
- *
- * The conversion never throws: a value it cannot convert is returned as it is.
- *
- * Mirrors `google/adk-python` `workflow/_base_node.py::_to_serializable` (and
- * the equivalent helper in `utils/_schema_utils.py::validate_node_data`), whose
- * job is `BaseModel -> model_dump()`.
- */
-export function toSerializable(value: unknown): unknown {
-  return convertValue(value, new WeakSet<object>());
-}
-
-/**
- * Converts one value, tracking the objects on the current path so a circular
- * structure terminates instead of overflowing the stack.
- */
-function convertValue(value: unknown, converting: WeakSet<object>): unknown {
-  if (value === null || typeof value !== 'object') {
-    return value;
-  }
-  if (converting.has(value)) {
-    return value;
-  }
-  converting.add(value);
-  const converted = convertObject(value, converting);
-  converting.delete(value);
-  return converted;
-}
-
-/** Dispatches an object to the conversion its shape calls for. */
-function convertObject(value: object, converting: WeakSet<object>): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => convertValue(item, converting));
-  }
-  if (value instanceof Set) {
-    return [...value].map((item) => convertValue(item, converting));
-  }
-  if (value instanceof Map) {
-    return Object.fromEntries(
-      [...value].map(([key, item]) => [
-        String(key),
-        convertValue(item, converting),
-      ]),
-    );
-  }
-  if (hasToJson(value)) {
-    return convertDumped(value, converting);
-  }
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      key,
-      convertValue(item, converting),
-    ]),
-  );
-}
-
-/** Dumps an object through `toJSON()`, or returns it if the dump fails. */
-function convertDumped(
-  value: JsonSerializable,
-  converting: WeakSet<object>,
-): unknown {
-  let dumped: unknown;
-  try {
-    dumped = value.toJSON();
-  } catch {
-    return value;
-  }
-  return convertValue(dumped, converting);
-}
-
-function hasToJson(value: object): value is JsonSerializable {
-  return typeof (value as Partial<JsonSerializable>).toJSON === 'function';
 }
 
 /** Serializes an arbitrary value to a text string for display. */

@@ -25,7 +25,8 @@ export {Workflow, isWorkflow} from './workflow.js';
 export type {DynamicEntry, WorkflowConfig} from './workflow.js';
 
 // --- Nodes ---
-export {BaseNode, START, findStaticNodePath} from './base_node.js';
+export {toSerializable} from '../utils/serialization_utils.js';
+export {BaseNode, START} from './base_node.js';
 export type {BaseNodeConfig} from './base_node.js';
 export {WorkflowNode, isWorkflowNode, node} from './node.js';
 export type {NodeOptions, WorkflowNodeConfig} from './node.js';
@@ -41,6 +42,7 @@ export {ParallelWorker} from './nodes/parallel_worker.js';
 export type {ParallelWorkerConfig} from './nodes/parallel_worker.js';
 export {ToolNode} from './nodes/tool_node.js';
 export type {ToolNodeConfig} from './nodes/tool_node.js';
+export {findStaticNodePath} from './utils/node_path_utils.js';
 export type {BuildNodeOptions} from './utils/workflow_graph_utils.js';
 
 // --- Graph model ---

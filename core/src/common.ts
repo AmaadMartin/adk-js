@@ -1527,6 +1527,7 @@ export {
   node,
   normalizeRetryExceptions,
   prepareRetryConfig,
+  toSerializable,
 } from './workflow/index.js';
 export type {
   BaseNodeConfig,

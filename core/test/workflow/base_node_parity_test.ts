@@ -6,13 +6,20 @@
 
 /**
  * Ported from `google/adk-python` at `main`:
- * `tests/unittests/workflow/test_base_node.py`. The `it(...)` strings keep the
- * Python test names verbatim so the two suites stay greppable against each
- * other. Paths are dot-separated here, where the reference joins with `/`.
+ * `tests/unittests/workflow/test_base_node.py`. All four reference tests are
+ * here, and the `it(...)` strings keep the Python test names verbatim so the
+ * two suites stay greppable against each other.
+ *
+ * Two adaptations, and no others:
+ *  - adk-js's `BaseNode` is abstract, so the fixture uses a concrete subclass
+ *    carrying `children` and `parentNode` where Python instantiates `BaseNode`
+ *    with extra Pydantic fields.
+ *  - a path segment is joined with `.`, not `/` (see `findStaticNodePath`).
  */
 
 import {describe, expect, it} from 'vitest';
-import {BaseNode, findStaticNodePath} from '../../src/workflow/base_node.js';
+import {BaseNode} from '../../src/workflow/base_node.js';
+import {findStaticNodePath} from '../../src/workflow/utils/node_path_utils.js';
 import {FnNode} from './test_helpers.js';
 
 /**
@@ -62,6 +69,7 @@ describe('find_static_node_path', () => {
 
   it('test_find_static_node_path_disambiguates_same_name_nodes', () => {
     const {root, workerA, workerB} = buildTree();
+    // The reference asserts 'root/team_a/worker'; adk-js joins with '.'.
     expect(findStaticNodePath(root, workerA)).toBe('root.team_a.worker');
     expect(findStaticNodePath(root, workerB)).toBe('root.team_b.worker');
   });

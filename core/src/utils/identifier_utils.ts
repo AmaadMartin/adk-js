@@ -10,15 +10,16 @@ export type NamedKind = 'Agent' | 'Node';
 /**
  * Checks if the given string is a valid identifier.
  *
- * An identifier starts with a letter or an underscore and continues with
- * letters, digits, underscores or hyphens. Hyphens are accepted because ADK
- * names are used as event authors and path segments, not as source-language
- * symbols.
+ * An identifier starts with a Unicode `ID_Start` character, `$` or `_`, and
+ * continues with `ID_Continue` characters, `$`, `_` or `-`. ADK names that
+ * become path segments or an `Event.author` value must match it. Hyphens are
+ * accepted because ADK names are used as event authors and path segments, not
+ * as source-language symbols.
  *
  * @param str The string to check.
  * @return True if the string is a valid identifier, false otherwise.
  */
-function isIdentifier(str: string): boolean {
+export function isIdentifier(str: string): boolean {
   return /^[\p{ID_Start}$_][\p{ID_Continue}$_-]*$/u.test(str);
 }
 
