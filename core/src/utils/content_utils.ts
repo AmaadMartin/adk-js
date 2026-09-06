@@ -34,6 +34,27 @@ export function toUserContent(value: ContentUnion): Content {
 }
 
 /**
+ * Coerces a value of any shape into a user `Content`.
+ *
+ * A `Content` keeps its parts and is re-roled to user; a string becomes one
+ * text part; anything else is serialized to JSON, so a structured value still
+ * reaches a model that only reads text.
+ *
+ * Use this for a value whose shape the caller does not control, such as a
+ * workflow node input. {@link toUserContent} is the strict version: it takes a
+ * `ContentUnion` and never re-roles a `Content` it is given.
+ */
+export function coerceToUserContent(input: unknown): Content {
+  if (isContent(input)) {
+    return {...input, role: 'user'};
+  }
+  if (typeof input === 'string') {
+    return {role: 'user', parts: [{text: input}]};
+  }
+  return {role: 'user', parts: [{text: JSON.stringify(input)}]};
+}
+
+/**
  * Returns whether a part carries audio, by inline blob or by file reference.
  *
  * The check is a prefix match on the top-level MIME type, so

@@ -7,6 +7,7 @@
 import {Content, Language, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
+  coerceToUserContent,
   contentHasNonTextParts,
   contentToText,
   filterAudioParts,
@@ -212,5 +213,30 @@ describe('contentHasNonTextParts', () => {
         ],
       }),
     ).toBe(true);
+  });
+});
+
+describe('coerceToUserContent', () => {
+  it('wraps a string in one user-role text part', () => {
+    expect(coerceToUserContent('fix the flake')).toEqual({
+      role: 'user',
+      parts: [{text: 'fix the flake'}],
+    });
+  });
+
+  it('keeps the parts of a Content and re-roles it to user', () => {
+    const given: Content = {role: 'model', parts: [{text: 'hello'}]};
+
+    expect(coerceToUserContent(given)).toEqual({
+      role: 'user',
+      parts: [{text: 'hello'}],
+    });
+  });
+
+  it('serializes any other value to JSON so a text model can read it', () => {
+    expect(coerceToUserContent({bug: 42})).toEqual({
+      role: 'user',
+      parts: [{text: '{"bug":42}'}],
+    });
   });
 });

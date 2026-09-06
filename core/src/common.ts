@@ -713,6 +713,33 @@ export {
   GCS_DEFAULT_SCOPE,
   GCS_TOKEN_CACHE_KEY,
 } from './integrations/gcs/gcs_credentials.js';
+export {AntigravityAgent} from './labs/antigravity/antigravity_agent.js';
+export type {
+  AntigravityAgentMode,
+  AntigravityAgentOptions,
+} from './labs/antigravity/antigravity_agent.js';
+export {
+  isAntigravityToolExecutionError,
+  isLocalAntigravityConfig,
+} from './labs/antigravity/sdk_types.js';
+export type {
+  AntigravityAgentConfig,
+  AntigravityHook,
+  AntigravityStep,
+  AntigravityStepSource,
+  AntigravityStepStatus,
+  AntigravityStepType,
+  AntigravityTool,
+  AntigravityToolCall,
+  AntigravityToolExecutionError,
+  AntigravityToolResult,
+  LocalAntigravityAgentConfig,
+  OnToolErrorHook,
+  PostToolCallHook,
+  SdkAgent,
+  SdkConversation,
+  SessionContinuationMode,
+} from './labs/antigravity/sdk_types.js';
 export {addEventsToMemory, addMemory} from './memory/base_memory_service.js';
 export type {
   AddEventsToMemoryRequest,
