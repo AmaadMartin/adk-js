@@ -73,18 +73,6 @@ const remoteMcpServerSchema = z.strictObject({
     .optional(),
 });
 
-/** Renders an issue path as `headers.X-Bad` or `allowedTools[1]`. */
-function formatPath(path: readonly PropertyKey[]): string {
-  return path
-    .map((segment, index) => {
-      if (typeof segment === 'number') {
-        return `[${segment}]`;
-      }
-      return index === 0 ? String(segment) : `.${String(segment)}`;
-    })
-    .join('');
-}
-
 /**
  * Validates a remote MCP server description and returns it as a
  * {@link RemoteMcpServer}.
@@ -109,7 +97,7 @@ export function createRemoteMcpServer(spec: unknown): RemoteMcpServer {
   throw new InputValidationError(
     issue.code === 'unrecognized_keys'
       ? `RemoteMcpServer does not accept the fields: ${issue.keys.join(', ')}.`
-      : `RemoteMcpServer.${formatPath(issue.path)} ${issue.message}`,
+      : `RemoteMcpServer.${issue.path.join('.')} ${issue.message}`,
   );
 }
 
