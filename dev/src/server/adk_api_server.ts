@@ -1028,8 +1028,12 @@ export class AdkApiServer {
         );
         await executeQuery(req.body);
       } else {
+        // Decode through the stream's StringDecoder: a multi-byte UTF-8
+        // sequence straddling two chunks would otherwise become replacement
+        // characters on both sides of the boundary.
+        req.setEncoding('utf-8');
         let rawBody = '';
-        req.on('data', (chunk) => {
+        req.on('data', (chunk: string) => {
           rawBody += chunk;
         });
         req.on('end', async () => {

@@ -136,6 +136,57 @@ class HttpClient {
   }
 }
 
+/** The U+FFFD standing in for bytes that did not decode as UTF-8. */
+const REPLACEMENT_CHARACTER = '\uFFFD';
+
+/**
+ * Fixture text made of 3-byte characters. `HTTP_CHUNK_BYTES` is not a multiple
+ * of three, so successive chunk boundaries land inside a UTF-8 sequence rather
+ * than between two of them.
+ */
+const MULTI_BYTE_TEXT = '世界你好'.repeat(16);
+
+/** Bytes per chunked-transfer frame written by `postInChunks`. */
+const HTTP_CHUNK_BYTES = 7;
+
+/**
+ * POSTs `payload` to `url`, writing its UTF-8 bytes `HTTP_CHUNK_BYTES` at a
+ * time. With no `Content-Length` Node frames each `write()` as its own chunked
+ * transfer frame and the receiving parser emits one 'data' event per frame, so
+ * the handler observes exactly these byte boundaries.
+ */
+async function postInChunks(
+  url: string,
+  payload: string,
+): Promise<{status: number}> {
+  const bytes = Buffer.from(payload, 'utf-8');
+  const target = new URL(url);
+
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname,
+        method: 'POST',
+        // A doubled media type is what Agent Engine sends; Express's JSON body
+        // parser declines it, which is what exercises the raw-body path.
+        headers: {'Content-Type': 'application/json,application/json'},
+      },
+      (response) => {
+        response.resume();
+        response.on('end', () => resolve({status: response.statusCode ?? 0}));
+      },
+    );
+
+    request.on('error', reject);
+    for (let offset = 0; offset < bytes.length; offset += HTTP_CHUNK_BYTES) {
+      request.write(bytes.subarray(offset, offset + HTTP_CHUNK_BYTES));
+    }
+    request.end();
+  });
+}
+
 class TestAgent extends LlmAgent {
   async *runAsyncImpl(
     context: InvocationContext,
@@ -1647,6 +1698,33 @@ describe('AdkWebServer', () => {
       expect(data.output[0].content?.parts?.[0].text).toBe(
         "Hello user! I'm streaming you events now!",
       );
+    });
+
+    it('should not corrupt a multi-byte raw body split across chunk boundaries', async () => {
+      const payload = JSON.stringify({
+        input: {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'utf8SessionId',
+          newMessage: {parts: [{text: MULTI_BYTE_TEXT}], role: 'user'},
+        },
+      });
+
+      const response = await postInChunks(
+        `${server.url}/api/reasoning_engine`,
+        payload,
+      );
+
+      expect(response.status).toBe(200);
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: 'utf8SessionId',
+      });
+      const userMessage = session?.events.find((e) => e.author === 'user')
+        ?.content?.parts?.[0].text;
+      expect(userMessage?.indexOf(REPLACEMENT_CHARACTER)).toBe(-1);
+      expect(userMessage).toBe(MULTI_BYTE_TEXT);
     });
 
     it('should return 400 if appName is missing', async () => {
