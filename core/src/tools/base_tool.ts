@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Tool} from '@google/genai';
+import {FunctionDeclaration} from '@google/genai';
 
-import {LlmRequest} from '../models/llm_request.js';
+import {
+  findToolWithFunctionDeclarations,
+  LlmRequest,
+} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
 import {Context} from '../agents/context.js';
@@ -198,12 +201,4 @@ export abstract class BaseTool {
   get apiVariant() {
     return getGoogleLlmVariant();
   }
-}
-
-function findToolWithFunctionDeclarations(
-  llmRequest: LlmRequest,
-): Tool | undefined {
-  return (llmRequest.config?.tools || []).find(
-    (tool) => 'functionDeclarations' in tool,
-  ) as Tool | undefined;
 }
