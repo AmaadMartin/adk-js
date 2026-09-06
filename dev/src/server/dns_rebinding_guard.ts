@@ -78,25 +78,28 @@ export function isLoopbackAddress(host: string): boolean {
  * --allowed_hosts) vouches for any host explicitly listed there -- the
  * latter exists so an embedder behind a proxy can widen the guard without
  * having to open CORS to every origin on the internet just to get a Host
- * header through. Only "*" in allowOrigins opts out of the guard entirely.
+ * header through. Only "*" opts out of the guard entirely, in any entry when
+ * allowOrigins is a list.
  */
 export function getAllowedRequestHosts(
-  allowOrigins: string | undefined,
+  allowOrigins: string | readonly string[] | undefined,
   extraAllowedHosts?: readonly string[],
 ): Set<string> | null {
-  const origin = (allowOrigins ?? '').trim();
-  if (origin === '*') {
-    return null;
-  }
+  const origins =
+    typeof allowOrigins === 'string' ? [allowOrigins] : allowOrigins;
   const hosts = new Set<string>();
-  if (origin) {
+  for (const rawOrigin of origins ?? []) {
+    const origin = rawOrigin.trim();
+    if (origin === '*') {
+      return null;
+    }
     try {
       const host = new URL(origin).hostname;
       if (host) {
         hosts.add(host.toLowerCase());
       }
     } catch {
-      // A malformed origin vouches for no host.
+      // A malformed origin -- an empty one included -- vouches for no host.
     }
   }
   for (const rawHost of extraAllowedHosts ?? []) {
