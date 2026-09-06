@@ -504,6 +504,43 @@ describe('VertexAiSessionService', () => {
       expect(parsedEvent?.usageMetadata).toEqual({promptTokens: 10});
     });
 
+    it('keeps the compacted-event fields fed from customMetadata', async () => {
+      const compactedContent = {role: 'user', parts: [{text: 'summary'}]};
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'projects/p/locations/l/sessions/s/events/e1',
+            invocationId: 'inv-1',
+            author: 'user',
+            timestamp: '2026-04-09T13:00:00Z',
+            eventMetadata: {
+              customMetadata: {
+                _compaction: {
+                  startTime: 1600000000000,
+                  endTime: 1610000000000,
+                  compactedContent,
+                },
+              },
+            },
+          },
+        ],
+      });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      const parsedEvent = session?.events[0];
+      if (parsedEvent === undefined || !isCompactedEvent(parsedEvent)) {
+        expect.fail('the parsed event is not a compacted event');
+      }
+      expect(parsedEvent.startTime).toBe(1600000000000);
+      expect(parsedEvent.endTime).toBe(1610000000000);
+      expect(parsedEvent.compactedContent).toEqual(compactedContent);
+    });
+
     it('restores groundingMetadata when rawEvent is absent', async () => {
       const groundingMetadata = {
         webSearchQueries: ['adk js sessions'],
