@@ -10,6 +10,11 @@ import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
+import {
+  DispatcherRequestInit,
+  resolveSslDispatcher,
+  SslVerify,
+} from '../../utils/ssl_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -26,6 +31,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private sslVerify?: SslVerify;
 
   constructor(
     name: string,
@@ -38,6 +44,7 @@ export class RestApiTool extends BaseTool {
       preservePropertyNames?: boolean;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
       credentialKey?: string;
+      sslVerify?: SslVerify;
     } = {},
   ) {
     super({name, description});
@@ -45,6 +52,7 @@ export class RestApiTool extends BaseTool {
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
     this.credentialKey = options.credentialKey;
+    this.sslVerify = options.sslVerify;
     this.operationParser = new OperationParser(operation, options);
   }
 
@@ -61,6 +69,17 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  /**
+   * Sets TLS certificate verification for this tool's outgoing requests.
+   *
+   * @param sslVerify The setting. Call with no argument to restore the default
+   *     verification against the system CA.
+   */
+  @experimental
+  public configureSslVerify(sslVerify?: SslVerify) {
+    this.sslVerify = sslVerify;
   }
 
   @experimental
@@ -130,13 +149,19 @@ export class RestApiTool extends BaseTool {
       Object.assign(headers, providerHeaders);
     }
 
+    const init: DispatcherRequestInit = {
+      method,
+      headers,
+      // eslint-disable-next-line no-undef
+      body: body as BodyInit,
+    };
+    const dispatcher = await resolveSslDispatcher(this.sslVerify);
+    if (dispatcher) {
+      init.dispatcher = dispatcher;
+    }
+
     try {
-      const response = await globalThis.fetch(url, {
-        method,
-        headers,
-        // eslint-disable-next-line no-undef
-        body: body as BodyInit,
-      });
+      const response = await globalThis.fetch(url, init);
 
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
@@ -316,6 +341,7 @@ export function createRestApiTool(
     preservePropertyNames?: boolean;
     headerProvider?: (context: ReadonlyContext) => Record<string, string>;
     credentialKey?: string;
+    sslVerify?: SslVerify;
   } = {},
 ): RestApiTool {
   return new RestApiTool(

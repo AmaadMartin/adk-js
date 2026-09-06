@@ -8,6 +8,7 @@ import {
   AuthCredentialTypes,
   Context,
   createSession,
+  HttpDispatcher,
   InvocationContext,
   LlmAgent,
   OpenAPIToolset,
@@ -129,6 +130,41 @@ describe('OpenAPIToolset Integration', () => {
     expect(result).toEqual({
       error: 'Failed to execute API call: Network error',
     });
+  });
+
+  it('should send the configured dispatcher alongside the unchanged request', async () => {
+    const fakeDispatcher: HttpDispatcher = {dispatch: () => true};
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+      sslVerify: fakeDispatcher,
+    });
+    const getProfileTool = toolset.getTool('get_profile');
+    if (!getProfileTool) expect.fail('get_profile tool was not created');
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response('{"status":"success"}', {
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+
+    const result = await getProfileTool.runAsync({
+      args: {id: 'user1', service: 'myservice'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(result).toEqual({status: 'success'});
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://staging.truanon.com/api/get_profile?id=user1&service=myservice',
+      expect.objectContaining({method: 'GET', dispatcher: fakeDispatcher}),
+    );
   });
 
   it('should keep a malicious path argument inside the declared endpoint', async () => {
