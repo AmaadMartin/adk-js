@@ -39,6 +39,16 @@ describe('FeatureRegistry', () => {
     expect(config?.defaultOn).toBe(false);
   });
 
+  it('should get correct config for JSON_SCHEMA_FOR_FUNC_DECL', () => {
+    delete process.env.ADK_ENABLE_JSON_SCHEMA_FOR_FUNC_DECL;
+    delete process.env.ADK_DISABLE_JSON_SCHEMA_FOR_FUNC_DECL;
+    const config = getFeatureConfig(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL);
+
+    expect(config?.stage).toBe(FeatureStage.EXPERIMENTAL);
+    expect(config?.defaultOn).toBe(false);
+    expect(isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)).toBe(false);
+  });
+
   it('should return defaultOn value when no overrides or env vars', () => {
     delete process.env.ADK_ENABLE_PROGRESSIVE_SSE_STREAMING;
     delete process.env.ADK_DISABLE_PROGRESSIVE_SSE_STREAMING;
