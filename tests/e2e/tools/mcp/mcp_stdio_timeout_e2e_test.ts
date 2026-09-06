@@ -24,6 +24,14 @@ const SILENT_SERVER_PATH = fileURLToPath(
 /** Comfortably below the SDK's 60s default, and above the 0.5s asked for. */
 const MAX_ELAPSED_MS = 5000;
 
+/**
+ * Long enough to outlast the SDK's 60s default. A regression then fails on the
+ * elapsed-time assertion, which reports the measured wait, rather than on the
+ * runner's own timeout, which reads like a flake. The passing run takes under
+ * a second, so the allowance costs nothing.
+ */
+const TEST_TIMEOUT_MS = 70_000;
+
 describe('MCP stdio timeout (e2e, real unresponsive server)', () => {
   let toolset: MCPToolset | undefined;
 
@@ -32,26 +40,32 @@ describe('MCP stdio timeout (e2e, real unresponsive server)', () => {
     toolset = undefined;
   });
 
-  it('gives up on a server that never answers the handshake', async () => {
-    toolset = new MCPToolset({
-      type: 'StdioConnectionParams',
-      serverParams: {command: process.execPath, args: [SILENT_SERVER_PATH]},
-      timeout: 0.5,
-    });
+  it(
+    'gives up on a server that never answers the handshake',
+    async () => {
+      toolset = new MCPToolset({
+        type: 'StdioConnectionParams',
+        serverParams: {command: process.execPath, args: [SILENT_SERVER_PATH]},
+        timeout: 0.5,
+      });
 
-    const startedAt = Date.now();
-    const failure = await toolset.getTools().then(
-      () => undefined,
-      (err: unknown) => err,
-    );
-    const elapsedMs = Date.now() - startedAt;
+      const startedAt = Date.now();
+      const failure = await toolset.getTools().then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const elapsedMs = Date.now() - startedAt;
 
-    if (!(failure instanceof Error)) {
-      expect.fail('getTools() resolved against an unresponsive MCP server');
-    }
-    expect(failure.message).toContain('Failed to create MCP session');
-    expect(failure.message).toContain(`MCP error ${ErrorCode.RequestTimeout}`);
-    expect(failure.cause).toBeDefined();
-    expect(elapsedMs).toBeLessThan(MAX_ELAPSED_MS);
-  });
+      if (!(failure instanceof Error)) {
+        expect.fail('getTools() resolved against an unresponsive MCP server');
+      }
+      expect(failure.message).toContain('Failed to create MCP session');
+      expect(failure.message).toContain(
+        `MCP error ${ErrorCode.RequestTimeout}`,
+      );
+      expect(failure.cause).toBeDefined();
+      expect(elapsedMs).toBeLessThan(MAX_ELAPSED_MS);
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
