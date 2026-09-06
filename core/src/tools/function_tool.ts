@@ -166,6 +166,17 @@ export class FunctionTool<
   }
 
   /**
+   * Whether `execute` is an async generator function. Such a function yields a
+   * sequence of results, which makes the tool a streaming tool.
+   */
+  override get isStreaming(): boolean {
+    return (
+      Object.prototype.toString.call(this.execute) ===
+      '[object AsyncGeneratorFunction]'
+    );
+  }
+
+  /**
    * Returns the function declaration derived from the tool's name, description,
    * and parameter schema.
    */

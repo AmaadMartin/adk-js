@@ -8,10 +8,10 @@ import {
   Content,
   FunctionDeclaration,
   GenerateContentConfig,
-  LiveConnectConfig,
   SchemaUnion,
 } from '@google/genai';
 
+import {LiveConnectConfigWithHistory} from '../agents/run_config.js';
 import {BaseTool} from '../tools/base_tool.js';
 
 /**
@@ -35,7 +35,12 @@ export interface LlmRequest {
    */
   config?: GenerateContentConfig;
 
-  liveConnectConfig: LiveConnectConfig;
+  /**
+   * The config the live connection is opened with. Typed as
+   * {@link LiveConnectConfigWithHistory} so the flow can set the history
+   * settings the Live API accepts but `@google/genai` 2.9.0 does not declare.
+   */
+  liveConnectConfig: LiveConnectConfigWithHistory;
 
   /**
    * The tools dictionary. Excluded from JSON serialization.

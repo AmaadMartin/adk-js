@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {Content, GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -34,9 +34,11 @@ import {BaseExampleProvider} from '../examples/base_example_provider.js';
 import {Example} from '../examples/example.js';
 import {BaseLlm, isBaseLlm} from '../models/base_llm.js';
 import {BaseLlmConnection} from '../models/base_llm_connection.js';
+import {isGemini} from '../models/google_llm.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {LLMRegistry} from '../models/registry.js';
+import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
@@ -66,8 +68,15 @@ import {
 } from './functions.js';
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
+import {TOOLSET_AUTH_PREPROCESSOR} from '../auth/toolset_auth.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
+import {AudioCacheManager} from './audio_cache_manager.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
+import {
+  markLiveAsyncToolsNonBlocking,
+  pumpEventsInto,
+  stopBackgroundToolTasks,
+} from './live_flow_utils.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
@@ -90,6 +99,15 @@ import {StreamingMode} from './run_config.js';
 const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
 
 /**
+ * Maximum number of times a live run restarts its session.
+ *
+ * A restart replays the whole flow, so a `beforeModelCallback` that blocks
+ * every turn would otherwise restart forever. adk-python recurses without a
+ * bound; adk-js bounds it.
+ */
+const MAX_LIVE_RESTARTS = 5;
+
+/**
  * Delay before closing the parent connection on agent transfer. Gives the
  * server-side model a moment to flush any pending audio for the final turn
  * before teardown. Mirrors `DEFAULT_TRANSFER_AGENT_DELAY` (1.0s) in the Python
@@ -98,12 +116,25 @@ const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
 const TRANSFER_AGENT_DELAY_MS = 1000;
 
 /**
+ * How `runLiveFlow` reopens a live session.
+ *
+ * `'resume'` keeps the session resumption handle, so the server restores the
+ * state it already holds. `'restart'` drops the handle and opens a new session
+ * whose history is rebuilt from the session's events.
+ */
+type LiveReconnectMode = 'resume' | 'restart';
+
+/**
  * Sentinel thrown from `runReceiveLoop` to break out of the receive iterator
- * and signal `runLiveFlow` to reconnect using the stored resumption handle.
- * Used when the server sends `goAway` or any other recoverable terminal.
+ * and signal `runLiveFlow` to reopen the connection. Used when the server
+ * sends `goAway`, on any other recoverable terminal, and when a model callback
+ * blocks a turn.
  */
 class LiveReconnectSignal extends Error {
-  constructor(readonly reason: string) {
+  constructor(
+    readonly reason: string,
+    readonly mode: LiveReconnectMode = 'resume',
+  ) {
     super(`live reconnect requested: ${reason}`);
     this.name = 'LiveReconnectSignal';
   }
@@ -158,6 +189,70 @@ function applyLiveRunConfig(
       (liveConfig as Record<string, unknown>)[k] = runConfig[k];
     }
   }
+}
+
+/**
+ * Puts the current session resumption handle on the connect config.
+ *
+ * `transparent` is set only for a Vertex AI backend: the Gemini API backend
+ * rejects it. A value the caller already chose is left alone.
+ */
+function applyLiveSessionResumption(
+  invocationContext: InvocationContext,
+  llmRequest: LlmRequest,
+  llm: BaseLlm,
+): void {
+  const handle = invocationContext.liveSessionResumptionHandle;
+  if (!handle) {
+    return;
+  }
+  const sessionResumption = (llmRequest.liveConnectConfig.sessionResumption ??=
+    {});
+  sessionResumption.handle = handle;
+  if (
+    isGemini(llm) &&
+    llm.apiBackend === GoogleLLMVariant.VERTEX_AI &&
+    sessionResumption.transparent === undefined
+  ) {
+    sessionResumption.transparent = true;
+  }
+}
+
+/**
+ * Tells the Live server that the history about to be replayed already holds
+ * the model's past answers, so the server does not answer those turns again.
+ *
+ * Only applies when history is replayed, i.e. on a fresh connection with
+ * contents. A value the caller already chose is left alone.
+ */
+function applyLiveHistoryConfig(
+  invocationContext: InvocationContext,
+  llmRequest: LlmRequest,
+): void {
+  if (
+    llmRequest.contents.length === 0 ||
+    invocationContext.liveSessionResumptionHandle
+  ) {
+    return;
+  }
+  const liveConfig = llmRequest.liveConnectConfig;
+  liveConfig.historyConfig = {
+    ...invocationContext.runConfig?.historyConfig,
+    ...liveConfig.historyConfig,
+  };
+  liveConfig.historyConfig.initialHistoryInClientContent ??= true;
+}
+
+/** What the live send loop needs to drain the queue into the connection. */
+interface LiveSendLoopParams {
+  invocationContext: InvocationContext;
+  connection: BaseLlmConnection;
+  llmRequest: LlmRequest;
+  liveRequestQueue: LiveRequestQueue;
+  /** Where the loop puts an event a before-model callback blocked. */
+  screenedEvents: AsyncQueue<Event>;
+  sendAbortSignal?: AbortSignal;
+  invocationAbortSignal?: AbortSignal;
 }
 
 /**
@@ -494,6 +589,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   readonly outputSchemaSource?: SchemaLike;
   outputKey?: string;
   private _finishTaskTool?: FinishTaskTool;
+  /** Caches this agent's live audio until a turn ends. */
+  private readonly audioCacheManager = new AudioCacheManager();
   beforeModelCallback?: BeforeModelCallback;
   afterModelCallback?: AfterModelCallback;
   beforeToolCallback?: BeforeToolCallback;
@@ -542,6 +639,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.requestProcessors = config.requestProcessors ?? [
       BASIC_LLM_REQUEST_PROCESSOR,
       AUTH_PREPROCESSOR,
+      TOOLSET_AUTH_PREPROCESSOR,
       IDENTITY_LLM_REQUEST_PROCESSOR,
       INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
@@ -957,9 +1055,33 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
    * reconnects using that handle up to {@link MAX_LIVE_RECONNECT_ATTEMPTS}
    * times. Subsequent reconnects skip `sendHistory` because the server
    * already holds the conversation state associated with the handle.
+   *
+   * A model callback that blocks a turn asks for a restart instead: the
+   * handle is dropped and the flow reruns from preprocess, so the new session
+   * starts from the history the session holds. Restarts are bounded by
+   * {@link MAX_LIVE_RESTARTS}.
+   *
+   * @param invocationContext The current invocation context.
+   * @param restartCount How many restarts already happened in this run.
    */
   private async *runLiveFlow(
     invocationContext: InvocationContext,
+    restartCount = 0,
+  ): AsyncGenerator<Event, void, void> {
+    try {
+      yield* this.runLiveSession(invocationContext, restartCount);
+    } finally {
+      // The tools this run started stop with it, whether it ended on
+      // `task_completed`, on a connection error, or because the caller walked
+      // away. A tool left running would keep answering a model that belongs
+      // to the next agent.
+      await stopBackgroundToolTasks(invocationContext);
+    }
+  }
+
+  private async *runLiveSession(
+    invocationContext: InvocationContext,
+    restartCount: number,
   ): AsyncGenerator<Event, void, void> {
     if (!invocationContext.liveRequestQueue) {
       throw new Error('liveRequestQueue is required for LlmAgent.runLiveFlow.');
@@ -1005,15 +1127,8 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         return;
       }
 
-      // Apply the latest resumption handle before each connect attempt.
-      const handle = invocationContext.liveSessionResumptionHandle;
-      if (handle) {
-        llmRequest.liveConnectConfig ??= {};
-        llmRequest.liveConnectConfig.sessionResumption = {
-          handle,
-          transparent: true,
-        };
-      }
+      applyLiveSessionResumption(invocationContext, llmRequest, llm);
+      applyLiveHistoryConfig(invocationContext, llmRequest);
 
       let connection: BaseLlmConnection;
       try {
@@ -1056,12 +1171,16 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       const combinedAbort = invocationContext.abortSignal
         ? AbortSignal.any([invocationContext.abortSignal, sendAbort.signal])
         : sendAbort.signal;
-      const sendTask = this.runSendLoop(
+      const screenedEvents = new AsyncQueue<Event>();
+      const sendTask = this.runSendLoop({
+        invocationContext,
         connection,
-        invocationContext.liveRequestQueue,
-        combinedAbort,
-        invocationContext.abortSignal,
-      );
+        llmRequest,
+        liveRequestQueue: invocationContext.liveRequestQueue,
+        screenedEvents,
+        sendAbortSignal: combinedAbort,
+        invocationAbortSignal: invocationContext.abortSignal,
+      });
       sendTask.catch((error) => {
         logger.error('Error in live send loop:', error);
         sendError = error;
@@ -1071,33 +1190,55 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         });
       });
 
-      let reconnect = false;
+      // The model's events and the send loop's screened events share one
+      // queue, so a blocked message reaches the caller without waiting on a
+      // server message that is never coming.
+      const receiveLoop = this.runReceiveLoop(
+        invocationContext,
+        connection,
+        llmRequest,
+        sendAbort,
+      );
+      void pumpEventsInto(receiveLoop, screenedEvents);
+
+      let reconnectMode: LiveReconnectMode | undefined;
+      let fatalError: unknown;
       try {
-        yield* this.runReceiveLoop(
-          invocationContext,
-          connection,
-          llmRequest,
-          sendAbort,
-        );
+        for await (const event of screenedEvents) {
+          yield event;
+        }
       } catch (err) {
-        const canReconnect =
+        // A restart opens a new session, so it does not need a handle; every
+        // other reconnect resumes the session the handle names.
+        const restartRequested =
+          err instanceof LiveReconnectSignal && err.mode === 'restart';
+        const canResume =
           !!invocationContext.liveSessionResumptionHandle &&
           (err instanceof LiveReconnectSignal || isRecoverableLiveError(err));
-        if (canReconnect) {
-          reconnect = true;
+        if (restartRequested) {
+          reconnectMode = 'restart';
+          logger.info('Live session blocked a turn; will restart it.', err);
+        } else if (canResume) {
+          reconnectMode = 'resume';
           logger.info(
             'Live connection closed; will reconnect with session handle.',
             err,
           );
         } else {
-          // Tear down before rethrowing.
-          await this.teardownLiveConnection(sendAbort, connection, sendTask);
-          throw err;
+          fatalError = err;
         }
+      } finally {
+        // Close the receive loop without waiting on it: when the caller walks
+        // away it is usually parked on a server message that is not coming.
+        void receiveLoop.return(undefined).catch(() => undefined);
+        // Stop this attempt's send loop and connection on every exit path,
+        // including the one where the caller stopped iterating.
+        await this.teardownLiveConnection(sendAbort, connection, sendTask);
       }
 
-      // Cancel send loop for this attempt; receive loop has exited.
-      await this.teardownLiveConnection(sendAbort, connection, sendTask);
+      if (fatalError) {
+        throw fatalError;
+      }
 
       if (invocationContext.abortSignal?.aborted) {
         return;
@@ -1107,7 +1248,20 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         throw sendError;
       }
 
-      if (!reconnect) {
+      if (!reconnectMode) {
+        return;
+      }
+
+      if (reconnectMode === 'restart') {
+        if (restartCount >= MAX_LIVE_RESTARTS) {
+          throw new Error(
+            `Max live session restarts reached (${MAX_LIVE_RESTARTS}).`,
+          );
+        }
+        // A new session holds none of the old one's state, so the handle goes
+        // and preprocess rebuilds the history from the session's events.
+        invocationContext.liveSessionResumptionHandle = undefined;
+        yield* this.runLiveFlow(invocationContext, restartCount + 1);
         return;
       }
 
@@ -1134,7 +1288,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
         yield event;
       }
+      // A processor that interrupts the invocation, such as a toolset asking
+      // for a credential, stops the rest of preprocessing.
+      if (invocationContext.endInvocation) {
+        return;
+      }
     }
+
     for (const toolUnion of this.tools) {
       const toolContext = new Context({invocationContext});
       const tools = (
@@ -1154,14 +1314,20 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+
+    markLiveAsyncToolsNonBlocking(llmRequest);
   }
 
-  private async runSendLoop(
-    connection: BaseLlmConnection,
-    liveRequestQueue: LiveRequestQueue,
-    sendAbortSignal?: AbortSignal,
-    invocationAbortSignal?: AbortSignal,
-  ): Promise<void> {
+  private async runSendLoop(params: LiveSendLoopParams): Promise<void> {
+    const {
+      invocationContext,
+      connection,
+      llmRequest,
+      liveRequestQueue,
+      screenedEvents,
+      sendAbortSignal,
+      invocationAbortSignal,
+    } = params;
     while (true) {
       if (sendAbortSignal?.aborted || invocationAbortSignal?.aborted) {
         return;
@@ -1179,7 +1345,22 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         throw error;
       }
       try {
-        await this.dispatchLiveRequest(connection, liveRequest);
+        const blockedEvent = await this.screenLiveRequest(
+          invocationContext,
+          liveRequest,
+          llmRequest,
+        );
+        if (blockedEvent) {
+          // The model never saw the message, so there is nothing to send and
+          // no server reply to wait for. The caller gets the block directly.
+          screenedEvents.push(blockedEvent);
+          continue;
+        }
+        await this.dispatchLiveRequest(
+          invocationContext,
+          connection,
+          liveRequest,
+        );
       } catch (error) {
         if (sendAbortSignal?.aborted || invocationAbortSignal?.aborted) {
           logger.debug('Send failed after teardown:', error);
@@ -1197,7 +1378,41 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
   }
 
+  /**
+   * Records the user's typed content in the session and screens it with the
+   * before-model callbacks. Live callback site 1 of 3.
+   *
+   * @return The blocked event when a callback blocked the content, otherwise
+   *     `undefined`.
+   */
+  private async screenLiveRequest(
+    invocationContext: InvocationContext,
+    liveRequest: LiveRequest,
+    llmRequest: LlmRequest,
+  ): Promise<Event | undefined> {
+    const content = liveRequest.content;
+    if (!content || liveRequest.close) {
+      return undefined;
+    }
+    if (content.parts?.some((part) => part.functionResponse)) {
+      return undefined;
+    }
+    content.role ??= 'user';
+
+    await invocationContext.sessionService?.appendEvent({
+      session: invocationContext.session,
+      event: createEvent({
+        invocationId: invocationContext.invocationId,
+        author: 'user',
+        content,
+      }),
+    });
+
+    return this.screenLiveUserContent(invocationContext, content, llmRequest);
+  }
+
   private async dispatchLiveRequest(
+    invocationContext: InvocationContext,
     connection: BaseLlmConnection,
     liveRequest: LiveRequest,
   ): Promise<void> {
@@ -1214,12 +1429,55 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
     if (liveRequest.blob) {
+      // Only cache what a flush can write. Nothing empties the cache while
+      // `saveLiveBlob` is off, so caching then would grow it for the life of
+      // the session. adk-python caches unconditionally and has that leak.
+      if (invocationContext.runConfig?.saveLiveBlob) {
+        this.audioCacheManager.cacheAudio(
+          invocationContext,
+          liveRequest.blob,
+          'input',
+        );
+      }
       await connection.sendRealtime(liveRequest.blob);
       return;
     }
     if (liveRequest.content) {
       await connection.sendContent(liveRequest.content);
     }
+  }
+
+  /**
+   * Screens one piece of live user content with the before-model callbacks.
+   *
+   * @return The finalized blocked event, marked `turnComplete`, when a
+   *     callback returned a response; otherwise `undefined`.
+   */
+  private async screenLiveUserContent(
+    invocationContext: InvocationContext,
+    content: Content,
+    llmRequest: LlmRequest,
+  ): Promise<Event | undefined> {
+    const callbackLlmRequest: LlmRequest = {...llmRequest, contents: [content]};
+    const callbackResponseEvent = createEvent({
+      invocationId: invocationContext.invocationId,
+      author: this.name,
+      branch: invocationContext.branch,
+    });
+
+    const blockedResponse = await this.handleBeforeModelCallback(
+      invocationContext,
+      callbackLlmRequest,
+      callbackResponseEvent,
+    );
+    if (!blockedResponse) {
+      return undefined;
+    }
+    return createEvent({
+      ...callbackResponseEvent,
+      ...blockedResponse,
+      turnComplete: true,
+    });
   }
 
   /**
@@ -1247,6 +1505,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     llmRequest: LlmRequest,
     sendAbort: AbortController,
   ): AsyncGenerator<Event, void, void> {
+    // Output transcription arrives in chunks; the callbacks see the text the
+    // model has spoken so far in this turn.
+    let turnOutputTranscription = '';
+
     for await (const llmResponse of connection.receive()) {
       if (invocationContext.abortSignal?.aborted) {
         return;
@@ -1271,6 +1533,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         throw new LiveReconnectSignal('goAway');
       }
 
+      if (llmResponse.turnComplete || llmResponse.interrupted) {
+        turnOutputTranscription = '';
+      }
+
       // Input transcriptions are the user speaking; echoed user-role
       // content (e.g. function responses) likewise belongs to the user side.
       const author =
@@ -1284,12 +1550,37 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         branch: invocationContext.branch,
       });
 
+      if (llmResponse.outputTranscription) {
+        if (llmResponse.outputTranscription.finished) {
+          turnOutputTranscription = '';
+        } else if (llmResponse.outputTranscription.text) {
+          turnOutputTranscription += llmResponse.outputTranscription.text;
+        }
+
+        // Live callback site 2 of 3: screen what the model has said so far. A
+        // block ends the turn and restarts the session, so the rest of the
+        // model's answer never reaches the caller.
+        if (turnOutputTranscription) {
+          const blockedEvent = await this.screenLiveModelOutput(
+            invocationContext,
+            llmResponse,
+            turnOutputTranscription,
+            modelResponseEvent,
+          );
+          if (blockedEvent) {
+            yield blockedEvent;
+            throw new LiveReconnectSignal('blocked model output', 'restart');
+          }
+        }
+      }
+
       for await (const event of this.postprocessLive(
         invocationContext,
         llmRequest,
         llmResponse,
         modelResponseEvent,
       )) {
+        this.cacheLiveOutputAudio(invocationContext, event);
         yield event;
 
         // Send function responses directly through the connection rather
@@ -1323,6 +1614,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           // concurrently (mirrors `send_task.cancel()` in the Python flow).
           sendAbort.abort();
           await connection.close();
+          // The sub-agent inherits the live request queue, and this run does
+          // not return until the sub-agent is done. This agent's tools have
+          // to stop here, or they keep answering the sub-agent's model.
+          await stopBackgroundToolTasks(invocationContext);
           const agent = requireAgent(invocationContext);
           const subAgent = agent.rootAgent.findAgent(transferTo);
           if (subAgent) {
@@ -1346,6 +1641,77 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           }
           return;
         }
+      }
+
+      // Live callback site 3 of 3: screen what the user said, once the server
+      // reports the transcription as finished. It runs after `postprocessLive`
+      // so the user's own words still reach the caller, as at site 1.
+      const inputTranscription = llmResponse.inputTranscription;
+      if (inputTranscription?.finished && inputTranscription.text) {
+        const blockedEvent = await this.screenLiveUserContent(
+          invocationContext,
+          {role: 'user', parts: [{text: inputTranscription.text}]},
+          llmRequest,
+        );
+        if (blockedEvent) {
+          yield blockedEvent;
+          throw new LiveReconnectSignal('blocked spoken input', 'restart');
+        }
+      }
+    }
+  }
+
+  /**
+   * Screens the model's accumulated output transcription with the after-model
+   * callbacks. Live callback site 2 of 3.
+   *
+   * @return The finalized blocked event, marked `turnComplete`, when a
+   *     callback returned a response; otherwise `undefined`.
+   */
+  private async screenLiveModelOutput(
+    invocationContext: InvocationContext,
+    llmResponse: LlmResponse,
+    turnOutputTranscription: string,
+    modelResponseEvent: Event,
+  ): Promise<Event | undefined> {
+    const callbackLlmResponse: LlmResponse = {
+      ...llmResponse,
+      outputTranscription: {text: turnOutputTranscription, finished: false},
+    };
+    const blockedResponse = await this.handleAfterModelCallback(
+      invocationContext,
+      callbackLlmResponse,
+      modelResponseEvent,
+    );
+    if (!blockedResponse) {
+      return undefined;
+    }
+    return createEvent({
+      ...modelResponseEvent,
+      ...blockedResponse,
+      turnComplete: true,
+    });
+  }
+
+  /**
+   * Caches the model's audio parts so the flow can write the turn's audio to
+   * the artifact service. Does nothing unless `saveLiveBlob` is on.
+   */
+  private cacheLiveOutputAudio(
+    invocationContext: InvocationContext,
+    event: Event,
+  ): void {
+    if (!invocationContext.runConfig?.saveLiveBlob) {
+      return;
+    }
+    for (const part of event.content?.parts ?? []) {
+      const inlineData = part.inlineData;
+      if (inlineData?.mimeType?.startsWith('audio/')) {
+        this.audioCacheManager.cacheAudio(
+          invocationContext,
+          {data: inlineData.data, mimeType: inlineData.mimeType},
+          'output',
+        );
       }
     }
   }
@@ -1407,6 +1773,26 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         partial: llmResponse.partial,
       });
       return;
+    }
+
+    // A turn ends on `interrupted` or `turnComplete`, and neither carries
+    // content worth merging into an event of its own, so the flushed audio
+    // replaces the control event. An interruption stops the model while the
+    // user keeps speaking, so it leaves the user's audio for the next flush.
+    if (
+      invocationContext.runConfig?.saveLiveBlob &&
+      (llmResponse.interrupted || llmResponse.turnComplete)
+    ) {
+      const flushedEvents = await this.audioCacheManager.flushCaches(
+        invocationContext,
+        {flushUserAudio: !llmResponse.interrupted},
+      );
+      if (flushedEvents.length) {
+        for (const event of flushedEvents) {
+          yield event;
+        }
+        return;
+      }
     }
 
     const mergedEvent = createEvent({
@@ -1473,7 +1859,13 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
         yield event;
       }
+      // A processor that interrupts the invocation, such as a toolset asking
+      // for a credential, stops the rest of preprocessing.
+      if (invocationContext.endInvocation) {
+        return;
+      }
     }
+
     // TODO - b/425992518: check if tool preprocessors can be simplified.
     // Run pre-processors for tools.
     const allTools = [...this.tools];

@@ -5,6 +5,7 @@
  */
 
 import {ReadonlyContext} from '../agents/readonly_context.js';
+import {AuthConfig} from '../auth/auth_tool.js';
 import {LlmRequest} from '../models/llm_request.js';
 
 import {Context} from '../agents/context.js';
@@ -56,6 +57,20 @@ export abstract class BaseToolset {
    * @return A Promise that resolves to the list of tools.
    */
   abstract getTools(context?: ReadonlyContext): Promise<BaseTool[]>;
+
+  /**
+   * Returns the auth config this toolset needs, or `undefined` when it needs
+   * none.
+   *
+   * ADK resolves the credential before it calls {@link getTools} and before it
+   * runs any tool the toolset returned. When no credential is available, the
+   * invocation stops and asks the client for one.
+   *
+   * @return The auth config for this toolset.
+   */
+  getAuthConfig(): AuthConfig | undefined {
+    return undefined;
+  }
 
   /**
    * Closes the toolset.

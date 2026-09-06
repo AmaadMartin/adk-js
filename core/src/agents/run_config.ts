@@ -7,6 +7,7 @@
 import {
   AudioTranscriptionConfig,
   ContextWindowCompressionConfig,
+  LiveConnectConfig,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
@@ -14,6 +15,26 @@ import {
 } from '@google/genai';
 
 import {logger} from '../utils/logger.js';
+
+/**
+ * How the Live API treats the conversation history a client replays on a fresh
+ * connection.
+ *
+ * Declared here rather than imported because `@google/genai` 2.9.0 does not
+ * export it. Replace this with the SDK type once the dependency is raised.
+ */
+export interface HistoryConfig {
+  /**
+   * Whether the replayed history already contains the model's past responses.
+   * When true, the Live server does not answer those turns again.
+   */
+  initialHistoryInClientContent?: boolean;
+}
+
+/** A `LiveConnectConfig` that also carries a {@link HistoryConfig}. */
+export interface LiveConnectConfigWithHistory extends LiveConnectConfig {
+  historyConfig?: HistoryConfig;
+}
 
 /**
  * The streaming mode for the run config.
@@ -47,6 +68,20 @@ export interface RunConfig {
    * Whether or not to save the input blobs as artifacts.
    */
   saveInputBlobsAsArtifacts?: boolean;
+
+  /**
+   * Whether a live run saves the session's audio to the artifact service.
+   *
+   * Off by default. When on, the flow caches model audio per turn and writes
+   * both the user's and the model's audio as artifacts when the turn ends.
+   */
+  saveLiveBlob?: boolean;
+
+  /**
+   * History settings for a live connection. Copied onto the connect config
+   * when the flow replays conversation history on a fresh connection.
+   */
+  historyConfig?: HistoryConfig;
 
   /**
    * Whether to support CFC (Compositional Function Calling). Only applicable
@@ -166,6 +201,7 @@ export interface RunConfig {
  *
  * Default values applied when the corresponding field is absent from `params`:
  * - `saveInputBlobsAsArtifacts` → `false`
+ * - `saveLiveBlob` → `false`
  * - `supportCfc` → `false`
  * - `enableAffectiveDialog` → `false`
  * - `streamingMode` → {@link StreamingMode.NONE}
@@ -181,6 +217,7 @@ export function createRunConfig(params: Partial<RunConfig> = {}) {
   validateStreamingMode(params.streamingMode);
   return {
     saveInputBlobsAsArtifacts: false,
+    saveLiveBlob: false,
     supportCfc: false,
     enableAffectiveDialog: false,
     streamingMode: StreamingMode.NONE,
