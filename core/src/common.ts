@@ -308,10 +308,22 @@ export type {
 } from './tools/function_tool.js';
 export {getUserChoiceTool} from './tools/get_user_choice_tool.js';
 export {
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
+} from './tools/google_credentials.js';
+export type {BaseGoogleCredentialsConfigOptions} from './tools/google_credentials.js';
+export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,
 } from './tools/google_maps_grounding_tool.js';
 export {GOOGLE_SEARCH, GoogleSearchTool} from './tools/google_search_tool.js';
+export {GoogleTool} from './tools/google_tool.js';
+export type {
+  GoogleToolErrorResponse,
+  GoogleToolExecuteContext,
+  GoogleToolExecuteFunction,
+  GoogleToolOptions,
+} from './tools/google_tool.js';
 export {
   LOAD_ARTIFACTS,
   LoadArtifactsTool,
