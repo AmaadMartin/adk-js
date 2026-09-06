@@ -5,7 +5,12 @@
  */
 import {GenerateContentConfig} from '@google/genai';
 
-import {isGemini2OrAbove, isGeminiModel} from '../utils/model_name.js';
+import {
+  isGemini1Model,
+  isGemini2OrAbove,
+  isGeminiModel,
+  isGeminiModelIdCheckDisabled,
+} from '../utils/model_name.js';
 
 import {ToolProcessLlmRequest} from './base_tool.js';
 import {BuiltInTool} from './built_in_tool.js';
@@ -29,13 +34,18 @@ export class UrlContextTool extends BuiltInTool {
       return;
     }
 
-    if (!isGeminiModel(llmRequest.model)) {
+    // The model-id escape hatch does not unlock Gemini 1.x, which does not
+    // support url_context at all.
+    const bypassModelCheck =
+      isGeminiModelIdCheckDisabled() && !isGemini1Model(llmRequest.model);
+
+    if (!isGeminiModel(llmRequest.model) && !bypassModelCheck) {
       throw new Error(
         `URL context tool is not supported for model ${llmRequest.model}`,
       );
     }
 
-    if (!isGemini2OrAbove(llmRequest.model)) {
+    if (!isGemini2OrAbove(llmRequest.model) && !bypassModelCheck) {
       throw new Error(
         `URL context tool requires Gemini 2 or above, but got ${llmRequest.model}`,
       );
