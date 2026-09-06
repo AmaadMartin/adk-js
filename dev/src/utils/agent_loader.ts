@@ -35,7 +35,7 @@ const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
  * Entrypoint file names an agent directory can use, in the order the loader
  * tries them.
  */
-const DIRECTORY_ENTRY_FILE_NAMES = ['app', 'agent', 'index'];
+const DIRECTORY_ENTRY_FILE_NAMES = ['app', 'agent', 'index'] as const;
 
 /**
  * Supported JS/TS file module types.
