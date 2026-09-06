@@ -5,6 +5,7 @@
  */
 
 import {spawn} from 'node:child_process';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {AdkApiClient} from '../../dev/src/server/adk_api_client.js';
 import {BaseTestServer} from './test_case_utils.js';
@@ -24,6 +25,30 @@ export interface TestApiServerParams {
 
 const DEFAULT_TIMEOUT = 60000;
 
+/** The built ADK CLI entrypoint that the test server spawns. */
+const CLI_ENTRYPOINT_PATH = path.resolve(
+  __dirname,
+  '../../dev/dist/esm/cli_entrypoint.js',
+);
+
+/**
+ * Throws if the ADK CLI has not been built.
+ *
+ * The integration tests spawn the compiled CLI. On an unbuilt checkout the
+ * child exits 1 with `ERR_MODULE_NOT_FOUND` and the harness reports only
+ * `CLI exited prematurely with code 1`. This check verifies the entrypoint
+ * alone, not that every workspace is built.
+ */
+export function assertAdkCliBuilt(cliPath: string): void {
+  if (!fs.existsSync(cliPath)) {
+    throw new Error(
+      `ADK CLI entrypoint not found at ${cliPath}. ` +
+        'The integration tests spawn the built CLI; run `npm run build` from ' +
+        'the repository root first.',
+    );
+  }
+}
+
 /**
  * ADK API server for testing via the CLI. This is useful for integration tests
  * that require an ADK API server to be running.
@@ -37,6 +62,8 @@ export class AdkTsApiServer extends BaseTestServer {
   }
 
   async start(): Promise<AdkApiClient> {
+    assertAdkCliBuilt(CLI_ENTRYPOINT_PATH);
+
     await this.startProcess({
       spawnProcess: () => {
         return spawn('node', this.getAdkCliArgs(this.params), {
@@ -56,12 +83,8 @@ export class AdkTsApiServer extends BaseTestServer {
   }
 
   private getAdkCliArgs(params: TestApiServerParams): string[] {
-    const cliPath = path.resolve(
-      __dirname,
-      '../../dev/dist/esm/cli_entrypoint.js',
-    );
     const args = [
-      cliPath,
+      CLI_ENTRYPOINT_PATH,
       params.serveDebugUI ? 'web' : 'api_server',
       params.agentsDir,
       '--port',
