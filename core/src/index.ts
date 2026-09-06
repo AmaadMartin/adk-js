@@ -48,3 +48,7 @@ export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
 // of this barrel.
 export * from './tools/mcp/index.js';
+// The Spanner tools are deliberately NOT re-exported here. They reach
+// `@google-cloud/spanner` through a literal `import()`, which a bundler
+// follows, and that peer adds about 5 MB to every bundle. Import them from
+// `@google/adk/tools/spanner`, which nothing else in this barrel reaches.
