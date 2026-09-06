@@ -15,8 +15,10 @@ import type {
   InferenceResult,
   InvocationEvents,
   LocalEvalSamplerConfig,
+  LocalEvalServiceOptions,
 } from '@google/adk';
 import {
+  CustomMetricEvaluator,
   EvalStatus,
   extractSingleInvocationInfo,
   extractToolCallData,
@@ -24,6 +26,8 @@ import {
   InferenceStatus,
   LlmAgent,
   LocalEvalSampler,
+  MetricEvaluatorRegistry,
+  NotFoundError,
   Sampler,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -43,7 +47,7 @@ import {
 const evalService = vi.hoisted(() => ({
   performInference: vi.fn(),
   evaluate: vi.fn(),
-  options: [] as unknown[],
+  options: [] as LocalEvalServiceOptions[],
 }));
 
 vi.mock('../../src/evaluation/local_eval_service.js', () => ({
@@ -51,7 +55,7 @@ vi.mock('../../src/evaluation/local_eval_service.js', () => ({
     performInference = evalService.performInference;
     evaluate = evalService.evaluate;
 
-    constructor(options: unknown) {
+    constructor(options: LocalEvalServiceOptions) {
       evalService.options.push(options);
     }
   },
@@ -262,6 +266,67 @@ describe('test_local_eval_service_interface_init', () => {
     expect(await evaluatedEvalSetId(sampler, Sampler.VALIDATION_SET)).toBe(
       'val_set',
     );
+  });
+});
+
+describe('test_init_registers_custom_metrics', () => {
+  it('registers the custom metrics the eval config declares', async () => {
+    stubEvalService([]);
+    vi.spyOn(logger, 'info').mockImplementation(() => {});
+    const callerRegistry = new MetricEvaluatorRegistry();
+    const sampler = await LocalEvalSampler.create({
+      config: {
+        evalConfig: {
+          criteria: {},
+          customMetrics: {
+            custom_metric_for_sampler_test: {
+              codeConfig: {name: './metrics.js#score'},
+            },
+          },
+        },
+        appName: TEST_APP,
+        trainEvalSet: 'train_set',
+        trainEvalCaseIds: ['t1'],
+      },
+      evalSetsManager: await createManagerWithSets(['train_set']),
+      metricEvaluatorRegistry: callerRegistry,
+    });
+
+    await sampler.sampleAndScore({candidate, exampleSet: Sampler.TRAIN_SET});
+
+    const registry = evalService.options.at(-1)?.metricEvaluatorRegistry;
+    expect(registry).toBeDefined();
+    expect(
+      registry?.getEvaluator({
+        metricName: 'custom_metric_for_sampler_test',
+        threshold: 0.5,
+      }),
+    ).toBeInstanceOf(CustomMetricEvaluator);
+  });
+
+  it('leaves the registry the caller passed untouched', async () => {
+    stubEvalService([]);
+    vi.spyOn(logger, 'info').mockImplementation(() => {});
+    const callerRegistry = new MetricEvaluatorRegistry();
+    await LocalEvalSampler.create({
+      config: {
+        evalConfig: {
+          criteria: {},
+          customMetrics: {
+            leaked_metric: {codeConfig: {name: './metrics.js#score'}},
+          },
+        },
+        appName: TEST_APP,
+        trainEvalSet: 'train_set',
+        trainEvalCaseIds: ['t1'],
+      },
+      evalSetsManager: await createManagerWithSets(['train_set']),
+      metricEvaluatorRegistry: callerRegistry,
+    });
+
+    expect(() =>
+      callerRegistry.getEvaluator({metricName: 'leaked_metric'}),
+    ).toThrowError(NotFoundError);
   });
 });
 

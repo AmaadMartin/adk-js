@@ -118,8 +118,7 @@ const scoreCandidate = node(
 
     return Object.entries(scores)
       .map(([evalId, score]) => {
-        const invocations = data?.[evalId]?.['invocations'];
-        const turns = Array.isArray(invocations) ? invocations.length : 0;
+        const turns = data?.[evalId]?.invocations.length ?? 0;
         return `${evalId}: score ${score} over ${turns} invocation(s)`;
       })
       .join('\n');

@@ -25,7 +25,11 @@ import {EvalStatus} from '../evaluation/eval_metrics.js';
 import type {EvalCaseResult} from '../evaluation/eval_result.js';
 import type {EvalSetsManager} from '../evaluation/eval_sets_manager.js';
 import {LocalEvalService} from '../evaluation/local_eval_service.js';
-import {MetricEvaluatorRegistry} from '../evaluation/metric_evaluator_registry.js';
+import {
+  defaultMetricEvaluatorRegistry,
+  MetricEvaluatorRegistry,
+  registerCustomMetricsFromConfig,
+} from '../evaluation/metric_evaluator_registry.js';
 import {UserSimulatorProvider} from '../evaluation/simulation/user_simulator_provider.js';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
@@ -83,10 +87,10 @@ export interface LocalEvalSamplerOptions {
   evalSetsManager: EvalSetsManager;
 
   /**
-   * The registry the eval run resolves metric names against. Defaults to a
-   * fresh {@link MetricEvaluatorRegistry}, so a metric one sampler registers
-   * cannot leak into another app's evaluations. Pass your own registry to
-   * score a metric ADK does not ship.
+   * The registry the eval run resolves metric names against. Defaults to
+   * {@link defaultMetricEvaluatorRegistry}. The sampler registers the config's
+   * custom metrics into a {@link MetricEvaluatorRegistry.fork} of it, so those
+   * registrations never reach the registry the caller passed.
    */
   metricEvaluatorRegistry?: MetricEvaluatorRegistry;
 }
@@ -139,6 +143,16 @@ export type CapturedEvalData = {
 
   invocations: CapturedInvocation[];
 };
+
+/**
+ * What {@link LocalEvalSampler.sampleAndScore} returns.
+ *
+ * It narrows `data` to {@link CapturedEvalData}, so a caller reads the
+ * captured invocations without re-narrowing what the sampler already knew.
+ */
+export interface LocalEvalSamplingResult extends UnstructuredSamplingResult {
+  data?: Record<string, CapturedEvalData>;
+}
 
 /**
  * Extracts the tool calls and their responses from an invocation's
@@ -320,7 +334,7 @@ function captureInvocation(
  * asynchronous in adk-js, and a constructor cannot await.
  */
 @experimental
-export class LocalEvalSampler extends Sampler<UnstructuredSamplingResult> {
+export class LocalEvalSampler extends Sampler<LocalEvalSamplingResult> {
   private constructor(
     private readonly config: LocalEvalSamplerConfig,
     private readonly evalSetsManager: EvalSetsManager,
@@ -343,10 +357,13 @@ export class LocalEvalSampler extends Sampler<UnstructuredSamplingResult> {
       options.config,
       options.evalSetsManager,
     );
+    const registry = (
+      options.metricEvaluatorRegistry ?? defaultMetricEvaluatorRegistry()
+    ).fork();
     return new LocalEvalSampler(
       options.config,
       options.evalSetsManager,
-      options.metricEvaluatorRegistry ?? new MetricEvaluatorRegistry(),
+      registerCustomMetricsFromConfig(options.config.evalConfig, registry),
       exampleSets,
     );
   }
@@ -371,7 +388,7 @@ export class LocalEvalSampler extends Sampler<UnstructuredSamplingResult> {
     exampleSet = Sampler.VALIDATION_SET,
     batch,
     captureFullEvalData = false,
-  }: SampleAndScoreParams): Promise<UnstructuredSamplingResult> {
+  }: SampleAndScoreParams): Promise<LocalEvalSamplingResult> {
     const evalSetId = this.getSelectedExampleSetId(exampleSet);
     const evalCaseIds = batch ?? this.getAllExampleIds(exampleSet);
 
