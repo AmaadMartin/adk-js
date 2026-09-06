@@ -20,7 +20,9 @@ State is split by scope across three keys, so a `user:` key is shared by all of
 one user's sessions and an `app:` key by every session of the application, while
 `temp:` state is never written anywhere.
 
-Every option is documented on `RedisSessionServiceOptions` in the API reference.
+Every connection and storage setting is documented on
+`RedisSessionServiceConfig` in the API reference. `RedisSessionServiceOptions`
+is that configuration plus `client`, for a client you connect yourself.
 
 ## Get started
 
