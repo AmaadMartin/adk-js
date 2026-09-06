@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
@@ -152,6 +153,14 @@ vi.mock('@google-cloud/vertexai/build/src/genai/client.js', () => ({
     };
   },
 }));
+
+function expectImageBuiltWithTag(tag: string) {
+  expect(spawnMock).toHaveBeenCalledWith(
+    'gcloud',
+    expect.arrayContaining(['builds', 'submit', '--tag', tag]),
+    expect.any(Object),
+  );
+}
 
 describe('deployToAgentEngine', () => {
   let tempFolder: string;
@@ -747,6 +756,101 @@ describe('deployToAgentEngine', () => {
 
     await expect(deployToAgentEngine(options)).rejects.toThrow(
       'Reasoning Engine update failed: [Code 404] Resource not found',
+    );
+  });
+
+  it('should use options.appName for the image tag, staged folder, Dockerfile and default displayName', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      appName: 'custom-app',
+      displayName: undefined,
+    });
+
+    const imageTag =
+      'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-custom-app:latest';
+    expectImageBuiltWithTag(imageTag);
+
+    expect(fs.cp).toHaveBeenCalledWith(
+      'path/to/agent1.ts',
+      path.join(tempFolder, 'agents', 'custom-app', 'agent1.ts'),
+    );
+
+    expect(saveToFile).toHaveBeenCalledWith(
+      path.join(tempFolder, 'Dockerfile'),
+      expect.stringContaining(
+        'COPY --chown=myuser:myuser "agents/custom-app/" "/app/agents/custom-app/"',
+      ),
+    );
+    expect(saveToFile).toHaveBeenCalledWith(
+      path.join(tempFolder, 'Dockerfile'),
+      expect.stringContaining('CMD npx adk api_server /app/agents/custom-app '),
+    );
+
+    expect(mockCreateInternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          displayName: 'custom-app',
+          spec: expect.objectContaining({
+            containerSpec: {imageUri: imageTag},
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('should fall back to the derived app name when options.appName is an empty string', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      appName: '',
+      displayName: undefined,
+    });
+
+    expectImageBuiltWithTag(
+      'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-agent:latest',
+    );
+
+    expect(fs.cp).toHaveBeenCalledWith(
+      'path/to/agent1.ts',
+      path.join(tempFolder, 'agents', 'agent', 'agent1.ts'),
+    );
+
+    expect(mockCreateInternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({displayName: 'agent'}),
+      }),
+    );
+  });
+
+  it('should prefer options.appName over the file stem when agentPath is a file', async () => {
+    (isFile as Mock).mockResolvedValue(true);
+
+    await deployToAgentEngine({
+      ...defaultOptions,
+      agentPath: 'path/to/agent.ts',
+      appName: 'custom-app',
+    });
+
+    expectImageBuiltWithTag(
+      'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-custom-app:latest',
+    );
+
+    expect(fs.cp).toHaveBeenCalledWith(
+      'path/to/agent1.ts',
+      path.join(tempFolder, 'agents', 'custom-app', 'agent1.ts'),
+    );
+  });
+
+  it('should keep an explicit displayName when appName is also provided', async () => {
+    await deployToAgentEngine({...defaultOptions, appName: 'custom-app'});
+
+    expectImageBuiltWithTag(
+      'us-central1-docker.pkg.dev/test-project/agent-engine-repo/agent-engine-custom-app:latest',
+    );
+
+    expect(mockCreateInternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({displayName: 'test-agent'}),
+      }),
     );
   });
 });

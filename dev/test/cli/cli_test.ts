@@ -445,6 +445,22 @@ describe('CLI Entrypoint', () => {
         agentEngineId: '12345',
       });
     });
+
+    it('should pass app_name to deployToAgentEngine when --app_name is set', async () => {
+      await parse(['deploy', 'agent_engine', '--app_name', 'custom-app']);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        appName: 'custom-app',
+      });
+    });
+
+    it('should leave appName undefined when --app_name is omitted', async () => {
+      await parse(['deploy', 'agent_engine']);
+
+      expect(
+        (deployToAgentEngine as Mock).mock.calls[0][0].appName,
+      ).toBeUndefined();
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
