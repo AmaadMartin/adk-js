@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InvocationContext, ReadonlyContext} from '@google/adk';
+import {
+  InMemorySessionService,
+  InvocationContext,
+  ReadonlyContext,
+} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
 import {injectSessionState} from '../../src/agents/instructions.js';
 
@@ -398,6 +402,44 @@ describe('injectSessionState', () => {
       expect(
         await injectSessionState('{tone}: <City.city from lookup> now', ctx),
       ).toBe('formal: Rome now');
+    });
+  });
+
+  describe('state read back from a session service', () => {
+    /** Reads a real session back through the service and wraps its state. */
+    const contextFromService = async (): Promise<ReadonlyContext> => {
+      const service = new InMemorySessionService();
+      await service.createSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+        state: {name: 'Alice'},
+      });
+      const session = await service.getSession({
+        appName: 'app1',
+        userId: 'u1',
+        sessionId: 's1',
+      });
+      return makeContext(session!.state);
+    };
+
+    it('resolves a real state key', async () => {
+      const ctx = await contextFromService();
+      expect(await injectSessionState('Hello {name}!', ctx)).toBe(
+        'Hello Alice!',
+      );
+    });
+
+    it('rejects an inherited Object.prototype member', async () => {
+      const ctx = await contextFromService();
+      await expect(injectSessionState('X={toString}', ctx)).rejects.toThrow(
+        'Context variable not found: `toString`',
+      );
+    });
+
+    it('renders an optional inherited member as empty', async () => {
+      const ctx = await contextFromService();
+      expect(await injectSessionState('Y={constructor?}', ctx)).toBe('Y=');
     });
   });
 });
