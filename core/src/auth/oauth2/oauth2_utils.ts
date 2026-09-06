@@ -8,8 +8,15 @@ import {logger} from '../../utils/logger.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
-import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
-import {validateDiscoveryUrl} from './oauth2_discovery.js';
+import {
+  AuthScheme,
+  isExtendedOAuth2,
+  OpenIdConnectWithConfig,
+} from '../auth_schemes.js';
+import {
+  OAuth2DiscoveryManager,
+  validateDiscoveryUrl,
+} from './oauth2_discovery.js';
 
 /**
  * Returns the token endpoint for the given auth scheme.
@@ -36,6 +43,81 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Reports whether an OAuth2 scheme declares a flow whose authorization or
+ * token endpoint is blank.
+ *
+ * A scheme parsed out of an OpenAPI document is cast, not validated, so
+ * `flows` can be absent at runtime however the type declares it.
+ */
+export function hasMissingOAuth2Endpoints(
+  authScheme: AuthScheme | undefined,
+): boolean {
+  if (authScheme?.type !== 'oauth2') {
+    return false;
+  }
+
+  const flows = authScheme.flows;
+  if (!flows) {
+    return false;
+  }
+
+  const {implicit, password, clientCredentials, authorizationCode} = flows;
+
+  return Boolean(
+    (implicit && !implicit.authorizationUrl) ||
+    (password && !password.tokenUrl) ||
+    (clientCredentials && !clientCredentials.tokenUrl) ||
+    (authorizationCode &&
+      (!authorizationCode.authorizationUrl || !authorizationCode.tokenUrl)),
+  );
+}
+
+/**
+ * Fills the blank endpoints of an {@link ExtendedOAuth2} scheme from the
+ * metadata its issuer publishes, and reports whether the scheme was filled.
+ *
+ * The flows are mutated in place because the two readers of these endpoints,
+ * `AuthHandler.generateAuthUri()` and `getTokenEndpoint()`, are reached
+ * synchronously and hold the same scheme object. An endpoint that is already
+ * set is never overwritten, and a flow that is absent is never created.
+ */
+export async function populateAuthScheme(
+  authScheme: AuthScheme | undefined,
+  discoveryManager: OAuth2DiscoveryManager = new OAuth2DiscoveryManager(),
+): Promise<boolean> {
+  if (!isExtendedOAuth2(authScheme)) {
+    logger.warn('No issuerUrl was provided for auto-discovery.');
+    return false;
+  }
+
+  const flows = authScheme.flows;
+  if (!flows) {
+    logger.warn('The auth scheme declares no OAuth2 flow to populate.');
+    return false;
+  }
+
+  const metadata = await discoveryManager.discoverAuthServerMetadata(
+    authScheme.issuerUrl,
+  );
+  if (!metadata) {
+    logger.warn('Auto-discovery has failed to populate OAuth scheme info.');
+    return false;
+  }
+
+  const {implicit, password, clientCredentials, authorizationCode} = flows;
+
+  if (implicit) implicit.authorizationUrl ||= metadata.authorization_endpoint;
+  if (password) password.tokenUrl ||= metadata.token_endpoint;
+  if (clientCredentials) clientCredentials.tokenUrl ||= metadata.token_endpoint;
+  if (authorizationCode) {
+    authorizationCode.authorizationUrl ||= metadata.authorization_endpoint;
+    authorizationCode.tokenUrl ||= metadata.token_endpoint;
+  }
+
+  return true;
 }
 
 interface OAuth2TokenResponse {
