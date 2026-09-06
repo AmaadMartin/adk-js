@@ -37,11 +37,16 @@ export function parseUserAgent(userAgent: string): string {
   return 'Browser';
 }
 
-function _getDefaultLabels(): string[] {
-  let frameworkLabel = `${ADK_LABEL}/${version}`;
+function _getDefaultLabels(frameworkLabel?: string): string[] {
+  let frameworkToken = `${ADK_LABEL}/${version}`;
 
-  if (!isBrowser() && process.env[AGENT_ENGINE_TELEMETRY_ENV_VARIABLE_NAME]) {
-    frameworkLabel = `${frameworkLabel}+${AGENT_ENGINE_TELEMETRY_TAG}`;
+  if (frameworkLabel) {
+    frameworkToken = `${frameworkToken}+${frameworkLabel}`;
+  } else if (
+    !isBrowser() &&
+    process.env[AGENT_ENGINE_TELEMETRY_ENV_VARIABLE_NAME]
+  ) {
+    frameworkToken = `${frameworkToken}+${AGENT_ENGINE_TELEMETRY_TAG}`;
   }
 
   const languageLabelDetail = isBrowser()
@@ -50,7 +55,7 @@ function _getDefaultLabels(): string[] {
     : process.version;
 
   const languageLabel = `${LANGUAGE_LABEL}/${languageLabelDetail}`;
-  return [frameworkLabel, languageLabel];
+  return [frameworkToken, languageLabel];
 }
 
 /**
@@ -74,26 +79,17 @@ export function runWithClientLabel<R>(
 
 /**
  * Returns the current list of client labels that can be added to HTTP Headers.
+ *
+ * @param frameworkLabel Optional SemVer build-metadata suffix for the
+ *   `google-adk` token, e.g. `managed_agent` yields
+ *   `google-adk/<version>+managed_agent`. It takes precedence over the Agent
+ *   Engine suffix.
  */
-export function getClientLabels(): string[] {
-  const labels = _getDefaultLabels();
+export function getClientLabels(frameworkLabel?: string): string[] {
+  const labels = _getDefaultLabels(frameworkLabel);
   const contextLabel = clientLabelLocalStorage.getStore();
   if (contextLabel) {
     labels.push(contextLabel);
   }
   return labels;
-}
-
-/**
- * Returns the HTTP headers that identify ADK as the caller.
- *
- * Both headers carry the same joined {@link getClientLabels} value, so a
- * backend reading either one sees the framework, its version and the runtime.
- */
-export function getTrackingHeaders(): Record<string, string> {
-  const headerValue = getClientLabels().join(' ');
-  return {
-    'x-goog-api-client': headerValue,
-    'user-agent': headerValue,
-  };
 }

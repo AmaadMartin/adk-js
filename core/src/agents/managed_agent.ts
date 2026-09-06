@@ -26,11 +26,14 @@ import {
   isRemoteMcpServer,
   RemoteMcpServer,
 } from '../tools/remote_mcp_server.js';
-import {getTrackingHeaders} from '../utils/client_labels.js';
 import {isContent, toUserContent} from '../utils/content_utils.js';
 import {isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {asApiFailure, formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
+import {
+  getTrackingHttpOptions,
+  mergeTrackingHeaders,
+} from '../utils/tracking_headers_utils.js';
 import type {NodeContext} from '../workflow/node_context.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {Context} from './context.js';
@@ -48,6 +51,12 @@ import {StreamingMode} from './run_config.js';
  * is still resolved from the environment as usual.
  */
 const MANAGED_AGENT_LOCATION = 'global';
+
+/**
+ * Names this surface in the `google-adk` tracking token, so a Managed Agents
+ * call is distinguishable from any other ADK call.
+ */
+const MANAGED_AGENT_FRAMEWORK_LABEL = 'managed_agent';
 
 /** Reported on a failed turn whose error carries no backend status. */
 const UNKNOWN_ERROR_CODE = 'UNKNOWN_ERROR';
@@ -288,7 +297,7 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
    */
   get apiClient(): GoogleGenAI {
     if (!this.lazyApiClient) {
-      const httpOptions = {headers: getTrackingHeaders()};
+      const httpOptions = getTrackingHttpOptions();
       this.lazyApiClient = isEnterpriseModeEnabled()
         ? new GoogleGenAI({
             enterprise: true,
@@ -473,6 +482,14 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
       createParams.system_instruction = systemInstruction;
     }
 
+    // Merged per request, not per client: an injected client must carry the
+    // same ADK attribution as a lazily built one, and the caller keeps any
+    // header it set itself.
+    const extraHeaders = mergeTrackingHeaders(
+      ctx.runConfig?.httpOptions?.headers,
+      MANAGED_AGENT_FRAMEWORK_LABEL,
+    );
+
     logger.debug(
       `Sending request via interactions API, agent: ${this.agentId}, ` +
         `stream: true, previous_interaction_id: ${previousInteractionId}, ` +
@@ -498,6 +515,7 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
             for await (const llmResponse of createInteractions(this.apiClient, {
               createParams,
               stream: true,
+              extraHeaders,
             })) {
               // The server always streams, but an intermediate partial only
               // reaches the caller in SSE mode. The default surfaces the

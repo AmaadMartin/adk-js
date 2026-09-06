@@ -35,8 +35,11 @@ import {
 } from '@google/adk';
 import {GoogleGenAI, Interactions} from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {getTrackingHeaders} from '../../src/utils/client_labels.js';
 import {toUserContent} from '../../src/utils/content_utils.js';
+import {
+  getTrackingHeaders,
+  getTrackingHttpOptions,
+} from '../../src/utils/tracking_headers_utils.js';
 import {driveNode} from '../workflow/test_helpers.js';
 
 const {constructedOptions} = vi.hoisted(() => ({
@@ -266,7 +269,9 @@ describe('ManagedAgent construction and client', () => {
     });
 
     expect(agent.apiClient).toBe(client);
-    // No second client is built, so no tracking headers are attached.
+    // The injected client is used as-is; the agent builds no second one. Its
+    // tracking headers ride on each request instead, which the
+    // `ManagedAgent tracking headers` suite pins.
     expect(constructedOptions).toHaveLength(before);
   });
 
@@ -281,9 +286,9 @@ describe('ManagedAgent construction and client', () => {
     expect(constructedOptions).toHaveLength(1);
     expect(constructedOptions[0]['enterprise']).toBe(true);
     expect(constructedOptions[0]['location']).toBe('global');
-    expect(constructedOptions[0]['httpOptions']).toEqual({
-      headers: getTrackingHeaders(),
-    });
+    expect(constructedOptions[0]['httpOptions']).toEqual(
+      getTrackingHttpOptions(),
+    );
   });
 
   it('test_lazy_client_dev_api_omits_location', () => {
@@ -295,9 +300,9 @@ describe('ManagedAgent construction and client', () => {
     expect(constructedOptions).toHaveLength(1);
     expect(constructedOptions[0]['enterprise']).toBe(false);
     expect('location' in constructedOptions[0]).toBe(false);
-    expect(constructedOptions[0]['httpOptions']).toEqual({
-      headers: getTrackingHeaders(),
-    });
+    expect(constructedOptions[0]['httpOptions']).toEqual(
+      getTrackingHttpOptions(),
+    );
   });
 
   it('test_lazy_client_is_built_once', () => {
@@ -986,6 +991,75 @@ describe('ManagedAgent run loop', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].content?.parts?.[0].text).toBe('thinking');
+  });
+});
+
+describe('ManagedAgent tracking headers', () => {
+  /**
+   * Runs one turn against a canned backend and returns the headers the agent
+   * actually put on the wire. The client is injected and carries no tracking
+   * options of its own, so every tracking header here came from the request.
+   */
+  async function requestHeadersOf(runConfig?: RunConfig): Promise<Headers> {
+    const backend = streamingBackend();
+    const agent = new ManagedAgent({
+      name: 'mgr',
+      agentId: 'agents/a',
+      apiClient: devApiClient(),
+    });
+
+    await collect(agent, userCtx('hi', {runConfig}));
+
+    expect(backend.requests).toHaveLength(1);
+    return backend.requests[0].headers;
+  }
+
+  it('test_run_async_merges_run_config_headers_into_extra_headers', async () => {
+    const headers = await requestHeadersOf({
+      httpOptions: {headers: {'x-custom': 'v'}},
+    });
+
+    expect(headers.get('x-custom')).toBe('v');
+    expect(headers.get('x-goog-api-client')).toContain('+managed_agent');
+  });
+
+  it('test_run_async_sends_tracking_headers_without_run_config_headers', async () => {
+    const headers = await requestHeadersOf();
+    const expected = getTrackingHeaders('managed_agent');
+
+    expect(headers.get('x-goog-api-client')).toBe(
+      expected['x-goog-api-client'],
+    );
+  });
+
+  it('test_run_async_sends_tracking_headers_when_http_options_has_no_headers', async () => {
+    const headers = await requestHeadersOf({httpOptions: {}});
+    const expected = getTrackingHeaders('managed_agent');
+
+    expect(headers.get('x-goog-api-client')).toBe(
+      expected['x-goog-api-client'],
+    );
+  });
+
+  it('records that the genai SDK replaces the user-agent header', async () => {
+    // `@google/genai` 2.9.0 overwrites `user-agent` with its own SDK string
+    // after it merges the caller's headers, on every non-browser request. So
+    // `x-goog-api-client` is the only tracking header that reaches the wire
+    // from adk-js, and adk-python's `user-agent` assertion cannot hold here.
+    // This test fails if a later SDK stops overwriting it.
+    const headers = await requestHeadersOf();
+
+    expect(headers.get('user-agent')).toContain('@google/genai');
+    expect(headers.get('user-agent')).not.toContain('google-adk');
+  });
+
+  it('keeps a caller token the tracking value does not carry', async () => {
+    const headers = await requestHeadersOf({
+      httpOptions: {headers: {'x-goog-api-client': 'caller/1.0'}},
+    });
+    const tracking = getTrackingHeaders('managed_agent')['x-goog-api-client'];
+
+    expect(headers.get('x-goog-api-client')).toBe(`${tracking} caller/1.0`);
   });
 });
 

@@ -940,6 +940,15 @@ export type InteractionsCreateParams =
   | Omit<Interactions.CreateAgentInteractionParamsStreaming, 'stream'>;
 
 /**
+ * The per-request options `interactions.create` accepts.
+ *
+ * `@google/genai` does not export this type, so it is read off the method.
+ */
+type InteractionsRequestOptions = NonNullable<
+  Parameters<GoogleGenAI['interactions']['create']>[1]
+>;
+
+/**
  * Issue `interactions.create` and convert the response(s) to LlmResponses.
  *
  * This is the shared transport and conversion loop. The caller assembles
@@ -948,20 +957,35 @@ export type InteractionsCreateParams =
  *
  * Ports `_create_interactions` in google/adk-python
  * `models/interactions_utils.py`.
+ *
+ * `extraHeaders` are per-request HTTP headers, typically the ADK tracking
+ * headers merged with the caller's own. They ride on every call, so an
+ * injected client is attributed the same way a lazily built one is.
  */
 export async function* createInteractions(
   apiClient: GoogleGenAI,
-  options: {createParams: InteractionsCreateParams; stream: boolean},
+  options: {
+    createParams: InteractionsCreateParams;
+    stream: boolean;
+    extraHeaders?: Record<string, string>;
+  },
 ): AsyncGenerator<LlmResponse, void, void> {
-  const {createParams, stream} = options;
+  const {createParams, stream, extraHeaders} = options;
+  // Spread, so a call with no extra headers passes no options argument at all.
+  const requestOptions: [InteractionsRequestOptions?] = extraHeaders
+    ? [{fetchOptions: {headers: extraHeaders}}]
+    : [];
   let currentInteractionId = createParams.previous_interaction_id;
   let currentEnvironmentId: string | undefined;
 
   if (stream) {
-    const responses = (await apiClient.interactions.create({
-      ...createParams,
-      stream: true,
-    })) as AsyncIterable<ExtendedInteractionSSEEvent>;
+    const responses = (await apiClient.interactions.create(
+      {
+        ...createParams,
+        stream: true,
+      },
+      ...requestOptions,
+    )) as AsyncIterable<ExtendedInteractionSSEEvent>;
 
     const aggregatedParts: Part[] = [];
     for await (const event of responses) {
@@ -995,10 +1019,13 @@ export async function* createInteractions(
       };
     }
   } else {
-    const interaction = (await apiClient.interactions.create({
-      ...createParams,
-      stream: false,
-    })) as ExtendedInteraction;
+    const interaction = (await apiClient.interactions.create(
+      {
+        ...createParams,
+        stream: false,
+      },
+      ...requestOptions,
+    )) as ExtendedInteraction;
 
     logger.info('Interaction response received from the model.');
     const llmResponse = convertInteractionToLlmResponse(interaction);
