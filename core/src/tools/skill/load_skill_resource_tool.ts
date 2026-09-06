@@ -6,6 +6,7 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
+import {State} from '../../sessions/state.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {
@@ -14,6 +15,29 @@ import {
   ToolProcessLlmRequest,
 } from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
+
+/**
+ * Error codes returned by {@link LoadSkillResourceTool} when a call cannot be
+ * completed. The string values are part of the tool's response contract and
+ * must remain stable.
+ */
+export enum LoadSkillResourceErrorCode {
+  MISSING_SKILL_NAME = 'MISSING_SKILL_NAME',
+  MISSING_RESOURCE_PATH = 'MISSING_RESOURCE_PATH',
+  REGISTRY_ERROR = 'REGISTRY_ERROR',
+  SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
+  INVALID_RESOURCE_PATH = 'INVALID_RESOURCE_PATH',
+  RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND',
+  RESOURCE_NOT_FOUND_FATAL = 'RESOURCE_NOT_FOUND_FATAL',
+}
+
+/**
+ * Prefix of the invocation-scoped resource-lookup failure counter. The
+ * {@link State.TEMP_PREFIX} keeps the counter out of durable session storage;
+ * the invocation id suffix stops in-memory session backends from carrying a
+ * count into the next invocation.
+ */
+const RESOURCE_NOT_FOUND_COUNT_KEY_PREFIX = `${State.TEMP_PREFIX}_adk_skill_resource_not_found_count_`;
 
 const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';
@@ -60,13 +84,13 @@ export class LoadSkillResourceTool extends BaseTool {
     if (!skillName) {
       return {
         error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
+        error_code: LoadSkillResourceErrorCode.MISSING_SKILL_NAME,
       };
     }
     if (!resourcePath) {
       return {
         error: 'Resource path is required.',
-        error_code: 'MISSING_RESOURCE_PATH',
+        error_code: LoadSkillResourceErrorCode.MISSING_RESOURCE_PATH,
       };
     }
 
@@ -81,14 +105,14 @@ export class LoadSkillResourceTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        error_code: 'REGISTRY_ERROR',
+        error_code: LoadSkillResourceErrorCode.REGISTRY_ERROR,
       };
     }
 
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
-        error_code: 'SKILL_NOT_FOUND',
+        error_code: LoadSkillResourceErrorCode.SKILL_NOT_FOUND,
       };
     }
 
@@ -110,14 +134,30 @@ export class LoadSkillResourceTool extends BaseTool {
     } else {
       return {
         error: "Path must start with 'references/', 'assets/', or 'scripts/'.",
-        error_code: 'INVALID_RESOURCE_PATH',
+        error_code: LoadSkillResourceErrorCode.INVALID_RESOURCE_PATH,
       };
     }
 
     if (content === undefined) {
+      // Counted across all paths and skills so the guard still fires when the
+      // model hallucinates a different resource path on each retry.
+      const counterKey = `${RESOURCE_NOT_FOUND_COUNT_KEY_PREFIX}${toolContext.invocationId}`;
+      const failCount = (toolContext.state.get<number>(counterKey) ?? 0) + 1;
+      toolContext.state.set(counterKey, failCount);
+
+      const notFoundMessage = `Resource '${resourcePath}' not found in skill '${skillName}'.`;
+      if (failCount > 1) {
+        return {
+          error:
+            `${notFoundMessage} This is resource lookup failure #${failCount}` +
+            ' this invocation. Do not retry any path — report the error to' +
+            ' the user and stop.',
+          error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND_FATAL,
+        };
+      }
       return {
-        error: `Resource '${resourcePath}' not found in skill '${skillName}'.`,
-        error_code: 'RESOURCE_NOT_FOUND',
+        error: notFoundMessage,
+        error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
       };
     }
 

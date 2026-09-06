@@ -365,7 +365,10 @@ export {
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
-export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
+export {
+  LoadSkillResourceErrorCode,
+  LoadSkillResourceTool,
+} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
