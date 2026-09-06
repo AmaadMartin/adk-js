@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Models
+
+- [CloudTtsLlm](models/cloud_tts_llm/index.md) - A BaseLlm that renders the text of a request as speech through Google Cloud Text-to-Speech.
+
 ### Tools
 
 #### Retrieval

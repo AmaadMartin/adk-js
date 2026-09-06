@@ -192,9 +192,12 @@ function isGoogleApiCallError(err: unknown): err is Error {
  * Loads the `@google-cloud/text-to-speech` optional peer and builds a client
  * from Application Default Credentials.
  *
- * `GOOGLE_CLOUD_PROJECT`, when set, becomes both the project and the quota
- * project, matching what the other Google Cloud clients in ADK do with it.
- * Credentials are resolved by the SDK on the first call, not here.
+ * `GOOGLE_CLOUD_PROJECT`, when set, selects the project, matching what the
+ * other Google Cloud clients in ADK do with it. Credentials are resolved by
+ * the SDK on the first call, not here. Cloud Text-to-Speech also needs a quota
+ * project under user credentials; google-auth-library reads that only from
+ * `GOOGLE_CLOUD_QUOTA_PROJECT` or from the credentials file, so no client
+ * option can set it here.
  *
  * @return A client for {@link CloudTtsLlm} to synthesize through.
  * @throws {Error} If `@google-cloud/text-to-speech` is not installed.
@@ -206,10 +209,7 @@ export async function createCloudTtsClient(): Promise<CloudTtsClient> {
   );
   const projectId = process.env['GOOGLE_CLOUD_PROJECT'];
   return projectId
-    ? new TextToSpeechClient({
-        projectId,
-        clientOptions: {quotaProjectId: projectId},
-      })
+    ? new TextToSpeechClient({projectId})
     : new TextToSpeechClient();
 }
 
