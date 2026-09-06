@@ -175,9 +175,9 @@ function buildWrapperCode(
     case CodeExecutionLanguage.SHELL:
       return `source ./${scriptPath} "$@"`;
     case CodeExecutionLanguage.POWERSHELL:
-      return `& .\\${scriptPath.replace(/\//g, '\\\\')} $args`;
+      return `& .\\${scriptPath.replace(/\//g, '\\')} $args`;
     case CodeExecutionLanguage.WINDOWS_CMD:
-      return `call .\\${scriptPath.replace(/\//g, '\\\\')} %*`;
+      return `call .\\${scriptPath.replace(/\//g, '\\')} %*`;
     default:
       throw new Error(`Unsupported wrapper language: ${language}`);
   }

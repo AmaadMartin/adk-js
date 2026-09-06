@@ -310,4 +310,66 @@ describe('RunSkillScriptTool', () => {
     expect(materializeFiles).toHaveBeenLastCalledWith([], outputDir);
     expect(result.outputDirectory).toBe(outputDir);
   });
+
+  const windowsSkill: Skill = {
+    frontmatter: {
+      name: 'windows-skill',
+      description: 'A skill with Windows scripts',
+    },
+    instructions: 'Test instructions',
+    resources: {
+      scripts: {
+        'setup.ps1': {src: 'Write-Host "setup"'},
+        'setup.bat': {src: '@echo off\necho setup'},
+        'deploy.cmd': {src: '@echo off\necho deploy'},
+        'nested/deep.ps1': {src: 'Write-Host "deep"'},
+      },
+    },
+  };
+
+  async function runWindowsScript(scriptPath: string) {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([windowsSkill], {
+      codeExecutor: mockExecutor,
+    });
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: 'windows-skill', script_path: scriptPath},
+      toolContext: createMockContext(),
+    });
+
+    return mockExecutor.executeCodeParams?.codeExecutionInput;
+  }
+
+  it('emits a single backslash separator in the PowerShell wrapper', async () => {
+    const input = await runWindowsScript('scripts/setup.ps1');
+
+    expect(input?.code).toBe('& .\\scripts\\setup.ps1 $args');
+    expect(input?.code).not.toContain('\\\\');
+    expect(input?.language).toBe(CodeExecutionLanguage.POWERSHELL);
+  });
+
+  it('emits a single backslash separator in the cmd wrapper', async () => {
+    const input = await runWindowsScript('scripts/setup.bat');
+
+    expect(input?.code).toBe('call .\\scripts\\setup.bat %*');
+    expect(input?.code).not.toContain('\\\\');
+    expect(input?.language).toBe(CodeExecutionLanguage.WINDOWS_CMD);
+  });
+
+  it('emits one separator per segment for a nested PowerShell script path', async () => {
+    const input = await runWindowsScript('scripts/nested/deep.ps1');
+
+    expect(input?.code).toBe('& .\\scripts\\nested\\deep.ps1 $args');
+    expect(input?.code).not.toContain('\\\\');
+  });
+
+  it('emits a single backslash separator for a .cmd script path', async () => {
+    const input = await runWindowsScript('scripts/deploy.cmd');
+
+    expect(input?.code).toBe('call .\\scripts\\deploy.cmd %*');
+    expect(input?.code).not.toContain('\\\\');
+    expect(input?.language).toBe(CodeExecutionLanguage.WINDOWS_CMD);
+  });
 });
