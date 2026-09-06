@@ -15,7 +15,10 @@ import {
   Tool,
 } from '@google/genai';
 import type {ReadonlyContext} from '../agents/readonly_context.js';
-import type {RemoteMcpServer} from '../tools/remote_mcp_server.js';
+import {
+  resolveRemoteMcpServerHeaders,
+  type RemoteMcpServer,
+} from '../tools/remote_mcp_server.js';
 import {logger} from '../utils/logger.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
@@ -1115,11 +1118,10 @@ export async function resolveMcpServerParam(
   server: RemoteMcpServer,
   context: ReadonlyContext,
 ): Promise<Interactions.Tool.MCPServer> {
-  const headers: Record<string, string> = {...server.headers};
-  if (server.headerProvider !== undefined) {
-    Object.assign(headers, await server.headerProvider(context));
-  }
-  return buildMcpServerParam(server, headers);
+  return buildMcpServerParam(
+    server,
+    await resolveRemoteMcpServerHeaders(server, context),
+  );
 }
 
 /** Parameters for {@link buildInteractionsRequestLog}. */

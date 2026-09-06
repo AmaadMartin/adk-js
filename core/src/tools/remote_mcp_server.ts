@@ -26,7 +26,8 @@ export type RemoteMcpHeaderProvider = (
  *
  * This is server-side MCP. `McpToolset` is the client-side counterpart: it
  * opens the session itself and runs the tools in this process. ADK never
- * connects to the server described here.
+ * connects to the server described here. The two share only the
+ * header-provider contract.
  *
  * Mirrors `RemoteMcpServer` in google/adk-python `tools/_remote_mcp_server.py`,
  * which models it as a validated pydantic model. TypeScript rejects an unknown
@@ -74,4 +75,31 @@ export function isRemoteMcpServer(value: unknown): value is RemoteMcpServer {
     'url' in value &&
     typeof value.url === 'string'
   );
+}
+
+/**
+ * Merges the static headers of a remote MCP server with the output of its
+ * header provider, for one turn.
+ *
+ * The static headers are copied first, then the provider output is assigned
+ * over the copy, so the provider wins on a key conflict. The copy keeps the
+ * spec's own `headers` object unchanged. An error from the provider
+ * propagates: a failed token mint must be loud, not a silently missing header.
+ *
+ * A caller that wants the tool param, not the headers, calls
+ * `resolveMcpServerParam` in `models/interactions_utils.ts` instead.
+ *
+ * @param server The server spec.
+ * @param context The context of the turn the headers are minted for.
+ * @return The headers to send. Empty when the server declares none.
+ */
+export async function resolveRemoteMcpServerHeaders(
+  server: RemoteMcpServer,
+  context: ReadonlyContext,
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {...server.headers};
+  if (server.headerProvider !== undefined) {
+    Object.assign(headers, await server.headerProvider(context));
+  }
+  return headers;
 }

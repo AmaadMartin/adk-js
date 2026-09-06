@@ -1276,7 +1276,10 @@ export {
 } from './tools/pubsub/pubsub_credentials.js';
 export {createPubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export type {PubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
-export {isRemoteMcpServer} from './tools/remote_mcp_server.js';
+export {
+  isRemoteMcpServer,
+  resolveRemoteMcpServerHeaders,
+} from './tools/remote_mcp_server.js';
 // The server-side header provider keeps its own name. `tools/mcp/mcp_auth.ts`
 // exports `McpHeaderProvider` for the client-side session through the MCP
 // barrel, and the same name twice would be ambiguous in `index.ts`.

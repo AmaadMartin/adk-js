@@ -2,7 +2,8 @@
 
 Describe a remote Model Context Protocol (MCP) server that the Managed Agents
 API runs on the server side. Reach for it when the backend, not your process,
-must open the MCP session.
+must open the MCP session, or when the server's credential must be minted fresh
+on every turn.
 
 ## Introduction
 
@@ -10,8 +11,8 @@ ADK has two ways to reach an MCP server, and they differ in who opens the
 session.
 
 `McpToolset` is the client-side one. Your process connects to the server, reads
-its tool list, and runs each tool locally. The tool results travel back through
-your agent.
+its tool list, and runs each tool locally. The toolset owns the connection, the
+deadline and the retry, and the tool results travel back through your agent.
 
 `RemoteMcpServer` is the server-side one. You describe the endpoint — its URL,
 its headers, and which of its tools the model may call. ADK forwards that
@@ -20,11 +21,20 @@ the tools. ADK never connects to the server itself. Only remote servers work
 here, over HTTP or streamable HTTP; a server you launch as a local subprocess
 has no URL to forward.
 
+Choose the server-side form when the MCP server is a hosted endpoint the
+backend can reach. Choose the client-side form when the server is local, or
+when the tool traffic must pass through your process. The one thing the two
+share is the header-provider contract: a callback that mints headers for one
+turn.
+
 `RemoteMcpServer` is a specification, not a toolset. It is a plain interface:
 it carries no `getTools()` and it executes nothing. adk-js does not yet have
 `ManagedAgent`, the agent that forwards the specification to the backend, so
 nothing in the SDK consumes a `RemoteMcpServer` today. The type and its mapping
 ship first so that the specification is stable when that agent lands.
+
+This is the TypeScript counterpart of `RemoteMcpServer` in
+[adk-python](https://github.com/google/adk-python).
 
 ## Get started
 
@@ -41,6 +51,14 @@ const maps: RemoteMcpServer = {
 Only `url` is required. Every other field is optional. TypeScript rejects a key
 that is not one of the five, so a typo is a compile error rather than a setting
 that silently does nothing.
+
+| Field            | Meaning                                                     |
+| ---------------- | ----------------------------------------------------------- |
+| `url`            | Full URL of the endpoint. Required.                         |
+| `name`           | Optional label for the server.                              |
+| `headers`        | Static headers sent on every turn, such as a fixed API key. |
+| `allowedTools`   | Restricts which of the server's tools the model can call.   |
+| `headerProvider` | Mints headers at request time, once per turn.               |
 
 ## Headers
 
@@ -68,11 +86,18 @@ const maps: RemoteMcpServer = {
 ADK copies `headers`, then assigns the callback's output over the copy. The
 callback wins on a key conflict. The copy means building the param never
 changes the specification you wrote: `maps.headers` holds the same values after
-a turn as before.
+a turn as before, so the same specification is safe to reuse across turns.
 
 An error thrown by `headerProvider` propagates to the caller. ADK does not
 catch it and does not fall back to the static headers, so a failed token mint
 fails the turn instead of sending a request the server will reject.
+
+## Restricting the tools
+
+`allowedTools` maps to `allowed_tools: [{tools: [...]}]`. It is guarded on
+`undefined`, not on emptiness: an empty array is a meaningful restriction and
+is forwarded as `[{tools: []}]`. Leave the field unset to expose every tool the
+server advertises.
 
 ## What crosses the wire
 
