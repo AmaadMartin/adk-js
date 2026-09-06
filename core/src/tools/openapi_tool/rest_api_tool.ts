@@ -10,6 +10,7 @@ import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
+import {version} from '../../version.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
 import {
@@ -26,6 +27,7 @@ export class RestApiTool extends BaseTool {
 
   private headerProvider?: (context: ReadonlyContext) => Record<string, string>;
   private credentialKey?: string;
+  private defaultHeaders: Record<string, string> = {};
 
   constructor(
     name: string,
@@ -61,6 +63,15 @@ export class RestApiTool extends BaseTool {
   @experimental
   public configureCredentialKey(credentialKey: string) {
     this.credentialKey = credentialKey;
+  }
+
+  /**
+   * Sets the headers this tool sends when the request does not already carry
+   * them. The map replaces any map set by an earlier call.
+   */
+  @experimental
+  public setDefaultHeaders(headers: Record<string, string>) {
+    this.defaultHeaders = headers;
   }
 
   @experimental
@@ -130,6 +141,16 @@ export class RestApiTool extends BaseTool {
       Object.assign(headers, providerHeaders);
     }
 
+    // Highest priority first: each call fills only what the request still
+    // lacks. The credential this tool was configured with, not the one the
+    // auth handler resolved, because the handler returns none when the tool
+    // declares no auth scheme.
+    fillMissingHeaders(headers, this.authCredential?.http?.additionalHeaders);
+    fillMissingHeaders(headers, {
+      'User-Agent': `google-adk/${version} (tool: ${this.name})`,
+    });
+    fillMissingHeaders(headers, this.defaultHeaders);
+
     try {
       const response = await globalThis.fetch(url, {
         method,
@@ -179,6 +200,24 @@ function encodePathParamValue(name: string, value: string): string {
     );
   }
   return encodeURIComponent(value);
+}
+
+/**
+ * Adds the headers the request does not already carry, leaving the ones it
+ * does. Names are compared without case, because `fetch` appends rather than
+ * replaces when a record holds two spellings of one header name.
+ */
+function fillMissingHeaders(
+  headers: Record<string, string>,
+  additions: Record<string, string> = {},
+): void {
+  const present = new Set(Object.keys(headers).map((key) => key.toLowerCase()));
+  for (const [key, value] of Object.entries(additions)) {
+    if (!present.has(key.toLowerCase())) {
+      headers[key] = value;
+      present.add(key.toLowerCase());
+    }
+  }
 }
 
 export function prepareRequestParams(

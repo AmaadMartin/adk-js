@@ -10,9 +10,13 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
+  version,
 } from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -653,6 +657,353 @@ describe('RestApiTool', () => {
       authScheme,
       authCredential,
       expect.anything(),
+    );
+  });
+});
+
+describe('RestApiTool request headers', () => {
+  const endpoint = {
+    baseUrl: 'http://api.example.com',
+    path: '/test',
+    method: 'POST',
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockFetch() {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'ok',
+    });
+  }
+
+  function createToolContext(): Context {
+    return new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'test-invocation',
+        session: createSession({
+          id: 'test-session',
+          appName: 'test-app',
+          userId: 'test-user',
+        }),
+        pluginManager: new PluginManager([]),
+      }),
+    });
+  }
+
+  function expectHeaders(headers: Record<string, unknown>) {
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({headers: expect.objectContaining(headers)}),
+    );
+  }
+
+  /** Every header of the last request, to assert one is absent. */
+  function sentHeaders() {
+    return vi.mocked(globalThis.fetch).mock.calls.at(-1)?.[1]?.headers;
+  }
+
+  it('should name itself in the ADK user agent', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({
+      'User-Agent': `google-adk/${version} (tool: test_tool)`,
+    });
+  });
+
+  it('should let a User-Agent header parameter override the ADK user agent', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'User-Agent', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      undefined,
+      {preservePropertyNames: true},
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {'User-Agent': 'api-client'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'User-Agent': 'api-client'});
+  });
+
+  function bearerCredential(
+    additionalHeaders: Record<string, string>,
+  ): AuthCredential {
+    return {
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: 'bearer',
+        credentials: {token: 'test_token'},
+        additionalHeaders,
+      },
+    };
+  }
+
+  it('should send the additional headers of a credential that has no auth scheme', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.configureAuthCredential(
+      bearerCredential({'x-goog-user-project': 'test-project'}),
+    );
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'x-goog-user-project': 'test-project'});
+  });
+
+  it('should let a header parameter override an additional header of the credential', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'x-goog-user-project', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      bearerCredential({'x-goog-user-project': 'from-credential'}),
+      {preservePropertyNames: true},
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {'x-goog-user-project': 'from-param'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'x-goog-user-project': 'from-param'});
+  });
+
+  it('should keep the content type of the body over an additional header of the credential', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {foo: {type: 'string'}}},
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      bearerCredential({'Content-Type': 'text/plain'}),
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {foo: 'bar'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'Content-Type': 'application/json'});
+  });
+
+  it('should not add a second spelling of a header parameter name', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      parameters: [
+        {name: 'user-agent', in: 'header', schema: {type: 'string'}},
+      ],
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+      undefined,
+      undefined,
+      {preservePropertyNames: true},
+    );
+    mockFetch();
+
+    await tool.runAsync({
+      args: {'user-agent': 'api-client'},
+      toolContext: createToolContext(),
+    });
+
+    expect(sentHeaders()).toEqual({'user-agent': 'api-client'});
+  });
+
+  it('should not add a second spelling of the content type the body set', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {foo: {type: 'string'}}},
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+    tool.setDefaultHeaders({'content-type': 'text/plain'});
+    mockFetch();
+
+    await tool.runAsync({
+      args: {foo: 'bar'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'Content-Type': 'application/json'});
+    expect(sentHeaders()).not.toHaveProperty('content-type');
+  });
+
+  it('should send one spelling when the credential carries two', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.configureAuthCredential(
+      bearerCredential({
+        'x-goog-user-project': 'first',
+        'X-Goog-User-Project': 'second',
+      }),
+    );
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'x-goog-user-project': 'first'});
+    expect(sentHeaders()).not.toHaveProperty('X-Goog-User-Project');
+  });
+
+  it('should not add a second spelling of a header the credential set', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.configureAuthCredential(bearerCredential({'User-Agent': 'from-cred'}));
+    tool.setDefaultHeaders({'user-agent': 'from-default'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expect(sentHeaders()).toEqual({'User-Agent': 'from-cred'});
+  });
+
+  it('should send a default header', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.setDefaultHeaders({'developer-token': 'token'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'developer-token': 'token'});
+  });
+
+  it('should keep the content type of the body over a default', async () => {
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {type: 'object', properties: {foo: {type: 'string'}}},
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+    tool.setDefaultHeaders({'Content-Type': 'text/plain'});
+    mockFetch();
+
+    await tool.runAsync({
+      args: {foo: 'bar'},
+      toolContext: createToolContext(),
+    });
+
+    expectHeaders({'Content-Type': 'application/json'});
+  });
+
+  it('should keep a credential header over a default', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      {responses: {}},
+      createApiKeyScheme('X-API-Key', 'header'),
+      {authType: AuthCredentialTypes.API_KEY, apiKey: 'secret_key'},
+    );
+    tool.setDefaultHeaders({'X-API-Key': 'default_key'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'X-API-Key': 'secret_key'});
+  });
+
+  it('should keep a header provider header over a default', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      {responses: {}},
+      undefined,
+      undefined,
+      {headerProvider: () => ({'X-Custom-Header': 'provided'})},
+    );
+    tool.setDefaultHeaders({'X-Custom-Header': 'default'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'X-Custom-Header': 'provided'});
+  });
+
+  it('should replace the default headers of an earlier call', async () => {
+    const tool = new RestApiTool('test_tool', 'description', endpoint, {
+      responses: {},
+    });
+    tool.setDefaultHeaders({'first-token': 'first'});
+    tool.setDefaultHeaders({'second-token': 'second'});
+    mockFetch();
+
+    await tool.runAsync({args: {}, toolContext: createToolContext()});
+
+    expectHeaders({'second-token': 'second'});
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.not.objectContaining({'first-token': 'first'}),
+      }),
     );
   });
 });
