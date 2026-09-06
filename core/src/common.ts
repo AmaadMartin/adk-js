@@ -275,6 +275,14 @@ export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
+export {
+  COMPLETION_DETAILS_EVENT_NAME,
+  maybeLogCompletionDetails,
+  setOperationDetailsAttributesFromRequest,
+  setOperationDetailsAttributesFromResponse,
+  setOperationDetailsCommonAttributes,
+  type ExperimentalSemconvConfig,
+} from './telemetry/_experimental_semconv.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
