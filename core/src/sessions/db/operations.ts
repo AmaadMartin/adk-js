@@ -14,12 +14,70 @@ import {
   StorageMetadata,
 } from './schema.js';
 
+/** Prefix that introduces a sqlite connection string. */
+const SQLITE_URI_PREFIX = 'sqlite://';
+
 /** Describes the optional driver peer backing a connection-string scheme. */
 function driverPeer(packageName: string, scheme: string) {
   return {
     packageName,
     feature: `DatabaseSessionService with a "${scheme}" connection string`,
   };
+}
+
+/** A sqlite connection string split into the parts the driver needs. */
+export interface SqliteUriParts {
+  /** Path of the database file, or `:memory:`. */
+  dbName: string;
+  /** Query string that configures the connection, without its leading `?`. */
+  query: string;
+}
+
+/**
+ * Splits a sqlite connection string into its path and its query string.
+ *
+ * Everything between `sqlite://` and a `?` is the path, verbatim. adk-js does
+ * not follow SQLAlchemy's rule that `sqlite:///x.db` is relative and
+ * `sqlite:////x.db` is absolute, so an existing database keeps resolving to
+ * the file it resolves to today.
+ *
+ * A query string configures the connection instead of becoming part of the
+ * file name, which is what adk-python's `_parse_db_path` does. The path is
+ * percent-decoded only when a query string is present, so a URL without one
+ * is unchanged.
+ */
+export function parseSqliteUri(uri: string): SqliteUriParts {
+  const rest = uri.substring(SQLITE_URI_PREFIX.length);
+  const queryStart = rest.indexOf('?');
+  if (queryStart < 0) {
+    return {dbName: rest, query: ''};
+  }
+  return {
+    dbName: decodeURIComponent(rest.slice(0, queryStart)),
+    query: rest.slice(queryStart + 1),
+  };
+}
+
+/** The part of a raw sqlite connection the foreign-key pragma needs. */
+interface SqliteRawConnection {
+  run(sql: string, callback: (error: Error | null) => void): void;
+}
+
+/**
+ * Turns foreign-key enforcement on for a freshly opened sqlite connection.
+ *
+ * sqlite reads `foreign_keys` per connection and defaults it off, so the
+ * `events -> sessions ON DELETE CASCADE` constraint adk-python declares does
+ * not fire without this. Installed as knex's `pool.afterCreate` hook, which
+ * runs for every connection the pool opens rather than only the first.
+ */
+export function enableSqliteForeignKeys(
+  connection: SqliteRawConnection,
+  done: (error: Error | null, connection: SqliteRawConnection) => void,
+): void {
+  connection.run('PRAGMA foreign_keys = ON', (error) =>
+    done(error, connection),
+  );
 }
 
 /**
@@ -68,14 +126,29 @@ export async function getConnectionOptionsFromUri(
     throw new Error(`Unsupported database URI: ${redactUriPassword(uri)}`);
   }
 
-  if (uri.startsWith('sqlite://')) {
+  if (uri.startsWith(SQLITE_URI_PREFIX)) {
+    const {dbName, query} = parseSqliteUri(uri);
     return {
       entities: ENTITIES,
-      dbName:
-        uri === 'sqlite://:memory:'
-          ? ':memory:'
-          : uri.substring('sqlite://'.length),
+      dbName,
       driver,
+      driverOptions: {
+        // knex reaches every connection it opens through this hook, while the
+        // `pool` option stays free for the caller to replace.
+        pool: {afterCreate: enableSqliteForeignKeys},
+        // A query string only reaches sqlite through a `file:` name, and
+        // sqlite only reads that name as a URI under `OPEN_URI`. sqlite
+        // validates the parameters it knows, `mode` among them, and ignores
+        // the rest — the same contract adk-python gets from `uri=True`.
+        ...(query
+          ? {
+              connection: {
+                filename: `file:${dbName}?${query}`,
+                flags: ['OPEN_URI'],
+              },
+            }
+          : {}),
+      },
     } as MikroORMOptions;
   }
 

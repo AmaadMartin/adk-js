@@ -4,12 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Entity, JsonType, PrimaryKey, Property} from '@mikro-orm/core';
+import {
+  Entity,
+  JsonType,
+  Platform,
+  PrimaryKey,
+  Property,
+  TransformContext,
+} from '@mikro-orm/core';
 import {
   Event,
   transformToCamelCaseEvent,
   transformToSnakeCaseEvent,
 } from '../../events/event.js';
+import {isRecord, safeJsonLoads} from '../../utils/json_utils.js';
 
 export const SCHEMA_VERSION_KEY = 'schema_version';
 export const SCHEMA_VERSION_1_JSON = '1';
@@ -36,6 +44,44 @@ class CamelCaseToSnakeCaseJsonType extends JsonType {
   }
 }
 
+/**
+ * Storage type for a state column, decoded defensively.
+ *
+ * A state column is plain JSON in the database, so another tool — or a
+ * hand-edit — can leave text behind that is not the object the merge expects.
+ * Both failures are reported against the column's role instead of surfacing a
+ * bare parser error or spreading an array into index keys.
+ *
+ * This is adk-python's `sqlite_session_service._decode_state`. Python rejects
+ * a non-string key as well; a `JSON.parse` result can only have string keys,
+ * so that branch has no counterpart here.
+ */
+class StateJsonType extends JsonType {
+  /**
+   * @param context The column's role, for example `'session state'`, named in
+   *   both error messages.
+   */
+  constructor(private readonly context: string) {
+    super();
+  }
+
+  override convertToJSValue(
+    value: unknown,
+    platform: Platform,
+    context?: TransformContext,
+  ): Record<string, unknown> {
+    const decoded =
+      typeof value === 'string'
+        ? safeJsonLoads(value, this.context)
+        : super.convertToJSValue(value, platform, context);
+
+    if (!isRecord(decoded)) {
+      throw new Error(`Persisted ${this.context} must be a JSON object.`);
+    }
+    return decoded;
+  }
+}
+
 @Entity({tableName: 'adk_internal_metadata'})
 export class StorageMetadata {
   @PrimaryKey({type: 'string'})
@@ -54,7 +100,7 @@ export class StorageAppState {
   })
   appName!: string;
 
-  @Property({type: 'json'})
+  @Property({type: new StateJsonType('app state')})
   state!: Record<string, unknown>;
 
   @Property({
@@ -82,7 +128,7 @@ export class StorageUserState {
   })
   userId!: string;
 
-  @Property({type: 'json'})
+  @Property({type: new StateJsonType('user state')})
   state!: Record<string, unknown>;
 
   @Property({
@@ -115,7 +161,7 @@ export class StorageSession {
   })
   userId!: string;
 
-  @Property({type: 'json'})
+  @Property({type: new StateJsonType('session state')})
   state!: Record<string, unknown>;
 
   @Property({
