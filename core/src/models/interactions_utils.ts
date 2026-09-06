@@ -59,7 +59,7 @@ export interface ExtendedInteractionSSEEvent extends Omit<
     signature?: string;
     data?: string;
     uri?: string;
-    mime_type: string;
+    mime_type?: string;
   };
   status?: string;
   error?: {
@@ -72,8 +72,12 @@ export interface ExtendedInteractionSSEEvent extends Omit<
   interactionId?: string;
   interaction?: {
     id: string;
+    // The SDK's InteractionSseEventInteraction omits environment_id, which the
+    // API may still send on a lifecycle payload.
+    environment_id?: string;
   };
   id?: string;
+  environment_id?: string;
 }
 
 // --- Helper Functions ---
@@ -860,6 +864,19 @@ function extractStreamInteractionId(
 }
 
 /**
+ * Copy `response`, adding the environment id the API reported for it.
+ *
+ * An absent id leaves the response untouched, so no response carries an
+ * `environmentId` key the API did not report.
+ */
+function withEnvironmentId(
+  response: LlmResponse,
+  environmentId: string | undefined,
+): LlmResponse {
+  return environmentId ? {...response, environmentId} : response;
+}
+
+/**
  * Generate content using the interactions API.
  */
 export async function* generateContentViaInteractions(
@@ -890,6 +907,7 @@ export async function* generateContentViaInteractions(
   );
 
   let currentInteractionId = previousInteractionId;
+  let currentEnvironmentId: string | undefined;
 
   if (stream) {
     const responses = (await apiClient.interactions.create({
@@ -909,24 +927,31 @@ export async function* generateContentViaInteractions(
       if (interactionId) {
         currentInteractionId = interactionId;
       }
+      currentEnvironmentId =
+        sseEvent.interaction?.environment_id ||
+        sseEvent.environment_id ||
+        currentEnvironmentId;
       const llmResponse = convertInteractionEventToLlmResponse(
         event,
         aggregatedParts,
         currentInteractionId,
       );
       if (llmResponse) {
-        yield llmResponse;
+        yield withEnvironmentId(llmResponse, currentEnvironmentId);
       }
     }
 
     if (aggregatedParts.length > 0) {
-      yield {
-        content: {role: 'model', parts: aggregatedParts},
-        partial: false,
-        turnComplete: true,
-        finishReason: 'STOP' as FinishReason,
-        interactionId: currentInteractionId,
-      };
+      yield withEnvironmentId(
+        {
+          content: {role: 'model', parts: aggregatedParts},
+          partial: false,
+          turnComplete: true,
+          finishReason: 'STOP' as FinishReason,
+          interactionId: currentInteractionId,
+        },
+        currentEnvironmentId,
+      );
     }
   } else {
     const interaction = (await apiClient.interactions.create({
@@ -941,6 +966,9 @@ export async function* generateContentViaInteractions(
     })) as ExtendedInteraction;
 
     logger.info('Interaction response received from the model.');
-    yield convertInteractionToLlmResponse(interaction);
+    yield withEnvironmentId(
+      convertInteractionToLlmResponse(interaction),
+      interaction.environment_id,
+    );
   }
 }
