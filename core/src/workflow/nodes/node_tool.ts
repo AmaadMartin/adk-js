@@ -65,21 +65,6 @@ function toDeclarationSchema(
 }
 
 /**
- * Wraps a scalar JSON Schema under a single `request` property: the GenAI API
- * accepts an object-typed parameter schema only. Mirrors
- * `_node_tool.py::_get_declaration`.
- */
-function wrapScalarSchema(
-  schema: Record<string, unknown>,
-): Record<string, unknown> {
-  return {
-    type: 'object',
-    properties: {request: schema},
-    required: ['request'],
-  };
-}
-
-/**
  * A tool that executes a {@link BaseNode} (e.g. a `Workflow` or a function node)
  * on behalf of an `LlmAgent`. This is the inverse of {@link ToolNode} (which
  * exposes a tool as a workflow node): here a node/workflow is exposed to a model
@@ -157,9 +142,16 @@ export class NodeTool extends BaseTool {
       } else {
         const json = toDeclarationSchema(schema);
         if (json) {
+          // The GenAI API accepts an object-typed parameter schema only, so a
+          // scalar goes under a single `request` property, as it does in
+          // `_node_tool.py::_get_declaration`.
           declaration.parametersJsonSchema = this.inputIsObject
             ? json
-            : wrapScalarSchema(json);
+            : {
+                type: 'object',
+                properties: {request: json},
+                required: ['request'],
+              };
         }
       }
     }

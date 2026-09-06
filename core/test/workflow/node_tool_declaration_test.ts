@@ -30,13 +30,15 @@ describe('NodeTool declaration', () => {
       name: 'doubler',
       inputSchema: z.number(),
     });
-    const parameters = new NodeTool(target)._getDeclaration()
-      .parametersJsonSchema as Record<string, Record<string, unknown>>;
-    expect(parameters['type']).toBe('object');
     // No `$schema`: JSON Schema does not allow the dialect key on a nested
     // subschema, and adk-python's `model_json_schema()` does not emit one.
-    expect(parameters['properties']).toEqual({request: {type: 'number'}});
-    expect(parameters['required']).toEqual(['request']);
+    expect(new NodeTool(target)._getDeclaration().parametersJsonSchema).toEqual(
+      {
+        type: 'object',
+        properties: {request: {type: 'number'}},
+        required: ['request'],
+      },
+    );
   });
 
   it('unwraps a numeric scalar argument on the way into the node', async () => {

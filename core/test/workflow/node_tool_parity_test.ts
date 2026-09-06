@@ -147,12 +147,11 @@ describe('NodeTool parity with adk-python', () => {
     });
     const tool = new NodeTool(subWorkflow, 'primitive_tool');
 
-    const parameters = tool._getDeclaration().parametersJsonSchema as Record<
-      string,
-      Record<string, Record<string, unknown>>
-    >;
-    expect(parameters['type']).toBe('object');
-    expect(parameters['properties']['request']['type']).toBe('string');
+    expect(tool._getDeclaration().parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {request: {type: 'string'}},
+      required: ['request'],
+    });
 
     const responses = await runTurn(
       callingAgent('primitive_tool', {request: 'hello_world'}, [tool]),
