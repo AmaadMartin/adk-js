@@ -198,4 +198,20 @@ describe('OpenAPIToolset Integration', () => {
     expect(requestUrl.pathname).toBe('/v1/users/..%2F..%2Fadmin%2Fexport');
     expect(requestUrl.searchParams.get('key')).toBe('test-api-key');
   });
+
+  it('should declare only formats the Gemini API accepts for the petstore spec', async () => {
+    const specPath = path.resolve(__dirname, 'fixtures/petstore.yaml');
+    const toolset = new OpenAPIToolset({
+      specStr: fs.readFileSync(specPath, 'utf8'),
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+    const uploadFileTool = tools.find((t) => t.name === 'upload_file');
+    if (!uploadFileTool) expect.fail('upload_file tool was not created');
+
+    const properties = uploadFileTool._getDeclaration()?.parameters?.properties;
+
+    expect(properties?.['pet_id'].format).toBe('int64');
+    expect(properties?.['body'].format).toBeUndefined();
+  });
 });

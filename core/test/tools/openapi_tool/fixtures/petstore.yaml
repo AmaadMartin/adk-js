@@ -809,8 +809,7 @@ components:
   requestBodies:
     Pet:
       description: Pet object that needs to be added to the store
-
-content:
+      content:
         application/json:
           schema:
             $ref: '#/components/schemas/Pet'
@@ -832,10 +831,9 @@ content:
         implicit:
           authorizationUrl: https://petstore3.swagger.io/oauth/authorize
           scopes:
-            "write:pets": modify pets in your account
-            "read:pets": read your pets
+            'write:pets': modify pets in your account
+            'read:pets': read your pets
     api_key:
       type: apiKey
       name: api_key
       in: header
-

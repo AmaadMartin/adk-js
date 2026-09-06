@@ -309,6 +309,44 @@ describe('RestApiTool', () => {
     });
   });
 
+  it('should keep a supported format and drop a rejected one in the declaration', () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/pet/{petId}/uploadImage',
+      method: 'POST',
+    };
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'uploadFile',
+      parameters: [
+        {
+          name: 'petId',
+          in: 'path',
+          required: true,
+          schema: {type: 'integer', format: 'int64'},
+        },
+      ],
+      requestBody: {
+        content: {
+          'application/octet-stream': {
+            schema: {type: 'string', format: 'binary'},
+          },
+        },
+      },
+      responses: {},
+    };
+    const tool = new RestApiTool(
+      'upload_file',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    const properties = tool._getDeclaration()?.parameters?.properties;
+
+    expect(properties?.['pet_id'].format).toBe('int64');
+    expect(properties?.['body'].format).toBeUndefined();
+  });
+
   it('should extract query parameters from path', async () => {
     const endpoint = {
       baseUrl: 'http://api.example.com',
