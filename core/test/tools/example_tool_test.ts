@@ -44,6 +44,17 @@ class FixedExampleProvider extends BaseExampleProvider {
   }
 }
 
+/** Stands in for a provider backed by a remote store, such as
+ * VertexAiExampleStore. */
+class AsyncExampleProvider extends BaseExampleProvider {
+  constructor(private readonly examples: Example[]) {
+    super();
+  }
+  override async getExamples(_query: string): Promise<Example[]> {
+    return this.examples;
+  }
+}
+
 /**
  * Builds a `toolContext` stub exposing only the `userContent` used by
  * ExampleTool, cast to `Context` (mirrors `StubToolContext` in
@@ -95,6 +106,25 @@ describe('ExampleTool', () => {
 
     expect(getExamplesSpy).toHaveBeenCalledWith('What is 2+2?');
     expect(llmRequest.config?.systemInstruction).toContain('What is 2+2?');
+  });
+
+  it('appends instructions from a provider that resolves asynchronously', async () => {
+    const provider = new AsyncExampleProvider([SIMPLE_EXAMPLE]);
+    const getExamplesSpy = vi.spyOn(provider, 'getExamples');
+    const tool = new ExampleTool(provider);
+    const toolContext = makeToolContext({
+      role: 'user',
+      parts: [{text: 'What is 2+2?'}],
+    });
+    const llmRequest = makeLlmRequest('gemini-2.0-flash');
+
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(getExamplesSpy).toHaveBeenCalledWith('What is 2+2?');
+    const instruction = llmRequest.config?.systemInstruction;
+    expect(instruction).toContain('<EXAMPLES>');
+    expect(instruction).toContain('4');
+    expect(instruction).not.toContain('[object Promise]');
   });
 
   it('forwards llmRequest.model to buildExampleSi (function-call fence style)', async () => {
