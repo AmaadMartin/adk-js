@@ -1429,3 +1429,187 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
   });
 });
+
+describe('LlmAgent set_model_response round trip', () => {
+  const OUTPUT_SCHEMA = z4.object({
+    name: z4.string(),
+    age: z4.number(),
+  });
+
+  /** Replays one scripted model turn per call. */
+  class ScriptedLlm extends BaseLlm {
+    calls = 0;
+
+    constructor(private readonly script: LlmResponse[]) {
+      super({model: 'gemini-1.5-pro'});
+    }
+
+    async *generateContentAsync(
+      _request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      const response = this.script[this.calls];
+      this.calls++;
+      if (!response) {
+        expect.fail(`the agent called the model ${this.calls} times`);
+      }
+      yield response;
+    }
+
+    async connect(): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  function setModelResponseCall(
+    id: string,
+    args: Record<string, unknown>,
+  ): LlmResponse {
+    return {
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id, name: 'set_model_response', args}}],
+      },
+    };
+  }
+
+  async function run(script: LlmResponse[]): Promise<{
+    events: Event[];
+    llm: ScriptedLlm;
+  }> {
+    const llm = new ScriptedLlm(script);
+    const agent = new LlmAgent({
+      name: 'structured_agent',
+      model: llm,
+      outputSchema: OUTPUT_SCHEMA,
+      outputKey: 'structured',
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+    });
+    const session = createSession({
+      id: 'sess_smr',
+      events: [],
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_smr',
+      session,
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+    return {events, llm};
+  }
+
+  it('answers with the validated value after a valid call', async () => {
+    const {events, llm} = await run([
+      setModelResponseCall('call-1', {name: 'Alice', age: 25}),
+    ]);
+
+    expect(llm.calls).toBe(1);
+    const parts = events.flatMap((event) => event.content?.parts ?? []);
+    expect(parts.filter((part) => part.functionCall)).toHaveLength(1);
+    expect(parts.filter((part) => part.functionResponse)).toHaveLength(1);
+
+    const finalEvent = events[events.length - 1];
+    expect(finalEvent.content?.parts?.[0].text).toBe(
+      JSON.stringify({name: 'Alice', age: 25}),
+    );
+    expect(finalEvent.actions.stateDelta['structured']).toEqual({
+      name: 'Alice',
+      age: 25,
+    });
+  });
+
+  it('does not set skipSummarization on the function call event', async () => {
+    const {events} = await run([
+      setModelResponseCall('call-1', {name: 'Alice', age: 25}),
+    ]);
+
+    const callEvent = events.find((event) =>
+      (event.content?.parts ?? []).some((part) => part.functionCall),
+    );
+    if (!callEvent) {
+      expect.fail('the agent emitted no function call event');
+    }
+    expect(callEvent.actions.skipSummarization).toBeUndefined();
+    expect(callEvent.content?.parts?.[0].functionCall?.name).toBe(
+      'set_model_response',
+    );
+  });
+
+  it('feeds a validation error back and answers on the retry', async () => {
+    const {events, llm} = await run([
+      setModelResponseCall('call-1', {name: 'Alice', age: 'twenty five'}),
+      setModelResponseCall('call-2', {name: 'Alice', age: 25}),
+    ]);
+
+    expect(llm.calls).toBe(2);
+
+    const responses = events
+      .flatMap((event) => event.content?.parts ?? [])
+      .filter((part) => part.functionResponse);
+    expect(responses).toHaveLength(2);
+    const firstResponse = responses[0].functionResponse?.response as {
+      error?: string;
+    };
+    expect(firstResponse.error).toContain('Validation Error found');
+    expect(firstResponse.error).toContain('age');
+
+    const finalEvent = events[events.length - 1];
+    expect(finalEvent.content?.parts?.[0].text).toBe(
+      JSON.stringify({name: 'Alice', age: 25}),
+    );
+    expect(finalEvent.actions.stateDelta['structured']).toEqual({
+      name: 'Alice',
+      age: 25,
+    });
+  });
+
+  it('answers when the call arrives alongside another tool call', async () => {
+    const {events} = await run([
+      {
+        content: {
+          role: 'model',
+          parts: [
+            {functionCall: {id: 'call-1', name: 'some_tool', args: {}}},
+            {
+              functionCall: {
+                id: 'call-2',
+                name: 'set_model_response',
+                args: {name: 'Alice', age: 25},
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const finalEvent = events[events.length - 1];
+    expect(finalEvent.content?.parts?.[0].text).toBe(
+      JSON.stringify({name: 'Alice', age: 25}),
+    );
+  });
+
+  it('yields no final model event for a failed call alone', async () => {
+    const {events} = await run([
+      setModelResponseCall('call-1', {name: 'Alice', age: 'twenty five'}),
+      {content: {role: 'model', parts: [{text: 'giving up'}]}},
+    ]);
+
+    const textEvents = events.filter((event) =>
+      (event.content?.parts ?? []).some((part) => part.text),
+    );
+    expect(textEvents).toHaveLength(1);
+    expect(textEvents[0].content?.parts?.[0].text).toBe('giving up');
+  });
+});
