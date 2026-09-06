@@ -6,6 +6,7 @@
 
 import {Event} from '../../events/event.js';
 import {LlmRequest, setOutputSchema} from '../../models/llm_request.js';
+import {isGemini3xFlashLive} from '../../utils/model_name.js';
 import {canUseOutputSchemaWithTools} from '../../utils/output_schema_utils.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
@@ -64,10 +65,13 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
         invocationContext.runConfig.inputAudioTranscription;
       llmRequest.liveConnectConfig.realtimeInputConfig =
         invocationContext.runConfig.realtimeInputConfig;
-      llmRequest.liveConnectConfig.enableAffectiveDialog =
-        invocationContext.runConfig.enableAffectiveDialog;
-      llmRequest.liveConnectConfig.proactivity =
-        invocationContext.runConfig.proactivity;
+      // Gemini 3.x Live models reject these two fields.
+      if (!isGemini3xFlashLive(llmRequest.model)) {
+        llmRequest.liveConnectConfig.enableAffectiveDialog =
+          invocationContext.runConfig.enableAffectiveDialog;
+        llmRequest.liveConnectConfig.proactivity =
+          invocationContext.runConfig.proactivity;
+      }
     }
   }
 }
