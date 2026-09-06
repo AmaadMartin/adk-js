@@ -68,6 +68,28 @@ export interface ListSessionsRequest {
 export type DeleteSessionRequest = CompositeSessionKey;
 
 /**
+ * The parameters for `getUserState`.
+ */
+export interface GetUserStateRequest {
+  /** The name of the application. */
+  appName: string;
+  /** The ID of the user. */
+  userId: string;
+}
+
+/**
+ * Session state split by the scope each key belongs to.
+ */
+export interface ScopedStateDelta {
+  /** `app:`-prefixed entries, with the prefix removed. */
+  app: Record<string, unknown>;
+  /** `user:`-prefixed entries, with the prefix removed. */
+  user: Record<string, unknown>;
+  /** Unprefixed entries. `temp:` entries belong to no scope and are dropped. */
+  session: Record<string, unknown>;
+}
+
+/**
  * The parameters for `appendEvent`.
  */
 export interface AppendEventRequest {
@@ -80,7 +102,8 @@ export interface AppendEventRequest {
 /**
  * The response of listing sessions.
  *
- * The events and states are not set within each Session object.
+ * The events are not set within each Session object. The state is the same
+ * merged view that `getSession` returns.
  * When no pagination params were requested, `page` is 1, `limit` equals
  * `totalItems`, and `totalPages` is 1 (or 0 when there are no sessions).
  */
@@ -161,6 +184,35 @@ export abstract class BaseSessionService {
   abstract deleteSession(request: DeleteSessionRequest): Promise<void>;
 
   /**
+   * Returns the user-scoped state for the given app and user.
+   *
+   * User state is keyed by `(appName, userId)` and shared by every session of
+   * that user within that app. The returned keys are un-prefixed: `myKey`
+   * rather than `user:myKey`.
+   *
+   * This method exists so a caller can read user state without holding a
+   * session id — bootstrapping context before `createSession`, for example,
+   * which would otherwise need a `listSessions` call just to reach
+   * user-scoped data.
+   *
+   * @param _request The request to get the user state.
+   * @return A promise that resolves to the un-prefixed user-scoped state, or
+   *     an empty object when nothing is stored for that app and user.
+   * @throws An error when the service cannot read user state without a
+   *     session. Callers should then enumerate sessions with `listSessions`
+   *     and call `getSession` on each result to reach the merged state.
+   */
+  async getUserState(
+    _request: GetUserStateRequest,
+  ): Promise<Record<string, unknown>> {
+    throw new Error(
+      `${this.constructor.name} does not support getUserState. To read user ` +
+        `state, enumerate sessions via listSessions and call getSession on ` +
+        `each result to access the merged state.`,
+    );
+  }
+
+  /**
    * Appends an event to a session.
    *
    * @param request The request to append an event.
@@ -173,52 +225,106 @@ export abstract class BaseSessionService {
 
     event = trimTempDeltaState(event);
 
-    this.updateSessionState({session, event});
-    const index = session.events.findIndex((e) => e.id === event.id);
-    if (index >= 0) {
-      session.events[index] = event;
-    } else {
-      session.events.push(event);
+    if (event.actions?.stateDelta) {
+      applyStateDelta(session.state, event.actions.stateDelta);
     }
+    upsertEvent(session.events, event);
 
     return event;
   }
+}
 
-  /**
-   * Updates the session state based on the event.
-   *
-   * @param request The request to update the session state.
-   */
-  private updateSessionState({session, event}: AppendEventRequest): void {
-    if (!event.actions || !event.actions.stateDelta) {
-      return;
+/**
+ * Appends an event to an event list, replacing an entry that already carries
+ * the same id.
+ *
+ * An event id names one logical event, so an event that reuses a stored id
+ * revises that entry instead of adding a second one. Every event list a
+ * session service keeps follows this rule, so a caller's session and the
+ * stored session hold the same events.
+ *
+ * @param events The event list to write into.
+ * @param event The event to append or revise.
+ */
+export function upsertEvent(events: Event[], event: Event): void {
+  const index = events.findIndex((e) => e.id === event.id);
+  if (index >= 0) {
+    events[index] = event;
+  } else {
+    events.push(event);
+  }
+}
+
+/**
+ * Commits the entries of a state delta into a state object.
+ *
+ * `temp:` entries are never committed: they live for the current invocation
+ * only.
+ *
+ * @param state The state to write into.
+ * @param stateDelta The delta to commit.
+ */
+export function applyStateDelta(
+  state: Record<string, unknown>,
+  stateDelta: Record<string, unknown>,
+): void {
+  for (const [key, value] of Object.entries(stateDelta)) {
+    if (key.startsWith(State.TEMP_PREFIX)) {
+      continue;
     }
-    for (const [key, value] of Object.entries(event.actions.stateDelta)) {
-      if (key.startsWith(State.TEMP_PREFIX)) {
-        continue;
-      }
-      // Commits lag the writes they carry, and events arrive here in the order
-      // they were streamed rather than the order their writes happened.
-      // Applying an entry that a newer write already superseded would roll the
-      // key back until that newer event commits in turn; skip it instead.
-      if (
-        !shouldApplyDeltaWrite(session.state, event.actions.stateDelta, key)
-      ) {
-        continue;
-      }
-      // `session.state` is not always a null-prototype map — a caller can hand
-      // us a session whose state is a plain object literal — and on a plain
-      // object `state['__proto__'] = value` reaches the inherited `__proto__`
-      // setter, which replaces the object's prototype instead of storing the
-      // entry. `defineProperty` always creates an own property.
-      Object.defineProperty(session.state, key, {
-        value,
-        writable: true,
-        enumerable: true,
-        configurable: true,
-      });
+    // Commits lag the writes they carry, and events arrive here in the order
+    // they were streamed rather than the order their writes happened.
+    // Applying an entry that a newer write already superseded would roll the
+    // key back until that newer event commits in turn; skip it instead.
+    if (!shouldApplyDeltaWrite(state, stateDelta, key)) {
+      continue;
+    }
+    // `state` is not always a null-prototype map — a caller can hand us a
+    // session whose state is a plain object literal — and on a plain object
+    // `state['__proto__'] = value` reaches the inherited `__proto__` setter,
+    // which replaces the object's prototype instead of storing the entry.
+    // `defineProperty` always creates an own property.
+    Object.defineProperty(state, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+}
+
+/**
+ * Splits a state object into its `app:`, `user:` and session-scoped entries,
+ * with the prefixes removed. `temp:` entries belong to no scope and are
+ * dropped.
+ *
+ * @param state The state to split.
+ * @return The three scoped buckets.
+ */
+export function extractStateDelta(
+  state: Record<string, unknown>,
+): ScopedStateDelta {
+  // Null-prototype: the caller controls these keys, and copying a `__proto__`
+  // key into a plain object literal invokes the inherited `__proto__` setter,
+  // which drops the entry and re-parents the map. See `trimTempState`.
+  const deltas: ScopedStateDelta = {
+    app: Object.create(null),
+    user: Object.create(null),
+    session: Object.create(null),
+  };
+  for (const [key, value] of Object.entries(state)) {
+    if (key.startsWith(State.APP_PREFIX)) {
+      deltas.app[key.slice(State.APP_PREFIX.length)] = value;
+    } else if (key.startsWith(State.USER_PREFIX)) {
+      deltas.user[key.slice(State.USER_PREFIX.length)] = value;
+    } else if (!key.startsWith(State.TEMP_PREFIX)) {
+      deltas.session[key] = value;
     }
   }
+  // The session bucket is a different object, so the write order recorded
+  // against the original has to come with it or the commit loses its ordering.
+  carryDeltaStamps(state, deltas.session);
+  return deltas;
 }
 
 /**

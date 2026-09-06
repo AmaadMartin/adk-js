@@ -268,8 +268,10 @@ export type {
   DeleteSessionRequest,
   GetSessionConfig,
   GetSessionRequest,
+  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
+  ScopedStateDelta,
 } from './sessions/base_session_service.js';
 export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';

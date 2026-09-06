@@ -3,31 +3,51 @@
  * Copyright 2025 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
-import {cloneDeep} from 'lodash-es';
+import {cloneDeep, isEqual} from 'lodash-es';
 
+import {AlreadyExistsError} from '../errors/already_exists_error.js';
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
   AppendEventRequest,
+  applyStateDelta,
   BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
+  extractStateDelta,
   GetSessionRequest,
+  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
-  trimTempState,
+  upsertEvent,
 } from './base_session_service.js';
 import {createSession, Session} from './session.js';
-import {State} from './state.js';
 
 /**
  * Checks if the given URI is an in-memory memory service URI.
  */
 export function isInMemoryConnectionString(uri?: string): boolean {
   return uri === 'memory://';
+}
+
+/**
+ * Builds the comparator that orders a listed page of sessions.
+ *
+ * Sessions run oldest-first unless `order` is `'desc'`. Ties break on user ID
+ * and then session ID, ascending in both directions, so that a list is stable
+ * across calls.
+ */
+function compareSessions(
+  order: ListSessionsRequest['order'],
+): (a: Session, b: Session) => number {
+  const direction = order === 'desc' ? -1 : 1;
+  return (a, b) =>
+    direction * (a.lastUpdateTime - b.lastUpdateTime) ||
+    a.userId.localeCompare(b.userId) ||
+    a.id.localeCompare(b.id);
 }
 
 /**
@@ -68,12 +88,21 @@ export class InMemorySessionService extends BaseSessionService {
     state,
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
-    const filteredState = state ? trimTempState(state) : undefined;
+    const trimmedId = sessionId?.trim();
+    if (trimmedId && this.sessions[appName]?.[userId]?.[trimmedId]) {
+      throw new AlreadyExistsError(
+        `Session with id ${trimmedId} already exists.`,
+      );
+    }
+
+    const {app, user, session: sessionState} = extractStateDelta(state ?? {});
+    this.writeScopedState(appName, userId, app, user);
+
     const session = createSession({
-      id: sessionId || randomUUID(),
+      id: trimmedId || randomUUID(),
       appName,
       userId,
-      state: filteredState,
+      state: sessionState,
       events: [],
       lastUpdateTime: Date.now(),
     });
@@ -115,10 +144,11 @@ export class InMemorySessionService extends BaseSessionService {
     const copiedSession = cloneDeep(session);
 
     if (config) {
-      if (config.numRecentEvents) {
-        copiedSession.events = copiedSession.events.slice(
-          -config.numRecentEvents,
-        );
+      if (config.numRecentEvents !== undefined) {
+        copiedSession.events =
+          config.numRecentEvents === 0
+            ? []
+            : copiedSession.events.slice(-config.numRecentEvents);
       }
       if (config.afterTimestamp) {
         let i = copiedSession.events.length - 1;
@@ -164,57 +194,25 @@ export class InMemorySessionService extends BaseSessionService {
             ? [appSessions[userId]]
             : [];
 
-    if (sessionsByUser.length === 0) {
-      if (limit !== undefined) {
-        const effectiveOffset =
-          page !== undefined ? (page - 1) * limit : (offset ?? 0);
-        const effectivePage =
-          page !== undefined
-            ? page
-            : limit === 0
-              ? 1
-              : Math.floor(effectiveOffset / limit) + 1;
-        return Promise.resolve({
-          sessions: [],
-          page: effectivePage,
-          limit,
-          totalItems: 0,
-          totalPages: 0,
-        });
-      }
-      return Promise.resolve({
-        sessions: [],
-        page: 1,
-        limit: 0,
-        totalItems: 0,
-        totalPages: 0,
-      });
-    }
-
     const all: Session[] = sessionsByUser.flatMap((sessionsById) =>
       Object.values(sessionsById).map((session) =>
         createSession({
           id: session.id,
           appName: session.appName,
           userId: session.userId,
-          state: {},
+          // `session.userId` rather than the request's, which may be omitted.
+          state: mergeStates(
+            this.appState[appName],
+            this.userState[appName]?.[session.userId],
+            session.state,
+          ),
           events: [],
           lastUpdateTime: session.lastUpdateTime,
         }),
       ),
     );
 
-    if (order === 'asc') {
-      all.sort(
-        (a, b) =>
-          a.lastUpdateTime - b.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    } else if (order === 'desc') {
-      all.sort(
-        (a, b) =>
-          b.lastUpdateTime - a.lastUpdateTime || a.id.localeCompare(b.id),
-      );
-    }
+    all.sort(compareSessions(order));
 
     if (limit === undefined) {
       const totalItems = all.length;
@@ -266,12 +264,20 @@ export class InMemorySessionService extends BaseSessionService {
     delete this.sessions[appName][userId][sessionId];
   }
 
+  override async getUserState({
+    appName,
+    userId,
+  }: GetUserStateRequest): Promise<Record<string, unknown>> {
+    return {...(this.userState[appName]?.[userId] ?? {})};
+  }
+
   override async appendEvent({
     session,
     event,
   }: AppendEventRequest): Promise<Event> {
-    await super.appendEvent({session, event});
-    session.lastUpdateTime = event.timestamp;
+    if (event.partial) {
+      return event;
+    }
 
     const appName = session.appName;
     const userId = session.userId;
@@ -296,31 +302,55 @@ export class InMemorySessionService extends BaseSessionService {
       return event;
     }
 
-    if (event.actions && event.actions.stateDelta) {
-      for (const key of Object.keys(event.actions.stateDelta)) {
-        if (key.startsWith(State.APP_PREFIX)) {
-          this.appState[appName] =
-            this.appState[appName] || Object.create(null);
-          this.appState[appName][key.replace(State.APP_PREFIX, '')] =
-            event.actions.stateDelta[key];
-        }
-
-        if (key.startsWith(State.USER_PREFIX)) {
-          this.userState[appName] =
-            this.userState[appName] || Object.create(null);
-          this.userState[appName][userId] =
-            this.userState[appName][userId] || Object.create(null);
-          this.userState[appName][userId][key.replace(State.USER_PREFIX, '')] =
-            event.actions.stateDelta[key];
-        }
-      }
+    const storageSession: Session = this.sessions[appName][userId][sessionId];
+    // A broadcast can deliver one event to several references of the same
+    // session, as the same object or as an equal copy, and applying its state
+    // delta twice would double-count it. An event that reuses a stored id with
+    // new content is a revision, not a re-delivery, so it is not equal and
+    // `upsertEvent` replaces the stored entry.
+    if (
+      storageSession.events.some((e) => e.id === event.id && isEqual(e, event))
+    ) {
+      return event;
     }
 
-    const storageSession: Session = this.sessions[appName][userId][sessionId];
-    await super.appendEvent({session: storageSession, event});
+    await super.appendEvent({session, event});
+    session.lastUpdateTime = event.timestamp;
 
-    storageSession.lastUpdateTime = event.timestamp;
+    if (storageSession !== session) {
+      upsertEvent(storageSession.events, event);
+      storageSession.lastUpdateTime = event.timestamp;
+    }
+
+    const {
+      app,
+      user,
+      session: sessionDelta,
+    } = extractStateDelta(event.actions?.stateDelta ?? {});
+    this.writeScopedState(appName, userId, app, user);
+    applyStateDelta(storageSession.state, sessionDelta);
 
     return event;
+  }
+
+  /**
+   * Writes the app- and user-scoped buckets of a state delta into the stores
+   * they are shared through.
+   */
+  private writeScopedState(
+    appName: string,
+    userId: string,
+    app: Record<string, unknown>,
+    user: Record<string, unknown>,
+  ): void {
+    if (Object.keys(app).length > 0) {
+      this.appState[appName] ??= Object.create(null);
+      Object.assign(this.appState[appName], app);
+    }
+    if (Object.keys(user).length > 0) {
+      this.userState[appName] ??= Object.create(null);
+      this.userState[appName][userId] ??= Object.create(null);
+      Object.assign(this.userState[appName][userId], user);
+    }
   }
 }
