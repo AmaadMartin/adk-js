@@ -14,10 +14,13 @@ import {BaseTool} from './base_tool.js';
  * Function to decide whether a tool should be exposed to LLM. Toolset
  * implementer could consider whether to accept such instance in the toolset's
  * constructor and apply the predicate in getTools method.
+ *
+ * `readonlyContext` is absent when a caller lists the tools outside an
+ * invocation. The predicate still runs, so it must handle that case.
  */
 export type ToolPredicate = (
   tool: BaseTool,
-  readonlyContext: ReadonlyContext,
+  readonlyContext?: ReadonlyContext,
 ) => boolean;
 
 /**
@@ -44,7 +47,12 @@ export abstract class BaseToolset {
   readonly [BASE_TOOLSET_SIGNATURE_SYMBOL] = true;
 
   constructor(
-    readonly toolFilter: ToolPredicate | string[],
+    /**
+     * Selects the tools the toolset exposes. A subclass may replace it after
+     * construction, matching adk-python's `set_tool_filter`, as long as it
+     * reads the field on every `getTools` call.
+     */
+    public toolFilter: ToolPredicate | string[],
     readonly prefix?: string,
   ) {}
 
@@ -73,10 +81,13 @@ export abstract class BaseToolset {
    * Returns whether the tool should be exposed to LLM.
    *
    * @param tool The tool to check.
-   * @param context Context used to filter tools available to the agent.
+   * @param context Context used to filter tools available to the agent. It is
+   *     absent when a caller lists the tools outside an invocation, so a
+   *     predicate filter must handle an absent context; a name-list filter
+   *     applies either way.
    * @return Whether the tool should be exposed to LLM.
    */
-  protected isToolSelected(tool: BaseTool, context: ReadonlyContext): boolean {
+  protected isToolSelected(tool: BaseTool, context?: ReadonlyContext): boolean {
     // An empty tool filter means no filtering: all tools are selected.
     if (
       !this.toolFilter ||
