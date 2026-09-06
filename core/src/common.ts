@@ -721,6 +721,8 @@ export {
   GCS_DEFAULT_SCOPE,
   GCS_TOKEN_CACHE_KEY,
 } from './integrations/gcs/gcs_credentials.js';
+export {createRedisSessionServiceConfig} from './integrations/redis/redis_session_service_config.js';
+export type {RedisSessionServiceConfig} from './integrations/redis/redis_session_service_config.js';
 export {
   AntigravityAgent,
   PARENT_REQUIRES_SINGLE_TURN_MESSAGE,
