@@ -60,18 +60,6 @@ function parseVersion(versionString: string): ParsedVersion {
 }
 
 /**
- * Check if the model is a Gemini 1.x model using regex patterns.
- *
- * @param modelString Either a simple model name or path - based model name
- * @return true if it's a Gemini 1.x model, false otherwise.
- */
-export function isGemini1Model(modelString: string): boolean {
-  const modelName = extractModelName(modelString);
-
-  return modelName.startsWith('gemini-1');
-}
-
-/**
  * Check if the model is a Gemini 2.x model using regex patterns.
  *
  * @param modelString Either a simple model name or path - based model name

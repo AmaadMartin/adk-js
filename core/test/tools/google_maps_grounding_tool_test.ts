@@ -34,17 +34,15 @@ describe('GoogleMapsGroundingTool', () => {
       expect(req.config?.tools).toEqual([]);
     });
 
-    it('throws for Gemini 1.x model', async () => {
+    it('adds googleMaps for a Gemini 1.x model id', async () => {
       const tool = new GoogleMapsGroundingTool();
       const req = makeRequest('gemini-1.5-pro');
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: {} as never,
-        }),
-      ).rejects.toThrow(
-        'Google Maps grounding tool cannot be used with Gemini 1.x models.',
-      );
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{googleMaps: {}}]);
     });
 
     it('adds googleMaps for Gemini 2+ model', async () => {

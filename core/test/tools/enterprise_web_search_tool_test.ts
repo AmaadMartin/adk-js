@@ -86,17 +86,18 @@ describe('EnterpriseWebSearchTool', () => {
       expect(req.config!.tools).toEqual([{enterpriseWebSearch: {}}]);
     });
 
-    it('throws when Gemini 1.x model already has other tools', async () => {
+    it('adds enterpriseWebSearch for a Gemini 1.x model id that already has other tools', async () => {
       const tool = new EnterpriseWebSearchTool();
       const req = makeRequest('gemini-1.5-flash', [{googleSearch: {}}]);
-      await expect(
-        tool.processLlmRequest({
-          llmRequest: req,
-          toolContext: {} as never,
-        }),
-      ).rejects.toThrow(
-        'Enterprise Web Search tool cannot be used with other tools in Gemini 1.x.',
-      );
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([
+        {googleSearch: {}},
+        {enterpriseWebSearch: {}},
+      ]);
     });
 
     it('throws for unsupported (non-Gemini) model', async () => {

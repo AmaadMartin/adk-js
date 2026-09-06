@@ -119,21 +119,20 @@ describe('VertexAiSearchTool', () => {
     });
   });
 
-  it('should throw error for Gemini 1.x if other tools are present and bypass is false', async () => {
+  it('appends the retrieval config for a Gemini 1.x model id that already has other tools', async () => {
     const tool = new VertexAiSearchTool({dataStoreId: 'ds'});
     const llmRequest = makeLlmRequest('gemini-1.5-pro', {
       tools: [{functionDeclarations: []}],
     });
     const toolContext = {} as Context;
 
-    await expect(
-      tool.processLlmRequest({toolContext, llmRequest}),
-    ).rejects.toThrowError(
-      'Vertex AI search tool cannot be used with other tools in Gemini 1.x.',
-    );
+    await tool.processLlmRequest({toolContext, llmRequest});
+
+    expect(llmRequest.config?.tools).toHaveLength(2);
+    expect(llmRequest.config?.tools?.[0]).toEqual({functionDeclarations: []});
   });
 
-  it('should not throw error for Gemini 1.x if other tools are present and bypass is true', async () => {
+  it('still accepts bypassMultiToolsLimit and appends the retrieval config', async () => {
     const tool = new VertexAiSearchTool({
       dataStoreId: 'ds',
       bypassMultiToolsLimit: true,
