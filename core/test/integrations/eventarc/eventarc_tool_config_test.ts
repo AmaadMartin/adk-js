@@ -127,11 +127,17 @@ describe('Eventarc tool config', () => {
       ).toBe(-1);
     });
 
+    // `toStrictEqual`, not `toEqual`: `toEqual` treats an absent key and an
+    // `undefined` one as equal, so it cannot see the resolved object's shape.
     it('resolves an empty object to the defaults', () => {
-      expect(createEventarcToolConfig({})).toEqual({
-        projectId: undefined,
-        publishTimeout: 15,
-      });
+      expect(createEventarcToolConfig({})).toStrictEqual({publishTimeout: 15});
+    });
+
+    it('omits projectId rather than setting it to undefined', () => {
+      expect(Object.keys(createEventarcToolConfig())).toStrictEqual([
+        'publishTimeout',
+      ]);
+      expect(createEventarcToolConfig().projectId).toBeUndefined();
     });
 
     it('returns a fresh object, not the caller object', () => {
@@ -146,8 +152,7 @@ describe('Eventarc tool config', () => {
     // pydantic's default `extra='ignore'` drops unknown keys rather than
     // rejecting them.
     it('accepts and drops an unknown key', () => {
-      expect(createFromJson('{"region": "us-central1"}')).toEqual({
-        projectId: undefined,
+      expect(createFromJson('{"region": "us-central1"}')).toStrictEqual({
         publishTimeout: 15,
       });
     });
@@ -197,10 +202,9 @@ describe('Eventarc tool config', () => {
     it('stays enabled under ADK_ENABLE_EVENTARC_TOOL_CONFIG', () => {
       process.env[ENABLE_ENV_VAR] = 'true';
 
-      expect(createEventarcToolConfig({projectId: 'my-project'})).toEqual({
-        projectId: 'my-project',
-        publishTimeout: 15,
-      });
+      expect(createEventarcToolConfig({projectId: 'my-project'})).toStrictEqual(
+        {projectId: 'my-project', publishTimeout: 15},
+      );
     });
   });
 });

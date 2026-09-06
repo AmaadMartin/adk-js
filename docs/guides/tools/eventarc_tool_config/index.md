@@ -36,10 +36,14 @@ config.publishTimeout; // 15
 ```
 
 Both fields are optional. Call the factory with no arguments and you get an
-unset project and the default timeout.
+unset project and the default timeout. An unset `projectId` is absent from the
+resolved object rather than present and `undefined`, so read it as a property
+rather than testing for the key.
 
 ```ts
-createEventarcToolConfig(); // {projectId: undefined, publishTimeout: 15}
+const bare = createEventarcToolConfig(); // {publishTimeout: 15}
+
+bare.projectId; // undefined
 ```
 
 ## The publish timeout
@@ -87,10 +91,10 @@ worth knowing: adk-js spells the field `projectId`, so the snake_case
 
 ```ts
 createEventarcToolConfig(JSON.parse('{"region": "us-central1"}'));
-// {projectId: undefined, publishTimeout: 15}
+// {publishTimeout: 15}
 
 createEventarcToolConfig(JSON.parse('{"project_id": "my-project"}'));
-// {projectId: undefined, publishTimeout: 15}
+// {publishTimeout: 15}
 ```
 
 The returned object is always fresh. Mutating it never changes the object you
