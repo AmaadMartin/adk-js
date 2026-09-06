@@ -10,7 +10,7 @@ import {isBaseAgent} from '../../agents/base_agent.js';
 import {Context} from '../../agents/context.js';
 import {BaseTool, RunAsyncToolRequest} from '../../tools/base_tool.js';
 import {formatError} from '../../utils/error_utils.js';
-import {parseWithSchema, toJsonSchema} from '../../utils/schema.js';
+import {parseWithSchema, SchemaLike, toJsonSchema} from '../../utils/schema.js';
 import {
   isZodObject,
   isZodSchema,
@@ -33,6 +33,17 @@ const NODE_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.workflow.nodeTool');
  * call that same tool again — unbounded model + tool spend otherwise).
  */
 const MAX_NODE_TOOL_DEPTH = 8;
+
+/**
+ * Renders a node's schema as the JSON Schema a declaration carries, without the
+ * `$schema` dialect key. Zod's serializers emit that key; JSON Schema does not
+ * allow it on a nested subschema, and adk-python's `model_json_schema()` never
+ * produces it.
+ */
+function toDeclarationSchema(schema: SchemaLike): Record<string, unknown> {
+  const {$schema: _dialect, ...rest} = toJsonSchema(schema);
+  return rest;
+}
 
 /**
  * Wraps a scalar JSON Schema under a single `request` property: the GenAI API
@@ -121,14 +132,16 @@ export class NodeTool extends BaseTool {
       if (isZodObject(schema)) {
         declaration.parameters = zodObjectToSchema(schema);
       } else {
-        const json = toJsonSchema(schema);
+        const json = toDeclarationSchema(schema);
         declaration.parametersJsonSchema = this.inputIsObject
           ? json
           : wrapScalarSchema(json);
       }
     }
     if (this.node.outputSchema) {
-      declaration.responseJsonSchema = toJsonSchema(this.node.outputSchema);
+      declaration.responseJsonSchema = toDeclarationSchema(
+        this.node.outputSchema,
+      );
     }
     return declaration;
   }

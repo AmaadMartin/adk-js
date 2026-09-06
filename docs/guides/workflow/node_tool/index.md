@@ -77,6 +77,13 @@ The wrapping of a scalar exists because the API accepts an object-typed
 parameter schema only. It is unwrapped again on the way in, so the node still
 receives the bare value.
 
+A `FunctionNode` with no `inputSchema` is declared with no parameters, so the
+model calls it with none and the node receives `{}`. Give a node an
+`inputSchema` whenever its handler reads its input.
+
+The node validates its own input, so a Zod `inputSchema` carrying a
+`.transform()` runs that transform exactly once.
+
 ## Failures the model sees
 
 A failure inside the node is a tool result, not an exception. The model reads

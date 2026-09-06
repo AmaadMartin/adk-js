@@ -33,9 +33,9 @@ describe('NodeTool declaration', () => {
     const parameters = new NodeTool(target)._getDeclaration()
       .parametersJsonSchema as Record<string, Record<string, unknown>>;
     expect(parameters['type']).toBe('object');
-    // `toJsonSchema` carries Zod v3's `$schema` key through, so match the type
-    // rather than the whole property object.
-    expect(parameters['properties']).toMatchObject({request: {type: 'number'}});
+    // No `$schema`: JSON Schema does not allow the dialect key on a nested
+    // subschema, and adk-python's `model_json_schema()` does not emit one.
+    expect(parameters['properties']).toEqual({request: {type: 'number'}});
     expect(parameters['required']).toEqual(['request']);
   });
 
@@ -102,6 +102,17 @@ describe('NodeTool declaration', () => {
       properties: {tier: {type: 'string'}},
     });
     expect(declaration.response).toBeUndefined();
+  });
+
+  it('publishes a Zod output schema as responseJsonSchema, without $schema', () => {
+    const target = node((_ctx: NodeContext) => 'gold', {
+      name: 'zod_output_node',
+      inputSchema: z.object({}),
+      outputSchema: z.string(),
+    });
+    expect(new NodeTool(target)._getDeclaration().responseJsonSchema).toEqual({
+      type: 'string',
+    });
   });
 
   it('leaves responseJsonSchema unset when the node has no output schema', () => {

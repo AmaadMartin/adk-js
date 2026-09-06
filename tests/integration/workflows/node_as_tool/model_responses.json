@@ -1,7 +1,7 @@
 [
   {
-    "key": "a8e514c49f558aab",
-    "instructionAgnosticKey": "1f00255f71f48852",
+    "key": "5931ca6744e311eb",
+    "instructionAgnosticKey": "302b12dbe416940a",
     "request": {
       "contents": [
         {
@@ -50,7 +50,6 @@
                   ]
                 },
                 "responseJsonSchema": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "type": "string"
                 }
               }
@@ -104,8 +103,8 @@
     }
   },
   {
-    "key": "40b4cf93b9180479",
-    "instructionAgnosticKey": "7893c01771f66127",
+    "key": "d9cf9a7db9ef8bd9",
+    "instructionAgnosticKey": "32fe0dcd85a731c3",
     "request": {
       "contents": [
         {
@@ -181,7 +180,6 @@
                   ]
                 },
                 "responseJsonSchema": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "type": "string"
                 }
               }
@@ -235,8 +233,8 @@
     }
   },
   {
-    "key": "3937403f316d9f1e",
-    "instructionAgnosticKey": "2b6ebce849177f7d",
+    "key": "15b4eacac336a1fe",
+    "instructionAgnosticKey": "44c0bdc20e27d4ef",
     "request": {
       "contents": [
         {
@@ -349,7 +347,6 @@
                   ]
                 },
                 "responseJsonSchema": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "type": "string"
                 }
               }
