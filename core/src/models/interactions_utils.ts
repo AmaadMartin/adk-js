@@ -14,6 +14,7 @@ import {
   Part,
   Tool,
 } from '@google/genai';
+import type {RemoteMcpServer} from '../tools/remote_mcp_server.js';
 import {logger} from '../utils/logger.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
@@ -72,7 +73,13 @@ export interface ExtendedInteractionSSEEvent extends Omit<
   interactionId?: string;
   interaction?: {
     id: string;
+    /**
+     * Declared by the non-streaming `Interaction` but not by the SSE payload,
+     * although the backend does send it on created/completed events.
+     */
+    environment_id?: string;
   };
+  environment_id?: string;
   id?: string;
 }
 
@@ -945,4 +952,172 @@ export async function* generateContentViaInteractions(
     logger.info('Interaction response received from the model.');
     yield convertInteractionToLlmResponse(interaction);
   }
+}
+
+/**
+ * Reads the execution environment id an Interactions SSE event carries.
+ *
+ * The non-streaming `Interaction` declares `environment_id`, but the streaming
+ * payloads do not, so the backend sends it opportunistically on the interaction
+ * an event carries. Mirrors `_extract_stream_environment_id` in
+ * google/adk-python `models/interactions_utils.py`.
+ *
+ * @param event The SSE event to read.
+ * @return The environment id, or undefined when the event carries none.
+ */
+export function extractStreamEnvironmentId(
+  event: ExtendedInteractionSSEEvent,
+): string | undefined {
+  return event.interaction?.environment_id ?? event.environment_id;
+}
+
+/** Options for {@link createInteractions}. */
+export interface CreateInteractionsOptions {
+  /** The create body, assembled by the caller. */
+  createParams: Interactions.CreateAgentInteractionParamsStreaming;
+  /** Per-request HTTP headers, e.g. ADK tracking headers. */
+  extraHeaders?: Record<string, string>;
+}
+
+/**
+ * Creates one agent interaction and streams its responses.
+ *
+ * This is the shared transport and conversion loop for an agent-backed
+ * interaction: it issues the call, tracks the interaction and environment ids
+ * across the stream, and maps each SSE event to an {@link LlmResponse}. Only
+ * the streaming form is supported, which is what the Managed Agents workflow
+ * uses. Mirrors `_create_interactions` in google/adk-python
+ * `models/interactions_utils.py`.
+ *
+ * @param apiClient The Google GenAI client to call.
+ * @param options The create body and any per-request headers.
+ * @yields One response per SSE event that maps to one.
+ */
+export async function* createInteractions(
+  apiClient: GoogleGenAI,
+  options: CreateInteractionsOptions,
+): AsyncGenerator<LlmResponse, void, void> {
+  const {createParams, extraHeaders} = options;
+  const responses = (await apiClient.interactions.create(
+    {...createParams, stream: true},
+    {fetchOptions: {headers: extraHeaders}},
+  )) as AsyncIterable<ExtendedInteractionSSEEvent>;
+
+  const aggregatedParts: Part[] = [];
+  let interactionId: string | undefined;
+  let environmentId: string | undefined;
+
+  for await (const event of responses) {
+    interactionId = extractStreamInteractionId(event) ?? interactionId;
+    environmentId = extractStreamEnvironmentId(event) ?? environmentId;
+    const llmResponse = convertInteractionEventToLlmResponse(
+      event,
+      aggregatedParts,
+      interactionId,
+    );
+    if (llmResponse) {
+      yield {...llmResponse, environmentId};
+    }
+  }
+}
+
+/**
+ * Maps a remote MCP server spec and its resolved headers to an interactions
+ * MCP server tool param.
+ *
+ * Built directly rather than through `types.Tool.mcpServers` so `allowedTools`
+ * survives and the enterprise-backend restriction on that field does not apply.
+ * Mirrors `_build_mcp_server_param` in google/adk-python
+ * `models/interactions_utils.py`.
+ *
+ * @param server The server spec.
+ * @param resolvedHeaders The static headers already merged with any
+ *     `headerProvider` output. An empty map omits the `headers` field.
+ * @return The tool param to send in `interactions.create`.
+ */
+export function buildMcpServerParam(
+  server: RemoteMcpServer,
+  resolvedHeaders: Record<string, string>,
+): Interactions.Tool.MCPServer {
+  const param: Interactions.Tool.MCPServer = {
+    type: 'mcp_server',
+    url: server.url,
+  };
+  if (server.name !== undefined) {
+    param.name = server.name;
+  }
+  if (Object.keys(resolvedHeaders).length > 0) {
+    param.headers = resolvedHeaders;
+  }
+  if (server.allowedTools !== undefined) {
+    param.allowed_tools = [{tools: [...server.allowedTools]}];
+  }
+  return param;
+}
+
+/** Parameters for {@link buildInteractionsRequestLog}. */
+export interface InteractionsRequestLogParams {
+  /** The model or managed agent the request names. */
+  model: string;
+  /** The input steps to send. */
+  inputSteps: Interactions.Step[];
+  /** The system instruction, if any. */
+  systemInstruction?: string;
+  /** The tools configuration, if any. */
+  tools?: Interactions.Tool[];
+  /** The interaction this turn chains onto, if any. */
+  previousInteractionId?: string;
+  /** Whether the response is streamed. */
+  stream: boolean;
+}
+
+/**
+ * Renders an interactions request as a debug log string.
+ *
+ * The steps and tools sections are JSON, truncated to
+ * {@link MAX_LOGGED_SECTION_LENGTH} characters so one turn cannot write an
+ * unbounded amount to the log. Mirrors `build_interactions_request_log` in
+ * google/adk-python `models/interactions_utils.py`, in a condensed layout.
+ *
+ * @param params The request fields to render.
+ * @return The formatted log string.
+ */
+export function buildInteractionsRequestLog(
+  params: InteractionsRequestLogParams,
+): string {
+  return [
+    '',
+    'Interactions API Request:',
+    LOG_SEPARATOR,
+    `Model: ${params.model}`,
+    `Stream: ${params.stream}`,
+    `Previous Interaction ID: ${params.previousInteractionId ?? '(none)'}`,
+    LOG_SEPARATOR,
+    `System Instruction: ${params.systemInstruction || '(none)'}`,
+    LOG_SEPARATOR,
+    `Input Steps: ${formatLogSection(params.inputSteps)}`,
+    LOG_SEPARATOR,
+    `Tools: ${formatLogSection(params.tools)}`,
+    LOG_SEPARATOR,
+  ].join('\n');
+}
+
+/** Rule drawn between the sections of a request log. */
+const LOG_SEPARATOR = '-'.repeat(59);
+
+/** Characters of one request-log section kept before truncation. */
+const MAX_LOGGED_SECTION_LENGTH = 1000;
+
+/** Marker appended to a request-log section that was truncated. */
+const LOG_TRUNCATION_MARKER = '... [truncated]';
+
+/** Renders one request-log section as bounded JSON. */
+function formatLogSection(value: unknown[] | undefined): string {
+  if (value === undefined || value.length === 0) {
+    return '(none)';
+  }
+  const json = JSON.stringify(value);
+  return json.length > MAX_LOGGED_SECTION_LENGTH
+    ? json.slice(0, MAX_LOGGED_SECTION_LENGTH) + LOG_TRUNCATION_MARKER
+    : json;
 }
