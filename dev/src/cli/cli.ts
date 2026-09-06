@@ -226,6 +226,11 @@ export function createProgram(): Command {
 
   const program = new Command('ADK CLI');
 
+  // Root options are parsed only before the subcommand name, so the shared
+  // `-v, --verbose` on each subcommand is not shadowed by the root's
+  // `-v, --version`.
+  program.enablePositionalOptions();
+
   program
     .addOption(new Option('-v, --version', 'Get ADK CLI version'))
     .action(() => {

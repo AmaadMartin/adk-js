@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -165,6 +166,67 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+  });
+
+  describe('short flag: -v', () => {
+    it('should enable verbose logging for a subcommand', async () => {
+      await parse(['web', '-v']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.logLevel).toBe(LogLevel.DEBUG);
+    });
+
+    it('should match --verbose for a subcommand', async () => {
+      await parse(['web', '--verbose']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+    });
+
+    it('should keep the agents_dir argument when it precedes the flag', async () => {
+      await parse(['web', './agents', '-v']);
+
+      expect(setLogLevel).toHaveBeenCalledWith(LogLevel.DEBUG);
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.agentsDir).toBe(path.join(process.cwd(), 'agents'));
+    });
+
+    it('should reach a subcommand nested under a command group', async () => {
+      await parse(['deploy', 'cloud_run', './my-agent-path', '-v']);
+
+      const deploy = program.commands.find((c) => c.name() === 'deploy');
+      const cloudRun = deploy?.commands.find((c) => c.name() === 'cloud_run');
+      if (!cloudRun) {
+        expect.fail('the deploy cloud_run subcommand should be registered');
+      }
+      expect(cloudRun.opts()['verbose']).toBe(true);
+    });
+
+    it('should still print the version at the root', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await parse(['-v']);
+
+      expect(logSpy).toHaveBeenCalledWith('1.0.0-test');
+      expect(AdkApiServer).not.toHaveBeenCalled();
+    });
+
+    it('should reject --version after a subcommand name instead of ignoring it', async () => {
+      const web = program.commands.find((c) => c.name() === 'web');
+      if (!web) {
+        expect.fail('the web subcommand should be registered');
+      }
+      // `createProgram()` builds the subcommands before the harness calls
+      // `program.exitOverride()`, and commander snapshots that callback per
+      // command, so the leaf needs its own override to throw instead of exit.
+      web.exitOverride();
+      web.configureOutput({writeErr: () => {}});
+
+      await expect(parse(['web', '--version'])).rejects.toMatchObject({
+        code: 'commander.unknownOption',
+      });
+      expect(AdkApiServer).not.toHaveBeenCalled();
     });
   });
 
