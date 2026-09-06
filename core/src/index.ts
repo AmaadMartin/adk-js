@@ -94,6 +94,12 @@ export {
   isSandboxError,
 } from './integrations/vmaas/sandbox_errors.js';
 export {getMemoryServiceFromUri} from './memory/registry.js';
+export {OciGenAiLlm} from './models/oci_genai_llm.js';
+export type {
+  OciAuthType,
+  OciGenAiLlmParams,
+  OciReasoningEffort,
+} from './models/oci_genai_llm.js';
 export {BigQueryAgentAnalyticsPlugin} from './plugins/bigquery_agent_analytics_plugin.js';
 export type {
   AnalyticsContentFormatter,

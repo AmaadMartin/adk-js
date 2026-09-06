@@ -11,6 +11,7 @@ import {ApigeeLlm} from './apigee_llm.js';
 import {BaseLlm} from './base_llm.js';
 import {Gemma} from './gemma_llm.js';
 import {Gemini} from './google_llm.js';
+import {OciGenAiLlm} from './oci_genai_llm.js';
 import {OpenAILlm} from './openai_llm.js';
 
 /**
@@ -138,4 +139,5 @@ LLMRegistry.register(Gemini);
 LLMRegistry.register(Gemma);
 LLMRegistry.register(ApigeeLlm);
 LLMRegistry.register(Claude);
+LLMRegistry.register(OciGenAiLlm);
 LLMRegistry.register(OpenAILlm);
