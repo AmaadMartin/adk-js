@@ -200,6 +200,35 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Method executed when the runner is closed.
+   *
+   * This method is used for cleanup tasks such as closing network connections
+   * or releasing resources.
+   */
+  async close(): Promise<void> {
+    return;
+  }
+
+  /**
+   * Callback executed when an unhandled error escapes the runner.
+   *
+   * This is a notification-only callback: the error is always rethrown after
+   * every registered plugin has been notified, and any value this callback
+   * returns is ignored. A plugin cannot recover the invocation here.
+   *
+   * @param _params.invocationContext The context for the entire invocation.
+   * @param _params.error The error that escaped the runner. A thrown value
+   *     that is not an `Error` is wrapped in one, so this callback sees every
+   *     failure; the runner still rethrows the original value.
+   */
+  async onRunErrorCallback(_params: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    return;
+  }
+
+  /**
    * Callback executed before an agent's primary logic is invoked.
    *
    * This callback can be used for logging, setup, or to short-circuit the
@@ -236,6 +265,27 @@ export abstract class BasePlugin {
     agent: BaseAgent;
     callbackContext: Context;
   }): Promise<Content | undefined> {
+    return;
+  }
+
+  /**
+   * Callback executed when an unhandled error escapes an agent's execution.
+   *
+   * This is a notification-only callback: the error is always rethrown after
+   * every registered plugin has been notified, and any value this callback
+   * returns is ignored. A plugin cannot recover the agent here.
+   *
+   * @param _params.agent The agent whose execution threw.
+   * @param _params.callbackContext The context for the agent invocation.
+   * @param _params.error The error that escaped the agent. A thrown value that
+   *     is not an `Error` is wrapped in one, so this callback sees every
+   *     failure; the agent still rethrows the original value.
+   */
+  async onAgentErrorCallback(_params: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
     return;
   }
 

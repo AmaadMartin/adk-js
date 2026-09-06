@@ -139,6 +139,35 @@ class FullOverridePlugin extends BasePlugin {
   }
 }
 
+/** Records the arguments the notification-only error hooks receive. */
+class ErrorHookPlugin extends BasePlugin {
+  agentErrors: Array<{
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }> = [];
+  runErrors: Array<{invocationContext: InvocationContext; error: Error}> = [];
+
+  constructor(name = 'error_hooks') {
+    super(name);
+  }
+
+  override async onAgentErrorCallback(params: {
+    agent: BaseAgent;
+    callbackContext: Context;
+    error: Error;
+  }): Promise<void> {
+    this.agentErrors.push(params);
+  }
+
+  override async onRunErrorCallback(params: {
+    invocationContext: InvocationContext;
+    error: Error;
+  }): Promise<void> {
+    this.runErrors.push(params);
+  }
+}
+
 describe('BasePlugin', () => {
   const mockInvocationContext = {} as InvocationContext;
   const mockUserMessage = {} as Content;
@@ -323,6 +352,68 @@ describe('BasePlugin', () => {
     ).toEqual({
       content: {parts: [{text: 'overridden_on_model_error'}]},
     });
+  });
+
+  it('default error callbacks should return undefined', async () => {
+    const plugin = new TestablePlugin('default_error_plugin');
+
+    expect(
+      await plugin.onAgentErrorCallback({
+        agent: mockAgent,
+        callbackContext: mockCallbackContext,
+        error: mockError,
+      }),
+    ).toBeUndefined();
+    expect(
+      await plugin.onRunErrorCallback({
+        invocationContext: mockInvocationContext,
+        error: mockError,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('default close should resolve to undefined', async () => {
+    const plugin = new TestablePlugin('default_close_plugin');
+
+    await expect(plugin.close()).resolves.toBeUndefined();
+  });
+
+  it('close can be overridden', async () => {
+    let closed = false;
+    class ClosingPlugin extends BasePlugin {
+      override async close(): Promise<void> {
+        closed = true;
+      }
+    }
+
+    await new ClosingPlugin('closing_plugin').close();
+
+    expect(closed).toBe(true);
+  });
+
+  it('error callbacks can be overridden and receive their arguments', async () => {
+    const plugin = new ErrorHookPlugin();
+
+    await plugin.onAgentErrorCallback({
+      agent: mockAgent,
+      callbackContext: mockCallbackContext,
+      error: mockError,
+    });
+    await plugin.onRunErrorCallback({
+      invocationContext: mockInvocationContext,
+      error: mockError,
+    });
+
+    expect(plugin.agentErrors).toEqual([
+      {
+        agent: mockAgent,
+        callbackContext: mockCallbackContext,
+        error: mockError,
+      },
+    ]);
+    expect(plugin.runErrors).toEqual([
+      {invocationContext: mockInvocationContext, error: mockError},
+    ]);
   });
 
   it('should warn that beforeToolSelection is experimental', async () => {

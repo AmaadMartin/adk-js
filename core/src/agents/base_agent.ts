@@ -261,29 +261,34 @@ export abstract class BaseAgent<
         async function* () {
           const context = this.createInvocationContext(parentContext);
 
-          const beforeAgentCallbackEvent =
-            await this.handleBeforeAgentCallback(context);
-          if (beforeAgentCallbackEvent) {
-            yield beforeAgentCallbackEvent;
-          }
+          try {
+            const beforeAgentCallbackEvent =
+              await this.handleBeforeAgentCallback(context);
+            if (beforeAgentCallbackEvent) {
+              yield beforeAgentCallbackEvent;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          traceAgentInvocation({agent: this, invocationContext: context});
-          for await (const event of this.runAsyncImpl(context)) {
-            yield event;
-          }
+            traceAgentInvocation({agent: this, invocationContext: context});
+            for await (const event of this.runAsyncImpl(context)) {
+              yield event;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          const afterAgentCallbackEvent =
-            await this.handleAfterAgentCallback(context);
-          if (afterAgentCallbackEvent) {
-            yield afterAgentCallbackEvent;
+            const afterAgentCallbackEvent =
+              await this.handleAfterAgentCallback(context);
+            if (afterAgentCallbackEvent) {
+              yield afterAgentCallbackEvent;
+            }
+          } catch (e: unknown) {
+            await this.handleAgentErrorCallback(context, e);
+            throw e;
           }
         },
       );
@@ -340,28 +345,33 @@ export abstract class BaseAgent<
         async function* () {
           const context = this.createInvocationContext(parentContext);
 
-          const beforeAgentCallbackEvent =
-            await this.handleBeforeAgentCallback(context);
-          if (beforeAgentCallbackEvent) {
-            yield beforeAgentCallbackEvent;
-          }
+          try {
+            const beforeAgentCallbackEvent =
+              await this.handleBeforeAgentCallback(context);
+            if (beforeAgentCallbackEvent) {
+              yield beforeAgentCallbackEvent;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          for await (const event of this.runLiveImpl(context)) {
-            yield event;
-          }
+            for await (const event of this.runLiveImpl(context)) {
+              yield event;
+            }
 
-          if (context.endInvocation || parentContext.abortSignal?.aborted) {
-            return;
-          }
+            if (context.endInvocation || parentContext.abortSignal?.aborted) {
+              return;
+            }
 
-          const afterAgentCallbackEvent =
-            await this.handleAfterAgentCallback(context);
-          if (afterAgentCallbackEvent) {
-            yield afterAgentCallbackEvent;
+            const afterAgentCallbackEvent =
+              await this.handleAfterAgentCallback(context);
+            if (afterAgentCallbackEvent) {
+              yield afterAgentCallbackEvent;
+            }
+          } catch (e: unknown) {
+            await this.handleAgentErrorCallback(context, e);
+            throw e;
           }
         },
       );
@@ -528,6 +538,23 @@ export abstract class BaseAgent<
     }
 
     return undefined;
+  }
+
+  /**
+   * Notifies the plugins that an error escaped this agent's execution.
+   *
+   * @param invocationContext The invocation context of the agent.
+   * @param error The value that escaped the agent.
+   */
+  protected async handleAgentErrorCallback(
+    invocationContext: InvocationContext,
+    error: unknown,
+  ): Promise<void> {
+    await invocationContext.pluginManager.runOnAgentErrorCallback({
+      agent: this,
+      callbackContext: new Context({invocationContext}),
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
   }
 
   private setParentAgentForSubAgents(): void {

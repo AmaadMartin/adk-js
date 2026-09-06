@@ -8,6 +8,7 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  Context,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -890,6 +891,221 @@ describe('Runner with plugins', () => {
     });
     expect(session!.events.length).toBe(2);
     expect(session!.events[1].author).toBe('test_agent');
+  });
+});
+
+describe('Runner error notification callbacks', () => {
+  const AGENT_FAILURE = new Error('agent exploded');
+  const NON_ERROR_FAILURE = 'agent exploded without an Error';
+
+  class CrashingLlmAgent extends LlmAgent {
+    failure: unknown = AGENT_FAILURE;
+
+    constructor(name: string) {
+      super({name, model: 'gemini-2.5-flash'});
+    }
+
+    protected override async *runAsyncImpl(
+      context: InvocationContext,
+    ): AsyncGenerator<Event, void, void> {
+      yield createEvent({
+        invocationId: context.invocationId,
+        author: this.name,
+        content: {role: 'model', parts: [{text: 'partial work'}]},
+      });
+      throw this.failure;
+    }
+  }
+
+  class ErrorNotificationPlugin extends BasePlugin {
+    readonly agentErrors: Error[] = [];
+    readonly runErrors: Error[] = [];
+    afterRunCallbackCalled = false;
+    failInBeforeRun = false;
+    failInUserMessage = false;
+    closeCount = 0;
+
+    constructor() {
+      super('error_notification_plugin');
+    }
+
+    override async close(): Promise<void> {
+      this.closeCount++;
+    }
+
+    override async onUserMessageCallback(_params: {
+      invocationContext: InvocationContext;
+      userMessage: Content;
+    }): Promise<Content | undefined> {
+      if (this.failInUserMessage) {
+        throw new Error('user-message hook exploded');
+      }
+      return undefined;
+    }
+
+    override async beforeRunCallback(_params: {
+      invocationContext: InvocationContext;
+    }): Promise<Content | undefined> {
+      if (this.failInBeforeRun) {
+        throw new Error('before-run exploded');
+      }
+      return undefined;
+    }
+
+    override async afterRunCallback(_params: {
+      invocationContext: InvocationContext;
+    }): Promise<void> {
+      this.afterRunCallbackCalled = true;
+    }
+
+    override async onAgentErrorCallback({
+      error,
+    }: {
+      agent: BaseAgent;
+      callbackContext: Context;
+      error: Error;
+    }): Promise<void> {
+      this.agentErrors.push(error);
+    }
+
+    override async onRunErrorCallback({
+      error,
+    }: {
+      invocationContext: InvocationContext;
+      error: Error;
+    }): Promise<void> {
+      this.runErrors.push(error);
+    }
+  }
+
+  let plugin: ErrorNotificationPlugin;
+  let sessionService: InMemorySessionService;
+
+  beforeEach(() => {
+    plugin = new ErrorNotificationPlugin();
+    sessionService = new InMemorySessionService();
+  });
+
+  function createRunner(agent: BaseAgent): Runner {
+    return new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService: new InMemoryArtifactService(),
+      plugins: [plugin],
+    });
+  }
+
+  async function run(runner: Runner, sessionId = TEST_SESSION_ID) {
+    for await (const _event of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the stream so the run reaches its end.
+    }
+  }
+
+  it('notifies both layers exactly once when the agent crashes', async () => {
+    const runner = createRunner(new CrashingLlmAgent('crashing_agent'));
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await expect(run(runner)).rejects.toBe(AGENT_FAILURE);
+
+    expect(plugin.agentErrors).toEqual([AGENT_FAILURE]);
+    expect(plugin.runErrors).toEqual([AGENT_FAILURE]);
+    expect(plugin.afterRunCallbackCalled).toBe(false);
+  });
+
+  it('notifies the run layer when the user-message hook throws', async () => {
+    plugin.failInUserMessage = true;
+    const runner = createRunner(new MockLlmAgent('test_agent'));
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await expect(run(runner)).rejects.toThrow(
+      "Error in plugin 'error_notification_plugin' during 'onUserMessageCallback' callback",
+    );
+
+    expect(plugin.runErrors).toHaveLength(1);
+    expect(plugin.agentErrors).toEqual([]);
+  });
+
+  it('closes every registered plugin through Runner.close', async () => {
+    const runner = createRunner(new MockLlmAgent('test_agent'));
+
+    await expect(runner.close()).resolves.toBeUndefined();
+
+    expect(plugin.closeCount).toBe(1);
+  });
+
+  it('notifies the run layer when a before-run callback throws', async () => {
+    plugin.failInBeforeRun = true;
+    const runner = createRunner(new MockLlmAgent('test_agent'));
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await expect(run(runner)).rejects.toThrow(
+      "Error in plugin 'error_notification_plugin' during 'beforeRunCallback' callback",
+    );
+
+    expect(plugin.runErrors).toHaveLength(1);
+    expect(plugin.agentErrors).toEqual([]);
+  });
+
+  it('wraps a non-Error failure for both layers and rethrows the original', async () => {
+    const agent = new CrashingLlmAgent('crashing_agent');
+    agent.failure = NON_ERROR_FAILURE;
+    const runner = createRunner(agent);
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await expect(run(runner)).rejects.toBe(NON_ERROR_FAILURE);
+
+    expect(plugin.agentErrors).toHaveLength(1);
+    expect(plugin.agentErrors[0]).toBeInstanceOf(Error);
+    expect(plugin.agentErrors[0].message).toBe(NON_ERROR_FAILURE);
+    expect(plugin.runErrors).toHaveLength(1);
+    expect(plugin.runErrors[0]).toBeInstanceOf(Error);
+    expect(plugin.runErrors[0].message).toBe(NON_ERROR_FAILURE);
+  });
+
+  it('notifies neither layer on a successful run', async () => {
+    const runner = createRunner(new MockLlmAgent('test_agent'));
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+
+    await run(runner);
+
+    expect(plugin.agentErrors).toEqual([]);
+    expect(plugin.runErrors).toEqual([]);
+    expect(plugin.afterRunCallbackCalled).toBe(true);
+  });
+
+  it('does not notify when the session lookup fails', async () => {
+    const runner = createRunner(new MockLlmAgent('test_agent'));
+
+    await expect(run(runner, 'missing_session')).rejects.toThrow(
+      'Session not found: missing_session',
+    );
+
+    expect(plugin.runErrors).toEqual([]);
   });
 });
 

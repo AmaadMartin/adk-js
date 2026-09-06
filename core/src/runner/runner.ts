@@ -328,150 +328,163 @@ export class Runner {
             abortSignal: params.abortSignal,
           });
 
-          // =========================================================================
-          // Preprocess plugins on user message
-          // =========================================================================
-          const pluginUserMessage =
-            await this.pluginManager.runOnUserMessageCallback({
-              userMessage: newMessage,
-              invocationContext,
-            });
+          try {
+            // =========================================================================
+            // Preprocess plugins on user message
+            // =========================================================================
+            const pluginUserMessage =
+              await this.pluginManager.runOnUserMessageCallback({
+                userMessage: newMessage,
+                invocationContext,
+              });
 
-          if (params.abortSignal?.aborted) {
-            return;
-          }
-
-          if (pluginUserMessage) {
-            newMessage = pluginUserMessage as Content;
-          }
-
-          // =========================================================================
-          // Append user message to session
-          // =========================================================================
-          if (newMessage) {
-            if (!newMessage.parts?.length) {
-              throw new Error('No parts in the newMessage.');
+            if (params.abortSignal?.aborted) {
+              return;
             }
 
-            // Directly saves the artifacts (if applicable) in the user message and
-            // replaces the artifact data with a file name placeholder.
-            // TODO - b/425992518: fix Runner<>>ArtifactService leaky abstraction.
-            if (runConfig.saveInputBlobsAsArtifacts) {
-              newMessage = await this.saveArtifacts(
-                invocationContext.invocationId,
-                session.userId,
-                session.id,
-                newMessage,
-              );
+            if (pluginUserMessage) {
+              newMessage = pluginUserMessage as Content;
+            }
+
+            // =========================================================================
+            // Append user message to session
+            // =========================================================================
+            if (newMessage) {
+              if (!newMessage.parts?.length) {
+                throw new Error('No parts in the newMessage.');
+              }
+
+              // Directly saves the artifacts (if applicable) in the user message and
+              // replaces the artifact data with a file name placeholder.
+              // TODO - b/425992518: fix Runner<>>ArtifactService leaky abstraction.
+              if (runConfig.saveInputBlobsAsArtifacts) {
+                newMessage = await this.saveArtifacts(
+                  invocationContext.invocationId,
+                  session.userId,
+                  session.id,
+                  newMessage,
+                );
+                if (params.abortSignal?.aborted) {
+                  return;
+                }
+              }
+              // Append the user message to the session with optional state delta.
+              await this.sessionService.appendEvent({
+                session,
+                event: createEvent({
+                  invocationId: invocationContext.invocationId,
+                  author: 'user',
+                  actions: stateDelta
+                    ? createEventActions({stateDelta})
+                    : undefined,
+                  content: newMessage,
+                  customMetadata: params.customMetadata,
+                }),
+              });
               if (params.abortSignal?.aborted) {
                 return;
               }
             }
-            // Append the user message to the session with optional state delta.
-            await this.sessionService.appendEvent({
-              session,
-              event: createEvent({
-                invocationId: invocationContext.invocationId,
-                author: 'user',
-                actions: stateDelta
-                  ? createEventActions({stateDelta})
-                  : undefined,
-                content: newMessage,
-                customMetadata: params.customMetadata,
-              }),
-            });
-            if (params.abortSignal?.aborted) {
-              return;
+
+            // =========================================================================
+            // Determine which agent should handle the workflow resumption.
+            // =========================================================================
+            // Only meaningful for an agent root: this resolves an event author
+            // against the agent tree, and a node subtree is not in that tree.
+            if (isBaseAgent(this.agent)) {
+              invocationContext.agent = this.determineAgentForResumption(
+                session,
+                this.agent,
+              );
             }
-          }
 
-          // =========================================================================
-          // Determine which agent should handle the workflow resumption.
-          // =========================================================================
-          // Only meaningful for an agent root: this resolves an event author
-          // against the agent tree, and a node subtree is not in that tree.
-          if (isBaseAgent(this.agent)) {
-            invocationContext.agent = this.determineAgentForResumption(
-              session,
-              this.agent,
-            );
-          }
-
-          // =========================================================================
-          // Run the agent with the plugins (aka hooks to apply in the lifecycle)
-          // =========================================================================
-          if (newMessage) {
             // =========================================================================
             // Run the agent with the plugins (aka hooks to apply in the lifecycle)
             // =========================================================================
-            // Step 1: Run the before_run callbacks to see if we should early exit.
-            const beforeRunCallbackResponse =
-              await this.pluginManager.runBeforeRunCallback({
-                invocationContext,
-              });
-            if (params.abortSignal?.aborted) {
-              return;
-            }
-
-            if (beforeRunCallbackResponse) {
-              const earlyExitEvent = createEvent({
-                invocationId: invocationContext.invocationId,
-                author: 'model',
-                content: beforeRunCallbackResponse,
-              });
-              // TODO: b/447446338 - In the future, do *not* save live call audio
-              // content to session This is a feature in Python ADK
-              await this.sessionService.appendEvent({
-                session,
-                event: earlyExitEvent,
-              });
+            if (newMessage) {
+              // =========================================================================
+              // Run the agent with the plugins (aka hooks to apply in the lifecycle)
+              // =========================================================================
+              // Step 1: Run the before_run callbacks to see if we should early exit.
+              const beforeRunCallbackResponse =
+                await this.pluginManager.runBeforeRunCallback({
+                  invocationContext,
+                });
               if (params.abortSignal?.aborted) {
                 return;
               }
 
-              yield earlyExitEvent;
-            } else {
-              // Step 2: Otherwise continue with normal execution
-              for await (const event of this.runRoot(invocationContext)) {
+              if (beforeRunCallbackResponse) {
+                const earlyExitEvent = createEvent({
+                  invocationId: invocationContext.invocationId,
+                  author: 'model',
+                  content: beforeRunCallbackResponse,
+                });
+                // TODO: b/447446338 - In the future, do *not* save live call audio
+                // content to session This is a feature in Python ADK
+                await this.sessionService.appendEvent({
+                  session,
+                  event: earlyExitEvent,
+                });
                 if (params.abortSignal?.aborted) {
                   return;
                 }
 
-                // Step 3: Run the on_event callbacks before persisting so callback
-                // changes are stored in the session and match the streamed event.
-                const modifiedEvent =
-                  await this.pluginManager.runOnEventCallback({
-                    invocationContext,
-                    event,
-                  });
-                const outputEvent = modifiedEvent
-                  ? {
-                      ...modifiedEvent,
-                      id: event.id,
-                      invocationId: event.invocationId,
-                      timestamp: event.timestamp,
-                      author: modifiedEvent.author || event.author,
-                      branch: modifiedEvent.branch ?? event.branch,
-                    }
-                  : event;
-                if (!event.partial) {
-                  await this.sessionService.appendEvent({
-                    session,
-                    event: outputEvent,
-                  });
+                yield earlyExitEvent;
+              } else {
+                // Step 2: Otherwise continue with normal execution
+                for await (const event of this.runRoot(invocationContext)) {
+                  if (params.abortSignal?.aborted) {
+                    return;
+                  }
+
+                  // Step 3: Run the on_event callbacks before persisting so callback
+                  // changes are stored in the session and match the streamed event.
+                  const modifiedEvent =
+                    await this.pluginManager.runOnEventCallback({
+                      invocationContext,
+                      event,
+                    });
+                  const outputEvent = modifiedEvent
+                    ? {
+                        ...modifiedEvent,
+                        id: event.id,
+                        invocationId: event.invocationId,
+                        timestamp: event.timestamp,
+                        author: modifiedEvent.author || event.author,
+                        branch: modifiedEvent.branch ?? event.branch,
+                      }
+                    : event;
+                  if (!event.partial) {
+                    await this.sessionService.appendEvent({
+                      session,
+                      event: outputEvent,
+                    });
+                  }
+                  if (params.abortSignal?.aborted) {
+                    return;
+                  }
+
+                  yield outputEvent;
                 }
+                // Step 4: Run the after_run callbacks to optionally modify the context.
+                await this.pluginManager.runAfterRunCallback({
+                  invocationContext,
+                });
                 if (params.abortSignal?.aborted) {
                   return;
                 }
-
-                yield outputEvent;
-              }
-              // Step 4: Run the after_run callbacks to optionally modify the context.
-              await this.pluginManager.runAfterRunCallback({invocationContext});
-              if (params.abortSignal?.aborted) {
-                return;
               }
             }
+          } catch (e: unknown) {
+            // The session lookup and code-executor validation above stay
+            // outside: they run before `invocationContext` exists, so there
+            // is nothing to notify with.
+            await this.pluginManager.runOnRunErrorCallback({
+              invocationContext,
+              error: e instanceof Error ? e : new Error(String(e)),
+            });
+            throw e;
           }
         },
       );
@@ -482,6 +495,19 @@ export class Runner {
         : [];
       await Promise.allSettled(toolsets.map((t) => t.close()));
     }
+  }
+
+  /**
+   * Closes this runner, releasing the resources held by its plugins.
+   *
+   * Only the plugins are closed. The toolsets reachable from the agent are
+   * already closed at the end of every invocation, so closing them again here
+   * would double-close them.
+   *
+   * @throws If one or more plugins failed to close.
+   */
+  async close(): Promise<void> {
+    return this.pluginManager.close();
   }
 
   /**
