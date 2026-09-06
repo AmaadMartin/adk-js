@@ -18,6 +18,7 @@ import {
   LlmAgent,
   LoopAgent,
   ParallelAgent,
+  ReadonlyContext,
   SequentialAgent,
 } from '@google/adk';
 
@@ -234,6 +235,101 @@ describe('Agent Card', () => {
       const workflowSkill = skills.find((s) => s.name === 'workflow');
       expect(workflowSkill?.description).toBe('Runs a graph');
       expect(skills.find((s) => s.name === 'custom')).toBeUndefined();
+    });
+  });
+
+  describe('instruction provider context', () => {
+    it('provides a fully populated context to a dynamic instruction provider', async () => {
+      let captured: ReadonlyContext | undefined;
+      const agent = new LlmAgent({
+        name: 'ctx_agent',
+        instruction: (ctx: ReadonlyContext) => {
+          captured = ctx;
+          return 'Static text';
+        },
+      });
+
+      await getA2AAgentCard(agent, [dummyTransport]);
+
+      if (!captured) {
+        expect.fail('the instruction provider was never invoked');
+      }
+      expect(captured.invocationId).toMatch(/^e-/);
+      expect(captured.agentName).toBe('ctx_agent');
+      expect(captured.sessionId).toBe('agent-card');
+      expect(captured.userId).toBe('');
+      expect(captured.userContent).toBeUndefined();
+      expect(captured.state.get('anything')).toBeUndefined();
+    });
+
+    it('resolves an instruction provider that reads session state', async () => {
+      const agent = new LlmAgent({
+        name: 'state_agent',
+        instruction: (ctx: ReadonlyContext) =>
+          `Serving ${ctx.userId || 'anonymous'} in session ${ctx.sessionId}`,
+      });
+
+      const card = await getA2AAgentCard(agent, [dummyTransport]);
+
+      const modelSkill = card.skills.find((s) => s.name === 'model');
+      expect(modelSkill?.description).toBe(
+        'Serving anonymous in session agent-card',
+      );
+    });
+
+    it('resolves a global instruction provider that reads the context', async () => {
+      const sub = new LlmAgent({name: 'sub_agent'});
+      const root = new LlmAgent({
+        name: 'root_agent',
+        globalInstruction: (ctx: ReadonlyContext) =>
+          `Global for ${ctx.agentName} at ${ctx.sessionId}`,
+        subAgents: [sub],
+      });
+      expect(sub.rootAgent).toBe(root);
+
+      const card = await getA2AAgentCard(sub, [dummyTransport]);
+
+      const modelSkill = card.skills.find((s) => s.name === 'model');
+      expect(modelSkill?.description).toBe(
+        'Global for sub_agent at agent-card',
+      );
+    });
+
+    it('falls back when a provider throws after reading the context', async () => {
+      const agent = new LlmAgent({
+        name: 'throwing_agent',
+        description: 'Fallback desc',
+        instruction: (ctx: ReadonlyContext) => {
+          void ctx.state;
+          throw new Error('boom');
+        },
+      });
+
+      const card = await getA2AAgentCard(agent, [dummyTransport]);
+
+      const modelSkill = card.skills.find((s) => s.name === 'model');
+      expect(modelSkill?.description).toBe('Fallback desc');
+    });
+
+    it('falls back when a global instruction provider throws after reading the context', async () => {
+      const sub = new LlmAgent({
+        name: 'throwing_global_sub',
+        description: 'Sub fallback desc',
+      });
+      const root = new LlmAgent({
+        name: 'throwing_global_root',
+        globalInstruction: (ctx: ReadonlyContext) => {
+          void ctx.state;
+          throw new Error('global boom');
+        },
+        subAgents: [sub],
+      });
+      expect(sub.rootAgent).toBe(root);
+
+      const card = await getA2AAgentCard(sub, [dummyTransport]);
+
+      const modelSkill = card.skills.find((s) => s.name === 'model');
+      expect(modelSkill?.description).toBe('Sub fallback desc');
     });
   });
 });
