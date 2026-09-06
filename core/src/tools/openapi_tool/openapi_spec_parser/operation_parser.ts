@@ -17,6 +17,27 @@ export interface ApiParameter {
 }
 
 /**
+ * Returns the name of the security scheme a requirement list makes mandatory,
+ * or an empty string when the list makes none.
+ *
+ * OpenAPI 3.0.3 treats an empty requirement object (`{}`) as an alternative
+ * that needs no credential, so a list holding one allows anonymous access.
+ * Only the first of the remaining alternatives is honoured, because a tool
+ * carries one credential.
+ */
+export function requiredSchemeName(
+  security: OpenAPIV3.SecurityRequirementObject[] | undefined,
+): string {
+  if (!security?.length) {
+    return '';
+  }
+  if (security.some((requirement) => Object.keys(requirement).length === 0)) {
+    return '';
+  }
+  return Object.keys(security[0])[0];
+}
+
+/**
  * Parses an OpenAPI OperationObject and extracts its parameters, request body, and return value.
  *
  * It maps OpenAPI parameters and request bodies into a flat list of `ApiParameter` objects
@@ -55,15 +76,20 @@ export class OperationParser {
       // Assume resolved references for now
       if ('name' in param) {
         const originalName = param.name;
-        const description = param.description || '';
         const location = param.in || '';
-        const schema = (param.schema as OpenAPIV3.SchemaObject) || {};
+        const declared = (param.schema as OpenAPIV3.SchemaObject) || {};
+        // The model reads the schema, not the parameter around it. Copy rather
+        // than patch, so the caller's operation object stays unchanged.
+        const schema =
+          !declared.description && param.description
+            ? {...declared, description: param.description}
+            : declared;
 
         this.params.push({
           originalName,
           paramLocation: location,
           paramSchema: schema,
-          description,
+          description: param.description || schema.description || '',
           required: param.required || false,
           name: this.getParamName(originalName),
         });
@@ -86,9 +112,9 @@ export class OperationParser {
 
     const mediaTypeObject = content[firstMimeType];
     const schema = mediaTypeObject.schema;
-    const description = requestBody.description || '';
 
     if (schema && !('$ref' in schema)) {
+      const description = requestBody.description || schema.description || '';
       if (schema.type === 'object') {
         const properties = schema.properties || {};
         if (Object.keys(properties).length > 0) {
@@ -98,7 +124,7 @@ export class OperationParser {
                 originalName: propName,
                 paramLocation: 'body',
                 paramSchema: propDetails,
-                description: propDetails.description,
+                description: propDetails.description ?? '',
                 required: (schema.required || []).includes(propName),
                 name: this.getParamName(propName),
               });
@@ -199,7 +225,7 @@ export class OperationParser {
     const required: string[] = [];
 
     for (const param of this.params) {
-      properties[param.name] = param.paramSchema;
+      properties[param.name] = JSON.parse(JSON.stringify(param.paramSchema));
       if (param.required) {
         required.push(param.name);
       }
