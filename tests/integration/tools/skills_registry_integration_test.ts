@@ -141,7 +141,7 @@ describe('Skills Registry Integration', () => {
                     name: 'load_skill_resource',
                     args: {
                       skill_name: 'remote-math-skill',
-                      path: 'references/formulas.txt',
+                      file_path: 'references/formulas.txt',
                     },
                   },
                 },
