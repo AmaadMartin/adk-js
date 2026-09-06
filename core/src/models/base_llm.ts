@@ -5,8 +5,11 @@
  */
 
 import {getClientLabels} from '../utils/client_labels.js';
+import {logger} from '../utils/logger.js';
+import {geminiOutputSchemaAndTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -15,6 +18,9 @@ import {LlmResponse} from './llm_response.js';
  * Defined once and shared by all BaseLlm instances.
  */
 const BASE_MODEL_SYMBOL = Symbol.for('google.adk.baseModel');
+
+/** Subclasses already told to migrate, so the notice is logged once each. */
+const warnedNameBasedModels = new WeakSet<object>();
 
 /**
  * Type guard to check if an object is an instance of BaseLlm.
@@ -52,6 +58,57 @@ export abstract class BaseLlm {
   }
 
   /**
+   * The capabilities of this model instance, recomputed on every access.
+   *
+   * Subclasses override this to declare what they support, so that callers ask
+   * the model instead of deriving support from its name. Declare every field
+   * when extending `BaseLlm` directly: spreading `super.capabilities` there
+   * routes through the deprecated name-based fallback below.
+   *
+   * ```ts
+   * class MyGemini extends Gemini {
+   *   override get capabilities(): LlmCapabilities {
+   *     return {...super.capabilities, outputSchemaAndTools: true};
+   *   }
+   * }
+   * ```
+   *
+   * @return A fresh snapshot of the resolved capabilities.
+   */
+  get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: this.legacyOutputSchemaAndTools()};
+  }
+
+  /**
+   * Name-based fallback for models that do not report the capability.
+   *
+   * The warning fires only when the fallback grants the capability, because
+   * those are the only models whose behavior changes once it is removed.
+   * `Gemini` declares {@link capabilities} outright and never reaches it.
+   *
+   * @deprecated It exists so that a model defined outside ADK keeps resolving
+   * the way it did before {@link capabilities}, when support was inferred from
+   * the model name rather than declared by the model. It is removed once such
+   * models declare the capability explicitly.
+   *
+   * @return True if the model name grants an output schema alongside tools.
+   */
+  private legacyOutputSchemaAndTools(): boolean {
+    if (!geminiOutputSchemaAndTools(this.model)) {
+      return false;
+    }
+    if (!warnedNameBasedModels.has(this.constructor)) {
+      warnedNameBasedModels.add(this.constructor);
+      logger.warn(
+        `${this.constructor.name} relies on name-based detection of ` +
+          'outputSchemaAndTools. Override BaseLlm.capabilities to declare it ' +
+          'explicitly; this fallback will be removed in a future release.',
+      );
+    }
+    return true;
+  }
+
+  /**
    * List of supported models in regex for LlmRegistry.
    */
   static readonly supportedModels: Array<string | RegExp> = [];
@@ -73,10 +130,16 @@ export abstract class BaseLlm {
   /**
    * Creates a live connection to the LLM.
    *
-   * @param llmRequest LlmRequest, the request to send to the LLM.
+   * Subclasses that support bidirectional streaming override this. The base
+   * implementation rejects.
+   *
+   * @param _llmRequest LlmRequest, the request to send to the LLM; unused by
+   * the base implementation.
    * @return A live connection to the LLM.
    */
-  abstract connect(llmRequest: LlmRequest): Promise<BaseLlmConnection>;
+  async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error(`Live connection is not supported for ${this.model}.`);
+  }
 
   protected get trackingHeaders(): Record<string, string> {
     const labels = getClientLabels();

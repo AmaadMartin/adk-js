@@ -47,6 +47,37 @@ class FakeLlm {
   }
 }
 
+const IMPLEMENTED_RESPONSE: LlmResponse = {
+  content: {role: 'model', parts: [{text: 'hi'}]},
+};
+
+const IMPLEMENTED_CONNECTION = {
+  sendHistory: async () => {},
+  sendContent: async () => {},
+  sendRealtime: async () => {},
+  receive: async function* () {},
+  close: async () => {},
+} satisfies BaseLlmConnection;
+
+/** A model that does not connect, so the BaseLlm default applies. */
+class BareLlm extends BaseLlm {
+  constructor() {
+    super({model: 'bare-model'});
+  }
+  override async *generateContentAsync(
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    yield IMPLEMENTED_RESPONSE;
+  }
+}
+
+/** A model that connects, so the BaseLlm default does not apply. */
+class ImplementedLlm extends BareLlm {
+  override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    return IMPLEMENTED_CONNECTION;
+  }
+}
+
 describe('BaseLlm', () => {
   it('should set tracking headers correctly when GOOGLE_CLOUD_AGENT_ENGINE_ID is not set', () => {
     delete process.env['GOOGLE_CLOUD_AGENT_ENGINE_ID'];
@@ -76,6 +107,26 @@ describe('BaseLlm', () => {
       expect(headers['x-goog-api-client']).toContain(customLabel);
       expect(headers['user-agent']).toContain(customLabel);
     });
+  });
+});
+
+describe('BaseLlm default connect', () => {
+  const request: LlmRequest = {
+    contents: [{role: 'user', parts: [{text: 'Hello'}]}],
+    liveConnectConfig: {},
+    toolsDict: {},
+  };
+
+  it('rejects, naming the model that does not support it', async () => {
+    await expect(new BareLlm().connect(request)).rejects.toThrow(
+      'Live connection is not supported for bare-model.',
+    );
+  });
+
+  it('gives way to a subclass implementation', async () => {
+    await expect(new ImplementedLlm().connect(request)).resolves.toBe(
+      IMPLEMENTED_CONNECTION,
+    );
   });
 });
 
