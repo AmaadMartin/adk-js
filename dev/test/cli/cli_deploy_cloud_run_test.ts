@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
@@ -211,6 +212,25 @@ describe('createDockerFileContent', () => {
     expect(content).toContain('GOOGLE_CLOUD_PROJECT=my-project.example-123');
   });
 });
+
+/**
+ * Returns the Dockerfile content handed to the mocked `saveToFile`.
+ * `createPackageJson` writes through the same mock, so the call is selected by
+ * path rather than by index.
+ */
+function readGeneratedDockerfile(): string {
+  const call = vi
+    .mocked(saveToFile)
+    .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+  if (!call) {
+    expect.fail('no Dockerfile path was passed to saveToFile');
+  }
+  const [, content] = call;
+  if (typeof content !== 'string') {
+    expect.fail(`Dockerfile content was written as ${typeof content}`);
+  }
+  return content;
+}
 
 describe('deployToCloudRun', () => {
   const defaultOptions = {
@@ -495,5 +515,27 @@ describe('deployToCloudRun', () => {
       expect.stringContaining('Command failed with exit code 1'),
       expect.stringContaining('\x1b[0m'),
     );
+  });
+
+  it('should forward session and artifact service URIs into the generated Dockerfile', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      sessionServiceUri: 'postgresql://user@host/db',
+      artifactServiceUri: 'gs://my-bucket',
+    });
+
+    const dockerfile = readGeneratedDockerfile();
+    expect(dockerfile).toContain(
+      "--session_service_uri='postgresql://user@host/db'",
+    );
+    expect(dockerfile).toContain("--artifact_service_uri='gs://my-bucket'");
+  });
+
+  it('should omit service URI flags when they are not set', async () => {
+    await deployToCloudRun(defaultOptions);
+
+    const dockerfile = readGeneratedDockerfile();
+    expect(dockerfile).not.toContain('--session_service_uri');
+    expect(dockerfile).not.toContain('--artifact_service_uri');
   });
 });
