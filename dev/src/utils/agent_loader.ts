@@ -584,8 +584,6 @@ export class AgentLoader {
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
     const subFiles = await getDirFiles(dir.path);
-    // `index` last: a barrel `index.ts` beside an `agent.ts` still resolves to
-    // `agent.ts`.
     const possibleEntryFile =
       subFiles.find((f) => f.isFile && f.name === 'app' && isJsFile(f.ext)) ??
       subFiles.find((f) => f.isFile && f.name === 'agent' && isJsFile(f.ext)) ??
