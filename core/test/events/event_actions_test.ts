@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {AuthConfig, EventActions, ToolConfirmation} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {AuthConfig} from '../../src/auth/auth_tool.js';
 import {
@@ -19,6 +20,37 @@ function createTestAuthConfig(credentialKey: string): AuthConfig {
     authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
     credentialKey,
   };
+}
+
+const apiKeyAuthConfig: AuthConfig = {
+  authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
+  credentialKey: 'call-key',
+};
+
+const toolConfirmation = new ToolConfirmation({
+  hint: 'proceed?',
+  confirmed: false,
+});
+
+/**
+ * Builds two fully populated sources, freshly allocated on every call so a
+ * test that mutates them cannot leak into the next one.
+ */
+function createMergeSources(): [EventActions, EventActions] {
+  return [
+    createEventActions({
+      stateDelta: {a: 1},
+      artifactDelta: {'file.txt': 1},
+      requestedAuthConfigs: {'call-1': apiKeyAuthConfig},
+      requestedToolConfirmations: {'call-1': toolConfirmation},
+    }),
+    createEventActions({
+      stateDelta: {b: 2},
+      artifactDelta: {'other.txt': 2},
+      requestedAuthConfigs: {'call-2': apiKeyAuthConfig},
+      requestedToolConfirmations: {'call-2': toolConfirmation},
+    }),
+  ];
 }
 
 describe('createEventActions', () => {
@@ -228,20 +260,65 @@ describe('mergeEventActions', () => {
     expect(result.escalate).toBe(true);
   });
 
-  it('applies target as the base before merging sources', () => {
-    const target = createEventActions({stateDelta: {base: 'val'}});
-    const result = mergeEventActions(
-      [
-        {
-          stateDelta: {extra: 'new'},
-          artifactDelta: {},
-          requestedAuthConfigs: {},
-          requestedToolConfirmations: {},
-        },
-      ],
-      target,
+  it('does not mutate the source objects', () => {
+    const [first, second] = createMergeSources();
+
+    mergeEventActions([first, second]);
+
+    expect(first.stateDelta).toEqual({a: 1});
+    expect(first.artifactDelta).toEqual({'file.txt': 1});
+    expect(first.requestedAuthConfigs).toEqual({'call-1': apiKeyAuthConfig});
+    expect(first.requestedToolConfirmations).toEqual({
+      'call-1': toolConfirmation,
+    });
+    expect(second.stateDelta).toEqual({b: 2});
+    expect(second.artifactDelta).toEqual({'other.txt': 2});
+    expect(second.requestedAuthConfigs).toEqual({'call-2': apiKeyAuthConfig});
+    expect(second.requestedToolConfirmations).toEqual({
+      'call-2': toolConfirmation,
+    });
+  });
+
+  it('returns dictionaries that are not aliases of any source dictionary', () => {
+    const [first, second] = createMergeSources();
+
+    const result = mergeEventActions([first, second]);
+
+    expect(result.stateDelta).not.toBe(first.stateDelta);
+    expect(result.stateDelta).not.toBe(second.stateDelta);
+    expect(result.artifactDelta).not.toBe(first.artifactDelta);
+    expect(result.artifactDelta).not.toBe(second.artifactDelta);
+    expect(result.requestedAuthConfigs).not.toBe(first.requestedAuthConfigs);
+    expect(result.requestedAuthConfigs).not.toBe(second.requestedAuthConfigs);
+    expect(result.requestedToolConfirmations).not.toBe(
+      first.requestedToolConfirmations,
     );
-    expect(result.stateDelta).toEqual({base: 'val', extra: 'new'});
+    expect(result.requestedToolConfirmations).not.toBe(
+      second.requestedToolConfirmations,
+    );
+  });
+
+  it('mutating the merged result does not affect the sources', () => {
+    const [first, second] = createMergeSources();
+    const result = mergeEventActions([first, second]);
+
+    result.stateDelta['c'] = 3;
+    result.artifactDelta['late.txt'] = 3;
+    result.requestedAuthConfigs['call-3'] = apiKeyAuthConfig;
+    result.requestedToolConfirmations['call-3'] = toolConfirmation;
+
+    expect(first.stateDelta).toEqual({a: 1});
+    expect(first.artifactDelta).toEqual({'file.txt': 1});
+    expect(first.requestedAuthConfigs).toEqual({'call-1': apiKeyAuthConfig});
+    expect(first.requestedToolConfirmations).toEqual({
+      'call-1': toolConfirmation,
+    });
+    expect(second.stateDelta).toEqual({b: 2});
+    expect(second.artifactDelta).toEqual({'other.txt': 2});
+    expect(second.requestedAuthConfigs).toEqual({'call-2': apiKeyAuthConfig});
+    expect(second.requestedToolConfirmations).toEqual({
+      'call-2': toolConfirmation,
+    });
   });
 
   it('ignores falsy sources', () => {

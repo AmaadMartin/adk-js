@@ -135,19 +135,14 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
- * @param target - Optional base {@link EventActions} to merge into. When
- *   provided it is used as the starting state before applying `sources`.
- * @returns A new {@link EventActions} containing the merged result.
+ * @returns A new {@link EventActions} whose four dictionaries are freshly
+ *   allocated, so nothing reachable from `sources` is mutated. Entry values
+ *   are copied by reference.
  */
 export function mergeEventActions(
   sources: Array<Partial<EventActions>>,
-  target?: EventActions,
 ): EventActions {
   const result = createEventActions();
-
-  if (target) {
-    Object.assign(result, target);
-  }
 
   for (const source of sources) {
     if (!source) continue;
