@@ -220,6 +220,18 @@ export type {
   OpenAICompletions,
   OpenAILlmParams,
 } from './models/openai_llm.js';
+export {
+  AzureOpenAIResponsesLlm,
+  OpenAIResponsesLlm,
+} from './models/openai_responses_llm.js';
+export type {
+  AzureOpenAIResponsesLlmParams,
+  OpenAIResponses,
+  OpenAIResponsesClient,
+  OpenAIResponsesLlmParams,
+  ResponsesRequestBody,
+  ResponsesRequestBodyWithExtras,
+} from './models/openai_responses_llm.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
