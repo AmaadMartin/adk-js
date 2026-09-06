@@ -8,6 +8,10 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Agents
+
+- [AudioCacheManager](agents/audio_cache_manager/index.md) - Buffering a live run's audio chunks and writing each buffer out as one artifact.
+
 ### Tools
 
 #### Retrieval
