@@ -6,12 +6,14 @@
 
 /**
  * Ports `tests/unittests/evaluation/test_audio_utils.py` from
- * google/adk-python at commit a119dd77. Each `it` keeps the name of the Python
- * test it ports.
+ * google/adk-python at commit a119dd77. Each ported `it` keeps the name of the
+ * Python test it ports; the `adk-js specific` group covers behaviour the
+ * reference suite does not.
  */
 
 import {
   LIVE_INPUT_MIME_TYPE,
+  LIVE_INPUT_RATE_HZ,
   parseSampleRate,
   resamplePcm16,
   toLiveInput,
@@ -135,6 +137,75 @@ describe('audio_utils', () => {
       const input = pcm([1, 2, 3, 4]);
 
       expect(toLiveInput(input, LIVE_INPUT_MIME_TYPE)).toEqual(input);
+    });
+  });
+
+  describe('adk-js specific', () => {
+    describe('toLiveInput', () => {
+      let warn: MockInstance<(...args: unknown[]) => void>;
+
+      beforeEach(() => {
+        warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it('warns and assumes the output rate when the mime type is absent', () => {
+        const result = toLiveInput(pcm(ramp(600)), undefined);
+
+        expect(samplesOf(result)).toHaveLength(400);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('no `rate=`'),
+        );
+      });
+    });
+
+    describe('resamplePcm16', () => {
+      it('returns a trailing odd byte unchanged with the rest', () => {
+        // Python keeps the odd byte: it drops it only from the sample view and
+        // then returns the original buffer.
+        const input = new Uint8Array([0x57, 0x41, 0x56]);
+
+        expect(resamplePcm16(input, 24000, LIVE_INPUT_RATE_HZ)).toEqual(input);
+      });
+
+      it('truncates toward zero on negative samples', () => {
+        // Python's int() truncates toward zero, and real PCM has negative
+        // samples. These rates put output index 1 at position 1.875, so the
+        // interpolated value is exactly -200.625: Math.trunc gives -200, while
+        // Math.floor and Math.round both give -201.
+        const input = pcm([0, -100, -215, -300]);
+
+        const result = samplesOf(
+          resamplePcm16(input, 30000, LIVE_INPUT_RATE_HZ),
+        );
+
+        expect(result[1]).toBe(-200);
+      });
+
+      it('upsamples when the target rate is higher', () => {
+        const input = pcm([0, 100, 200, 300]);
+
+        const result = samplesOf(resamplePcm16(input, 16000, 24000));
+
+        expect(result).toHaveLength(6);
+      });
+
+      it('reads a buffer that starts at an odd byte offset', () => {
+        // A Uint8Array view at an odd offset cannot be read through
+        // `new Int16Array(view.buffer)`; DataView can.
+        const backing = new Uint8Array(9);
+        backing.set(pcm([0, 100, 200, 300]), 1);
+        const input = backing.subarray(1);
+
+        const result = samplesOf(
+          resamplePcm16(input, 24000, LIVE_INPUT_RATE_HZ),
+        );
+
+        expect(result[1]).toBe(150);
+      });
     });
   });
 });
