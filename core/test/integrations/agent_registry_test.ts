@@ -8,17 +8,20 @@
 
 import {Client, ClientFactory} from '@a2a-js/sdk/client';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import * as adk from '../../src/index.js';
 import {
   AgentRegistry,
   AgentRegistrySingleMCPToolset,
-  cleanName,
   GCP_MCP_SERVER_DESTINATION_ID,
-  isGoogleApi,
   ProtocolType,
   ReadonlyContext,
   RemoteA2AAgent,
   StreamableHTTPConnectionParams,
 } from '../../src/index.js';
+import {
+  cleanName,
+  isGoogleApi,
+} from '../../src/integrations/agent_registry/helpers.js';
 
 // Mock google-auth-library
 let shouldAuthThrow = false;
@@ -86,6 +89,19 @@ describe('AgentRegistry Helpers', () => {
       expect(cleanName('__agent__')).toBe('agent');
       expect(cleanName('123agent')).toBe('_123agent');
     });
+  });
+});
+
+// `cleanName` and `isGoogleApi` are module-internal; keep them off the barrel.
+describe('@google/adk public surface', () => {
+  it('does not export the agent registry internal helpers', () => {
+    expect(Object.keys(adk)).not.toContain('cleanName');
+    expect(Object.keys(adk)).not.toContain('isGoogleApi');
+  });
+
+  it('still exports the agent registry public API', () => {
+    expect(Object.keys(adk)).toContain('AgentRegistry');
+    expect(Object.keys(adk)).toContain('AgentRegistrySingleMCPToolset');
   });
 });
 
