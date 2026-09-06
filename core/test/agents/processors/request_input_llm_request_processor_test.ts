@@ -22,6 +22,7 @@ import {
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v3';
 import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from '../../../src/agents/processors/request_input_llm_request_processor.js';
+import {AsyncQueue} from '../../../src/utils/async_queue.js';
 
 const AGENT_NAME = 'assistant';
 
@@ -262,5 +263,40 @@ describe('RequestInputLlmRequestProcessor resume inputs', () => {
     // Answering the node's question is not approving the action: the gate holds
     // and the node does not run.
     expect(runs).toEqual([]);
+  });
+});
+
+describe('RequestInputLlmRequestProcessor event queue handling', () => {
+  it('puts back the queue the invocation already carried', async () => {
+    const {tool} = makeNodeTool();
+    const agent = new LlmAgent({
+      name: AGENT_NAME,
+      model: 'gemini-2.5-flash',
+      tools: [tool],
+    });
+    // A live run installs a queue on the context for the whole run. The
+    // processor substitutes its own for the node re-runs and must restore this
+    // one, or every later tool in that run finds no queue.
+    const liveQueue = new AsyncQueue<Event>();
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv-1',
+      agent,
+      session: createSession({
+        id: 's1',
+        appName: 'app',
+        userId: 'u1',
+        events: [...pausedNodeToolEvents(AGENT_NAME), structuredAnswerEvent()],
+      }),
+      pluginManager: new PluginManager([]),
+      eventQueue: liveQueue,
+    });
+
+    for await (const _ of REQUEST_INPUT_LLM_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+    )) {
+      // drain
+    }
+
+    expect(invocationContext.eventQueue).toBe(liveQueue);
   });
 });

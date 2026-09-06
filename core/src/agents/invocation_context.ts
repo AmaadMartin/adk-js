@@ -58,6 +58,7 @@ export interface InvocationContextParams {
   isolationScope?: string;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
   nodeToolDepth?: number;
+  eventQueue?: AsyncQueue<Event>;
   liveRequestQueue?: LiveRequestQueue;
   liveSessionResumptionHandle?: string;
   /**
@@ -225,7 +226,11 @@ export class InvocationContext {
    * An optional channel into which a running tool can push events to be
    * interleaved into the agent's output stream. Set by the LLM flow around tool
    * execution so a {@link NodeTool} (running a node/workflow) can surface the
-   * node's intermediate and interrupt events. Cleared once tools finish.
+   * node's intermediate and interrupt events, and by `Runner.runLive` for the
+   * whole live run. Inherited by the child contexts of an invocation, so a tool
+   * several agents deep reaches the queue its run was started with. A flow that
+   * substitutes its own queue for one tool step runs on its own context object,
+   * so it does not disturb the inherited one.
    */
   eventQueue?: AsyncQueue<Event>;
 
@@ -288,6 +293,7 @@ export class InvocationContext {
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
+    this.eventQueue = params.eventQueue;
     this.a2aMetadata = params.a2aMetadata;
     // Inherit the parent invocation's cost manager when one is available.
 

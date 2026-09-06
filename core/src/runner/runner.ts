@@ -40,6 +40,7 @@ import {
   tracer,
 } from '../telemetry/tracing.js';
 import {BaseToolset, isBaseToolset} from '../tools/base_toolset.js';
+import {AsyncQueue} from '../utils/async_queue.js';
 import {logger} from '../utils/logger.js';
 import {isGemini2OrAbove} from '../utils/model_name.js';
 import type {RunnableNode} from '../workflow/graph.js';
@@ -48,6 +49,7 @@ import {
   RunnableRoot,
   runNodeAsInvocation,
 } from '../workflow/run_node_as_invocation.js';
+import {mergeLiveEventStreams} from './live_event_merge.js';
 
 /**
  * The configuration parameters for the Runner.
@@ -660,18 +662,15 @@ export class Runner {
       throw new Error('liveRequestQueue is required for runLive.');
     }
 
-    if (!isBaseAgent(this.agent)) {
-      throw new Error('runLive is only supported for agents.');
-    }
-    const agent = this.agent;
+    const agent = isBaseAgent(this.agent) ? this.agent : undefined;
 
     const runConfig = createRunConfig(params.runConfig);
     if (!runConfig.responseModalities?.length) {
       runConfig.responseModalities = [Modality.AUDIO];
     }
     // For multi-agent live setups, the model's text transcription is needed
-    // as context for the transferred agent.
-    if (agent.subAgents?.length) {
+    // as context for the transferred agent. A node root has no sub-agents.
+    if (agent?.subAgents?.length) {
       if (runConfig.responseModalities.includes(Modality.AUDIO)) {
         runConfig.outputAudioTranscription ??= {};
       }
@@ -718,10 +717,14 @@ export class Runner {
             liveSessionResumptionHandle: params.liveSessionResumptionHandle,
           });
 
-          invocationContext.agent = this.determineAgentForResumption(
-            session,
-            agent,
-          );
+          // Only meaningful for an agent root: this resolves an event author
+          // against the agent tree, and a node subtree is not in that tree.
+          if (agent) {
+            invocationContext.agent = this.determineAgentForResumption(
+              session,
+              agent,
+            );
+          }
 
           // Step 1: before-run plugin hook (early exit if it returns content).
           const beforeRunCallbackResponse =
@@ -745,35 +748,52 @@ export class Runner {
             return;
           }
 
-          // Step 2: drive the agent's runLive and propagate events.
-          for await (const event of requireAgent(invocationContext).runLive(
-            invocationContext,
-          )) {
-            if (params.abortSignal?.aborted) {
-              return;
+          // Step 2: drive the root and propagate events.
+          //
+          // A streaming tool or a node tool running underneath the root has no
+          // way to yield an event back through the root's own stream, so it
+          // pushes onto this queue instead; without a queue those pushes throw.
+          const eventQueue = new AsyncQueue<Event>();
+          invocationContext.eventQueue = eventQueue;
+          try {
+            const rootEvents = mergeLiveEventStreams(
+              eventQueue,
+              agent
+                ? requireAgent(invocationContext).runLive(invocationContext)
+                : runNodeAsInvocation(this.agent, invocationContext),
+            );
+
+            for await (const event of rootEvents) {
+              if (params.abortSignal?.aborted) {
+                return;
+              }
+
+              const modifiedEvent = await this.pluginManager.runOnEventCallback(
+                {
+                  invocationContext,
+                  event,
+                },
+              );
+              if (params.abortSignal?.aborted) {
+                return;
+              }
+
+              const eventToProcess = modifiedEvent ?? event;
+
+              if (
+                !eventToProcess.partial &&
+                !isLiveModelMediaEventWithInlineData(eventToProcess)
+              ) {
+                await this.sessionService.appendEvent({
+                  session,
+                  event: eventToProcess,
+                });
+              }
+
+              yield eventToProcess;
             }
-
-            const modifiedEvent = await this.pluginManager.runOnEventCallback({
-              invocationContext,
-              event,
-            });
-            if (params.abortSignal?.aborted) {
-              return;
-            }
-
-            const eventToProcess = modifiedEvent ?? event;
-
-            if (
-              !eventToProcess.partial &&
-              !isLiveModelMediaEventWithInlineData(eventToProcess)
-            ) {
-              await this.sessionService.appendEvent({
-                session,
-                event: eventToProcess,
-              });
-            }
-
-            yield eventToProcess;
+          } finally {
+            invocationContext.eventQueue = undefined;
           }
 
           // Step 3: after-run plugin hook for cleanup/metrics.
