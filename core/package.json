@@ -70,9 +70,6 @@
     "build": "tsc --emitDeclarationOnly && node ./build.js",
     "build:bundle": "tsc --emitDeclarationOnly && node ./build.js --bundle",
     "build:watch": "concurrently \"tsc --noEmit --watch --preserveWatchOutput\" \"node ./build.js --watch\"",
-    "test": "vitest",
-    "lint": "eslint 'src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
