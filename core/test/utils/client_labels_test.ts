@@ -6,7 +6,10 @@
 
 import {getClientLabels, runWithClientLabel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {parseUserAgent} from '../../src/utils/client_labels.js';
+import {
+  getTrackingHeaders,
+  parseUserAgent,
+} from '../../src/utils/client_labels.js';
 
 describe('client_labels', () => {
   describe('parseUserAgent', () => {
@@ -144,5 +147,26 @@ describe('client_labels', () => {
         runWithClientLabel('   ', () => {});
       }).toThrow('Client label must be a non-empty string.');
     });
+  });
+});
+
+describe('getTrackingHeaders', () => {
+  it('sends the same joined labels in both headers', () => {
+    const headers = getTrackingHeaders();
+    const expected = getClientLabels().join(' ');
+
+    expect(headers).toEqual({
+      'x-goog-api-client': expected,
+      'user-agent': expected,
+    });
+  });
+
+  it('carries a custom client label', () => {
+    const headers = runWithClientLabel('my-app/1.0', () =>
+      getTrackingHeaders(),
+    );
+
+    expect(headers['x-goog-api-client']).toContain('my-app/1.0');
+    expect(headers['user-agent']).toContain('my-app/1.0');
   });
 });

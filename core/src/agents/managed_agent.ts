@@ -20,7 +20,7 @@ import {
   runAsyncGeneratorWithOtelContext,
   tracer,
 } from '../telemetry/tracing.js';
-import {isBaseTool, isInModelTool} from '../tools/base_tool.js';
+import {BaseTool, isBaseTool, isInModelTool} from '../tools/base_tool.js';
 import {
   isRemoteMcpServer,
   RemoteMcpServer,
@@ -183,7 +183,7 @@ export interface ManagedAgentConfig extends BaseAgentConfig {
    * Server-side tools: ADK built-in tools, raw genai `Tool` configs, or
    * {@link RemoteMcpServer} specs. Client-executed tools are rejected.
    */
-  tools?: Array<Tool | RemoteMcpServer>;
+  tools?: Array<Tool | BaseTool | RemoteMcpServer>;
 
   /**
    * Composition mode.
@@ -247,7 +247,7 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
     | Interactions.DynamicAgentConfig
     | Interactions.DeepResearchAgentConfig;
   readonly instruction: string | InstructionProvider;
-  readonly tools: Array<Tool | RemoteMcpServer>;
+  readonly tools: Array<Tool | BaseTool | RemoteMcpServer>;
   readonly mode?: 'single_turn';
 
   private lazyApiClient?: GoogleGenAI;
@@ -469,7 +469,7 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
       createParams.system_instruction = systemInstruction;
     }
 
-    logger.info(
+    logger.debug(
       `Sending request via interactions API, agent: ${this.agentId}, ` +
         `stream: true, previous_interaction_id: ${previousInteractionId}, ` +
         `environment: ${JSON.stringify(environment)}`,

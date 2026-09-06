@@ -9,6 +9,7 @@
 import {
   BaseAgent,
   BaseLlm,
+  createEvent,
   Event,
   EventActions,
   Gemini,
@@ -20,6 +21,7 @@ import {
   Session,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {findPreviousInteractionState} from '../../../src/agents/processors/interactions_request_processor.js';
 
 class MockLlm extends BaseLlm {
   constructor() {
@@ -248,5 +250,49 @@ describe('InteractionsRequestProcessor', () => {
     }
 
     expect(llmRequest.previousInteractionId).toBeUndefined();
+  });
+});
+
+describe('findPreviousInteractionState', () => {
+  it('returns both ids from the latest matching event', () => {
+    const events = [
+      createEvent({author: 'mgr', interactionId: 'old', environmentId: 'e0'}),
+      createEvent({author: 'mgr', interactionId: 'new', environmentId: 'e1'}),
+    ];
+
+    expect(findPreviousInteractionState(events, 'mgr')).toEqual({
+      interactionId: 'new',
+      environmentId: 'e1',
+    });
+  });
+
+  it('skips an event another agent authored', () => {
+    const events = [
+      createEvent({author: 'mgr', interactionId: 'mine'}),
+      createEvent({author: 'other', interactionId: 'theirs'}),
+    ];
+
+    expect(findPreviousInteractionState(events, 'mgr')).toEqual({
+      interactionId: 'mine',
+      environmentId: undefined,
+    });
+  });
+
+  it('skips an event outside the current branch', () => {
+    const events = [
+      createEvent({author: 'mgr', interactionId: 'mine', branch: 'wf.a'}),
+      createEvent({author: 'mgr', interactionId: 'elsewhere', branch: 'wf.b'}),
+    ];
+
+    expect(findPreviousInteractionState(events, 'mgr', 'wf.a')).toEqual({
+      interactionId: 'mine',
+      environmentId: undefined,
+    });
+  });
+
+  it('returns nothing when no event matches', () => {
+    const events = [createEvent({author: 'mgr'})];
+
+    expect(findPreviousInteractionState(events, 'mgr')).toEqual({});
   });
 });

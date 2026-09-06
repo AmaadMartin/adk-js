@@ -73,6 +73,12 @@ export interface ExtendedInteractionSSEEvent extends Omit<
   interactionId?: string;
   interaction?: {
     id: string;
+    /**
+     * The environment the interaction ran in. `@google/genai` 2.9.0 omits this
+     * field from its streaming interaction payload, though the Interactions
+     * API sends it on a created or completed event.
+     */
+    environment_id?: string;
   };
   id?: string;
 }
@@ -906,10 +912,7 @@ function extractStreamInteractionId(
 function extractStreamEnvironmentId(
   event: ExtendedInteractionSSEEvent,
 ): string | undefined {
-  const interaction = event.interaction as
-    | {environment_id?: string}
-    | undefined;
-  return interaction?.environment_id;
+  return event.interaction?.environment_id;
 }
 
 /**

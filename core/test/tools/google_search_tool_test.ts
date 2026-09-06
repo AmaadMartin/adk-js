@@ -94,6 +94,21 @@ describe('GoogleSearchTool', () => {
     });
   });
 
+  describe('managed agent requests', () => {
+    it('enables google search on a request that carries no model', async () => {
+      const tool = new GoogleSearchTool();
+      const req = makeRequest(undefined);
+      req.isManagedAgent = true;
+
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config?.tools).toEqual([{googleSearch: {}}]);
+    });
+  });
+
   it('has a global instance GOOGLE_SEARCH', () => {
     expect(GOOGLE_SEARCH).toBeInstanceOf(GoogleSearchTool);
   });
