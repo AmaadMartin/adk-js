@@ -840,6 +840,15 @@ export type {
   ReflectionLm,
 } from './optimization/gepa_engine.js';
 export {
+  GEPARootAgentOptimizer,
+  RootAgentGepaAdapter,
+} from './optimization/gepa_root_agent_optimizer.js';
+export type {
+  GEPARootAgentOptimizerConfig,
+  GEPARootAgentOptimizerResult,
+  RootAgentGepaAdapterParams,
+} from './optimization/gepa_root_agent_optimizer.js';
+export {
   AGENT_PROMPT_NAME,
   AgentGepaAdapter,
   GEPARootAgentPromptOptimizer,
@@ -850,6 +859,10 @@ export type {
   GEPARootAgentPromptOptimizerResult,
 } from './optimization/gepa_root_agent_prompt_optimizer.js';
 export {requireStaticInstruction} from './optimization/gepa_utils.js';
+export {
+  SKILL_KEY_PREFIX,
+  skillComponentKey,
+} from './optimization/instruction_proposal.js';
 export {
   LocalEvalSampler,
   extractSingleInvocationInfo,
@@ -1375,6 +1388,7 @@ export type {SkillSystemInstructionOptions} from './tools/skill/skill_system_ins
 export {
   DEFAULT_SCRIPT_TIMEOUT_SECONDS,
   SkillToolset,
+  isSkillToolset,
 } from './tools/skill/skill_toolset.js';
 export type {SkillToolsetOptions} from './tools/skill/skill_toolset.js';
 export {

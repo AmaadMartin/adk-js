@@ -89,8 +89,31 @@ export interface SkillToolsetOptions {
   toolNamePrefix?: string;
 }
 
+/**
+ * A unique symbol to identify ADK skill toolsets.
+ * Defined once and shared by all SkillToolset instances.
+ */
+const SKILL_TOOLSET_SIGNATURE_SYMBOL = Symbol.for('google.adk.skillToolset');
+
+/**
+ * Reports whether `obj` is a {@link SkillToolset}.
+ *
+ * The symbol check holds across two copies of the package in one runtime,
+ * where `instanceof` against either copy's class returns false.
+ */
+export function isSkillToolset(obj: unknown): obj is SkillToolset {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    SKILL_TOOLSET_SIGNATURE_SYMBOL in obj &&
+    obj[SKILL_TOOLSET_SIGNATURE_SYMBOL] === true
+  );
+}
+
 @experimental
 export class SkillToolset extends BaseToolset {
+  readonly [SKILL_TOOLSET_SIGNATURE_SYMBOL] = true;
+
   public skills: Record<string, Skill>;
   private tools: BaseTool[];
   public additionalTools: Array<BaseTool | BaseToolset>;
@@ -246,6 +269,30 @@ export class SkillToolset extends BaseToolset {
 
   getSkill(name: string): Skill | undefined {
     return this.skills[name];
+  }
+
+  /**
+   * Returns a new toolset carrying the given skills and this toolset's
+   * configuration.
+   *
+   * A fresh instance is required rather than a shallow copy: the toolset owns
+   * the skill tools it built around itself, plus per-invocation caches, so a
+   * copy would keep serving the original's skills. Every constructor option is
+   * forwarded here, and a new option must be added to this list too.
+   *
+   * @param skills The skills the new toolset exposes.
+   */
+  cloneWithUpdatedSkills(skills: Skill[]): SkillToolset {
+    return new SkillToolset(skills, {
+      codeExecutor: this.codeExecutor,
+      additionalTools: this.additionalTools,
+      registry: this.registry,
+      allowInlineScripts: this.allowInlineScripts,
+      scriptOutputDir: this.scriptOutputDir,
+      environment: this.environment,
+      skillsFolder: this.configuredSkillsFolder,
+      scriptTimeoutSeconds: this.scriptTimeoutSeconds,
+    });
   }
 
   /**
