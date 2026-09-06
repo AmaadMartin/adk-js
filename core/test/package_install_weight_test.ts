@@ -56,6 +56,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@mikro-orm/sqlite',
   '@modelcontextprotocol/sdk',
   '@toolbox-sdk/core',
+  'e2b',
   'express',
   'openai',
   'sqlite3',
@@ -90,6 +91,7 @@ describe('core/package.json install weight', () => {
     '@mikro-orm/sqlite',
     '@modelcontextprotocol/sdk',
     '@toolbox-sdk/core',
+    'e2b',
     'express',
     'openai',
     'sqlite3',
@@ -127,6 +129,7 @@ describe('core/package.json subpath exports', () => {
     expect(subpaths.map(([subpath]) => subpath).sort()).toEqual([
       './a2a',
       './artifacts/gcs',
+      './integrations/e2b',
       './plugins/bigquery',
       './sessions/database',
       './telemetry/gcp',

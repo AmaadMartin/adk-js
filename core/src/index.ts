@@ -72,6 +72,8 @@ export {
   loadEvalSetFromFile,
 } from './evaluation/local_eval_sets_manager.js';
 export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
+export {E2BEnvironment} from './integrations/e2b/e2b_environment.js';
+export type {E2BEnvironmentOptions} from './integrations/e2b/e2b_environment.js';
 export {SandboxClient} from './integrations/vmaas/sandbox_client.js';
 export type {
   CdpBatchResult,
