@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
@@ -152,6 +153,25 @@ vi.mock('@google-cloud/vertexai/build/src/genai/client.js', () => ({
     };
   },
 }));
+
+/** Returns the CMD line of the Dockerfile written by the last deployment. */
+function getGeneratedDockerFileCmd(): string {
+  const call = vi
+    .mocked(saveToFile)
+    .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+  if (!call) {
+    expect.fail('deployToAgentEngine did not write a Dockerfile');
+  }
+  const content = call[1];
+  if (typeof content !== 'string') {
+    expect.fail('the generated Dockerfile was not written as a string');
+  }
+  const cmd = content.split('\n').find((line) => line.startsWith('CMD '));
+  if (cmd === undefined) {
+    expect.fail('the generated Dockerfile has no CMD line');
+  }
+  return cmd;
+}
 
 describe('deployToAgentEngine', () => {
   let tempFolder: string;
@@ -748,5 +768,41 @@ describe('deployToAgentEngine', () => {
     await expect(deployToAgentEngine(options)).rejects.toThrow(
       'Reasoning Engine update failed: [Code 404] Resource not found',
     );
+  });
+
+  it('should include --otel_to_cloud in the Dockerfile CMD when otelToCloud is true', async () => {
+    await deployToAgentEngine({...defaultOptions, otelToCloud: true});
+
+    expect(getGeneratedDockerFileCmd()).toContain('--otel_to_cloud');
+  });
+
+  it('should not include --otel_to_cloud in the Dockerfile CMD by default', async () => {
+    await deployToAgentEngine(defaultOptions);
+
+    expect(getGeneratedDockerFileCmd()).not.toContain('--otel_to_cloud');
+  });
+
+  it('should not include --otel_to_cloud in the Dockerfile CMD when otelToCloud is false', async () => {
+    await deployToAgentEngine({...defaultOptions, otelToCloud: false});
+
+    expect(getGeneratedDockerFileCmd()).not.toContain('--otel_to_cloud');
+  });
+
+  it('should include --otel_to_cloud alongside the other server flags', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      otelToCloud: true,
+      a2a: true,
+      allowOrigins: 'http://example.com',
+      sessionServiceUri: 'http://session-service',
+      artifactServiceUri: 'http://artifact-service',
+    });
+
+    const cmd = getGeneratedDockerFileCmd();
+    expect(cmd).toContain('--otel_to_cloud');
+    expect(cmd).toContain('--a2a');
+    expect(cmd).toContain('--allow_origins=http://example.com');
+    expect(cmd).toContain('--session_service_uri=http://session-service');
+    expect(cmd).toContain('--artifact_service_uri=http://artifact-service');
   });
 });

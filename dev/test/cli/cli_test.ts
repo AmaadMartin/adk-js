@@ -445,6 +445,30 @@ describe('CLI Entrypoint', () => {
         agentEngineId: '12345',
       });
     });
+
+    it('should pass otelToCloud to deployToAgentEngine when --otel_to_cloud is set', async () => {
+      await parse(['deploy', 'agent_engine', '--otel_to_cloud']);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        otelToCloud: true,
+      });
+    });
+
+    it('should default otelToCloud to false for deployToAgentEngine', async () => {
+      await parse(['deploy', 'agent_engine']);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        otelToCloud: false,
+      });
+    });
+
+    it('should pass otelToCloud false when --otel_to_cloud=false is set', async () => {
+      await parse(['deploy', 'agent_engine', '--otel_to_cloud=false']);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        otelToCloud: false,
+      });
+    });
   });
 
   describe('command: deploy reasoning_engine', () => {
@@ -465,6 +489,14 @@ describe('CLI Entrypoint', () => {
 
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
+      });
+    });
+
+    it('should pass otelToCloud to deployToAgentEngine when --otel_to_cloud is set', async () => {
+      await parse(['deploy', 'reasoning_engine', '--otel_to_cloud']);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        otelToCloud: true,
       });
     });
   });
