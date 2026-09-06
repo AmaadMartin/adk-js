@@ -464,4 +464,48 @@ describe('Event Utils', () => {
       expect(event.content!.parts![0].text).toBe('hello');
     });
   });
+
+  describe('renderUiWidgets serialization', () => {
+    const widgetPayload = {
+      resource_uri: 'ui://demo/card',
+      tool: {name: 'get_forecast', inputSchema: {type: 'object'}},
+      tool_args: {cityName: 'Paris'},
+    };
+
+    function eventWithWidget() {
+      return createEvent({
+        invocationId: 'i-1',
+        author: 'agent',
+        actions: createEventActions({
+          renderUiWidgets: [
+            {id: 'call-1', provider: 'mcp', payload: widgetPayload},
+          ],
+        }),
+      });
+    }
+
+    it('renames the field but leaves the payload keys alone on the wire', () => {
+      const wire = transformToSnakeCaseEvent(eventWithWidget());
+
+      expect(wire).toMatchObject({
+        actions: {
+          render_ui_widgets: [
+            {id: 'call-1', provider: 'mcp', payload: widgetPayload},
+          ],
+        },
+      });
+    });
+
+    it('survives a snake_case round trip unchanged', () => {
+      const event = eventWithWidget();
+
+      const restored = transformToCamelCaseEvent(
+        transformToSnakeCaseEvent(event),
+      );
+
+      expect(restored.actions.renderUiWidgets).toEqual(
+        event.actions.renderUiWidgets,
+      );
+    });
+  });
 });

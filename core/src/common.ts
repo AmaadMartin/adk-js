@@ -192,6 +192,7 @@ export type {
   ToolConfirmationEvent,
   ToolResultEvent,
 } from './events/structured_events.js';
+export type {UiWidget} from './events/ui_widget.js';
 export {
   BaseExampleProvider,
   isBaseExampleProvider,

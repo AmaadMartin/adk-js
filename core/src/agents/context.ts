@@ -10,6 +10,7 @@ import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthHandler} from '../auth/auth_handler.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
+import {UiWidget} from '../events/ui_widget.js';
 import {SearchMemoryResponse} from '../memory/base_memory_service.js';
 import {State} from '../sessions/state.js';
 import {ResumeInputs} from '../tools/resume_inputs.js';
@@ -81,6 +82,38 @@ export class Context extends ReadonlyContext {
 
   get actions(): EventActions {
     return this.eventActions;
+  }
+
+  /**
+   * Free-form metadata shared by every context of the current invocation.
+   *
+   * A write through this object is visible to whatever reads the invocation
+   * afterwards. Mirrors Python `CallbackContext.custom_metadata`.
+   */
+  get customMetadata(): Record<string, unknown> {
+    return this.invocationContext.customMetadata;
+  }
+
+  /**
+   * Adds a UI widget to the current event's actions for the host to render.
+   *
+   * A UI widget carries the payload a host needs to draw a rich component
+   * (an MCP App iframe, for instance) next to the agent's response.
+   *
+   * @param uiWidget The widget to render.
+   * @throws If a widget with the same id is already on the current actions.
+   */
+  renderUiWidget(uiWidget: UiWidget): void {
+    const widgets = (this.eventActions.renderUiWidgets ??= []);
+
+    if (widgets.some((existing) => existing.id === uiWidget.id)) {
+      throw new Error(
+        `UI widget with ID '${uiWidget.id}' already exists in the current ` +
+          'event actions.',
+      );
+    }
+
+    widgets.push(uiWidget);
   }
 
   /**

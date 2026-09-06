@@ -383,6 +383,10 @@ const PRESERVE_KEYS_CAMEL_CASE = [
   'output',
   'route',
   'actions.agentState',
+  // A UI widget's payload is provider-defined: it carries the raw MCP tool
+  // declaration and the call arguments, whose keys must reach the host exactly
+  // as the server and the model spelled them.
+  'actions.renderUiWidgets.payload',
 ];
 
 /**
@@ -407,6 +411,7 @@ const PRESERVE_KEYS_SNAKE_CASE = [
   'output',
   'route',
   'actions.agent_state',
+  'actions.render_ui_widgets.payload',
 ];
 
 /**
