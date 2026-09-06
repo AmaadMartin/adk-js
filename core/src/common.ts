@@ -13,6 +13,10 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {
+  AgentConfigError,
+  AgentConfigErrorCode,
+} from './agents/configs/agent_config.js';
 export {Context} from './agents/context.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
