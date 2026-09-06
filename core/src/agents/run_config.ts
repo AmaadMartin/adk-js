@@ -144,6 +144,15 @@ export interface RunConfig {
   allowRemoteToolConfirmation?: boolean;
 
   /**
+   * Custom metadata for the current invocation.
+   *
+   * `InvocationContext` copies it into `InvocationContext.customMetadata` at
+   * construction, where tools and services read and extend it for the life of
+   * the run.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /**
    * Set by the A2A executor to record that this run's message came from a
    * remote peer. Not part of the configuration surface: an application setting
    * it by hand is asserting something about the message's provenance that only
