@@ -6,6 +6,7 @@
 
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
+export type {AgentOrigin} from './agents/agent_origin.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
@@ -260,7 +261,7 @@ export {
   isRoutableLlmAgent,
   isRunner,
 } from './runner/runner.js';
-export type {RunnerConfig} from './runner/runner.js';
+export type {RunAsyncParams, RunnerConfig} from './runner/runner.js';
 export {BaseSessionService} from './sessions/base_session_service.js';
 export type {
   AppendEventRequest,

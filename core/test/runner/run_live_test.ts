@@ -10,6 +10,7 @@ import {
   BaseLlmConnection,
   BaseTool,
   Event,
+  GetSessionConfig,
   InMemoryArtifactService,
   InMemorySessionService,
   LiveRequestQueue,
@@ -18,9 +19,10 @@ import {
   LlmResponse,
   RunAsyncToolRequest,
   Runner,
+  SessionNotFoundError,
 } from '@google/adk';
 import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -206,6 +208,7 @@ describe('Runner.runLive', () => {
       agent,
       sessionService,
       artifactService,
+      autoCreateSession: true,
     });
     const queue = new LiveRequestQueue();
     queue.close();
@@ -223,6 +226,70 @@ describe('Runner.runLive', () => {
       sessionId: 'missing',
     });
     expect(session).toBeDefined();
+  });
+
+  it('raises SessionNotFoundError without autoCreateSession', async () => {
+    const llm = new FakeLiveLlm([]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+    const queue = new LiveRequestQueue();
+    queue.close();
+
+    await expect(
+      (async () => {
+        for await (const _ of runner.runLive({
+          userId: TEST_USER_ID,
+          sessionId: 'missing',
+          liveRequestQueue: queue,
+        })) {
+          // no-op
+        }
+      })(),
+    ).rejects.toBeInstanceOf(SessionNotFoundError);
+
+    const session = await sessionService.getSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: 'missing',
+    });
+    expect(session).toBeUndefined();
+  });
+
+  it('passes getSessionConfig to the session service', async () => {
+    const llm = new FakeLiveLlm([]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+    const getSession = vi.spyOn(sessionService, 'getSession');
+    const getSessionConfig: GetSessionConfig = {numRecentEvents: 3};
+    const queue = new LiveRequestQueue();
+    queue.close();
+
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {getSessionConfig},
+    })) {
+      // no-op
+    }
+
+    expect(getSession).toHaveBeenCalledWith({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      config: getSessionConfig,
+    });
+    getSession.mockRestore();
   });
 
   it('forwards realtime blobs to the connection and yields model events', async () => {

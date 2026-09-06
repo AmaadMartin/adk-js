@@ -13,6 +13,7 @@ import {
   SpeechConfig,
 } from '@google/genai';
 
+import type {GetSessionConfig} from '../sessions/base_session_service.js';
 import {logger} from '../utils/logger.js';
 
 /**
@@ -126,6 +127,19 @@ export interface RunConfig {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+
+  /**
+   * Custom metadata for the current invocation. The runner merges it onto every
+   * event of the run. A key the event already carries keeps the event's value.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /**
+   * Controls which events the runner fetches when it loads the session. Use it
+   * to avoid loading the full event history on every invocation, for example
+   * with `{numRecentEvents: 50}`.
+   */
+  getSessionConfig?: GetSessionConfig;
 
   /**
    * If true, a `requireConfirmation` gate may be answered by a message that
