@@ -32,12 +32,16 @@ export class ToolExecutionError extends Error {
    * @param errorType The semantic error type (e.g.
    *   {@link ToolErrorType.REQUEST_TIMEOUT} or `'500'`). Used to populate the
    *   `error.type` span attribute in OpenTelemetry traces.
+   * @param options Standard error options. Pass `cause` to keep the failure
+   *   that made the tool fail, so that a caller can report the root problem
+   *   instead of only the summary.
    */
   constructor(
     message: string,
     readonly errorType?: ToolErrorType | string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = 'ToolExecutionError';
   }
 }

@@ -45,6 +45,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@google-cloud/opentelemetry-cloud-monitoring-exporter',
   '@google-cloud/opentelemetry-cloud-trace-exporter',
   '@google-cloud/storage',
+  '@langchain/core',
   '@mikro-orm/mariadb',
   '@mikro-orm/mssql',
   '@mikro-orm/mysql',
@@ -75,6 +76,7 @@ describe('core/package.json install weight', () => {
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',
     '@google-cloud/storage',
+    '@langchain/core',
     '@mikro-orm/sqlite',
     '@modelcontextprotocol/sdk',
     'express',
@@ -111,6 +113,7 @@ describe('core/package.json subpath exports', () => {
       './artifacts/gcs',
       './sessions/database',
       './telemetry/gcp',
+      './tools/langchain_tool',
       './tools/mcp',
     ]);
   });
