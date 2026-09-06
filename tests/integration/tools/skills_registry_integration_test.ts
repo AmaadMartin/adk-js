@@ -121,7 +121,7 @@ describe('Skills Registry Integration', () => {
                 {
                   functionCall: {
                     name: 'load_skill',
-                    args: {name: 'remote-math-skill'},
+                    args: {skill_name: 'remote-math-skill'},
                   },
                 },
               ],
@@ -162,7 +162,7 @@ describe('Skills Registry Integration', () => {
                     name: 'run_skill_script',
                     args: {
                       skill_name: 'remote-math-skill',
-                      script_path: 'scripts/double.js',
+                      file_path: 'scripts/double.js',
                       args: {
                         val: 21,
                       },

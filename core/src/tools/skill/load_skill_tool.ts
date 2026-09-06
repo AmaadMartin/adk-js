@@ -26,12 +26,12 @@ export class LoadSkillTool extends BaseTool {
       parameters: {
         type: Type.OBJECT,
         properties: {
-          name: {
+          skill_name: {
             type: Type.STRING,
             description: 'The name of the skill to load.',
           },
         },
-        required: ['name'],
+        required: ['skill_name'],
       },
     };
   }
@@ -40,10 +40,10 @@ export class LoadSkillTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
-    const skillName = args['name'] as string;
+    const skillName = args['skill_name'] as string;
     if (!skillName) {
       return {
-        error: 'Skill name is required.',
+        error: "Argument 'skill_name' is required.",
         error_code: 'MISSING_SKILL_NAME',
       };
     }

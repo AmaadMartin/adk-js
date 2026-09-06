@@ -106,16 +106,43 @@ describe('RunSkillScriptTool', () => {
     },
   };
 
-  it('returns error if skill name is missing', async () => {
-    const toolset = new SkillToolset([mockSkill]);
-    const tool = new RunSkillScriptTool(toolset);
+  it('declares skill_name and file_path as required arguments', () => {
+    const tool = new RunSkillScriptTool(new SkillToolset([mockSkill]));
+
+    const parameters = tool._getDeclaration().parameters;
+
+    expect(Object.keys(parameters?.properties ?? {})).toEqual([
+      'skill_name',
+      'file_path',
+      'args',
+    ]);
+    expect(parameters?.required).toEqual(['skill_name', 'file_path']);
+  });
+
+  it('rejects the legacy script_path argument', async () => {
+    const tool = new RunSkillScriptTool(new SkillToolset([mockSkill]));
+
     const result = (await tool.runAsync({
-      args: {script_path: 'scripts/setup.js'},
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
     })) as ToolErrorResponse;
 
     expect(result).toEqual({
-      error: 'Skill name is required.',
+      error: "Argument 'file_path' is required.",
+      errorCode: 'MISSING_SCRIPT_PATH',
+    });
+  });
+
+  it('returns error if skill name is missing', async () => {
+    const toolset = new SkillToolset([mockSkill]);
+    const tool = new RunSkillScriptTool(toolset);
+    const result = (await tool.runAsync({
+      args: {file_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error: "Argument 'skill_name' is required.",
       errorCode: 'MISSING_SKILL_NAME',
     });
   });
@@ -129,7 +156,7 @@ describe('RunSkillScriptTool', () => {
     })) as ToolErrorResponse;
 
     expect(result).toEqual({
-      error: 'Script path is required.',
+      error: "Argument 'file_path' is required.",
       errorCode: 'MISSING_SCRIPT_PATH',
     });
   });
@@ -138,7 +165,7 @@ describe('RunSkillScriptTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new RunSkillScriptTool(toolset);
     const result = (await tool.runAsync({
-      args: {skill_name: 'invalid-skill', script_path: 'scripts/setup.js'},
+      args: {skill_name: 'invalid-skill', file_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
     })) as ToolErrorResponse;
 
@@ -152,7 +179,7 @@ describe('RunSkillScriptTool', () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new RunSkillScriptTool(toolset);
     const result = (await tool.runAsync({
-      args: {skill_name: 'test-skill', script_path: 'scripts/invalid.js'},
+      args: {skill_name: 'test-skill', file_path: 'scripts/invalid.js'},
       toolContext: createMockContext(),
     })) as ToolErrorResponse;
 
@@ -166,7 +193,7 @@ describe('RunSkillScriptTool', () => {
     const toolset = new SkillToolset([mockSkill]); // no executor
     const tool = new RunSkillScriptTool(toolset);
     const result = (await tool.runAsync({
-      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      args: {skill_name: 'test-skill', file_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
     })) as ToolErrorResponse;
 
@@ -185,7 +212,7 @@ describe('RunSkillScriptTool', () => {
     const tool = new RunSkillScriptTool(toolset);
 
     const result = (await tool.runAsync({
-      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      args: {skill_name: 'test-skill', file_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
     })) as CodeExecutionResult;
 
@@ -207,7 +234,7 @@ describe('RunSkillScriptTool', () => {
     const tool = new RunSkillScriptTool(toolset);
 
     await tool.runAsync({
-      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      args: {skill_name: 'test-skill', file_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
     });
 
@@ -249,7 +276,7 @@ describe('RunSkillScriptTool', () => {
     const tool = new RunSkillScriptTool(toolset);
 
     await tool.runAsync({
-      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      args: {skill_name: 'test-skill', file_path: 'scripts/setup.js'},
       toolContext: createMockContext(),
     });
 

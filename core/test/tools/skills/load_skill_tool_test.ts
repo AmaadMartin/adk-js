@@ -42,6 +42,29 @@ describe('LoadSkillTool', () => {
     });
   }
 
+  it('declares skill_name as the required argument', () => {
+    const tool = new LoadSkillTool(new SkillToolset([mockSkill]));
+
+    const parameters = tool._getDeclaration().parameters;
+
+    expect(Object.keys(parameters?.properties ?? {})).toEqual(['skill_name']);
+    expect(parameters?.required).toEqual(['skill_name']);
+  });
+
+  it('rejects the legacy name argument', async () => {
+    const tool = new LoadSkillTool(new SkillToolset([mockSkill]));
+
+    const result = await tool.runAsync({
+      args: {name: 'test-skill'},
+      toolContext: createMockContext(),
+    });
+
+    expect(result).toEqual({
+      error: "Argument 'skill_name' is required.",
+      error_code: 'MISSING_SKILL_NAME',
+    });
+  });
+
   it('loads skill instructions and updates state', async () => {
     const toolset = new SkillToolset([mockSkill]);
     const tool = new LoadSkillTool(toolset);
@@ -49,7 +72,7 @@ describe('LoadSkillTool', () => {
     const toolContext = createMockContext('test-agent');
 
     const result = await tool.runAsync({
-      args: {name: 'test-skill'},
+      args: {skill_name: 'test-skill'},
       toolContext,
     });
 
@@ -69,7 +92,7 @@ describe('LoadSkillTool', () => {
     const toolset = new SkillToolset([]);
     const tool = new LoadSkillTool(toolset);
     const result = await tool.runAsync({
-      args: {name: 'unknown-skill'},
+      args: {skill_name: 'unknown-skill'},
       toolContext: createMockContext(),
     });
     expect(result).toEqual({

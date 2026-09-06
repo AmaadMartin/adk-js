@@ -111,7 +111,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const result = (await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        script_path: 'scripts/hello.js',
+        file_path: 'scripts/hello.js',
       },
       toolContext: createMockContext(),
     })) as CodeExecutionResult;
@@ -134,7 +134,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       const result = (await tool.runAsync({
         args: {
           skill_name: 'test-skill',
-          script_path: 'scripts/hello.sh',
+          file_path: 'scripts/hello.sh',
         },
         toolContext: createMockContext(),
       })) as CodeExecutionResult;
@@ -156,7 +156,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const result = (await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        script_path: 'scripts/fail.js',
+        file_path: 'scripts/fail.js',
       },
       toolContext: createMockContext(),
     })) as CodeExecutionResult;
@@ -178,7 +178,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       const result = (await tool.runAsync({
         args: {
           skill_name: 'test-skill',
-          script_path: 'scripts/fail.sh',
+          file_path: 'scripts/fail.sh',
         },
         toolContext: createMockContext(),
       })) as CodeExecutionResult;
@@ -199,7 +199,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const result = (await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        script_path: 'scripts/hello.py',
+        file_path: 'scripts/hello.py',
       },
       toolContext: createMockContext(),
     })) as CodeExecutionResult;
@@ -220,7 +220,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const result = (await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        script_path: 'scripts/fail.py',
+        file_path: 'scripts/fail.py',
       },
       toolContext: createMockContext(),
     })) as CodeExecutionResult;
@@ -242,7 +242,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       const result = (await tool.runAsync({
         args: {
           skill_name: 'test-skill',
-          script_path: 'scripts/hello.ps1',
+          file_path: 'scripts/hello.ps1',
         },
         toolContext: createMockContext(),
       })) as CodeExecutionResult;
@@ -267,7 +267,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       const result = (await tool.runAsync({
         args: {
           skill_name: 'test-skill',
-          script_path: 'scripts/fail.ps1',
+          file_path: 'scripts/fail.ps1',
         },
         toolContext: createMockContext(),
       })) as CodeExecutionResult;
@@ -292,7 +292,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       const result = (await tool.runAsync({
         args: {
           skill_name: 'test-skill',
-          script_path: 'scripts/hello.bat',
+          file_path: 'scripts/hello.bat',
         },
         toolContext: createMockContext(),
       })) as CodeExecutionResult;
@@ -317,7 +317,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
       const result = (await tool.runAsync({
         args: {
           skill_name: 'test-skill',
-          script_path: 'scripts/fail.bat',
+          file_path: 'scripts/fail.bat',
         },
         toolContext: createMockContext(),
       })) as CodeExecutionResult;
@@ -339,7 +339,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const result = (await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        script_path: 'scripts/create_file.js',
+        file_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext(),
     })) as CodeExecutionResult & {outputDirectory: string};
@@ -381,7 +381,7 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     const result = (await tool.runAsync({
       args: {
         skill_name: 'test-skill',
-        script_path: 'scripts/create_file.js',
+        file_path: 'scripts/create_file.js',
       },
       toolContext: createMockContext(),
     })) as CodeExecutionResult;

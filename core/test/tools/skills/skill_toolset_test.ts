@@ -117,6 +117,24 @@ describe('skill_toolset', () => {
       );
     });
 
+    it('instructs the model to call load_skill with skill_name', async () => {
+      const toolset = new SkillToolset([mockSkill]);
+      const llmRequest: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+      };
+
+      await toolset.processLlmRequest(createMockContext(), llmRequest);
+
+      expect(llmRequest.config?.systemInstruction).toContain(
+        '`load_skill` tool with `skill_name="<SKILL_NAME>"`',
+      );
+      expect(llmRequest.config?.systemInstruction).not.toContain(
+        '`load_skill` tool with `name="<SKILL_NAME>"`',
+      );
+    });
+
     it('resolves additional tools when skill is activated', async () => {
       class DummyTool extends BaseTool {
         constructor() {
