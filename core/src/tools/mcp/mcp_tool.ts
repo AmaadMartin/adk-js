@@ -10,6 +10,7 @@ import type {
   CallToolResult,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
+import {context, propagation} from '@opentelemetry/api';
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
@@ -66,9 +67,17 @@ export class MCPTool extends BaseTool {
     const session = await this.mcpSessionManager.createSession();
 
     try {
-      const callRequest: CallToolRequest = {} as CallToolRequest;
-      callRequest.params = {name: this.originalName, arguments: request.args};
-      const result = await session.callTool(callRequest.params, undefined, {
+      const traceCarrier: Record<string, string> = {};
+      propagation.inject(context.active(), traceCarrier);
+
+      const params: CallToolRequest['params'] = {
+        name: this.originalName,
+        arguments: request.args,
+        // An MCP server can join the caller's trace only if the request carries
+        // the trace context; omitted entirely when no propagator is configured.
+        ...(Object.keys(traceCarrier).length > 0 ? {_meta: traceCarrier} : {}),
+      };
+      const result = await session.callTool(params, undefined, {
         signal: request.toolContext.abortSignal,
       });
       return result as CallToolResult;
