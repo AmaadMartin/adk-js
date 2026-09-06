@@ -10,6 +10,17 @@ import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
 
+/**
+ * Error codes returned by {@link LoadSkillTool} when a call cannot be
+ * completed. The string values are part of the tool's response contract and
+ * must remain stable.
+ */
+export enum LoadSkillErrorCode {
+  MISSING_SKILL_NAME = 'MISSING_SKILL_NAME',
+  REGISTRY_ERROR = 'REGISTRY_ERROR',
+  SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
+}
+
 @experimental
 export class LoadSkillTool extends BaseTool {
   constructor(private toolset: SkillToolset) {
@@ -44,7 +55,7 @@ export class LoadSkillTool extends BaseTool {
     if (!skillName) {
       return {
         error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
+        error_code: LoadSkillErrorCode.MISSING_SKILL_NAME,
       };
     }
 
@@ -57,14 +68,14 @@ export class LoadSkillTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        error_code: 'REGISTRY_ERROR',
+        error_code: LoadSkillErrorCode.REGISTRY_ERROR,
       };
     }
 
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
-        error_code: 'SKILL_NOT_FOUND',
+        error_code: LoadSkillErrorCode.SKILL_NOT_FOUND,
       };
     }
 

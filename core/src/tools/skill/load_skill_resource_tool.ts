@@ -15,6 +15,20 @@ import {
 } from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
 
+/**
+ * Error codes returned by {@link LoadSkillResourceTool} when a call cannot be
+ * completed. The string values are part of the tool's response contract and
+ * must remain stable.
+ */
+export enum LoadSkillResourceErrorCode {
+  MISSING_SKILL_NAME = 'MISSING_SKILL_NAME',
+  MISSING_RESOURCE_PATH = 'MISSING_RESOURCE_PATH',
+  REGISTRY_ERROR = 'REGISTRY_ERROR',
+  SKILL_NOT_FOUND = 'SKILL_NOT_FOUND',
+  INVALID_RESOURCE_PATH = 'INVALID_RESOURCE_PATH',
+  RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND',
+}
+
 const BINARY_FILE_DETECTED_MSG =
   'Binary file detected. The content has been injected into the conversation history for you to analyze.';
 
@@ -60,13 +74,13 @@ export class LoadSkillResourceTool extends BaseTool {
     if (!skillName) {
       return {
         error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
+        error_code: LoadSkillResourceErrorCode.MISSING_SKILL_NAME,
       };
     }
     if (!resourcePath) {
       return {
         error: 'Resource path is required.',
-        error_code: 'MISSING_RESOURCE_PATH',
+        error_code: LoadSkillResourceErrorCode.MISSING_RESOURCE_PATH,
       };
     }
 
@@ -81,14 +95,14 @@ export class LoadSkillResourceTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to fetch skill '${skillName}' from registry: ${(e as Error).message || e}`,
-        error_code: 'REGISTRY_ERROR',
+        error_code: LoadSkillResourceErrorCode.REGISTRY_ERROR,
       };
     }
 
     if (!skill) {
       return {
         error: `Skill '${skillName}' not found.`,
-        error_code: 'SKILL_NOT_FOUND',
+        error_code: LoadSkillResourceErrorCode.SKILL_NOT_FOUND,
       };
     }
 
@@ -110,14 +124,14 @@ export class LoadSkillResourceTool extends BaseTool {
     } else {
       return {
         error: "Path must start with 'references/', 'assets/', or 'scripts/'.",
-        error_code: 'INVALID_RESOURCE_PATH',
+        error_code: LoadSkillResourceErrorCode.INVALID_RESOURCE_PATH,
       };
     }
 
     if (content === undefined) {
       return {
         error: `Resource '${resourcePath}' not found in skill '${skillName}'.`,
-        error_code: 'RESOURCE_NOT_FOUND',
+        error_code: LoadSkillResourceErrorCode.RESOURCE_NOT_FOUND,
       };
     }
 

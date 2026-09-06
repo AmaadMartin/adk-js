@@ -14,6 +14,7 @@ import {
   FileContentEncoding,
   InvocationContext,
   LlmAgent,
+  RunSkillScriptErrorCode,
   RunSkillScriptTool,
   Skill,
   SkillToolset,
@@ -309,5 +310,41 @@ describe('RunSkillScriptTool', () => {
 
     expect(materializeFiles).toHaveBeenLastCalledWith([], outputDir);
     expect(result.outputDirectory).toBe(outputDir);
+  });
+
+  it('returns error if the executor throws', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    mockExecutor.shouldThrow = true;
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/setup.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(result).toEqual({
+      error:
+        "Failed to execute script 'scripts/setup.js': Mock execution failure",
+      errorCode: 'EXECUTION_ERROR',
+    });
+  });
+
+  describe('error codes', () => {
+    it('exposes stable string values for the error-code enum', () => {
+      // The error-code string values are part of the tool's response contract
+      // and must remain stable across releases.
+      expect(RunSkillScriptErrorCode.MISSING_SKILL_NAME).toBe(
+        'MISSING_SKILL_NAME',
+      );
+      expect(RunSkillScriptErrorCode.MISSING_SCRIPT_PATH).toBe(
+        'MISSING_SCRIPT_PATH',
+      );
+      expect(RunSkillScriptErrorCode.REGISTRY_ERROR).toBe('REGISTRY_ERROR');
+      expect(RunSkillScriptErrorCode.SKILL_NOT_FOUND).toBe('SKILL_NOT_FOUND');
+      expect(RunSkillScriptErrorCode.SCRIPT_NOT_FOUND).toBe('SCRIPT_NOT_FOUND');
+      expect(RunSkillScriptErrorCode.NO_CODE_EXECUTOR).toBe('NO_CODE_EXECUTOR');
+      expect(RunSkillScriptErrorCode.EXECUTION_ERROR).toBe('EXECUTION_ERROR');
+    });
   });
 });

@@ -10,6 +10,16 @@ import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
 
+/**
+ * Error codes returned by {@link SearchSkillsTool} when a call cannot be
+ * completed. The string values are part of the tool's response contract and
+ * must remain stable.
+ */
+export enum SearchSkillsErrorCode {
+  INVALID_ARGUMENTS = 'INVALID_ARGUMENTS',
+  REGISTRY_ERROR = 'REGISTRY_ERROR',
+}
+
 @experimental
 export class SearchSkillsTool extends BaseTool {
   constructor(private toolset: SkillToolset) {
@@ -46,7 +56,7 @@ export class SearchSkillsTool extends BaseTool {
     if (!query) {
       return {
         error: "Argument 'query' is required.",
-        error_code: 'INVALID_ARGUMENTS',
+        error_code: SearchSkillsErrorCode.INVALID_ARGUMENTS,
       };
     }
 
@@ -64,7 +74,7 @@ export class SearchSkillsTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to search skills from registry: ${(e as Error).message || e}`,
-        error_code: 'REGISTRY_ERROR',
+        error_code: SearchSkillsErrorCode.REGISTRY_ERROR,
       };
     }
   }
