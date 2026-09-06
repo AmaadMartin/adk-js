@@ -351,6 +351,8 @@ export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export {Task} from './utils/task.js';
 export type {TaskExecutable} from './utils/task.js';
+export {getTime, resetTimeProvider, setTimeProvider} from './utils/time.js';
+export type {TimeProvider} from './utils/time.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
 export {version} from './version.js';
 
