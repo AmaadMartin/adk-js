@@ -27,6 +27,7 @@
 
 import {
   AUTH_PREPROCESSOR,
+  AuthCredentialTypes,
   Event,
   InvocationContext,
   createEvent,
@@ -95,6 +96,43 @@ function pendingOAuthRequest(overrides: Partial<AuthConfig> = {}): AuthConfig {
       },
     } as unknown as AuthCredential,
     ...overrides,
+  };
+}
+
+/**
+ * The request an agent raises when no redirect is pending: the client identity
+ * the agent registered, and nothing for the client to echo back. Mirrors
+ * `requested_oauth2` in adk-python's `test_store_auth_merges_oauth2_fields`.
+ */
+function unpinnedOAuthRequest(): AuthConfig {
+  return {
+    credentialKey: CREDENTIAL_KEY,
+    authScheme: oauth2Scheme() as AuthConfig['authScheme'],
+    exchangedAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {
+        clientId: 'real-client',
+        clientSecret: 'real-secret',
+        redirectUri: 'https://app.example.com/callback',
+        codeVerifier: 'request-verifier',
+        tokenEndpointAuthMethod: 'client_secret_post',
+      },
+    },
+  };
+}
+
+/** The same request, plus a token the agent is already holding. */
+function unpinnedOAuthRequestWithToken(): AuthConfig {
+  const request = unpinnedOAuthRequest();
+  return {
+    ...request,
+    exchangedAuthCredential: {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {
+        ...request.exchangedAuthCredential?.oauth2,
+        accessToken: 'agent-token',
+      },
+    },
   };
 }
 
@@ -330,6 +368,33 @@ describe('credential response binding', () => {
 
     expect(storedCredential(state)?.apiKey).toBe('user-key');
   });
+
+  // With no redirect pending the client answers with a bare code, and only the
+  // request knows the client identity the exchange has to authenticate with.
+  it('exchanges an unpinned request with the client identity from the request', async () => {
+    const {invocationContext, state} = sessionAnswering(
+      unpinnedOAuthRequest(),
+      {
+        exchangedAuthCredential: {
+          authType: 'oauth2',
+          oauth2: {authCode: 'user-code'},
+        },
+      },
+    );
+
+    const error = await resume(invocationContext);
+
+    expect(error).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe(ISSUER_TOKEN_URL);
+    const tokenRequest = new URLSearchParams(
+      String(fetchMock.mock.calls[0][1].body),
+    );
+    expect(tokenRequest.get('client_id')).toBe('real-client');
+    expect(tokenRequest.get('client_secret')).toBe('real-secret');
+    expect(tokenRequest.get('code')).toBe('user-code');
+    expect(storedCredential(state)?.oauth2?.accessToken).toBe('issuer-token');
+  });
 });
 
 // The cases above drive the binder through the preprocessor, which is how it is
@@ -394,6 +459,14 @@ describe('bindCredentialResponse', () => {
     ).toBeUndefined();
   });
 
+  it('returns nothing when the credential is not an object', () => {
+    expect(
+      bindCredentialResponse(unpinnedOAuthRequest(), {
+        exchangedAuthCredential: 'nope',
+      }),
+    ).toBeUndefined();
+  });
+
   // The shape the nit on #775 named: a credential is present, but nothing in it
   // answers the pending authorization-code flow.
   it('refuses a credential that answers nothing', () => {
@@ -424,5 +497,168 @@ describe('bindCredentialResponse', () => {
     });
 
     expect(bound?.exchangedAuthCredential?.apiKey).toBe('user-key');
+  });
+
+  // Ported from adk-python's `_merge_credential_oauth2_fields`. The client
+  // holds the material the user obtained; the request holds the identity the
+  // agent registered, and the exchanger needs both.
+  describe('unpinned OAuth2 backfill', () => {
+    it('backfills the client identity the response left out', () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequest(), {
+        exchangedAuthCredential: {
+          authType: 'oauth2',
+          oauth2: {accessToken: 'client-token'},
+        },
+      });
+
+      expect(bound?.exchangedAuthCredential?.oauth2).toStrictEqual({
+        accessToken: 'client-token',
+        clientId: 'real-client',
+        clientSecret: 'real-secret',
+        redirectUri: 'https://app.example.com/callback',
+        codeVerifier: 'request-verifier',
+        tokenEndpointAuthMethod: 'client_secret_post',
+      });
+    });
+
+    it('keeps a field the response supplied', () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequest(), {
+        exchangedAuthCredential: {
+          authType: 'oauth2',
+          oauth2: {redirectUri: 'https://client.example.com/callback'},
+        },
+      });
+
+      expect(bound?.exchangedAuthCredential?.oauth2?.redirectUri).toBe(
+        'https://client.example.com/callback',
+      );
+    });
+
+    // Backfilling a field the client sent in snake_case would leave the same
+    // value under two keys, and every consumer reads the camelCase one.
+    it('treats a snake_case field as supplied', () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequest(), {
+        exchangedAuthCredential: {
+          authType: 'oauth2',
+          oauth2: {'client_id': 'client-supplied'},
+        },
+      });
+
+      const oauth2 = bound?.exchangedAuthCredential?.oauth2;
+      if (!oauth2) {
+        expect.fail('expected the response to bind');
+      }
+      expect(Object.keys(oauth2)).not.toContain('clientId');
+    });
+
+    it('adds no key for a field the request left empty', () => {
+      const request: AuthConfig = {
+        credentialKey: CREDENTIAL_KEY,
+        authScheme: oauth2Scheme() as AuthConfig['authScheme'],
+        exchangedAuthCredential: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {clientId: 'real-client'},
+        },
+      };
+
+      const bound = bindCredentialResponse(request, {
+        exchangedAuthCredential: {authType: 'oauth2', oauth2: {authCode: 'x'}},
+      });
+
+      expect(bound?.exchangedAuthCredential?.oauth2).toStrictEqual({
+        authCode: 'x',
+        clientId: 'real-client',
+      });
+    });
+
+    it("takes the request's oauth2 when the response carries none", () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequest(), {
+        exchangedAuthCredential: {authType: 'oauth2'},
+      });
+
+      expect(bound?.exchangedAuthCredential?.oauth2).toStrictEqual(
+        unpinnedOAuthRequest().exchangedAuthCredential?.oauth2,
+      );
+    });
+
+    it("takes the request's oauth2 when the response sends a null one", () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequest(), {
+        exchangedAuthCredential: {authType: 'oauth2', oauth2: null},
+      });
+
+      expect(bound?.exchangedAuthCredential?.oauth2).toStrictEqual(
+        unpinnedOAuthRequest().exchangedAuthCredential?.oauth2,
+      );
+    });
+
+    // A token from the request is the agent's, not the user's, and the
+    // exchanger returns early on any token it finds.
+    it('does not backfill a token from the request', () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequestWithToken(), {
+        exchangedAuthCredential: {authType: 'oauth2', oauth2: {authCode: 'x'}},
+      });
+
+      expect(
+        bound?.exchangedAuthCredential?.oauth2?.accessToken,
+      ).toBeUndefined();
+    });
+
+    // The same rule with nothing to merge into: a response carrying no oauth2
+    // gets the listed fields, not the request's whole block.
+    it('copies no token when the response carries no oauth2', () => {
+      const bound = bindCredentialResponse(unpinnedOAuthRequestWithToken(), {
+        exchangedAuthCredential: {authType: 'oauth2'},
+      });
+
+      expect(bound?.exchangedAuthCredential?.oauth2).toStrictEqual(
+        unpinnedOAuthRequest().exchangedAuthCredential?.oauth2,
+      );
+    });
+
+    // The request is read back out of an event in session history.
+    it('does not mutate the request', () => {
+      const request = unpinnedOAuthRequest();
+      const requestOAuth2 = request.exchangedAuthCredential?.oauth2;
+
+      const bound = bindCredentialResponse(request, {
+        exchangedAuthCredential: {
+          authType: 'oauth2',
+          oauth2: {authCode: 'x'},
+        },
+      });
+
+      expect(request.exchangedAuthCredential?.oauth2).toStrictEqual(
+        unpinnedOAuthRequest().exchangedAuthCredential?.oauth2,
+      );
+      expect(bound?.exchangedAuthCredential?.oauth2).not.toBe(requestOAuth2);
+    });
+
+    it('leaves a request with no OAuth2 credential alone', () => {
+      const request: AuthConfig = {
+        credentialKey: CREDENTIAL_KEY,
+        authScheme: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'X-API-Key',
+        } as AuthConfig['authScheme'],
+      };
+
+      const bound = bindCredentialResponse(request, {
+        exchangedAuthCredential: {authType: 'apiKey', apiKey: 'user-key'},
+      });
+
+      expect(bound?.exchangedAuthCredential).toStrictEqual({
+        authType: 'apiKey',
+        apiKey: 'user-key',
+      });
+    });
+
+    it('refuses a response whose oauth2 is not an object', () => {
+      expect(
+        bindCredentialResponse(unpinnedOAuthRequest(), {
+          exchangedAuthCredential: {authType: 'oauth2', oauth2: 'nope'},
+        }),
+      ).toBeUndefined();
+    });
   });
 });
