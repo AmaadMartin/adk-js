@@ -19,10 +19,12 @@ import {
   CreateSessionRequest,
   DeleteSessionRequest,
   GetSessionRequest,
+  GetUserStateRequest,
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
   trimTempDeltaState,
+  validateGetSessionConfig,
 } from './base_session_service.js';
 import {
   ensureDatabaseCreated,
@@ -197,6 +199,8 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
+    validateGetSessionConfig(config);
+
     await this.init();
     const em = this.orm!.em.fork();
 
@@ -249,6 +253,20 @@ export class DatabaseSessionService extends BaseSessionService {
       events: storageEvents.map((se) => se.eventData),
       lastUpdateTime: storageSession.updateTime.getTime(),
     });
+  }
+
+  override async getUserState({
+    appName,
+    userId,
+  }: GetUserStateRequest): Promise<Record<string, unknown>> {
+    await this.init();
+    const em = this.orm!.em.fork();
+
+    const userStateModel = await em.findOne(StorageUserState, {
+      appName,
+      userId,
+    });
+    return {...(userStateModel?.state ?? {})};
   }
 
   async listSessions({
