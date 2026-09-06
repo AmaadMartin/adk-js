@@ -61,6 +61,15 @@ function build({
     logLevel: 'info',
   };
 
+  if (platform === 'node') {
+    // The node target predates dynamic `import()`, so esbuild rewrites every
+    // `import()` into `require()`. `require` reads neither a `file:` URL nor
+    // an ES module, which breaks loading a module named at run time — see
+    // `utils/module_utils.ts`. Every Node release that runs this package has
+    // `import()`, so keep the call as written.
+    buildOptions.supported = {'dynamic-import': true};
+  }
+
   if (platform === 'browser' && bundle) {
     buildOptions.alias = {
       'node:async_hooks': './src/utils/async_hooks_shim.ts',
