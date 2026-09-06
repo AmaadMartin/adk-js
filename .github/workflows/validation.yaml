@@ -16,7 +16,13 @@ jobs:
       contents: read
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macOS is the scarcest GitHub-hosted runner class and adds no unique
+        # signal: every platform branch in this repository is a Windows one.
+        # Pull requests run ubuntu + windows; push to main keeps all three.
+        os: >-
+          ${{ github.event_name == 'pull_request'
+          && fromJSON('["ubuntu-latest", "windows-latest"]')
+          || fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') }}
 
     steps:
       - name: Checkout code
