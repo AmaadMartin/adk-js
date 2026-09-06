@@ -5,6 +5,7 @@
  */
 
 import {
+  BaseCodeExecutor,
   CodeExecutionLanguage,
   ExecuteCodeParams,
   FileContentEncoding,
@@ -46,6 +47,16 @@ const EXPECTED_POWERSHELL_ARGS = [
   ...POWERSHELL_FLAGS,
   expect.stringMatching(/script\.ps1$/),
 ];
+
+/** A spawned child that closes only once the executor kills it. */
+class HangingChildProcess extends EventEmitter {
+  killed = false;
+
+  kill(): void {
+    this.killed = true;
+    this.emit('close', null, 'SIGKILL');
+  }
+}
 
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
@@ -560,6 +571,81 @@ describe('UnsafeLocalCodeExecutor', () => {
           expect.anything(),
         );
       });
+    });
+  });
+
+  describe('the inherited timeoutSeconds field', () => {
+    it('exposes the default timeout through the base class', () => {
+      const codeExecutor: BaseCodeExecutor = new UnsafeLocalCodeExecutor();
+
+      expect(codeExecutor.timeoutSeconds).toBe(30);
+    });
+
+    it('exposes a configured timeout through the base class', () => {
+      const codeExecutor: BaseCodeExecutor = new UnsafeLocalCodeExecutor({
+        timeoutSeconds: 5,
+      });
+
+      expect(codeExecutor.timeoutSeconds).toBe(5);
+    });
+
+    it('honours a timeout assigned through the base class', async () => {
+      const codeExecutor: BaseCodeExecutor = new UnsafeLocalCodeExecutor();
+      codeExecutor.timeoutSeconds = 1;
+
+      const result = await codeExecutor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'setTimeout(() => {}, 5000);',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stderr).toContain(
+        'Code execution timed out after 1 seconds.',
+      );
+    });
+
+    it('applies the 30 second fallback when the field is cleared', async () => {
+      const child = new HangingChildProcess();
+      const spawned = new Promise<void>((resolve) => {
+        spawnMock.mockImplementation(() => {
+          resolve();
+          return child;
+        });
+      });
+      vi.useFakeTimers();
+
+      try {
+        const codeExecutor: BaseCodeExecutor = new UnsafeLocalCodeExecutor();
+        codeExecutor.timeoutSeconds = undefined;
+
+        const pending = codeExecutor.executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: 'setTimeout(() => {}, 60000);',
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+        // Writing the script file is real I/O, which no timer drives, so the
+        // deadline only exists once the executor has reached `spawn`.
+        await spawned;
+
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(child.killed).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(1);
+        const result = await pending;
+
+        expect(child.killed).toBe(true);
+        expect(result.stderr).toContain(
+          'Code execution timed out after 30 seconds.',
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

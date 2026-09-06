@@ -94,6 +94,14 @@ export abstract class BaseCodeExecutor {
   executionResultDelimiters: [string, string] = ['```tool_output\n', '\n```'];
 
   /**
+   * The fallback timeout in seconds for the code execution.
+   *
+   * Undefined means the base class imposes no deadline. A subclass sets its
+   * own default when it needs one.
+   */
+  timeoutSeconds?: number;
+
+  /**
    * Executes code and return the code execution result.
    *
    * @param params The parameters for executing code.
