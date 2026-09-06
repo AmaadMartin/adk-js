@@ -434,6 +434,30 @@ describe('managed agent parity', () => {
       await expect(resolveTools(agent)).rejects.toThrow(/Unsupported raw/);
     });
 
+    // Not a reference test: it pins the accept-list in
+    // `rejectUnsupportedRawTool` against what the converter actually emits, so
+    // an accepted tool cannot be dropped on the way to the backend.
+    it('resolve_forwards_every_accepted_raw_tool', async () => {
+      const agent = new ManagedAgent({
+        name: 'mgr',
+        agentId: 'agents/a',
+        tools: [
+          {googleSearch: {}},
+          {codeExecution: {}},
+          {urlContext: {}},
+          {computerUse: {}},
+        ],
+        apiClient: fakeClient(),
+      });
+
+      expect(await resolveTools(agent)).toEqual([
+        {type: 'google_search'},
+        {type: 'code_execution'},
+        {type: 'url_context'},
+        {type: 'computer_use'},
+      ]);
+    });
+
     it('test_resolve_combines_multiple_tools', async () => {
       const agent = new ManagedAgent({
         name: 'mgr',

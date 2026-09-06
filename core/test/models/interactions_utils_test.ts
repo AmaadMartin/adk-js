@@ -2387,14 +2387,6 @@ describe('agent interactions', () => {
     });
   });
 
-  describe('convertToolsConfigToInteractionsFormat', () => {
-    it('emits a computer_use tool, which the agent also accepts', () => {
-      expect(
-        convertToolsConfigToInteractionsFormat({tools: [{computerUse: {}}]}),
-      ).toEqual([{type: 'computer_use'}]);
-    });
-  });
-
   describe('extractStreamEnvironmentId', () => {
     it('reads the id off the interaction an event carries', () => {
       expect(
