@@ -255,7 +255,7 @@ describe('OpenApiSpecParser', () => {
     const operations = parser.parse(specMissingId);
 
     expect(operations.length).toBe(1);
-    expect(operations[0].operation.operationId).toBe('get__test');
+    expect(operations[0].operation.operationId).toBe('test_get');
   });
 
   it('should extract specific security scheme', () => {

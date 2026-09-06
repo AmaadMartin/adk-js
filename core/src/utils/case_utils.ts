@@ -5,6 +5,27 @@
  */
 
 /**
+ * Converts a string to snake_case.
+ *
+ * Handles lowerCamelCase, UpperCamelCase, space-separated text, acronyms
+ * (e.g. "REST API") and consecutive uppercase letters.
+ *
+ * This matches the output of `_to_snake_case` in adk-python, which names the
+ * same OpenAPI tools and tool arguments there.
+ *
+ * @param text The string to convert.
+ * @returns The snake_case version of the string.
+ */
+export function snakeCase(text: string): string {
+  return text
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/^_+|_+$/g, '');
+}
+
+/**
  * Recursively converts snake_case keys of an object to camelCase.
  *
  * @param val The value to convert.
