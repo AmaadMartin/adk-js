@@ -14,12 +14,17 @@
  * publisher client instead, and assert on the CloudEvent that reaches the
  * wire, which pins the same bindings one layer further down.
  *
- * Two Python tests have no counterpart, as the plan directs:
+ * Three Python tests have no counterpart.
  * `test_custom_attribute_missing_raises_typeerror` needs the `MISSING`
  * sentinel, which this port does not have, and
  * `test_runtime_execution_with_python_keywords` needs Python's identifier
  * renaming, which TypeScript object keys do not require. Replacements for
  * both are in `domain_specific_publish_adk_js_test.ts`.
+ *
+ * `test_mandatory_none_raises_typeerror` is the third. Python reports an
+ * explicit `None` separately from an absent binding; this port reports both as
+ * "not provided", so the assertion would be identical to
+ * `test_mandatory_missing_raises_typeerror` below, which pins that message.
  */
 
 import {
@@ -99,19 +104,6 @@ describe('buildDomainSpecificTool validation', () => {
     expect(() =>
       buildTool({ceAttributesBinding: {type: OMIT, source: 'source'}}),
     ).toThrow("CloudEvent field 'type' is mandatory and cannot be OMIT.");
-  });
-
-  // Python distinguishes a missing binding from an explicit None. This port
-  // treats both as "not provided", so one message covers them, and `bus` is
-  // the only one of the three a TypeScript caller can leave out: `type` and
-  // `source` are required properties, so the compiler rejects them first.
-  it('test_mandatory_none_raises_typeerror', () => {
-    expect(() =>
-      buildTool({
-        bus: undefined,
-        ceAttributesBinding: {type: 'type', source: 'source'},
-      }),
-    ).toThrow("The 'bus' parameter is mandatory and must be provided.");
   });
 
   it('test_invalid_cloudevent_attributes', () => {
