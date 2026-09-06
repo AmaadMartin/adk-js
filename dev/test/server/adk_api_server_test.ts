@@ -411,14 +411,9 @@ describe('AdkWebServer', () => {
         sessionId: 'sessionId',
       });
 
-      try {
-        await client.post(
-          '/apps/testApp/users/testUser/sessions/sessionId',
-          {},
-        );
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(400);
-      }
+      await expect(
+        client.post('/apps/testApp/users/testUser/sessions/sessionId', {}),
+      ).rejects.toMatchObject({response: {status: 400}});
     });
 
     it('should return a session by id', async () => {
@@ -437,11 +432,9 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 404 if session not found', async () => {
-      try {
-        await client.get('/apps/testApp/users/testUser/sessions/sessionId');
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+      await expect(
+        client.get('/apps/testApp/users/testUser/sessions/sessionId'),
+      ).rejects.toMatchObject({response: {status: 404}});
     });
 
     it('should delete a session', async () => {
@@ -515,13 +508,11 @@ describe('AdkWebServer', () => {
         sessionId: 'sessionId',
       });
 
-      try {
-        await client.get(
+      await expect(
+        client.get(
           '/apps/testApp/users/testUser/sessions/sessionId/artifacts/artifact.txt',
-        );
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+        ),
+      ).rejects.toMatchObject({response: {status: 404}});
     });
 
     it('should return an artifact by version', async () => {
@@ -678,8 +669,8 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 404 if session not found', async () => {
-      try {
-        await client.post('/run', {
+      await expect(
+        client.post('/run', {
           appName: 'testApp',
           userId: 'testUser',
           sessionId: 'sessionId',
@@ -687,10 +678,8 @@ describe('AdkWebServer', () => {
             parts: [{text: 'Hello'}],
             role: 'user',
           },
-        });
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+        }),
+      ).rejects.toMatchObject({response: {status: 404}});
     });
 
     it('should return 500 if execution fails', async () => {
@@ -704,14 +693,14 @@ describe('AdkWebServer', () => {
       });
 
       try {
-        await client.post('/run', {
-          appName: 'testApp',
-          userId: 'testUser',
-          sessionId: 'sessionId',
-          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
-        });
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(500);
+        await expect(
+          client.post('/run', {
+            appName: 'testApp',
+            userId: 'testUser',
+            sessionId: 'sessionId',
+            newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+          }),
+        ).rejects.toMatchObject({response: {status: 500}});
       } finally {
         agentLoader.getAgentFile = originalGetAgentFile;
       }
@@ -878,8 +867,8 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 404 if session not found', async () => {
-      try {
-        await client.post('/run_sse', {
+      await expect(
+        client.post('/run_sse', {
           appName: 'testApp',
           userId: 'testUser',
           sessionId: 'sessionId',
@@ -887,13 +876,14 @@ describe('AdkWebServer', () => {
             parts: [{text: 'Hello'}],
             role: 'user',
           },
-        });
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+        }),
+      ).rejects.toMatchObject({response: {status: 404}});
     });
 
-    it('should return 500 if execution fails', async () => {
+    // The handler flushes the SSE headers before it runs the agent, so a later
+    // failure cannot change the status code. It arrives as an error frame on a
+    // stream that already answered 200.
+    it('should stream an error frame if execution fails', async () => {
       const originalGetAgentFile = agentLoader.getAgentFile;
       agentLoader.getAgentFile = () => Promise.reject(new Error('Load failed'));
 
@@ -904,14 +894,15 @@ describe('AdkWebServer', () => {
       });
 
       try {
-        await client.post('/run_sse', {
+        const response = await client.post('/run_sse', {
           appName: 'testApp',
           userId: 'testUser',
           sessionId: 'sessionId',
           newMessage: {parts: [{text: 'Hello'}], role: 'user'},
         });
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(500);
+
+        expect(response.status).toBe(200);
+        expect(response.text).toContain('data: {"error":"Load failed"}');
       } finally {
         agentLoader.getAgentFile = originalGetAgentFile;
       }
@@ -958,9 +949,9 @@ describe('AdkWebServer', () => {
       agentLoader.listAgents = () => Promise.reject(new Error('List failed'));
 
       try {
-        await client.get('/list-apps');
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(500);
+        await expect(client.get('/list-apps')).rejects.toMatchObject({
+          response: {status: 500},
+        });
       } finally {
         agentLoader.listAgents = originalListAgents;
       }
@@ -997,11 +988,9 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 404 for missing trace', async () => {
-      try {
-        await client.get('/debug/trace/missing');
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+      await expect(client.get('/debug/trace/missing')).rejects.toMatchObject({
+        response: {status: 404},
+      });
     });
 
     it('should return session traces', async () => {
@@ -1205,13 +1194,11 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 404 if session not found', async () => {
-      try {
-        await client.get(
+      await expect(
+        client.get(
           '/apps/testApp/users/testUser/sessions/missing/events/event1/graph',
-        );
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+        ),
+      ).rejects.toMatchObject({response: {status: 404}});
     });
 
     it('should return 404 if event not found', async () => {
@@ -1220,13 +1207,11 @@ describe('AdkWebServer', () => {
         userId: 'testUser',
         sessionId: 'sessionNoEvents',
       });
-      try {
-        await client.get(
+      await expect(
+        client.get(
           '/apps/testApp/users/testUser/sessions/sessionNoEvents/events/missing/graph',
-        );
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+        ),
+      ).rejects.toMatchObject({response: {status: 404}});
     });
   });
 
@@ -1472,11 +1457,9 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 404 for A2A endpoints when disabled', async () => {
-      try {
-        await client.get(`/a2a/testApp/${AGENT_CARD_PATH}`);
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(404);
-      }
+      await expect(
+        client.get(`/a2a/testApp/${AGENT_CARD_PATH}`),
+      ).rejects.toMatchObject({response: {status: 404}});
     });
 
     // The agent card route is mounted without a user builder, so it stays
@@ -1650,20 +1633,17 @@ describe('AdkWebServer', () => {
     });
 
     it('should return 400 if appName is missing', async () => {
-      try {
-        await client.post('/api/reasoning_engine', {
+      await expect(
+        client.post('/api/reasoning_engine', {
           input: {
             userId: 'testUser',
             sessionId: 'sessionId',
           },
-        });
-        expect.fail('Should fail with 400');
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(400);
-        expect((e as {message: string}).message).toContain(
-          'appName is required',
-        );
-      }
+        }),
+      ).rejects.toMatchObject({
+        response: {status: 400},
+        message: expect.stringContaining('appName is required'),
+      });
     });
 
     it('should return 500 if execution fails', async () => {
@@ -1671,16 +1651,15 @@ describe('AdkWebServer', () => {
       agentLoader.getAgentFile = () => Promise.reject(new Error('Load failed'));
 
       try {
-        await client.post('/api/reasoning_engine', {
-          input: {
-            appName: 'testApp',
-            userId: 'testUser',
-            sessionId: 'sessionId',
-          },
-        });
-        expect.fail('Should fail with 500');
-      } catch (e: unknown) {
-        expect((e as {response: {status: number}}).response.status).toBe(500);
+        await expect(
+          client.post('/api/reasoning_engine', {
+            input: {
+              appName: 'testApp',
+              userId: 'testUser',
+              sessionId: 'sessionId',
+            },
+          }),
+        ).rejects.toMatchObject({response: {status: 500}});
       } finally {
         agentLoader.getAgentFile = originalGetAgentFile;
       }
