@@ -1,0 +1,4 @@
+services:
+  - scheme: demo
+    type: session
+    class: './demo_session_service.js#DemoSessionService'

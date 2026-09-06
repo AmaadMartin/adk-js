@@ -33,6 +33,7 @@ import {
   loadFileData,
   saveToFile,
 } from '../utils/file_utils.js';
+import {loadRunInputFile} from './run_input_file.js';
 
 const HOW_TO_ANSWER: Record<UserInputKind, string> = {
   input: 'Type your reply at the next prompt to continue.',
@@ -144,11 +145,6 @@ function printEvent(event: Event, options: PrintEventOptions = {}): void {
   }
 }
 
-interface InputFile {
-  state: Record<string, unknown>;
-  queries: string[];
-}
-
 /**
  * The one readline interface for the run, created on first prompt. A fresh
  * interface per prompt discards the lines readline had already read ahead from
@@ -193,13 +189,8 @@ interface RunFromInputFileOptions {
 }
 async function runFromInputFile(
   options: RunFromInputFileOptions,
-): Promise<Session | undefined> {
-  const fileContent = await loadFileData<InputFile>(
-    getAbsolutePath(options.filePath),
-  );
-  if (!fileContent) {
-    return;
-  }
+): Promise<Session> {
+  const fileContent = await loadRunInputFile(getAbsolutePath(options.filePath));
 
   fileContent.state['_time'] = new Date().toISOString();
 
@@ -376,16 +367,15 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
 
   try {
     if (options.inputFile) {
-      session =
-        (await runFromInputFile({
-          appName: app?.name ?? rootAgent.name,
-          userId,
-          agent: rootAgent,
-          artifactService,
-          sessionService,
-          memoryService,
-          filePath: options.inputFile,
-        })) || session;
+      session = await runFromInputFile({
+        appName: app?.name ?? rootAgent.name,
+        userId,
+        agent: rootAgent,
+        artifactService,
+        sessionService,
+        memoryService,
+        filePath: options.inputFile,
+      });
     } else if (options.savedSessionFile) {
       const loadedSession = await loadFileData<Session>(
         options.savedSessionFile,
