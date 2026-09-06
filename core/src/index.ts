@@ -36,6 +36,17 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+// The API Hub tools use Node-only APIs (`google-auth-library`, `Buffer`), so
+// they are exported here and not from the browser barrel `common.ts`.
+export {APIHubToolset} from './tools/apihub_tool/apihub_toolset.js';
+export type {APIHubToolsetOptions} from './tools/apihub_tool/apihub_toolset.js';
+export {APIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
+export type {
+  APIHubClientOptions,
+  ApiHubApi,
+  ApiHubApiVersion,
+  BaseAPIHubClient,
+} from './tools/apihub_tool/clients/apihub_client.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
