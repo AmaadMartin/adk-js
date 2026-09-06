@@ -1446,6 +1446,7 @@ export {
   type ReadFileToolOptions,
 } from './tools/environment/read_file_tool.js';
 export {WriteFileTool} from './tools/environment/write_file_tool.js';
+export type {WriteFileResponse} from './tools/environment/write_file_tool.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './evaluation/index.js';

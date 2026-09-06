@@ -10,7 +10,40 @@ import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
-/** Create or overwrite a file in the environment. */
+/**
+ * What {@link WriteFileTool} returns to the model.
+ *
+ * The tool never throws: it reports a rejected write, a missing path and a
+ * non-string content as `status: 'error'`, so the model reads the reason and
+ * can correct its next call.
+ */
+export type WriteFileResponse =
+  | {status: 'ok'; message: string}
+  | {status: 'error'; error: string};
+
+/**
+ * Creates or overwrites a file in a {@link BaseEnvironment}.
+ *
+ * All input and output goes through the injected environment, so the tool
+ * inherits whatever containment that environment provides. `LocalEnvironment`,
+ * for example, creates missing parent directories and rejects a path that
+ * lexically escapes its working directory.
+ *
+ * The caller owns the environment's lifecycle. Call `initialize()` on it before
+ * the first tool call; an uninitialised environment rejects the write and the
+ * tool reports that rejection as `status: 'error'`.
+ *
+ * @example
+ * ```ts
+ * const environment = new LocalEnvironment({workingDir: '/tmp/workspace'});
+ * await environment.initialize();
+ * const agent = new LlmAgent({
+ *   name: 'writer',
+ *   model: 'gemini-2.0-flash',
+ *   tools: [new WriteFileTool(environment)],
+ * });
+ * ```
+ */
 @experimental
 export class WriteFileTool extends BaseTool {
   constructor(private readonly environment: BaseEnvironment) {
@@ -44,13 +77,19 @@ export class WriteFileTool extends BaseTool {
     };
   }
 
-  override async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
-    const filePath = args['path'];
-    if (typeof filePath !== 'string' || filePath.length === 0) {
+  override async runAsync({
+    args,
+  }: RunAsyncToolRequest): Promise<WriteFileResponse> {
+    const filePath = typeof args['path'] === 'string' ? args['path'] : '';
+    if (!filePath) {
       return {status: 'error', error: '`path` is required.'};
     }
     // Python defaults `content` to `''`, so writing an empty file is legal.
-    const content = typeof args['content'] === 'string' ? args['content'] : '';
+    const rawContent = args['content'];
+    const content = rawContent === undefined ? '' : rawContent;
+    if (typeof content !== 'string') {
+      return {status: 'error', error: '`content` must be a string.'};
+    }
     try {
       await this.environment.writeFile(filePath, content);
     } catch (e: unknown) {
