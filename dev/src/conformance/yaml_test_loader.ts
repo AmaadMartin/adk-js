@@ -5,12 +5,12 @@
  */
 
 import {Session} from '@google/adk';
-import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
+import {toCamelKeys} from './yaml_writer.js';
 
 /**
  * batchLoadYamlTestDefs will recursively search the directory given
@@ -48,9 +48,7 @@ export async function batchLoadYamlTestDefs(
     if (typeof parsedSpec !== 'object' || parsedSpec === null) {
       throw new Error('Spec file must be a YAML mapping');
     }
-    const testSpec = camelcaseKeys(parsedSpec, {
-      deep: true,
-    }) as TestSpec;
+    const testSpec = toCamelKeys(parsedSpec) as TestSpec;
 
     // Session file
     const sessionFile = path.posix.join(baseDir, 'generated-session.yaml');
@@ -59,9 +57,7 @@ export async function batchLoadYamlTestDefs(
     if (typeof parsedSession !== 'object' || parsedSession === null) {
       throw new Error('Session file must be a YAML mapping');
     }
-    const session = camelcaseKeys(parsedSession, {
-      deep: true,
-    }) as Session;
+    const session = toCamelKeys(parsedSession) as Session;
 
     // Recordings file
     const recordingsFile = path.posix.join(
@@ -73,9 +69,7 @@ export async function batchLoadYamlTestDefs(
     if (typeof parsedRecordings !== 'object' || parsedRecordings === null) {
       throw new Error('Recording file must be a YAML mapping');
     }
-    const recordings = camelcaseKeys(parsedRecordings, {
-      deep: true,
-    }) as Recordings;
+    const recordings = toCamelKeys(parsedRecordings) as Recordings;
 
     // Make test names unique by including relative file path from given root dir
     const normalizedDir = directory.replaceAll('\\', '/');
