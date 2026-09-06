@@ -18,6 +18,7 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 
@@ -476,6 +477,54 @@ describe('deployToCloudRun', () => {
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining('WITHOUT authentication'),
     );
+  });
+
+  function verbosityArg(): string {
+    const gcloudArgs = spawnMock.mock.calls[0][1];
+    return gcloudArgs[gcloudArgs.indexOf('--verbosity') + 1];
+  }
+
+  it('should translate the warn log level to the gcloud warning verbosity', async () => {
+    await deployToCloudRun({...defaultOptions, logLevel: 'warn'});
+
+    expect(verbosityArg()).toBe('warning');
+    expect(spawnMock.mock.calls[0][1]).not.toContain('warn');
+  });
+
+  it.each(['debug', 'info', 'error'])(
+    'should pass the %s log level through to gcloud unchanged',
+    async (logLevel) => {
+      await deployToCloudRun({...defaultOptions, logLevel});
+
+      expect(verbosityArg()).toBe(logLevel);
+    },
+  );
+
+  it('should accept an upper-case log level', async () => {
+    await deployToCloudRun({...defaultOptions, logLevel: 'WARN'});
+
+    expect(verbosityArg()).toBe('warning');
+  });
+
+  it('should fall back to the info verbosity for a level gcloud does not accept', async () => {
+    await deployToCloudRun({...defaultOptions, logLevel: 'trace'});
+
+    expect(verbosityArg()).toBe('info');
+  });
+
+  it('should keep the raw ADK log level in the generated Dockerfile', async () => {
+    // The containerized ADK server speaks the ADK vocabulary, so it must keep
+    // receiving 'warn' and never the gcloud spelling.
+    await deployToCloudRun({...defaultOptions, logLevel: 'warn'});
+
+    // createPackageJson also writes through saveToFile, so select by path.
+    const dockerFileCall = vi
+      .mocked(saveToFile)
+      .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+    if (!dockerFileCall) {
+      expect.fail('deployToCloudRun did not write a Dockerfile');
+    }
+    expect(dockerFileCall[1]).toContain("--log_level='warn'");
   });
 
   it('should handle spawn failures', async () => {

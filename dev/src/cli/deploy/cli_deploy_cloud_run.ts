@@ -57,6 +57,17 @@ function validateGcloudExtraArgs(
   }
 }
 
+// gcloud's --verbosity vocabulary is critical|debug|error|info|none|warning,
+// which is not the ADK CLI's debug|info|warn|error. gcloud has no 'warn', so
+// forwarding the ADK level verbatim makes gcloud reject the argument and fail
+// the whole deploy.
+const GCLOUD_VERBOSITY_BY_LOG_LEVEL: Record<string, string> = {
+  'debug': 'debug',
+  'info': 'info',
+  'warn': 'warning',
+  'error': 'error',
+};
+
 function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
   const regionOptions: string[] = options.region
     ? ['--region', options.region]
@@ -90,7 +101,7 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
     '--port',
     options.port.toString(),
     '--verbosity',
-    options.logLevel.toLowerCase(),
+    GCLOUD_VERBOSITY_BY_LOG_LEVEL[options.logLevel.toLowerCase()] ?? 'info',
   ];
 
   if (options.a2aAuthToken) {
