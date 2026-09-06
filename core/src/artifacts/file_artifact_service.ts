@@ -9,6 +9,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -78,7 +79,9 @@ export class FileArtifactService implements BaseArtifactService {
     customMetadata,
   }: SaveArtifactRequest): Promise<number> {
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
-      throw new Error('Artifact must have either inlineData or text content.');
+      throw new InputValidationError(
+        'Artifact must have either inlineData or text content.',
+      );
     }
 
     const artifactDir = getArtifactDir(
@@ -253,14 +256,16 @@ export class FileArtifactService implements BaseArtifactService {
     const userRoot = getUserRoot(this.rootDir, userId);
 
     // Session artifacts
-    const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
-    for await (const artifactDir of iterateArtifactDirs(sessionRoot)) {
-      const metadata = await getLatestMetadata(artifactDir);
-      if (metadata?.fileName) {
-        filenames.add(metadata.fileName);
-      } else {
-        const rel = path.relative(sessionRoot, artifactDir);
-        filenames.add(asPosixPath(rel));
+    if (sessionId !== undefined) {
+      const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
+      for await (const artifactDir of iterateArtifactDirs(sessionRoot)) {
+        const metadata = await getLatestMetadata(artifactDir);
+        if (metadata?.fileName) {
+          filenames.add(metadata.fileName);
+        } else {
+          const rel = path.relative(sessionRoot, artifactDir);
+          filenames.add(asPosixPath(rel));
+        }
       }
     }
 

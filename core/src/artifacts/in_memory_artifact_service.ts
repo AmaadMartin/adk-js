@@ -6,6 +6,7 @@
 
 import {Part} from '@google/genai';
 
+import {InputValidationError} from '../errors/input_validation_error.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -41,7 +42,9 @@ export class InMemoryArtifactService implements BaseArtifactService {
   }: SaveArtifactRequest): Promise<number> {
     if (!artifact.inlineData && !artifact.text && !artifact.fileData) {
       return Promise.reject(
-        new Error('Artifact must have either inlineData or text content.'),
+        new InputValidationError(
+          'Artifact must have inlineData, text, or fileData content.',
+        ),
       );
     }
 
@@ -52,10 +55,11 @@ export class InMemoryArtifactService implements BaseArtifactService {
     }
 
     const version = this.artifacts[path].length;
-    const metadata: ArtifactVersion = {
-      version,
-      customMetadata,
-    };
+    const metadata: ArtifactVersion = {version};
+
+    if (customMetadata && Object.keys(customMetadata).length > 0) {
+      metadata.customMetadata = customMetadata;
+    }
 
     if (!artifact.inlineData && artifact.text === undefined) {
       const fileData = artifact.fileData!;
@@ -82,18 +86,16 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve(undefined);
     }
 
-    if (version === undefined) {
-      version = versions.length - 1;
-    }
+    const index = versionIndex(versions.length, version);
 
-    if (!versions[version]) {
+    if (index === undefined) {
       logger.warn(
         `[InMemoryArtifactService] loadArtifact: Artifact ${filename} version ${version} not found`,
       );
       return Promise.resolve(undefined);
     }
 
-    return Promise.resolve(versions[version].part);
+    return Promise.resolve(versions[index].part);
   }
 
   listArtifactKeys({
@@ -101,12 +103,15 @@ export class InMemoryArtifactService implements BaseArtifactService {
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
-    const sessionPrefix = artifactPrefix('session', appName, userId, sessionId);
+    const sessionPrefix =
+      sessionId === undefined
+        ? undefined
+        : artifactPrefix('session', appName, userId, sessionId);
     const userPrefix = artifactPrefix('user', appName, userId);
     const filenames: string[] = [];
 
     for (const path in this.artifacts) {
-      if (path.startsWith(sessionPrefix)) {
+      if (sessionPrefix !== undefined && path.startsWith(sessionPrefix)) {
         filenames.push(decodeURIComponent(path.slice(sessionPrefix.length)));
       } else if (path.startsWith(userPrefix)) {
         filenames.push(decodeURIComponent(path.slice(userPrefix.length)));
@@ -182,16 +187,30 @@ export class InMemoryArtifactService implements BaseArtifactService {
       return Promise.resolve(undefined);
     }
 
-    if (version === undefined) {
-      version = versions.length - 1;
+    const index = versionIndex(versions.length, version);
+
+    if (index === undefined) {
+      return Promise.resolve(undefined);
     }
 
-    if (versions[version]) {
-      return Promise.resolve(versions[version].metadata);
-    }
-
-    return Promise.resolve(undefined);
+    return Promise.resolve(versions[index].metadata);
   }
+}
+
+/**
+ * Resolves a caller-supplied version to a stored index.
+ *
+ * A negative version counts back from the newest, as adk-python's list indexing
+ * does, so the default of -1 selects the newest version.
+ *
+ * @param length The number of stored versions.
+ * @param version The requested version, defaulting to the newest.
+ * @return The index, or undefined when it falls outside the stored range.
+ */
+function versionIndex(length: number, version = -1): number | undefined {
+  const index = version < 0 ? length + version : version;
+
+  return index >= 0 && index < length ? index : undefined;
 }
 
 /**
