@@ -35,6 +35,18 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # Lockfile content is OS-independent, and installing on the macOS and
+      # Windows legs can churn platform-specific optional entries, so assert on
+      # one leg only.
+      - name: Check package-lock.json is in sync with the workspace manifests
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          if ! git diff --exit-code -- package-lock.json; then
+            echo "::error::package-lock.json is out of sync with the package.json files. Run 'npm install --package-lock-only' locally and commit the updated lockfile."
+            exit 1
+          fi
+
       - name: Check for secrets leaks
         run: npx secretlint "**/*"
 
