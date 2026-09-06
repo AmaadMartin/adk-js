@@ -12,6 +12,11 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+const TEST_PROJECT = 'test-project';
+const TEST_LOCATION = 'us-central1';
+const AGENT_ENGINE_NAME = `projects/${TEST_PROJECT}/locations/${TEST_LOCATION}/reasoningEngines/123`;
+const SANDBOX_NAME = `${AGENT_ENGINE_NAME}/sandboxEnvironments/456`;
+
 describe('AgentEngineSandboxCodeExecutor', () => {
   let executor: AgentEngineSandboxCodeExecutor;
   interface MockClient {
@@ -29,8 +34,8 @@ describe('AgentEngineSandboxCodeExecutor', () => {
   let mockClient: MockClient;
 
   beforeEach(() => {
-    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
-    vi.stubEnv('GOOGLE_CLOUD_LOCATION', 'us-central1');
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', TEST_PROJECT);
+    vi.stubEnv('GOOGLE_CLOUD_LOCATION', TEST_LOCATION);
 
     mockClient = {
       agentEnginesInternal: {
@@ -38,31 +43,31 @@ describe('AgentEngineSandboxCodeExecutor', () => {
           name: 'operations/create-engine-op',
           done: true,
           response: {
-            name: 'projects/test-project/locations/us-central1/reasoningEngines/123',
+            name: AGENT_ENGINE_NAME,
           },
         }),
         getAgentOperationInternal: vi.fn().mockResolvedValue({
           done: true,
           response: {
-            name: 'projects/test-project/locations/us-central1/reasoningEngines/123',
+            name: AGENT_ENGINE_NAME,
           },
         }),
         sandboxes: {
           getInternal: vi.fn().mockResolvedValue({
-            name: 'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+            name: SANDBOX_NAME,
             state: 'STATE_RUNNING',
           }),
           createInternal: vi.fn().mockResolvedValue({
             name: 'operations/create-sandbox-op',
             done: true,
             response: {
-              name: 'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+              name: SANDBOX_NAME,
             },
           }),
           getSandboxOperationInternal: vi.fn().mockResolvedValue({
             done: true,
             response: {
-              name: 'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+              name: SANDBOX_NAME,
             },
           }),
           executeCodeInternal: vi.fn().mockResolvedValue({
@@ -96,13 +101,15 @@ describe('AgentEngineSandboxCodeExecutor', () => {
 
   it('defaults location to us-central1 if missing in env', () => {
     vi.stubEnv('GOOGLE_CLOUD_LOCATION', '');
-    executor = new AgentEngineSandboxCodeExecutor({projectId: 'test-project'});
+    executor = new AgentEngineSandboxCodeExecutor({projectId: TEST_PROJECT});
+    // Not TEST_LOCATION: this pins the library default, which only happens to
+    // share its value. Reusing the constant here would make the test vacuous.
     expect(executor['location']).toBe('us-central1');
   });
 
   it('uses location from options if provided', () => {
     executor = new AgentEngineSandboxCodeExecutor({
-      projectId: 'test-project',
+      projectId: TEST_PROJECT,
       location: 'custom-location',
     });
     expect(executor['location']).toBe('custom-location');
@@ -180,7 +187,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
 
     it('reuses existing sandbox from session state', async () => {
       invocationContext.session!.state!['sandbox_name_language_python'] =
-        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+        SANDBOX_NAME;
 
       await executor.executeCode({
         invocationContext,
@@ -199,7 +206,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
 
     it('creates new sandbox if existing one is not running', async () => {
       invocationContext.session!.state!['sandbox_name_language_python'] =
-        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+        SANDBOX_NAME;
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockResolvedValue({
         state: 'STATE_EXPIRED',
       });
@@ -508,15 +515,13 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       });
 
       expect(contextWithoutState.session?.state).toEqual({
-        sandbox_name_language_python:
-          'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+        sandbox_name_language_python: SANDBOX_NAME,
       });
     });
 
     it('uses provided sandboxResourceName directly', async () => {
       executor = new AgentEngineSandboxCodeExecutor({
-        sandboxResourceName:
-          'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+        sandboxResourceName: SANDBOX_NAME,
         client: mockClient as unknown as Client,
       });
 
@@ -539,7 +544,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
 
     it('creates new sandbox if getInternal throws error', async () => {
       invocationContext.session!.state!['sandbox_name_language_python'] =
-        'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456';
+        SANDBOX_NAME;
       mockClient.agentEnginesInternal.sandboxes.getInternal.mockRejectedValue(
         new Error('API Error'),
       );
@@ -559,8 +564,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
     it('uses provided agentEngineResourceName directly', async () => {
       executor = new AgentEngineSandboxCodeExecutor({
-        agentEngineResourceName:
-          'projects/test-project/locations/us-central1/reasoningEngines/123',
+        agentEngineResourceName: AGENT_ENGINE_NAME,
         client: mockClient as unknown as Client,
       });
 
@@ -579,7 +583,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
     });
     it('creates default client if not provided', () => {
       executor = new AgentEngineSandboxCodeExecutor({
-        projectId: 'test-project',
+        projectId: TEST_PROJECT,
       });
       expect(executor['client']).toBeDefined();
     });
@@ -655,8 +659,7 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       );
 
       expect(invocationContext.session?.state).toEqual({
-        sandbox_name_language_javascript:
-          'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
+        sandbox_name_language_javascript: SANDBOX_NAME,
       });
     });
   });
