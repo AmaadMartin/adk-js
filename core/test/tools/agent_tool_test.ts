@@ -14,10 +14,14 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  RunConfig,
   Runner,
   State,
+  StreamingMode,
 } from '@google/adk';
-import {describe, expect, it, vi} from 'vitest';
+import {Content, Type} from '@google/genai';
+import {describe, expect, it, Mock, vi} from 'vitest';
+import {z} from 'zod';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
@@ -27,6 +31,7 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     Runner: vi.fn().mockImplementation((config) => ({
       appName: config?.appName,
       sessionService: config?.sessionService,
+      close: vi.fn(),
       runAsync: vi.fn(),
     })),
   };
@@ -78,6 +83,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -146,6 +152,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -201,6 +208,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -284,6 +292,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -340,6 +349,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -390,6 +400,7 @@ describe('AgentTool', () => {
         ({
           appName: config?.appName,
           sessionService: config?.sessionService,
+          close: vi.fn(),
           runAsync: mockRunAsync,
         }) as unknown as Runner,
     );
@@ -439,6 +450,7 @@ describe('AgentTool', () => {
         ({
           appName: config?.appName,
           sessionService: config?.sessionService,
+          close: vi.fn(),
           runAsync: mockRunAsync,
         }) as unknown as Runner,
     );
@@ -490,6 +502,7 @@ describe('AgentTool', () => {
       return {
         appName: config?.appName,
         sessionService: config?.sessionService,
+        close: vi.fn(),
         runAsync: mockRunAsync,
       } as unknown as Runner;
     });
@@ -510,5 +523,264 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
+  });
+});
+
+/** What `AgentTool` asked of the stubbed nested runner. */
+interface NestedRun {
+  /** The run config it handed to the nested runner. */
+  runConfig?: RunConfig;
+  /** The message it handed to the nested runner. */
+  newMessage?: Content;
+  /** The nested runner's `close`. */
+  close: Mock<() => Promise<void>>;
+}
+
+/**
+ * Stubs the nested runner and records what `AgentTool` asked of it.
+ *
+ * @param error What the nested run fails with; it yields one text event when
+ *     no error is given.
+ */
+function stubNestedRunner(error?: Error): NestedRun {
+  const nested: NestedRun = {close: vi.fn(async () => {})};
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        close: nested.close,
+        async *runAsync(params: {runConfig?: RunConfig; newMessage: Content}) {
+          nested.runConfig = params.runConfig;
+          nested.newMessage = params.newMessage;
+          if (error) {
+            throw error;
+          }
+          yield createEvent({
+            author: 'sub-agent',
+            content: {role: 'model', parts: [{text: 'done'}]},
+          });
+        },
+      }) as unknown as Runner,
+  );
+  return nested;
+}
+
+/** A tool context for a caller running under `runConfig`. */
+function createToolContext(options: {
+  agent: LlmAgent;
+  runConfig?: RunConfig;
+  abortSignal?: AbortSignal;
+}): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: options.agent,
+      session: createSession({
+        id: 'parent-session',
+        appName: 'sub-agent',
+        userId: 'parent-user',
+      }),
+      pluginManager: new PluginManager([]),
+      sessionService: new InMemorySessionService(),
+      runConfig: options.runConfig,
+      abortSignal: options.abortSignal,
+    }),
+  });
+}
+
+describe('AgentTool nested run config', () => {
+  it("forwards the caller's run config to the nested run", async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const runConfig: RunConfig = {
+      maxLlmCalls: 7,
+      a2aMetadata: {tier: 'x'},
+    };
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent, runConfig}),
+    });
+
+    expect(nested.runConfig).toBe(runConfig);
+    expect(nested.runConfig?.maxLlmCalls).toBe(7);
+    expect(nested.runConfig?.a2aMetadata).toEqual({tier: 'x'});
+  });
+
+  it('does not forward supportCfc', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const runConfig: RunConfig = {supportCfc: true, maxLlmCalls: 7};
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent, runConfig}),
+    });
+
+    expect(nested.runConfig?.supportCfc).toBe(false);
+    expect(nested.runConfig?.maxLlmCalls).toBe(7);
+    expect(runConfig.supportCfc).toBe(true);
+  });
+
+  it('forces the nested run unary', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const runConfig: RunConfig = {
+      streamingMode: StreamingMode.SSE,
+      maxLlmCalls: 7,
+    };
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent, runConfig}),
+    });
+
+    expect(nested.runConfig?.streamingMode).toBe(StreamingMode.NONE);
+    expect(nested.runConfig?.maxLlmCalls).toBe(7);
+    expect(runConfig.streamingMode).toBe(StreamingMode.SSE);
+  });
+
+  it('leaves an already-unary run config unchanged', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const runConfig: RunConfig = {streamingMode: StreamingMode.NONE};
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent, runConfig}),
+    });
+
+    expect(nested.runConfig).toBe(runConfig);
+  });
+
+  it('tolerates a caller with no run config', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const nested = stubNestedRunner();
+
+    const result = await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent}),
+    });
+
+    expect(nested.runConfig).toBeUndefined();
+    expect(result).toBe('done');
+  });
+});
+
+describe('AgentTool nested runner cleanup', () => {
+  it('closes the nested runner after the run', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({agent}),
+    });
+
+    expect(nested.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the nested runner when the run throws', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const nested = stubNestedRunner(new Error('nested run failed'));
+
+    await expect(
+      new AgentTool({agent}).runAsync({
+        args: {request: 'go'},
+        toolContext: createToolContext({agent}),
+      }),
+    ).rejects.toThrow('nested run failed');
+
+    expect(nested.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the nested runner when the call is already aborted', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    const nested = stubNestedRunner();
+
+    const result = await new AgentTool({agent}).runAsync({
+      args: {request: 'go'},
+      toolContext: createToolContext({
+        agent,
+        abortSignal: AbortSignal.abort(),
+      }),
+    });
+
+    expect(result).toBe('');
+    expect(nested.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AgentTool input schema', () => {
+  const inputSchema = z.object({
+    city: z.string().describe('The city to report on.'),
+  });
+
+  it('builds the declaration from the input schema', () => {
+    const agent = new LlmAgent({
+      name: 'sub-agent',
+      description: 'Reports the weather.',
+      inputSchema,
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration?.name).toBe('sub-agent');
+    expect(declaration?.parameters?.type).toBe(Type.OBJECT);
+    expect(declaration?.parameters?.properties).toHaveProperty('city');
+  });
+
+  it("uses the agent's description, not the schema's", () => {
+    const agent = new LlmAgent({
+      name: 'sub-agent',
+      description: 'Reports the weather.',
+      inputSchema: inputSchema.describe('A city request.'),
+    });
+
+    const declaration = new AgentTool({agent})._getDeclaration();
+
+    expect(declaration?.description).toBe('Reports the weather.');
+  });
+
+  it('rejects arguments that violate the input schema', async () => {
+    const agent = new LlmAgent({name: 'sub-agent', inputSchema});
+    stubNestedRunner();
+
+    await expect(
+      new AgentTool({agent}).runAsync({
+        args: {city: 42},
+        toolContext: createToolContext({agent}),
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('validates against a schema set directly on the agent', async () => {
+    const agent = new LlmAgent({name: 'sub-agent'});
+    agent.inputSchema = {
+      type: Type.OBJECT,
+      properties: {city: {type: Type.STRING}},
+      required: ['city'],
+    };
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {city: 'Paris'},
+      toolContext: createToolContext({agent}),
+    });
+
+    expect(nested.newMessage?.parts?.[0].text).toBe('{"city":"Paris"}');
+  });
+
+  it('passes the validated arguments as bare JSON', async () => {
+    const agent = new LlmAgent({name: 'sub-agent', inputSchema});
+    const nested = stubNestedRunner();
+
+    await new AgentTool({agent}).runAsync({
+      args: {city: 'Paris', unexpected: 'dropped'},
+      toolContext: createToolContext({agent}),
+    });
+
+    expect(nested.newMessage?.parts?.[0].text).toBe('{"city":"Paris"}');
   });
 });
