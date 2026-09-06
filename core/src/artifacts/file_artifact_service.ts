@@ -38,18 +38,25 @@ interface FileArtifactVersion extends ArtifactVersion {
  *
  * Storage layout matches the cloud and in-memory services:
  * root/
- * └── users/
- *     └── {userId}/
- *         ├── sessions/
- *         │   └── {sessionId}/
- *         │       └── artifacts/
- *         │           └── {artifactPath}/  // derived from filename
- *         │               └── versions/
- *         │                   └── {version}/
- *         │                       ├── {originalFilename}
- *         │                       └── metadata.json
- *         └── artifacts/
- *             └── {artifactPath}/...
+ * └── apps/
+ *     └── {appName}/
+ *         └── users/
+ *             └── {userId}/
+ *                 ├── sessions/
+ *                 │   └── {sessionId}/
+ *                 │       └── artifacts/
+ *                 │           └── {artifactPath}/  // derived from filename
+ *                 │               └── versions/
+ *                 │                   └── {version}/
+ *                 │                       ├── {originalFilename}
+ *                 │                       └── metadata.json
+ *                 └── artifacts/
+ *                     └── {artifactPath}/...
+ *
+ * Releases that predate the `apps/{appName}` level wrote the same tree
+ * directly under `root/users`, which records no app name. A root can be
+ * shared by several apps, so that tree cannot be attributed to one of them
+ * and is never read from or deleted.
  *
  * Artifact paths are derived from the provided filenames: separators create
  * nested directories, and path traversal is rejected to keep the layout
@@ -71,6 +78,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact({
+    appName,
     userId,
     sessionId,
     filename,
@@ -83,6 +91,7 @@ export class FileArtifactService implements BaseArtifactService {
 
     const artifactDir = getArtifactDir(
       this.rootDir,
+      appName,
       userId,
       sessionId,
       filename,
@@ -117,13 +126,7 @@ export class FileArtifactService implements BaseArtifactService {
       mimeType = artifact.fileData!.mimeType;
     }
 
-    const canonicalUri = await getCanonicalUri(
-      this.rootDir,
-      userId,
-      sessionId,
-      filename,
-      nextVersion,
-    );
+    const canonicalUri = pathToFileURL(contentPath).toString();
     const metadata: FileArtifactVersion = {
       fileName: filename,
       mimeType,
@@ -139,6 +142,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async loadArtifact({
+    appName,
     userId,
     sessionId,
     filename,
@@ -147,6 +151,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
+        appName,
         userId,
         sessionId,
         filename,
@@ -246,14 +251,15 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listArtifactKeys({
+    appName,
     userId,
     sessionId,
   }: ListArtifactKeysRequest): Promise<string[]> {
     const filenames: Set<string> = new Set();
-    const userRoot = getUserRoot(this.rootDir, userId);
+    const baseRoot = getBaseRoot(this.rootDir, appName, userId);
 
     // Session artifacts
-    const sessionRoot = getSessionArtifactsDir(userRoot, sessionId);
+    const sessionRoot = getSessionArtifactsDir(baseRoot, sessionId);
     for await (const artifactDir of iterateArtifactDirs(sessionRoot)) {
       const metadata = await getLatestMetadata(artifactDir);
       if (metadata?.fileName) {
@@ -265,7 +271,7 @@ export class FileArtifactService implements BaseArtifactService {
     }
 
     // User artifacts
-    const artifactsRoot = getUserArtifactsDir(userRoot);
+    const artifactsRoot = getUserArtifactsDir(baseRoot);
     for await (const artifactDir of iterateArtifactDirs(artifactsRoot)) {
       const metadata = await getLatestMetadata(artifactDir);
       if (metadata?.fileName) {
@@ -280,6 +286,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async deleteArtifact({
+    appName,
     userId,
     sessionId,
     filename,
@@ -287,6 +294,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
+        appName,
         userId,
         sessionId,
         filename,
@@ -301,6 +309,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listVersions({
+    appName,
     userId,
     sessionId,
     filename,
@@ -308,6 +317,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
+        appName,
         userId,
         sessionId,
         filename,
@@ -323,6 +333,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async listArtifactVersions({
+    appName,
     userId,
     sessionId,
     filename,
@@ -330,6 +341,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
+        appName,
         userId,
         sessionId,
         filename,
@@ -364,6 +376,7 @@ export class FileArtifactService implements BaseArtifactService {
   }
 
   async getArtifactVersion({
+    appName,
     userId,
     sessionId,
     filename,
@@ -372,6 +385,7 @@ export class FileArtifactService implements BaseArtifactService {
     try {
       const artifactDir = getArtifactDir(
         this.rootDir,
+        appName,
         userId,
         sessionId,
         filename,
@@ -432,10 +446,15 @@ export function assertInsideRoot(
   }
 }
 
-export function getUserRoot(rootDir: string, userId: string): string {
+export function getBaseRoot(
+  rootDir: string,
+  appName: string,
+  userId: string,
+): string {
+  assertSafeSegment(appName, 'appName');
   assertSafeSegment(userId, 'userId');
-  const result = path.join(rootDir, 'users', userId);
-  assertInsideRoot(result, rootDir, 'userRoot');
+  const result = path.join(rootDir, 'apps', appName, 'users', userId);
+  assertInsideRoot(result, rootDir, 'baseRoot');
   return result;
 }
 
@@ -468,6 +487,7 @@ function getVersionsDir(artifactDir: string): string {
  * Gets the artifact directory full path for a given artifact keys.
  *
  * @param rootDir The root directory.
+ * @param appName The app name.
  * @param userId The user ID.
  * @param sessionId The session ID.
  * @param filename The filename.
@@ -475,22 +495,23 @@ function getVersionsDir(artifactDir: string): string {
  */
 function getArtifactDir(
   rootDir: string,
+  appName: string,
   userId: string,
   sessionId: string,
   filename: string,
 ): string {
-  const userRoot = getUserRoot(rootDir, userId);
+  const baseRoot = getBaseRoot(rootDir, appName, userId);
   let scopeRoot: string;
 
   if (isUserScoped(sessionId, filename)) {
-    scopeRoot = getUserArtifactsDir(userRoot);
+    scopeRoot = getUserArtifactsDir(baseRoot);
   } else {
     if (!sessionId) {
       throw new Error(
         'Session ID must be provided for session-scoped artifacts.',
       );
     }
-    scopeRoot = getSessionArtifactsDir(userRoot, sessionId);
+    scopeRoot = getSessionArtifactsDir(baseRoot, sessionId);
   }
 
   let cleanFilename = filename;
@@ -539,39 +560,6 @@ async function getArtifactVersionsFromDir(
     );
     return [];
   }
-}
-
-/**
- * Gets the canonical URI for an artifact version.
- *
- * @param rootDir The root directory.
- * @param userId The user ID.
- * @param sessionId The session ID.
- * @param filename The filename.
- * @param version The version.
- * @returns A promise that resolves to the canonical URI.
- */
-async function getCanonicalUri(
-  rootDir: string,
-  userId: string,
-  sessionId: string,
-  filename: string,
-  version: number,
-): Promise<string> {
-  const artifactDir = await getArtifactDir(
-    rootDir,
-    userId,
-    sessionId,
-    filename,
-  );
-  const storedFilename = path.basename(artifactDir);
-  const versionsDir = getVersionsDir(artifactDir);
-  const payloadPath = path.join(
-    versionsDir,
-    version.toString(),
-    storedFilename,
-  );
-  return pathToFileURL(payloadPath).toString();
 }
 
 /**
