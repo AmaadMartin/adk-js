@@ -218,6 +218,19 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export {BasePlanner, isBasePlanner} from './planners/base_planner.js';
+export type {
+  BuildPlanningInstructionParams,
+  ProcessPlanningResponseParams,
+} from './planners/base_planner.js';
+export {
+  ACTION_TAG,
+  FINAL_ANSWER_TAG,
+  PLANNING_TAG,
+  PlanReActPlanner,
+  REASONING_TAG,
+  REPLANNING_TAG,
+} from './planners/plan_re_act_planner.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
