@@ -12,6 +12,9 @@ import {InvocationContext} from './invocation_context.js';
 
 /**
  * The configuration options for creating a loop agent.
+ *
+ * These are constructor options. The schema of a `LoopAgent` config document
+ * is `LoopAgentYamlConfig`.
  */
 export interface LoopAgentConfig extends BaseAgentConfig {
   /**
