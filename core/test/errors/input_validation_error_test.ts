@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {InputValidationError, NotFoundError} from '@google/adk';
+import {
+  InputValidationError,
+  isInputValidationError,
+  NotFoundError,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('InputValidationError', () => {
@@ -38,5 +42,34 @@ describe('InputValidationError', () => {
     expect(() => {
       throw new InputValidationError('boom');
     }).toThrow(InputValidationError);
+  });
+
+  it('carries a supplied cause', () => {
+    const cause = new Error('the schema rejected the value');
+
+    expect(new InputValidationError('boom', {cause}).cause).toBe(cause);
+    expect(new InputValidationError('boom').cause).toBeUndefined();
+  });
+});
+
+describe('isInputValidationError', () => {
+  it('accepts an InputValidationError', () => {
+    expect(isInputValidationError(new InputValidationError())).toBe(true);
+  });
+
+  it('rejects a plain Error and a sibling error class', () => {
+    expect(isInputValidationError(new Error('boom'))).toBe(false);
+    expect(isInputValidationError(new NotFoundError())).toBe(false);
+  });
+
+  it('rejects a value that is not an Error', () => {
+    expect(isInputValidationError({name: 'InputValidationError'})).toBe(false);
+  });
+
+  it('accepts an error from another copy of the package', () => {
+    const fromAnotherCopy = new Error('Invalid input.');
+    fromAnotherCopy.name = 'InputValidationError';
+
+    expect(isInputValidationError(fromAnotherCopy)).toBe(true);
   });
 });
