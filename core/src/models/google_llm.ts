@@ -136,6 +136,8 @@ export class Gemini extends BaseLlm {
    */
   static override readonly supportedModels: Array<string | RegExp> = [
     /gemini-.*/,
+    // Gemma 4+ calls functions natively, so it needs no Gemma 3 workaround.
+    /gemma-4.*/,
     // fine-tuned vertex endpoint pattern
     /projects\/.+\/locations\/.+\/endpoints\/.+/,
     // vertex gemini long name
