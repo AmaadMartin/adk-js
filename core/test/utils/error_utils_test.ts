@@ -9,6 +9,7 @@ import {formatError} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
+const UNSTRINGIFIABLE_VALUE = '<unstringifiable value>';
 
 /** Builds an axios/httpx-style error carrying a `.response` object. */
 function httpError(status: number, body: string, statusText?: string): Error {
@@ -114,6 +115,83 @@ describe('formatError', () => {
     const result = formatError({foo: 1});
     expect(typeof result).toBe('string');
     expect(result.length).toBeGreaterThan(0);
+  });
+
+  it('returns the decimal form of a number', () => {
+    expect(formatError(42)).toBe('42');
+  });
+
+  it('surfaces the fields of a plain object', () => {
+    const result = formatError({
+      errorCode: 'E_PERM',
+      detail: 'permission denied',
+    });
+    expect(result).toContain('errorCode');
+    expect(result).toContain('E_PERM');
+    expect(result).toContain('permission denied');
+    expect(result).not.toContain('[object Object]');
+  });
+
+  it('degrades to a placeholder when toString throws', () => {
+    const hostile = {
+      toString() {
+        throw new Error('toString exploded');
+      },
+    };
+    expect(() => formatError(hostile)).not.toThrow();
+    expect(formatError(hostile)).toBe(UNSTRINGIFIABLE_VALUE);
+  });
+
+  // `status` is read by the HTTP branch, which runs before the base message.
+  it('degrades to a placeholder when an inspected getter throws', () => {
+    const hostile = {
+      get status(): number {
+        throw new Error('getter exploded');
+      },
+    };
+    expect(() => formatError(hostile)).not.toThrow();
+    expect(formatError(hostile)).toBe(UNSTRINGIFIABLE_VALUE);
+  });
+
+  it('degrades to a placeholder for a circular plain object', () => {
+    const circular: Record<string, unknown> = {detail: 'cyclic'};
+    circular['self'] = circular;
+    expect(() => formatError(circular)).not.toThrow();
+    expect(formatError(circular)).toBe(UNSTRINGIFIABLE_VALUE);
+  });
+
+  it('degrades to a placeholder for an object holding a BigInt field', () => {
+    expect(formatError({size: 1n})).toBe(UNSTRINGIFIABLE_VALUE);
+  });
+
+  it('surfaces the fields of a null-prototype object', () => {
+    const nullProto: Record<string, unknown> = Object.create(null);
+    nullProto['detail'] = 'no prototype';
+    expect(() => formatError(nullProto)).not.toThrow();
+    expect(formatError(nullProto)).toContain('no prototype');
+  });
+
+  it('prefers a custom toString over an empty serialization', () => {
+    class ErrorLike {
+      toString(): string {
+        return 'ErrorLike: connection reset';
+      }
+    }
+    expect(formatError(new ErrorLike())).toBe('ErrorLike: connection reset');
+  });
+
+  it('truncates an oversized serialized object', () => {
+    const result = formatError({blob: 'q'.repeat(5000)});
+    expect(result).toContain(TRUNCATION_MARKER);
+    expect(result.length).toBeLessThanOrEqual(
+      MAX_RESPONSE_BODY_LENGTH + TRUNCATION_MARKER.length,
+    );
+  });
+
+  // Pins the `typeof json === 'string'` guard. `JSON.stringify` returns
+  // `undefined` here, which must not reach the rest of the function.
+  it('falls back to toString when toJSON returns nothing', () => {
+    expect(formatError({toJSON: () => undefined})).toBe('[object Object]');
   });
 
   it('is safe against a self-referential cause cycle', () => {

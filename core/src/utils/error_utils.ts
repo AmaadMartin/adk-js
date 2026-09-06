@@ -23,6 +23,9 @@ const TRUNCATION_MARKER = '... [truncated]';
 /** Returned by {@link formatError} when the input carries no usable message. */
 const UNKNOWN_ERROR = 'Unknown error';
 
+/** Returned when a value cannot be converted to a string at all. */
+const UNSTRINGIFIABLE_VALUE = '<unstringifiable value>';
+
 /** Lowest and highest values treated as an HTTP status code. */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
@@ -48,7 +51,10 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-/** Truncates a response body to {@link MAX_RESPONSE_BODY_LENGTH} characters. */
+/**
+ * Truncates a response body or a serialized value to
+ * {@link MAX_RESPONSE_BODY_LENGTH} characters.
+ */
 function truncateBody(body: string): string {
   return body.length > MAX_RESPONSE_BODY_LENGTH
     ? body.slice(0, MAX_RESPONSE_BODY_LENGTH) + TRUNCATION_MARKER
@@ -62,6 +68,16 @@ function baseMessage(err: unknown): string {
   }
   if (typeof err === 'string') {
     return err;
+  }
+  const record = asRecord(err);
+  if (record !== undefined) {
+    const json = JSON.stringify(record);
+    // `JSON.stringify` is typed as returning `string` but yields `undefined`
+    // when `toJSON` returns nothing. `'{}'` says no more than `[object
+    // Object]`, so both cases defer to the value's own `toString`.
+    if (typeof json === 'string' && json !== '{}') {
+      return truncateBody(json);
+    }
   }
   return String(err);
 }
@@ -154,8 +170,16 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
  * on `null`/`undefined` and cyclic error graphs.
  *
  * @param err The thrown or rejected value to format.
- * @return A single human-readable message describing the root cause(s).
+ * @return A single human-readable message describing the root cause(s), or
+ *     `<unstringifiable value>` for a value that defeats every conversion.
  */
 export function formatError(err: unknown): string {
-  return formatErrorRecursive(err, new Set<unknown>());
+  try {
+    return formatErrorRecursive(err, new Set<unknown>());
+  } catch {
+    // A hostile value can throw from a property getter, `toString`,
+    // `Symbol.toPrimitive` or `toJSON`, a null-prototype object has no
+    // `toString`, and `JSON.stringify` refuses cycles and BigInt.
+    return UNSTRINGIFIABLE_VALUE;
+  }
 }
