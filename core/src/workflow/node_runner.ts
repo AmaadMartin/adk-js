@@ -94,6 +94,15 @@ export interface ExecuteChildNodeParams {
    * starts clean instead of re-reading a response it already answered.
    */
   resumeInputs?: Record<string, unknown>;
+  /**
+   * Output from a previous run, carried forward on resume when the node had
+   * both output and interrupts. On the engine seam rather than
+   * {@link RunNodeOptions}, matching adk-python's `NodeRunner` constructor; the
+   * consumer is `Workflow`'s resume path, which carries `prior.input` today.
+   */
+  priorOutput?: unknown;
+  /** Unresolved interrupt ids from a previous run, carried forward on resume. */
+  priorInterruptIds?: readonly string[];
 }
 
 /**
@@ -156,6 +165,8 @@ async function runChildNode({
     abortSignal,
     nodeState: callerNodeState,
     resumeInputs,
+    priorOutput,
+    priorInterruptIds,
   },
   nodeName,
   nodePath,
@@ -263,6 +274,19 @@ async function runChildNode({
     let inputRecorded = false;
     while (!succeeded) {
       resetState(child);
+      // Per attempt, not once before the loop: `resetState` clears exactly
+      // these fields, and adk-python rebuilds the child context per attempt for
+      // the same reason. A carried-forward output was emitted last turn, so it
+      // must not be flushed again.
+      if (priorOutput !== undefined) {
+        child.output = priorOutput;
+        child.outputEmitted = true;
+      }
+      for (const id of priorInterruptIds ?? []) {
+        if (!child.interruptIds.includes(id)) {
+          child.interruptIds.push(id);
+        }
+      }
       child.attemptCount = nodeState.attemptCount;
       try {
         inputRecorded = await runAttempt({
@@ -344,7 +368,14 @@ async function runChildNode({
       }
     }
 
-    flushOutputAndDeltas({child, nodeName, branch, isolationScope});
+    // After the plugin hook, which can replace the output, and before the
+    // handover to the parent, so the flushed event carries the final value. A
+    // node that stopped to ask the user is excluded: its checkpoint event is
+    // already in the stream, and adk-python reaches the flush only on the
+    // non-interrupt path.
+    if (child.interruptIds.length === 0) {
+      flushOutputAndDeltas({child, nodeName, branch, isolationScope});
+    }
 
     if (options.useAsOutput) {
       parent.output = child.output;
@@ -460,7 +491,10 @@ function failIfNodeReportedError(child: NodeContext, nodeName: string): void {
  * and then throws would otherwise leave the failed attempt's writes in the
  * delta, to be committed alongside the successful attempt's. `NodeContext`
  * builds its `State` over this exact `stateDelta` object once (in its
- * constructor), so we clear the keys in place rather than reassigning it.
+ * constructor), so we clear the keys in place rather than reassigning it. The
+ * same goes for its artifact deltas, its output flags and a requested agent
+ * transfer — everything adk-python discards by building a fresh child context
+ * per attempt.
  *
  * The reporting flags matter as much as the values. Every one of them is raised
  * during an attempt — by an event this node emitted, or by a child it ran with
@@ -484,6 +518,7 @@ function resetState(childNodeContext: NodeContext): void {
   childNodeContext.outputEmitted = false;
   childNodeContext.routeEmitted = false;
   childNodeContext.outputDelegated = false;
+  childNodeContext.actions.transferToAgent = undefined;
   clearInPlace(childNodeContext.actions.stateDelta);
   clearInPlace(childNodeContext.actions.artifactDelta);
 }
@@ -542,6 +577,8 @@ async function runOnce({
     if (event.output !== undefined) {
       child.output = event.output;
       if (child.outputDelegated) {
+        // Nothing but the output, which the delegate already emitted: drop
+        // the event entirely rather than pushing an emptied one.
         if (!hasNonOutputContent(event)) {
           return;
         }
@@ -557,6 +594,7 @@ async function runOnce({
     if (isNativeNodeEvent) {
       if (event.route !== undefined) {
         child.route = event.route;
+        // After the assignment: the setter re-arms the flush.
         child.routeEmitted = true;
       }
       if (event.actions?.transferToAgent !== undefined) {
@@ -594,6 +632,8 @@ async function runOnce({
     if (event.output !== undefined) {
       child.outputEmitted = true;
     }
+    // After the push, so the FIRST such event reaches the stream and only the
+    // ones after it are suppressed as duplicates of the node's answer.
     if (event.nodeInfo?.messageAsOutput) {
       child.outputDelegated = true;
     }

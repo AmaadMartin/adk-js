@@ -5,6 +5,7 @@
  */
 
 import {Part} from '@google/genai';
+import {expect} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {LlmAgent, LlmAgentConfig} from '../../src/agents/llm_agent.js';
@@ -313,11 +314,56 @@ export async function runFailingChildNode(
   return {error, events};
 }
 
+/** Options for {@link driveNodeRunner} and {@link driveNodeRunnerFailure}. */
+export interface DriveNodeRunnerOptions {
+  /** The input handed to the node. */
+  input?: unknown;
+  /** InvocationContext to run under (defaults to a fresh {@link createIc}). */
+  ic?: InvocationContext;
+  /** Output from a previous run, carried forward on resume. */
+  priorOutput?: unknown;
+  /** Unresolved interrupt ids from a previous run, carried forward on resume. */
+  priorInterruptIds?: readonly string[];
+}
+
+/**
+ * Runs one node through the node runner, returning its context and every event
+ * it pushed — the shape adk-python's node runner tests get from
+ * `NodeRunner(node=…, parent_ctx=…).run()`.
+ *
+ * Fails the test when the node threw; use {@link driveNodeRunnerFailure} for a
+ * node that is expected to fail.
+ */
+export async function driveNodeRunner(
+  node: BaseNode,
+  opts: DriveNodeRunnerOptions = {},
+): Promise<{child: NodeContext; events: Event[]}> {
+  const {child, error, events} = await executeAndDrain(node, opts);
+  if (!child) {
+    expect.fail(`node '${node.name}' threw unexpectedly: ${String(error)}`);
+  }
+  return {child, events};
+}
+
+/**
+ * Runs one node expected to fail, returning what it threw and the events it
+ * left on the channel on its way out.
+ */
+export async function driveNodeRunnerFailure(
+  node: BaseNode,
+  opts: DriveNodeRunnerOptions = {},
+): Promise<{events: Event[]; thrown: unknown}> {
+  const {error, events} = await executeAndDrain(node, opts);
+  return {events, thrown: error};
+}
+
 /**
  * A node whose body is an async generator — the analogue of adk-python's
  * `BaseNode._run_impl`, and what the ported reference tests are written
  * against. Unlike `node(fn)` it is a plain {@link BaseNode}, so it brings none
- * of `FunctionNode`'s own event or delta handling with it.
+ * of `FunctionNode`'s own event or delta handling with it. Use it for the cases
+ * {@link FnNode} cannot express: yielding more than once, or yielding between
+ * context writes.
  */
 export class GenNode extends BaseNode {
   constructor(

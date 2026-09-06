@@ -288,6 +288,13 @@ export class Workflow extends BaseNode {
         ctx.outputDelegated = true;
       }
       ctx.output = output;
+      // An entry that hands back a child's value verbatim is reporting an
+      // output the child already emitted; a second event for it would deliver
+      // one result as two. A value the entry computed itself has no event yet,
+      // so the node runner still flushes one.
+      ctx.outputEmitted = [...dynamicState.runs.values()].some((run) =>
+        Object.is(run.output, output),
+      );
     }
   }
 
@@ -648,6 +655,12 @@ export class Workflow extends BaseNode {
       // second time.
       ctx.outputDelegated = true;
       ctx.output = terminalOutputs[0];
+      // The terminal node's own event already carried this value, so the node
+      // runner must not flush a second one for the workflow. adk-python marks
+      // the same case as `ctx._output_delegated` in `_workflow.py`; adk-js does
+      // not run its terminal node with `useAsOutput`, so nothing was delegated
+      // — the output was simply already emitted.
+      ctx.outputEmitted = true;
     } else if (terminalOutputs.length > 1) {
       throw new Error(
         `Workflow ${this.name}: multiple terminal nodes produced output ` +

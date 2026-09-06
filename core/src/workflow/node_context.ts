@@ -133,7 +133,19 @@ export class NodeContext {
   output: unknown = undefined;
 
   /** The route key(s) emitted by the node, if any (array = multi-route). */
-  route?: RouteValue | RouteValue[];
+  get route(): RouteValue | RouteValue[] | undefined {
+    return this.routeValue;
+  }
+
+  /**
+   * Assigning a route re-arms the end-of-node flush, so a route set after an
+   * earlier one was already emitted still reaches the stream. Mirrors
+   * `Context.route` in `google/adk-python` `agents/context.py`.
+   */
+  set route(value: RouteValue | RouteValue[] | undefined) {
+    this.routeValue = value;
+    this.routeEmitted = false;
+  }
 
   /** Interrupt ids the node is currently blocked on (HITL). */
   interruptIds: string[] = [];
@@ -195,6 +207,7 @@ export class NodeContext {
    */
   readonly stateSchema?: SchemaLike;
 
+  private routeValue?: RouteValue | RouteValue[];
   private readonly _state: State;
   private readonly dynamicRunCounters = new Map<string, number>();
   /** Run ids this context handed out automatically, per node name. */

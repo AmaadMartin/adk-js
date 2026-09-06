@@ -98,6 +98,45 @@ describe('node_runner — ctx.output set directly', () => {
   });
 });
 
+describe('node_runner — ctx.output written twice', () => {
+  /**
+   * Divergence from adk-python: its `Context.output` setter raises
+   * `ValueError('...already set...')` on a second assignment
+   * (`agents/context.py`). adk-js lets the last write win and relies on it —
+   * `resetState` assigns `undefined` between retries, and the plugin
+   * after-node hook assigns a replacement. The reference tests
+   * `test_double_output_raises` and `test_yield_then_ctx_output_raises` are
+   * therefore ported asserting the target's behaviour: no error event.
+   */
+  it('test_double_output_raises', async () => {
+    const n = new FnNode('n', (ctx) => {
+      ctx.output = 'first';
+      ctx.output = 'second';
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('second');
+    expect(events.filter((e) => e.errorCode !== undefined)).toHaveLength(0);
+  });
+
+  it('test_yield_then_ctx_output_raises', async () => {
+    const n = new GenNode('n', async function* (ctx: NodeContext) {
+      yield 'first';
+      ctx.output = 'second';
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('second');
+    expect(events.filter((e) => e.errorCode !== undefined)).toHaveLength(0);
+    // The first value already went out on its own event, so the end-of-node
+    // flush does not emit the second one.
+    expect(outputEvents(events)).toHaveLength(1);
+    expect(events[0].output).toBe('first');
+  });
+});
+
 describe('node_runner — ctx.route', () => {
   it('test_yield_route_sets_ctx_route', async () => {
     const n = new GenNode('n', async function* () {
@@ -153,10 +192,13 @@ describe('node_runner — ctx.interruptIds', () => {
       });
     });
 
-    const {child} = await runChildNode(n);
+    const {child, events} = await runChildNode(n);
 
     expect(child.output).toBe('result');
     expect(child.interruptIds).toEqual(['fc-1']);
+    // A node that stopped to ask the user gets no end-of-node flush, so the
+    // output it already emitted is not repeated.
+    expect(outputEvents(events)).toHaveLength(1);
   });
 
   it('test_duplicate_interrupt_ids_deduplicated', async () => {
@@ -216,6 +258,87 @@ describe('node_runner — output delegation', () => {
     // content of a delegated event, adk-js clears it because the delegate
     // emits the same text and it appeared twice in the stream.
     expect(events[0].content).toBeUndefined();
+  });
+
+  it('test_delegated_output_with_artifact_delta_is_enqueued', async () => {
+    // The reference covers only a state delta here. adk-python's
+    // `_has_non_output_content` also accepts an artifact delta, so this pins
+    // the other half of that condition.
+    const n = new FnNode('n', (ctx) => {
+      ctx.outputDelegated = true;
+      return createEvent({
+        output: 'delegated_value',
+        actions: {artifactDelta: {'doc.txt': 3}},
+      });
+    });
+
+    const {events} = await runChildNode(n);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].output).toBeUndefined();
+    expect(events[0].actions.artifactDelta).toEqual({'doc.txt': 3});
+  });
+});
+
+describe('node_runner — resume state carried forward', () => {
+  it('test_prior_output_carried_forward', async () => {
+    const n = new FnNode('n', () => undefined);
+
+    const {child, events} = await runChildNode(n, {
+      priorOutput: 'cached_result',
+    });
+
+    expect(child.output).toBe('cached_result');
+    // A carried-forward output was already emitted last turn, so it must not
+    // be emitted again.
+    expect(outputEvents(events)).toHaveLength(0);
+  });
+
+  it('test_prior_interrupt_ids_carried_forward', async () => {
+    const n = new FnNode('n', () => undefined);
+
+    const {child} = await runChildNode(n, {priorInterruptIds: ['fc-old']});
+
+    expect(child.interruptIds).toContain('fc-old');
+  });
+
+  it('test_prior_and_new_interrupt_ids_merged', async () => {
+    const n = new FnNode('n', () =>
+      createEvent({
+        content: {
+          parts: [{functionCall: {name: 'tool', args: {}, id: 'fc-new'}}],
+        },
+        longRunningToolIds: ['fc-new'],
+      }),
+    );
+
+    const {child} = await runChildNode(n, {priorInterruptIds: ['fc-old']});
+
+    expect([...child.interruptIds].sort()).toEqual(['fc-new', 'fc-old']);
+  });
+
+  it('keeps the prior output and interrupt ids after a failed attempt', async () => {
+    let attempts = 0;
+    const flaky = new FnNode(
+      'flaky',
+      () => {
+        attempts += 1;
+        if (attempts < 2) {
+          throw new Error('transient');
+        }
+        return undefined;
+      },
+      {retryConfig: {maxAttempts: 2, initialDelay: 0, jitter: 0}},
+    );
+
+    const {child} = await runChildNode(flaky, {
+      priorOutput: 'cached',
+      priorInterruptIds: ['fc-old'],
+    });
+
+    expect(attempts).toBe(2);
+    expect(child.output).toBe('cached');
+    expect(child.interruptIds).toEqual(['fc-old']);
   });
 });
 

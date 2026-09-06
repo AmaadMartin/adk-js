@@ -87,6 +87,13 @@ export function createNodeErrorEvent(
  * class that carried it.
  */
 function errorCodeOf(error: unknown): string {
+  // An API client's own canonical status (e.g. 'PERMISSION_DENIED') is the most
+  // useful code, so it wins over the transport `code`. The string check
+  // matters: some clients expose a numeric `.status` (an HTTP status).
+  const status = (error as {status?: unknown} | null | undefined)?.status;
+  if (typeof status === 'string') {
+    return status;
+  }
   const code = (error as {code?: unknown} | null | undefined)?.code;
   if (typeof code === 'string' || typeof code === 'number') {
     return String(code);
