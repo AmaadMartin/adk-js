@@ -16,8 +16,8 @@ import {Skill} from '../../skills/skill.js';
 import {SkillRegistry} from '../../skills/skill_registry.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
-import {BaseTool} from '../base_tool.js';
-import {BaseToolset} from '../base_toolset.js';
+import {BaseTool, isBaseTool} from '../base_tool.js';
+import {BaseToolset, isBaseToolset} from '../base_toolset.js';
 import {ListSkillsTool} from './list_skills_tool.js';
 import {LoadSkillResourceTool} from './load_skill_resource_tool.js';
 import {LoadSkillTool} from './load_skill_tool.js';
@@ -116,8 +116,23 @@ export class SkillToolset extends BaseToolset {
     return [...this.tools, ...dynamicTools];
   }
 
+  /**
+   * Closes this toolset and every toolset in `additionalTools`.
+   *
+   * The caches are cleared before the nested closes are awaited: a nested close
+   * is remote I/O that can hang, and a failed close must not leave this toolset
+   * serving stale entries.
+   */
   override async close(): Promise<void> {
     this.fetchedSkillCache.clear();
+    this.toolCache.clear();
+    await Promise.all(
+      this.additionalTools.filter(isBaseToolset).map((toolset) =>
+        toolset.close().catch((e: unknown) => {
+          logger.warn(`Failed to close an additional toolset: ${e}`);
+        }),
+      ),
+    );
   }
 
   getSkill(name: string): Skill | undefined {
@@ -236,13 +251,13 @@ export class SkillToolset extends BaseToolset {
 
     const candidateTools: Record<string, BaseTool> = {};
     for (const toolUnion of this.additionalTools) {
-      if (toolUnion instanceof BaseTool) {
+      if (isBaseTool(toolUnion)) {
         if (candidateTools[toolUnion.name]) {
           throw new Error(`Duplicate tool name: ${toolUnion.name}`);
         }
 
         candidateTools[toolUnion.name] = toolUnion;
-      } else if (toolUnion instanceof BaseToolset) {
+      } else if (isBaseToolset(toolUnion)) {
         const tsTools = await toolUnion.getTools(context);
 
         for (const t of tsTools) {
