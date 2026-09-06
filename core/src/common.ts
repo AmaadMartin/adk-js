@@ -1344,6 +1344,7 @@ export {
 } from './tools/transfer_to_agent_tool.js';
 export type {TransferToAgentToolConfig} from './tools/transfer_to_agent_tool.js';
 export {URL_CONTEXT, UrlContextTool} from './tools/url_context_tool.js';
+export {VertexAiLoadProfilesTool} from './tools/vertex_ai_load_profiles_tool.js';
 export {
   VertexAiSearchTool,
   isVertexAiSearchTool,

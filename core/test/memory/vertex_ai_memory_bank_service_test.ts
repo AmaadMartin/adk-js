@@ -1871,3 +1871,47 @@ describe('VertexAiMemoryBankService', () => {
     });
   });
 });
+
+describe('VertexAiMemoryBankService.retrieveProfiles', () => {
+  function createService() {
+    const retrieveProfiles = vi.fn();
+    const client = new Client({});
+    Object.assign(client.agentEnginesInternal.memories, {retrieveProfiles});
+    const service = new VertexAiMemoryBankService({
+      agentEngineId: 'test-engine-id',
+      client,
+    });
+    return {service, retrieveProfiles};
+  }
+
+  it('asks the memory bank for the scope and returns the profiles', async () => {
+    const {service, retrieveProfiles} = createService();
+    retrieveProfiles.mockResolvedValue({
+      profiles: {
+        'user-profile': {schemaId: 'user-profile', profile: {name: 'Kim'}},
+      },
+    });
+
+    const profiles = await service.retrieveProfiles({
+      appName: 'test-app',
+      userId: 'test-user',
+    });
+
+    expect(retrieveProfiles).toHaveBeenCalledWith({
+      name: 'reasoningEngines/test-engine-id',
+      scope: {app_name: 'test-app', user_id: 'test-user'},
+    });
+    expect(profiles).toEqual([
+      {schemaId: 'user-profile', profile: {name: 'Kim'}},
+    ]);
+  });
+
+  it('returns no profiles when the response carries none', async () => {
+    const {service, retrieveProfiles} = createService();
+    retrieveProfiles.mockResolvedValue({});
+
+    await expect(
+      service.retrieveProfiles({appName: 'test-app', userId: 'test-user'}),
+    ).resolves.toEqual([]);
+  });
+});
