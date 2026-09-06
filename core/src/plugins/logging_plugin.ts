@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import {Content, ContentUnion} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {Context} from '../agents/context.js';
@@ -18,6 +18,8 @@ import {
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {isContent} from '../utils/content_utils.js';
+import {stringifyForLog} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin} from './base_plugin.js';
@@ -172,7 +174,9 @@ export class LoggingPlugin extends BasePlugin {
     this.log(`   Agent: ${callbackContext.agentName}`);
 
     if (llmRequest.config && llmRequest.config.systemInstruction) {
-      let sysInstruction = llmRequest.config.systemInstruction as string;
+      let sysInstruction = this.renderSystemInstruction(
+        llmRequest.config.systemInstruction,
+      );
       if (sysInstruction.length > 200) {
         sysInstruction = sysInstruction.substring(0, 200) + '...';
       }
@@ -294,8 +298,33 @@ export class LoggingPlugin extends BasePlugin {
     logger.info(formattedMessage);
   }
 
+  /**
+   * Renders a system instruction for logging.
+   *
+   * The field accepts a string, a `Content`, a `Part`, or a list of those.
+   */
+  private renderSystemInstruction(instruction: ContentUnion): string {
+    if (typeof instruction === 'string') {
+      return instruction;
+    }
+    if (Array.isArray(instruction)) {
+      return instruction
+        .map((entry) => this.renderSystemInstruction(entry))
+        .join(' | ');
+    }
+    if (isContent(instruction)) {
+      return this.formatContent(instruction);
+    }
+    if (typeof instruction === 'object' && instruction !== null) {
+      return this.formatContent({parts: [instruction]});
+    }
+    // `ContentUnion` forbids it, but a JavaScript caller can still pass `null`
+    // or a number. The reference falls back to `str(...)` rather than raising.
+    return stringifyForLog(instruction);
+  }
+
   private formatContent(content?: Content, maxLength = 200): string {
-    if (!content || !content.parts) {
+    if (!content?.parts?.length) {
       return 'None';
     }
 
@@ -326,7 +355,7 @@ export class LoggingPlugin extends BasePlugin {
       return '{}';
     }
 
-    let formatted = JSON.stringify(args);
+    let formatted = stringifyForLog(args);
     if (formatted.length > maxLength) {
       formatted = formatted.substring(0, maxLength) + '...}';
     }
