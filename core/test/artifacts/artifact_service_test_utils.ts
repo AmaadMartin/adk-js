@@ -613,4 +613,190 @@ export function runArtifactServiceTests(
       expect(keysAfterDelete).not.toContain(filename);
     });
   });
+
+  describe('whitespace-padded filenames', () => {
+    const PADDED_FILENAMES: Array<[label: string, filename: string]> = [
+      ['a leading space', ' padded.txt'],
+      ['a trailing space', 'padded.txt '],
+      ['leading and trailing spaces', ' padded.txt '],
+      ['a trailing tab', 'padded.txt\t'],
+      ['only whitespace', '   '],
+      ['padding after the user: prefix', 'user: padded.txt'],
+    ];
+
+    it.each(PADDED_FILENAMES)(
+      'rejects saving a filename with %s',
+      async (_label, filename) => {
+        await expect(
+          service.saveArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename,
+            artifact: {text: 'rejected'},
+          }),
+        ).rejects.toThrow(/leading or trailing whitespace/);
+      },
+    );
+
+    it('does not resolve a padded filename onto the unpadded artifact', async () => {
+      const filename = 'padded.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'unpadded'},
+      });
+
+      expect(
+        await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: ' padded.txt',
+        }),
+      ).toBeUndefined();
+      expect(
+        await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'padded.txt ',
+        }),
+      ).toBeUndefined();
+      expect(
+        await service.getArtifactVersion({
+          appName,
+          userId,
+          sessionId,
+          filename: ' padded.txt',
+        }),
+      ).toBeUndefined();
+      expect(
+        await service.listVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: 'padded.txt ',
+        }),
+      ).toEqual([]);
+      expect(
+        await service.listArtifactVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: ' padded.txt',
+        }),
+      ).toEqual([]);
+    });
+
+    it('deletes nothing when the padded filename is deleted', async () => {
+      const filename = 'padded.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'unpadded'},
+      });
+
+      await service.deleteArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'padded.txt ',
+      });
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+      });
+      expect(loaded?.text).toBe('unpadded');
+      const keys = await service.listArtifactKeys({
+        appName,
+        userId,
+        sessionId,
+      });
+      expect(keys).toContain(filename);
+    });
+
+    it('stores nothing when a padded save is rejected', async () => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: ' fresh.txt',
+          artifact: {text: 'rejected'},
+        }),
+      ).rejects.toThrow(/leading or trailing whitespace/);
+
+      const keys = await service.listArtifactKeys({
+        appName,
+        userId,
+        sessionId,
+      });
+      expect(keys).not.toContain(' fresh.txt');
+      expect(keys).not.toContain('fresh.txt');
+      expect(
+        await service.listVersions({
+          appName,
+          userId,
+          sessionId,
+          filename: 'fresh.txt',
+        }),
+      ).toEqual([]);
+    });
+
+    it('does not version a padded filename onto the unpadded artifact', async () => {
+      const filename = 'a.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'first'},
+      });
+
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: ' a.txt',
+          artifact: {text: 'second'},
+        }),
+      ).rejects.toThrow(/leading or trailing whitespace/);
+
+      expect(
+        await service.listVersions({appName, userId, sessionId, filename}),
+      ).toEqual([0]);
+      expect(
+        (await service.loadArtifact({appName, userId, sessionId, filename}))
+          ?.text,
+      ).toBe('first');
+    });
+
+    it('saves a filename with an interior space', async () => {
+      const filename = 'my report.txt';
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'interior'},
+      });
+
+      expect(
+        (await service.loadArtifact({appName, userId, sessionId, filename}))
+          ?.text,
+      ).toBe('interior');
+      expect(
+        await service.listArtifactKeys({appName, userId, sessionId}),
+      ).toContain(filename);
+    });
+  });
 }

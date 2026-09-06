@@ -80,6 +80,9 @@ export interface BaseArtifactService {
    * filename. After saving the artifact, a revision ID is returned to identify
    * the artifact version.
    *
+   * The filename must not have leading or trailing whitespace, after any
+   * `user:` prefix. Implementations reject such a filename and store nothing.
+   *
    * @param request The request to save an artifact.
    * @return A promise that resolves to The revision ID. The first version of
    * the artifact has a revision ID of 0. This is incremented by 1 after each
@@ -91,7 +94,8 @@ export interface BaseArtifactService {
    * Gets an artifact from the artifact service storage.
    *
    * The artifact is a file identified by the app name, user ID, session ID, and
-   * filename.
+   * filename. A filename with leading or trailing whitespace resolves to
+   * nothing, because no artifact can be saved under it.
    *
    * @param request The request to load an artifact.
    * @return A promise that resolves to the artifact or undefined if not found.
