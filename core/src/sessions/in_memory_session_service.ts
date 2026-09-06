@@ -115,10 +115,12 @@ export class InMemorySessionService extends BaseSessionService {
     const copiedSession = cloneDeep(session);
 
     if (config) {
-      if (config.numRecentEvents) {
-        copiedSession.events = copiedSession.events.slice(
-          -config.numRecentEvents,
-        );
+      if (config.numRecentEvents !== undefined) {
+        // `slice(-0)` returns every event, so zero needs its own branch.
+        copiedSession.events =
+          config.numRecentEvents === 0
+            ? []
+            : copiedSession.events.slice(-config.numRecentEvents);
       }
       if (config.afterTimestamp) {
         let i = copiedSession.events.length - 1;

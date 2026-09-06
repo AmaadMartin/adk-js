@@ -36,7 +36,6 @@ describe('createExecutorContext', () => {
       sessionId: 'session-123',
       appName: 'agent-1',
       readonlyState: {key: 'value'},
-      events: mockSession.events,
       userContent: mockUserContent,
       requestContext: mockRequestContext,
     });
