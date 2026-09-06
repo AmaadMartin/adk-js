@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {CommanderError} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -72,6 +73,79 @@ describe('CLI Entrypoint', () => {
       }
     }
   };
+
+  describe('bare invocation', () => {
+    let stdout: string;
+    let stderr: string;
+
+    beforeEach(() => {
+      stdout = '';
+      stderr = '';
+      program.configureOutput({
+        writeOut: (str) => {
+          stdout += str;
+        },
+        writeErr: (str) => {
+          stderr += str;
+        },
+      });
+    });
+
+    const parseExpectingError = async (
+      args: string[],
+    ): Promise<CommanderError | undefined> => {
+      try {
+        await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
+      } catch (e: unknown) {
+        return e as CommanderError;
+      }
+      return undefined;
+    };
+
+    it('should print usage listing every subcommand and request no exit', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await parseExpectingError([])).toBeUndefined();
+
+      expect(stdout).toContain('Usage: adk');
+      expect(stdout).toContain('Commands:');
+      for (const name of [
+        'web',
+        'api_server',
+        'create',
+        'run',
+        'deploy',
+        'integration',
+      ]) {
+        expect(stdout).toContain(name);
+      }
+      expect(stderr).toBe('');
+      expect(logSpy).not.toHaveBeenCalledWith('1.0.0-test');
+    });
+
+    it('should print the version without usage for -v and --version', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      expect(await parseExpectingError(['--version'])).toBeUndefined();
+      expect(await parseExpectingError(['-v'])).toBeUndefined();
+
+      expect(logSpy).toHaveBeenCalledWith('1.0.0-test');
+      expect(logSpy).toHaveBeenCalledTimes(2);
+      expect(stdout).toBe('');
+      expect(stderr).toBe('');
+    });
+
+    it('should exit non-zero for an unknown subcommand', async () => {
+      const err = await parseExpectingError(['bogus']);
+      if (!err) {
+        expect.fail('expected commander to reject an unknown subcommand');
+      }
+
+      expect(err.code).toBe('commander.excessArguments');
+      expect(err.exitCode).toBe(1);
+      expect(stdout).toBe('');
+    });
+  });
 
   describe('command: version', () => {
     it('should output version', async () => {

@@ -224,12 +224,19 @@ export function createProgram(): Command {
     colorize: {all: true},
   });
 
-  const program = new Command('ADK CLI');
+  const program = new Command('adk');
 
   program
     .addOption(new Option('-v, --version', 'Get ADK CLI version'))
-    .action(() => {
-      console.log(version);
+    .action((options: {version?: boolean}) => {
+      if (options.version) {
+        console.log(version);
+        return;
+      }
+      // `outputHelp()` writes and returns, so a bare `adk` still exits 0.
+      // `help()` raises a CommanderError through commander's exit handling,
+      // and `help({error: true})` would also redirect to stderr and exit 1.
+      program.outputHelp();
     });
 
   program
