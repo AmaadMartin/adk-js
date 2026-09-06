@@ -137,6 +137,30 @@ describe('Agent Card', () => {
       expect(orchestrationSkill).toBeDefined();
       expect(orchestrationSkill?.description).toContain('fetch data');
     });
+
+    // The A2A spec defines the default modes as media types, and adk-python's
+    // AgentCardBuilder publishes 'text/plain'.
+    it('declares the default modes of a custom agent as media types', async () => {
+      const agent = new CustomAgent('modes_agent', 'A custom test agent');
+
+      const card = await getA2AAgentCard(agent, [dummyTransport]);
+
+      expect(card.defaultInputModes).toEqual(['text/plain']);
+      expect(card.defaultOutputModes).toEqual(['text/plain']);
+    });
+
+    it('declares the default modes of an LlmAgent as media types', async () => {
+      const agent = new LlmAgent({
+        name: 'llm_modes_agent',
+        description: 'An LLM agent',
+        instruction: 'You are a helpful assistant',
+      });
+
+      const card = await getA2AAgentCard(agent, [dummyTransport]);
+
+      expect(card.defaultInputModes).toEqual(['text/plain']);
+      expect(card.defaultOutputModes).toEqual(['text/plain']);
+    });
   });
 
   describe('buildAgentSkills', () => {
