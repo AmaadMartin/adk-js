@@ -37,6 +37,21 @@ describe('LiveRequestQueue', () => {
     expect(request).toEqual({activityEnd: {}});
   });
 
+  it('should handle sendAudioStreamEnd', async () => {
+    const queue = new LiveRequestQueue();
+    queue.sendAudioStreamEnd();
+    const request = await queue.get();
+    expect(request).toEqual({audioStreamEnd: true});
+  });
+
+  it('should reject sendAudioStreamEnd on a closed queue', () => {
+    const queue = new LiveRequestQueue();
+    queue.close();
+    expect(() => queue.sendAudioStreamEnd()).toThrow(
+      'Cannot send to a closed queue.',
+    );
+  });
+
   it('should handle close', async () => {
     const queue = new LiveRequestQueue();
     queue.close();

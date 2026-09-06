@@ -1213,6 +1213,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       await connection.sendActivityEnd?.();
       return;
     }
+    if (liveRequest.audioStreamEnd) {
+      await connection.sendAudioStreamEnd?.();
+      return;
+    }
     if (liveRequest.blob) {
       await connection.sendRealtime(liveRequest.blob);
       return;
