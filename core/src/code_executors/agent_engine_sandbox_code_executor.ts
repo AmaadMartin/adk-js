@@ -33,6 +33,7 @@ import {
 } from './code_execution_utils.js';
 
 const DEFAULT_MAX_ATTEMPTS = 180;
+const POLL_INTERVAL_MS = 1_000;
 const DEFAULT_SANDBOX_TTL = '31536000s';
 const DEFAULT_SANDBOX_DISPLAY_NAME = 'default_sandbox';
 const DEFAULT_ENGINE_DISPLAY_NAME = 'default_engine';
@@ -260,7 +261,12 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
         let apiResponse = operation;
         let attempts = 0;
         while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          // Sleep between polls only; the first poll must not wait.
+          if (attempts > 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, POLL_INTERVAL_MS),
+            );
+          }
           apiResponse =
             await this.client.agentEnginesInternal.getAgentOperationInternal({
               operationName: operation.name!,
@@ -339,7 +345,10 @@ export class AgentEngineSandboxCodeExecutor extends BaseCodeExecutor {
       let apiResponse = operation;
       let attempts = 0;
       while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Sleep between polls only; the first poll must not wait.
+        if (attempts > 0) {
+          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        }
         apiResponse =
           await this.client.agentEnginesInternal.sandboxes.getSandboxOperationInternal(
             {

@@ -10,7 +10,12 @@ import {
   CodeExecutionLanguage,
   InvocationContext,
 } from '@google/adk';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+/** Mirrors `DEFAULT_MAX_ATTEMPTS` in agent_engine_sandbox_code_executor.ts. */
+const MAX_POLL_ATTEMPTS = 180;
+/** Mirrors `POLL_INTERVAL_MS` in agent_engine_sandbox_code_executor.ts. */
+const POLL_INTERVAL_MS = 1000;
 
 describe('AgentEngineSandboxCodeExecutor', () => {
   let executor: AgentEngineSandboxCodeExecutor;
@@ -78,6 +83,12 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         },
       },
     };
+  });
+
+  afterEach(() => {
+    // A fake-timer test that fails mid-body would otherwise leak the fake clock
+    // into every test after it.
+    vi.useRealTimers();
   });
 
   it('can be initialized with project and location from env', () => {
@@ -658,6 +669,122 @@ describe('AgentEngineSandboxCodeExecutor', () => {
         sandbox_name_language_javascript:
           'projects/test-project/locations/us-central1/reasoningEngines/123/sandboxEnvironments/456',
       });
+    });
+
+    it('polls before sleeping, so an operation done on the first poll costs no delay', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: false,
+      });
+      mockClient.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        {
+          name: 'operations/create-sandbox-op',
+          done: false,
+        },
+      );
+
+      vi.useFakeTimers();
+
+      const executePromise = executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      // Drain microtasks without moving the clock, and assert on the timer
+      // count before awaiting the result: an implementation that sleeps first
+      // is parked on a timer here, so awaiting would hang instead of fail.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(0);
+
+      await expect(executePromise).resolves.toMatchObject({
+        stdout: 'hello world',
+      });
+      expect(
+        mockClient.agentEnginesInternal.getAgentOperationInternal,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it('spaces agent engine operation polls by the poll interval and stops at the attempt limit', async () => {
+      mockClient.agentEnginesInternal.createInternal.mockResolvedValue({
+        name: 'operations/create-engine-op',
+        done: false,
+      });
+      const getOperation =
+        mockClient.agentEnginesInternal.getAgentOperationInternal;
+      getOperation.mockResolvedValue({done: false});
+
+      vi.useFakeTimers();
+
+      const executePromise = executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+      const rejection = expect(executePromise).rejects.toThrow(
+        'Agent Engine creation operation operations/create-engine-op did not complete in time.',
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getOperation).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS - 1);
+      expect(getOperation).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(getOperation).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * MAX_POLL_ATTEMPTS);
+      expect(getOperation).toHaveBeenCalledTimes(MAX_POLL_ATTEMPTS);
+      await rejection;
+    });
+
+    it('spaces sandbox operation polls by the poll interval and stops at the attempt limit', async () => {
+      mockClient.agentEnginesInternal.sandboxes.createInternal.mockResolvedValue(
+        {
+          name: 'operations/create-sandbox-op',
+          done: false,
+        },
+      );
+      const getOperation =
+        mockClient.agentEnginesInternal.sandboxes.getSandboxOperationInternal;
+      getOperation.mockResolvedValue({done: false});
+
+      vi.useFakeTimers();
+
+      const executePromise = executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hello")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+      const rejection = expect(executePromise).rejects.toThrow(
+        'Sandbox creation operation operations/create-sandbox-op did not complete in time.',
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getOperation).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS - 1);
+      expect(getOperation).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(getOperation).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * MAX_POLL_ATTEMPTS);
+      expect(getOperation).toHaveBeenCalledTimes(MAX_POLL_ATTEMPTS);
+      await rejection;
     });
   });
 });
