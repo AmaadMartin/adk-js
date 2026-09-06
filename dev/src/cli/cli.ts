@@ -492,7 +492,6 @@ export function createProgram(): Command {
   const registerAgentEngineCommand = (cmd: Command) => {
     cmd
       .addArgument(AGENT_DIR_ARGUMENT)
-      .allowUnknownOption()
       .allowExcessArguments()
       .addOption(PROJECT_DEPLOY_OPTION)
       .addOption(REGION_DEPLOY_OPTION)

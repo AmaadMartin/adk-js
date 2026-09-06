@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import type {Command} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -48,6 +49,56 @@ vi.mock('@google/adk', async (importOriginal) => {
     setLogLevel: vi.fn(),
   };
 });
+
+/**
+ * Applies `exitOverride()` to a whole command tree. Commander copies the exit
+ * callback into a subcommand when that subcommand is created, so calling
+ * `exitOverride()` on an already-built program covers the root only, and a
+ * subcommand parse error still ends the process.
+ */
+function overrideExitRecursively(cmd: Command) {
+  cmd.exitOverride();
+  cmd.configureOutput({writeErr: () => {}});
+  cmd.commands.forEach(overrideExitRecursively);
+}
+
+const UNKNOWN_OPTION_INVOCATIONS: Array<[string, string[], RegExp]> = [
+  [
+    'agent_engine with a misspelled option in --flag=value form',
+    ['deploy', 'agent_engine', '--displayname=x'],
+    /unknown option '--displayname=x'/,
+  ],
+  [
+    'agent_engine with a misspelled option in --flag value form',
+    ['deploy', 'agent_engine', '--displayname', 'x'],
+    /unknown option '--displayname'/,
+  ],
+  [
+    'agent_engine with an unknown short flag',
+    ['deploy', 'agent_engine', '-x'],
+    /unknown option '-x'/,
+  ],
+  [
+    'agent_engine with a cloud_run-only option',
+    ['deploy', 'agent_engine', '--port', '9000'],
+    /unknown option '--port'/,
+  ],
+  [
+    'agent_engine with a misspelled option before an explicit agent directory',
+    ['deploy', 'agent_engine', '--displayname', 'x', './my-agent'],
+    /unknown option '--displayname'/,
+  ],
+  [
+    'reasoning_engine with a misspelled option',
+    ['deploy', 'reasoning_engine', '--projct=my-proj'],
+    /unknown option '--projct=my-proj'/,
+  ],
+  [
+    'reasoning_engine with an unknown short flag',
+    ['deploy', 'reasoning_engine', '-x'],
+    /unknown option '-x'/,
+  ],
+];
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
@@ -466,6 +517,47 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('deploy agent_engine/reasoning_engine: unknown option handling', () => {
+    beforeEach(() => {
+      overrideExitRecursively(program);
+    });
+
+    it.each(UNKNOWN_OPTION_INVOCATIONS)(
+      'should reject %s',
+      async (_invocation, argv, expectedError) => {
+        await expect(parse(argv)).rejects.toThrow(expectedError);
+
+        expect(deployToAgentEngine).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should keep deploying an explicit agent directory with recognised options', async () => {
+      await parse([
+        'deploy',
+        'agent_engine',
+        './my-agent-path',
+        '--display_name=my-display-name',
+        '--agent_engine_id=12345',
+      ]);
+
+      expect(deployToAgentEngine).toHaveBeenCalledTimes(1);
+      const options = vi.mocked(deployToAgentEngine).mock.calls[0][0];
+      expect(options).toMatchObject({
+        agentPath: expect.stringContaining('my-agent-path'),
+        displayName: 'my-display-name',
+        agentEngineId: '12345',
+      });
+    });
+
+    it('should keep deploying the current directory when the agent directory is omitted', async () => {
+      await parse(['deploy', 'agent_engine']);
+
+      expect(deployToAgentEngine).toHaveBeenCalledTimes(1);
+      const {agentPath} = vi.mocked(deployToAgentEngine).mock.calls[0][0];
+      expect(agentPath).toBe(process.cwd());
     });
   });
 });
