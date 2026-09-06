@@ -9,7 +9,15 @@
  */
 
 import {LIVE_INPUT_RATE_HZ, resamplePcm16, toLiveInput} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 
 /** Builds little-endian signed 16-bit PCM bytes from integer samples. */
@@ -31,7 +39,7 @@ function samplesOf(bytes: Uint8Array): number[] {
 
 describe('audio_utils (adk-js specific)', () => {
   describe('toLiveInput', () => {
-    let warn: ReturnType<typeof vi.spyOn>;
+    let warn: MockInstance<(...args: unknown[]) => void>;
 
     beforeEach(() => {
       warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
@@ -48,9 +56,7 @@ describe('audio_utils (adk-js specific)', () => {
       );
 
       expect(samplesOf(result)).toHaveLength(400);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('no `rate=`') as unknown as string,
-      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no `rate=`'));
     });
   });
 
