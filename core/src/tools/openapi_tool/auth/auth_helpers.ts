@@ -5,7 +5,11 @@
  */
 
 import {OpenAPIV3} from 'openapi-types';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+  ServiceAccount,
+} from '../../../auth/auth_credential.js';
 
 /**
  * Applies the given credential to the request headers and URL.
@@ -75,5 +79,44 @@ export function createBearerScheme(): OpenAPIV3.SecuritySchemeObject {
   return {
     type: 'http',
     scheme: 'bearer',
+  };
+}
+
+/**
+ * Placeholder token URL for the service account client-credentials scheme.
+ *
+ * The service account exchange obtains its own token from Application Default
+ * Credentials or a JWT assertion, so it never calls this endpoint. The OAuth2
+ * client-credentials model requires a token URL, and the mTLS host form is the
+ * one Google API endpoints expect.
+ */
+const SERVICE_ACCOUNT_TOKEN_URL = 'https://oauth2.mtls.googleapis.com/token';
+
+/**
+ * Builds the auth scheme and auth credential for a Google service account.
+ *
+ * A scheme must be set or `ToolAuthHandler` short-circuits before the
+ * exchange. The client-credentials shape and token URL match adk-python's
+ * `_service_account_auth_scheme`, and `authScheme.type` keys the
+ * exchanged-credential cache.
+ *
+ * @param config The service account configuration to exchange at call time.
+ * @returns The auth scheme and the auth credential to configure a tool with.
+ */
+export function serviceAccountSchemeCredential(config: ServiceAccount): {
+  authScheme: OpenAPIV3.OAuth2SecurityScheme;
+  authCredential: AuthCredential;
+} {
+  return {
+    authScheme: {
+      type: 'oauth2',
+      flows: {
+        clientCredentials: {tokenUrl: SERVICE_ACCOUNT_TOKEN_URL, scopes: {}},
+      },
+    },
+    authCredential: {
+      authType: AuthCredentialTypes.SERVICE_ACCOUNT,
+      serviceAccount: config,
+    },
   };
 }

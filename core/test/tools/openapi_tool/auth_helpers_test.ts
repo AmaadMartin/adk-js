@@ -9,11 +9,13 @@ import {describe, expect, it} from 'vitest';
 import {
   AuthCredential,
   AuthCredentialTypes,
+  ServiceAccount,
 } from '../../../src/auth/auth_credential.js';
 import {
   applyCredential,
   createApiKeyScheme,
   createBearerScheme,
+  serviceAccountSchemeCredential,
 } from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
 
 describe('auth_helpers', () => {
@@ -134,6 +136,46 @@ describe('auth_helpers', () => {
         type: 'http',
         scheme: 'bearer',
       });
+    });
+  });
+
+  describe('serviceAccountSchemeCredential', () => {
+    const config: ServiceAccount = {
+      serviceAccountCredential: {
+        type: 'service_account',
+        projectId: 'project_id',
+        privateKeyId: 'private_key_id',
+        privateKey: 'private_key',
+        clientEmail: 'client_email',
+        clientId: 'client_id',
+        authUri: 'auth_uri',
+        tokenUri: 'token_uri',
+        authProviderX509CertUrl: 'auth_provider_x509_cert_url',
+        clientX509CertUrl: 'client_x509_cert_url',
+        universeDomain: 'universe_domain',
+      },
+      scopes: ['scope1', 'scope2'],
+    };
+
+    it('should create an OAuth2 client-credentials scheme', () => {
+      const {authScheme} = serviceAccountSchemeCredential(config);
+
+      expect(authScheme).toEqual({
+        type: 'oauth2',
+        flows: {
+          clientCredentials: {
+            tokenUrl: 'https://oauth2.mtls.googleapis.com/token',
+            scopes: {},
+          },
+        },
+      });
+    });
+
+    it('should carry the service account config on the credential', () => {
+      const {authCredential} = serviceAccountSchemeCredential(config);
+
+      expect(authCredential.authType).toBe(AuthCredentialTypes.SERVICE_ACCOUNT);
+      expect(authCredential.serviceAccount).toBe(config);
     });
   });
 });
