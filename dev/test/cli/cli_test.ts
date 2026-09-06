@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {Command, CommanderError} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -466,6 +467,98 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('bare intermediate command groups', () => {
+    let stdout: string;
+    let stderr: string;
+
+    beforeEach(() => {
+      stdout = '';
+      stderr = '';
+      // `command()` snapshots the parent's exit callback and output config when
+      // the child is created, so the outer `program.exitOverride()` covers the
+      // root only. Without this walk a group reaches `process.exit(1)` and
+      // kills the worker.
+      const applyTestIo = (cmd: Command) => {
+        cmd.exitOverride();
+        cmd.configureOutput({
+          writeOut: (str) => {
+            stdout += str;
+          },
+          writeErr: (str) => {
+            stderr += str;
+          },
+        });
+        cmd.commands.forEach(applyTestIo);
+      };
+      applyTestIo(program);
+    });
+
+    const parseExpectingError = async (
+      args: string[],
+    ): Promise<CommanderError> => {
+      try {
+        await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
+      } catch (e: unknown) {
+        if (e instanceof CommanderError) {
+          return e;
+        }
+        throw e;
+      }
+      return expect.fail(`expected 'adk ${args.join(' ')}' to throw`);
+    };
+
+    it('writes deploy help to stderr and exits 1 when no subcommand is given', async () => {
+      const error = await parseExpectingError(['deploy']);
+
+      expect(error.code).toBe('commander.help');
+      expect(error.exitCode).toBe(1);
+      expect(stdout).toBe('');
+      expect(stderr).toContain('deploy [options] [command]');
+      expect(stderr).toContain('Deploy agent');
+      for (const child of ['cloud_run', 'agent_engine', 'reasoning_engine']) {
+        expect(stderr).toContain(child);
+      }
+    });
+
+    it('writes integration help to stderr and exits 1 when no subcommand is given', async () => {
+      const error = await parseExpectingError(['integration']);
+
+      expect(error.code).toBe('commander.help');
+      expect(error.exitCode).toBe(1);
+      expect(stdout).toBe('');
+      expect(stderr).toContain('integration [options] [command]');
+      expect(stderr).toContain('Run ADK integration and conformance tests');
+      expect(stderr).toContain('conformance');
+    });
+
+    it('rejects an unknown deploy subcommand instead of falling back to help', async () => {
+      const error = await parseExpectingError(['deploy', 'bogus']);
+
+      expect(error.code).toBe('commander.unknownCommand');
+      expect(error.exitCode).toBe(1);
+      expect(stdout).toBe('');
+      expect(stderr).toContain("unknown command 'bogus'");
+    });
+
+    it('rejects an unknown integration subcommand', async () => {
+      const error = await parseExpectingError(['integration', 'bogus']);
+
+      expect(error.code).toBe('commander.unknownCommand');
+      expect(error.exitCode).toBe(1);
+      expect(stdout).toBe('');
+      expect(stderr).toContain("unknown command 'bogus'");
+    });
+
+    it('writes deploy help to stdout and exits 0 for an explicit --help', async () => {
+      const error = await parseExpectingError(['deploy', '--help']);
+
+      expect(error.code).toBe('commander.helpDisplayed');
+      expect(error.exitCode).toBe(0);
+      expect(stderr).toBe('');
+      expect(stdout).toContain('deploy [options] [command]');
     });
   });
 });

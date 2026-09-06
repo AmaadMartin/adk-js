@@ -417,6 +417,12 @@ export function createProgram(): Command {
       }
     });
 
+  // The intermediate groups `deploy` and `integration` deliberately have no
+  // action handler: naming a group without a subcommand is a usage error, so
+  // commander prints the group help to stderr and exits 1. An action handler
+  // also switches off commander's unknown-subcommand check, and `deploy`
+  // allows excess arguments, so `adk deploy cloud-run` would print help and
+  // exit 0 instead of reporting the typo.
   const DEPLOY_COMMAND = program
     .command('deploy')
     .description('Deploy agent')
