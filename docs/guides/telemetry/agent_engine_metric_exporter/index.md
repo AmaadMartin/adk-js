@@ -8,38 +8,13 @@ requests, such as the Vertex AI Agent Runtime.
 ## Introduction
 
 A normal metric pipeline uses `PeriodicExportingMetricReader`, which exports on
-a timer. That works while the process keeps getting CPU. The Agent Runtime bills
-per request and throttles CPU the instant a request finishes, so between
-requests the timer gets no CPU. The periodic export is starved and metric points
-are dropped.
+a timer. The Agent Runtime bills per request and throttles CPU the instant a
+request finishes, so between requests that timer gets no CPU: the export is
+starved and points are dropped. This reader has no timer, and collects only from
+hooks the request path calls.
 
-This reader has no timer. It collects only when a hook says a collect is
-warranted, and every hook is called from the request path, where CPU is
-guaranteed. Three constraints shape it:
-
-- **I1, export only while serving.** A collect runs while a request is in
-  flight.
-- **I2, never collect more often than the floor.** Two collects closer together
-  than the floor are skipped. Cloud Monitoring throttles points sent faster.
-- **I3, never collect too rarely.** A single export carries a limited number of
-  points, so the reader collects at least once per configured period.
-
-The configured export period stops being a schedule and becomes a grid of
-guideposts: would-be collect times used to decide whether an event-driven
-collect is warranted. Four decision points drive the reader:
-
-1. **Baseline.** When the in-flight count drains to zero, collect. This is gated
-   on the floor only, never on a guidepost.
-2. **Overlap.** Under continuous load the in-flight count never reaches zero, so
-   a crossed guidepost fires at the next request start instead.
-3. **Mute.** A guidepost within the floor of the last collect is muted, and the
-   grid advances by one period.
-4. **Long request.** A lone long request collects off its own inference span
-   starts, once 1.5 periods have passed without a collect in the current busy
-   period.
-
-Point 4 is what the returned span processor does. It watches for spans named
-`call_llm`, the span ADK opens for a model call.
+The three invariants it holds and the four decision points that fire a collect
+are documented in the module header, `core/src/telemetry/agent_engine_metric_exporter.ts`.
 
 ## Get started
 
@@ -93,15 +68,14 @@ environment.
 | `exportIntervalMillis` | `OTEL_METRIC_EXPORT_INTERVAL`                                    | 60000             |
 | `exportTimeoutMillis`  | `OTEL_METRIC_EXPORT_TIMEOUT`                                     | 30000             |
 | `floorMillis`          | `GOOGLE_CLOUD_AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS` | 5000              |
-| `inferenceSpanName`    | none                                                             | `call_llm`        |
 | `now`                  | none                                                             | `performance.now` |
 
 An environment value that is not a finite number is logged and replaced by the
 default. An empty or blank value counts as invalid, because `Number('')` is `0`
 and a zero floor would disable I2.
 
-`collectFloorMillis()` reads the floor at call time, so a caller can share the
-same value the reader uses.
+The span processor drives point 4 off spans named `call_llm`, the span ADK opens
+for a model call. That name is not configurable.
 
 ## Guarantees and failure modes
 

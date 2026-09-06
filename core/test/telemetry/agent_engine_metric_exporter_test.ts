@@ -504,14 +504,13 @@ describe('buildRequestDrivenMetrics', () => {
   let tracerProvider: BasicTracerProvider;
 
   /** Wires a real tracer and meter around a reader driven by a fake clock. */
-  function build(options: {inferenceSpanName?: string} = {}): void {
+  function build(): void {
     exporter = new FakeExporter();
     clock = new FakeClock();
     ({reader, spanProcessor} = buildRequestDrivenMetrics(exporter, {
       exportIntervalMillis: PERIOD_MS,
       floorMillis: FLOOR_MS,
       now: clock.now,
-      ...options,
     }));
     meterProvider = meterProviderWith(reader);
     tracerProvider = new BasicTracerProvider({spanProcessors: [spanProcessor]});
@@ -561,23 +560,6 @@ describe('buildRequestDrivenMetrics', () => {
 
   it('ignores a span that is neither', async () => {
     spanDuringOverdueRequest('execute_tool');
-
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(exporter.exports).toEqual([]);
-  });
-
-  it('honours a configured inference span name', async () => {
-    build({inferenceSpanName: 'generate_content'});
-
-    spanDuringOverdueRequest('generate_content');
-
-    await vi.waitFor(() => expect(exporter.exports).toHaveLength(1));
-  });
-
-  it('ignores the default span name once one is configured', async () => {
-    build({inferenceSpanName: 'generate_content'});
-
-    spanDuringOverdueRequest('call_llm');
 
     await new Promise((resolve) => setImmediate(resolve));
     expect(exporter.exports).toEqual([]);
