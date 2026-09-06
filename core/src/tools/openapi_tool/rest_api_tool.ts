@@ -106,6 +106,7 @@ export class RestApiTool extends BaseTool {
       this.endpoint,
       this.operationParser.getParameters(),
       args,
+      this.operation.requestBody,
     );
 
     // Handle body
@@ -185,10 +186,21 @@ export function prepareRequestParams(
   endpoint: OperationEndpoint,
   parameters: ApiParameter[],
   args: Record<string, unknown>,
+  requestBody?: OpenAPIV3.RequestBodyObject | OpenAPIV3.ReferenceObject,
 ): PreparedParams {
   const headers: Record<string, string> = {};
   const queryParams = new URLSearchParams();
   let body: unknown = undefined;
+
+  // OperationParser.processRequestBody is the authority for this classification.
+  const bodySchema =
+    requestBody && 'content' in requestBody
+      ? Object.values(requestBody.content)[0]?.schema
+      : undefined;
+  const bodyIsObject =
+    bodySchema !== undefined &&
+    !('$ref' in bodySchema) &&
+    bodySchema.type === 'object';
 
   const paramsMap = new Map(parameters.map((p) => [p.name, p]));
   const pathParams: Record<string, string> = {};
@@ -211,11 +223,15 @@ export function prepareRequestParams(
     } else if (location === 'header') {
       headers[originalName] = String(argValue);
     } else if (location === 'body') {
-      if (
-        originalName === 'body' ||
-        originalName === 'array' ||
-        originalName === ''
-      ) {
+      // An object body has one parameter per declared property, so a property
+      // called 'body' or 'array' is an ordinary key, not the whole payload.
+      // Those two names mark the whole body only for a non-object body; an
+      // empty name always marks it.
+      const isWholeBody =
+        originalName === '' ||
+        (!bodyIsObject &&
+          (originalName === 'body' || originalName === 'array'));
+      if (isWholeBody) {
         body = argValue;
       } else {
         bodyData[originalName] = argValue;

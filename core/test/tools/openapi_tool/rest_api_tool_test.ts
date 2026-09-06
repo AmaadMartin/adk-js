@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -129,6 +133,64 @@ describe('RestApiTool', () => {
       expect.objectContaining({
         body: JSON.stringify({foo: 'bar'}),
       }),
+    );
+  });
+
+  it('should send every property of an object body whose property is named body', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'POST',
+    };
+    const operation: OpenAPIV3.OperationObject = {
+      responses: {},
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                body: {type: 'object'},
+                name: {type: 'string'},
+              },
+            },
+          },
+        },
+      },
+    };
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        new Response('ok', {headers: {'content-type': 'text/plain'}}),
+      );
+    globalThis.fetch = fetchMock;
+
+    await tool.runAsync({
+      args: {body: {id: 1}, name: 'x'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    if (!init) {
+      expect.fail('fetch was not called');
+    }
+    expect(JSON.parse(String(init.body))).toEqual({body: {id: 1}, name: 'x'});
+    expect(init.headers).toEqual(
+      expect.objectContaining({'Content-Type': 'application/json'}),
     );
   });
 
@@ -1029,6 +1091,181 @@ describe('RestApiTool Utilities', () => {
 
         expect(result.url).toBe('http://api.example.com/v1/users/%252e%252e');
         expect(new URL(result.url).pathname).toBe('/v1/users/%252e%252e');
+      });
+    });
+
+    describe('request body routing', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/test',
+        method: 'POST',
+      };
+
+      function bodyParameter(
+        name: string,
+        originalName: string = name,
+      ): ApiParameter {
+        return {
+          name,
+          originalName,
+          paramLocation: 'body',
+          paramSchema: {},
+          required: false,
+        };
+      }
+
+      function jsonRequestBody(
+        schema: OpenAPIV3.SchemaObject,
+      ): OpenAPIV3.RequestBodyObject {
+        return {content: {'application/json': {schema}}};
+      }
+
+      it('should key an object property named body under its own name', () => {
+        const requestBody = jsonRequestBody({
+          type: 'object',
+          properties: {body: {type: 'object'}},
+        });
+
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('body')],
+          {body: {id: 1}},
+          requestBody,
+        );
+
+        expect(result.body).toBeUndefined();
+        expect(result.bodyData).toEqual({body: {id: 1}});
+      });
+
+      it('should key an object property named array under its own name', () => {
+        const requestBody = jsonRequestBody({
+          type: 'object',
+          properties: {array: {type: 'array', items: {type: 'string'}}},
+        });
+
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('array')],
+          {array: ['a']},
+          requestBody,
+        );
+
+        expect(result.body).toBeUndefined();
+        expect(result.bodyData).toEqual({array: ['a']});
+      });
+
+      it('should keep the siblings of an object property named body', () => {
+        const requestBody = jsonRequestBody({
+          type: 'object',
+          properties: {body: {type: 'object'}, name: {type: 'string'}},
+        });
+
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('body'), bodyParameter('name')],
+          {body: {id: 1}, name: 'x'},
+          requestBody,
+        );
+
+        expect(result.bodyData).toEqual({body: {id: 1}, name: 'x'});
+      });
+
+      it('should fill the whole body from an array-typed body', () => {
+        const requestBody = jsonRequestBody({
+          type: 'array',
+          items: {type: 'string'},
+        });
+
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('array')],
+          {array: ['a', 'b']},
+          requestBody,
+        );
+
+        expect(result.body).toEqual(['a', 'b']);
+        expect(result.bodyData).toEqual({});
+      });
+
+      it('should fill the whole body from a scalar body', () => {
+        const requestBody: OpenAPIV3.RequestBodyObject = {
+          content: {'text/plain': {schema: {type: 'string'}}},
+        };
+
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('body')],
+          {body: 'hello'},
+          requestBody,
+        );
+
+        expect(result.body).toBe('hello');
+        expect(result.bodyData).toEqual({});
+      });
+
+      it('should fill the whole body from an object body with no properties', () => {
+        const requestBody = jsonRequestBody({type: 'object'});
+
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('body', '')],
+          {body: {a: 1}},
+          requestBody,
+        );
+
+        expect(result.body).toEqual({a: 1});
+        expect(result.bodyData).toEqual({});
+      });
+
+      it('should keep the name-based routing when no request body is declared', () => {
+        const result = prepareRequestParams(endpoint, [bodyParameter('user')], {
+          user: {name: 'Alice'},
+        });
+
+        expect(result.body).toBeUndefined();
+        expect(result.bodyData).toEqual({user: {name: 'Alice'}});
+      });
+
+      it('should fill the whole body from a $ref request body', () => {
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('body')],
+          {body: {id: 1}},
+          {$ref: '#/components/requestBodies/Pet'},
+        );
+
+        expect(result.body).toEqual({id: 1});
+        expect(result.bodyData).toEqual({});
+      });
+
+      it('should fill the whole body when the request body declares no media type', () => {
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('body')],
+          {body: {id: 1}},
+          {content: {}},
+        );
+
+        expect(result.body).toEqual({id: 1});
+        expect(result.bodyData).toEqual({});
+      });
+
+      it('should fill the whole body from a $ref body schema', () => {
+        const requestBody: OpenAPIV3.RequestBodyObject = {
+          content: {
+            'application/json': {schema: {$ref: '#/components/schemas/Pet'}},
+          },
+        };
+
+        const result = prepareRequestParams(
+          endpoint,
+          [bodyParameter('body')],
+          {body: {id: 1}},
+          requestBody,
+        );
+
+        expect(result.body).toEqual({id: 1});
+        expect(result.bodyData).toEqual({});
       });
     });
   });
