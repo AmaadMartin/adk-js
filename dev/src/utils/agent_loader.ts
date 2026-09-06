@@ -599,14 +599,10 @@ export class AgentLoader {
       return;
     }
 
-    // `app` beating `agent` is the documented layout, not an ambiguity, so
-    // only a same-named sibling counts as a dropped candidate here.
     warnShadowedEntries(
       dir.name,
       entryFile.path,
-      ignored
-        .filter((file) => file.name === entryFile.name)
-        .map((file) => file.path),
+      ignored.map((file) => file.path),
     );
 
     try {
@@ -677,13 +673,16 @@ function groupEntryFilesByName(
 
 /**
  * The entry points a directory offers, most preferred first. `app` outranks
- * `agent` so that an App wins over the agent it wraps.
+ * `agent` so that an App wins over the agent it wraps, and a directory holding
+ * both is the documented layout rather than a duplicate definition — so only
+ * one of the two names is ever a candidate.
  */
 function directoryEntryFiles(subFiles: FileMetadata[]): EntryFile[] {
-  return [
-    ...sortEntryFiles(subFiles.filter((file) => file.name === 'app')),
-    ...sortEntryFiles(subFiles.filter((file) => file.name === 'agent')),
-  ];
+  const apps = sortEntryFiles(subFiles.filter((file) => file.name === 'app'));
+
+  return apps.length > 0
+    ? apps
+    : sortEntryFiles(subFiles.filter((file) => file.name === 'agent'));
 }
 
 function isAgentDirectory(entry: FileMetadata): boolean {
