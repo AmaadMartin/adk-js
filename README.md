@@ -117,6 +117,54 @@ agents:
 
 <img src="https://raw.githubusercontent.com/google/adk-python/main/assets/adk-web-dev-ui-function-call.png"/>
 
+## Troubleshooting
+
+### Advanced: injecting a Vertex AI Sessions client
+
+Most users do not need this. `new VertexAiSessionService({projectId, location})`
+builds the Agent Engine client internally, and nothing below applies.
+
+If you pass your own `sessions:` client you import `Sessions` from
+`@google-cloud/vertexai/build/src/genai/sessions.js` and `ApiClient` from
+`@google/genai/vertex_internal`, so both packages must be **direct**
+dependencies of your project — do not rely on npm hoisting a transitive copy
+into scope. That exposes a version conflict:
+`@google-cloud/vertexai@1.12.0` requires `@google/genai@^1.45.0` while
+`@google/adk` requires `^2.9.0`, so npm installs two copies and your
+`new Sessions(apiClient)` call fails to typecheck:
+
+```
+error TS2345: Argument of type '...ApiClient' is not assignable to parameter of type '...ApiClient'.
+  Types have separate declarations of a private property 'customBaseUrl'.
+```
+
+ADK cannot fix this from its own manifest, because npm honours `overrides` only
+in the root project and ignores an `overrides` block declared by a dependency.
+The dedupe has to go in **your** root `package.json`:
+
+```json
+{
+  "overrides": {
+    "@google-cloud/vertexai": {
+      "@google/genai": "^2.9.0"
+    }
+  }
+}
+```
+
+Adding `overrides` does not re-resolve an existing lockfile: a plain
+`npm install` leaves the nested copy in place. Remove both first:
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+Yarn and pnpm have equivalent mechanisms, `resolutions` and `pnpm.overrides`.
+
+This workaround becomes unnecessary once `@google-cloud/vertexai` widens its
+`@google/genai` range to accept 2.x.
+
 ## 📚 Documentation
 
 - **Getting Started**: https://adk.dev/get-started/typescript
