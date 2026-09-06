@@ -75,7 +75,10 @@ describe('importModuleFile', () => {
     });
   });
 
-  it('keeps a package import external so the process shares one copy', async () => {
+  // That a package import stays external, and so shares the process's one copy
+  // of the module, is pinned by tests/integration/service_registry: it takes a
+  // second registry instance to observe, which needs the built package.
+  it('keeps a Node built-in usable after compiling', async () => {
     const filePath = await write(
       'external.ts',
       `import * as path from 'node:path';
