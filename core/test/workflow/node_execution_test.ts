@@ -17,7 +17,7 @@ import {
 } from '../../src/workflow/errors.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {executeChildNode} from '../../src/workflow/node_runner.js';
-import {createIc, driveNode, FnNode} from './test_helpers.js';
+import {createIc, drain, driveNode, FnNode} from './test_helpers.js';
 
 // --- Tests ----------------------------------------------------------------
 
@@ -116,7 +116,13 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
       options: {useAsOutput: true},
     });
     expect(child.state.get('counter')).toBe(7);
-    expect(child.actions.stateDelta['counter']).toBe(7);
+    // The write leaves the context on the node's own event: the runner moves
+    // every pending delta onto the event it pushes, and clears it there.
+    const events = await drain(channel);
+    expect(events.map((e) => e.actions.stateDelta)).toContainEqual({
+      counter: 7,
+    });
+    expect(child.actions.stateDelta).toEqual({});
   });
 
   it('retries a flaky node per retryConfig and then succeeds', async () => {
@@ -192,8 +198,15 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
 
     expect(child.output).toBe('ok');
     // The failed first attempt's write must not survive into the committed
-    // delta — only the successful attempt's write remains.
-    expect(child.actions.stateDelta).toEqual({'attempt-2': 2});
+    // delta — only the successful attempt's write reaches an event, and the
+    // runner clears the context's own delta once it has moved it there.
+    const events = await drain(channel);
+    const committed = Object.assign(
+      {},
+      ...events.map((e) => e.actions.stateDelta),
+    );
+    expect(committed).toEqual({'attempt-2': 2});
+    expect(child.actions.stateDelta).toEqual({});
   });
 
   it('enforces a per-node timeout with NodeTimeoutError', async () => {

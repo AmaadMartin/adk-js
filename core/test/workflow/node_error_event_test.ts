@@ -99,7 +99,7 @@ describe('NodeErrorEvent — a failed node leaves a record', () => {
     expect(error.author).toBe('boom');
     expect(error.errorMessage).toBe('kaboom');
     expect(error.errorType).toBe('Error');
-    expect(error.errorCode).toBe('UNKNOWN_ERROR');
+    expect(error.errorCode).toBe('Error');
     expect(error.attemptCount).toBe(1);
     expect(thrown).toBe(kaboom);
   });
@@ -132,7 +132,7 @@ describe('NodeErrorEvent — a failed node leaves a record', () => {
     expect(errorEvents[0].errorType).toBe('TypeError');
   });
 
-  it('falls back to a generic errorCode rather than repeating errorType', async () => {
+  it('falls back to the error class name when it carries no code', async () => {
     const wf = new Workflow({
       name: 'wf',
       edges: [['START', throwingNode('boom', new RangeError('out of range'))]],
@@ -141,7 +141,7 @@ describe('NodeErrorEvent — a failed node leaves a record', () => {
     const {errorEvents} = await driveExpectingFailure(wf, 'x');
 
     expect(errorEvents[0].errorType).toBe('RangeError');
-    expect(errorEvents[0].errorCode).toBe('UNKNOWN_ERROR');
+    expect(errorEvents[0].errorCode).toBe('RangeError');
   });
 });
 
@@ -304,7 +304,7 @@ describe('NodeErrorEvent — cancellation is not failure', () => {
 });
 
 describe('NodeErrorEvent — retries and timeouts', () => {
-  it('emits once for a node that exhausts its retryConfig, not once per attempt', async () => {
+  it('emits one error event per failed attempt of a node with a retryConfig', async () => {
     let attempts = 0;
     const flaky = new FunctionNode(
       'flaky',
@@ -319,9 +319,12 @@ describe('NodeErrorEvent — retries and timeouts', () => {
     const {errorEvents} = await driveExpectingFailure(wf, 'x');
 
     expect(attempts).toBe(3);
-    expect(errorEvents).toHaveLength(1);
-    expect(errorEvents[0].attemptCount).toBe(3);
-    expect(errorEvents[0].errorMessage).toBe('still broken');
+    expect(errorEvents.map((e) => e.attemptCount)).toEqual([1, 2, 3]);
+    expect(errorEvents.map((e) => e.errorMessage)).toEqual([
+      'still broken',
+      'still broken',
+      'still broken',
+    ]);
   });
 
   it('emits for a genuine timeout, identifying it as one', async () => {
@@ -340,7 +343,7 @@ describe('NodeErrorEvent — retries and timeouts', () => {
     expect(isNodeTimeoutError(thrown)).toBe(true);
     expect(errorEvents).toHaveLength(1);
     expect(errorEvents[0].errorType).toBe('NodeTimeoutError');
-    expect(errorEvents[0].errorCode).toBe('UNKNOWN_ERROR');
+    expect(errorEvents[0].errorCode).toBe('NodeTimeoutError');
     expect(errorEvents[0].errorMessage).toContain('timed out');
     expect(errorEvents[0].nodeInfo?.path).toBe('wf.slow');
   });

@@ -277,6 +277,16 @@ export class Workflow extends BaseNode {
       return;
     }
     if (output !== undefined) {
+      // An entry that hands its last child's result straight back is reporting
+      // a value that child already announced, so the workflow must not announce
+      // it a second time. One the entry computed itself has never been on an
+      // event, and does need one. There is no provenance to test here — the
+      // entry returns a plain value, and the reference has no `dynamicEntry` to
+      // borrow a rule from — so identity against that child's output is the
+      // signal, and `useAsOutput` remains the explicit way to say it.
+      if (Object.is(dynamicState.lastChildOutput, output)) {
+        ctx.outputDelegated = true;
+      }
       ctx.output = output;
     }
   }
@@ -633,6 +643,10 @@ export class Workflow extends BaseNode {
       .map((name) => loop.nodeOutputs.get(name));
 
     if (terminalOutputs.length === 1) {
+      // The terminal node already emitted this value as its own output event,
+      // so the workflow's end-of-node flush must not put it in the stream a
+      // second time.
+      ctx.outputDelegated = true;
       ctx.output = terminalOutputs[0];
     } else if (terminalOutputs.length > 1) {
       throw new Error(

@@ -1,0 +1,296 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * Ported from `google/adk-python`
+ * `tests/unittests/workflow/test_node_runner_ctx.py`, which covers the node
+ * context as the result channel of a node run: the output, route and interrupt
+ * ids the runner writes onto it, and the resume state it carries forward.
+ *
+ * Test names are kept verbatim so the two suites can be read side by side.
+ * Where adk-js deliberately behaves differently the test asserts what adk-js
+ * does and says why.
+ */
+
+import {describe, expect, it} from 'vitest';
+import {createEvent, Event} from '../../src/events/event.js';
+import {NodeContext} from '../../src/workflow/node_context.js';
+import {createIc, FnNode, GenNode, runChildNode} from './test_helpers.js';
+
+/** The events that carry an output, which is what most assertions read. */
+function outputEvents(events: Event[]): Event[] {
+  return events.filter((e) => e.output !== undefined);
+}
+
+describe('node_runner — ctx.output from yielded events', () => {
+  it('test_yield_value_sets_ctx_output', async () => {
+    const n = new GenNode('n', async function* () {
+      yield 'hello';
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.output).toBe('hello');
+  });
+
+  it('test_yield_event_output_sets_ctx_output', async () => {
+    const n = new GenNode('n', async function* () {
+      yield createEvent({output: 'from_event'});
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.output).toBe('from_event');
+  });
+
+  it('test_no_yield_leaves_ctx_output_none', async () => {
+    const n = new FnNode('n', () => undefined);
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBeUndefined();
+    expect(events).toHaveLength(0);
+  });
+});
+
+describe('node_runner — ctx.output set directly', () => {
+  it('test_ctx_output_set_directly', async () => {
+    const n = new FnNode('n', (ctx) => {
+      ctx.output = 'direct';
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('direct');
+    expect(outputEvents(events)).toHaveLength(1);
+    expect(outputEvents(events)[0].output).toBe('direct');
+  });
+
+  it('test_ctx_output_direct_with_state_delta', async () => {
+    const n = new FnNode('n', (ctx) => {
+      ctx.state.set('key', 'val');
+      ctx.output = 'result';
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('result');
+    const withOutput = outputEvents(events);
+    expect(withOutput).toHaveLength(1);
+    expect(withOutput[0].actions.stateDelta['key']).toBe('val');
+  });
+
+  it('test_deferred_output_emitted_after_intermediate', async () => {
+    const n = new GenNode('n', async function* (ctx: NodeContext) {
+      ctx.output = 'deferred';
+      yield createEvent({content: {parts: [{text: 'working'}]}});
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('deferred');
+    expect(events).toHaveLength(2);
+    expect(events[0].content?.parts?.[0].text).toBe('working');
+    expect(events[1].output).toBe('deferred');
+  });
+});
+
+describe('node_runner — ctx.route', () => {
+  it('test_yield_route_sets_ctx_route', async () => {
+    const n = new GenNode('n', async function* () {
+      yield createEvent({output: 'out', route: 'next'});
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.output).toBe('out');
+    expect(child.route).toBe('next');
+  });
+
+  it('test_ctx_route_set_directly', async () => {
+    const n = new GenNode('n', async function* (ctx: NodeContext) {
+      ctx.route = 'branch_a';
+      yield 'out';
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.route).toBe('branch_a');
+    // A route the node assigned rather than emitted still reaches the session:
+    // the run ends with an event carrying it.
+    expect(events.map((e) => e.route)).toEqual([undefined, 'branch_a']);
+  });
+});
+
+describe('node_runner — ctx.interruptIds', () => {
+  it('test_interrupt_sets_ctx_interrupt_ids', async () => {
+    const n = new GenNode('n', async function* () {
+      yield createEvent({
+        content: {
+          parts: [{functionCall: {name: 'tool', args: {}, id: 'fc-1'}}],
+        },
+        longRunningToolIds: ['fc-1'],
+      });
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.interruptIds).toEqual(['fc-1']);
+    expect(child.output).toBeUndefined();
+  });
+
+  it('test_output_and_interrupt_coexist', async () => {
+    const n = new GenNode('n', async function* () {
+      yield 'result';
+      yield createEvent({
+        content: {
+          parts: [{functionCall: {name: 'tool', args: {}, id: 'fc-1'}}],
+        },
+        longRunningToolIds: ['fc-1'],
+      });
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.output).toBe('result');
+    expect(child.interruptIds).toEqual(['fc-1']);
+  });
+
+  it('test_duplicate_interrupt_ids_deduplicated', async () => {
+    const n = new GenNode('n', async function* () {
+      yield createEvent({longRunningToolIds: ['fc-1', 'fc-2']});
+      yield createEvent({longRunningToolIds: ['fc-2', 'fc-3']});
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect([...child.interruptIds].sort()).toEqual(['fc-1', 'fc-2', 'fc-3']);
+  });
+});
+
+describe('node_runner — output delegation', () => {
+  it('test_delegated_output_not_enqueued', async () => {
+    const n = new GenNode('n', async function* (ctx: NodeContext) {
+      ctx.outputDelegated = true;
+      yield 'delegated_value';
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('delegated_value');
+    expect(outputEvents(events)).toHaveLength(0);
+  });
+
+  it('test_delegated_ctx_output_not_emitted', async () => {
+    const n = new FnNode('n', (ctx) => {
+      ctx.outputDelegated = true;
+      ctx.output = 'delegated_direct';
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('delegated_direct');
+    expect(outputEvents(events)).toHaveLength(0);
+  });
+
+  it('test_delegated_output_preserves_event_details', async () => {
+    const n = new GenNode('n', async function* (ctx: NodeContext) {
+      ctx.outputDelegated = true;
+      yield createEvent({
+        output: 'delegated_value',
+        actions: {stateDelta: {foo: 'bar'}},
+        content: {role: 'model', parts: [{text: 'hello'}]},
+      });
+    });
+
+    const {child, events} = await runChildNode(n);
+
+    expect(child.output).toBe('delegated_value');
+    expect(events).toHaveLength(1);
+    expect(events[0].output).toBeUndefined();
+    expect(events[0].actions.stateDelta).toEqual({foo: 'bar'});
+    // Divergence from adk-python, kept deliberately: adk-python preserves the
+    // content of a delegated event, adk-js clears it because the delegate
+    // emits the same text and it appeared twice in the stream.
+    expect(events[0].content).toBeUndefined();
+  });
+});
+
+describe('node_runner — event enrichment', () => {
+  it('test_event_author_defaults_to_node_name', async () => {
+    const n = new GenNode('my_node', async function* () {
+      yield 'result';
+    });
+
+    const {events} = await runChildNode(n);
+
+    expect(events[0].author).toBe('my_node');
+  });
+
+  it('test_override_branch_used_in_node_runner', async () => {
+    const n = new GenNode('n', async function* () {
+      yield createEvent({output: 'result'});
+    });
+
+    const {events} = await runChildNode(n, {
+      options: {overrideBranch: 'custom_branch'},
+    });
+
+    expect(events[0].branch).toBe('custom_branch');
+  });
+
+  it('test_use_sub_branch_appends_segment_to_branch', async () => {
+    const n = new GenNode('n', async function* () {
+      yield createEvent({output: 'result'});
+    });
+
+    const {events} = await runChildNode(n, {
+      ic: createIc(),
+      options: {useSubBranch: true, runId: '1'},
+    });
+
+    expect(events[0].branch).toBe('n@1');
+  });
+
+  it('test_sequential_branch_propagation', async () => {
+    const n = new GenNode('n', async function* () {
+      yield createEvent({output: 'result'});
+    });
+
+    const {events} = await runChildNode(n, {
+      options: {overrideBranch: 'parent_branch'},
+    });
+
+    expect(events[0].branch).toBe('parent_branch');
+  });
+
+  it('test_child_event_branch_does_not_mutate_parent_ic', async () => {
+    const ic = createIc();
+    const n = new GenNode('n', async function* () {
+      yield createEvent({output: 'result', branch: 'new_child_branch'});
+    });
+
+    const {events} = await runChildNode(n, {ic});
+
+    expect(events[0].branch).toBe('new_child_branch');
+    expect(ic.branch).toBeUndefined();
+  });
+
+  it('test_override_isolation_scope_used_in_node_runner', async () => {
+    const seen: Array<string | undefined> = [];
+    const n = new GenNode('n', async function* (ctx: NodeContext) {
+      seen.push(ctx.isolationScope);
+      yield createEvent({output: 'result'});
+    });
+
+    const {events} = await runChildNode(n, {
+      options: {overrideIsolationScope: 'task:fc-999'},
+    });
+
+    expect(seen).toEqual(['task:fc-999']);
+    expect(events[0].isolationScope).toBe('task:fc-999');
+  });
+});

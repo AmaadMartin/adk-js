@@ -108,6 +108,23 @@ export class NodeContext {
    * node still reports the output — only the duplicate event is suppressed.
    */
   outputDelegated = false;
+
+  /**
+   * Whether this node's output has already gone out on an event.
+   *
+   * Engine-owned: the runner sets it when it pushes an event carrying the
+   * output, and reads it once the node finishes to decide whether an output the
+   * node only assigned to `ctx.output` still needs an event of its own. Mirrors
+   * adk-python's `Context._output_emitted`.
+   */
+  outputEmitted = false;
+
+  /**
+   * Whether this node's route has already gone out on an event. The engine
+   * counterpart of {@link outputEmitted}, for `ctx.route`. Mirrors adk-python's
+   * `Context._route_emitted`.
+   */
+  routeEmitted = false;
   readonly actions: EventActions;
   resumeInputs: Record<string, unknown>;
   isolationScope?: string;

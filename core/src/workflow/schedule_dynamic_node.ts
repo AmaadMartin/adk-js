@@ -79,6 +79,16 @@ export class DynamicNodeState {
   /** Union of unresolved interrupt ids across dynamic child nodes. */
   readonly interruptIds = new Set<string>();
 
+  /**
+   * The output of the child that most recently handed a result back.
+   *
+   * A `dynamicEntry` that returns this value is passing its child's result
+   * through rather than producing one of its own, and the child has already
+   * announced it. `Workflow` reads it to decide whether it still owes the
+   * stream an output event of its own.
+   */
+  lastChildOutput: unknown = undefined;
+
   /** All in-flight dynamic node tasks. */
   getDynamicTasks(): Array<Promise<NodeContext>> {
     return [...this.runs.values()]
