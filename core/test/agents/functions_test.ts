@@ -22,7 +22,7 @@ import {
   SingleBeforeToolCallback,
   ToolConfirmation,
 } from '@google/adk';
-import {FunctionCall} from '@google/genai';
+import {FunctionCall, FunctionResponseScheduling} from '@google/genai';
 import type {MockInstance} from 'vitest';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
@@ -775,6 +775,41 @@ describe('handleFunctionCallList', () => {
       status: 'pending',
     });
     expect(event!.actions.stateDelta).toEqual({jobStarted: true});
+  });
+
+  it('should stamp the scheduling of the tool onto the function response', async () => {
+    const scheduledTool = new FunctionTool({
+      name: 'scheduledTool',
+      description: 'answers without interrupting the model',
+      parameters: z.object({}),
+      execute: async () => ({result: 'noted'}),
+    });
+    scheduledTool.responseScheduling = FunctionResponseScheduling.SILENT;
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(scheduledTool)],
+      toolsDict: {scheduledTool},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.scheduling).toBe(
+      FunctionResponseScheduling.SILENT,
+    );
+  });
+
+  it('should emit no scheduling key for a tool that sets no scheduling', async () => {
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [functionCall],
+      toolsDict,
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    const functionResponse = event!.content!.parts![0].functionResponse!;
+    expect(Object.keys(functionResponse)).not.toContain('scheduling');
   });
 });
 

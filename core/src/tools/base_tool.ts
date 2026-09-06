@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {FunctionDeclaration, Tool} from '@google/genai';
+import {
+  FunctionDeclaration,
+  FunctionResponseScheduling,
+  Tool,
+} from '@google/genai';
 
 import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
@@ -34,6 +38,10 @@ export interface BaseToolParams {
   name: string;
   description: string;
   isLongRunning?: boolean;
+  /** Tool-specific metadata. The whole object must be JSON serializable. */
+  customMetadata?: Record<string, unknown>;
+  /** Tool-wide default for when the model reacts to this tool's response. */
+  responseScheduling?: FunctionResponseScheduling;
 }
 
 /**
@@ -87,6 +95,27 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Tool-specific metadata, such as a tool manifest or a deployment
+   * identifier. ADK stores it and never interprets it.
+   *
+   * The whole object must be JSON serializable. Assignable after construction,
+   * which is how a tool whose constructor does not forward it (`FunctionTool`,
+   * for one) gets one.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /**
+   * Controls when the model reacts to this tool's response (Live API only).
+   *
+   * The value is stamped onto the emitted `FunctionResponse`:
+   * `SILENT` feeds the response back without starting a model turn,
+   * `WHEN_IDLE` defers the reaction until the model is idle, and `INTERRUPT`
+   * reacts immediately. A model that does not support asynchronous function
+   * calling ignores it, and `undefined` keeps the default behaviour.
+   */
+  responseScheduling?: FunctionResponseScheduling;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
@@ -95,6 +124,8 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
+    this.customMetadata = params.customMetadata;
+    this.responseScheduling = params.responseScheduling;
   }
 
   /**
