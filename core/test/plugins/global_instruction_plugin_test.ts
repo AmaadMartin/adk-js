@@ -16,6 +16,7 @@ import {
   LlmResponse,
   ReadonlyContext,
 } from '@google/adk';
+import {Content, ContentUnion} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class MockLlm extends BaseLlm {
@@ -37,6 +38,19 @@ class MockLlm extends BaseLlm {
   async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
     throw new Error('Method not implemented.');
   }
+}
+
+/** Narrows a resolved `systemInstruction` to `Content`, failing if it is not. */
+function asContent(value: ContentUnion | undefined): Content {
+  if (
+    value === undefined ||
+    typeof value === 'string' ||
+    Array.isArray(value) ||
+    !('parts' in value)
+  ) {
+    expect.fail(`expected a Content, got ${JSON.stringify(value)}`);
+  }
+  return value;
 }
 
 describe('GlobalInstructionPlugin', () => {
@@ -280,6 +294,115 @@ describe('GlobalInstructionPlugin', () => {
       'Global instruction.',
       existingObj,
     ]);
+  });
+
+  // Ported from `test_global_instruction_plugin_prepends_to_content` in
+  // `tests/unittests/plugins/test_global_instruction_plugin.py` on
+  // `google/adk-python` main.
+  describe('Content system instruction', () => {
+    it('prepends into a Content system instruction', async () => {
+      const plugin = new GlobalInstructionPlugin('Global instruction.');
+      const llmRequest: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        config: {systemInstruction: {parts: [{text: 'Existing instruction.'}]}},
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest,
+      });
+
+      const result = llmRequest.config?.systemInstruction;
+      expect(Array.isArray(result)).toBe(false);
+      expect(asContent(result).parts?.map((part) => part.text)).toEqual([
+        'Global instruction.',
+        'Existing instruction.',
+      ]);
+    });
+
+    it('prepends into a Content and preserves role and non-text parts', async () => {
+      const plugin = new GlobalInstructionPlugin('Global instruction.');
+      const inlineData = {mimeType: 'image/png', data: 'aGVsbG8='};
+      const llmRequest: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        config: {
+          systemInstruction: {
+            role: 'user',
+            parts: [{text: 'Existing.'}, {inlineData}],
+          },
+        },
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest,
+      });
+
+      const result = asContent(llmRequest.config?.systemInstruction);
+      expect(result.role).toBe('user');
+      expect(result.parts).toEqual([
+        {text: 'Global instruction.'},
+        {text: 'Existing.'},
+        {inlineData},
+      ]);
+    });
+
+    it('prepends into a Content with no parts', async () => {
+      const plugin = new GlobalInstructionPlugin('Global instruction.');
+      const llmRequestEmptyParts: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        config: {systemInstruction: {parts: []}},
+      };
+      const llmRequestUndefinedParts: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        config: {systemInstruction: {role: 'model', parts: undefined}},
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: llmRequestEmptyParts,
+      });
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: llmRequestUndefinedParts,
+      });
+
+      expect(asContent(llmRequestEmptyParts.config?.systemInstruction)).toEqual(
+        {parts: [{text: 'Global instruction.'}]},
+      );
+      expect(
+        asContent(llmRequestUndefinedParts.config?.systemInstruction),
+      ).toEqual({role: 'model', parts: [{text: 'Global instruction.'}]});
+    });
+
+    it("does not mutate the caller's Content", async () => {
+      const plugin = new GlobalInstructionPlugin('Global instruction.');
+      const existingParts = [{text: 'Existing instruction.'}];
+      const existingContent = {role: 'user', parts: existingParts};
+      const llmRequest: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        config: {systemInstruction: existingContent},
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest,
+      });
+
+      expect(existingContent).toEqual({role: 'user', parts: existingParts});
+      expect(existingParts).toEqual([{text: 'Existing instruction.'}]);
+      expect(llmRequest.config?.systemInstruction).not.toBe(existingContent);
+    });
   });
 
   it('should inject system instruction in an end-to-end InMemoryRunner simulation', async () => {
