@@ -207,6 +207,14 @@ describe('BaseGoogleCredentialsConfig construction', () => {
     ]);
   });
 
+  it('drops the empty entries of a padded scope string', () => {
+    const config = new BaseGoogleCredentialsConfig({
+      credentials: userClientWithScope('  '),
+    });
+
+    expect(config.scopes).toEqual([]);
+  });
+
   it('harvests nothing from a client that carries no OAuth identity', () => {
     const credentials = new Compute();
     credentials.setCredentials({

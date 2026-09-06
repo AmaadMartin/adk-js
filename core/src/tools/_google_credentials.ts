@@ -95,6 +95,8 @@ function validateAuthenticationMode(
  * key. The base class validates the authentication mode and adopts the OAuth
  * identity of an authorized-user client, so a caller who already holds one
  * does not repeat its client id, secret and scopes.
+ *
+ * Please do not use this in production, as it may be deprecated later.
  */
 @experimental
 export class BaseGoogleCredentialsConfig implements GoogleCredentialsConfigOptions {

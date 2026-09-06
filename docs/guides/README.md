@@ -315,6 +315,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [EnvironmentToolset](tools/environment_toolset/index.md) - Giving an agent a working directory it can run commands in, read files from and edit, and the confirmation gate on shell execution.
 - [ExampleTool.fromConfig](tools/example_tool/index.md) - Building an ExampleTool from a configuration record, and naming an example provider that user code exports.
 - [FunctionTool parameters and the sync-callable runner](tools/function_tool/index.md) - How a tool's parameter declaration is built, and how a host keeps a blocking tool body off the event loop.
+- [GCSCredentialsConfig](tools/gcs_credentials/index.md) - How a Cloud Storage tool authenticates: the three credential modes, the default scope and the token cache key.
 - [GoogleApiToolset](tools/google_api_toolset/index.md) - Turning a Google API Discovery document into callable tools, and the credentials they run under.
 - [GoogleSearchAgentTool](tools/google_search_agent/index.md) - Running Google
   Search in a sub-agent so it can sit beside your agent's other tools.

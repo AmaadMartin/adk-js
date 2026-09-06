@@ -708,6 +708,11 @@ export type {
   CrewaiToolLike,
   CrewaiToolOptions,
 } from './integrations/crewai/crewai_tool.js';
+export {
+  GCSCredentialsConfig,
+  GCS_DEFAULT_SCOPE,
+  GCS_TOKEN_CACHE_KEY,
+} from './integrations/gcs/gcs_credentials.js';
 export {addEventsToMemory, addMemory} from './memory/base_memory_service.js';
 export type {
   AddEventsToMemoryRequest,
