@@ -160,14 +160,11 @@ export class CloudRunSandboxCodeExecutor extends BaseCodeExecutor {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
-      let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
 
+      // 'error' and 'close' can both fire. `resolve` and `clearTimeout` are
+      // both idempotent, so the second call is a no-op.
       const settle = (result: CodeExecutionResult) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
         clearTimeout(timer);
         resolve(result);
       };

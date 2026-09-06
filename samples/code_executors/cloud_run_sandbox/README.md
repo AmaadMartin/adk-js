@@ -4,7 +4,9 @@
 `sandbox` binary that the Cloud Run container runtime installs. Deploy this
 sample to Cloud Run with sandboxes enabled to see it execute anything. Anywhere
 else the binary is missing, and every run returns a result whose `stderr` says
-so.
+so. The
+[developer guide](../../../docs/guides/code_executors/cloud_run_sandbox_code_executor/index.md)
+covers the options and the failure modes.
 
 ## Running
 
