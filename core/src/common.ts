@@ -197,6 +197,8 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {createRedisSessionServiceConfig} from './integrations/redis/redis_session_service_config.js';
+export type {RedisSessionServiceConfig} from './integrations/redis/redis_session_service_config.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
