@@ -31,17 +31,9 @@ export function findPreviousInteractionState(
   agentName: string,
   currentBranch?: string,
 ): PreviousInteractionState {
-  logger.debug(
-    `Finding previous_interaction_id: agent=${agentName}, ` +
-      `branch=${currentBranch}, num_events=${events.length}`,
-  );
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (!isEventInBranch(currentBranch, event)) {
-      logger.debug(
-        `Skipping event not in branch: author=${event.author}, ` +
-          `branch=${event.branch}, current=${currentBranch}`,
-      );
       continue;
     }
     if (event.author === agentName && event.interactionId) {

@@ -532,20 +532,6 @@ export function buildMcpServerParam(
 }
 
 /**
- * Describes tools for a log line, by type alone.
- *
- * A tool can carry a credential: a remote MCP server's headers are minted per
- * turn and may hold a bearer token. So the description names the type and
- * nothing else, as `_build_tool_log` does for a non-function tool in
- * google/adk-python `models/interactions_utils.py`.
- */
-export function describeInteractionsTools(
-  tools: Interactions.Tool[],
-): string[] {
-  return tools.map((tool) => tool.type);
-}
-
-/**
  * Helper to find the last element in an array matching a predicate.
  */
 function findLastPart(
@@ -917,19 +903,6 @@ function extractStreamInteractionId(
 }
 
 /**
- * Extract the environment id carried by a stream event, if it has one.
- *
- * Only the created and completed events carry the interaction, and the
- * Interactions API includes the id opportunistically, so an event without one
- * yields `undefined`.
- */
-function extractStreamEnvironmentId(
-  event: ExtendedInteractionSSEEvent,
-): string | undefined {
-  return event.interaction?.environment_id;
-}
-
-/**
  * The `interactions.create` parameters a caller assembles, without `stream`.
  *
  * A model interaction names a `model`; an agent interaction names an `agent`.
@@ -938,15 +911,6 @@ function extractStreamEnvironmentId(
 export type InteractionsCreateParams =
   | Omit<Interactions.CreateModelInteractionParamsStreaming, 'stream'>
   | Omit<Interactions.CreateAgentInteractionParamsStreaming, 'stream'>;
-
-/**
- * The per-request options `interactions.create` accepts.
- *
- * `@google/genai` does not export this type, so it is read off the method.
- */
-type InteractionsRequestOptions = NonNullable<
-  Parameters<GoogleGenAI['interactions']['create']>[1]
->;
 
 /**
  * Issue `interactions.create` and convert the response(s) to LlmResponses.
@@ -971,10 +935,11 @@ export async function* createInteractions(
   },
 ): AsyncGenerator<LlmResponse, void, void> {
   const {createParams, stream, extraHeaders} = options;
-  // Spread, so a call with no extra headers passes no options argument at all.
-  const requestOptions: [InteractionsRequestOptions?] = extraHeaders
-    ? [{fetchOptions: {headers: extraHeaders}}]
-    : [];
+  // A tuple, so a call with no extra headers passes no second argument at all
+  // and the arity the existing callers assert on is unchanged.
+  const requestOptions = extraHeaders
+    ? ([{fetchOptions: {headers: extraHeaders}}] as const)
+    : ([] as const);
   let currentInteractionId = createParams.previous_interaction_id;
   let currentEnvironmentId: string | undefined;
 
@@ -993,7 +958,9 @@ export async function* createInteractions(
       if (interactionId) {
         currentInteractionId = interactionId;
       }
-      const environmentId = extractStreamEnvironmentId(event);
+      // Only a lifecycle event carries the interaction, and the API includes
+      // the environment id on it opportunistically.
+      const environmentId = event.interaction?.environment_id;
       if (environmentId) {
         currentEnvironmentId = environmentId;
       }

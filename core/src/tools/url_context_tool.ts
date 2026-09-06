@@ -26,22 +26,21 @@ export class UrlContextTool extends BuiltInTool {
     llmRequest,
   }: ToolProcessLlmRequest): Promise<void> {
     // A managed agent resolves its tools server-side and so builds a request
-    // with no model. The tool still has to enable itself on such a request.
-    if (!llmRequest.model && !llmRequest.isManagedAgent) {
-      return;
-    }
-
-    const model = llmRequest.model ?? '';
-
-    // A managed agent's request names no model, so there is nothing to check.
+    // with no model. It skips the model checks and still enables the tool.
     if (!llmRequest.isManagedAgent) {
-      if (!isGeminiModel(model)) {
-        throw new Error(`URL context tool is not supported for model ${model}`);
+      if (!llmRequest.model) {
+        return;
       }
 
-      if (!isGemini2OrAbove(model)) {
+      if (!isGeminiModel(llmRequest.model)) {
         throw new Error(
-          `URL context tool requires Gemini 2 or above, but got ${model}`,
+          `URL context tool is not supported for model ${llmRequest.model}`,
+        );
+      }
+
+      if (!isGemini2OrAbove(llmRequest.model)) {
+        throw new Error(
+          `URL context tool requires Gemini 2 or above, but got ${llmRequest.model}`,
         );
       }
     }

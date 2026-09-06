@@ -13,7 +13,6 @@ import {
   convertContentToSteps,
   convertToolsConfigToInteractionsFormat,
   createInteractions,
-  describeInteractionsTools,
 } from '../models/interactions_utils.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
@@ -83,16 +82,6 @@ class ClientLocationReader extends GoogleGenAI {
 }
 
 /**
- * Returns the client's resolved location, or `undefined` when it has none.
- *
- * A client that carries no `apiClient` yields `undefined`, and callers treat an
- * unresolvable location as acceptable.
- */
-function resolveClientLocation(client: GoogleGenAI): string | undefined {
-  return ClientLocationReader.locationOf(client);
-}
-
-/**
  * Rejects an injected enterprise client that does not target `global`.
  *
  * The check applies to enterprise clients only. The Gemini Developer API has no
@@ -107,7 +96,8 @@ function validateClientLocation(client: GoogleGenAI): void {
   if (!client.vertexai) {
     return;
   }
-  const location = resolveClientLocation(client);
+  // A client carrying no `apiClient` yields undefined, which is acceptable.
+  const location = ClientLocationReader.locationOf(client);
   if (location !== undefined && location !== MANAGED_AGENT_LOCATION) {
     throw new Error(
       `ManagedAgent requires an enterprise client configured for the ` +
@@ -495,13 +485,12 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
         `stream: true, previous_interaction_id: ${previousInteractionId}, ` +
         `environment: ${JSON.stringify(environment)}`,
     );
-    // The tools are reduced to their types: a remote MCP server's headers are
+    // Each tool is reduced to its type: a remote MCP server's headers are
     // minted per turn and may hold a bearer token, which must never be logged.
     logger.debug(
       `Interactions request: ${JSON.stringify({
         ...createParams,
-        tools:
-          createParams.tools && describeInteractionsTools(createParams.tools),
+        tools: createParams.tools?.map((tool) => tool.type),
       })}`,
     );
 
@@ -573,8 +562,7 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
     );
   }
 
-  // eslint-disable-next-line require-yield -- the base class mandates an AsyncGenerator, and there is no live event to emit before rejecting the mode
-  protected async *runLiveImpl(
+  protected runLiveImpl(
     _ctx: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     throw new Error(

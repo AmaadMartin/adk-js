@@ -31,10 +31,12 @@ export function getTrackingHeaders(
  * Returns {@link HttpOptions} carrying the ADK tracking headers.
  *
  * Pass it when you construct a genai client, so every call that client makes
- * is attributable to ADK.
+ * is attributable to ADK. It carries no surface label: a caller that needs one
+ * names it per request through {@link mergeTrackingHeaders}, which is the only
+ * labelled path.
  */
-export function getTrackingHttpOptions(frameworkLabel?: string): HttpOptions {
-  return {headers: getTrackingHeaders(frameworkLabel)};
+export function getTrackingHttpOptions(): HttpOptions {
+  return {headers: getTrackingHeaders()};
 }
 
 /**

@@ -44,12 +44,6 @@ describe('getTrackingHttpOptions', () => {
   it('wraps the tracking headers', () => {
     expect(getTrackingHttpOptions()).toEqual({headers: getTrackingHeaders()});
   });
-
-  it('forwards the framework label', () => {
-    expect(getTrackingHttpOptions('managed_agent')).toEqual({
-      headers: getTrackingHeaders('managed_agent'),
-    });
-  });
 });
 
 describe('mergeTrackingHeaders', () => {
