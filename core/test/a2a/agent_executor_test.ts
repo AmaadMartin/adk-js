@@ -1454,7 +1454,7 @@ describe('A2AAgentExecutor', () => {
       });
     });
 
-    it('looks the session up once, with its event history', async () => {
+    it('looks the session up with its event history, after the probe', async () => {
       mockRunner(async function* () {});
 
       await new A2AAgentExecutor({runner: runnerConfig()}).execute(
@@ -1462,8 +1462,10 @@ describe('A2AAgentExecutor', () => {
         mockEventBus,
       );
 
-      expect(mockSessionService.getSession).toHaveBeenCalledTimes(1);
-      expect(mockSessionService.getSession).toHaveBeenCalledWith({
+      // The probe skips the history, so the second read is the one that must
+      // carry it: `getUnansweredRequestEvent` reads those events.
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(2);
+      expect(mockSessionService.getSession).toHaveBeenLastCalledWith({
         appName: 'test-app',
         userId: 'A2A_USER_test-context',
         sessionId: 'test-context',
@@ -1546,6 +1548,107 @@ describe('A2AAgentExecutor', () => {
       );
 
       expect(publishSpy).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('session lookup', () => {
+    const PROBE_REQUEST = {
+      appName: 'test-app',
+      userId: 'A2A_USER_test-context',
+      sessionId: 'test-context',
+      config: {numRecentEvents: 0},
+    };
+    const FULL_READ_REQUEST = {
+      appName: 'test-app',
+      userId: 'A2A_USER_test-context',
+      sessionId: 'test-context',
+    };
+
+    /** An open `adk_request_confirmation` call, which holds the task open. */
+    const unansweredRequest = () =>
+      createEvent({
+        author: 'model',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'fc-open',
+                name: 'adk_request_confirmation',
+                args: {},
+              },
+            },
+          ],
+        },
+        actions: createEventActions(),
+      });
+
+    const session = (events: AdkEvent[]): Session =>
+      createSession({
+        id: 'test-context',
+        userId: 'A2A_USER_test-context',
+        appName: 'test-app',
+        events,
+      });
+
+    function executor(): A2AAgentExecutor {
+      const runner: RunnerConfig = {
+        appName: 'test-app',
+        sessionService: mockSessionService,
+      };
+      return new A2AAgentExecutor({runner});
+    }
+
+    it('probes without event history, then reads the history it skipped', async () => {
+      // VertexAiSessionService honours `numRecentEvents: 0` by returning no
+      // events, so the pending-request scan must read the second result.
+      mockSessionService.getSession
+        .mockResolvedValueOnce(session([]))
+        .mockResolvedValueOnce(session([unansweredRequest()]));
+
+      await executor().execute(createRequestContext(), mockEventBus);
+
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(2);
+      expect(mockSessionService.getSession).toHaveBeenNthCalledWith(
+        1,
+        PROBE_REQUEST,
+      );
+      expect(mockSessionService.getSession).toHaveBeenNthCalledWith(
+        2,
+        FULL_READ_REQUEST,
+      );
+      expect(mockSessionService.createSession).not.toHaveBeenCalled();
+
+      expect(publishedStates()).toEqual(['input-required']);
+    });
+
+    it('creates the session and skips the second read when the probe finds none', async () => {
+      mockSessionService.getSession.mockResolvedValue(undefined);
+      mockSessionService.createSession.mockResolvedValue(session([]));
+
+      await executor().execute(createRequestContext(), mockEventBus);
+
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(1);
+      expect(mockSessionService.getSession).toHaveBeenCalledWith(PROBE_REQUEST);
+      expect(mockSessionService.createSession).toHaveBeenCalledWith(
+        FULL_READ_REQUEST,
+      );
+    });
+
+    it('creates the session when it is deleted between the two reads', async () => {
+      // The probe returns no events, as Vertex does, so reusing its result
+      // would hand the pending-request scan an empty history.
+      mockSessionService.getSession
+        .mockResolvedValueOnce(session([]))
+        .mockResolvedValueOnce(undefined);
+      mockSessionService.createSession.mockResolvedValue(session([]));
+
+      await executor().execute(createRequestContext(), mockEventBus);
+
+      expect(mockSessionService.getSession).toHaveBeenCalledTimes(2);
+      expect(mockSessionService.createSession).toHaveBeenCalledWith(
+        FULL_READ_REQUEST,
+      );
     });
   });
 });

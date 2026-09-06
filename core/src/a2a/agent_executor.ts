@@ -585,8 +585,18 @@ function withInvocationMetadata<T extends {metadata?: Record<string, unknown>}>(
 /**
  * Gets or creates new ADK session.
  *
- * `created` reports which of the two happened, because only a created session
- * can carry an id the service chose instead of the one that was requested.
+ * Reads an existing session twice. The first read only asks whether the
+ * session exists, so it skips the event history, matching `_resolve_session`
+ * in adk-python. The second read fetches that history, which
+ * `getUnansweredRequestEvent` needs to decide whether a pending
+ * human-in-the-loop request is still open. adk-python needs one read because
+ * its `Runner` reloads the session itself and its executor never reads events.
+ *
+ * `created` reports whether this call created the session, because only a
+ * created session can carry an id the service chose instead of the one that
+ * was requested.
+ *
+ * @returns A session carrying its event history, never the probe result.
  */
 async function getAdkSession(
   userId: string,
@@ -594,21 +604,25 @@ async function getAdkSession(
   sessionService: BaseSessionService,
   appName: string,
 ): Promise<{session: Session; created: boolean}> {
-  // Fetched with its full event history, unlike adk-python's
-  // `_resolve_session`, which passes `num_recent_events=0` because it only
-  // probes for existence. These events feed `getUnansweredRequestEvent`, which
-  // decides whether a pending human-in-the-loop request is still open. Asking
-  // for no events would blind that gate: VertexAiSessionService returns an
-  // event-less session for `numRecentEvents: 0`.
-  const session = await sessionService.getSession({
+  const exists = await sessionService.getSession({
     appName,
     userId,
     sessionId,
+    // Checking existence does not require event history.
+    config: {numRecentEvents: 0},
   });
-  if (session) {
-    return {session, created: false};
+
+  const sessionWithEvents = exists
+    ? await sessionService.getSession({appName, userId, sessionId})
+    : undefined;
+
+  if (sessionWithEvents) {
+    return {session: sessionWithEvents, created: false};
   }
 
+  // A session deleted between the two reads is created fresh. Returning the
+  // probe result instead would hand the pending-request scan the empty history
+  // that `numRecentEvents: 0` asked for.
   return {
     session: await sessionService.createSession({
       appName,

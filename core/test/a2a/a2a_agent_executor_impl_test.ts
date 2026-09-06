@@ -268,15 +268,13 @@ describe('a2a_agent_executor_impl parity', () => {
 
     await new A2AAgentExecutor({runner}).execute(createRequestContext(), bus);
 
-    // Divergence from the reference, which passes
-    // `GetSessionConfig(num_recent_events=0)` because it only probes for
-    // existence. adk-js feeds these events to `getUnansweredRequestEvent`, so
-    // the executor's own lookup, the first one, must ask for the history. The
-    // runner looks the session up again later, which is why this pins call 1.
+    // Matches the reference, which passes `GetSessionConfig(num_recent_events=0)`
+    // because it only probes for existence.
     expect(getSession).toHaveBeenNthCalledWith(1, {
       appName: APP_NAME,
       userId: USER_ID,
       sessionId: SESSION_ID,
+      config: {numRecentEvents: 0},
     });
     expect(createSession).toHaveBeenCalledWith({
       appName: APP_NAME,
