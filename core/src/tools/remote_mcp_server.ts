@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {z} from 'zod';
 import type {ReadonlyContext} from '../agents/readonly_context.js';
-import {InputValidationError} from '../errors/input_validation_error.js';
 
 /**
  * Mints headers for one remote MCP turn, from the invocation that asked for
@@ -15,56 +13,6 @@ import {InputValidationError} from '../errors/input_validation_error.js';
 export type RemoteMcpHeaderProvider = (
   context: ReadonlyContext,
 ) => Record<string, string> | Promise<Record<string, string>>;
-
-/** The options {@link RemoteMcpServer} is constructed from. */
-export interface RemoteMcpServerOptions {
-  /**
-   * Full URL of the remote MCP server endpoint, for example
-   * `https://api.example.com/mcp`.
-   */
-  url: string;
-
-  /** Optional server label. */
-  name?: string;
-
-  /**
-   * Static headers sent on every turn, for example a fixed API key. Merged
-   * with {@link RemoteMcpServerOptions.headerProvider} output, which wins on a
-   * key conflict.
-   */
-  headers?: Record<string, string>;
-
-  /** Restricts which of the server's tools the model may call. */
-  allowedTools?: string[];
-
-  /** Runtime callback that mints headers at request time, once per turn. */
-  headerProvider?: RemoteMcpHeaderProvider;
-}
-
-const remoteMcpServerSchema = z.strictObject({
-  url: z.string(),
-  name: z.string().optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  allowedTools: z.array(z.string()).optional(),
-  // Zod has no schema for a function type, so the callback is checked by hand.
-  headerProvider: z
-    .custom<RemoteMcpHeaderProvider>((value) => typeof value === 'function')
-    .optional(),
-});
-
-/**
- * Describes why a construction failed, naming the offending keys. Values are
- * deliberately left out: a header value is a credential.
- */
-function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
-  return issues
-    .map((issue) =>
-      issue.code === 'unrecognized_keys'
-        ? `unknown key(s) ${issue.keys.join(', ')}`
-        : `invalid value for '${issue.path.join('.')}'`,
-    )
-    .join('; ');
-}
 
 /**
  * A remote MCP server that the Managed Agents API runs server-side.
@@ -77,40 +25,26 @@ function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
  * opens the session itself and runs the tools in this process. ADK never
  * connects to the server described here.
  */
-export class RemoteMcpServer {
-  /** Full URL of the remote MCP server endpoint. */
+export interface RemoteMcpServer {
+  /**
+   * Full URL of the remote MCP server endpoint, for example
+   * `https://api.example.com/mcp`.
+   */
   url: string;
 
   /** Optional server label. */
   name?: string;
 
-  /** Static headers sent on every turn. */
+  /**
+   * Static headers sent on every turn, for example a fixed API key. Merged
+   * with {@link RemoteMcpServer.headerProvider} output, which wins on a key
+   * conflict.
+   */
   headers?: Record<string, string>;
 
   /** Restricts which of the server's tools the model may call. */
   allowedTools?: string[];
 
-  /** Runtime callback that mints headers at request time. */
+  /** Runtime callback that mints headers at request time, once per turn. */
   headerProvider?: RemoteMcpHeaderProvider;
-
-  /**
-   * @param options The server description.
-   * @throws {InputValidationError} If `options` carries an unknown key, or a
-   *   known key of the wrong type.
-   */
-  constructor(options: RemoteMcpServerOptions) {
-    // TypeScript rejects a stray key in an object literal already. This check
-    // catches the widened-object and plain-JavaScript callers it cannot see.
-    const parsed = remoteMcpServerSchema.safeParse(options);
-    if (!parsed.success) {
-      throw new InputValidationError(
-        `Invalid RemoteMcpServer: ${describeIssues(parsed.error.issues)}.`,
-      );
-    }
-    this.url = options.url;
-    this.name = options.name;
-    this.headers = options.headers;
-    this.allowedTools = options.allowedTools;
-    this.headerProvider = options.headerProvider;
-  }
 }
