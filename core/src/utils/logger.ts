@@ -13,6 +13,14 @@ export enum LogLevel {
   ERROR = 3,
 }
 
+/** The winston level name each {@link LogLevel} is logged under. */
+const WINSTON_LEVEL: Readonly<Record<LogLevel, string>> = {
+  [LogLevel.DEBUG]: 'debug',
+  [LogLevel.INFO]: 'info',
+  [LogLevel.WARN]: 'warn',
+  [LogLevel.ERROR]: 'error',
+};
+
 /**
  * Logger interface for ADK.
  */
@@ -68,7 +76,7 @@ class SimpleLogger implements Logger {
       return;
     }
 
-    this.logger.log(level.toString(), messages.join(' '));
+    this.logger.log(WINSTON_LEVEL[level], messages.join(' '));
   }
 
   debug(...messages: unknown[]): void {
