@@ -22,6 +22,7 @@ import {
   PluginManager,
   RemoteMcpServer,
   Session,
+  StreamingMode,
   ToolProcessLlmRequest,
 } from '@google/adk';
 import {GoogleGenAI, Interactions} from '@google/genai';
@@ -72,14 +73,15 @@ function isAgentParams(body: unknown): body is CreateParams {
 }
 
 /**
- * Answers every genai HTTP call with an empty stream and records the request,
- * so the SDK's own serialization decides what the assertions see.
+ * Answers every genai HTTP call with canned server-sent events and records the
+ * request, so the SDK's own serialization decides what the assertions see.
  */
-function fakeBackend(): {requests: Request[]} {
+function fakeBackend(events: object[] = []): {requests: Request[]} {
   const requests: Request[] = [];
+  const body = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   vi.stubGlobal('fetch', async (...args: Parameters<typeof fetch>) => {
     requests.push(new Request(...args));
-    return new Response('', {
+    return new Response(body, {
       status: 200,
       headers: {'content-type': 'text/event-stream'},
     });
@@ -96,7 +98,10 @@ async function requestBody(request: Request): Promise<CreateParams> {
   return body;
 }
 
-function userCtx(text: string): InvocationContext {
+function userCtx(
+  text: string,
+  options: {streamingMode?: StreamingMode} = {},
+): InvocationContext {
   const session: Session = createSession({
     id: 's1',
     appName: 'test',
@@ -106,6 +111,9 @@ function userCtx(text: string): InvocationContext {
     invocationId: 'inv1',
     session,
     userContent: {role: 'user', parts: [{text}]},
+    runConfig: options.streamingMode
+      ? {streamingMode: options.streamingMode}
+      : undefined,
     pluginManager: new PluginManager(),
   });
 }
@@ -243,6 +251,47 @@ describe('ManagedAgent input', () => {
     await collect(agent, ctx);
 
     expect((await requestBody(backend.requests[0])).input).toEqual([]);
+  });
+});
+
+describe('ManagedAgent event identity', () => {
+  it('stamps the interaction and environment ids onto every event', async () => {
+    fakeBackend([
+      {
+        event_type: 'interaction.created',
+        interaction: {
+          id: 'int_1',
+          status: 'in_progress',
+          environment_id: 'env_1',
+        },
+      },
+      {event_type: 'step.delta', index: 0, delta: {type: 'text', text: 'one'}},
+      {event_type: 'step.delta', index: 0, delta: {type: 'text', text: 'two'}},
+    ]);
+    const agent = new ManagedAgent({
+      name: 'mgr',
+      agentId: 'agents/a',
+      apiClient: devApiClient(),
+    });
+
+    // SSE mode, so the two partials reach the caller alongside the final
+    // aggregated event and each one must carry the ids.
+    const events = await collect(
+      agent,
+      userCtx('hi', {streamingMode: StreamingMode.SSE}),
+    );
+
+    expect(events).toHaveLength(3);
+    expect(events.map((e) => e.interactionId)).toEqual([
+      'int_1',
+      'int_1',
+      'int_1',
+    ]);
+    expect(events.map((e) => e.environmentId)).toEqual([
+      'env_1',
+      'env_1',
+      'env_1',
+    ]);
   });
 });
 
