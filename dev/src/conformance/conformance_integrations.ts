@@ -245,8 +245,18 @@ export const searchFlights = new FunctionTool({
 
     const tripType = input.trip.returnDate ? 'round-trip' : 'one-way';
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: Record<string, any> = {
+    const airline = preferredAirline || 'Various Airlines';
+    const stopsDesc = maxStops === 0 ? 'direct' : `up to ${maxStops} stops`;
+
+    const availableFlights = [
+      `${airline} - ${tripType} ${cabinClass} flight with ${stopsDesc}`,
+      `Departure: ${trip.departureDate}`,
+    ];
+    if (trip.returnDate) {
+      availableFlights.push(`Return: ${trip.returnDate}`);
+    }
+
+    return {
       trip_type: tripType,
       route: `${trip.origin} to ${trip.destination}`,
       departure_date: trip.departureDate,
@@ -256,21 +266,8 @@ export const searchFlights = new FunctionTool({
       preferred_airline: preferredAirline,
       flexible_dates: flexibleDates,
       search_status: 'completed',
+      available_flights: availableFlights,
     };
-
-    const airline = preferredAirline || 'Various Airlines';
-    const stopsDesc = maxStops === 0 ? 'direct' : `up to ${maxStops} stops`;
-
-    result['available_flights'] = [
-      `${airline} - ${tripType} ${cabinClass} flight with ${stopsDesc}`,
-      `Departure: ${trip.departureDate}`,
-    ];
-
-    if (trip.returnDate) {
-      result['available_flights'].push(`Return: ${trip.returnDate}`);
-    }
-
-    return result;
   },
 });
 
