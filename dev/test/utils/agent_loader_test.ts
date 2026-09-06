@@ -27,6 +27,7 @@ import {
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
@@ -121,6 +122,25 @@ class FakeAgent extends BaseAgent {
 
 export const agent1 = new FakeAgent('agent1');
 export const agent2 = new FakeAgent('agent2');
+`;
+
+const appMultipleExportsContent = `
+import {App, BaseAgent} from '@google/adk';
+
+class FakeAgentForApp extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+
+export const firstApp = new App({
+  name: 'test_app_multi_1',
+  rootAgent: new FakeAgentForApp('agent_for_app_1'),
+});
+export const secondApp = new App({
+  name: 'test_app_multi_2',
+  rootAgent: new FakeAgentForApp('agent_for_app_2'),
+});
 `;
 
 const appJsContent = `
@@ -524,16 +544,44 @@ describe('AgentLoader', () => {
         return Promise.resolve();
       });
 
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
       const agentFile = new AgentFile(agentPath);
       const agent = await agentFile.load();
 
       expect(agent.name).toEqual('agent1');
-      expect(consoleSpy).toHaveBeenCalledWith(
+      expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Multiple agents found'),
       );
       await agentFile.dispose();
-      consoleSpy.mockRestore();
+      warnSpy.mockRestore();
+    });
+
+    it('loads first app if multiple apps exported', async () => {
+      const appPath = path.join(tempAgentsDir, 'app_multiple.js');
+      await fs.writeFile(appPath, appMultipleExportsContent);
+
+      const compiledAppPath = compiledPath('app_multiple.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAppPath, appMultipleExportsContent);
+        return Promise.resolve();
+      });
+
+      const warnSpy = vi
+        .spyOn(AdkLogger.prototype, 'warn')
+        .mockImplementation(() => {});
+      const agentFile = new AgentFile(appPath);
+      const loaded = await agentFile.load();
+
+      expect(isApp(loaded)).toBe(true);
+      expect((loaded as App).name).toBe('test_app_multi_1');
+      expect((loaded as App).rootAgent.name).toBe('agent_for_app_1');
+      expect(warnSpy).toHaveBeenCalledWith(
+        `Multiple apps found in ${compiledAppPath}. Using the test_app_multi_1 as a root app.`,
+      );
+      await agentFile.dispose();
+      warnSpy.mockRestore();
     });
 
     it('caches loaded agent instance', async () => {
