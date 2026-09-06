@@ -1429,3 +1429,90 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
   });
 });
+
+describe('LlmAgent transfer to a peer', () => {
+  /** Asks to transfer to `target` on its first turn, then answers. */
+  class TransferringLlm extends BaseLlm {
+    private calls = 0;
+
+    constructor(private readonly target: string) {
+      super({model: 'mock-llm'});
+    }
+
+    async *generateContentAsync(
+      _request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.calls++;
+      yield this.calls > 1
+        ? {content: {role: 'model', parts: [{text: 'Done.'}]}}
+        : {
+            content: {
+              role: 'model',
+              parts: [
+                {
+                  functionCall: {
+                    id: `call-${this.target}`,
+                    name: 'transfer_to_agent',
+                    args: {agentName: this.target},
+                  },
+                },
+              ],
+            },
+          };
+    }
+
+    async connect(): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  // The unit tests pin `resolveTransferTarget` itself. This one proves the
+  // async transfer path calls it: the model names a peer the prompt never
+  // offered, and the invocation must fail instead of running that peer.
+  it('fails the invocation instead of running the peer', async () => {
+    const child1 = new LlmAgent({
+      name: 'child1',
+      model: new TransferringLlm('child2'),
+      disallowTransferToPeers: true,
+    });
+    const child2 = new LlmAgent({
+      name: 'child2',
+      model: new MockLlm({content: {role: 'model', parts: [{text: 'peer'}]}}),
+    });
+    const root = new LlmAgent({
+      name: 'root',
+      model: new TransferringLlm('child1'),
+      subAgents: [child1, child2],
+    });
+
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: 'test_app',
+      agent: root,
+      sessionService,
+    });
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+    });
+
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: session.userId,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'go'}]},
+    })) {
+      events.push(event);
+    }
+
+    // `runAndHandleError` turns the thrown rejection into an error event, the
+    // same route the "not found in the agent tree" error already takes.
+    const errorEvents = events.filter((e) => e.errorMessage);
+    expect(errorEvents).toHaveLength(1);
+    expect(errorEvents[0].author).toBe('child1');
+    expect(errorEvents[0].errorMessage).toMatch(
+      /Transfer to sibling agent child2 is disallowed/,
+    );
+    expect(events.some((e) => e.author === 'child2')).toBe(false);
+  });
+});

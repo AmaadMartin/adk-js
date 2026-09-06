@@ -67,7 +67,7 @@ import {
 
 import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
-import {InvocationContext, requireAgent} from './invocation_context.js';
+import {InvocationContext} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
@@ -82,6 +82,7 @@ import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_ll
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
+import {resolveTransferTarget} from './transfer_utils.js';
 
 /**
  * Maximum number of reconnect attempts on transient live connection failure
@@ -1323,26 +1324,20 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           // concurrently (mirrors `send_task.cancel()` in the Python flow).
           sendAbort.abort();
           await connection.close();
-          const agent = requireAgent(invocationContext);
-          const subAgent = agent.rootAgent.findAgent(transferTo);
-          if (subAgent) {
-            const previousAgent = invocationContext.agent;
-            invocationContext.agent = subAgent;
-            // Child agent starts its own live session; do not carry over
-            // the parent's resumption handle.
-            const previousHandle =
-              invocationContext.liveSessionResumptionHandle;
-            invocationContext.liveSessionResumptionHandle = undefined;
-            try {
-              for await (const subEvent of subAgent.runLive(
-                invocationContext,
-              )) {
-                yield subEvent;
-              }
-            } finally {
-              invocationContext.agent = previousAgent;
-              invocationContext.liveSessionResumptionHandle = previousHandle;
+          const subAgent = resolveTransferTarget(invocationContext, transferTo);
+          const previousAgent = invocationContext.agent;
+          invocationContext.agent = subAgent;
+          // Child agent starts its own live session; do not carry over
+          // the parent's resumption handle.
+          const previousHandle = invocationContext.liveSessionResumptionHandle;
+          invocationContext.liveSessionResumptionHandle = undefined;
+          try {
+            for await (const subEvent of subAgent.runLive(invocationContext)) {
+              yield subEvent;
             }
+          } finally {
+            invocationContext.agent = previousAgent;
+            invocationContext.liveSessionResumptionHandle = previousHandle;
           }
           return;
         }
@@ -1758,7 +1753,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     // If model instruct to transfer to an agent, run the transferred agent.
     const nextAgentName = functionResponseEvent.actions.transferToAgent;
     if (nextAgentName) {
-      const nextAgent = this.getAgentByName(invocationContext, nextAgentName);
+      const nextAgent = resolveTransferTarget(invocationContext, nextAgentName);
       for await (const event of nextAgent.runAsync(invocationContext)) {
         if (invocationContext.abortSignal?.aborted) {
           return;
@@ -1767,30 +1762,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         yield event;
       }
     }
-  }
-
-  /**
-   * Retrieves an agent from the agent tree by its name.
-   *
-   * Performing a depth-first search to locate the agent with the given name.
-   * - Starts searching from the root agent of the current invocation context.
-   * - Traverses down the agent tree to find the specified agent.
-   *
-   * @param invocationContext The current invocation context.
-   * @param agentName The name of the agent to retrieve.
-   * @returns The agent with the given name.
-   * @throws Error if the agent is not found.
-   */
-  private getAgentByName(
-    invocationContext: InvocationContext,
-    agentName: string,
-  ): BaseAgent {
-    const rootAgent = requireAgent(invocationContext).rootAgent;
-    const agentToRun = rootAgent.findAgent(agentName);
-    if (!agentToRun) {
-      throw new Error(`Agent ${agentName} not found in the agent tree.`);
-    }
-    return agentToRun;
   }
 
   protected async *callLlmAsync(
