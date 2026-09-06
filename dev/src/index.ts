@@ -5,4 +5,9 @@
  */
 
 export {AdkApiClient} from './server/adk_api_client.js';
+export type {
+  AdkApiClientConfig,
+  RunAgentRequest,
+} from './server/adk_api_client.js';
 export {AdkApiServer} from './server/adk_api_server.js';
+export type {AdkApiServerOptions} from './server/adk_api_server.js';

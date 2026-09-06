@@ -63,7 +63,7 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 
-interface ServerOptions {
+export interface AdkApiServerOptions {
   agentsDir?: string;
   host?: string;
   port?: number;
@@ -142,7 +142,7 @@ export class AdkApiServer {
   private readonly a2a: boolean;
   private readonly a2aAuthToken?: string;
 
-  constructor(options: ServerOptions) {
+  constructor(options: AdkApiServerOptions) {
     this.host = options.host ?? 'localhost';
     this.port = options.port ?? 0; // 0 means random free port
     this.sessionService =
