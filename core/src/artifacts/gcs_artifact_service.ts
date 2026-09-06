@@ -13,6 +13,7 @@ import {
   ArtifactVersion,
   BaseArtifactService,
   DeleteArtifactRequest,
+  hasArtifactContent,
   ListArtifactKeysRequest,
   ListVersionsRequest,
   LoadArtifactRequest,
@@ -49,11 +50,7 @@ export class GcsArtifactService implements BaseArtifactService {
   }
 
   async saveArtifact(request: SaveArtifactRequest): Promise<number> {
-    if (
-      !request.artifact.inlineData &&
-      !request.artifact.text &&
-      !request.artifact.fileData
-    ) {
+    if (!hasArtifactContent(request.artifact)) {
       throw new Error('Artifact must have either inlineData or text content.');
     }
 
@@ -85,7 +82,7 @@ export class GcsArtifactService implements BaseArtifactService {
       );
 
       return version;
-    } else if (request.artifact.text !== undefined) {
+    } else if (request.artifact.text != null) {
       await file.save(request.artifact.text, {
         contentType: 'text/plain',
         metadata: {

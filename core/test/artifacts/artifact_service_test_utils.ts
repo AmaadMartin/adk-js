@@ -113,6 +113,89 @@ export function runArtifactServiceTests(
       ).rejects.toThrow('Artifact must have either inlineData or text');
     });
 
+    it('rejects an artifact whose text is null', async () => {
+      // A part rebuilt from JSON can carry a null that the Part type forbids.
+      const artifact = JSON.parse('{"text":null}') as Part;
+
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'null-text.txt',
+          artifact,
+        }),
+      ).rejects.toThrow('Artifact must have either inlineData or text');
+    });
+
+    it('saves an empty text artifact', async () => {
+      const filename = 'empty.txt';
+
+      const version = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: ''},
+      });
+      expect(version).toBe(0);
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version: 0,
+      });
+      expect(loaded?.text).toBe('');
+      expect(loaded?.inlineData).toBeUndefined();
+    });
+
+    it('versions an empty text artifact alongside a non-empty one', async () => {
+      const filename = 'report.txt';
+
+      const first = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: 'v0'},
+      });
+      const second = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact: {text: ''},
+      });
+      expect(first).toBe(0);
+      expect(second).toBe(1);
+
+      expect(
+        await service.listVersions({appName, userId, sessionId, filename}),
+      ).toEqual([0, 1]);
+      expect(
+        await service.listArtifactKeys({appName, userId, sessionId}),
+      ).toContain(filename);
+
+      const loadedFirst = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version: 0,
+      });
+      const loadedSecond = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version: 1,
+      });
+      expect(loadedFirst?.text).toBe('v0');
+      expect(loadedSecond?.text).toBe('');
+    });
+
     it('increments version number', async () => {
       const filename = 'test.txt';
       const version1 = await service.saveArtifact({
@@ -569,6 +652,42 @@ export function runArtifactServiceTests(
         version,
       });
       expect(versionMetadata?.mimeType).not.toBe('image/png');
+    });
+
+    it('stores fileData when text is null', async () => {
+      const filename = 'null-text.pdf';
+      const fileUri = 'gs://my-bucket/null-text.pdf';
+      const mimeType = 'application/pdf';
+      // A part rebuilt from JSON can carry a null that the Part type forbids.
+      const artifact = JSON.parse(
+        `{"text":null,"fileData":{"fileUri":"${fileUri}","mimeType":"${mimeType}"}}`,
+      ) as Part;
+
+      const version = await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        artifact,
+      });
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version,
+      });
+      expect(loaded?.fileData?.fileUri).toBe(fileUri);
+
+      const versionMetadata = await service.getArtifactVersion({
+        appName,
+        userId,
+        sessionId,
+        filename,
+        version,
+      });
+      expect(versionMetadata?.mimeType).toBe(mimeType);
     });
   });
 
