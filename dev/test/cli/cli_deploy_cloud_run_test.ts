@@ -478,6 +478,44 @@ describe('deployToCloudRun', () => {
     );
   });
 
+  it('should warn that ADK Web is not for production when shipping the UI', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+
+    await deployToCloudRun({...defaultOptions, withUi: true});
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      'WARNING: ADK Web is for development purposes. It has access to all data and should not be used in production.',
+    );
+  });
+
+  it('should not warn about ADK Web when the UI is not shipped', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+
+    await deployToCloudRun({...defaultOptions, withUi: false});
+
+    expect(consoleWarnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('ADK Web'),
+    );
+  });
+
+  it('should warn about ADK Web before it stages any source files', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    (createTempDir as Mock).mockResolvedValue('/tmp/generated-deploy');
+
+    await deployToCloudRun({
+      ...defaultOptions,
+      tempFolder: undefined,
+      withUi: true,
+    });
+
+    const [warnOrder] = consoleWarnSpy.mock.invocationCallOrder;
+    const [stageOrder] = (createTempDir as Mock).mock.invocationCallOrder;
+    if (warnOrder === undefined || stageOrder === undefined) {
+      expect.fail('the warning and the staging directory must both happen');
+    }
+    expect(warnOrder).toBeLessThan(stageOrder);
+  });
+
   it('should handle spawn failures', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error');
     spawnMock.mockReturnValue({
