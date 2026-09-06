@@ -10,6 +10,7 @@ import {
   BaseMemoryService,
   BaseSessionService,
   bearerTokenUserBuilder,
+  createEvent,
   Event,
   getFunctionCalls,
   getFunctionResponses,
@@ -30,6 +31,7 @@ import {trace, TracerProvider} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
 import express, {Request, Response} from 'express';
+import {randomUUID} from 'node:crypto';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import {version} from '../version.js';
@@ -62,6 +64,23 @@ import {renderStructureGraphAsDot} from './structure_graph.js';
  * command line.
  */
 export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads the state delta out of a session patch body. `adk-python` generates a
+ * camel-case alias over `state_delta` and accepts either spelling, so both
+ * names are read here.
+ */
+function readStateDelta(body: unknown): Record<string, unknown> | undefined {
+  const delta = isRecord(body)
+    ? (body['stateDelta'] ?? body['state_delta'])
+    : undefined;
+
+  return isRecord(delta) ? delta : undefined;
+}
 
 interface ServerOptions {
   agentsDir?: string;
@@ -706,6 +725,54 @@ export class AdkApiServer {
       },
     );
 
+    // Updates session state without running the agent. A delta key carrying an
+    // `app:` or `user:` prefix writes state shared beyond this session, exactly
+    // as `adk-python` does; the delta is never logged because callers keep
+    // credentials in state.
+    app.patch(
+      '/apps/:appName/users/:userId/sessions/:sessionId',
+      async (req: Request, res: Response) => {
+        try {
+          const appName = req.params['appName'];
+          const userId = req.params['userId'];
+          const sessionId = req.params['sessionId'];
+          const stateDelta = readStateDelta(req.body);
+
+          if (!stateDelta) {
+            res.status(422).json({error: 'Invalid or missing stateDelta'});
+            return;
+          }
+
+          const session = await this.sessionService.getSession({
+            appName,
+            userId,
+            sessionId,
+          });
+
+          if (!session) {
+            res.status(404).json({error: `Session not found: ${sessionId}`});
+            return;
+          }
+
+          await this.sessionService.appendEvent({
+            session,
+            event: createEvent({
+              invocationId: `p-${randomUUID()}`,
+              author: 'user',
+              actions: {stateDelta},
+            }),
+          });
+
+          res.json(session);
+        } catch (e: unknown) {
+          const error = `Failed to update session: ${e}`;
+
+          res.status(500).json({error});
+          this.logger.error(error);
+        }
+      },
+    );
+
     // ----------------------- Artifact related endpoints ----------------------
     app.get(
       '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName',
@@ -733,6 +800,81 @@ export class AdkApiServer {
           res.json(artifact);
         } catch (e: unknown) {
           const error = `Failed to load artifact: ${e}`;
+
+          res.status(500).json({error});
+          this.logger.error(error);
+        }
+      },
+    );
+
+    // Registered ahead of the `:versionId` loader below: Express matches in
+    // registration order, so the loader would otherwise bind
+    // `versionId = 'metadata'` and make this route unreachable.
+    app.get(
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName/versions/metadata',
+      async (req: Request, res: Response) => {
+        try {
+          const appName = req.params['appName'];
+          const userId = req.params['userId'];
+          const sessionId = req.params['sessionId'];
+          const artifactName = req.params['artifactName'];
+
+          const artifactVersions =
+            await this.artifactService.listArtifactVersions({
+              appName,
+              userId,
+              sessionId,
+              filename: artifactName,
+            });
+
+          res.json(artifactVersions);
+        } catch (e: unknown) {
+          const error = `Failed to list artifact version metadata: ${e}`;
+
+          res.status(500).json({error});
+          this.logger.error(error);
+        }
+      },
+    );
+
+    app.get(
+      '/apps/:appName/users/:userId/sessions/:sessionId/artifacts/:artifactName/versions/:versionId/metadata',
+      async (req: Request, res: Response) => {
+        try {
+          const appName = req.params['appName'];
+          const userId = req.params['userId'];
+          const sessionId = req.params['sessionId'];
+          const artifactName = req.params['artifactName'];
+          const versionId = req.params['versionId'];
+
+          // A decimal integer, matching what Python's `int()` accepts.
+          // `Number` would take '0x10' and '1e3', which must be a 422.
+          if (versionId !== 'latest' && !/^[+-]?\d+$/.test(versionId)) {
+            res.status(422).json({error: `Invalid version ID: ${versionId}`});
+            return;
+          }
+
+          const artifactVersion = await this.artifactService.getArtifactVersion(
+            {
+              appName,
+              userId,
+              sessionId,
+              filename: artifactName,
+              // An absent version reads as "newest".
+              version: versionId === 'latest' ? undefined : Number(versionId),
+            },
+          );
+
+          if (!artifactVersion) {
+            res
+              .status(404)
+              .json({error: `Artifact version not found: ${artifactName}`});
+            return;
+          }
+
+          res.json(artifactVersion);
+        } catch (e: unknown) {
+          const error = `Failed to get artifact version metadata: ${e}`;
 
           res.status(500).json({error});
           this.logger.error(error);
