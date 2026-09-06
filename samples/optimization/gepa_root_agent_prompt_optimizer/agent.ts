@@ -7,13 +7,13 @@
 /**
  * GEPARootAgentPromptOptimizer: reflective prompt evolution over a root agent.
  *
- * ADK bundles no GEPA search engine, so the optimizer takes one as
- * `config.engine`. This sample supplies a two-candidate engine and scores with
- * hardcoded numbers, so it runs offline with no credentials.
+ * ADK bundles a GEPA search engine, so `config.engine` is optional.
+ * {@link optimizeWithBundledEngine} runs that search; it reflects, so it calls
+ * `config.optimizerModel` and needs an API key.
  *
- * The engine here never reflects, which is why no model is ever called. A real
- * engine calls `params.reflectionLm` to have `config.optimizerModel` write the
- * next candidate.
+ * The workflow below stays offline instead. It passes a two-candidate engine
+ * that never reflects, which is how the sample runs with no credentials and
+ * also shows what `config.engine` is for.
  *
  * Run (offline, no API key):
  *   npm run sample -- samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts
@@ -131,6 +131,35 @@ export const startingAgent = new LlmAgent({
   name: 'support_agent',
   instruction: 'Help the user with their order.',
 });
+
+/** The reflection model the bundled search asks for each rewrite. */
+export const DEFAULT_OPTIMIZER_MODEL = 'gemini-2.5-flash';
+
+/**
+ * Runs the bundled search, which is what an optimization with no
+ * `config.engine` does.
+ *
+ * @param optimizerModel The model that writes each rewrite. The default calls
+ *     Gemini, so it needs an API key.
+ * @returns One line per candidate the search kept: its score and instruction.
+ */
+export async function optimizeWithBundledEngine(
+  optimizerModel = DEFAULT_OPTIMIZER_MODEL,
+): Promise<string[]> {
+  const {optimizedAgents} = await new GEPARootAgentPromptOptimizer({
+    optimizerModel,
+    maxMetricCalls: 8,
+    reflectionMinibatchSize: 2,
+  }).optimize({
+    initialAgent: startingAgent,
+    sampler: new PhraseCoverageSampler(),
+  });
+
+  return optimizedAgents.map(
+    ({optimizedAgent, overallScore}) =>
+      `validation score ${overallScore}: ${optimizedAgent.instruction}`,
+  );
+}
 
 const optimizeInstruction = node(
   async (_ctx: NodeContext) => {

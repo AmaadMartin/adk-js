@@ -10,12 +10,11 @@ against.
 ## Introduction
 
 GEPA is a search: it evaluates a candidate instruction, reads the failures, has
-a model write a better candidate, and repeats until it runs out of budget. Two
-halves of that loop are yours, and this class is the third.
+a model write a better candidate, and repeats until it runs out of budget. One
+half of that loop is yours, and this class is the other.
 
-- The **engine** runs the search. ADK bundles none. You pass one as
-  `config.engine`, and an `optimize` call without it throws before it touches
-  your sampler.
+- The **engine** runs the search. ADK bundles `DefaultGepaEngine` and uses it
+  when you configure none. Pass `config.engine` to search your own way.
 - The **sampler** scores a candidate. You implement `Sampler` over whatever
   scoring you already trust; it reports the example UIDs and the score each
   candidate earned on them.
@@ -27,9 +26,11 @@ Only the root agent's instruction changes. Sub-agent instructions are left
 alone, and the optimizer warns when the agent has any.
 
 ADK Python imports the PyPI package `gepa` here. npm has no first-party
-equivalent, so adk-js declares the engine contract instead of importing one:
+equivalent, so adk-js implements the search itself, behind a declared contract:
 `GepaEngine`, `GepaAdapter`, `EvaluationBatch`, `GepaOptimizeParams` and
 `GepaRunResult`. Anything satisfying `GepaEngine` works, including your own.
+The two searches are independent implementations, so they will not follow the
+same trajectory over the same inputs.
 
 Nothing runs at request time. Optimization is an offline batch job whose output
 is an in-memory agent carrying a better instruction. Copying that instruction
@@ -37,20 +38,18 @@ into your source is manual.
 
 ## Get started
 
-You need two things the optimizer does not supply: a `Sampler` that scores a
-candidate, and an engine that searches. Both live, runnable, in
+You supply one thing the optimizer does not: a `Sampler` that scores a
+candidate. A runnable one lives in
 [`samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts`](../../../../samples/optimization/gepa_root_agent_prompt_optimizer/agent.ts).
-Import them there, or copy them; the call that drives them is this:
+Import it there, or copy it; the call that drives it is this:
 
 ```ts
 import {GEPARootAgentPromptOptimizer, LlmAgent} from '@google/adk';
-import {
-  PhraseCoverageSampler,
-  TwoCandidateEngine,
-} from './samples/optimization/gepa_root_agent_prompt_optimizer/agent.js';
+import {PhraseCoverageSampler} from './samples/optimization/gepa_root_agent_prompt_optimizer/agent.js';
 
 const result = await new GEPARootAgentPromptOptimizer({
-  engine: new TwoCandidateEngine(),
+  maxMetricCalls: 8,
+  reflectionMinibatchSize: 2,
 }).optimize({
   initialAgent: new LlmAgent({
     name: 'support_agent',
@@ -63,6 +62,10 @@ const result = await new GEPARootAgentPromptOptimizer({
 // the rewritten instruction.
 ```
 
+The bundled search reflects, so it calls `optimizerModel` and needs that
+model's credentials. The same sample also passes a `TwoCandidateEngine` as
+`config.engine`; that engine never reflects, so it runs with no credentials.
+
 The instruction has to be a static string. A request-scoped instruction
 provider cannot be resolved without an invocation context, so the optimizer
 rejects one. Your sampler gets the same guarantee: call the exported
@@ -73,18 +76,52 @@ which would silently score a function's source text.
 
 Every field is optional and matches the ADK Python defaults.
 
-| Field                     | Default                   | What it does                                                    |
-| ------------------------- | ------------------------- | --------------------------------------------------------------- |
-| `engine`                  | none                      | The GEPA search engine. Without it, `optimize` throws.          |
-| `optimizerModel`          | `'gemini-2.5-flash'`      | The model that writes each rewrite.                             |
-| `modelConfiguration`      | thinking on, budget 10240 | The generation config for that model.                           |
-| `maxMetricCalls`          | `100`                     | The evaluation budget, passed to the engine.                    |
-| `reflectionMinibatchSize` | `3`                       | How many examples the engine reflects over at a time.           |
-| `runDir`                  | none                      | Where the engine writes its results. ADK writes nothing itself. |
+| Field                     | Default              | What it does                                          |
+| ------------------------- | -------------------- | ----------------------------------------------------- |
+| `engine`                  | `DefaultGepaEngine`  | The GEPA search engine.                               |
+| `optimizerModel`          | `'gemini-2.5-flash'` | The model that writes each rewrite.                   |
+| `modelConfiguration`      | thinking on, 10240   | The generation config for that model.                 |
+| `maxMetricCalls`          | `100`                | The evaluation budget, passed to the engine.          |
+| `reflectionMinibatchSize` | `3`                  | How many examples the engine reflects over at a time. |
+| `runDir`                  | none                 | Where the engine writes its results.                  |
 
 The constructor resolves `optimizerModel` through `LLMRegistry`, so an unknown
 model fails immediately. The model itself is built on first reflection, which
 keeps a run whose engine never reflects free of credentials.
+
+## The bundled engine
+
+`DefaultGepaEngine` scores the seed candidate on the validation set, then
+repeats one round until the budget runs out: pick a parent, sample a training
+minibatch, evaluate the parent on it, ask the reflection model for a rewrite,
+evaluate that child on the same minibatch, and keep it when it beats its
+parent. A kept child is scored on the validation set and joins the pool. Every
+evaluated example is one metric call, and the engine starts no round it cannot
+pay for, so a run never exceeds `maxMetricCalls`.
+
+Construct it yourself to change either option:
+
+```ts
+import {DefaultGepaEngine, GEPARootAgentPromptOptimizer} from '@google/adk';
+
+new GEPARootAgentPromptOptimizer({
+  engine: new DefaultGepaEngine({
+    candidateSelectionStrategy: 'current-best',
+    seed: 42,
+  }),
+});
+```
+
+- `candidateSelectionStrategy` is `'pareto'` by default, which picks uniformly
+  among the candidates no other candidate beats on every validation example.
+  `'current-best'` always reflects on the highest mean instead.
+- `seed` makes a run reproducible. Without it the engine uses `Math.random`,
+  so two runs over the same inputs can take different paths.
+
+With `runDir` set, the engine writes the final result to
+`<runDir>/gepa_result.json` and creates the directory if it is missing. It
+writes nothing else; ADK Python's `gepa` package keeps far more intermediate
+state than this.
 
 ## What the engine gets
 
@@ -107,8 +144,11 @@ the response text with the model's thoughts removed.
 
 ## Failure modes
 
-- No `config.engine`: `optimize` throws before it reads anything from the
-  sampler, and the message names `config.engine`.
+- The bundled engine module fails to load: `optimize` throws
+  `MISSING_GEPA_DEPENDENCIES_MESSAGE`, keeps the load failure as the error's
+  `cause`, and names `config.engine` as the way round it.
+- An empty training set, an empty validation set, or a `maxMetricCalls` below
+  the validation-set size: the bundled engine throws, naming the input.
 - A non-string `instruction`: `optimize` throws, naming the invocation context
   it would need.
 - A batch spanning both example sets, or holding an unknown UID: `evaluate`

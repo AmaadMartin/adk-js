@@ -35,6 +35,7 @@ import {beforeAll, describe, expect, it} from 'vitest';
 import {
   EXPECTED_PHRASES,
   mean,
+  optimizeWithBundledEngine,
   PhraseCoverageSampler,
   rootAgent,
   startingAgent,
@@ -54,6 +55,16 @@ const REWRITES = [
   'Help the user with their order. Confirm the order id first.',
   'Confirm the order id, then help the user with their order politely.',
 ];
+
+/** The reflection model the bundled-engine cases use. */
+const BUNDLED_REFLECTION_MODEL = 'bundled-gepa-reflector';
+
+/** The one rewrite that model proposes. It covers every rewarded phrase. */
+const BUNDLED_REWRITE =
+  'Confirm the order id, then help the user with their order.';
+
+/** The budget those cases give the search, matching the sample's. */
+const BUNDLED_BUDGET = 8;
 
 /** A model that hands back the next rewrite on each reflection call. */
 class ScriptedReflectionLlm extends BaseLlm {
@@ -87,6 +98,37 @@ class ScriptedReflectionLlm extends BaseLlm {
 
   override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
     throw new Error('ScriptedReflectionLlm has no live connection.');
+  }
+}
+
+/** A model that answers every reflection call with {@link BUNDLED_REWRITE}. */
+class BundledEngineReflectionLlm extends BaseLlm {
+  static override readonly supportedModels: Array<string | RegExp> = [
+    /bundled-gepa-.*/,
+  ];
+
+  override async *generateContentAsync(
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {
+    yield {content: {role: 'model', parts: [{text: BUNDLED_REWRITE}]}};
+  }
+
+  override async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('BundledEngineReflectionLlm has no live connection.');
+  }
+}
+
+/** The sample's sampler, counting the examples it was asked to score. */
+class BatchRecordingSampler extends PhraseCoverageSampler {
+  /** How many examples the search has spent so far. */
+  examplesScored = 0;
+
+  override async sampleAndScore(
+    params: SampleAndScoreParams,
+  ): Promise<UnstructuredSamplingResult> {
+    const result = await super.sampleAndScore(params);
+    this.examplesScored += Object.keys(result.scores).length;
+    return result;
   }
 }
 
@@ -234,5 +276,49 @@ describe('GEPARootAgentPromptOptimizer end to end', () => {
         'validation score 1: Help the user with their order. Confirm the ' +
         'order id before you act.',
     );
+  });
+});
+
+describe('GEPARootAgentPromptOptimizer on the bundled engine', () => {
+  beforeAll(() => {
+    LLMRegistry.register(BundledEngineReflectionLlm);
+  });
+
+  it('rewrites the instruction and stays inside its budget', async () => {
+    const sampler = new BatchRecordingSampler();
+    const initialAgent = new LlmAgent({
+      name: 'support_agent',
+      instruction: STARTING_INSTRUCTION,
+    });
+
+    const result = await new GEPARootAgentPromptOptimizer({
+      optimizerModel: BUNDLED_REFLECTION_MODEL,
+      maxMetricCalls: BUNDLED_BUDGET,
+      reflectionMinibatchSize: 2,
+    }).optimize({initialAgent, sampler});
+
+    expect(
+      result.optimizedAgents.map(({optimizedAgent}) =>
+        requireStaticInstruction(optimizedAgent),
+      ),
+    ).toEqual([STARTING_INSTRUCTION, BUNDLED_REWRITE]);
+    expect(
+      result.optimizedAgents.map(({overallScore}) => overallScore),
+    ).toEqual([0.5, 1]);
+    expect(result.gepaResult).toMatchObject({
+      bestScore: 1,
+      totalMetricCalls: sampler.examplesScored,
+    });
+    expect(sampler.examplesScored).toBeLessThanOrEqual(BUNDLED_BUDGET);
+    expect(initialAgent.instruction).toBe(STARTING_INSTRUCTION);
+  });
+
+  it('runs the sample without a caller-written engine', async () => {
+    const lines = await optimizeWithBundledEngine(BUNDLED_REFLECTION_MODEL);
+
+    expect(lines).toEqual([
+      `validation score 0.5: ${STARTING_INSTRUCTION}`,
+      `validation score 1: ${BUNDLED_REWRITE}`,
+    ]);
   });
 });
