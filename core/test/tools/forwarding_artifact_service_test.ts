@@ -41,6 +41,9 @@ function makeToolContext(
   } as any;
 }
 
+/** Unix seconds for 2025-01-01T12:00:00Z, as a delegate would report it. */
+const DELEGATE_CREATE_TIME = 1735732800;
+
 describe('ForwardingArtifactService', () => {
   describe('saveArtifact', () => {
     it('delegates to toolContext.saveArtifact', async () => {
@@ -215,6 +218,26 @@ describe('ForwardingArtifactService', () => {
       expect(result).toEqual(versions);
     });
 
+    it('propagates createTime from the delegate', async () => {
+      const artifactService = makeArtifactServiceStub();
+      artifactService.listArtifactVersions.mockResolvedValue([
+        {version: 0, createTime: DELEGATE_CREATE_TIME},
+      ]);
+      const toolContext = makeToolContext(artifactService);
+      const service = new ForwardingArtifactService(toolContext);
+
+      const request: ListVersionsRequest = {
+        appName: 'app',
+        userId: 'user',
+        sessionId: 'session',
+        filename: 'file.txt',
+      };
+
+      const result = await service.listArtifactVersions(request);
+
+      expect(result[0].createTime).toBe(DELEGATE_CREATE_TIME);
+    });
+
     it('throws when artifactService is undefined', async () => {
       const toolContext = makeToolContext(undefined);
       const service = new ForwardingArtifactService(toolContext);
@@ -254,6 +277,28 @@ describe('ForwardingArtifactService', () => {
         version: 1,
       });
       expect(result).toEqual(versionMeta);
+    });
+
+    it('propagates createTime from the delegate', async () => {
+      const artifactService = makeArtifactServiceStub();
+      artifactService.getArtifactVersion.mockResolvedValue({
+        version: 0,
+        createTime: DELEGATE_CREATE_TIME,
+      });
+      const toolContext = makeToolContext(artifactService);
+      const service = new ForwardingArtifactService(toolContext);
+
+      const request: LoadArtifactRequest = {
+        appName: 'app',
+        userId: 'user',
+        sessionId: 'session',
+        filename: 'file.txt',
+        version: 0,
+      };
+
+      const result = await service.getArtifactVersion(request);
+
+      expect(result?.createTime).toBe(DELEGATE_CREATE_TIME);
     });
 
     it('throws when artifactService is undefined', async () => {

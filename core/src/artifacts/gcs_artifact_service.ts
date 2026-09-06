@@ -281,6 +281,7 @@ export class GcsArtifactService implements BaseArtifactService {
         mimeType: metadata.contentType,
         customMetadata: metadata.metadata as Record<string, unknown>,
         canonicalUri: file.publicUrl(),
+        createTime: toEpochSeconds(metadata.timeCreated),
       };
     } catch (e) {
       logger.warn(
@@ -290,6 +291,12 @@ export class GcsArtifactService implements BaseArtifactService {
       return undefined;
     }
   }
+}
+
+/** Converts an RFC 3339 timestamp reported by GCS into Unix seconds. */
+function toEpochSeconds(rfc3339?: string): number | undefined {
+  const ms = rfc3339 ? Date.parse(rfc3339) : NaN;
+  return isNaN(ms) ? undefined : ms / 1000;
 }
 
 function getFileName({
