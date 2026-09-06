@@ -222,7 +222,7 @@ export function isJsonSchemaFormat(
 }
 
 /** Narrows a chat request to the GenericChat shape the provider sends. */
-function isGenericChatRequest(
+export function isGenericChatRequest(
   request: models.ChatDetails['chatRequest'],
 ): request is models.GenericChatRequest {
   return request.apiFormat === 'GENERIC';
