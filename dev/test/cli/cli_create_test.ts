@@ -64,6 +64,17 @@ describe('createAgent', () => {
     language: '',
   });
 
+  /** The `.env` contents that `createAgent` handed to `saveToFile`. */
+  const writtenEnvFile = (): string => {
+    const call = vi
+      .mocked(saveToFile)
+      .mock.calls.find(([filePath]) => filePath.endsWith('.env'));
+    if (!call) {
+      expect.fail('createAgent did not write a .env file');
+    }
+    return String(call[1]);
+  };
+
   beforeAll(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -160,9 +171,81 @@ describe('createAgent', () => {
         expect.stringContaining('GOOGLE_GENAI_API_KEY=my-api-key'),
       );
     });
+
+    it('should set Vertex AI env vars when only a project is provided', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        project: 'my-project',
+      });
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_PROJECT=my-project'),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_LOCATION=us-central1'),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_GENAI_USE_VERTEXAI=1'),
+      );
+    });
+
+    it('should write exactly one backend selector when an api key and a project are both provided', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        apiKey: 'my-api-key',
+        project: 'my-project',
+        region: 'us-west1',
+      });
+
+      const envFile = writtenEnvFile();
+      const selectors = [
+        ...envFile.matchAll(/^GOOGLE_GENAI_USE_VERTEXAI=(.*)$/gm),
+      ].map((match) => match[1]);
+      expect(selectors).toEqual(['1']);
+      expect(envFile).toContain('GOOGLE_GENAI_API_KEY=my-api-key');
+    });
+
+    it('should keep writing only the location when just a region is provided', async () => {
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        region: 'us-west1',
+      });
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_LOCATION=us-west1'),
+      );
+      expect(saveToFile).not.toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_GENAI_USE_VERTEXAI'),
+      );
+    });
   });
 
   describe('Interactive Mode', () => {
+    /**
+     * Drives model -> language -> Vertex AI backend, with gcloud supplying a
+     * project and no region, and the user answering the two Vertex prompts.
+     */
+    const answerVertexPrompts = (project: string, region: string) => {
+      vi.stubEnv('GOOGLE_CLOUD_PROJECT', undefined);
+      vi.stubEnv('GOOGLE_CLOUD_LOCATION', undefined);
+      (select as Mock).mockResolvedValueOnce('gemini-2.5-flash');
+      (select as Mock).mockResolvedValueOnce('ts');
+      (select as Mock).mockResolvedValueOnce('vertex');
+      (execSync as Mock).mockImplementation((cmd: string) =>
+        cmd.includes('project') ? 'gcloud-project\n' : '',
+      );
+      (text as Mock).mockResolvedValueOnce(project);
+      (text as Mock).mockResolvedValueOnce(region);
+    };
+
     it('should prompt for model if not provided', async () => {
       (select as Mock).mockResolvedValueOnce('gemini-2.5-pro'); // Model
       (select as Mock).mockResolvedValueOnce('ts'); // Language
@@ -282,6 +365,84 @@ describe('createAgent', () => {
       );
 
       expect(saveToFile).not.toHaveBeenCalled();
+    });
+
+    it('should seed the region prompt with the default location when gcloud has none', async () => {
+      answerVertexPrompts('gcloud-project', 'us-central1');
+
+      await createAgent(getFreshOptions());
+
+      expect(text).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: 'Enter the Google Cloud Region',
+          initialValue: 'us-central1',
+        }),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_LOCATION=us-central1'),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_GENAI_USE_VERTEXAI=1'),
+      );
+    });
+
+    it('should still select Vertex when the region comes back empty', async () => {
+      answerVertexPrompts('gcloud-project', '');
+
+      await createAgent(getFreshOptions());
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_PROJECT=gcloud-project'),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_LOCATION=us-central1'),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_GENAI_USE_VERTEXAI=1'),
+      );
+    });
+
+    it('should reject an empty project at the prompt', async () => {
+      answerVertexPrompts('gcloud-project', 'us-central1');
+
+      await createAgent(getFreshOptions());
+
+      // The @clack/prompts mock never runs `validate`, so call it directly.
+      const options = vi
+        .mocked(text)
+        .mock.calls.find(
+          ([opts]) => opts.message === 'Enter the Google Cloud Project ID',
+        )?.[0];
+      if (!options?.validate) {
+        expect.fail('the project prompt received no validate callback');
+      }
+      expect(options.validate('')).toBeTypeOf('string');
+      expect(options.validate('   ')).toBeTypeOf('string');
+      expect(options.validate('my-project')).toBeUndefined();
+    });
+
+    it('should trim the Vertex answers', async () => {
+      answerVertexPrompts('  spaced-project  ', '  europe-west4  ');
+
+      await createAgent(getFreshOptions());
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_PROJECT=spaced-project'),
+      );
+      expect(saveToFile).toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_LOCATION=europe-west4'),
+      );
+      expect(saveToFile).not.toHaveBeenCalledWith(
+        expect.stringContaining('.env'),
+        expect.stringContaining('GOOGLE_CLOUD_PROJECT=  spaced-project'),
+      );
     });
   });
 
