@@ -42,6 +42,31 @@ Only `url` is required. Every other field is optional. TypeScript rejects a key
 that is not one of the five, so a typo is a compile error rather than a setting
 that silently does nothing.
 
+## Validating a description TypeScript never saw
+
+The compile-time check reaches an object literal you write by hand. It does not
+reach a description that arrives from a configuration file, from JavaScript, or
+through a variable that has been widened along the way. Pass such a description
+through `createRemoteMcpServer`, which checks the same rules when it runs.
+
+```typescript
+import {createRemoteMcpServer} from '@google/adk';
+
+const maps = createRemoteMcpServer({
+  url: 'https://mcp.example.com/mcp',
+  name: 'maps',
+  allowedTools: ['search_places'],
+});
+```
+
+It throws `InputValidationError` when a key is not one of the five, when `url`
+is missing or empty, and when a field holds the wrong type. The message names
+the offending key, so `{headers: {'X-Bad': 3}}` reports
+`RemoteMcpServer.headers.X-Bad must be a string.`
+
+It returns a new object, and it copies `headers` and `allowedTools`. Editing
+the description you passed in cannot change the specification you got back.
+
 ## Headers
 
 Two fields supply headers, and they serve different lifetimes.
@@ -65,10 +90,16 @@ const maps: RemoteMcpServer = {
 };
 ```
 
-ADK copies `headers`, then assigns the callback's output over the copy. The
-callback wins on a key conflict. The copy means building the param never
-changes the specification you wrote: `maps.headers` holds the same values after
-a turn as before.
+`resolveRemoteMcpServerHeaders` performs that merge, once per turn. It copies
+`headers`, then assigns the callback's output over the copy, so the callback
+wins on a key conflict. The copy means a turn never changes the specification
+you wrote: `maps.headers` holds the same values after a turn as before.
+
+```typescript
+import {resolveRemoteMcpServerHeaders} from '@google/adk';
+
+const headers = await resolveRemoteMcpServerHeaders(maps, readonlyContext);
+```
 
 An error thrown by `headerProvider` propagates to the caller. ADK does not
 catch it and does not fall back to the static headers, so a failed token mint
