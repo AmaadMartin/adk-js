@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isCancel, select, text} from '@clack/prompts';
+import {isCancel, password, select, text} from '@clack/prompts';
 import {exec, execSync} from 'node:child_process';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
@@ -287,7 +287,7 @@ export async function createAgent(options: AgentCreationOptions) {
     } else {
       const apiKeyResponse: symbol | string = options.forceYes
         ? ''
-        : await text({
+        : await password({
             message: 'Enter the Google API Key',
           });
 
