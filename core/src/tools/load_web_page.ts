@@ -46,6 +46,12 @@ const BLOCKED_IPV4_CIDRS = [
   '240.0.0.0/4', // reserved / future use (includes 255.255.255.255)
 ].map(parseIpv4Cidr);
 
+/** An IPv6 network: the eight hextets of its address plus its prefix length. */
+interface Ipv6Cidr {
+  base: number[];
+  prefix: number;
+}
+
 /**
  * IPv6 ranges that are not globally routable and therefore blocked. The
  * IPv4-mapped range `::ffff:0:0/96` is handled separately by extracting the
@@ -61,6 +67,9 @@ const BLOCKED_IPV6_CIDRS = [
   'fe80::/10', // link-local
   'ff00::/8', // multicast
 ].map(parseIpv6Cidr);
+
+/** IPv4-mapped IPv6 addresses, which are re-checked against the IPv4 rules. */
+const IPV4_MAPPED_CIDR = parseIpv6Cidr('::ffff:0:0/96');
 
 /** Builds the parity failure message for a URL. */
 function failedToFetchMessage(url: string): string {
@@ -132,15 +141,6 @@ function ipv4ToInt(octets: number[]): number {
   );
 }
 
-/** Packs eight IPv6 hextets into a 128-bit BigInt. */
-function hextetsToBigInt(hextets: number[]): bigint {
-  let value = 0n;
-  for (const hextet of hextets) {
-    value = (value << 16n) | BigInt(hextet);
-  }
-  return value;
-}
-
 /** Precomputes the network address and mask for an IPv4 CIDR string. */
 function parseIpv4Cidr(cidr: string): {base: number; mask: number} {
   const [address, prefix] = cidr.split('/');
@@ -148,10 +148,10 @@ function parseIpv4Cidr(cidr: string): {base: number; mask: number} {
   return {base: (ipv4ToInt(parseIpv4(address)!) & mask) >>> 0, mask};
 }
 
-/** Precomputes the network address and prefix length for an IPv6 CIDR string. */
-function parseIpv6Cidr(cidr: string): {base: bigint; prefix: number} {
+/** Precomputes the network hextets and prefix length for an IPv6 CIDR string. */
+function parseIpv6Cidr(cidr: string): Ipv6Cidr {
   const [address, prefix] = cidr.split('/');
-  return {base: hextetsToBigInt(parseIpv6(address)!), prefix: Number(prefix)};
+  return {base: parseIpv6(address)!, prefix: Number(prefix)};
 }
 
 /** Returns `true` if the IPv4 octets fall within any blocked range. */
@@ -162,22 +162,33 @@ function isBlockedIpv4(octets: number[]): boolean {
   );
 }
 
+/**
+ * Returns `true` when `hextets` falls inside the network. Every hextet is
+ * compared with the bits the prefix does not reach shifted away, so the shift
+ * is 0 for a hextet the prefix spans whole, partial for the hextet it splits,
+ * and 16 past the prefix, where both sides become 0 and always match.
+ */
+function matchesIpv6Prefix(
+  hextets: number[],
+  {base, prefix}: Ipv6Cidr,
+): boolean {
+  return base.every((baseHextet, i) => {
+    const shift = Math.min(16, Math.max(0, 16 * (i + 1) - prefix));
+    return hextets[i] >> shift === baseHextet >> shift;
+  });
+}
+
 /** Returns `true` if the IPv6 hextets fall within any blocked range. */
 function isBlockedIpv6(hextets: number[]): boolean {
-  const value = hextetsToBigInt(hextets);
-  // IPv4-mapped (::ffff:0:0/96): re-check the embedded IPv4 address.
-  if (value >> 32n === 0xffffn) {
+  if (matchesIpv6Prefix(hextets, IPV4_MAPPED_CIDR)) {
     return isBlockedIpv4([
-      Number((value >> 24n) & 0xffn),
-      Number((value >> 16n) & 0xffn),
-      Number((value >> 8n) & 0xffn),
-      Number(value & 0xffn),
+      hextets[6] >> 8,
+      hextets[6] & 0xff,
+      hextets[7] >> 8,
+      hextets[7] & 0xff,
     ]);
   }
-  return BLOCKED_IPV6_CIDRS.some(
-    ({base, prefix}) =>
-      value >> BigInt(128 - prefix) === base >> BigInt(128 - prefix),
-  );
+  return BLOCKED_IPV6_CIDRS.some((cidr) => matchesIpv6Prefix(hextets, cidr));
 }
 
 /**

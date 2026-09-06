@@ -329,6 +329,45 @@ describe('loadWebPage', () => {
     });
   });
 
+  describe('IPv6 CIDR boundaries', () => {
+    it.each([
+      'http://[64:ff9b:1::1]/',
+      'http://[100::1]/',
+      'http://[fc00::]/',
+      'http://[fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/',
+      'http://[febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/',
+      'http://[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/',
+      'http://[2001:db8:ffff:ffff:ffff:ffff:ffff:ffff]/',
+      'http://[::ffff:192.168.0.1]/',
+    ])('rejects %s, inside a blocked range', async (url) => {
+      const result = await loadWebPage(url);
+
+      expect(result).toBe(`Failed to fetch url: ${url}`);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      'http://[fb00::1]/',
+      'http://[fe00::1]/',
+      'http://[fe7f:ffff:ffff:ffff:ffff:ffff:ffff:ffff]/',
+      'http://[fec0::1]/',
+      'http://[2001:db9::1]/',
+      'http://[64:ff9b:2::1]/',
+      'http://[100:0:0:1::1]/',
+      'http://[1::ffff:7f00:1]/',
+      'http://[::fffe:7f00:1]/',
+    ])('allows %s, just outside every blocked range', async (url) => {
+      fetchMock.mockResolvedValue(
+        htmlResponse('<p>The quick brown fox jumped over here</p>'),
+      );
+
+      const result = await loadWebPage(url);
+
+      expect(result).toBe('The quick brown fox jumped over here');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('timeout configuration', () => {
     it('uses the 30s default and honors an override', async () => {
       resolveTo('93.184.216.34');
