@@ -49,6 +49,7 @@ export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig} from './agents/loop_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
 export {AgentTransferLlmRequestProcessor} from './agents/processors/agent_transfer_llm_request_processor.js';
+export {AutoFlow} from './agents/processors/auto_flow.js';
 export {
   BaseLlmRequestProcessor,
   BaseLlmResponseProcessor,
@@ -62,6 +63,7 @@ export {
   INTERACTIONS_REQUEST_PROCESSOR,
   InteractionsRequestProcessor,
 } from './agents/processors/interactions_request_processor.js';
+export {SingleFlow} from './agents/processors/single_flow.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
