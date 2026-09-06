@@ -18,6 +18,10 @@ export {
 } from './code_executors/agent_engine_sandbox_code_executor.js';
 export {CodeExecutionLanguage} from './code_executors/code_execution_utils.js';
 export {
+  GkeCodeExecutor,
+  type GkeCodeExecutorOptions,
+} from './code_executors/gke_code_executor.js';
+export {
   UnsafeLocalCodeExecutor,
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
