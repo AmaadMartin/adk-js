@@ -15,6 +15,10 @@
     "dist"
   ],
   "type": "module",
+  "sideEffects": [
+    "./dist/*/cli_entrypoint.js",
+    "./dist/*/cli/cli.js"
+  ],
   "typings": "./dist/types/index.d.ts",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
