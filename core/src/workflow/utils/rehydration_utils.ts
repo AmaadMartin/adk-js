@@ -15,6 +15,7 @@
 
 import {requiresUserInput} from '../../agents/user_input_request.js';
 import {Event} from '../../events/event.js';
+import {isPlainRecord} from '../../utils/object_utils.js';
 import {RouteValue} from '../graph.js';
 import type {NodeContext, NodeResult} from '../node_context.js';
 import {
@@ -401,7 +402,7 @@ function reconstructRuns(
     // resumed waiting node re-runs with it (not the resume message). Guard the
     // read since `agentState` is an unknown, arbitrarily-shaped payload.
     const agentState = event.actions?.agentState;
-    if (isRecord(agentState) && 'input' in agentState) {
+    if (isPlainRecord(agentState) && 'input' in agentState) {
       node.input = agentState.input;
     }
   }
@@ -482,11 +483,6 @@ function directChildName(path: string, parentPath: string): string | undefined {
   return rest.split('@')[0];
 }
 
-/** Narrows an unknown value to a plain (non-array) record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /**
  * Unwraps a `{result: value}` FunctionResponse envelope to the bare value.
  *
@@ -535,7 +531,7 @@ export function unwrapResponse(
  * declares nothing and so does not suppress parsing.
  */
 function acceptsString(jsonSchema: unknown): boolean {
-  if (!isRecord(jsonSchema)) {
+  if (!isPlainRecord(jsonSchema)) {
     return false;
   }
   const type = jsonSchema['type'];
