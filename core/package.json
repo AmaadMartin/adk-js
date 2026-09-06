@@ -61,6 +61,12 @@
       "require": "./dist/cjs/tools/mcp/index.js",
       "default": "./dist/esm/tools/mcp/index.js"
     },
+    "./models/oci": {
+      "types": "./dist/types/models/oci_genai_llm.d.ts",
+      "import": "./dist/esm/models/oci_genai_llm.js",
+      "require": "./dist/cjs/models/oci_genai_llm.js",
+      "default": "./dist/esm/models/oci_genai_llm.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -112,6 +118,8 @@
     "@types/express": "^4.17.25",
     "@types/lodash-es": "^4.17.12",
     "express": "^4.22.1",
+    "oci-common": "^2.140.1",
+    "oci-generativeaiinference": "^2.140.1",
     "openapi-types": "^12.1.3"
   },
   "peerDependencies": {
@@ -124,7 +132,9 @@
     "@mikro-orm/postgresql": "^6.6.6",
     "@mikro-orm/sqlite": "^6.6.6",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "express": "^4.22.1 || ^5.1.0"
+    "express": "^4.22.1 || ^5.1.0",
+    "oci-common": "^2.140.1",
+    "oci-generativeaiinference": "^2.140.1"
   },
   "peerDependenciesMeta": {
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": {
@@ -155,6 +165,12 @@
       "optional": true
     },
     "express": {
+      "optional": true
+    },
+    "oci-common": {
+      "optional": true
+    },
+    "oci-generativeaiinference": {
       "optional": true
     }
   }
