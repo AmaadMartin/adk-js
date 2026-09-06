@@ -285,16 +285,16 @@ export class StreamAccumulator {
     };
   }
 
-  /** Builds the parts of a response the API never sent in full. */
+  /**
+   * Builds the parts of a response the API never sent in full.
+   *
+   * Every function call is reached through its output item, because both are
+   * keyed by the `output_index` that each item-scoped event carries.
+   */
   private accumulatedParts(): Part[] {
     const parts: Part[] = [];
     for (const [index, item] of this.outputItems) {
       parts.push(...this.itemParts(index, item));
-    }
-    for (const [index, call] of this.functionCalls) {
-      if (!this.outputItems.has(index)) {
-        parts.push(callToPart(call));
-      }
     }
     return parts;
   }

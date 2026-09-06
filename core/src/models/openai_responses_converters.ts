@@ -582,11 +582,9 @@ export function functionDeclarationToResponseTool(
     parameters = structuredClone(jsonSchema);
     lowercaseSchemaTypes(parameters);
   } else if (functionDeclaration.parameters) {
+    // `required` needs no special handling: the schema conversion carries it
+    // through, unlike adk-python's, which rebuilds the document field by field.
     parameters = schemaToJsonObject(functionDeclaration.parameters);
-    const required = functionDeclaration.parameters.required;
-    if (required?.length && !('required' in parameters)) {
-      parameters['required'] = required;
-    }
   } else {
     parameters = {type: 'object', properties: {}};
   }
@@ -633,11 +631,13 @@ export function toUsageMetadata(
   if (!usage) {
     return undefined;
   }
+  // adk-python derives the total from the input and output counts when the
+  // API omits it. The SDK declares `total_tokens` as always present, so there
+  // is nothing here to fall back from.
   return {
     promptTokenCount: usage.input_tokens,
     candidatesTokenCount: usage.output_tokens,
-    totalTokenCount:
-      usage.total_tokens ?? usage.input_tokens + usage.output_tokens,
+    totalTokenCount: usage.total_tokens,
     cachedContentTokenCount: usage.input_tokens_details?.cached_tokens,
     thoughtsTokenCount: usage.output_tokens_details?.reasoning_tokens,
   };

@@ -1157,6 +1157,74 @@ describe('OpenAIResponsesLlm', () => {
     );
   });
 
+  it('test_model_options_reach_the_request_body', async () => {
+    const body = await sentBody(
+      {
+        parallelToolCalls: false,
+        truncation: 'auto',
+        serviceTier: 'flex',
+      },
+      userRequest({
+        toolConfig: {
+          functionCallingConfig: {mode: FunctionCallingConfigMode.ANY},
+        },
+      }),
+    );
+
+    expect(body.parallel_tool_calls).toBe(false);
+    expect(body.truncation).toBe('auto');
+    expect(body.service_tier).toBe('flex');
+    expect(body.tool_choice).toBe('required');
+  });
+
+  it('test_a_tool_that_declares_no_functions_is_skipped', async () => {
+    const body = await sentBody(
+      {},
+      userRequest({
+        tools: [{googleSearch: {}}, {functionDeclarations: undefined}],
+      }),
+    );
+
+    expect(body.tools).toBeUndefined();
+  });
+
+  it('test_the_request_falls_back_to_the_configured_model', async () => {
+    const client = new FakeResponsesClient({
+      response: makeResponse({status: 'completed'}),
+    });
+    const llm = new OpenAIResponsesLlm({model: 'gpt-5-mini', client});
+
+    await collect(
+      llm.generateContentAsync({
+        contents: [{role: 'user', parts: [{text: 'Hi'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      }),
+    );
+
+    expect(client.body.model).toBe('gpt-5-mini');
+    expect(client.body.temperature).toBeUndefined();
+  });
+
+  it('test_azure_without_an_endpoint_keeps_the_default_base_url', async () => {
+    const llm = new AzureOpenAIResponsesLlm({apiKey: 'test-key'});
+
+    await collect(llm.generateContentAsync(userRequest()));
+
+    expect(openAiConstructor).toHaveBeenCalledExactlyOnceWith({
+      apiKey: 'test-key',
+    });
+  });
+
+  it('test_the_client_is_built_at_most_once', async () => {
+    const llm = new OpenAIResponsesLlm({apiKey: 'test-key'});
+
+    await collect(llm.generateContentAsync(userRequest()));
+    await collect(llm.generateContentAsync(userRequest()));
+
+    expect(openAiConstructor).toHaveBeenCalledOnce();
+  });
+
   it('test_connect_is_not_supported', async () => {
     const llm = new OpenAIResponsesLlm({model: 'gpt-5'});
 
