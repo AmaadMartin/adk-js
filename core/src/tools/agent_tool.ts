@@ -32,6 +32,14 @@ export interface AgentToolConfig {
    * Whether to skip summarization of the agent output.
    */
   skipSummarization?: boolean;
+
+  /**
+   * Whether to propagate the parent runner's plugins to the wrapped agent's
+   * runner. When true (the default) the agent inherits every plugin registered
+   * on its parent. Set to false to run the agent with an isolated plugin
+   * environment.
+   */
+  includePlugins?: boolean;
 }
 
 /**
@@ -71,6 +79,8 @@ export class AgentTool extends BaseTool {
 
   private readonly skipSummarization: boolean;
 
+  private readonly includePlugins: boolean;
+
   constructor(config: AgentToolConfig) {
     super({
       name: config.agent.name,
@@ -78,6 +88,7 @@ export class AgentTool extends BaseTool {
     });
     this.agent = config.agent;
     this.skipSummarization = config.skipSummarization || false;
+    this.includePlugins = config.includePlugins ?? true;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -155,6 +166,9 @@ export class AgentTool extends BaseTool {
         toolContext.invocationContext.memoryService ??
         new InMemoryMemoryService(),
       credentialService: toolContext.invocationContext.credentialService,
+      plugins: this.includePlugins
+        ? toolContext.invocationContext.pluginManager.getPlugins()
+        : undefined,
     });
 
     const session = await runner.sessionService.getOrCreateSession({
