@@ -16,6 +16,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
   createCloudTtsClient,
+  extractText,
   extractVoiceConfig,
 } from '../../../src/evaluation/simulation/cloud_tts_llm.js';
 
@@ -122,6 +123,18 @@ describe('CloudTtsLlm error paths', () => {
     await expect(llm.connect(textRequest('hi'))).rejects.toThrow(
       'Live connection is not supported for cloud_tts.',
     );
+  });
+});
+
+describe('extractText', () => {
+  it('skips a content that carries no parts at all', () => {
+    const request: LlmRequest = {
+      contents: [{role: 'user'}, {role: 'user', parts: [{text: 'only this'}]}],
+      liveConnectConfig: {},
+      toolsDict: {},
+    };
+
+    expect(extractText(request)).toBe('only this');
   });
 });
 
