@@ -30,9 +30,13 @@ import {
 import {createExecutorContext, ExecutorContext} from './executor_context.js';
 import {
   getA2AEventMetadata,
-  getA2ASessionMetadata,
+  getA2AInvocationMetadata,
 } from './metadata_converter_utils.js';
-import {toA2AParts, toGenAIContent} from './part_converter_utils.js';
+import {
+  GenAIPartToA2APartConverter,
+  toA2AParts,
+  toGenAIContent,
+} from './part_converter_utils.js';
 import {getA2aRequestMetadata} from './request_metadata.js';
 
 /**
@@ -76,6 +80,11 @@ export type AfterExecuteCallback = (
 export interface AgentExecutorConfig {
   runner: RunnerOrRunnerConfig;
   runConfig?: RunConfig;
+  /**
+   * Converts one GenAI part to an A2A part. Defaults to `toA2APart`. A part it
+   * converts to nothing is dropped from the published event.
+   */
+  genAiPartConverter?: GenAIPartToA2APartConverter;
   beforeExecuteCallback?: BeforeExecuteCallback;
   afterEventCallback?: AfterEventCallback;
   afterExecuteCallback?: AfterExecuteCallback;
@@ -144,6 +153,7 @@ export class A2AAgentExecutor implements AgentExecutor {
             taskId: ctx.taskId,
             contextId: ctx.contextId,
             message: a2aUserMessage,
+            metadata: getA2AInvocationMetadata(executorContext),
           }),
         );
       }
@@ -152,6 +162,7 @@ export class A2AAgentExecutor implements AgentExecutor {
         createTaskWorkingEvent({
           taskId: ctx.taskId,
           contextId: ctx.contextId,
+          metadata: getA2AInvocationMetadata(executorContext),
         }),
       );
 
@@ -191,7 +202,11 @@ export class A2AAgentExecutor implements AgentExecutor {
       await this.publishFinalTaskStatus({
         executorContext,
         eventBus,
-        event: getFinalTaskStatusUpdate(adkEvents, executorContext),
+        event: getFinalTaskStatusUpdate(
+          adkEvents,
+          executorContext,
+          this.config.genAiPartConverter,
+        ),
       });
     } catch (e: unknown) {
       const error = e as Error;
@@ -204,7 +219,6 @@ export class A2AAgentExecutor implements AgentExecutor {
           taskId: ctx.taskId,
           contextId: ctx.contextId,
           error: new Error(`Agent run failed: ${error.message}`),
-          metadata: getA2ASessionMetadata(executorContext),
         }),
       });
     }
@@ -222,6 +236,7 @@ export class A2AAgentExecutor implements AgentExecutor {
     const a2aParts = toA2AParts(
       adkEvent.content?.parts,
       adkEvent.longRunningToolIds,
+      this.config.genAiPartConverter,
     );
     if (a2aParts.length === 0) {
       return undefined;
@@ -235,7 +250,10 @@ export class A2AAgentExecutor implements AgentExecutor {
       contextId: executorContext.requestContext.contextId,
       artifactId,
       parts: a2aParts,
-      metadata: getA2AEventMetadata(adkEvent, executorContext),
+      metadata: {
+        ...getA2AEventMetadata(adkEvent, executorContext),
+        ...getA2AInvocationMetadata(executorContext),
+      },
       append: adkEvent.partial,
       lastChunk: !adkEvent.partial,
     });
@@ -263,13 +281,25 @@ export class A2AAgentExecutor implements AgentExecutor {
     event: TaskStatusUpdateEvent;
     error?: Error;
   }): Promise<void> {
+    const finalEvent = {
+      ...event,
+      metadata: {
+        ...event.metadata,
+        ...getA2AInvocationMetadata(executorContext),
+      },
+    };
+
     try {
-      await this.config.afterExecuteCallback?.(executorContext, event, error);
+      await this.config.afterExecuteCallback?.(
+        executorContext,
+        finalEvent,
+        error,
+      );
     } catch (e: unknown) {
       logger.error('Error in afterExecuteCallback:', e);
     }
 
-    eventBus.publish(event);
+    eventBus.publish(finalEvent);
   }
 }
 
@@ -282,6 +312,12 @@ async function getAdkSession(
   sessionService: BaseSessionService,
   appName: string,
 ): Promise<Session> {
+  // Fetched with its full event history, unlike adk-python's
+  // `_resolve_session`, which passes `num_recent_events=0` because it only
+  // probes for existence. These events feed `getUnansweredRequestEvent`, which
+  // decides whether a pending human-in-the-loop request is still open. Asking
+  // for no events would blind that gate: VertexAiSessionService returns an
+  // event-less session for `numRecentEvents: 0`.
   const session = await sessionService.getSession({
     appName,
     userId,
@@ -300,19 +336,50 @@ async function getAdkSession(
 
 /**
  * Resolves the runner from the provided runner or runner config.
+ *
+ * Takes `unknown` because the value is unvalidated: a JavaScript caller is not
+ * bound by `RunnerOrRunnerConfig`, and a factory can return anything whatever
+ * its declared return type says.
+ *
+ * @param runnerOrConfig - A runner, a runner config, or a factory for either.
+ * @param fromFactory - Whether a factory produced this value, which selects the
+ *   error message.
+ * @returns The resolved runner.
+ * @throws {TypeError} If the value is neither a runner nor a runner config.
  */
 async function getAdkRunner(
-  runnerOrConfig: RunnerOrRunnerConfig,
+  runnerOrConfig: unknown,
+  fromFactory = false,
 ): Promise<Runner> {
   if (typeof runnerOrConfig === 'function') {
-    const result = await runnerOrConfig();
-
-    return getAdkRunner(result);
+    return getAdkRunner(await runnerOrConfig(), true);
   }
 
   if (isRunner(runnerOrConfig)) {
     return runnerOrConfig;
   }
 
+  if (!isRunnerConfig(runnerOrConfig)) {
+    // The type only: the value itself may carry credentials.
+    const got = runnerOrConfig === null ? 'null' : typeof runnerOrConfig;
+    throw new TypeError(
+      fromFactory
+        ? `Runner factory must return a Runner instance, got ${got}`
+        : `Runner must be a Runner instance or a callable that returns a Runner, got ${got}`,
+    );
+  }
+
   return new Runner(runnerOrConfig);
+}
+
+/**
+ * Whether the value can be handed to the `Runner` constructor.
+ *
+ * Tests for `sessionService`, the one property `RunnerConfig` requires. Kept
+ * unexported because the executor is the only caller that accepts this union.
+ */
+function isRunnerConfig(value: unknown): value is RunnerConfig {
+  return (
+    typeof value === 'object' && value !== null && 'sessionService' in value
+  );
 }
