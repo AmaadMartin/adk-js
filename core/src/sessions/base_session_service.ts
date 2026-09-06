@@ -292,3 +292,45 @@ export function mergeStates(
   }
   return merged;
 }
+
+/**
+ * Slices an ordered session list into the page a request asked for.
+ *
+ * `page` takes precedence over `offset`. With no `limit` the whole list is one
+ * page and `limit` reports the total, which is the shape
+ * {@link ListSessionsResponse} documents.
+ *
+ * @param sessions Every session matching the request, already ordered.
+ * @param request The request whose `limit`, `offset` and `page` to apply.
+ * @return The page, with all four response fields filled in.
+ */
+export function paginateSessions(
+  sessions: Session[],
+  {limit, offset, page}: ListSessionsRequest,
+): ListSessionsResponse {
+  const totalItems = sessions.length;
+  if (limit === undefined) {
+    return {
+      sessions: offset ? sessions.slice(offset) : sessions,
+      page: 1,
+      limit: totalItems,
+      totalItems,
+      totalPages: totalItems === 0 ? 0 : 1,
+    };
+  }
+  const effectiveOffset =
+    page !== undefined ? (page - 1) * limit : (offset ?? 0);
+  const effectivePage =
+    page !== undefined
+      ? page
+      : limit === 0
+        ? 1
+        : Math.floor(effectiveOffset / limit) + 1;
+  return {
+    sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
+    page: effectivePage,
+    limit,
+    totalItems,
+    totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
+  };
+}

@@ -15,16 +15,18 @@
 
 import {
   createEvent,
-  escapeRedisGlob,
   InputValidationError,
-  redisAppStateKey,
-  redisSessionKey,
   RedisSessionService,
-  redisUserStateKey,
   type RedisClientLike,
 } from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 
+import {
+  escapeRedisGlob,
+  redisAppStateKey,
+  redisSessionKey,
+  redisUserStateKey,
+} from '../../../src/integrations/redis/redis_session_service.js';
 import {resetLogger, setLogger} from '../../../src/utils/logger.js';
 
 import {FakeRedis} from './fake_redis.js';

@@ -14,12 +14,15 @@
 import {
   AlreadyExistsError,
   createEvent,
-  redisAppStateKey,
-  redisSessionKey,
   RedisSessionService,
-  redisUserStateKey,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
+
+import {
+  redisAppStateKey,
+  redisSessionKey,
+  redisUserStateKey,
+} from '../../../src/integrations/redis/redis_session_service.js';
 
 import {FakeRedis} from './fake_redis.js';
 
