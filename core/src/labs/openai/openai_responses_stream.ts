@@ -395,14 +395,11 @@ export class ResponsesStreamAccumulator {
   }
 
   private assembleParts(): Part[] {
+    // Every tracked function call opens an output item under the same key, so
+    // iterating the items covers all of them.
     const parts: Part[] = [];
     for (const [key, item] of this.outputItems) {
       parts.push(...this.outputItemParts(key, item));
-    }
-    for (const [key, call] of this.functionCalls) {
-      if (!this.outputItems.has(key)) {
-        parts.push(streamedFunctionCallPart(call));
-      }
     }
     return parts;
   }
