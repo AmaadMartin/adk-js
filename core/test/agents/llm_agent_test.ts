@@ -12,6 +12,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BuiltInPlanner,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -25,6 +26,9 @@ import {
   LlmRequest,
   LlmResponse,
   LongRunningFunctionTool,
+  NL_PLANNING_REQUEST_PROCESSOR,
+  NL_PLANNING_RESPONSE_PROCESSOR,
+  PlanReActPlanner,
   PluginManager,
   RunAsyncToolRequest,
   Runner,
@@ -43,6 +47,7 @@ import {
 } from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
+import {CODE_EXECUTION_REQUEST_PROCESSOR} from '../../src/agents/processors/code_execution_request_processor.js';
 import {logger} from '../../src/utils/logger.js';
 
 class MockLlmConnection implements BaseLlmConnection {
@@ -1026,6 +1031,79 @@ describe('LlmAgent Default Request Processors', () => {
       CONTENT_REQUEST_PROCESSOR,
     );
     expect(authIndex).toBeLessThan(contentIndex);
+  });
+});
+
+describe('LlmAgent NL planning wiring', () => {
+  it('runs NL planning after contents and before code execution', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    const planningIndex = agent.requestProcessors.indexOf(
+      NL_PLANNING_REQUEST_PROCESSOR,
+    );
+    const contentIndex = agent.requestProcessors.indexOf(
+      CONTENT_REQUEST_PROCESSOR,
+    );
+    const codeExecutionIndex = agent.requestProcessors.indexOf(
+      CODE_EXECUTION_REQUEST_PROCESSOR,
+    );
+    expect(contentIndex).toBeLessThan(planningIndex);
+    expect(planningIndex).toBeLessThan(codeExecutionIndex);
+  });
+
+  it('registers the NL planning response processor by default', () => {
+    const agent = new LlmAgent({name: 'test_agent'});
+
+    expect(agent.responseProcessors).toEqual([NL_PLANNING_RESPONSE_PROCESSOR]);
+  });
+
+  it('lets an explicit responseProcessors config win', () => {
+    const agent = new LlmAgent({name: 'test_agent', responseProcessors: []});
+
+    expect(agent.responseProcessors).toEqual([]);
+  });
+
+  it('keeps the planner on the agent', () => {
+    const planner = new PlanReActPlanner();
+
+    const agent = new LlmAgent({name: 'test_agent', planner});
+
+    expect(agent.planner).toBe(planner);
+  });
+
+  it('warns once when a thinking config is set in two places', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    new LlmAgent({
+      name: 'test_agent',
+      generateContentConfig: {thinkingConfig: {includeThoughts: true}},
+      planner: new BuiltInPlanner({thinkingConfig: {thinkingBudget: 512}}),
+    });
+
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0][0]).toContain(
+      "The planner's configuration will take precedence.",
+    );
+    warnSpy.mockRestore();
+  });
+
+  it.each([
+    [
+      'only generateContentConfig sets it',
+      {generateContentConfig: {thinkingConfig: {includeThoughts: true}}},
+    ],
+    [
+      'only the planner sets it',
+      {planner: new BuiltInPlanner({thinkingConfig: {thinkingBudget: 512}})},
+    ],
+    ['the planner is not a BuiltInPlanner', {planner: new PlanReActPlanner()}],
+  ])('does not warn when %s', (_name, config) => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    new LlmAgent({name: 'test_agent', ...config});
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
