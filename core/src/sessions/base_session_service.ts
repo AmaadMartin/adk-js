@@ -58,7 +58,10 @@ export interface ListSessionsRequest {
   offset?: number;
   /** 1-based page number. Requires `limit`. Takes precedence over `offset`. */
   page?: number;
-  /** Sort direction by last update time. No ordering is applied if omitted. */
+  /**
+   * Sort direction by last update time. When omitted, the ordering is
+   * implementation-defined.
+   */
   order?: 'asc' | 'desc';
 }
 
