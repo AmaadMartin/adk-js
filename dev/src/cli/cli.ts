@@ -420,12 +420,13 @@ export function createProgram(): Command {
   const DEPLOY_COMMAND = program
     .command('deploy')
     .description('Deploy agent')
-    .allowUnknownOption()
-    .allowExcessArguments();
+    .allowUnknownOption();
 
   DEPLOY_COMMAND.command('cloud_run')
     .addArgument(AGENT_DIR_ARGUMENT)
     .allowUnknownOption()
+    // A gcloud flag written as `--flag value` leaves `value` as a bare operand
+    // for the pass-through below, so cloud_run must accept excess arguments.
     .allowExcessArguments()
     .addOption(PORT_OPTION)
     .addOption(PROJECT_DEPLOY_OPTION)
@@ -493,7 +494,6 @@ export function createProgram(): Command {
     cmd
       .addArgument(AGENT_DIR_ARGUMENT)
       .allowUnknownOption()
-      .allowExcessArguments()
       .addOption(PROJECT_DEPLOY_OPTION)
       .addOption(REGION_DEPLOY_OPTION)
       .addOption(DISPLAY_NAME_OPTION)

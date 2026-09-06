@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import type {Command} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -48,6 +49,18 @@ vi.mock('@google/adk', async (importOriginal) => {
     setLogLevel: vi.fn(),
   };
 });
+
+/**
+ * Applies `exitOverride()` to a whole command tree. Commander copies the exit
+ * callback into a subcommand when that subcommand is created, so calling
+ * `exitOverride()` on an already-built program covers the root only, and a
+ * subcommand parse error still ends the process.
+ */
+function overrideExitRecursively(cmd: Command) {
+  cmd.exitOverride();
+  cmd.configureOutput({writeErr: () => {}});
+  cmd.commands.forEach(overrideExitRecursively);
+}
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
@@ -466,6 +479,53 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('command: deploy excess positional arguments', () => {
+    beforeEach(() => {
+      overrideExitRecursively(program);
+    });
+
+    /**
+     * Parses argv with the `node <script>` prefix that production sees. The
+     * shared `parse` helper omits it, which shifts the `process.argv.slice(5)`
+     * gcloud pass-through in the cloud_run handler by two tokens.
+     */
+    const parseFullArgv = async (args: string[]) => {
+      process.argv = ['node', 'cli_entrypoint.js', ...args];
+      await program.parseAsync(process.argv);
+    };
+
+    it.each(['agent_engine', 'reasoning_engine'])(
+      'should reject a second positional for %s',
+      async (subcommand) => {
+        await expect(
+          parseFullArgv(['deploy', subcommand, './a', './b']),
+        ).rejects.toThrow(/too many arguments/);
+
+        expect(deployToAgentEngine).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should still accept a second positional for cloud_run', async () => {
+      await parseFullArgv(['deploy', 'cloud_run', './a', './b']);
+
+      expect(deployToCloudRun).toHaveBeenCalledTimes(1);
+    });
+
+    it('should still forward a space-separated gcloud flag from cloud_run', async () => {
+      await parseFullArgv([
+        'deploy',
+        'cloud_run',
+        './a',
+        '--min-instances',
+        '1',
+      ]);
+
+      expect(
+        (deployToCloudRun as Mock).mock.calls[0][0].extraGcloudArgs,
+      ).toEqual(['--min-instances', '1']);
     });
   });
 });
