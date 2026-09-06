@@ -201,10 +201,7 @@ export {
   EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS,
   createEventarcToolConfig,
 } from './integrations/eventarc/eventarc_tool_config.js';
-export type {
-  EventarcToolConfig,
-  EventarcToolConfigParams,
-} from './integrations/eventarc/eventarc_tool_config.js';
+export type {EventarcToolConfig} from './integrations/eventarc/eventarc_tool_config.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,

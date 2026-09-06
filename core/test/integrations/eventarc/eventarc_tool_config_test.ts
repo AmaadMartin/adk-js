@@ -13,7 +13,6 @@
 import {
   EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS,
   EventarcToolConfig,
-  EventarcToolConfigParams,
   FeatureName,
   FeatureStage,
   InputValidationError,
@@ -111,6 +110,15 @@ describe('Eventarc tool config', () => {
       ).toBe(30);
     });
 
+    // An explicit `undefined` is legal against `Partial<EventarcToolConfig>`,
+    // and the resolved type promises a number. A `{default, ...params}` spread
+    // would return `undefined` here.
+    it('applies the default to an explicit undefined publishTimeout', () => {
+      expect(
+        createEventarcToolConfig({publishTimeout: undefined}).publishTimeout,
+      ).toBe(15);
+    });
+
     // adk-python applies no range check to `publish_timeout`, so neither does
     // this port.
     it('accepts a non-positive publishTimeout, as the reference does', () => {
@@ -127,7 +135,7 @@ describe('Eventarc tool config', () => {
     });
 
     it('returns a fresh object, not the caller object', () => {
-      const params: EventarcToolConfigParams = {projectId: 'my-project'};
+      const params: Partial<EventarcToolConfig> = {projectId: 'my-project'};
 
       const config = createEventarcToolConfig(params);
       config.projectId = 'another-project';
@@ -135,8 +143,8 @@ describe('Eventarc tool config', () => {
       expect(params.projectId).toBe('my-project');
     });
 
-    // pydantic's default `extra='ignore'` drops unknown keys, so this config
-    // accepts them where the neighbouring Pub/Sub config rejects them.
+    // pydantic's default `extra='ignore'` drops unknown keys rather than
+    // rejecting them.
     it('accepts and drops an unknown key', () => {
       expect(createFromJson('{"region": "us-central1"}')).toEqual({
         projectId: undefined,

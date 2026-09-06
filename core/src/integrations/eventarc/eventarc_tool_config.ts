@@ -20,28 +20,19 @@ import {
  */
 export const EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS = 15.0;
 
-/** Fields accepted by {@link createEventarcToolConfig}. */
-export interface EventarcToolConfigParams {
+/** Configuration for the Eventarc tool. */
+export interface EventarcToolConfig {
   /** Optional project ID for telemetry and API calls. */
   projectId?: string;
   /**
    * Timeout in seconds for publishing messages. Defaults to
    * {@link EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS}.
    */
-  publishTimeout?: number;
-}
-
-/** Configuration for the Eventarc tool. */
-export interface EventarcToolConfig {
-  /** Optional project ID for telemetry and API calls. */
-  projectId?: string;
-  /** Timeout in seconds for publishing messages. */
   publishTimeout: number;
 }
 
-// Unknown keys are dropped, not rejected. adk-python's model leaves pydantic's
-// `extra` at its default `'ignore'`, so this deliberately uses `z.object`
-// where the neighbouring Pub/Sub config uses `z.strictObject`.
+// Unknown keys are dropped, not rejected: adk-python's model leaves pydantic's
+// `extra` at its default `'ignore'`.
 const eventarcToolConfigSchema = z.object({
   projectId: z.string().optional(),
   publishTimeout: z.number().default(EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS),
@@ -50,14 +41,15 @@ const eventarcToolConfigSchema = z.object({
 /**
  * Creates an {@link EventarcToolConfig}.
  *
- * @param params Optional {@link EventarcToolConfigParams} fields.
+ * @param params Optional partial {@link EventarcToolConfig} overriding
+ *     defaults.
  * @returns A validated {@link EventarcToolConfig}.
  * @throws {Error} When the `EVENTARC_TOOL_CONFIG` feature is disabled.
  * @throws {InputValidationError} When `projectId` is not a string, or
  *     `publishTimeout` is not a number.
  */
 export function createEventarcToolConfig(
-  params: EventarcToolConfigParams = {},
+  params: Partial<EventarcToolConfig> = {},
 ): EventarcToolConfig {
   if (!isFeatureEnabled(FeatureName.EVENTARC_TOOL_CONFIG)) {
     throw new Error(
@@ -70,8 +62,5 @@ export function createEventarcToolConfig(
       `Invalid EventarcToolConfig: ${z.prettifyError(result.error)}`,
     );
   }
-  return {
-    projectId: result.data.projectId,
-    publishTimeout: result.data.publishTimeout,
-  };
+  return result.data;
 }
