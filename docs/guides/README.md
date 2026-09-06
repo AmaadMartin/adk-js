@@ -346,3 +346,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [TransferToAgentTool](tools/transfer_to_agent_tool/index.md) - Handing off control to another agent, with the reachable agent names declared to the model.
 - [UrlContextTool](tools/url_context/index.md) - Letting a Gemini model fetch and read the URLs a user mentions.
 - [VertexRagRetrievalTool](tools/vertex_rag_retrieval/index.md) - Grounding an agent in a Vertex AI RAG corpus, server-side for Gemini and client-side for every other model.
+
+### Workflow
+
+- [Workflow nodes](workflow/node/index.md) - Building a node from a function, tool, agent or node, subclassing `WorkflowNode`, and running a node once per item of a list input.
