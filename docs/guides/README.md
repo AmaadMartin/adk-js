@@ -182,6 +182,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Integrations
 
+- [AgentEngineSandboxComputer](integrations/vmaas/index.md) - Driving a browser hosted in a Vertex AI Agent Engine Computer Use Sandbox, and the two transports the caller supplies.
 - [SlackRunner](integrations/slack_runner/index.md) - Putting an ADK agent behind a Slack bot over Socket Mode, and how a Slack thread maps onto a session.
 
 ### Memory

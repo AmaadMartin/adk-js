@@ -72,6 +72,26 @@ export {
   loadEvalSetFromFile,
 } from './evaluation/local_eval_sets_manager.js';
 export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
+export {SandboxClient} from './integrations/vmaas/sandbox_client.js';
+export type {
+  CdpBatchResult,
+  CdpCommand,
+  SandboxClientOptions,
+  SandboxCommandSender,
+  SandboxJson,
+  SandboxScrollDirection,
+} from './integrations/vmaas/sandbox_client.js';
+export {AgentEngineSandboxComputer} from './integrations/vmaas/sandbox_computer.js';
+export type {
+  AccessTokenProvider,
+  AgentEngineSandboxApi,
+  AgentEngineSandboxComputerOptions,
+} from './integrations/vmaas/sandbox_computer.js';
+export {
+  SandboxError,
+  SandboxErrorCode,
+  isSandboxError,
+} from './integrations/vmaas/sandbox_errors.js';
 export {getMemoryServiceFromUri} from './memory/registry.js';
 export {BigQueryAgentAnalyticsPlugin} from './plugins/bigquery_agent_analytics_plugin.js';
 export type {
