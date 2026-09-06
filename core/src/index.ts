@@ -49,6 +49,7 @@ export {RedisSessionService} from './integrations/redis/redis_session_service.js
 export type {
   RedisClientLike,
   RedisGetUserStateRequest,
+  RedisSessionServiceConfig,
   RedisSessionServiceOptions,
 } from './integrations/redis/redis_session_service.js';
 export * from './telemetry/google_cloud.js';

@@ -94,12 +94,13 @@ export interface RedisClientLike {
 }
 
 /**
- * Constructor options for {@link RedisSessionService}.
+ * Connection and storage settings for {@link RedisSessionService}.
  *
- * Every default matches adk-python, because the defaults are what make an
- * adk-js runner and an adk-python runner address the same keys.
+ * The field set and every default match adk-python's
+ * `google.adk.integrations.redis` configuration, because the defaults are what
+ * make an adk-js runner and an adk-python runner address the same keys.
  */
-export interface RedisSessionServiceOptions {
+export interface RedisSessionServiceConfig {
   /**
    * Connection URI, `redis://[:password@]host:port/db` or `rediss://...` for
    * TLS. Takes precedence over the discrete fields below.
@@ -122,6 +123,13 @@ export interface RedisSessionServiceOptions {
   ttlSeconds?: number;
   /** Prefix for every key this service writes. Defaults to `adk:session:`. */
   keyPrefix?: string;
+}
+
+/**
+ * Constructor options for {@link RedisSessionService}: the configuration, plus
+ * the option of supplying the client instead of letting the service build one.
+ */
+export interface RedisSessionServiceOptions extends RedisSessionServiceConfig {
   /**
    * A connected client to use instead of one built from the fields above.
    * It belongs to its caller: the service never connects or closes it.
@@ -441,7 +449,7 @@ async function scanKeys(
  * ```
  */
 export class RedisSessionService extends BaseSessionService {
-  private readonly config: RedisSessionServiceOptions;
+  private readonly options: RedisSessionServiceOptions;
   private readonly keyPrefix: string;
   /** The `EX` argument for every write, or undefined when expiry is off. */
   private readonly expiry: number | undefined;
@@ -449,7 +457,7 @@ export class RedisSessionService extends BaseSessionService {
 
   constructor(options: RedisSessionServiceOptions = {}) {
     super();
-    this.config = options;
+    this.options = options;
     this.keyPrefix = options.keyPrefix ?? DEFAULT_KEY_PREFIX;
     const ttlSeconds = options.ttlSeconds ?? DEFAULT_TTL_SECONDS;
     this.expiry = ttlSeconds > 0 ? ttlSeconds : undefined;
@@ -463,8 +471,8 @@ export class RedisSessionService extends BaseSessionService {
    * never enters that cache, which is what leaves it for its owner to close.
    */
   private getClient(): Promise<RedisClientLike> {
-    if (this.config.client) {
-      return Promise.resolve(this.config.client);
+    if (this.options.client) {
+      return Promise.resolve(this.options.client);
     }
     if (this.clientPromise === undefined) {
       const pending = this.connect();
@@ -487,15 +495,15 @@ export class RedisSessionService extends BaseSessionService {
       {packageName: 'redis', feature: 'RedisSessionService'},
       () => import('redis'),
     );
-    const {uri, password, ssl} = this.config;
-    const host = this.config.host ?? DEFAULT_HOST;
-    const port = this.config.port ?? DEFAULT_PORT;
+    const {uri, password, ssl} = this.options;
+    const host = this.options.host ?? DEFAULT_HOST;
+    const port = this.options.port ?? DEFAULT_PORT;
     const client = uri
       ? createClient({url: uri})
       : createClient({
           socket: ssl ? {host, port, tls: true} : {host, port},
           password,
-          database: this.config.db ?? DEFAULT_DB,
+          database: this.options.db ?? DEFAULT_DB,
         });
 
     const target = uri ? redactUriPassword(uri) : `${host}:${port}`;
