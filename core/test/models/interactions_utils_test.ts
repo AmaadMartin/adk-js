@@ -19,16 +19,23 @@ import {
 } from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
+  buildInteractionsRequestLog,
+  buildMcpServerParam,
   convertContentToSteps,
   convertInteractionEventToLlmResponse,
   convertInteractionToLlmResponse,
   convertStepToParts,
   convertToolsConfigToInteractionsFormat,
+  createInteractions,
   ExtendedInteraction,
+  ExtendedInteractionSSEEvent,
+  extractStreamEnvironmentId,
   extractSystemInstruction,
   generateContentViaInteractions,
   getLatestUserContents,
+  InteractionsClient,
 } from '../../src/models/interactions_utils.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
 
 describe('interactions_utils', () => {
   describe('getLatestUserContents', () => {
@@ -2232,6 +2239,231 @@ describe('interactions_utils', () => {
         responses.push(res);
       }
       expect(responses[0].interactionId).toBe('int-camel-case');
+    });
+  });
+});
+
+describe('agent interactions', () => {
+  /** Records every `create` call and replays a scripted SSE event list. */
+  function recordingClient(events: ExtendedInteractionSSEEvent[]) {
+    const calls: Array<{
+      params: Interactions.CreateAgentInteractionParamsStreaming & {
+        stream: true;
+      };
+      options: {fetchOptions: {headers?: Record<string, string>}};
+    }> = [];
+    const client: InteractionsClient = {
+      interactions: {
+        create: (params, options) => {
+          calls.push({params, options});
+          return Promise.resolve({
+            async *[Symbol.asyncIterator]() {
+              yield* events;
+            },
+          });
+        },
+      },
+    };
+    return {client, calls};
+  }
+
+  const CREATE_PARAMS: Interactions.CreateAgentInteractionParamsStreaming = {
+    agent: 'agents/a',
+    input: [],
+    background: true,
+  };
+
+  async function collect(
+    responses: AsyncGenerator<LlmResponse, void, void>,
+  ): Promise<LlmResponse[]> {
+    const out: LlmResponse[] = [];
+    for await (const response of responses) {
+      out.push(response);
+    }
+    return out;
+  }
+
+  describe('createInteractions', () => {
+    it('always creates the interaction in streaming mode', async () => {
+      const {client, calls} = recordingClient([]);
+
+      await collect(createInteractions(client, {createParams: CREATE_PARAMS}));
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].params.stream).toBe(true);
+      expect(calls[0].params.agent).toBe('agents/a');
+      expect(calls[0].params.background).toBe(true);
+    });
+
+    it('forwards the extra headers as per-request fetch options', async () => {
+      const {client, calls} = recordingClient([]);
+
+      await collect(
+        createInteractions(client, {
+          createParams: CREATE_PARAMS,
+          extraHeaders: {'x-goog-api-client': 'adk'},
+        }),
+      );
+
+      expect(calls[0].options).toEqual({
+        fetchOptions: {headers: {'x-goog-api-client': 'adk'}},
+      });
+    });
+
+    it('stamps the interaction and environment ids onto every response', async () => {
+      const {client} = recordingClient([
+        {
+          event_type: 'interaction.created',
+          interaction: {id: 'int_1', environment_id: 'env_1'},
+        },
+        {event_type: 'step.delta', delta: {type: 'text', text: 'hi'}},
+      ]);
+
+      const responses = await collect(
+        createInteractions(client, {createParams: CREATE_PARAMS}),
+      );
+
+      expect(responses).toHaveLength(1);
+      expect(responses[0].interactionId).toBe('int_1');
+      expect(responses[0].environmentId).toBe('env_1');
+    });
+
+    it('keeps the last ids it saw when a later event carries none', async () => {
+      const {client} = recordingClient([
+        {
+          event_type: 'interaction.created',
+          interaction: {id: 'int_1', environment_id: 'env_1'},
+        },
+        {event_type: 'step.delta', delta: {type: 'text', text: 'a'}},
+        {event_type: 'step.delta', delta: {type: 'text', text: 'b'}},
+      ]);
+
+      const responses = await collect(
+        createInteractions(client, {createParams: CREATE_PARAMS}),
+      );
+
+      expect(responses.map((response) => response.environmentId)).toEqual([
+        'env_1',
+        'env_1',
+      ]);
+    });
+
+    it('rejects a response that is not a stream', async () => {
+      const client: InteractionsClient = {
+        interactions: {create: () => Promise.resolve({id: 'int_1'})},
+      };
+
+      await expect(
+        collect(createInteractions(client, {createParams: CREATE_PARAMS})),
+      ).rejects.toThrow(/non-streaming response/);
+    });
+  });
+
+  describe('extractStreamEnvironmentId', () => {
+    it('reads the id off the interaction an event carries', () => {
+      expect(
+        extractStreamEnvironmentId({
+          interaction: {id: 'i', environment_id: 'e'},
+        }),
+      ).toBe('e');
+    });
+
+    it('reads a top-level id off a bare interaction event', () => {
+      expect(extractStreamEnvironmentId({environment_id: 'e'})).toBe('e');
+    });
+
+    it('returns undefined when the event carries no id', () => {
+      expect(extractStreamEnvironmentId({})).toBeUndefined();
+      expect(
+        extractStreamEnvironmentId({interaction: {id: 'i'}}),
+      ).toBeUndefined();
+    });
+  });
+
+  describe('buildMcpServerParam', () => {
+    it('maps the url and omits every unset field', () => {
+      expect(buildMcpServerParam({url: 'https://x/mcp'}, {})).toEqual({
+        type: 'mcp_server',
+        url: 'https://x/mcp',
+      });
+    });
+
+    it('maps the name, the headers and the allowed tools', () => {
+      expect(
+        buildMcpServerParam(
+          {url: 'https://x/mcp', name: 'example', allowedTools: ['a', 'b']},
+          {Authorization: 'Bearer t'},
+        ),
+      ).toEqual({
+        type: 'mcp_server',
+        url: 'https://x/mcp',
+        name: 'example',
+        headers: {Authorization: 'Bearer t'},
+        allowed_tools: [{tools: ['a', 'b']}],
+      });
+    });
+
+    it('copies the allowed tools rather than aliasing the spec array', () => {
+      const allowedTools = ['a'];
+
+      const param = buildMcpServerParam(
+        {url: 'https://x/mcp', allowedTools},
+        {},
+      );
+      allowedTools.push('b');
+
+      expect(param.allowed_tools).toEqual([{tools: ['a']}]);
+    });
+  });
+
+  describe('buildInteractionsRequestLog', () => {
+    it('renders every section of the request', () => {
+      const log = buildInteractionsRequestLog({
+        model: 'agents/a',
+        inputSteps: [
+          {type: 'user_input', content: [{type: 'text', text: 'hi'}]},
+        ],
+        systemInstruction: 'Be terse.',
+        tools: [{type: 'google_search'}],
+        previousInteractionId: 'int_prev',
+        stream: true,
+      });
+
+      expect(log).toContain('Model: agents/a');
+      expect(log).toContain('Stream: true');
+      expect(log).toContain('Previous Interaction ID: int_prev');
+      expect(log).toContain('System Instruction: Be terse.');
+      expect(log).toContain('"type":"user_input"');
+      expect(log).toContain('"type":"google_search"');
+    });
+
+    it('marks an absent section rather than rendering an empty one', () => {
+      const log = buildInteractionsRequestLog({
+        model: 'agents/a',
+        inputSteps: [],
+        stream: true,
+      });
+
+      expect(log).toContain('Previous Interaction ID: (none)');
+      expect(log).toContain('System Instruction: (none)');
+      expect(log).toContain('Input Steps: (none)');
+      expect(log).toContain('Tools: (none)');
+    });
+
+    it('truncates a section that would otherwise be unbounded', () => {
+      const log = buildInteractionsRequestLog({
+        model: 'agents/a',
+        inputSteps: [
+          {
+            type: 'user_input',
+            content: [{type: 'text', text: 'x'.repeat(2000)}],
+          },
+        ],
+        stream: true,
+      });
+
+      expect(log).toContain('... [truncated]');
+      expect(log).not.toContain('x'.repeat(1200));
     });
   });
 });

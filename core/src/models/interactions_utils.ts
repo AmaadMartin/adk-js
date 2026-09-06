@@ -60,7 +60,8 @@ export interface ExtendedInteractionSSEEvent extends Omit<
     signature?: string;
     data?: string;
     uri?: string;
-    mime_type: string;
+    // Optional: only a media delta carries one, and a text delta does not.
+    mime_type?: string;
   };
   status?: string;
   error?: {

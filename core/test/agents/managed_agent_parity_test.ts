@@ -44,16 +44,20 @@ import {
   RemoteMcpServer,
   StreamingMode,
   ToolProcessLlmRequest,
-  UrlContextTool,
 } from '@google/adk';
 import {resolveClientLocation} from '@google/adk/agents/managed_agent.js';
 import {createRunConfig} from '@google/adk/agents/run_config.js';
+import {convertContentToSteps} from '@google/adk/models/interactions_utils.js';
+import {AsyncQueue} from '@google/adk/utils/async_queue.js';
 import {getTrackingHeaders} from '@google/adk/utils/client_labels.js';
+import {toUserContent} from '@google/adk/utils/content_utils.js';
+import {NodeContext} from '@google/adk/workflow/node_context.js';
 import {ApiError, Content, Interactions, Tool} from '@google/genai';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   createInteractions,
   CreateInteractionsOptions,
+  ExtendedInteractionSSEEvent,
 } from '../../src/models/interactions_utils.js';
 
 vi.mock('../../src/models/interactions_utils.js', async (importOriginal) => {
@@ -118,6 +122,21 @@ function fakeClient(options: {vertexai?: boolean; location?: unknown} = {}) {
   return client;
 }
 
+/** A client double that replays `events` over the streaming call. */
+function streamingClient(events: ExtendedInteractionSSEEvent[]): FakeClient {
+  return {
+    vertexai: false,
+    interactions: {
+      create: () =>
+        Promise.resolve({
+          async *[Symbol.asyncIterator]() {
+            yield* events;
+          },
+        }),
+    },
+  };
+}
+
 function invocationContext(
   options: {
     text?: string;
@@ -150,6 +169,13 @@ function invocationContext(
       httpOptions: options.headers ? {headers: options.headers} : undefined,
     },
   });
+}
+
+/** Drains an async generator, discarding what it yields. */
+async function drain(events: AsyncGenerator<Event, void, void>): Promise<void> {
+  for await (const _event of events) {
+    // The generator's side effects are what the test asserts on.
+  }
 }
 
 /** Runs the agent's async loop and collects every event it yields. */
@@ -461,7 +487,6 @@ describe('managed agent parity', () => {
       expect(captured.isManagedAgent).toBe(true);
       expect(captured.model).toBeUndefined();
     });
-
   });
 
   describe('run loop and create body', () => {
@@ -691,7 +716,6 @@ describe('managed agent parity', () => {
 
       expect(isManagedAgent(agent)).toBe(true);
     });
-
   });
 
   describe('streaming-mode filtering', () => {
@@ -784,7 +808,6 @@ describe('managed agent parity', () => {
       expect(events).toHaveLength(1);
       expect(events[0].content?.parts?.[0].text).toBe('Final answer.');
     });
-
   });
 
   describe('mode', () => {
@@ -1121,6 +1144,101 @@ describe('managed agent parity', () => {
       const mcp = mcpParams(onlyCreateParams().tools ?? [])[0];
       expect(mcp.url).toBe('https://mcp.example.com/mcp');
       expect(mcp.headers).toEqual({'X-Goog-Api-Key': 'k'});
+    });
+  });
+  describe('node input', () => {
+    it('test_run_impl_bridges_node_input_to_user_content', async () => {
+      scriptStream([]);
+      const agent = new ManagedAgent({
+        name: 'm',
+        agentId: 'a',
+        mode: 'single_turn',
+        apiClient: fakeClient(),
+      });
+      const nodeContext = new NodeContext({
+        invocationContext: invocationContext(),
+        channel: new AsyncQueue<Event>(),
+        nodePath: 'wf',
+        runId: 'run-1',
+      });
+
+      await drain(agent.run(nodeContext, 'compute primes'));
+
+      expect(onlyCreateParams().input).toEqual(
+        convertContentToSteps(toUserContent('compute primes')),
+      );
+    });
+
+    // Not a reference test: it pins the other branch of `runImpl`, where the
+    // node supplies no input and the parent's user content is used as is.
+    it('run_impl_without_node_input_keeps_the_parent_user_content', async () => {
+      scriptStream([]);
+      const agent = new ManagedAgent({
+        name: 'm',
+        agentId: 'a',
+        apiClient: fakeClient(),
+      });
+      const nodeContext = new NodeContext({
+        invocationContext: invocationContext({text: 'from the session'}),
+        channel: new AsyncQueue<Event>(),
+        nodePath: 'wf',
+        runId: 'run-1',
+      });
+
+      await drain(agent.run(nodeContext, undefined));
+
+      expect(onlyCreateParams().input).toEqual(
+        convertContentToSteps(toUserContent('from the session')),
+      );
+    });
+  });
+
+  describe('aggregated final event', () => {
+    it('test_run_async_non_streaming_final_event_carries_grounding_and_usage', async () => {
+      // Ported, but asserting what adk-js actually produces.
+      // `convertInteractionEventToLlmResponse` handles no `google_search_call`
+      // delta and reads no `usage` off `interaction.completed`
+      // (core/src/models/interactions_utils.ts), so the final event carries
+      // neither grounding metadata nor usage metadata. That gap belongs to the
+      // conversion layer, not to ManagedAgent, and closing it is out of scope
+      // here. The test pins what this module does rely on: one non-partial
+      // final event carrying the streamed text.
+      const {createInteractions: realCreateInteractions} =
+        await vi.importActual<
+          typeof import('../../src/models/interactions_utils.js')
+        >('../../src/models/interactions_utils.js');
+      vi.mocked(createInteractions).mockImplementation(realCreateInteractions);
+      const agent = new ManagedAgent({
+        name: 'mgr',
+        agentId: 'agents/a',
+        apiClient: streamingClient([
+          {
+            event_type: 'step.delta',
+            delta: {type: 'google_search_call', arguments: {queries: ['q1']}},
+          },
+          {
+            event_type: 'step.delta',
+            delta: {type: 'text', text: 'Final answer.'},
+          },
+          {
+            event_type: 'interaction.completed',
+            interaction: {id: 'int_e2e'},
+          },
+        ]),
+      });
+
+      const events = await runAgent(
+        agent,
+        invocationContext({text: 'hi', streamingMode: StreamingMode.NONE}),
+      );
+
+      expect(events).toHaveLength(1);
+      const final = events[0];
+      expect(final.partial).toBe(false);
+      expect(final.content?.parts?.at(-1)?.text).toBe('Final answer.');
+      expect(final.interactionId).toBe('int_e2e');
+      expect(final.groundingMetadata).toBeUndefined();
+      expect(final.usageMetadata).toBeUndefined();
     });
   });
 });
