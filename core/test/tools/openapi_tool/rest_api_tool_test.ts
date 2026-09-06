@@ -752,6 +752,98 @@ describe('RestApiTool Utilities', () => {
       expect(result.headers).toEqual({});
     });
 
+    describe('null and undefined query parameters', () => {
+      const itemsEndpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/items',
+        method: 'GET',
+      };
+      const queryParameter = (name: string): ApiParameter => ({
+        name,
+        originalName: name,
+        paramLocation: 'query',
+        paramSchema: {},
+        required: false,
+      });
+
+      it('should omit a query parameter whose value is null', () => {
+        const result = prepareRequestParams(
+          itemsEndpoint,
+          [queryParameter('limit')],
+          {limit: null},
+        );
+
+        expect(result.url).toBe('http://api.example.com/items');
+        expect(result.url).not.toContain('limit');
+      });
+
+      it('should omit a query parameter whose value is undefined', () => {
+        const result = prepareRequestParams(
+          itemsEndpoint,
+          [queryParameter('limit')],
+          {limit: undefined},
+        );
+
+        expect(result.url).toBe('http://api.example.com/items');
+        expect(result.url).not.toContain('undefined');
+      });
+
+      it('should keep false, zero and empty-string query parameters while dropping null', () => {
+        const parameters = [
+          queryParameter('flag'),
+          queryParameter('offset'),
+          queryParameter('cursor'),
+          queryParameter('empty_param'),
+        ];
+
+        const result = prepareRequestParams(itemsEndpoint, parameters, {
+          flag: false,
+          offset: 0,
+          cursor: null,
+          empty_param: '',
+        });
+
+        expect(result.url).toBe(
+          'http://api.example.com/items?flag=false&offset=0&empty_param=',
+        );
+        expect([...new URL(result.url).searchParams.keys()]).toEqual([
+          'flag',
+          'offset',
+          'empty_param',
+        ]);
+      });
+
+      it('should keep sibling query parameters when one is null', () => {
+        const parameters = [queryParameter('q'), queryParameter('limit')];
+
+        const result = prepareRequestParams(itemsEndpoint, parameters, {
+          q: 'search term',
+          limit: null,
+        });
+
+        expect(new URL(result.url).searchParams.get('q')).toBe('search term');
+        expect(new URL(result.url).searchParams.has('limit')).toBe(false);
+      });
+
+      it('should still stringify a null header parameter', () => {
+        const parameters: ApiParameter[] = [
+          {
+            name: 'x_trace_id',
+            originalName: 'X-Trace-Id',
+            paramLocation: 'header',
+            paramSchema: {},
+            required: false,
+          },
+        ];
+
+        const result = prepareRequestParams(itemsEndpoint, parameters, {
+          x_trace_id: null,
+        });
+
+        expect(result.headers['X-Trace-Id']).toBe('null');
+      });
+    });
+
     describe('path parameter encoding', () => {
       const usersEndpoint = {
         baseUrl: 'http://api.example.com',
