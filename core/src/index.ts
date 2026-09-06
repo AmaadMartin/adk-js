@@ -79,7 +79,6 @@ export type {
   SandboxClientOptions,
   SandboxCommandSender,
   SandboxJson,
-  SandboxScrollDirection,
 } from './integrations/vmaas/sandbox_client.js';
 export {AgentEngineSandboxComputer} from './integrations/vmaas/sandbox_computer.js';
 export type {

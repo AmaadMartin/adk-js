@@ -15,6 +15,8 @@ export enum SandboxErrorCode {
   TRANSPORT_NOT_CONFIGURED = 'TRANSPORT_NOT_CONFIGURED',
   /** A create operation was still running when the poll budget ran out. */
   CREATE_OPERATION_INCOMPLETE = 'CREATE_OPERATION_INCOMPLETE',
+  /** An unfinished create operation carried no name to poll it by. */
+  CREATE_OPERATION_UNNAMED = 'CREATE_OPERATION_UNNAMED',
   /** A create operation finished without naming the resource it created. */
   CREATED_RESOURCE_UNNAMED = 'CREATED_RESOURCE_UNNAMED',
   /** The screenshot response carried no base64 image data. */

@@ -34,6 +34,7 @@ import {
 import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
+import {sleep} from '../../utils/time_utils.js';
 import {
   SandboxClient,
   SandboxCommandSender,
@@ -165,14 +166,35 @@ interface LongRunningOperation<T> {
   response?: T;
 }
 
-/** Resolves after `ms` milliseconds. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /** The current time in seconds, the unit adk-python writes into state. */
 function nowSeconds(): number {
   return Date.now() / 1000;
+}
+
+/** A resource the backend has named. */
+type Named<T> = T & {name: string};
+
+/** Whether the backend named `resource`. */
+function isNamed<T extends {name?: string}>(
+  resource: T | undefined,
+): resource is Named<T> {
+  // An empty name is as unusable as an absent one: it names no resource.
+  return !!resource?.name;
+}
+
+/** The name a create operation is polled by. */
+function requireOperationName(
+  operation: LongRunningOperation<unknown>,
+  resource: string,
+): string {
+  if (operation.name === undefined) {
+    throw new SandboxError(
+      SandboxErrorCode.CREATE_OPERATION_UNNAMED,
+      `The call that creates the ${resource} returned an unfinished operation ` +
+        'with no name, so there is nothing to poll.',
+    );
+  }
+  return operation.name;
 }
 
 /**
@@ -185,13 +207,16 @@ function nowSeconds(): number {
  */
 async function awaitCreatedResource<T extends {name?: string}>(
   operation: LongRunningOperation<T>,
-  poll: () => Promise<LongRunningOperation<T>>,
+  poll: (operationName: string) => Promise<LongRunningOperation<T>>,
   resource: string,
-): Promise<T> {
+): Promise<Named<T>> {
   let current = operation;
-  for (let polls = 0; !current.done && polls < OPERATION_MAX_POLLS; polls++) {
-    await sleep(OPERATION_POLL_INTERVAL_MS);
-    current = await poll();
+  if (!current.done) {
+    const operationName = requireOperationName(operation, resource);
+    for (let polls = 0; !current.done && polls < OPERATION_MAX_POLLS; polls++) {
+      await sleep(OPERATION_POLL_INTERVAL_MS);
+      current = await poll(operationName);
+    }
   }
   if (!current.done) {
     throw new SandboxError(
@@ -200,14 +225,15 @@ async function awaitCreatedResource<T extends {name?: string}>(
         `running after ${OPERATION_MAX_POLLS} polls.`,
     );
   }
-  if (!current.response?.name) {
+  const created = current.response;
+  if (!isNamed(created)) {
     throw new SandboxError(
       SandboxErrorCode.CREATED_RESOURCE_UNNAMED,
       `The operation ${operation.name} finished without naming the ${resource} ` +
         'it created.',
     );
   }
-  return current.response;
+  return created;
 }
 
 /**
@@ -534,16 +560,13 @@ export class AgentEngineSandboxComputer extends BaseComputer {
     const operation = await client.agentEnginesInternal.createInternal({});
     const engine = await awaitCreatedResource<ReasoningEngine>(
       operation,
-      () =>
-        client.agentEnginesInternal.getAgentOperationInternal({
-          operationName: operation.name!,
-        }),
+      (operationName) =>
+        client.agentEnginesInternal.getAgentOperationInternal({operationName}),
       'agent engine',
     );
-    const engineName = engine.name!;
-    state.set(STATE_KEY_AGENT_ENGINE_NAME, engineName);
-    logger.debug(`Created the agent engine ${engineName}.`);
-    return engineName;
+    state.set(STATE_KEY_AGENT_ENGINE_NAME, engine.name);
+    logger.debug(`Created the agent engine ${engine.name}.`);
+    return engine.name;
   }
 
   /** The sandbox to drive, creating one if there is none. */
@@ -564,14 +587,13 @@ export class AgentEngineSandboxComputer extends BaseComputer {
       return [sharedName, sandbox];
     }
     const sandbox = await this.createSandbox();
-    const createdName = sandbox.name!;
-    state.set(STATE_KEY_SANDBOX_NAME, createdName);
-    logger.debug(`Created the sandbox ${createdName}.`);
-    return [createdName, sandbox];
+    state.set(STATE_KEY_SANDBOX_NAME, sandbox.name);
+    logger.debug(`Created the sandbox ${sandbox.name}.`);
+    return [sandbox.name, sandbox];
   }
 
   /** Creates a sandbox and waits for the create operation to finish. */
-  private async createSandbox(): Promise<SandboxEnvironment> {
+  private async createSandbox(): Promise<Named<SandboxEnvironment>> {
     const agentEngineName = await this.ensureAgentEngine();
     const client = this.getClient();
     const source = sandboxSourceFields(
@@ -596,9 +618,9 @@ export class AgentEngineSandboxComputer extends BaseComputer {
       });
     return awaitCreatedResource<SandboxEnvironment>(
       operation,
-      () =>
+      (operationName) =>
         client.agentEnginesInternal.sandboxes.getSandboxOperationInternal({
-          operationName: operation.name!,
+          operationName,
         }),
       'sandbox',
     );

@@ -11,6 +11,10 @@
  * Each `it` keeps its Python test name. The Python tests patch
  * `asyncio.to_thread` and read private fields; these drive the injected
  * transport instead, because adk-js tests may not reach into a private.
+ *
+ * 20 of the 21 reference tests are here. `test_update_access_token` is not:
+ * `update_access_token` is not ported, because the computer builds a client per
+ * action rather than replacing the token on a long-lived one.
  */
 
 import {SandboxEnvironment} from '@google-cloud/vertexai/build/src/genai/types.js';
@@ -74,15 +78,6 @@ describe('SandboxClient parity with adk-python', () => {
     // this asserts on.
     expect(calls[0].sandbox).toBe(SANDBOX);
     expect(calls[0].accessToken).toBe(ACCESS_TOKEN);
-  });
-
-  it('test_update_access_token', async () => {
-    const {client, calls} = createClient({});
-    client.updateAccessToken('new_token_67890');
-
-    await client.makeCdpRequest('Page.navigate');
-
-    expect(calls[0].accessToken).toBe('new_token_67890');
   });
 
   it('test_make_cdp_request', async () => {
