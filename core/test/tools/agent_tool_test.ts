@@ -13,11 +13,14 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LlmAgentSchema,
   PluginManager,
   Runner,
   State,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
+import {z} from 'zod/v4';
 
 vi.mock('../../src/runner/runner.js', async (importOriginal) => {
   const actual =
@@ -31,6 +34,53 @@ vi.mock('../../src/runner/runner.js', async (importOriginal) => {
     })),
   };
 });
+
+/** Makes the mocked sub-agent run emit `text` as its only reply. */
+function mockSubAgentReply(text: string) {
+  vi.mocked(Runner).mockImplementation(
+    (config) =>
+      ({
+        appName: config?.appName,
+        sessionService: config?.sessionService,
+        runAsync: async function* () {
+          yield createEvent({
+            author: 'sub-agent',
+            content: {role: 'model', parts: [{text}]},
+          });
+        },
+      }) as unknown as Runner,
+  );
+}
+
+/**
+ * A sub-agent to wrap in an `AgentTool`. Transfer is disallowed because
+ * `LlmAgent` forces it off whenever an output schema is set.
+ */
+function createSubAgent(outputSchema?: LlmAgentSchema): LlmAgent {
+  return new LlmAgent({
+    name: 'sub-agent',
+    outputSchema,
+    disallowTransferToParent: true,
+    disallowTransferToPeers: true,
+  });
+}
+
+/** A tool context whose parent invocation runs `agent`. */
+function createToolContext(agent: LlmAgent): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'test-invocation',
+      agent,
+      session: createSession({
+        id: 'parent-session',
+        appName: agent.name,
+        userId: 'parent-user',
+      }),
+      pluginManager: new PluginManager([]),
+      sessionService: new InMemorySessionService(),
+    }),
+  });
+}
 
 describe('AgentTool', () => {
   it('propagates session context and state delta', async () => {
@@ -510,5 +560,135 @@ describe('AgentTool', () => {
     expect(subAgentSession?.state).not.toHaveProperty(
       `${State.TEMP_PREFIX}tempKey`,
     );
+  });
+
+  describe('output schema validation', () => {
+    it('returns the parsed reply when it satisfies a Zod output schema', async () => {
+      const subAgent = createSubAgent(z.object({answer: z.number()}));
+      mockSubAgentReply('{"answer": 7}');
+
+      const result = await new AgentTool({agent: subAgent}).runAsync({
+        args: {request: 'how many'},
+        toolContext: createToolContext(subAgent),
+      });
+
+      expect(result).toEqual({answer: 7});
+    });
+
+    it('throws when the reply has the wrong type for a declared field', async () => {
+      const subAgent = createSubAgent(z.object({answer: z.number()}));
+      mockSubAgentReply('{"answer": "seven"}');
+
+      await expect(
+        new AgentTool({agent: subAgent}).runAsync({
+          args: {request: 'how many'},
+          toolContext: createToolContext(subAgent),
+        }),
+      ).rejects.toThrow(/does not satisfy its output schema/);
+    });
+
+    it('throws when the reply omits a required field', async () => {
+      const subAgent = createSubAgent(z.object({answer: z.number()}));
+      mockSubAgentReply('{}');
+
+      await expect(
+        new AgentTool({agent: subAgent}).runAsync({
+          args: {request: 'how many'},
+          toolContext: createToolContext(subAgent),
+        }),
+      ).rejects.toThrow(/does not satisfy its output schema/);
+    });
+
+    it('returns the raw text when the sub-agent has no output schema', async () => {
+      const subAgent = createSubAgent();
+      mockSubAgentReply('plain text');
+
+      const result = await new AgentTool({agent: subAgent}).runAsync({
+        args: {request: 'say something'},
+        toolContext: createToolContext(subAgent),
+      });
+
+      expect(result).toBe('plain text');
+    });
+
+    it('returns the parsed reply when it satisfies a genai output schema', async () => {
+      const subAgent = createSubAgent({
+        type: Type.OBJECT,
+        properties: {answer: {type: Type.NUMBER}},
+        required: ['answer'],
+      });
+      mockSubAgentReply('{"answer": 7}');
+
+      const result = await new AgentTool({agent: subAgent}).runAsync({
+        args: {request: 'how many'},
+        toolContext: createToolContext(subAgent),
+      });
+
+      expect(result).toEqual({answer: 7});
+    });
+
+    it('throws when the reply violates a genai output schema', async () => {
+      const subAgent = createSubAgent({
+        type: Type.OBJECT,
+        properties: {answer: {type: Type.NUMBER}},
+        required: ['answer'],
+      });
+      mockSubAgentReply('{"answer": "seven"}');
+
+      await expect(
+        new AgentTool({agent: subAgent}).runAsync({
+          args: {request: 'how many'},
+          toolContext: createToolContext(subAgent),
+        }),
+      ).rejects.toThrow(/does not satisfy its output schema/);
+    });
+
+    it('enforces a Zod refinement the genai conversion drops', async () => {
+      const subAgent = createSubAgent(
+        z.object({
+          answer: z.number().refine((n) => n >= 10, 'answer must be >= 10'),
+        }),
+      );
+      mockSubAgentReply('{"answer": 1}');
+
+      await expect(
+        new AgentTool({agent: subAgent}).runAsync({
+          args: {request: 'how many'},
+          toolContext: createToolContext(subAgent),
+        }),
+      ).rejects.toThrow(/does not satisfy its output schema/);
+    });
+
+    it('reports malformed JSON as a parse failure, not a schema violation', async () => {
+      const subAgent = createSubAgent(z.object({answer: z.number()}));
+      mockSubAgentReply('not json');
+
+      const rejection = new AgentTool({agent: subAgent}).runAsync({
+        args: {request: 'how many'},
+        toolContext: createToolContext(subAgent),
+      });
+
+      await expect(rejection).rejects.toThrow(SyntaxError);
+      await expect(rejection).rejects.not.toThrow(
+        /does not satisfy its output schema/,
+      );
+    });
+
+    it('reports a validation failure that is not an Error', async () => {
+      const subAgent = createSubAgent(z.object({answer: z.number()}));
+      vi.spyOn(subAgent, 'validateOutput').mockImplementation(() => {
+        throw 'answer is not a number';
+      });
+      mockSubAgentReply('{"answer": "seven"}');
+
+      await expect(
+        new AgentTool({agent: subAgent}).runAsync({
+          args: {request: 'how many'},
+          toolContext: createToolContext(subAgent),
+        }),
+      ).rejects.toThrow(
+        /does not satisfy its output schema: answer is not a number/,
+      );
+    });
   });
 });
