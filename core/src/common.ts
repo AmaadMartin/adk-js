@@ -155,6 +155,59 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {InferenceStatus} from './evaluation/base_eval_service.js';
+export type {
+  BaseEvalService,
+  EvaluateConfig,
+  EvaluateRequest,
+  InferenceConfig,
+  InferenceRequest,
+  InferenceResult,
+} from './evaluation/base_eval_service.js';
+export {
+  DEFAULT_LIVE_TIMEOUT_SECONDS,
+  MISSING_EVAL_DEPENDENCIES_MESSAGE,
+} from './evaluation/constants.js';
+export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export type {
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+} from './evaluation/eval_case.js';
+export {
+  DEFAULT_EVAL_CONFIG,
+  getEvalMetricsFromConfig,
+  getEvaluationCriteriaOrDefault,
+  parseEvalConfig,
+} from './evaluation/eval_config.js';
+export type {
+  Criterion,
+  CustomMetricCodeConfig,
+  CustomMetricConfig,
+  EvalConfig,
+  LiveModelConfig,
+} from './evaluation/eval_config.js';
+export {EvalStatus, PrebuiltMetrics} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricResult,
+  EvalMetricResultPerInvocation,
+} from './evaluation/eval_metrics.js';
+export type {EvalCaseResult} from './evaluation/eval_result.js';
+export type {EvalSet} from './evaluation/eval_set.js';
+export type {
+  EvalSetResult,
+  EvalSetResultsManager,
+} from './evaluation/eval_set_results_manager.js';
+export type {EvalSetsManager} from './evaluation/eval_sets_manager.js';
+export {InMemoryEvalSetsManager} from './evaluation/in_memory_eval_sets_manager.js';
+export {convertLegacyEvalSet} from './evaluation/legacy_eval_set_converter.js';
+export type {LegacyEvalCase} from './evaluation/legacy_eval_set_converter.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
