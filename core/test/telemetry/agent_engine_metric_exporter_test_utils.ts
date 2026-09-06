@@ -62,14 +62,16 @@ export interface RequestWindow {
   end: number;
 }
 
-/** Overrides for a {@link Harness}. */
+/**
+ * Overrides for a {@link Harness}.
+ *
+ * Passing null for a timing lets the reader resolve it from the environment,
+ * which is how the environment tests observe it.
+ */
 export interface HarnessOptions {
   /** Guidepost grid spacing in milliseconds. */
-  periodMs?: number;
-  /**
-   * Collect floor in milliseconds. Pass null to let the reader resolve the
-   * floor from the environment, which is how the floor tests observe it.
-   */
+  periodMs?: number | null;
+  /** Collect floor in milliseconds. */
   floorMs?: number | null;
 }
 
@@ -88,7 +90,7 @@ export class Harness {
   constructor({periodMs = PERIOD_MS, floorMs = FLOOR_MS}: HarnessOptions = {}) {
     this.exporter = new RecordingExporter(() => this.t);
     this.reader = new RequestDrivenMetricReader(this.exporter, {
-      exportIntervalMillis: periodMs,
+      exportIntervalMillis: periodMs ?? undefined,
       floorMillis: floorMs ?? undefined,
       now: () => this.t,
     });
