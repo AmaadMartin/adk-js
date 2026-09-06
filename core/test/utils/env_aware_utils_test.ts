@@ -14,7 +14,12 @@ import {
   type MockInstance,
 } from 'vitest';
 import {randomUUID as shimRandomUUID} from '../../src/utils/crypto_shim.js';
-import {getBooleanEnvVar, randomUUID} from '../../src/utils/env_aware_utils.js';
+import {
+  base64ByteLength,
+  base64Encode,
+  getBooleanEnvVar,
+  randomUUID,
+} from '../../src/utils/env_aware_utils.js';
 import type {Logger} from '../../src/utils/logger.js';
 
 describe('env_aware_utils', () => {
@@ -227,6 +232,41 @@ describe('env_aware_utils', () => {
       expect(isEnterpriseModeEnabled()).toBe(true);
       expect(isEnterpriseModeEnabled()).toBe(true);
       expect(warnSpy).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('base64ByteLength', () => {
+    it('should return 0 for an empty string', () => {
+      expect(base64ByteLength('')).toBe(0);
+    });
+
+    it('should discount one padding character', () => {
+      // 'YWJjZGU=' decodes to 'abcde'.
+      expect(base64ByteLength('YWJjZGU=')).toBe(5);
+    });
+
+    it('should discount two padding characters', () => {
+      // 'YWJjZA==' decodes to 'abcd'.
+      expect(base64ByteLength('YWJjZA==')).toBe(4);
+    });
+
+    it('should measure an unpadded payload', () => {
+      // 'YWJjZGVm' decodes to 'abcdef'.
+      expect(base64ByteLength('YWJjZGVm')).toBe(6);
+    });
+
+    it('should agree with the encoder for every remainder', () => {
+      for (const text of ['a', 'ab', 'abc', 'abcd']) {
+        expect(base64ByteLength(base64Encode(text))).toBe(text.length);
+      }
+    });
+
+    it('should measure decoded bytes, not encoded characters', () => {
+      const twentyMegabytes = 20 * 1024 * 1024;
+      const encoded = base64Encode(new Uint8Array(twentyMegabytes));
+
+      expect(encoded.length).toBeGreaterThan(twentyMegabytes);
+      expect(base64ByteLength(encoded)).toBe(twentyMegabytes);
     });
   });
 });
