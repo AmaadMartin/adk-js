@@ -26,28 +26,7 @@ import {
   type MockInstance,
 } from 'vitest';
 import {logger} from '../../src/utils/logger.js';
-
-/** Builds little-endian signed 16-bit PCM bytes from integer samples. */
-function pcm(samples: number[]): Uint8Array {
-  const bytes = new Uint8Array(samples.length * 2);
-  const view = new DataView(bytes.buffer);
-  samples.forEach((sample, index) => view.setInt16(index * 2, sample, true));
-  return bytes;
-}
-
-/** Decodes little-endian signed 16-bit PCM bytes back into samples. */
-function samplesOf(bytes: Uint8Array): number[] {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const decoded: number[] = [];
-  for (let offset = 0; offset + 1 < bytes.length; offset += 2) {
-    decoded.push(view.getInt16(offset, true));
-  }
-  return decoded;
-}
-
-function range(count: number): number[] {
-  return Array.from({length: count}, (_unused, index) => index);
-}
+import {pcm, ramp, samplesOf} from './pcm_fixtures.js';
 
 describe('audio_utils', () => {
   describe('parseSampleRate', () => {
@@ -104,7 +83,7 @@ describe('audio_utils', () => {
     });
 
     it('test_resample_downsamples_by_rate_ratio', () => {
-      const input = pcm(range(600));
+      const input = pcm(ramp(600));
 
       expect(samplesOf(resamplePcm16(input, 24000, 16000))).toHaveLength(400);
     });
@@ -132,13 +111,13 @@ describe('audio_utils', () => {
     });
 
     it('test_to_live_input_resamples_from_declared_rate', () => {
-      const result = toLiveInput(pcm(range(600)), 'audio/l16; rate=24000');
+      const result = toLiveInput(pcm(ramp(600)), 'audio/l16; rate=24000');
 
       expect(samplesOf(result)).toHaveLength(400);
     });
 
     it('test_to_live_input_defaults_to_common_tts_rate_and_warns', () => {
-      const result = toLiveInput(pcm(range(600)), 'audio/pcm');
+      const result = toLiveInput(pcm(ramp(600)), 'audio/pcm');
 
       // The 24 kHz default downsamples 600 samples to 400 at 16 kHz...
       expect(samplesOf(result)).toHaveLength(400);
@@ -147,7 +126,7 @@ describe('audio_utils', () => {
     });
 
     it('test_to_live_input_does_not_warn_when_rate_is_declared', () => {
-      toLiveInput(pcm(range(600)), 'audio/l16; rate=24000');
+      toLiveInput(pcm(ramp(600)), 'audio/l16; rate=24000');
 
       expect(warn).not.toHaveBeenCalled();
     });
