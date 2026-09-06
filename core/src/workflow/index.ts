@@ -25,7 +25,7 @@ export {Workflow, isWorkflow} from './workflow.js';
 export type {DynamicEntry, WorkflowConfig} from './workflow.js';
 
 // --- Nodes ---
-export {BaseNode, START} from './base_node.js';
+export {BaseNode, START, findStaticNodePath} from './base_node.js';
 export type {BaseNodeConfig} from './base_node.js';
 export {WorkflowNode, isWorkflowNode, node} from './node.js';
 export type {NodeOptions, WorkflowNodeConfig} from './node.js';
