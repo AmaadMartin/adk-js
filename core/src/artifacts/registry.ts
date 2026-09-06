@@ -25,9 +25,10 @@ export function getArtifactServiceFromUri(uri: string): BaseArtifactService {
   }
 
   if (uri.startsWith('file://')) {
-    const rootDir = uri.split('://')[1];
-
-    return new FileArtifactService(rootDir);
+    // Pass the URI through: FileArtifactService resolves it with fileURLToPath,
+    // which keeps Windows drive letters and percent-escapes intact. Stripping
+    // the scheme here turns file:///C:/x into the root-relative /C:/x.
+    return new FileArtifactService(uri);
   }
 
   throw new Error(
