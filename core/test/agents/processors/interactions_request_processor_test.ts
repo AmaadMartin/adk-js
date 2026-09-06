@@ -227,6 +227,41 @@ describe('InteractionsRequestProcessor', () => {
     expect(llmRequest.previousInteractionId).toBe('int-2');
   });
 
+  it('should resolve a branchless event while on a branch', async () => {
+    // A branchless event was appended at the invocation root, so a branched
+    // run still sees it. The earlier inline scan compared the two branches
+    // strictly and missed it; `isEventInBranch` matches adk-python's
+    // `_is_event_in_branch`.
+    const rawEvents: Event[] = [
+      createEvent({author: 'test_agent', interactionId: 'int-root'}),
+    ];
+    const geminiModel = new Gemini({
+      model: 'gemini-2.5-flash',
+      apiKey: 'dummy',
+      useInteractionsApi: true,
+    });
+    const invocationContext = createMockInvocationContext(
+      rawEvents,
+      geminiModel,
+      'test_agent',
+    );
+    invocationContext.branch = 'main';
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of INTERACTIONS_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    expect(llmRequest.previousInteractionId).toBe('int-root');
+  });
+
   it('should do nothing if agent is not LlmAgent', async () => {
     const rawEvents: Event[] = [
       createMockEvent('1', 'test_agent', 'main', 'int-1'),
