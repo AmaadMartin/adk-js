@@ -70,13 +70,15 @@ describe('audio_utils (adk-js specific)', () => {
     });
 
     it('truncates toward zero on negative samples', () => {
-      // Python's int() truncates toward zero. Math.round and Math.floor both
-      // disagree with it here: the exact value is -149.5.
-      const input = pcm([0, -100, -200, -300]);
+      // Python's int() truncates toward zero, and real PCM has negative
+      // samples. These rates put output index 1 at position 1.875, so the
+      // interpolated value is exactly -200.625: Math.trunc gives -200, while
+      // Math.floor and Math.round both give -201.
+      const input = pcm([0, -100, -215, -300]);
 
-      const result = samplesOf(resamplePcm16(input, 24000, LIVE_INPUT_RATE_HZ));
+      const result = samplesOf(resamplePcm16(input, 30000, LIVE_INPUT_RATE_HZ));
 
-      expect(result[1]).toBe(-150);
+      expect(result[1]).toBe(-200);
     });
 
     it('upsamples when the target rate is higher', () => {
