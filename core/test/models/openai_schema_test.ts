@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 import {
   enforceStrictOpenAiSchema,
+  isGenaiSchema,
   isJsonSchemaObject,
   lowercaseSchemaTypes,
+  schemaToJsonObject,
 } from '../../src/models/openai_schema.js';
 
 describe('isJsonSchemaObject', () => {
@@ -189,5 +192,50 @@ describe('enforceStrictOpenAiSchema', () => {
       properties: {broken: 'not a schema'},
       anyOf: ['not a schema'],
     });
+  });
+});
+
+describe('isGenaiSchema', () => {
+  it('recognises a schema by its uppercase genai type', () => {
+    expect(isGenaiSchema({type: Type.OBJECT})).toBe(true);
+    expect(isGenaiSchema({type: 'object'})).toBe(false);
+    expect(isGenaiSchema({properties: {}})).toBe(false);
+    expect(isGenaiSchema('object')).toBe(false);
+  });
+});
+
+describe('schemaToJsonObject', () => {
+  it('converts a genai schema out of its dialect', () => {
+    expect(
+      schemaToJsonObject({
+        type: Type.OBJECT,
+        properties: {n: {type: Type.INTEGER, maxItems: '5'}},
+      }),
+    ).toEqual({
+      type: 'object',
+      properties: {n: {type: 'integer', maxItems: 5}},
+    });
+  });
+
+  it('lowercases the types of a plain JSON schema without dropping them', () => {
+    expect(
+      schemaToJsonObject({
+        type: 'object',
+        properties: {n: {type: 'INTEGER'}},
+      }),
+    ).toEqual({type: 'object', properties: {n: {type: 'integer'}}});
+  });
+
+  it('does not mutate the schema it was given', () => {
+    const schema = {type: 'OBJECT', properties: {n: {type: 'STRING'}}};
+
+    schemaToJsonObject(schema);
+
+    expect(schema).toEqual({type: 'OBJECT', properties: {n: {type: 'STRING'}}});
+  });
+
+  it('returns an empty object for a value that is not a schema', () => {
+    expect(schemaToJsonObject('object')).toEqual({});
+    expect(schemaToJsonObject(undefined)).toEqual({});
   });
 });

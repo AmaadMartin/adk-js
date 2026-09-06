@@ -225,6 +225,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [LlmRequest](models/llm_request/index.md) - The request object ADK builds for one model call, and the rules that keep it valid for the provider.
 - [OpenAILlm](models/openai/index.md) - Running an agent on a GPT model, or on
   any host that speaks the OpenAI Chat Completions API.
+- [OpenAIResponsesLlm](models/openai_responses_llm/index.md) - Running an agent
+  on a GPT model through the OpenAI Responses API, with reasoning effort and
+  structured output.
 
 ### Optimization
 

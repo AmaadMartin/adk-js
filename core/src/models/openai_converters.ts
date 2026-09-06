@@ -17,7 +17,6 @@ import {
   GenerateContentConfig,
   Part,
   Schema,
-  Type,
 } from '@google/genai';
 import type {OpenAI} from 'openai';
 
@@ -32,13 +31,11 @@ import {
   isJsonSchemaObject,
   JsonSchemaObject,
   lowercaseSchemaTypes,
+  schemaToJsonObject,
 } from './openai_schema.js';
 
 /** Name given to a strict `json_schema` response format with no `title`. */
 const DEFAULT_RESPONSE_SCHEMA_NAME = 'response';
-
-/** The genai `type` values, used to tell a genai `Schema` from JSON Schema. */
-const GENAI_SCHEMA_TYPES = new Set<string>(Object.values(Type));
 
 /** A single accumulated tool call, assembled from streamed fragments. */
 interface AccumulatedToolCall {
@@ -403,28 +400,11 @@ export function toOpenAiResponseFormat(
   return undefined;
 }
 
-/**
- * Converts a response schema into the strict JSON Schema OpenAI wants.
- *
- * genai types `responseSchema` as `Schema | unknown`, so both a genai `Schema`
- * and a plain JSON Schema object reach here. A genai `Schema` is recognised by
- * its uppercase `type` and converted, which also unwraps `nullable` and the
- * stringified bounds; anything else is only case-normalised, because
- * converting it would drop its already-lowercase `type`.
- */
+/** Converts a response schema into the strict JSON Schema OpenAI wants. */
 function toStrictJsonSchema(
   responseSchema: JsonSchemaObject,
 ): JsonSchemaObject {
-  let schema: JsonSchemaObject;
-  if (
-    typeof responseSchema['type'] === 'string' &&
-    GENAI_SCHEMA_TYPES.has(responseSchema['type'])
-  ) {
-    schema = genaiSchemaToJsonSchema(responseSchema as Schema);
-  } else {
-    schema = structuredClone(responseSchema);
-    lowercaseSchemaTypes(schema);
-  }
+  const schema = schemaToJsonObject(responseSchema);
   enforceStrictOpenAiSchema(schema);
   return schema;
 }

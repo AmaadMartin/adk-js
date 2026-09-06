@@ -5,15 +5,22 @@
  */
 
 /**
- * JSON-schema helpers for the OpenAI Chat Completions API.
+ * JSON-schema helpers shared by the OpenAI models.
  *
  * Ported from adk-python `src/google/adk/labs/openai/_openai_schema.py`
  * (`enforce_strict_openai_schema`) and `_update_type_string` in
  * `src/google/adk/labs/openai/_openai_llm.py`.
  */
 
+import {Schema, Type} from '@google/genai';
+
+import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
+
 /** A JSON Schema node. Keys are schema keywords; values are unconstrained. */
 export type JsonSchemaObject = Record<string, unknown>;
+
+/** The genai `type` values, used to tell a genai `Schema` from JSON Schema. */
+const GENAI_SCHEMA_TYPES = new Set<string>(Object.values(Type));
 
 /** Keywords whose value maps names to subschemas. */
 const SCHEMA_MAP_KEYWORDS = [
@@ -46,6 +53,43 @@ const STRICT_COMBINATOR_KEYWORDS = ['anyOf', 'oneOf', 'allOf'] as const;
 /** Narrows an arbitrary value to a JSON Schema node. */
 export function isJsonSchemaObject(value: unknown): value is JsonSchemaObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Narrows a schema value to the genai `Schema` dialect.
+ *
+ * genai types a response schema as `Schema | unknown`, so both dialects reach
+ * the converters. A genai `Schema` is recognised by its uppercase `type`.
+ */
+export function isGenaiSchema(value: unknown): value is Schema {
+  return (
+    isJsonSchemaObject(value) &&
+    typeof value['type'] === 'string' &&
+    GENAI_SCHEMA_TYPES.has(value['type'])
+  );
+}
+
+/**
+ * Renders a schema of either dialect as a JSON Schema object.
+ *
+ * A genai `Schema` is converted, which also unwraps `nullable` and the
+ * stringified bounds. Anything else is copied and only case-normalised,
+ * because converting it would drop its already-lowercase `type`.
+ *
+ * @param schema The schema, in either dialect.
+ * @return A new JSON Schema object, or `{}` when there is nothing to convert.
+ *   The input is never mutated.
+ */
+export function schemaToJsonObject(schema: unknown): JsonSchemaObject {
+  if (isGenaiSchema(schema)) {
+    return genaiSchemaToJsonSchema(schema);
+  }
+  if (!isJsonSchemaObject(schema)) {
+    return {};
+  }
+  const copy = structuredClone(schema);
+  lowercaseSchemaTypes(copy);
+  return copy;
 }
 
 /**
