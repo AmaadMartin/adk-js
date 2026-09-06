@@ -15,6 +15,21 @@ import {isLlmAgent, LlmAgent} from '../llm_agent.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
+ * Whether an agent is configured as a workflow node.
+ *
+ * A node is driven by the workflow graph rather than by the model's transfer
+ * decision, so it is not offered as a transfer target and is given no transfer
+ * instructions. The `transfer_to_agent` tool is still registered — adk-python
+ * suppresses only the instruction text. Only {@link LlmAgent} carries `mode`;
+ * any other agent type is a normal transfer participant. Mirrors adk-python's
+ * `mode not in ('single_turn', 'task')` check — adk-js has no `'chat'` mode, so
+ * a set `mode` is exactly a node.
+ */
+function isWorkflowNode(agent: BaseAgent): boolean {
+  return isLlmAgent(agent) && agent.mode !== undefined;
+}
+
+/**
  * Augments the {@link LlmRequest} to support agent transfer. When the current
  * agent has reachable transfer targets (sub-agents, peer agents, or a parent
  * agent), this processor registers a `transfer_to_agent` function tool and
@@ -82,6 +97,10 @@ Agent description: ${targetAgent.description}
     agent: LlmAgent,
     targetAgents: BaseAgent[],
   ): string {
+    if (isWorkflowNode(agent)) {
+      return '';
+    }
+
     let instructions = `
 You have a list of other agents to transfer to:
 
@@ -108,7 +127,7 @@ to your parent agent.
 
   private getTransferTargets(agent: LlmAgent): BaseAgent[] {
     const targets: BaseAgent[] = [];
-    targets.push(...agent.subAgents);
+    targets.push(...agent.subAgents.filter((a) => !isWorkflowNode(a)));
 
     if (!agent.parentAgent || !isLlmAgent(agent.parentAgent)) {
       return targets;
@@ -121,7 +140,8 @@ to your parent agent.
     if (!agent.disallowTransferToPeers) {
       targets.push(
         ...agent.parentAgent.subAgents.filter(
-          (peerAgent) => peerAgent.name !== agent.name,
+          (peerAgent) =>
+            peerAgent.name !== agent.name && !isWorkflowNode(peerAgent),
         ),
       );
     }
