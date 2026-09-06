@@ -8,6 +8,7 @@ import {Content, createPartFromText, Modality, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
+import {ContextCacheConfig} from '../agents/context_cache_config.js';
 import {reservedFunctionCallName} from '../agents/framework_function_calls.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
 import {
@@ -164,6 +165,7 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  readonly contextCacheConfig?: ContextCacheConfig;
 
   /**
    * Creates a new Runner instance.
@@ -191,6 +193,7 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       input.app?.resumabilityConfig ?? input.resumabilityConfig;
+    this.contextCacheConfig = input.app?.contextCacheConfig;
   }
 
   /**
@@ -325,6 +328,7 @@ export class Runner {
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
             pluginManager: this.pluginManager,
+            contextCacheConfig: this.contextCacheConfig,
             abortSignal: params.abortSignal,
           });
 
@@ -713,6 +717,7 @@ export class Runner {
             runConfig,
             a2aMetadata: runConfig.a2aMetadata,
             pluginManager: this.pluginManager,
+            contextCacheConfig: this.contextCacheConfig,
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,
             liveSessionResumptionHandle: params.liveSessionResumptionHandle,

@@ -12,6 +12,10 @@ import {getGoogleLlmVariant, GoogleLLMVariant} from './variant_utils.js';
  * time as tools, which is strictly more reliable than the prompt-based
  * `set_model_response` workaround.
  *
+ * Read `model.capabilities.outputSchemaAndTools` instead whenever a model
+ * instance is in hand, because a subclass may declare a capability that no
+ * model name reveals.
+ *
  * Early Access Program model names encode no numeric version, so
  * `isGemini2OrAbove` rejects them even on Vertex AI. The Python
  * implementation accepts them; that gap lives in the shared predicate.

@@ -22,6 +22,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  LlmCapabilities,
   LlmRequest,
   LlmResponse,
   LongRunningFunctionTool,
@@ -1060,11 +1061,21 @@ describe('LlmAgent outputSchema with tools', () => {
     }
   }
 
+  /** A model that declares a capability its name would not reveal. */
+  class DeclaringLlm extends CapturingLlm {
+    override get capabilities(): LlmCapabilities {
+      return {outputSchemaAndTools: true};
+    }
+  }
+
   async function captureRequest(options: {
     model: string;
     withTools: boolean;
+    declaresCapability?: boolean;
   }): Promise<LlmRequest> {
-    const llm = new CapturingLlm({model: options.model});
+    const llm = options.declaresCapability
+      ? new DeclaringLlm({model: options.model})
+      : new CapturingLlm({model: options.model});
     const agent = new LlmAgent({
       name: 'test_agent',
       model: llm,
@@ -1145,6 +1156,23 @@ describe('LlmAgent outputSchema with tools', () => {
     expect(request.config?.responseSchema).toBeUndefined();
     expect(request.toolsDict).toHaveProperty('set_model_response');
     expect(request.config?.systemInstruction).toContain('set_model_response');
+  });
+
+  it('uses the native response schema when the model declares the capability', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const request = await captureRequest({
+      model: 'openai/gpt-4o',
+      withTools: true,
+      declaresCapability: true,
+    });
+
+    expect(request.config?.responseSchema).toBeDefined();
+    expect(request.toolsDict).not.toHaveProperty('set_model_response');
+    expect(request.toolsDict).toHaveProperty('some_tool');
+    expect(request.config?.systemInstruction).not.toContain(
+      'set_model_response',
+    );
   });
 
   it.each(['true', undefined])(
