@@ -6,7 +6,10 @@
 
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
-import {getExpressModeApiKey} from '../../src/utils/vertex_ai_utils.js';
+import {
+  createExpressModeApiClient,
+  getExpressModeApiKey,
+} from '../../src/utils/vertex_ai_utils.js';
 
 describe('vertex_ai_utils', () => {
   describe('getExpressModeApiKey', () => {
@@ -95,6 +98,20 @@ describe('vertex_ai_utils', () => {
       process.env['GOOGLE_API_KEY'] = 'env-api-key';
       const result = getExpressModeApiKey();
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('createExpressModeApiClient', () => {
+    it('should authenticate with the key and target Vertex AI', async () => {
+      const client = createExpressModeApiClient('my-api-key');
+
+      expect(client.getApiKey()).toBe('my-api-key');
+      expect(client.isVertexAI()).toBe(true);
+      // The key has to reach the auth object, not just the client options, or
+      // requests go out unauthenticated. No credentials are read: NodeAuth
+      // returns the key header without constructing GoogleAuth.
+      const headers = await client.getAuthHeaders();
+      expect(headers.get('x-goog-api-key')).toBe('my-api-key');
     });
   });
 });

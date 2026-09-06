@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {VertexAiSessionService} from '@google/adk';
+import {createEvent, VertexAiSessionService} from '@google/adk';
+import {createSession} from '@google/adk/sessions/session.js';
+import {createAgentEngineSessions} from '@google/adk/utils/vertex_ai_utils.js';
+import {HttpOptions} from '@google/genai';
 import {
   ApiClient,
   Auth,
@@ -19,23 +21,6 @@ import {json} from 'node:stream/consumers';
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 
 const AGENT_ENGINE_ID = '12345';
-
-/**
- * Builds the Agent Engine `Sessions` client from an `ApiClient`.
- *
- * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
- * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
- * `ApiClient` this test constructs is a structurally distinct class (its
- * private fields make the two nominally incompatible) from the one `Sessions`
- * declares. The instances are interchangeable at runtime -- the mismatch is a
- * duplicate-dependency artifact, not a real API difference -- so the cast is
- * confined to this one boundary.
- */
-function createSessionsClient(apiClient: ApiClient): Sessions {
-  return new Sessions(
-    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
-  );
-}
 
 /**
  * Exercises `getSession`'s NOT_FOUND handling against an error the SDK builds
@@ -73,7 +58,7 @@ describe('VertexAiSessionService over the real Sessions HTTP client', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: createAgentEngineSessions(apiClient),
     });
   });
 
@@ -138,7 +123,7 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     });
     service = new VertexAiSessionService({
       agentEngineId: AGENT_ENGINE_ID,
-      sessions: createSessionsClient(apiClient),
+      sessions: createAgentEngineSessions(apiClient),
     });
   });
 
@@ -169,5 +154,231 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     expect(bodies).toEqual([
       {userId: 'user-1', expireTime: '2026-10-01T00:00:00Z'},
     ]);
+  });
+});
+
+/**
+ * A subclass that points every request at extra HTTP options, so the test can
+ * read them off the request the SDK sends.
+ */
+class TracedSessionService extends VertexAiSessionService {
+  protected override apiClientHttpOptionsOverride(): HttpOptions {
+    return {headers: {'x-adk-test': 'traced'}};
+  }
+}
+
+/** One request the loopback server answered. */
+interface RecordedRequest {
+  url: string;
+  headers: http.IncomingHttpHeaders;
+  body: unknown;
+}
+
+/**
+ * Drives the parity behaviours through the real Agent Engine Sessions client
+ * against a loopback server: the rate-limit retry sees an error the SDK built
+ * from a real 429 response, and pagination follows a real `nextPageToken`.
+ * Nothing here is mocked below the service, and no credentials are needed.
+ */
+describe('VertexAiSessionService parity behaviour over the wire', () => {
+  let server: http.Server;
+  let requests: RecordedRequest[];
+  let respond: (url: string, response: http.ServerResponse) => void;
+  let port: number;
+
+  beforeAll(async () => {
+    server = http.createServer(async (request, response) => {
+      requests.push({
+        url: request.url ?? '',
+        headers: request.headers,
+        body: request.method === 'GET' ? undefined : await json(request),
+      });
+      respond(request.url ?? '', response);
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  beforeEach(() => {
+    requests = [];
+  });
+
+  function sendJson(
+    response: http.ServerResponse,
+    body: unknown,
+    status = 200,
+  ) {
+    response.writeHead(status, {'content-type': 'application/json'});
+    response.end(JSON.stringify(body));
+  }
+
+  function buildService(
+    Service: typeof VertexAiSessionService = VertexAiSessionService,
+  ): VertexAiSessionService {
+    const apiClient = new ApiClient({
+      auth: unauthenticated,
+      uploader: new NodeUploader(),
+      downloader: new NodeDownloader(),
+      project: 'test-project',
+      location: 'us-central1',
+      vertexai: true,
+      httpOptions: {baseUrl: `http://127.0.0.1:${port}`},
+    });
+    return new Service({
+      agentEngineId: AGENT_ENGINE_ID,
+      sessions: createAgentEngineSessions(apiClient),
+    });
+  }
+
+  it('retries an append the backend rate limits', async () => {
+    let appends = 0;
+    respond = (_url, response) => {
+      appends++;
+      if (appends === 1) {
+        sendJson(
+          response,
+          {error: {code: 429, message: 'Resource exhausted'}},
+          429,
+        );
+        return;
+      }
+      sendJson(response, {});
+    };
+    const service = buildService();
+    const session = createSession({
+      id: 'retry-session',
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+    });
+    const event = createEvent({
+      author: 'user',
+      invocationId: 'inv-1',
+      timestamp: 1767225600000,
+      content: {role: 'user', parts: [{text: 'hello'}]},
+    });
+
+    await service.appendEvent({session, event});
+
+    expect(appends).toBe(2);
+  });
+
+  it('gives up after one retry when the backend keeps rate limiting', async () => {
+    let appends = 0;
+    respond = (_url, response) => {
+      appends++;
+      sendJson(
+        response,
+        {error: {code: 429, message: 'Resource exhausted'}},
+        429,
+      );
+    };
+    const service = buildService();
+    const session = createSession({
+      id: 'retry-session',
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+    });
+    const event = createEvent({
+      author: 'user',
+      invocationId: 'inv-2',
+      timestamp: 1767225600000,
+      content: {role: 'user', parts: [{text: 'hello'}]},
+    });
+
+    await expect(service.appendEvent({session, event})).rejects.toThrow(
+      'Resource exhausted',
+    );
+
+    expect(appends).toBe(2);
+  });
+
+  it('reads every page of events the backend returns', async () => {
+    respond = (url, response) => {
+      if (!url.includes('/events')) {
+        sendJson(response, {
+          userId: 'user-1',
+          sessionState: {},
+          updateTime: '2026-01-01T00:00:00Z',
+        });
+        return;
+      }
+      if (url.includes('pageToken=page-2')) {
+        sendJson(response, {
+          sessionEvents: [
+            {name: 'events/e3', invocationId: 'inv-3', author: 'user'},
+          ],
+        });
+        return;
+      }
+      sendJson(response, {
+        sessionEvents: [
+          {name: 'events/e1', invocationId: 'inv-1', author: 'user'},
+          {name: 'events/e2', invocationId: 'inv-2', author: 'user'},
+        ],
+        nextPageToken: 'page-2',
+      });
+    };
+    const service = buildService();
+
+    const session = await service.getSession({
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+      sessionId: 'paged-session',
+    });
+
+    expect(session?.events.map((event) => event.id)).toEqual([
+      'e1',
+      'e2',
+      'e3',
+    ]);
+    expect(
+      requests.filter((request) => request.url.includes('pageToken=page-2')),
+    ).toHaveLength(1);
+  });
+
+  it('sends passthrough create config in the request body', async () => {
+    respond = (_url, response) =>
+      sendJson(response, {
+        name: 'operations/1',
+        done: true,
+        response: {
+          name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-1`,
+          updateTime: '2026-01-01T00:00:00Z',
+        },
+      });
+    const service = buildService();
+
+    await service.createSession({
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+      config: {displayName: 'triage', labels: {team: 'support'}},
+    });
+
+    expect(requests[0].body).toEqual({
+      userId: 'user-1',
+      displayName: 'triage',
+      labels: {team: 'support'},
+    });
+  });
+
+  it('sends the overridden http header on the requests it issues', async () => {
+    respond = (_url, response) =>
+      sendJson(response, {
+        name: 'operations/1',
+        done: true,
+        response: {
+          name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/session-1`,
+          updateTime: '2026-01-01T00:00:00Z',
+        },
+      });
+    const service = buildService(TracedSessionService);
+
+    await service.createSession({appName: AGENT_ENGINE_ID, userId: 'user-1'});
+
+    expect(requests[0].headers['x-adk-test']).toBe('traced');
   });
 });
