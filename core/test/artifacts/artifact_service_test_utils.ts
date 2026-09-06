@@ -572,6 +572,216 @@ export function runArtifactServiceTests(
     });
   });
 
+  describe('artifact references', () => {
+    const otherSessionId = 'other-session';
+    const sessionScopedUri = (filename: string, version = 0) =>
+      `artifact://apps/${appName}/users/${userId}/sessions/${sessionId}/artifacts/${filename}/versions/${version}`;
+    const userScopedUri = (filename: string, version = 0) =>
+      `artifact://apps/${appName}/users/${userId}/artifacts/${filename}/versions/${version}`;
+
+    it('loads the target of a session-scoped reference', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'source.txt',
+        artifact: {text: 'source content'},
+      });
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'ref.txt',
+        artifact: {
+          fileData: {
+            fileUri: sessionScopedUri('source.txt'),
+            mimeType: 'text/plain',
+          },
+        },
+      });
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'ref.txt',
+      });
+
+      expect(loaded?.text).toBe('source content');
+      expect(loaded?.fileData).toBeUndefined();
+    });
+
+    it('loads the target of a reference to a nested filename', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'folder/file456',
+        artifact: {text: 'nested target'},
+      });
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'reference',
+        artifact: {
+          fileData: {
+            fileUri: sessionScopedUri('folder/file456'),
+            mimeType: 'text/plain',
+          },
+        },
+      });
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'reference',
+      });
+
+      expect(loaded?.text).toBe('nested target');
+    });
+
+    it('loads a user-scoped reference from another session of the same user', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'user:profile.txt',
+        artifact: {text: 'profile'},
+      });
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId: otherSessionId,
+        filename: 'ref.txt',
+        artifact: {
+          fileData: {
+            fileUri: userScopedUri('user:profile.txt'),
+            mimeType: 'text/plain',
+          },
+        },
+      });
+
+      const loaded = await service.loadArtifact({
+        appName,
+        userId,
+        sessionId: otherSessionId,
+        filename: 'ref.txt',
+      });
+
+      expect(loaded?.text).toBe('profile');
+    });
+
+    it('rejects a reference owned by another user on save', async () => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId: 'attacker',
+          sessionId,
+          filename: 'ref.txt',
+          artifact: {
+            fileData: {
+              fileUri: userScopedUri('user:secret.txt'),
+              mimeType: 'text/plain',
+            },
+          },
+        }),
+      ).rejects.toThrow('same app and user scope');
+    });
+
+    it('rejects a reference owned by another app on save', async () => {
+      await expect(
+        service.saveArtifact({
+          appName: 'attacker-app',
+          userId,
+          sessionId,
+          filename: 'ref.txt',
+          artifact: {
+            fileData: {
+              fileUri: userScopedUri('user:secret.txt'),
+              mimeType: 'text/plain',
+            },
+          },
+        }),
+      ).rejects.toThrow('same app and user scope');
+    });
+
+    it('rejects a malformed artifact URI on save', async () => {
+      await expect(
+        service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'ref.txt',
+          artifact: {
+            fileData: {
+              fileUri: 'artifact://apps/app/invalid',
+              mimeType: 'text/plain',
+            },
+          },
+        }),
+      ).rejects.toThrow(
+        'Invalid artifact reference URI: artifact://apps/app/invalid',
+      );
+    });
+
+    it('rejects a stored session-scoped reference loaded from another session', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'source.txt',
+        artifact: {text: 'source content'},
+      });
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'user:pointer.txt',
+        artifact: {
+          fileData: {
+            fileUri: sessionScopedUri('source.txt'),
+            mimeType: 'text/plain',
+          },
+        },
+      });
+
+      await expect(
+        service.loadArtifact({
+          appName,
+          userId,
+          sessionId: otherSessionId,
+          filename: 'user:pointer.txt',
+        }),
+      ).rejects.toThrow('same session scope');
+    });
+
+    it('rejects a self-referencing artifact instead of following it forever', async () => {
+      await service.saveArtifact({
+        appName,
+        userId,
+        sessionId,
+        filename: 'loop.txt',
+        artifact: {
+          fileData: {
+            fileUri: sessionScopedUri('loop.txt'),
+            mimeType: 'text/plain',
+          },
+        },
+      });
+
+      await expect(
+        service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'loop.txt',
+        }),
+      ).rejects.toThrow('exceeded the maximum depth of 10');
+    }, 5000);
+  });
+
   describe('CompositeSessionKey compatibility', () => {
     it('supports pre-constructed CompositeSessionKey for artifact operations', async () => {
       const sessionKey: CompositeSessionKey = {

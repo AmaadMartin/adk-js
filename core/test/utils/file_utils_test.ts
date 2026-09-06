@@ -9,7 +9,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {materializeFiles} from '../../src/utils/file_utils.js';
+import {
+  materializeFiles,
+  validatePathSegment,
+} from '../../src/utils/file_utils.js';
 
 describe('file_utils', () => {
   let tempDir: string;
@@ -211,6 +214,83 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content3).toBe('third');
+    });
+  });
+  describe.each(['appName', 'userId', 'sessionId'])(
+    'validatePathSegment %s',
+    (fieldName) => {
+      it.each([
+        'user123',
+        'myapp',
+        'sess123',
+        'group/user123',
+        'has/slash',
+        'back\\slash',
+        'user:profile.txt',
+        'a/./b',
+        '1:x',
+        '_:x',
+        'é:x',
+        ':x',
+        'plain',
+      ])('accepts %s', (value) => {
+        expect(() => validatePathSegment(value, fieldName)).not.toThrow();
+      });
+
+      it.each([
+        '../escape',
+        '../../etc',
+        'foo/../../bar',
+        'mixed/..\\separators',
+        './..\\',
+        '.\\../',
+        '..',
+        '.',
+        '',
+        '/etc/passwd',
+        '/leading/slash',
+        '\\leading\\backslash',
+        'C:\\absolute',
+        'C:/absolute',
+        'C:drive-relative',
+        'C:',
+        'c:/data',
+        'Z:relative',
+      ])('rejects %s', (value) => {
+        expect(() => validatePathSegment(value, fieldName)).toThrow();
+      });
+
+      it('rejects a value holding a null byte', () => {
+        expect(() => validatePathSegment('null\x00byte', fieldName)).toThrow(
+          `${fieldName} must not contain null bytes.`,
+        );
+      });
+    },
+  );
+
+  describe('validatePathSegment rejection messages', () => {
+    it('reports an empty value', () => {
+      expect(() => validatePathSegment('', 'userId')).toThrow(
+        'userId must not be empty.',
+      );
+    });
+
+    it('reports a leading slash before a traversal segment', () => {
+      expect(() => validatePathSegment('/../etc', 'appName')).toThrow(
+        "appName '/../etc' must not be an absolute path or start with a slash.",
+      );
+    });
+
+    it('reports a drive letter before a traversal segment', () => {
+      expect(() => validatePathSegment('C:/../etc', 'sessionId')).toThrow(
+        "sessionId 'C:/../etc' must not be drive-qualified.",
+      );
+    });
+
+    it('reports a traversal segment', () => {
+      expect(() => validatePathSegment('foo/../bar', 'sessionId')).toThrow(
+        "sessionId 'foo/../bar' must not contain traversal segments.",
+      );
     });
   });
 });

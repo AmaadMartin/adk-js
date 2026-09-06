@@ -363,4 +363,71 @@ describe('GcsArtifactService', () => {
       expect(loaded?.inlineData?.displayName).toBe('photo.png');
     });
   });
+
+  describe('scope identifier validation', () => {
+    it.each([
+      {
+        field: 'appName',
+        appName: '../escape',
+        userId: 'test-user',
+        sessionId: 'test-session',
+      },
+      {
+        field: 'userId',
+        appName: 'test-app',
+        userId: '../escape',
+        sessionId: 'test-session',
+      },
+      {
+        field: 'sessionId',
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: '../escape',
+      },
+    ])(
+      'rejects a traversal $field on every operation',
+      async ({field, ...scope}) => {
+        storageMock.buckets.clear();
+        const service = new GcsArtifactService(bucketName);
+        const message = `${field} '../escape' must not contain traversal segments.`;
+
+        await expect(
+          service.saveArtifact({
+            ...scope,
+            filename: 'report.txt',
+            artifact: {text: 'hello'},
+          }),
+        ).rejects.toThrow(message);
+        await expect(
+          service.loadArtifact({...scope, filename: 'report.txt'}),
+        ).rejects.toThrow(message);
+        await expect(
+          service.deleteArtifact({...scope, filename: 'report.txt'}),
+        ).rejects.toThrow(message);
+        await expect(service.listArtifactKeys(scope)).rejects.toThrow(message);
+
+        expect(storageMock.bucket(bucketName).files.size).toBe(0);
+      },
+    );
+
+    it('keeps the sessionId out of a user-namespaced blob name', async () => {
+      storageMock.buckets.clear();
+      const service = new GcsArtifactService(bucketName);
+      const scope = {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: '../escape',
+      };
+
+      await service.saveArtifact({
+        ...scope,
+        filename: 'user:report.txt',
+        artifact: {text: 'user-scoped'},
+      });
+
+      expect([...storageMock.bucket(bucketName).files.keys()]).toEqual([
+        'test-app/test-user/user/report.txt/0',
+      ]);
+    });
+  });
 });
