@@ -6,7 +6,6 @@
 
 import {FunctionDeclaration} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
-import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
@@ -75,7 +74,7 @@ export class RestApiTool extends BaseTool {
 
   @experimental
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    const context = request.toolContext as Context;
+    const context = request.toolContext;
     const args = request.args;
 
     const authHandler = ToolAuthHandler.fromToolContext(
