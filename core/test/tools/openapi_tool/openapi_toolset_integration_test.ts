@@ -13,6 +13,7 @@ import {
   OpenAPIToolset,
   PluginManager,
 } from '@google/adk';
+import {FunctionDeclaration, Type} from '@google/genai';
 import * as fs from 'fs';
 import {OpenAPIV3} from 'openapi-types';
 import * as path from 'path';
@@ -26,6 +27,62 @@ describe('OpenAPIToolset Integration', () => {
     truanonSpec = fs.readFileSync(specPath, 'utf8');
 
     globalThis.fetch = vi.fn();
+  });
+
+  it('should build a clean genai Schema from a messy spec', async () => {
+    const specStr = JSON.stringify({
+      openapi: '3.0.0',
+      info: {title: 'Things', version: '1.0.0'},
+      servers: [{url: 'https://api.example.com'}],
+      paths: {
+        '/things': {
+          get: {
+            operationId: 'get_thing',
+            parameters: [
+              {
+                name: 'id',
+                in: 'query',
+                required: true,
+                schema: {type: 'string', format: 'uuid'},
+              },
+              {
+                name: 'note',
+                in: 'query',
+                schema: {type: ['string', 'null'], 'x-vendor': 'ignored'},
+              },
+              {
+                name: 'limit',
+                in: 'query',
+                schema: {type: 'integer', format: 'int32', minimum: 1},
+              },
+            ],
+            responses: {'200': {description: 'ok'}},
+          },
+        },
+      },
+    });
+
+    const toolset = new OpenAPIToolset({specStr, specType: 'json'});
+    const tools = await toolset.getTools();
+    const tool = tools.find((t) => t.name === 'get_thing');
+    if (!tool) {
+      expect.fail('get_thing tool was not created');
+    }
+
+    const declaration = (
+      tool as unknown as {_getDeclaration: () => FunctionDeclaration}
+    )._getDeclaration();
+
+    expect(declaration.parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        id: {type: Type.STRING},
+        note: {type: Type.STRING, nullable: true},
+        limit: {type: Type.INTEGER, format: 'int32', minimum: 1},
+      },
+      required: ['id'],
+      title: 'get_thing_Arguments',
+    });
   });
 
   it('should parse truanon spec and create tools', async () => {

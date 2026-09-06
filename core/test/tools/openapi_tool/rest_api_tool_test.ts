@@ -14,6 +14,7 @@ import {
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
+import {FunctionDeclaration, Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -305,7 +306,60 @@ describe('RestApiTool', () => {
     expect(declaration).toEqual({
       name: 'test_tool',
       description: 'description',
-      parameters: mockSchema,
+      parameters: {type: Type.OBJECT, properties: {}},
+    });
+  });
+
+  it('should sanitize the declaration schema', () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/things/{id}',
+      method: 'GET',
+    };
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'get_thing',
+      parameters: [
+        {
+          name: 'id',
+          in: 'query',
+          required: true,
+          schema: {type: 'string', format: 'uuid'},
+        },
+      ],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                note: {type: ['string', 'null']} as OpenAPIV3.SchemaObject,
+              },
+            },
+          },
+        },
+      },
+      responses: {},
+    };
+    const tool = new RestApiTool(
+      'get_thing',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    const declaration = (
+      tool as unknown as {_getDeclaration: () => FunctionDeclaration}
+    )._getDeclaration();
+
+    expect(declaration.parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        id: {type: Type.STRING},
+        note: {type: Type.STRING, nullable: true},
+      },
+      required: ['id'],
+      title: 'get_thing_Arguments',
     });
   });
 
