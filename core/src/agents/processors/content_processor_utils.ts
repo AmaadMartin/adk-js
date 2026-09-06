@@ -32,7 +32,7 @@ import {
  * specific to the client-side and should not be included in requests to the
  * model.
  */
-export function removeClientFunctionCallId(content: Content): void {
+export function removeClientFunctionCallId(content: Content | undefined): void {
   for (const part of content?.parts ?? []) {
     if (part.functionCall?.id?.startsWith(AF_FUNCTION_CALL_ID_PREFIX)) {
       part.functionCall.id = undefined;

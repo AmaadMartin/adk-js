@@ -1192,13 +1192,8 @@ describe('removeClientFunctionCallId', () => {
     expect(content.parts![0].functionCall!.id).toBe('server-id');
   });
 
-  it('should safely handle null, undefined, or empty content objects without throwing', () => {
-    expect(() =>
-      removeClientFunctionCallId(undefined as unknown as Content),
-    ).not.toThrow();
-    expect(() =>
-      removeClientFunctionCallId(null as unknown as Content),
-    ).not.toThrow();
+  it('should safely handle undefined or empty content objects without throwing', () => {
+    expect(() => removeClientFunctionCallId(undefined)).not.toThrow();
     const emptyContent: Content = {};
     expect(() => removeClientFunctionCallId(emptyContent)).not.toThrow();
     const noParts: Content = {role: 'user', parts: []};
