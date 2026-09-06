@@ -393,6 +393,47 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].mimeType).toBe('text/plain');
   });
 
+  it('should exclude input files nested in a subdirectory from the output files', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.writeFileSync("new_output.txt", "hello from script");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [
+          {
+            name: 'scripts/existing_input.js',
+            content: 'module.exports = {};',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/javascript',
+          },
+        ],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.outputFiles!.map((file) => file.name)).toEqual([
+      'new_output.txt',
+    ]);
+  });
+
+  it('should report output files created in a subdirectory with forward-slash names', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.mkdirSync("out"); fs.writeFileSync("out/nested.txt", "nested output");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.outputFiles!.map((file) => file.name)).toEqual([
+      'out/nested.txt',
+    ]);
+  });
+
   it('should infer correct mimeType for generated JSON files', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,

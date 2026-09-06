@@ -107,6 +107,22 @@ export async function materializeFiles(
   return createdFiles;
 }
 
+/**
+ * Converts a path to a POSIX path.
+ *
+ * Used for ensuring paths use forward slashes (/), regardless of the operating
+ * system. Splitting on the separator rather than replacing every backslash
+ * keeps POSIX filenames that legitimately contain a backslash (`a\b.txt`)
+ * intact.
+ *
+ * @param p The path.
+ * @param separator The separator convention `p` uses. Defaults to the host's.
+ * @returns The POSIX path.
+ */
+export function asPosixPath(p: string, separator: '\\' | '/' = path.sep) {
+  return p.split(separator).join('/');
+}
+
 export const EXTENSION_TO_MIME_TYPE: Record<string, string> = {
   'pdf': 'application/pdf',
   'jpg': 'image/jpeg',
