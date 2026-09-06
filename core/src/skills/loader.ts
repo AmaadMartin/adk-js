@@ -250,36 +250,20 @@ export async function loadSkillFromDir(skillDir: string): Promise<Skill> {
  * @returns A promise that resolves to an array of validation error messages, or an empty array if valid.
  */
 export async function validateSkillDir(skillDir: string): Promise<string[]> {
-  const problems: string[] = [];
-  const resolvedDir = path.resolve(skillDir);
-
   let skill;
   try {
-    skill = await loadSkillFile(resolvedDir);
+    skill = await loadSkillFile(path.resolve(skillDir));
   } catch (e: unknown) {
     return [(e as Error).message];
   }
 
-  try {
-    const keys = Object.keys(skill.frontmatter);
-    const unknown = keys.filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k));
-    if (unknown.length > 0) {
-      problems.push(
-        `Unknown frontmatter fields: [${unknown.sort().join(', ')}]`,
-      );
-    }
+  const unknown = Object.keys(skill.frontmatter)
+    .filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k))
+    .sort();
 
-    const dirName = path.basename(resolvedDir);
-    if (dirName !== skill.frontmatter.name) {
-      problems.push(
-        `Skill name '${skill.frontmatter.name}' does not match directory name '${dirName}'.`,
-      );
-    }
-  } catch (e: unknown) {
-    problems.push((e as Error).message);
-  }
-
-  return problems;
+  return unknown.length > 0
+    ? [`Unknown frontmatter fields: [${unknown.join(', ')}]`]
+    : [];
 }
 
 /**
