@@ -991,8 +991,36 @@ describe('skill_toolset parity: script arguments and status', () => {
     expect(result.status).toBe('warning');
   });
 
+  it('test_executor_exit_code_is_not_overridden_by_stderr', async () => {
+    const executor = new RecordingCodeExecutor({
+      stderr: 'a warning\n',
+      exitCode: 0,
+    });
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+      exitCode?: number | null;
+    };
+
+    expect(result.status).toBe('error');
+    expect(result.exitCode).toBe(0);
+  });
+
   it('test_missing_executor_exit_code_falls_back_to_stderr', async () => {
     const executor = new RecordingCodeExecutor({stderr: 'fatal error\n'});
+
+    const result = (await runScript(executor, {script_path: 'run.py'})) as {
+      status: string;
+    };
+
+    expect(result.status).toBe('error');
+  });
+
+  it('reports a non-zero exit code as an error whatever the streams say', async () => {
+    const executor = new RecordingCodeExecutor({
+      stdout: 'partial\n',
+      exitCode: 3,
+    });
 
     const result = (await runScript(executor, {script_path: 'run.py'})) as {
       status: string;

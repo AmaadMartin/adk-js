@@ -337,6 +337,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [RestApiTool](tools/rest_api_tool/index.md) - Calling one REST endpoint from a model, and configuring it from JSON text.
 - [RestApiTool request timeouts](tools/rest_api_tool_timeouts/index.md) - Bounding one REST API call, and the error a timeout returns to the model.
 - [SetModelResponseTool](tools/set_model_response/index.md) - Returning structured output on a model that cannot take an output schema and tools in one request.
+- [SkillToolset](tools/skill_toolset/index.md) - Giving an agent folders of instructions, resources and runnable scripts, in a code executor or an environment.
 - [Spanner tool settings](tools/spanner_tool_settings/index.md) - Configuring what the Spanner tools may do, how they shape query results, and the vector store they search.
 - [SpannerToolset](tools/spanner_toolset/index.md) - Reading Spanner tables,
   schemas and vector columns from an agent, with read-only access and

@@ -167,7 +167,9 @@ export abstract class BaseTool {
    * The `error.type` to record on this call's telemetry span, or `undefined`
    * when the response is not a failure. Must not modify the response.
    *
-   * Optional on purpose: a tool that does not implement it reports no error
+   * A tool that reports a failure as a response object rather than by throwing
+   * overrides this so the `execute_tool` span can record the failure. The hook
+   * is optional on purpose: a tool that does not implement it reports no error
    * type at all, rather than inheriting a classification that does not fit it.
    */
   detectErrorInResponse?(response: unknown): string | undefined;

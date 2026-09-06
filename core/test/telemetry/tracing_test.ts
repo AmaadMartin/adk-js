@@ -212,6 +212,38 @@ describe('Telemetry Tracing Functions', () => {
       });
     });
 
+    it('records the error type a tool reported without throwing', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+        errorType: 'RESOURCE_NOT_FOUND_FATAL',
+      });
+
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'error.type',
+        'RESOURCE_NOT_FOUND_FATAL',
+      );
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: 'RESOURCE_NOT_FOUND_FATAL',
+      });
+    });
+
+    it('leaves the span unmarked when the tool reported no error', () => {
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+      });
+
+      expect(mockSpan.setStatus).not.toHaveBeenCalled();
+    });
+
     it('should handle tool call without function response', () => {
       // Arrange
       vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);

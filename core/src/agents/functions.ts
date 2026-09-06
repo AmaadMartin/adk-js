@@ -22,6 +22,7 @@ import {isAgentTool} from '../tools/agent_tool_signature.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {ResumeInputs} from '../tools/resume_inputs.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
+import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {Context} from './context.js';
 import {
@@ -76,6 +77,7 @@ export const functionsExportedForTestingOnly = {
   handleFunctionCallList,
   generateAuthEvent,
   generateRequestConfirmationEvent,
+  detectErrorTypeForTelemetry,
 };
 // TODO - b/425992518: consider internalize as part of llm_agent's runtime.
 /**
@@ -223,7 +225,7 @@ function detectErrorTypeForTelemetry(
     return tool.detectErrorInResponse?.(response);
   } catch (error) {
     logger.error(
-      `Error while detecting the error type of tool '${tool.name}'.`,
+      `Error while detecting the error type of tool '${tool.name}': ${formatError(error)}`,
       error,
     );
     return undefined;

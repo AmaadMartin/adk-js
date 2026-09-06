@@ -15,7 +15,11 @@ import {
 } from '../../code_executors/code_execution_utils.js';
 import {BaseEnvironment} from '../../environment/base_environment.js';
 import {getScript, Skill} from '../../skills/skill.js';
-import {formatError, isFileNotFoundError} from '../../utils/error_utils.js';
+import {
+  asRecord,
+  formatError,
+  isFileNotFoundError,
+} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -26,6 +30,7 @@ import {materializeFiles} from '../../utils/file_utils.js';
 import {logger} from '../../utils/logger.js';
 import {RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
+import {detectSkillToolError} from './skill_error_detection.js';
 import {
   countInvocationFailure,
   SCRIPT_NOT_FOUND_COUNTER_PREFIX,
@@ -334,6 +339,16 @@ export class RunSkillScriptTool extends SkillTool {
       );
     }
   }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    const errorType = detectSkillToolError(response);
+    if (errorType) {
+      return errorType;
+    }
+    return asRecord(response)?.['status'] === 'error'
+      ? SkillErrorCode.SKILL_SCRIPT_EXECUTION_ERROR
+      : undefined;
+  }
 }
 
 function buildWrapperCode(
@@ -627,13 +642,19 @@ function describeExtension(scriptPath: string): string {
 /**
  * Classifies a completed run as `success`, `warning` or `error`.
  *
- * `CodeExecutionResult` carries no exit status, so the streams decide: output
- * on stderr alone is an error, and stderr alongside stdout is a warning. This
- * is the branch adk-python falls back to when its executor reports no status.
+ * A reported non-zero status is an error. With no status reported, the streams
+ * decide: output on stderr alone is an error, and stderr alongside stdout is a
+ * warning. That is the branch adk-python falls back to when its executor
+ * reports no status.
  */
 function deriveScriptStatus(
   result: CodeExecutionResult,
 ): 'success' | 'warning' | 'error' {
+  // `0`, `null` and `undefined` are all falsy, so a run that reported success
+  // and one that reported nothing are both classified from the streams.
+  if (result.exitCode) {
+    return 'error';
+  }
   if (!result.stderr) {
     return 'success';
   }

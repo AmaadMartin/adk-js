@@ -1385,6 +1385,7 @@ export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillErrorCode} from './tools/skill/skill_error_codes.js';
+export {detectSkillToolError} from './tools/skill/skill_error_detection.js';
 export {
   DEFAULT_SKILL_SYSTEM_INSTRUCTION,
   buildSkillSystemInstruction,

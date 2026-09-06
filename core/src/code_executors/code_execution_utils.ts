@@ -103,8 +103,9 @@ export interface CodeExecutionResult {
   outputFiles: File[];
 
   /**
-   * The status the executed process exited with, or undefined when the
-   * executor cannot report one.
+   * The status the executed process exited with, when the executor can report
+   * one. `undefined` or `null` means the executor does not know: a built-in
+   * model-side executor never sees a process.
    */
   exitCode?: number | null;
 }

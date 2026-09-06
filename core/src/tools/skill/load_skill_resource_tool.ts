@@ -11,6 +11,7 @@ import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {RunAsyncToolRequest, ToolProcessLlmRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
+import {detectSkillToolError} from './skill_error_detection.js';
 import {
   countInvocationFailure,
   RESOURCE_NOT_FOUND_COUNTER_PREFIX,
@@ -154,6 +155,10 @@ export class LoadSkillResourceTool extends SkillTool {
       path: resourcePath,
       content,
     };
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return detectSkillToolError(response);
   }
 
   override async processLlmRequest(

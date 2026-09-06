@@ -10,6 +10,7 @@ import {requireAgent} from '../../agents/invocation_context.js';
 import {experimental} from '../../utils/experimental.js';
 import {RunAsyncToolRequest} from '../base_tool.js';
 import {SkillErrorCode} from './skill_error_codes.js';
+import {detectSkillToolError} from './skill_error_detection.js';
 import {SkillTool} from './skill_tool.js';
 import {LOAD_SKILL_TOOL_NAME} from './skill_tool_names.js';
 import {SkillToolset} from './skill_toolset.js';
@@ -95,5 +96,9 @@ export class LoadSkillTool extends SkillTool {
       frontmatter: skill.frontmatter,
       resources: skill.resources,
     };
+  }
+
+  override detectErrorInResponse(response: unknown): string | undefined {
+    return detectSkillToolError(response);
   }
 }

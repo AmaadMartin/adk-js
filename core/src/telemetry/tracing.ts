@@ -164,8 +164,8 @@ export interface TraceToolCallParams {
   args: Record<string, unknown>;
   functionResponseEvent: Event;
   /**
-   * The error type the tool detected in its own response, when it reported a
-   * failure by returning it rather than by throwing.
+   * The error type the tool reported in its own response without throwing,
+   * from `BaseTool.detectErrorInResponse`. Absent when the call succeeded.
    */
   errorType?: string;
   /**
@@ -192,6 +192,10 @@ export function traceToolCall({
 
   if (errorType !== undefined) {
     span.setAttribute(ERROR_TYPE, errorType);
+    // Without an explicit status the span renders as successful, which hides a
+    // tool that reported its failure as a response object. The description
+    // repeats the type rather than the message, so no tool content lands in an
+    // attribute the content toggle cannot gate.
     span.setStatus({code: SpanStatusCode.ERROR, message: errorType});
   }
 
