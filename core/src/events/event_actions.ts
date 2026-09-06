@@ -71,6 +71,14 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * The structured output the model submitted through the
+   * `set_model_response` tool, already checked against the agent's output
+   * schema. Its shape is the schema's, so it stays untyped here, as in Python
+   * `EventActions.set_model_response`.
+   */
+  setModelResponse?: unknown;
 }
 
 /**
@@ -116,7 +124,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.requestedToolConfirmations) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
-    actions.escalate === undefined
+    actions.escalate === undefined &&
+    actions.setModelResponse === undefined
   );
 }
 
@@ -179,6 +188,9 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.setModelResponse !== undefined) {
+      result.setModelResponse = source.setModelResponse;
     }
   }
   return result;

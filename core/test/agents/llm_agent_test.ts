@@ -25,6 +25,7 @@ import {
   LlmRequest,
   LlmResponse,
   LongRunningFunctionTool,
+  OUTPUT_SCHEMA_REQUEST_PROCESSOR,
   PluginManager,
   RunAsyncToolRequest,
   Runner,
@@ -1027,6 +1028,20 @@ describe('LlmAgent Default Request Processors', () => {
     );
     expect(authIndex).toBeLessThan(contentIndex);
   });
+
+  // Agent transfer is appended after the shared list, as adk-python's AutoFlow
+  // appends it after single_flow's, so it is disabled here.
+  it('ends the shared processor list with OUTPUT_SCHEMA_REQUEST_PROCESSOR', () => {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      disallowTransferToParent: true,
+      disallowTransferToPeers: true,
+    });
+
+    expect(agent.requestProcessors.at(-1)).toBe(
+      OUTPUT_SCHEMA_REQUEST_PROCESSOR,
+    );
+  });
 });
 
 describe('LlmAgent outputSchema with tools', () => {
@@ -1242,6 +1257,203 @@ describe('LlmAgent outputSchema with tools', () => {
       sessionId: 'test_session',
     });
     expect(sessionAfterTurn2?.state?.['probe_counter']).toBe(2);
+  });
+});
+
+describe('LlmAgent set_model_response round-trip', () => {
+  const VERTEX_ENV_VAR = 'GOOGLE_GENAI_USE_VERTEXAI';
+
+  const OUTPUT_SCHEMA: Schema = {
+    type: Type.OBJECT,
+    properties: {answer: {type: Type.STRING}},
+    required: ['answer'],
+  };
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** Replays one scripted response per model turn, then a fixed sign-off. */
+  class ScriptedLlm extends BaseLlm {
+    turns = 0;
+
+    constructor(
+      private readonly script: LlmResponse[],
+      model = 'gemini-2.5-flash',
+    ) {
+      super({model});
+    }
+
+    async *generateContentAsync(
+      _request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      const response = this.script[this.turns];
+      this.turns++;
+      yield response ?? {
+        content: {role: 'model', parts: [{text: 'no more turns'}]},
+      };
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  function callResponse(
+    name: string,
+    args: Record<string, unknown>,
+  ): LlmResponse {
+    return {content: {role: 'model', parts: [{functionCall: {name, args}}]}};
+  }
+
+  async function runAgent(options: {
+    script: LlmResponse[];
+    outputKey?: string;
+  }): Promise<Event[]> {
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: new ScriptedLlm(options.script),
+      outputSchema: OUTPUT_SCHEMA,
+      outputKey: options.outputKey,
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: createSession({
+        id: 'sess_123',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    const events: Event[] = [];
+    for await (const event of agent.runAsync(invocationContext)) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  /** Describes an event as `<kind>:<detail>`, so a stream reads at a glance. */
+  function summarize(event: Event): string {
+    const call = event.content?.parts?.[0]?.functionCall;
+    if (call) {
+      return `call:${call.name}`;
+    }
+    const response = event.content?.parts?.[0]?.functionResponse;
+    if (response) {
+      return `response:${response.name}`;
+    }
+    return `text:${event.content?.parts?.[0]?.text}`;
+  }
+
+  it('answers a valid call with the function response and then the JSON', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const events = await runAgent({
+      script: [callResponse('set_model_response', {answer: 'forty two'})],
+    });
+
+    expect(events.map(summarize)).toEqual([
+      'call:set_model_response',
+      'response:set_model_response',
+      'text:{"answer":"forty two"}',
+    ]);
+  });
+
+  it('stops the run on the final event, without a further model turn', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+    const model = new ScriptedLlm([
+      callResponse('set_model_response', {answer: 'forty two'}),
+    ]);
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model,
+      outputSchema: OUTPUT_SCHEMA,
+      tools: [
+        new FunctionTool({
+          name: 'some_tool',
+          description: 'A test tool',
+          execute: () => 'result',
+        }),
+      ],
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_123',
+      session: createSession({
+        id: 'sess_123',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+    });
+
+    for await (const _event of agent.runAsync(invocationContext)) {
+      // Drain the run.
+    }
+
+    expect(model.turns).toBe(1);
+  });
+
+  it('answers a schema-violating call with the error alone, so the model retries', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const events = await runAgent({
+      script: [
+        callResponse('set_model_response', {answer: 42}),
+        {content: {role: 'model', parts: [{text: 'plain answer'}]}},
+      ],
+    });
+
+    expect(events.map(summarize)).toEqual([
+      'call:set_model_response',
+      'response:set_model_response',
+      'text:plain answer',
+    ]);
+    const errorResponse = events[1].content?.parts?.[0]?.functionResponse
+      ?.response as {error?: string};
+    expect(errorResponse.error).toContain('Validation Error found:');
+    expect(events[1].actions.setModelResponse).toBeUndefined();
+  });
+
+  it('answers an ordinary tool call with the function response alone', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const events = await runAgent({
+      script: [
+        callResponse('some_tool', {}),
+        {content: {role: 'model', parts: [{text: 'plain answer'}]}},
+      ],
+    });
+
+    expect(events.map(summarize)).toEqual([
+      'call:some_tool',
+      'response:some_tool',
+      'text:plain answer',
+    ]);
+  });
+
+  it('writes the parsed answer to the output key', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, undefined);
+
+    const events = await runAgent({
+      script: [callResponse('set_model_response', {answer: 'forty two'})],
+      outputKey: 'person',
+    });
+
+    expect(events[2].actions.stateDelta['person']).toEqual({
+      answer: 'forty two',
+    });
   });
 });
 

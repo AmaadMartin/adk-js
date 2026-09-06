@@ -62,6 +62,11 @@ export {
   INTERACTIONS_REQUEST_PROCESSOR,
   InteractionsRequestProcessor,
 } from './agents/processors/interactions_request_processor.js';
+export {
+  OUTPUT_SCHEMA_REQUEST_PROCESSOR,
+  OutputSchemaRequestProcessor,
+  getStructuredModelResponse,
+} from './agents/processors/output_schema_request_processor.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
@@ -364,6 +369,7 @@ export {
 } from './skills/loader.js';
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
+export {SET_MODEL_RESPONSE_TOOL_NAME} from './tools/set_model_response_tool.js';
 export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';

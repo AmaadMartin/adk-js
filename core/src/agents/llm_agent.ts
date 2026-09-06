@@ -7,7 +7,6 @@
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
-import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
@@ -42,7 +41,6 @@ import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
 
 import {logger} from '../utils/logger.js';
-import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
@@ -77,6 +75,11 @@ import {ContextCompactorRequestProcessor} from './processors/context_compactor_r
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from './processors/instructions_llm_request_processor.js';
 import {INTERACTIONS_REQUEST_PROCESSOR} from './processors/interactions_request_processor.js';
+import {
+  createFinalModelResponseEvent,
+  getStructuredModelResponse,
+  OUTPUT_SCHEMA_REQUEST_PROCESSOR,
+} from './processors/output_schema_request_processor.js';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_confirmation_llm_request_processor.js';
 import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_llm_request_processor.js';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
@@ -550,6 +553,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       INTERACTIONS_REQUEST_PROCESSOR,
       CODE_EXECUTION_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,
+      OUTPUT_SCHEMA_REQUEST_PROCESSOR,
     ];
 
     if (
@@ -1447,6 +1451,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       yield authEvent;
     }
     yield functionResponseEvent;
+
+    const jsonResponse = getStructuredModelResponse(functionResponseEvent);
+    if (jsonResponse !== undefined) {
+      yield createFinalModelResponseEvent(invocationContext, jsonResponse);
+    }
   }
 
   private async *runOneStepAsync(
@@ -1481,24 +1490,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       // Task mode: the agent completes by calling `finish_task` (whose params
       // mirror the output schema) rather than emitting structured output.
       allTools.push(this.finishTaskTool);
-    } else if (
-      this.outputSchema &&
-      allTools.length > 0 &&
-      !canUseOutputSchemaWithTools(this.canonicalModel.model)
-    ) {
-      const setModelResponseTool = new FunctionTool({
-        name: 'set_model_response',
-        description:
-          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-        parameters: this.outputSchema,
-        execute: async (args, toolContext) => {
-          if (toolContext) {
-            toolContext.actions.skipSummarization = true;
-          }
-          return JSON.stringify(args);
-        },
-      });
-      allTools.push(setModelResponseTool);
     }
     // Collect turn metadata and event actions
     // TODO - b/425992518: misleading, this is passing metadata.
@@ -1525,8 +1516,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         // The allowedTools set is populated by request processors.
         return (
           !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name) ||
-          tool.name === 'set_model_response'
+          llmRequest.allowedTools.includes(tool.name)
         );
       });
 
@@ -1659,14 +1649,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
 
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
-      const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
-      );
-      if (setModelResponseCall) {
-        const args = setModelResponseCall.args;
-        mergedEvent.content.parts = [{text: JSON.stringify(args)}];
-        mergedEvent.actions.skipSummarization = true;
-      } else if (functionCalls && functionCalls.length) {
+      if (functionCalls.length) {
         populateClientFunctionCallId(mergedEvent);
         // TODO - b/425992518: hacky, transaction log, simplify.
         // Long running is a property of tool in registry.
@@ -1754,6 +1737,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     }
 
     yield functionResponseEvent;
+
+    const jsonResponse = getStructuredModelResponse(functionResponseEvent);
+    if (jsonResponse !== undefined) {
+      yield createFinalModelResponseEvent(invocationContext, jsonResponse);
+    }
 
     // If model instruct to transfer to an agent, run the transferred agent.
     const nextAgentName = functionResponseEvent.actions.transferToAgent;
