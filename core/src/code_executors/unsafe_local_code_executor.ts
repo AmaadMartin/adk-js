@@ -191,9 +191,17 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
       const filePath = res.filePath;
       tempDir = res.tempDir;
 
-      if (params.codeExecutionInput.inputFiles) {
-        await materializeFiles(params.codeExecutionInput.inputFiles, tempDir);
-      }
+      // Recorded as resolved paths rather than names: `fs.readdir` reports
+      // platform separators (`subdir\file` on Windows) while `File.name` is
+      // always `/`-separated, so comparing the two as raw strings misses
+      // nested inputs and re-reports them as script output.
+      const inputFiles = await materializeFiles(
+        params.codeExecutionInput.inputFiles,
+        tempDir,
+      );
+      const inputFilePaths = new Set(
+        inputFiles.map((f) => path.join(res.tempDir, f.name)),
+      );
 
       let command = this.nodeCommandPath;
       let args = [filePath];
@@ -299,10 +307,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           }
 
           // Skip input files
-          const isInputFile = params.codeExecutionInput.inputFiles?.some(
-            (f) => f.name === relativeFilePath,
-          );
-          if (isInputFile) {
+          if (inputFilePaths.has(fullPath)) {
             continue;
           }
 

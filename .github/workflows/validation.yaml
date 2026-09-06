@@ -50,6 +50,18 @@ jobs:
       - name: Run tests and check code coverage
         run: npm run test:coverage
 
+      - name: Check that tests left the working tree clean
+        # Tests must clean up after themselves; a leaked artifact once got
+        # committed from a local run (google/adk-js#276).
+        shell: bash
+        run: |
+          changes="$(git status --porcelain)"
+          if [ -n "$changes" ]; then
+            echo "::error::The test run left the working tree dirty. Tests must delete the files they create, or write them under a temp directory (fs.mkdtemp)."
+            echo "$changes"
+            exit 1
+          fi
+
       - name: Run lint check
         run: npm run lint
 

@@ -393,6 +393,39 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].mimeType).toBe('text/plain');
   });
 
+  it('should exclude nested input files from the returned output files', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("fs"); fs.writeFileSync("new_output.txt", "hello from script");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        // A nested input file is read back from disk as `scripts/hello.js` on
+        // POSIX and `scripts\hello.js` on Windows, and `./assets/logo.txt` is
+        // a third spelling of the same path. All of them denote an input and
+        // must not be reported as script output.
+        inputFiles: [
+          {
+            name: 'scripts/hello.js',
+            content: 'console.log("hello");',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/javascript',
+          },
+          {
+            name: './assets/logo.txt',
+            content: 'logo',
+            contentEncoding: FileContentEncoding.UTF8,
+            mimeType: 'text/plain',
+          },
+        ],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.stderr).toBe('');
+    expect(result.outputFiles!.map((f) => f.name)).toEqual(['new_output.txt']);
+  });
+
   it('should infer correct mimeType for generated JSON files', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,
