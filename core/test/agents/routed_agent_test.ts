@@ -11,6 +11,7 @@ import {
   InvocationContext,
   InvocationContextParams,
   LlmAgent,
+  PluginManager,
   RoutedAgent,
   Session,
   createEvent,
@@ -66,6 +67,7 @@ function createTestContext(params: {
     branch: params.branch ?? 'test-branch',
     agent: params.agent,
     session: params.session,
+    pluginManager: new PluginManager(),
   } as unknown as InvocationContextParams);
 }
 

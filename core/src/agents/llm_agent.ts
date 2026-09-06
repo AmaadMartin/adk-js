@@ -502,6 +502,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   responseProcessors: BaseLlmResponseProcessor[];
   codeExecutor?: BaseCodeExecutor;
 
+  /**
+   * The context compactors this agent was built with, in priority order.
+   *
+   * They are also folded into {@link requestProcessors}; this keeps the field
+   * readable on the agent, as `context_compactors` is on adk-python's `Agent`.
+   */
+  readonly contextCompactors?: BaseContextCompactor[];
+
   constructor(config: LlmAgentConfig) {
     // Node defaults for an agent used in a graph, matching adk-python's
     // `build_node`: an agent re-runs on resume (its turn is what the reply is
@@ -536,6 +544,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.beforeToolCallback = config.beforeToolCallback;
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
+    this.contextCompactors = config.contextCompactors;
 
     // TODO - b/425992518: Define these processor arrays.
     // Orders matter, don't change. Append new processors to the end
