@@ -219,6 +219,10 @@ export class AgentFile {
                 'pg-query-stream',
                 'tedious',
                 'libsql',
+                // dockerode (ContainerCodeExecutor) reaches these through
+                // ssh2; both ship native addons esbuild cannot process.
+                'ssh2',
+                'cpu-features',
                 // Optional peer dependencies of vite and eslint that are not
                 // installed and MUST NOT be bundled.
                 'lightningcss',
