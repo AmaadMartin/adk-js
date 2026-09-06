@@ -52,6 +52,8 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@mikro-orm/sqlite',
   '@modelcontextprotocol/sdk',
   'express',
+  'oci-common',
+  'oci-generativeaiinference',
 ];
 
 describe('core/package.json install weight', () => {
@@ -78,6 +80,8 @@ describe('core/package.json install weight', () => {
     '@mikro-orm/sqlite',
     '@modelcontextprotocol/sdk',
     'express',
+    'oci-common',
+    'oci-generativeaiinference',
   ])(
     '%s is still a devDependency so the repo can build and test against it',
     (name) => {
@@ -109,6 +113,7 @@ describe('core/package.json subpath exports', () => {
     expect(subpaths.map(([subpath]) => subpath).sort()).toEqual([
       './a2a',
       './artifacts/gcs',
+      './models/oci',
       './sessions/database',
       './telemetry/gcp',
       './tools/mcp',
