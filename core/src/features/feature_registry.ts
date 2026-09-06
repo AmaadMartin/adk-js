@@ -16,6 +16,8 @@ export enum FeatureName {
   /** Configuration surface for the Bigtable tools. */
   BIGTABLE_TOOL_SETTINGS = 'BIGTABLE_TOOL_SETTINGS',
   ENVIRONMENT_SIMULATION = 'ENVIRONMENT_SIMULATION',
+  /** Configuration surface for the Cloud Storage tools. */
+  GCS_TOOL_SETTINGS = 'GCS_TOOL_SETTINGS',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
   /**
    * Declares a function tool's parameters as a raw JSON schema
@@ -66,6 +68,10 @@ const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   // Matches adk-python, whose features/_feature_registry.py registers
   // ENVIRONMENT_SIMULATION as FeatureConfig(EXPERIMENTAL, default_on=True).
   [FeatureName.ENVIRONMENT_SIMULATION]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
+  [FeatureName.GCS_TOOL_SETTINGS]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: true,
   },
