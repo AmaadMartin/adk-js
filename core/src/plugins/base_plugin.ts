@@ -122,6 +122,17 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Releases the resources this plugin holds, such as network connections or
+   * file handles.
+   *
+   * `Runner.close` calls this once for every registered plugin. The default
+   * does nothing, so a plugin that holds no resource needs no override.
+   */
+  async close(): Promise<void> {
+    return;
+  }
+
+  /**
    * Callback executed when a user message is received before an invocation
    * starts.
    *
