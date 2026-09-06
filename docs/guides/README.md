@@ -8,6 +8,11 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ## Index
 
+### Environments
+
+- [DaytonaEnvironment](environments/daytona_environment/index.md) - Running an
+  agent's shell commands and file operations inside a remote Daytona sandbox.
+
 ### Tools
 
 #### Retrieval
