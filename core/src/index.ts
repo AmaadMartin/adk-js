@@ -43,7 +43,11 @@ export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_b
 export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
 export type {VertexAiRagMemoryServiceOptions} from './memory/vertex_ai_rag_memory_service.js';
 export {OCIGenAILlm} from './models/oci_genai_llm.js';
-export type {OCIAuthType, OCIGenAILlmParams} from './models/oci_genai_llm.js';
+export type {
+  OCIAuthType,
+  OCIGenAILlmParams,
+  OciChatClient,
+} from './models/oci_genai_llm.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
