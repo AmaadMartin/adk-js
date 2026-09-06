@@ -150,11 +150,28 @@ export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
 export {InputValidationError} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
+export {NotImplementedError} from './errors/not_implemented_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {Invocation} from './evaluation/eval_case.js';
+export {
+  DEFAULT_USER_SIMULATOR_AUDIO_MODEL,
+  DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
+  DEFAULT_USER_SIMULATOR_VOICE_NAME,
+  LLM_AUDIO_USER_SIMULATOR_TYPE,
+  LlmAudioUserSimulator,
+  parseLlmAudioUserSimulatorConfig,
+} from './evaluation/simulation/llm_audio_user_simulator.js';
+export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
+export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
+export {UserSimulatorStatus} from './evaluation/simulation/user_simulator.js';
+export type {
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
@@ -343,6 +360,14 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
+export {
+  LIVE_INPUT_MIME_TYPE,
+  LIVE_INPUT_RATE_HZ,
+  LIVE_OUTPUT_RATE_HZ,
+  parseSampleRate,
+  resamplePcm16,
+  toLiveInput,
+} from './utils/audio_utils.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
