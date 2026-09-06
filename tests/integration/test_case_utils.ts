@@ -258,6 +258,12 @@ export async function runTestCase(testCase: TestCase) {
 }
 
 /**
+ * How long {@link BaseTestServer.stop} waits for a killed child to exit before
+ * giving up. Bounded so a child that ignores SIGINT cannot hang suite teardown.
+ */
+const STOP_EXIT_TIMEOUT_MS = 500;
+
+/**
  * Base class for test servers.
  */
 export abstract class BaseTestServer {
@@ -289,77 +295,109 @@ export abstract class BaseTestServer {
     serverName: string;
     timeoutMs: number;
   }): Promise<void> {
-    this.serverProcess = spawnProcess();
+    const serverProcess = spawnProcess();
+    this.serverProcess = serverProcess;
 
-    await new Promise<void>((resolve, reject) => {
-      let started = false;
-      const stdoutChunks: string[] = [];
+    // Appended to only during the handshake, to explain a premature exit.
+    const stdoutChunks: string[] = [];
+    let releaseStartHandshake = () => {};
 
-      this.serverProcess!.stdout.on('data', (data) => {
-        const message = data.toString();
-        stdoutChunks.push(message);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onStdout = (data: Buffer) => {
+          const message = data.toString();
+          stdoutChunks.push(message);
 
-        // Find URL like http://localhost:12345
-        const urlMatch = message.match(/http:\/\/localhost:([0-9]+)/i);
-        if (urlMatch && urlMatch[1]) {
-          const parsedPort = parseInt(urlMatch[1], 10);
-          if (parsedPort > 0) {
-            this.port = parsedPort;
-            this.url = `http://${this.host}:${this.port}`;
+          // Find URL like http://localhost:12345
+          const urlMatch = message.match(/http:\/\/localhost:([0-9]+)/i);
+          if (urlMatch && urlMatch[1]) {
+            const parsedPort = parseInt(urlMatch[1], 10);
+            if (parsedPort > 0) {
+              this.port = parsedPort;
+              this.url = `http://${this.host}:${this.port}`;
+            }
           }
-        }
 
-        if (message.includes(startMessage)) {
-          started = true;
-          console.log(successLogMessage);
-          resolve();
-        }
-      });
+          if (message.includes(startMessage)) {
+            console.log(successLogMessage);
+            resolve();
+          }
+        };
 
-      this.serverProcess!.stderr.on('data', (data) => {
-        console.error(`${serverName} Stderr: ${data.toString()}`);
-      });
-
-      this.serverProcess!.on('error', (error) => {
-        console.error(`${serverName} Error: ${error.message}`);
-
-        reject(
-          new Error(
-            `Failed to start ${serverName.toLowerCase()}: ${error.message}`,
-          ),
-        );
-      });
-
-      this.serverProcess!.on('exit', (code) => {
-        console.error(`${serverName} exited with code ${code}`);
-
-        if (!started) {
+        // Only attached during the handshake, so any exit it sees is premature.
+        const onExit = (code: number | null) => {
+          console.error(`${serverName} exited with code ${code}`);
           console.error(
             `${serverName} Captured stdout before premature exit:\n${stdoutChunks.join('')}`,
           );
           reject(
             new Error(`${serverName} exited prematurely with code ${code}`),
           );
-        }
-      });
+        };
 
-      setTimeout(() => {
-        if (!started) {
+        const startTimer = setTimeout(() => {
           reject(
             new Error(
               `Timeout waiting for ${serverName.toLowerCase()} to start.`,
             ),
           );
-        }
-      }, timeoutMs);
-    });
+        }, timeoutMs);
+
+        releaseStartHandshake = () => {
+          clearTimeout(startTimer);
+          // stdout stays in flowing mode after this, so it keeps draining and
+          // the child never blocks on a full pipe.
+          serverProcess.stdout.off('data', onStdout);
+          serverProcess.off('exit', onExit);
+        };
+
+        serverProcess.stdout.on('data', onStdout);
+        serverProcess.on('exit', onExit);
+
+        // The stderr logger and the 'error' listener stay for the life of the
+        // child: an 'error' event with no listener is thrown by EventEmitter
+        // and would crash the worker, and stderr needs a draining consumer.
+        serverProcess.stderr.on('data', (data: Buffer) => {
+          console.error(`${serverName} Stderr: ${data.toString()}`);
+        });
+
+        serverProcess.on('error', (error) => {
+          console.error(`${serverName} Error: ${error.message}`);
+
+          reject(
+            new Error(
+              `Failed to start ${serverName.toLowerCase()}: ${error.message}`,
+            ),
+          );
+        });
+      });
+    } finally {
+      releaseStartHandshake();
+    }
   }
 
   async stop(): Promise<void> {
-    if (this.serverProcess) {
-      this.serverProcess.kill('SIGINT');
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    const serverProcess = this.serverProcess;
+    if (!serverProcess) return;
+
+    // 'exit' never fires again for a child that is already gone, so waiting on
+    // it would burn the whole fallback budget on every repeat call.
+    if (serverProcess.exitCode !== null || serverProcess.signalCode !== null) {
+      return;
     }
+
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(fallbackTimer);
+        serverProcess.off('exit', finish);
+        resolve();
+      };
+
+      const fallbackTimer = setTimeout(finish, STOP_EXIT_TIMEOUT_MS);
+      // Subscribed before the kill so a fast exit cannot be missed.
+      serverProcess.once('exit', finish);
+      serverProcess.kill('SIGINT');
+    });
   }
 }
 
