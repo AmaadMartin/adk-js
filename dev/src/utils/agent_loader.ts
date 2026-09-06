@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, isApp, isRunnableRoot, RunnableRoot} from '@google/adk';
+import {
+  AgentOrigin,
+  App,
+  isApp,
+  isBaseAgent,
+  isRunnableRoot,
+  RunnableRoot,
+  setAgentOrigin,
+} from '@google/adk';
 import esbuild from 'esbuild';
 import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
@@ -571,7 +579,10 @@ export class AgentLoader {
   private async loadAgentFromFile(file: FileMetadata): Promise<void> {
     try {
       const agentFile = new AgentFile(file.path, this.options);
-      await agentFile.load();
+      stampAgentOrigin(await agentFile.load(), {
+        appName: file.name,
+        dir: path.dirname(file.path),
+      });
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(file.name, file.path, e);
@@ -590,7 +601,10 @@ export class AgentLoader {
 
     try {
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
-      await agentFile.load();
+      stampAgentOrigin(await agentFile.load(), {
+        appName: dir.name,
+        dir: dir.path,
+      });
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
@@ -612,6 +626,25 @@ export class AgentLoader {
       `Failed to load agent '${name}' from ${filePath}: ${error.message}. ` +
         `Skipping it; the other agents are unaffected.`,
     );
+  }
+}
+
+/**
+ * Records where the loader found a root agent, so a `Runner` can report an app
+ * name that disagrees with it.
+ *
+ * A `Workflow` root is skipped: only an agent carries an origin.
+ *
+ * @param loaded What the agent file exported.
+ * @param origin The app name and directory the loader read it from.
+ */
+function stampAgentOrigin(
+  loaded: RunnableRoot | App,
+  origin: AgentOrigin,
+): void {
+  const root = isApp(loaded) ? loaded.rootAgent : loaded;
+  if (isBaseAgent(root)) {
+    setAgentOrigin(root, origin);
   }
 }
 

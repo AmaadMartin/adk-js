@@ -157,6 +157,12 @@ describe('BasePlugin', () => {
     expect(plugin.name).toEqual(pluginName);
   });
 
+  it('default close should resolve without doing anything', async () => {
+    const plugin = new TestablePlugin('closable_plugin');
+
+    await expect(plugin.close()).resolves.toBeUndefined();
+  });
+
   it('default callbacks should return undefined', async () => {
     const plugin = new TestablePlugin('default_plugin');
 
