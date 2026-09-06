@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {GenerateContentConfig, GroundingMetadata, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -96,6 +96,14 @@ const MAX_LIVE_RECONNECT_ATTEMPTS = 5;
  * ADK live flow; the value is an empirical heuristic, not a guarantee.
  */
 const TRANSFER_AGENT_DELAY_MS = 1000;
+
+/**
+ * Delay before a live run returns after the model calls `task_completed`.
+ * Gives the server-side model a moment to flush any pending audio for the
+ * final turn before teardown. Mirrors `DEFAULT_TASK_COMPLETION_DELAY` (1.0s)
+ * in the Python ADK live flow.
+ */
+const TASK_COMPLETION_DELAY_MS = 1000;
 
 /**
  * Sentinel thrown from `runReceiveLoop` to break out of the receive iterator
@@ -427,6 +435,58 @@ async function convertToolUnionToTools(
     return [new NodeTool(toolUnion)];
   }
   return await toolUnion.getTools(context);
+}
+
+/**
+ * Name of the agent tool that wraps the built-in Google Search tool. Its
+ * presence in the agent's resolved tools is what makes a search result's
+ * grounding metadata belong on the agent's own response.
+ */
+const GROUNDING_SEARCH_AGENT_TOOL_NAME = 'google_search_agent';
+
+/**
+ * Session state key the search agent tool writes its grounding metadata to.
+ * The `temp:` prefix keeps it out of the persisted session state.
+ */
+const GROUNDING_METADATA_STATE_KEY = 'temp:_adk_grounding_metadata';
+
+/**
+ * Copies the search agent's grounding metadata onto the response the flow is
+ * about to return, so a citation survives the hop from the nested search agent
+ * to its parent.
+ *
+ * Mirrors `_maybe_add_grounding_metadata` in the Python ADK
+ * `flows/llm_flows/base_llm_flow.py`. Python resolves the agent's tools when
+ * the cache is empty; here `runOneStepAsync` fills the cache before the model
+ * is called, so a miss means no step ran and there is nothing to add.
+ *
+ * @param invocationContext The invocation the response belongs to.
+ * @param llmResponse The unmodified response from the model.
+ * @param response The response an after-model callback returned, if any.
+ * @returns `response` unchanged when there is no metadata to add; otherwise
+ *     the response carrying the metadata, defaulting to `llmResponse`.
+ */
+function maybeAddGroundingMetadata(
+  invocationContext: InvocationContext,
+  llmResponse: LlmResponse,
+  response?: LlmResponse,
+): LlmResponse | undefined {
+  const tools = invocationContext.canonicalToolsCache;
+  if (!tools?.some((tool) => tool.name === GROUNDING_SEARCH_AGENT_TOOL_NAME)) {
+    return response;
+  }
+
+  const groundingMetadata =
+    invocationContext.session.state[GROUNDING_METADATA_STATE_KEY];
+  if (typeof groundingMetadata !== 'object' || groundingMetadata === null) {
+    return response;
+  }
+
+  const target = response ?? llmResponse;
+  // Every field of GroundingMetadata is optional, so "is an object" is all a
+  // runtime check can establish about a value the framework itself writes.
+  target.groundingMetadata = groundingMetadata as GroundingMetadata;
+  return target;
 }
 
 /**
@@ -1306,7 +1366,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           (r) => r.name === 'task_completed',
         );
         if (taskCompleted) {
-          await sleep(TRANSFER_AGENT_DELAY_MS);
+          await sleep(TASK_COMPLETION_DELAY_MS);
           return;
         }
 
@@ -1507,6 +1567,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       author: this.name,
       branch: invocationContext.branch,
     });
+    const resolvedTools: BaseTool[] = [];
     for (const toolUnion of allTools) {
       const toolContext = new Context({
         invocationContext,
@@ -1514,12 +1575,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       });
 
       // process all tools from this tool union
-      const tools = (
-        await convertToolUnionToTools(
-          toolUnion,
-          new ReadonlyContext(invocationContext),
-        )
-      ).filter((tool) => {
+      const unionTools = await convertToolUnionToTools(
+        toolUnion,
+        new ReadonlyContext(invocationContext),
+      );
+      resolvedTools.push(...unionTools);
+      const tools = unionTools.filter((tool) => {
         // If allowedTools is not set, allow all tools. Otherwise, only allow
         // tools that are in the allowedTools set.
         // The allowedTools set is populated by request processors.
@@ -1538,6 +1599,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         }
       }
     }
+    invocationContext.canonicalToolsCache = resolvedTools;
     // =========================================================================
     // Global runtime interruption
     // =========================================================================
@@ -1927,7 +1989,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         llmResponse,
       });
     if (afterModelCallbackResponse) {
-      return afterModelCallbackResponse;
+      return maybeAddGroundingMetadata(
+        invocationContext,
+        llmResponse,
+        afterModelCallbackResponse,
+      );
     }
 
     // If no override was returned from the plugins, run the canonical callbacks
@@ -1942,10 +2008,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
 
       if (callbackResponse) {
-        return callbackResponse;
+        return maybeAddGroundingMetadata(
+          invocationContext,
+          llmResponse,
+          callbackResponse,
+        );
       }
     }
-    return undefined;
+    return maybeAddGroundingMetadata(invocationContext, llmResponse);
   }
 
   protected async *runAndHandleError<T extends LlmResponse | Event>(
