@@ -185,4 +185,185 @@ describe('FileArtifactService', () => {
       });
     });
   });
+
+  describe('failed save cleanup', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+
+    async function exists(target: string): Promise<boolean> {
+      try {
+        await fs.access(target);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    it('leaves no artifact directory behind when fileData has no fileUri', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await expect(
+          service.saveArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename: 'report.pdf',
+            artifact: {fileData: {mimeType: 'application/pdf'}},
+          }),
+        ).rejects.toThrow('Artifact fileData must have a fileUri.');
+
+        expect(
+          await service.listVersions({
+            appName,
+            userId,
+            sessionId,
+            filename: 'report.pdf',
+          }),
+        ).toEqual([]);
+        expect(
+          await service.listArtifactKeys({appName, userId, sessionId}),
+        ).toEqual([]);
+        expect(
+          await service.loadArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename: 'report.pdf',
+          }),
+        ).toBeUndefined();
+
+        const artifactDir = path.join(
+          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          'report.pdf',
+        );
+        expect(await exists(artifactDir)).toBe(false);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('keeps an earlier version and reuses the version number', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'report.pdf',
+          artifact: {text: 'v0'},
+        });
+
+        await expect(
+          service.saveArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename: 'report.pdf',
+            artifact: {fileData: {mimeType: 'application/pdf'}},
+          }),
+        ).rejects.toThrow('Artifact fileData must have a fileUri.');
+
+        expect(
+          await service.listVersions({
+            appName,
+            userId,
+            sessionId,
+            filename: 'report.pdf',
+          }),
+        ).toEqual([0]);
+        const loaded = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'report.pdf',
+        });
+        expect(loaded?.text).toBe('v0');
+
+        const version = await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: 'report.pdf',
+          artifact: {text: 'v1'},
+        });
+        expect(version).toBe(1);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('removes the written payload when the metadata write fails', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+
+      try {
+        await expect(
+          service.saveArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename: 'report.txt',
+            artifact: {text: 'payload'},
+            customMetadata: circular,
+          }),
+        ).rejects.toThrow();
+
+        expect(
+          await service.listVersions({
+            appName,
+            userId,
+            sessionId,
+            filename: 'report.txt',
+          }),
+        ).toEqual([]);
+
+        const versionDir = path.join(
+          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          'report.txt',
+          'versions',
+          '0',
+        );
+        expect(await exists(versionDir)).toBe(false);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('cleans up a user-scoped artifact the same way', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await expect(
+          service.saveArtifact({
+            appName,
+            userId,
+            sessionId,
+            filename: 'user:report.pdf',
+            artifact: {fileData: {mimeType: 'application/pdf'}},
+          }),
+        ).rejects.toThrow('Artifact fileData must have a fileUri.');
+
+        expect(
+          await service.listArtifactKeys({appName, userId, sessionId}),
+        ).toEqual([]);
+
+        const artifactDir = path.join(
+          getUserRoot(rootDir, userId),
+          'artifacts',
+          'report.pdf',
+        );
+        expect(await exists(artifactDir)).toBe(false);
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
 });
