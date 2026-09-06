@@ -41,6 +41,21 @@ export {
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
+export {
+  ToolboxCredentialStrategy,
+  ToolboxCredentialType,
+} from './tools/toolbox_credentials.js';
+export type {
+  ToolboxCredentialConfig,
+  ToolboxTokenSource,
+} from './tools/toolbox_credentials.js';
+export {ToolboxToolset} from './tools/toolbox_toolset.js';
+export type {
+  ToolboxAuthTokenGetter,
+  ToolboxClientOptions,
+  ToolboxHeaderValue,
+  ToolboxToolsetOptions,
+} from './tools/toolbox_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
