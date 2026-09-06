@@ -166,6 +166,20 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
     });
+
+    it('should enable otelToCloud when --otel_to_cloud is passed as a bare flag', async () => {
+      await parse(['web', '--otel_to_cloud']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.otelToCloud).toBe(true);
+    });
+
+    it('should disable otelToCloud when --otel_to_cloud=false', async () => {
+      await parse(['web', '--otel_to_cloud=false']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.otelToCloud).toBe(false);
+    });
   });
 
   describe('command: api_server', () => {
@@ -192,6 +206,20 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should enable otelToCloud when --otel_to_cloud is passed as a bare flag', async () => {
+      await parse(['api_server', '--otel_to_cloud']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.otelToCloud).toBe(true);
+    });
+
+    it('should disable otelToCloud when --otel_to_cloud=false', async () => {
+      await parse(['api_server', '--otel_to_cloud=false']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.otelToCloud).toBe(false);
     });
   });
 
@@ -297,6 +325,22 @@ describe('CLI Entrypoint', () => {
           savedSessionFile: 'resume.json',
           otelToCloud: true,
         }),
+      );
+    });
+
+    it('should enable otelToCloud when --otel_to_cloud is passed as a bare flag', async () => {
+      await parse(['run', 'agent.ts', '--otel_to_cloud']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({otelToCloud: true}),
+      );
+    });
+
+    it('should disable otelToCloud when --otel_to_cloud=false', async () => {
+      await parse(['run', 'agent.ts', '--otel_to_cloud=false']);
+
+      expect(runAgent).toHaveBeenCalledWith(
+        expect.objectContaining({otelToCloud: false}),
       );
     });
   });
