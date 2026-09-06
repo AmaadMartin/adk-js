@@ -8,6 +8,7 @@ import {
   App,
   BaseAgent,
   BasePlugin,
+  createArtifactVersion,
   createEvent,
   createResumabilityConfig,
   determineAgentForResumption,
@@ -1105,11 +1106,13 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
       sessionId: TEST_SESSION_ID,
     });
 
-    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
-      version: 0,
-      canonicalUri: 'gs://test-bucket/file.pdf/versions/0',
-      mimeType: 'application/pdf',
-    });
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue(
+      createArtifactVersion({
+        version: 0,
+        canonicalUri: 'gs://test-bucket/file.pdf/versions/0',
+        mimeType: 'application/pdf',
+      }),
+    );
 
     const newMessage: Content = {
       role: 'user',
@@ -1160,11 +1163,13 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
       sessionId: TEST_SESSION_ID,
     });
 
-    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
-      version: 0,
-      canonicalUri: 'file:///tmp/file.pdf',
-      mimeType: 'application/pdf',
-    });
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue(
+      createArtifactVersion({
+        version: 0,
+        canonicalUri: 'file:///tmp/file.pdf',
+        mimeType: 'application/pdf',
+      }),
+    );
 
     const newMessage: Content = {
       role: 'user',
@@ -1243,10 +1248,12 @@ describe('Runner artifact saving (`saveInputBlobsAsArtifacts`)', () => {
       sessionId: TEST_SESSION_ID,
     });
 
-    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue({
-      version: 0,
-      canonicalUri: 'gs://test-bucket/doc/versions/0',
-    });
+    vi.spyOn(artifactService, 'getArtifactVersion').mockResolvedValue(
+      createArtifactVersion({
+        version: 0,
+        canonicalUri: 'gs://test-bucket/doc/versions/0',
+      }),
+    );
 
     // Test with displayName and without displayName
     const newMessage: Content = {

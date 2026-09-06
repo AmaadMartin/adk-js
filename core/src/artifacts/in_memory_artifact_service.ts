@@ -11,6 +11,7 @@ import {logger} from '../utils/logger.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
+  createArtifactVersion,
   DeleteArtifactRequest,
   ListArtifactKeysRequest,
   ListVersionsRequest,
@@ -52,10 +53,11 @@ export class InMemoryArtifactService implements BaseArtifactService {
     }
 
     const version = this.artifacts[path].length;
-    const metadata: ArtifactVersion = {
+    const metadata = createArtifactVersion({
       version,
+      canonicalUri: canonicalUri(appName, userId, sessionId, filename, version),
       customMetadata,
-    };
+    });
 
     if (!artifact.inlineData && artifact.text === undefined) {
       const fileData = artifact.fileData!;
@@ -192,6 +194,32 @@ export class InMemoryArtifactService implements BaseArtifactService {
 
     return Promise.resolve(undefined);
   }
+}
+
+/**
+ * Builds the canonical URI of an in-memory artifact version.
+ *
+ * A `user:` filename is scoped to the user, so its URI carries no session.
+ *
+ * @param appName The app name.
+ * @param userId The user ID.
+ * @param sessionId The session ID.
+ * @param filename The filename.
+ * @param version The version.
+ * @return The canonical URI.
+ */
+function canonicalUri(
+  appName: string,
+  userId: string,
+  sessionId: string,
+  filename: string,
+  version: number,
+): string {
+  if (fileHasUserNamespace(filename)) {
+    return `memory://apps/${appName}/users/${userId}/artifacts/${filename}/versions/${version}`;
+  }
+
+  return `memory://apps/${appName}/users/${userId}/sessions/${sessionId}/artifacts/${filename}/versions/${version}`;
 }
 
 /**

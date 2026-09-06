@@ -8,6 +8,7 @@ import {FileArtifactService} from '@google/adk';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import {pathToFileURL} from 'url';
 import {describe, expect, it} from 'vitest';
 import {
   assertInsideRoot,
@@ -72,6 +73,85 @@ describe('FileArtifactService', () => {
         });
         expect(loaded?.fileData?.fileUri).toBe('gs://my-bucket/report.pdf');
         expect(loaded?.fileData?.mimeType).toBe('application/pdf');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+  });
+
+  describe('metadata.json version fields', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+    const sessionId = 'test-session';
+    const filename = 'stamped.txt';
+
+    const versionDirOf = (root: string): string =>
+      path.join(
+        getSessionArtifactsDir(getUserRoot(root, userId), sessionId),
+        filename,
+        'versions',
+        '0',
+      );
+
+    it('writes a numeric createTime and an empty customMetadata', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: 'hello'},
+        });
+
+        const written = JSON.parse(
+          await fs.readFile(
+            path.join(versionDirOf(rootDir), 'metadata.json'),
+            'utf-8',
+          ),
+        ) as {createTime?: unknown; customMetadata?: unknown};
+
+        expect(written.customMetadata).toEqual({});
+        expect(written.createTime).toBeTypeOf('number');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it('completes a metadata file written before the fields existed', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          artifact: {text: 'hello'},
+        });
+
+        await fs.writeFile(
+          path.join(versionDirOf(rootDir), 'metadata.json'),
+          JSON.stringify({fileName: filename, version: 0}),
+          'utf-8',
+        );
+
+        const read = await service.getArtifactVersion({
+          appName,
+          userId,
+          sessionId,
+          filename,
+          version: 0,
+        });
+
+        expect(read?.customMetadata).toEqual({});
+        expect(read?.createTime).toBeTypeOf('number');
+        expect(read?.canonicalUri).toBe(
+          pathToFileURL(path.join(versionDirOf(rootDir), filename)).toString(),
+        );
       } finally {
         await fs.rm(rootDir, {recursive: true, force: true});
       }

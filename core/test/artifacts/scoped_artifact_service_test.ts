@@ -6,7 +6,10 @@
 
 import {Part} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
-import {BaseArtifactService} from '../../src/artifacts/base_artifact_service.js';
+import {
+  BaseArtifactService,
+  createArtifactVersion,
+} from '../../src/artifacts/base_artifact_service.js';
 import {ScopedArtifactService} from '../../src/artifacts/scoped_artifact_service.js';
 import {
   SessionLoadArtifactRequest,
@@ -160,7 +163,9 @@ describe('ScopedArtifactService', () => {
   describe('listArtifactVersions', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
-      const versions = [{version: 1}];
+      const versions = [
+        createArtifactVersion({version: 1, canonicalUri: 'memory://v1'}),
+      ];
       vi.mocked(delegate.listArtifactVersions).mockResolvedValue(versions);
       const service = new ScopedArtifactService(
         delegate,
@@ -184,7 +189,10 @@ describe('ScopedArtifactService', () => {
   describe('getArtifactVersion', () => {
     it('delegates with scoped context', async () => {
       const delegate = makeBaseArtifactServiceStub();
-      const version = {version: 1};
+      const version = createArtifactVersion({
+        version: 1,
+        canonicalUri: 'memory://v1',
+      });
       vi.mocked(delegate.getArtifactVersion).mockResolvedValue(version);
       const service = new ScopedArtifactService(
         delegate,

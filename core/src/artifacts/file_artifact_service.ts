@@ -14,6 +14,7 @@ import {logger} from '../utils/logger.js';
 import {
   ArtifactVersion,
   BaseArtifactService,
+  createArtifactVersion,
   DeleteArtifactRequest,
   ListArtifactKeysRequest,
   ListVersionsRequest,
@@ -29,6 +30,17 @@ const USER_NAMESPACE_PREFIX = 'user:';
 interface FileArtifactVersion extends ArtifactVersion {
   fileName?: string;
   fileUri?: string;
+}
+
+/**
+ * A `metadata.json` as it is found on disk.
+ *
+ * A file the service wrote before `canonicalUri`, `customMetadata` and
+ * `createTime` became required holds none of them, so the read path treats
+ * every one of the three as optional.
+ */
+interface StoredFileArtifactVersion extends Partial<FileArtifactVersion> {
+  version: number;
 }
 
 /**
@@ -125,12 +137,14 @@ export class FileArtifactService implements BaseArtifactService {
       nextVersion,
     );
     const metadata: FileArtifactVersion = {
+      ...createArtifactVersion({
+        version: nextVersion,
+        canonicalUri,
+        customMetadata,
+        mimeType,
+      }),
       fileName: filename,
-      mimeType,
       fileUri,
-      version: nextVersion,
-      canonicalUri,
-      customMetadata,
     };
 
     await writeMetadata(path.join(versionDir, 'metadata.json'), metadata);
@@ -564,13 +578,19 @@ async function getCanonicalUri(
     sessionId,
     filename,
   );
-  const storedFilename = path.basename(artifactDir);
-  const versionsDir = getVersionsDir(artifactDir);
-  const payloadPath = path.join(
-    versionsDir,
-    version.toString(),
-    storedFilename,
-  );
+  const versionDir = path.join(getVersionsDir(artifactDir), version.toString());
+  return getCanonicalUriForVersionDir(versionDir);
+}
+
+/**
+ * Gets the canonical URI of the payload a version directory holds.
+ *
+ * @param versionDir The directory of a single artifact version.
+ * @returns The canonical URI.
+ */
+function getCanonicalUriForVersionDir(versionDir: string): string {
+  const artifactDir = path.dirname(path.dirname(versionDir));
+  const payloadPath = path.join(versionDir, path.basename(artifactDir));
   return pathToFileURL(payloadPath).toString();
 }
 
@@ -597,7 +617,16 @@ async function readMetadata(
   metadataPath: string,
 ): Promise<FileArtifactVersion> {
   const content = await fs.readFile(metadataPath, 'utf-8');
-  return JSON.parse(content) as FileArtifactVersion;
+  const stored = JSON.parse(content) as StoredFileArtifactVersion;
+  return {
+    ...stored,
+    ...createArtifactVersion({
+      ...stored,
+      canonicalUri:
+        stored.canonicalUri ??
+        getCanonicalUriForVersionDir(path.dirname(metadataPath)),
+    }),
+  };
 }
 
 /**
