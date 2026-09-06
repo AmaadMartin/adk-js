@@ -61,9 +61,9 @@ const timedStdioParams: MCPConnectionParams = {
 };
 
 /** A client whose only usable method is the one under assertion. */
-function mockClientOnce(methods: Record<string, unknown>): void {
+function mockClientOnce(methods: Partial<Client>): void {
   vi.mocked(Client).mockImplementationOnce(
-    () => ({connect: noop(), close: noop(), ...methods}) as unknown as Client,
+    () => ({connect: noop(), close: noop(), ...methods}) as Client,
   );
 }
 

@@ -173,13 +173,13 @@ describe('MCPTool', () => {
     const mockClient = {
       callTool: vi.fn().mockResolvedValue({content: []}),
       close: vi.fn().mockResolvedValue(undefined),
-    } as unknown as Client;
+    } as Partial<Client> as Client;
 
     const mockSessionManager = {
       createSession: vi.fn().mockResolvedValue(mockClient),
       closeSession: vi.fn().mockResolvedValue(undefined),
       requestTimeoutMs: 5000,
-    } as unknown as MCPSessionManager;
+    } as Partial<MCPSessionManager> as MCPSessionManager;
 
     const tool = new MCPTool(mockTool, mockSessionManager);
 
@@ -187,7 +187,7 @@ describe('MCPTool', () => {
     const invocationContext = {
       abortSignal: signal,
       session: {state: {}},
-    } as unknown as InvocationContext;
+    } as Partial<InvocationContext> as InvocationContext;
 
     await tool.runAsync({
       args: {},
