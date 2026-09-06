@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {Command, CommanderError} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -49,6 +50,58 @@ vi.mock('@google/adk', async (importOriginal) => {
   };
 });
 
+/** The outcome of one commander run that terminated through `_exit`. */
+interface HelpRun {
+  /** The `CommanderError.code` commander exited with. */
+  code: string;
+  stdout: string;
+  stderr: string;
+}
+
+/** A stream whose writes are collected instead of being emitted. */
+interface StreamCapture {
+  text(): string;
+  restore(): void;
+}
+
+/** The part of `process.stdout` / `process.stderr` commander writes through. */
+interface TextStream {
+  write(chunk: string | Uint8Array): boolean;
+}
+
+/**
+ * Applies `exitOverride()` to a command and to every command below it.
+ *
+ * Commander copies the exit callback into a subcommand when that subcommand is
+ * created, so `exitOverride()` on an already-built program leaves the
+ * subcommands calling the real `process.exit`.
+ */
+function exitOverrideDeep(command: Command): void {
+  command.exitOverride();
+  command.commands.forEach(exitOverrideDeep);
+}
+
+function captureStream(stream: TextStream): StreamCapture {
+  const chunks: string[] = [];
+  const spy = vi
+    .spyOn(stream, 'write')
+    .mockImplementation((chunk: string | Uint8Array) => {
+      chunks.push(chunk.toString());
+      return true;
+    });
+  return {
+    text: () => chunks.join(''),
+    restore: () => spy.mockRestore(),
+  };
+}
+
+function commanderErrorCode(error: unknown): string {
+  if (!(error instanceof CommanderError)) {
+    expect.fail(`expected a CommanderError, received: ${String(error)}`);
+  }
+  return error.code;
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -81,6 +134,68 @@ describe('CLI Entrypoint', () => {
 
       await parse(['-v']);
       expect(logSpy).toHaveBeenCalledWith('1.0.0-test');
+    });
+  });
+
+  describe('command: help', () => {
+    // The shared `parse` helper only swallows `commander.exit`, and help always
+    // terminates with `commander.help` or `commander.helpDisplayed`.
+    const runHelp = async (args: string[]): Promise<HelpRun> => {
+      exitOverrideDeep(program);
+      const stdout = captureStream(process.stdout);
+      const stderr = captureStream(process.stderr);
+      let thrown: unknown;
+      try {
+        await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
+      } catch (error: unknown) {
+        thrown = error;
+      } finally {
+        stdout.restore();
+        stderr.restore();
+      }
+      return {
+        code: commanderErrorCode(thrown),
+        stdout: stdout.text(),
+        stderr: stderr.text(),
+      };
+    };
+
+    it("should print the root usage block for 'adk help'", async () => {
+      const run = await runHelp(['help']);
+
+      expect(run.code).toBe('commander.help');
+      expect(run.stdout).toContain('Commands:');
+      expect(run.stdout).toContain('web [options] [agents_dir]');
+      expect(run.stdout).toContain('help [command]');
+      expect(run.stderr).toBe('');
+    });
+
+    it("should print the web usage block for 'adk help web'", async () => {
+      const run = await runHelp(['help', 'web']);
+
+      expect(run.code).toBe('commander.help');
+      expect(run.stdout).toMatch(/Usage: .* web \[options\] \[agents_dir\]/);
+      expect(run.stdout).toContain('Start ADK web server');
+      expect(run.stdout).toContain('--session_service_uri');
+      expect(run.stderr).toBe('');
+    });
+
+    it("should print the deploy group usage block for 'adk help deploy'", async () => {
+      const run = await runHelp(['help', 'deploy']);
+
+      expect(run.code).toBe('commander.help');
+      expect(run.stdout).toMatch(/Usage: .* deploy \[options\] \[command\]/);
+      expect(run.stdout).toContain('cloud_run');
+      expect(run.stderr).toBe('');
+    });
+
+    it("should keep '<command> --help' working", async () => {
+      const run = await runHelp(['web', '--help']);
+
+      expect(run.code).toBe('commander.helpDisplayed');
+      expect(run.stdout).toMatch(/Usage: .* web \[options\] \[agents_dir\]/);
+      expect(run.stdout).toContain('Start ADK web server');
+      expect(run.stderr).toBe('');
     });
   });
 

@@ -232,6 +232,12 @@ export function createProgram(): Command {
       console.log(version);
     });
 
+  // The root program has an action handler, which suppresses commander's
+  // implicit `help [command]` subcommand. Re-enable it so `adk help` and
+  // `adk help <command>` work, as they already do for the nested command
+  // groups.
+  program.helpCommand(true);
+
   program
     .command('web')
     .description('Start ADK web server')
