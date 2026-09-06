@@ -64,8 +64,8 @@ breaks and the whole transcript goes out again.
 ## Diagnosing a broken chain
 
 The scan logs each step at debug level: the agent and branch it starts with,
-every event it skips as out of branch, every event it checks, and the id it
-settles on. Raise the log level to see them.
+every event it skips as out of branch, and the id it settles on. Raise the log
+level to see them.
 
 ```ts
 import {LogLevel, setLogLevel} from '@google/adk';
@@ -80,6 +80,9 @@ API ran the turn in, and `Event` inherits the field. The API reports one only
 when the request configured an environment, so it is usually absent.
 
 A non-streaming response carries the id through
-`convertInteractionToLlmResponse`, and `findPreviousInteractionState` returns
-it beside the interaction id. A streaming response does not: the SDK's
-`InteractionSSEEvent` declares no environment id, so there is nothing to read.
+`convertInteractionToLlmResponse`. A streaming response carries it too, but the
+SDK's `InteractionSSEEvent` does not declare the field, so
+`extractStreamEnvironmentId` reads it structurally off the interaction an event
+carries and `createInteractions` stamps the last id it saw onto every response
+it yields. Either way `findPreviousInteractionState` returns it beside the
+interaction id, so the next turn can reuse the same environment.
