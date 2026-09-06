@@ -32,6 +32,96 @@ import {
  */
 export type SchemaLike = z3.ZodType | z4.ZodType | Schema;
 
+/** Schema keywords whose value is a map of subschemas. */
+const SUBSCHEMA_MAP_KEYWORDS = [
+  '$defs',
+  'definitions',
+  'defs',
+  'dependentSchemas',
+  'patternProperties',
+  'properties',
+] as const;
+
+/** Schema keywords whose value is a single subschema, or a list of them. */
+const SUBSCHEMA_KEYWORDS = [
+  'additionalProperties',
+  'additional_properties',
+  'contains',
+  'else',
+  'if',
+  'items',
+  'not',
+  'propertyNames',
+  'then',
+  'unevaluatedProperties',
+] as const;
+
+/** Schema keywords whose value is a list of subschemas. */
+const SUBSCHEMA_LIST_KEYWORDS = [
+  'allOf',
+  'all_of',
+  'anyOf',
+  'any_of',
+  'oneOf',
+  'one_of',
+  'prefixItems',
+] as const;
+
+/** Returns true when `value` is a plain JSON object rather than an array. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Lowercases the JSON Schema `type` strings in a schema, in place.
+ *
+ * A genai `Schema` serializes its type as the uppercase enum name (`STRING`),
+ * while JSON Schema and the providers that consume it expect `string`. A type
+ * may also be a list of names, as in `['STRING', 'NULL']`. Only schema
+ * keywords are followed, so a `type` key inside a `default` or an `example`
+ * value is left alone.
+ *
+ * @param value A JSON Schema object, or a list of them. Mutated in place.
+ */
+export function lowercaseSchemaTypes(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      lowercaseSchemaTypes(item);
+    }
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+
+  const schemaType = value['type'];
+  if (typeof schemaType === 'string') {
+    value['type'] = schemaType.toLowerCase();
+  } else if (Array.isArray(schemaType)) {
+    value['type'] = schemaType.map((item) =>
+      typeof item === 'string' ? item.toLowerCase() : item,
+    );
+  }
+
+  for (const keyword of SUBSCHEMA_MAP_KEYWORDS) {
+    const children = value[keyword];
+    if (isRecord(children)) {
+      for (const child of Object.values(children)) {
+        lowercaseSchemaTypes(child);
+      }
+    }
+  }
+  for (const keyword of SUBSCHEMA_KEYWORDS) {
+    lowercaseSchemaTypes(value[keyword]);
+  }
+  for (const keyword of SUBSCHEMA_LIST_KEYWORDS) {
+    const children = value[keyword];
+    if (Array.isArray(children)) {
+      lowercaseSchemaTypes(children);
+    }
+  }
+}
+
 /**
  * Compiled validators for genai `Schema` objects, keyed by the schema itself.
  *
