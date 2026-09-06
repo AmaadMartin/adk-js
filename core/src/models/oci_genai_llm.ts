@@ -593,22 +593,10 @@ function toolParameters(fn: FunctionDeclaration): unknown {
   if (fn.parametersJsonSchema) {
     return fn.parametersJsonSchema;
   }
-  const properties = fn.parameters?.properties;
-  if (!properties) {
+  if (!fn.parameters?.properties) {
     return {type: 'object', properties: {}};
   }
-  const converted: Record<string, unknown> = {};
-  for (const [name, property] of Object.entries(properties)) {
-    converted[name] = toJsonSchema(property);
-  }
-  const parameters: Record<string, unknown> = {
-    type: 'object',
-    properties: converted,
-  };
-  if (fn.parameters?.required?.length) {
-    parameters['required'] = fn.parameters.required;
-  }
-  return parameters;
+  return toJsonSchema(fn.parameters);
 }
 
 /** Maps the response settings of a request onto an OCI response format. */
