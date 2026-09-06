@@ -144,7 +144,7 @@ export class ResponsesStreamAccumulator {
       case 'response.reasoning_text.delta':
         return [this.appendReasoning(event)];
       case 'response.output_item.added':
-        return this.onOutputItemAdded(event);
+        return this.onOutputItem(event, false);
       case 'response.content_part.done':
       case 'response.output_text.done':
         return this.onTextDone(event);
@@ -157,7 +157,7 @@ export class ResponsesStreamAccumulator {
       case 'response.function_call_arguments.done':
         return this.onFunctionArgumentsDone(event);
       case 'response.output_item.done':
-        return this.onOutputItemDone(event);
+        return this.onOutputItem(event, true);
       case 'response.completed':
       case 'response.incomplete':
         this.response = optional(event.response);
@@ -222,24 +222,21 @@ export class ResponsesStreamAccumulator {
     return this.partialResponse({text: delta, thought: true});
   }
 
-  private onOutputItemAdded(event: OpenAIStreamEvent): LlmResponse[] {
+  /**
+   * Opens the output item an event describes, and closes it when `done`.
+   *
+   * A reasoning item does not end an open run of reasoning deltas; every other
+   * kind does.
+   */
+  private onOutputItem(event: OpenAIStreamEvent, done: boolean): LlmResponse[] {
     const item = event.item;
     const responses =
       item?.type === 'reasoning' ? [] : this.closeReasoning(event);
     const key = streamOutputKey(event, optional(item?.call_id));
-    this.ensureOutputItem(key, optional(item?.type));
-    if (item?.type === 'function_call') {
-      this.trackFunctionCall(key, item);
+    const outputItem = this.ensureOutputItem(key, optional(item?.type));
+    if (done) {
+      outputItem.doneItem = optional(item);
     }
-    return responses;
-  }
-
-  private onOutputItemDone(event: OpenAIStreamEvent): LlmResponse[] {
-    const item = event.item;
-    const responses =
-      item?.type === 'reasoning' ? [] : this.closeReasoning(event);
-    const key = streamOutputKey(event, optional(item?.call_id));
-    this.ensureOutputItem(key, optional(item?.type)).doneItem = optional(item);
     if (item?.type === 'function_call') {
       this.trackFunctionCall(key, item);
     }

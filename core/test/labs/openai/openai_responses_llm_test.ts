@@ -38,6 +38,7 @@ import {
 } from '../../../src/labs/openai/openai_responses_converters.js';
 import {
   AzureOpenAIResponsesLlm,
+  OpenAIApiKeyProvider,
   OpenAIResponsesLlm,
   OpenAIResponsesLlmParams,
 } from '../../../src/labs/openai/openai_responses_llm.js';
@@ -45,6 +46,7 @@ import {enforceStrictOpenAiSchema} from '../../../src/labs/openai/openai_schema.
 import {logger} from '../../../src/utils/logger.js';
 
 import {
+  asUntypedInput,
   CaptureClient,
   collect,
   fakeEventStream,
@@ -1293,9 +1295,12 @@ describe('OpenAI Responses client construction', () => {
   });
 
   it('test_async_api_key_callable_raises', async () => {
+    // `OpenAIApiKeyProvider` returns a string, so TypeScript already rejects
+    // an async provider at the call site. This reaches the runtime guard the
+    // way an untyped JavaScript caller does.
     const llm = new OpenAIResponsesLlm({
       model: 'gpt-5',
-      apiKey: async () => 'k',
+      apiKey: asUntypedInput<OpenAIApiKeyProvider>(async () => 'k'),
     });
 
     await expect(

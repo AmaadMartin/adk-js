@@ -30,14 +30,14 @@ import {LlmRequest} from '../../models/llm_request.js';
 import {LlmResponse} from '../../models/llm_response.js';
 import {genaiSchemaToJsonSchema} from '../../utils/genai_schema_to_json.js';
 import {logger} from '../../utils/logger.js';
-import {toJsonSchema} from '../../utils/schema.js';
-import {isZodSchema} from '../../utils/simple_zod_to_json.js';
-
 import {
-  enforceStrictOpenAiSchema,
   isRecord,
   lowercaseSchemaTypes,
-} from './openai_schema.js';
+  toJsonSchema,
+} from '../../utils/schema.js';
+import {isZodSchema} from '../../utils/simple_zod_to_json.js';
+
+import {enforceStrictOpenAiSchema} from './openai_schema.js';
 
 /** Prefix ADK puts in front of a model refusal so it survives as text. */
 const REFUSAL_PREFIX = 'OpenAI refusal: ';
@@ -651,7 +651,7 @@ function structuredOutputSchema(
 function schemaName(schema: Record<string, unknown>): string {
   const title = schema['title'];
   const name = typeof title === 'string' && title ? title : DEFAULT_SCHEMA_NAME;
-  return name.replace(INVALID_SCHEMA_NAME_CHARS, () => '_');
+  return name.replace(INVALID_SCHEMA_NAME_CHARS, '_');
 }
 
 /** Maps the ADK structured-output settings onto the Responses `text` field. */
