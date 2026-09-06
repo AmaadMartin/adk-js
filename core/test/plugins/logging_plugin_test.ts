@@ -19,14 +19,6 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {LoggingPlugin} from '../../src/plugins/logging_plugin.js';
 import {resetLogger, setLogger} from '../../src/utils/logger.js';
 
-/**
- * Builds a system instruction that `ContentUnion` forbids but a JavaScript
- * caller can still pass, without weakening the types in the test.
- */
-function malformedInstruction(json: string): ContentUnion {
-  return JSON.parse(json);
-}
-
 function makeMockLogger() {
   const infoCalls: string[] = [];
   const mockLogger = {
@@ -675,7 +667,10 @@ describe('LoggingPlugin', () => {
     const plugin = new LoggingPlugin();
     const request: LlmRequest = {
       ...mockLlmRequest,
-      config: {systemInstruction: malformedInstruction('[null, 42]')},
+      // A JavaScript caller can pass these; `ContentUnion` cannot express
+      // them. The cast is the subject of the test: the plugin must render a
+      // value the type system says cannot occur, rather than throw.
+      config: {systemInstruction: [null, 42] as unknown as ContentUnion},
     };
 
     await expect(
@@ -693,7 +688,8 @@ describe('LoggingPlugin', () => {
     const plugin = new LoggingPlugin();
     const request: LlmRequest = {
       ...mockLlmRequest,
-      config: {systemInstruction: malformedInstruction('42')},
+      // See the preceding test: a deliberate type violation.
+      config: {systemInstruction: 42 as unknown as ContentUnion},
     };
 
     await expect(
@@ -830,5 +826,223 @@ describe('LoggingPlugin', () => {
     });
 
     expect(infoCalls.some((m) => m.includes('User Content: None'))).toBe(true);
+  });
+
+  /**
+   * Ported from adk-python main
+   * tests/unittests/plugins/test_logging_plugin.py. Each name is kept verbatim
+   * so a reviewer can grep it against the reference.
+   */
+  describe('ported from adk-python', () => {
+    it('test_before_model_callback_truncates_long_system_instruction', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {systemInstruction: 'a'.repeat(200) + 'Z'.repeat(50)},
+      };
+
+      const result = await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain(
+        `System Instruction: '${'a'.repeat(200)}...'`,
+      );
+      // Everything past the 200-char budget is dropped, not merely elided.
+      expect(infoCalls.join('\n')).not.toContain('Z');
+    });
+
+    it('test_before_model_callback_keeps_system_instruction_at_budget', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {systemInstruction: 'a'.repeat(200)},
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(infoCalls.join('\n')).toContain(
+        `System Instruction: '${'a'.repeat(200)}'`,
+      );
+    });
+
+    it('test_before_model_callback_lists_available_tool_names', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        model: 'test-model',
+        toolsDict: {alpha: mockTool, beta: mockTool},
+      };
+
+      await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      // adk-python prints the Python list repr `['alpha', 'beta']`; adk-js
+      // interpolates the array into a template literal.
+      expect(infoCalls.join('\n')).toContain('Available Tools: alpha,beta');
+      expect(infoCalls.join('\n')).toContain('Model: test-model');
+    });
+
+    it('test_after_model_callback_logs_error_instead_of_content', async () => {
+      const plugin = new LoggingPlugin();
+      const llmResponse: LlmResponse = {
+        content: {parts: [{text: 'unreachable-text'}]},
+        errorCode: '429',
+        errorMessage: 'rate limited',
+      };
+
+      const result = await plugin.afterModelCallback({
+        callbackContext: mockCallbackContext,
+        llmResponse,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain('ERROR - Code: 429');
+      expect(infoCalls.join('\n')).toContain('Error Message: rate limited');
+      // An errored response carries no usable content; logging it would bury
+      // the error under an empty "Content:" line.
+      expect(infoCalls.join('\n')).not.toContain('unreachable-text');
+      expect(infoCalls.join('\n')).not.toContain('Content:');
+    });
+
+    it('test_after_model_callback_logs_content_and_token_usage', async () => {
+      const plugin = new LoggingPlugin();
+      const llmResponse: LlmResponse = {
+        content: {parts: [{text: 'hello'}]},
+        usageMetadata: {promptTokenCount: 11, candidatesTokenCount: 7},
+      };
+
+      await plugin.afterModelCallback({
+        callbackContext: mockCallbackContext,
+        llmResponse,
+      });
+
+      expect(infoCalls.join('\n')).toContain("Content: text: 'hello'");
+      expect(infoCalls.join('\n')).toContain(
+        'Token Usage - Input: 11, Output: 7',
+      );
+    });
+
+    it('test_on_event_callback_summarizes_function_parts', async () => {
+      const plugin = new LoggingPlugin();
+      const event = createEvent({
+        author: 'test_agent',
+        content: {
+          parts: [
+            {functionCall: {name: 'do_thing', args: {x: 1}}},
+            {functionResponse: {name: 'do_thing', response: {ok: true}}},
+          ],
+        },
+      });
+
+      const result = await plugin.onEventCallback({
+        invocationContext: mockInvocationContext,
+        event,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain(
+        'Content: function_call: do_thing | function_response: do_thing',
+      );
+      // adk-python prints the Python list repr `['do_thing']`.
+      expect(infoCalls.join('\n')).toContain('Function Calls: do_thing');
+      expect(infoCalls.join('\n')).toContain('Function Responses: do_thing');
+    });
+
+    it('test_on_event_callback_renders_absent_content_as_none', async () => {
+      const plugin = new LoggingPlugin();
+      const event = createEvent({author: 'test_agent'});
+
+      await plugin.onEventCallback({
+        invocationContext: mockInvocationContext,
+        event,
+      });
+
+      expect(infoCalls.join('\n')).toContain('Content: None');
+    });
+
+    it('test_on_event_callback_truncates_long_text_part', async () => {
+      const plugin = new LoggingPlugin();
+      // The id is pinned because the plugin logs it and `createEvent`
+      // generates a random one, which can itself contain the 'Z' this test
+      // looks for.
+      const event = createEvent({
+        id: 'event-1',
+        author: 'test_agent',
+        content: {parts: [{text: 'a'.repeat(200) + 'Z'.repeat(50)}]},
+      });
+
+      await plugin.onEventCallback({
+        invocationContext: mockInvocationContext,
+        event,
+      });
+
+      expect(infoCalls.join('\n')).toContain(`text: '${'a'.repeat(200)}...'`);
+      expect(infoCalls.join('\n')).not.toContain('Z');
+    });
+
+    it('test_before_tool_callback_truncates_long_arguments', async () => {
+      const plugin = new LoggingPlugin();
+      const toolArgs = {payload: 'a'.repeat(400)};
+
+      const result = await plugin.beforeToolCallback({
+        tool: mockTool,
+        toolArgs,
+        toolContext: mockToolContext,
+      });
+
+      expect(result).toBeUndefined();
+      // adk-python asserts `str(tool_args)[:300]`, a Python dict repr; adk-js
+      // emits JSON.
+      expect(infoCalls.join('\n')).toContain(
+        `Arguments: ${JSON.stringify(toolArgs).slice(0, 300)}...}`,
+      );
+      // The full payload must not reach the console.
+      expect(infoCalls.join('\n')).not.toContain(JSON.stringify(toolArgs));
+    });
+
+    it('test_before_model_callback_formats_content_system_instruction', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {
+          systemInstruction: {role: 'system', parts: [{text: 'Stay concise.'}]},
+        },
+      };
+
+      const result = await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain('Stay concise.');
+    });
+
+    it('test_before_model_callback_formats_list_system_instruction', async () => {
+      const plugin = new LoggingPlugin();
+      const request: LlmRequest = {
+        ...mockLlmRequest,
+        config: {
+          systemInstruction: [{text: 'Stay concise.'}, {text: 'Cite sources.'}],
+        },
+      };
+
+      const result = await plugin.beforeModelCallback({
+        callbackContext: mockCallbackContext,
+        llmRequest: request,
+      });
+
+      expect(result).toBeUndefined();
+      expect(infoCalls.join('\n')).toContain('Stay concise.');
+      expect(infoCalls.join('\n')).toContain('Cite sources.');
+    });
   });
 });

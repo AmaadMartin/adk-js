@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, ContentUnion, Part} from '@google/genai';
+import {Content, ContentUnion} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {Context} from '../agents/context.js';
@@ -18,54 +18,11 @@ import {
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {isContent} from '../utils/content_utils.js';
+import {stringifyForLog} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin} from './base_plugin.js';
-
-/** Returns whether a system-instruction entry is a `Content` and not a `Part`. */
-function isContent(value: unknown): value is Content {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'parts' in value &&
-    Array.isArray(value.parts)
-  );
-}
-
-/** Returns whether a system-instruction entry can be read as a `Part`. */
-function isPartLike(value: unknown): value is Part {
-  return typeof value === 'object' && value !== null;
-}
-
-/**
- * Serializes a value for a log line. Never throws.
- *
- * A tool may return a value `JSON.stringify` rejects, such as a `BigInt` or a
- * circular structure. Logging must not abort the invocation it observes.
- */
-function stringifyForLog(value: unknown): string {
-  const seen = new WeakSet<object>();
-  try {
-    return (
-      JSON.stringify(value, (_key, entry: unknown) => {
-        if (typeof entry === 'bigint') {
-          return entry.toString();
-        }
-        if (typeof entry === 'object' && entry !== null) {
-          // A value referenced twice without a cycle also reads as
-          // `[Circular]`; the log line is truncated anyway.
-          if (seen.has(entry)) {
-            return '[Circular]';
-          }
-          seen.add(entry);
-        }
-        return entry;
-      }) ?? String(value)
-    );
-  } catch {
-    return String(value);
-  }
-}
 
 /**
  * A plugin that logs important information at each callback point.
@@ -358,7 +315,7 @@ export class LoggingPlugin extends BasePlugin {
     if (isContent(instruction)) {
       return this.formatContent(instruction);
     }
-    if (isPartLike(instruction)) {
+    if (typeof instruction === 'object' && instruction !== null) {
       return this.formatContent({parts: [instruction]});
     }
     // `ContentUnion` forbids it, but a JavaScript caller can still pass `null`
