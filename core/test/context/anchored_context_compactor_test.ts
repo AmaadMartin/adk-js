@@ -13,9 +13,29 @@ import {
   InvocationContext,
   PluginManager,
   Session,
+  createEvent,
   isScratchpadEvent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {getActiveEvents} from '../../src/context/compaction_utils.js';
+
+/**
+ * Builds an event with an explicit timestamp, so a test can place two events
+ * in the same millisecond. `createMockEvent` stamps `Date.now()`.
+ */
+function createTimestampedEvent(
+  id: string,
+  timestamp: number,
+  tokenCount: number,
+): Event {
+  return createEvent({
+    id,
+    author: 'user',
+    timestamp,
+    usageMetadata: {promptTokenCount: tokenCount},
+    content: {role: 'user', parts: [{text: id}]},
+  });
+}
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
@@ -265,5 +285,69 @@ describe('AnchoredContextCompactor', () => {
     expect(context.session.events[1].id).toBe('2');
     expect(context.session.events[2].id).toBe('3');
     expect(context.session.events[3].id).toBe('4');
+  });
+
+  it('records the first retained event so the shared getActiveEvents keeps a same-millisecond event', async () => {
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer: new MockSummarizer(),
+    });
+
+    // '2' and '3' share a millisecond across the compaction boundary.
+    const context = createMockInvocationContext([
+      createTimestampedEvent('1', 1000, 5),
+      createTimestampedEvent('2', 2000, 5),
+      createTimestampedEvent('3', 2000, 5),
+      createTimestampedEvent('4', 3000, 5),
+    ]);
+
+    await compactor.compact(context);
+
+    const scratchpad = context.session.events[0] as CompactedEvent;
+    expect(isScratchpadEvent(scratchpad)).toBe(true);
+    expect(scratchpad.retainFromEventId).toBe('3');
+    expect(context.session.events.map((e) => e.id)).toEqual([
+      scratchpad.id,
+      '3',
+      '4',
+    ]);
+    expect(getActiveEvents(context.session.events).map((e) => e.id)).toEqual([
+      scratchpad.id,
+      '3',
+      '4',
+    ]);
+  });
+
+  it('merges a same-millisecond retained event on a second compaction instead of discarding it', async () => {
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer: new MockSummarizer(),
+    });
+
+    const context = createMockInvocationContext([
+      createTimestampedEvent('1', 1000, 5),
+      createTimestampedEvent('2', 2000, 5),
+      createTimestampedEvent('3', 2000, 5),
+      createTimestampedEvent('4', 3000, 5),
+    ]);
+
+    await compactor.compact(context);
+    context.session.events.push(
+      createTimestampedEvent('5', 4000, 5),
+      createTimestampedEvent('6', 5000, 5),
+    );
+    await compactor.compact(context);
+
+    // The second round sees the scratchpad plus '3' and '4', so the summary
+    // covers 3 events. A timestamp boundary would drop '3' and summarize 2.
+    const scratchpad = context.session.events[0] as CompactedEvent;
+    expect(scratchpad.compactedContent).toBe('Mock summary of 3 events');
+    expect(context.session.events.map((e) => e.id)).toEqual([
+      scratchpad.id,
+      '5',
+      '6',
+    ]);
   });
 });

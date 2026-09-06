@@ -75,6 +75,9 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
 
     try {
       const compactedEvent = await this.summarizer.summarize(eventsToCompact);
+      // The tool call is the first event this compaction retains.
+      compactedEvent.retainFromEventId =
+        activeEvents[consolidateToolCallIndex].id;
       invocationContext.session.events.push(compactedEvent);
     } catch (error) {
       // If the summarizer fails, log the error, clear the flags, and proceed without compaction.

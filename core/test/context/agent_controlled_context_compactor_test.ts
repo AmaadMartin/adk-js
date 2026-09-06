@@ -13,8 +13,11 @@ import {
   InvocationContext,
   PluginManager,
   Session,
+  createEvent,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
+import {getActiveEvents} from '../../src/context/compaction_utils.js';
+import {createCompactedEvent} from '../../src/events/compacted_event.js';
 
 class MockSummarizer implements BaseSummarizer {
   async summarize(events: Event[]): Promise<CompactedEvent> {
@@ -39,6 +42,28 @@ class MockSummarizer implements BaseSummarizer {
       },
     } as CompactedEvent;
   }
+}
+
+/**
+ * Builds an event with an explicit timestamp, so a test can place two events
+ * in the same millisecond. `createMockEvent` stamps `Date.now()`.
+ */
+function createTimestampedEvent(
+  id: string,
+  timestamp: number,
+  toolName?: string,
+): Event {
+  return createEvent({
+    id,
+    author: 'user',
+    timestamp,
+    content: {
+      role: 'user',
+      parts: toolName
+        ? [{functionCall: {name: toolName, args: {}}}]
+        : [{text: id}],
+    },
+  });
 }
 
 function createMockEvent(
@@ -186,5 +211,65 @@ describe('AgentControlledContextCompactor', () => {
 
     expect(context.session.events.length).toBe(2); // no compacted event appended
     expect(context.session.state['temp:consolidate_context']).toBeUndefined();
+  });
+
+  it('keeps a tool call that shares a millisecond with the last compacted event', async () => {
+    const compactor = new AgentControlledContextCompactor({
+      summarizer: new MockSummarizer(),
+    });
+
+    // '2' and the tool call share a millisecond across the boundary.
+    const events = [
+      createTimestampedEvent('1', 1000),
+      createTimestampedEvent('2', 2000),
+      createTimestampedEvent('tc', 2000, 'consolidate_context'),
+    ];
+    const context = createMockInvocationContext(events, {
+      'temp:consolidate_context': true,
+    });
+
+    await compactor.compact(context);
+
+    const compacted = context.session.events[3] as CompactedEvent;
+    expect(compacted.retainFromEventId).toBe('tc');
+    expect(getActiveEvents(context.session.events).map((e) => e.id)).toEqual([
+      'mock-id',
+      'tc',
+    ]);
+  });
+
+  it('keeps the tool call when a previous summary sits after it in the list', async () => {
+    const compactor = new AgentControlledContextCompactor({
+      summarizer: new MockSummarizer(),
+    });
+
+    // A previous compactor appended its summary at the end, so the retained
+    // tool call is positioned before it.
+    const events = [
+      createTimestampedEvent('1', 1000),
+      createTimestampedEvent('2', 2000),
+      createTimestampedEvent('tc', 3000, 'consolidate_context'),
+      createCompactedEvent({
+        id: 'previous-summary',
+        author: 'system',
+        timestamp: 3000,
+        startTime: 1000,
+        endTime: 3000,
+        compactedContent: 'previous summary',
+        retainFromEventId: 'tc',
+      }),
+    ];
+    const context = createMockInvocationContext(events, {
+      'temp:consolidate_context': true,
+    });
+
+    await compactor.compact(context);
+
+    const compacted = context.session.events[4] as CompactedEvent;
+    expect(compacted.retainFromEventId).toBe('tc');
+    expect(getActiveEvents(context.session.events).map((e) => e.id)).toEqual([
+      'mock-id',
+      'tc',
+    ]);
   });
 });

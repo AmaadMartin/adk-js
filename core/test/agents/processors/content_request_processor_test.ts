@@ -32,6 +32,35 @@ function createMockEvent(id: string, timestamp: number, text: string): Event {
   };
 }
 
+function createFunctionCallEvent(
+  id: string,
+  timestamp: number,
+  callId: string,
+): Event {
+  return {
+    ...createMockEvent(id, timestamp, ''),
+    author: 'test_agent',
+    content: {
+      role: 'model',
+      parts: [{functionCall: {id: callId, name: 'tool', args: {}}}],
+    },
+  };
+}
+
+function createFunctionResponseEvent(
+  id: string,
+  timestamp: number,
+  callId: string,
+): Event {
+  return {
+    ...createMockEvent(id, timestamp, ''),
+    content: {
+      role: 'user',
+      parts: [{functionResponse: {id: callId, name: 'tool', response: {}}}],
+    },
+  };
+}
+
 function createCompactedEvent(
   id: string,
   timestamp: number,
@@ -182,5 +211,41 @@ describe('ContentRequestProcessor', () => {
     expect(llmRequest.contents[0].parts?.[0]?.text).toContain('Summary 1-3');
     // Followed by message 4
     expect(llmRequest.contents[1].parts?.[0]?.text).toContain('New message 4');
+  });
+
+  it('keeps a function call that shares a millisecond with the last compacted event', async () => {
+    // Eliding the call while its response survives makes prompt assembly throw
+    // "No function call event found for function responses ids".
+    const compacted: CompactedEvent = {
+      ...createCompactedEvent('c1', 2500, 1000, 2000, 'Summary 1-2'),
+      retainFromEventId: 'fc',
+    };
+    const rawEvents: Event[] = [
+      createMockEvent('1', 1000, 'Original message 1'),
+      createMockEvent('2', 2000, 'Original message 2'),
+      compacted,
+      createFunctionCallEvent('fc', 2000, 'call-1'),
+      createFunctionResponseEvent('fr', 3000, 'call-1'),
+    ];
+
+    const invocationContext = createMockInvocationContext(rawEvents);
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+
+    for await (const _ of CONTENT_REQUEST_PROCESSOR.runAsync(
+      invocationContext,
+      llmRequest,
+    )) {
+      // intentionally empty
+    }
+
+    const calls = llmRequest.contents.flatMap((c) =>
+      (c.parts ?? []).filter((p) => p.functionCall),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0].functionCall?.id).toBe('call-1');
   });
 });
