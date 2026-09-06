@@ -41,6 +41,17 @@ const SKIPPED_TESTS = [
   },
 ];
 
+/**
+ * Replay bookkeeping keys written by the conformance recorder and replayer.
+ * They are excluded from the event state deltas and from the final session
+ * state, matching adk-python's
+ * `src/google/adk/cli/conformance/_replay_validators.py`.
+ */
+const ADK_INTERNAL_STATE_KEYS = [
+  '_adk_recordings_config',
+  '_adk_replay_config',
+];
+
 export class TestRunner {
   constructor(private agentRegistry: AgentRegistry) {}
 
@@ -150,11 +161,40 @@ function userMessageToContent(msg: UserMessage): Content {
   throw new Error('Either Content text or content field is required');
 }
 
-function validateSession(actual: Session, expected: Session) {
+/**
+ * Asserts that a replayed session matches the recorded one.
+ *
+ * Events are compared first, then the final session state. `id` and
+ * `lastUpdateTime` vary per run. `appName` and `userId` are excluded as well,
+ * unlike the adk-python reference: `TestRunner.run()` fabricates both, while
+ * the recorder wrote the agent's own name and its own test user id.
+ */
+export function validateSession(actual: Session, expected: Session) {
   const actualEvents = actual.events.map(normalizeEvent);
   const expectedEvents = expected.events.map(normalizeEvent);
 
   assert.deepStrictEqual(actualEvents, expectedEvents);
+
+  assert.deepStrictEqual(
+    normalizeSessionState(actual.state),
+    normalizeSessionState(expected.state),
+  );
+}
+
+/**
+ * Returns a copy of `state` without the ADK bookkeeping keys.
+ *
+ * `state` is optional because the recorded session is a cast over parsed YAML,
+ * and the recorder omits a field left at its default.
+ */
+function normalizeSessionState(
+  state?: Record<string, unknown>,
+): Record<string, unknown> {
+  const normalized = {...state};
+  for (const key of ADK_INTERNAL_STATE_KEYS) {
+    delete normalized[key];
+  }
+  return normalized;
 }
 
 function normalizeEvent(event: Event): FilteredEvent {
@@ -199,8 +239,7 @@ function filterEventActionsStateDelta(actions?: FilteredEventActions) {
     return;
   }
 
-  delete actions.stateDelta['_adk_recordings_config'];
-  delete actions.stateDelta['_adk_replay_config'];
+  actions.stateDelta = normalizeSessionState(actions.stateDelta);
 }
 
 function filterPartFields(part: FilteredPart) {
