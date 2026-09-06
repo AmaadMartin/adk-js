@@ -159,3 +159,45 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Returns the status a duck-typed error carries, or `undefined` when it
+ * carries none.
+ *
+ * Clients disagree on the field name: undici-flavoured errors use
+ * `statusCode`, `@google/genai` exposes `status`, and gRPC and GAPIC clients
+ * use `code`. An explicit status field therefore wins over the generic `code`.
+ * No numeric range is applied, because a gRPC status and a Node error string
+ * such as `ECONNREFUSED` are both legitimate values here.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return The status it carries, or `undefined`.
+ */
+export function errorStatusCode(err: unknown): string | number | undefined {
+  const record = asRecord(err);
+  const status =
+    record?.['statusCode'] ?? record?.['status'] ?? record?.['code'];
+  return typeof status === 'string' || typeof status === 'number'
+    ? status
+    : undefined;
+}
+
+/**
+ * Returns an error's detail text: its own `details` field, or the response
+ * body that httpx-flavoured clients keep on `response.text`.
+ *
+ * The body is only read when it is already a string, so no async
+ * `Response.text()` is ever invoked. The result is not truncated: it is a data
+ * field for a caller that already holds the error, not a log line. A caller
+ * that logs it must bound it itself.
+ *
+ * @param err The thrown or rejected value to inspect.
+ * @return The detail text it carries, or `undefined`.
+ */
+export function errorDetails(err: unknown): string | undefined {
+  const record = asRecord(err);
+  return firstString(
+    record?.['details'],
+    asRecord(record?.['response'])?.['text'],
+  );
+}
