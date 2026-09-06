@@ -9,12 +9,20 @@ import {MAX_OUTPUT_CHARS} from '../../../src/tools/environment/constants.js';
 import {truncate} from '../../../src/tools/environment/truncate.js';
 
 describe('truncate', () => {
+  it('returns text shorter than the limit unchanged', () => {
+    expect(truncate('abc', 10)).toBe('abc');
+  });
+
   it('returns text that is exactly at the limit unchanged', () => {
     expect(truncate('abcde', 5)).toBe('abcde');
   });
 
   it('adds the notice when the text is one character over', () => {
     expect(truncate('abcdef', 5)).toBe('abcde\n... (truncated, 6 total chars)');
+  });
+
+  it('adds the notice when the cut is well inside the text', () => {
+    expect(truncate('abcdef', 3)).toBe('abc\n... (truncated, 6 total chars)');
   });
 
   it('defaults to the 30000-character cap', () => {
