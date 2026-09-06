@@ -5,6 +5,16 @@
  */
 
 /**
+ * Narrows an unknown value to a plain (non-array) record.
+ *
+ * @param value The value to narrow.
+ * @returns Whether the value can be read as a record.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
  * Converts an object with snake_case keys to camelCase keys.
  *
  * @param obj The object to convert.
