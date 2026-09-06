@@ -84,6 +84,11 @@ model calls it with none and the node receives `{}`. Give a node an
 The node validates its own input, so a Zod `inputSchema` carrying a
 `.transform()` runs that transform exactly once.
 
+Zod v4 cannot render a schema holding a `.transform()` as JSON Schema. Such a
+schema still runs; the declaration simply leaves the field out, so the model is
+told the tool's name and description but not its shape. A Zod object is
+unaffected — its declaration comes from a different converter.
+
 ## Failures the model sees
 
 A failure inside the node is a tool result, not an exception. The model reads
