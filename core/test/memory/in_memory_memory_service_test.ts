@@ -245,6 +245,144 @@ describe('InMemoryMemoryService', () => {
       expect(result.memories[0].timestamp).toBe('2024-01-15T10:30:00.000Z');
     });
 
+    it('matches a query with trailing punctuation', async () => {
+      const event = createEvent({
+        author: 'agent',
+        content: {role: 'model', parts: [{text: 'the weather is sunny today'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'weather?',
+      });
+
+      expect(result.memories).toHaveLength(1);
+    });
+
+    it('matches a numeric query token', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'the 2024 report'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: '2024',
+      });
+
+      expect(result.memories).toHaveLength(1);
+    });
+
+    it('matches a non-ASCII query token', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'I like café au lait'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'café',
+      });
+
+      expect(result.memories).toHaveLength(1);
+    });
+
+    it('matches a non-ASCII query in text with no word delimiters', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: '私の名前は太郎です'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const hit = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: '太郎',
+      });
+      const miss = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: '天気',
+      });
+
+      expect(hit.memories).toHaveLength(1);
+      expect(miss.memories).toHaveLength(0);
+    });
+
+    it('does not substring-match an ASCII query token', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'I like to code in Python.'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'thon',
+      });
+
+      expect(result.memories).toHaveLength(0);
+    });
+
+    it('returns no memories for a query with no word characters', async () => {
+      const event = createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'hello world'}]},
+      });
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      await sessionService.appendEvent({session, event});
+
+      await service.addSessionToMemory(session);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: '  ?  ',
+      });
+
+      expect(result.memories).toHaveLength(0);
+    });
+
     it('matches any word in a multi-word query', async () => {
       const event = createEvent({
         author: 'user',
@@ -265,6 +403,69 @@ describe('InMemoryMemoryService', () => {
       });
 
       expect(result.memories).toHaveLength(1);
+    });
+  });
+
+  describe('ranking and limits', () => {
+    async function addTexts(texts: string[]): Promise<void> {
+      const session = await sessionService.createSession({
+        appName: 'myApp',
+        userId: 'alice',
+      });
+      for (const text of texts) {
+        await sessionService.appendEvent({
+          session,
+          event: createEvent({
+            author: 'user',
+            content: {role: 'user', parts: [{text}]},
+          }),
+        });
+      }
+      await service.addSessionToMemory(session);
+    }
+
+    it('ranks the events matching the most query words first', async () => {
+      await addTexts([
+        'The deploy is ready.',
+        'Ready.',
+        'The deploy status is ready.',
+      ]);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'deploy status ready',
+      });
+
+      expect(
+        result.memories.map((memory) => memory.content.parts?.[0].text),
+      ).toEqual([
+        'The deploy status is ready.',
+        'The deploy is ready.',
+        'Ready.',
+      ]);
+    });
+
+    it('returns at most ten memories, best match first', async () => {
+      const texts = Array.from(
+        {length: 20},
+        (_unused, index) => `note ${index} about work`,
+      );
+      texts.push('the backlog note about work');
+      await addTexts(texts);
+
+      const result = await service.searchMemory({
+        appName: 'myApp',
+        userId: 'alice',
+        query: 'work backlog note',
+      });
+
+      expect(
+        result.memories.map((memory) => memory.content.parts?.[0].text),
+      ).toEqual([
+        'the backlog note about work',
+        ...Array.from({length: 9}, (_unused, i) => `note ${i} about work`),
+      ]);
     });
   });
 
