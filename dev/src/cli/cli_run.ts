@@ -338,6 +338,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   await using agentFile = new AgentFile(
     getAbsolutePath(options.agentPath),
     options.agentFileLoadOptions,
+    options.reloadAgents,
   );
   const loaded = await agentFile.load();
   const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
@@ -358,6 +359,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
         await using reloadedFile = new AgentFile(
           agentFilePath,
           options.agentFileLoadOptions,
+          options.reloadAgents,
         );
         const reloaded = await reloadedFile.load();
         const newAgent = isApp(reloaded) ? reloaded.rootAgent : reloaded;
