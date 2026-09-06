@@ -199,15 +199,6 @@ const SUPPORTED_FORMATS: Readonly<Record<string, readonly string[]>> = {
   string: ['date-time', 'enum'],
 };
 
-/** A `Schema` under construction, before its field values are narrowed. */
-type SchemaDraft = {[K in keyof Schema]: unknown};
-
-/** The JSON Schema `type` of a node, split into a name and a nullability flag. */
-interface ResolvedSchemaType {
-  jsonType?: string;
-  nullable: boolean;
-}
-
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -224,7 +215,10 @@ function isSupportedField(field: string): field is keyof Schema {
  * `type` and a separate `nullable` flag. A union keeps its first named member,
  * and a node that names nothing but null becomes a nullable object.
  */
-function resolveSchemaType(rawType: unknown): ResolvedSchemaType {
+function resolveSchemaType(rawType: unknown): {
+  jsonType?: string;
+  nullable: boolean;
+} {
   const entries = Array.isArray(rawType) ? rawType : [rawType];
   const nullable = entries.includes('null');
   const named = entries.find(
@@ -239,7 +233,7 @@ function resolveSchemaType(rawType: unknown): ResolvedSchemaType {
 function isSupportedFormat(
   jsonType: string | undefined,
   format: unknown,
-): boolean {
+): format is string {
   if (jsonType === undefined || typeof format !== 'string') {
     return false;
   }
@@ -264,6 +258,11 @@ function isSupportedFormat(
  * The function never throws and never mutates its argument. A node it cannot
  * make sense of degrades to an object rather than failing the whole toolset.
  *
+ * `toGeminiSchema` cannot serve this path. It answers to the MCP contract: it
+ * infers a missing type from `enum`, `const` or `$ref`, expands a multi-member
+ * union into `anyOf`, and emits only 8 keys, so it discards `format`, `title`,
+ * `default`, `pattern` and every bound an OpenAPI document declares.
+ *
  * @param jsonSchema The JSON Schema object to convert.
  * @returns The equivalent genai `Schema`.
  */
@@ -271,7 +270,7 @@ export function jsonSchemaToGeminiSchema(
   jsonSchema: Record<string, unknown>,
 ): Schema {
   const {jsonType, nullable} = resolveSchemaType(jsonSchema['type']);
-  const draft: SchemaDraft = {};
+  const draft: Schema = {};
 
   for (const [key, value] of Object.entries(jsonSchema)) {
     if (value === null || value === undefined) {
@@ -313,7 +312,9 @@ export function jsonSchemaToGeminiSchema(
         }
         break;
       default:
-        draft[field] =
+        // The allow-list makes `field` a `keyof Schema`, but each field has its
+        // own value type, so a keyed write cannot be checked against one union.
+        (draft as Record<string, unknown>)[field] =
           NUMERIC_STRING_KEYS.has(field) && typeof value === 'number'
             ? String(value)
             : value;
@@ -328,7 +329,7 @@ export function jsonSchemaToGeminiSchema(
   if (nullable) {
     draft.nullable = true;
   }
-  return draft as Schema;
+  return draft;
 }
 
 /**
