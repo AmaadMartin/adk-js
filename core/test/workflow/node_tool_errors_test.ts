@@ -19,6 +19,7 @@ import {
   InvocationContext,
   NodeContext,
   NodeTool,
+  RequestInput,
   Workflow,
   node,
 } from '@google/adk';
@@ -95,6 +96,16 @@ describe('NodeTool error paths', () => {
     await expect(runTool(new NodeTool(wf), {})).rejects.toThrow(
       /Dynamic node boom failed/,
     );
+  });
+
+  it('returns undefined while the node waits for input', async () => {
+    const target = new FunctionNode('approval', (ctx: NodeContext) =>
+      ctx.resumeInputs['approve-1'] === undefined
+        ? new RequestInput({interruptId: 'approve-1', message: 'approve?'})
+        : 'approved',
+    );
+    const result = await runTool(new NodeTool(target), {});
+    expect(result).toBeUndefined();
   });
 
   it('throws when there is no invocation event queue', async () => {

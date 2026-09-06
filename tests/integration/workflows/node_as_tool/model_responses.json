@@ -1,7 +1,7 @@
 [
   {
-    "key": "d745c2462b709e3f",
-    "instructionAgnosticKey": "cd29e9d8047eef5e",
+    "key": "a8e514c49f558aab",
+    "instructionAgnosticKey": "1f00255f71f48852",
     "request": {
       "contents": [
         {
@@ -48,6 +48,10 @@
                   "required": [
                     "tier"
                   ]
+                },
+                "responseJsonSchema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "string"
                 }
               }
             ]
@@ -100,8 +104,8 @@
     }
   },
   {
-    "key": "31758cfb2f2b5c51",
-    "instructionAgnosticKey": "9c901c45de75f6ba",
+    "key": "40b4cf93b9180479",
+    "instructionAgnosticKey": "7893c01771f66127",
     "request": {
       "contents": [
         {
@@ -175,6 +179,10 @@
                   "required": [
                     "tier"
                   ]
+                },
+                "responseJsonSchema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "string"
                 }
               }
             ]
@@ -227,8 +235,8 @@
     }
   },
   {
-    "key": "106beb6c3c01fe20",
-    "instructionAgnosticKey": "2c0ec1ce41d3014e",
+    "key": "3937403f316d9f1e",
+    "instructionAgnosticKey": "2b6ebce849177f7d",
     "request": {
       "contents": [
         {
@@ -339,6 +347,10 @@
                   "required": [
                     "tier"
                   ]
+                },
+                "responseJsonSchema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "string"
                 }
               }
             ]
