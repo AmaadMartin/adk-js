@@ -9,6 +9,7 @@ import {
   BaseArtifactService,
   BaseSessionService,
   LogLevel,
+  StreamingMode,
   getArtifactServiceFromUri,
   getSessionServiceFromUri,
   setLogLevel as setAdkCoreLogLevel,
@@ -80,6 +81,10 @@ function getAgentFileOptions(options: {
   };
 }
 
+function getStreamingMode(option?: string): StreamingMode {
+  return option === 'sse' ? StreamingMode.SSE : StreamingMode.NONE;
+}
+
 function getBoolean(option?: string | boolean): boolean {
   if (typeof option === 'boolean') {
     return option;
@@ -136,6 +141,12 @@ const VERBOSE_OPTION = new Option(
   '-v, --verbose',
   'Optional. Log at debug level. Shorthand for --log_level debug',
 ).default(false);
+const STREAMING_MODE_OPTION = new Option(
+  '--streaming_mode <mode>',
+  'Optional. The streaming mode of the recordings to replay.',
+)
+  .choices(['none', 'sse'])
+  .default('none');
 const LOG_LEVEL_OPTION = new Option(
   '--log_level <string>',
   'Optional. The log level of the server',
@@ -563,12 +574,14 @@ export function createProgram(): Command {
       'Directory of conformance test definitions. Recursively searched for .yaml files with test definitions.',
       process.cwd(),
     )
+    .addOption(STREAMING_MODE_OPTION)
     .option('--force', 'Force run skipped tests.')
     .action(async (options: Record<string, string>) => {
       runIntegrationTests({
         agentsDir: options['agents_dir'],
         testsDir: options['tests_dir'],
         forceRunAll: getBoolean(options['force']),
+        streamingMode: getStreamingMode(options['streaming_mode']),
       });
     });
 

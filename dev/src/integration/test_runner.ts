@@ -10,17 +10,19 @@ import {
   isLlmAgent,
   Runner,
   Session,
+  StreamingMode,
 } from '@google/adk';
 import {Content} from '@google/genai';
 import {cloneDeep} from 'lodash-es';
 import * as assert from 'node:assert';
 import {AgentRegistry} from './agent_registry.js';
-import {DummyLlm} from './dummy_llm.js';
+import {ReplayLlm} from './replay_llm.js';
 import {ReplayPlugin} from './replay_plugin.js';
 import {
   FilteredEvent,
   FilteredEventActions,
   FilteredPart,
+  Recording,
   TestInfo,
   UserMessage,
 } from './test_types.js';
@@ -42,7 +44,10 @@ const SKIPPED_TESTS = [
 ];
 
 export class TestRunner {
-  constructor(private agentRegistry: AgentRegistry) {}
+  constructor(
+    private agentRegistry: AgentRegistry,
+    private streamingMode: StreamingMode,
+  ) {}
 
   async run(testInfo: TestInfo, force: boolean): Promise<boolean> {
     // skip tests for unimplemented features
@@ -67,7 +72,11 @@ export class TestRunner {
     // Clone recordings to track consumption without mutating the original test info
     const recordings = cloneDeep(testInfo.recordings.recordings);
     const context = {userMessageIndex: 0};
-    injectDummyLlm(agent);
+    injectReplayLlm(
+      this.agentRegistry.instantiatedAgents(),
+      recordings,
+      context,
+    );
 
     const replayPlugin = new ReplayPlugin(recordings, context);
     const sessionService = new InMemorySessionService();
@@ -100,6 +109,7 @@ export class TestRunner {
         sessionId,
         newMessage: content,
         stateDelta: i === 0 ? testInfo.spec.initialState : undefined,
+        runConfig: {streamingMode: this.streamingMode},
       });
 
       for await (const _ of iterator) {
@@ -123,16 +133,21 @@ export class TestRunner {
   }
 }
 
-function injectDummyLlm(agent: BaseAgent) {
-  if (isLlmAgent(agent)) {
-    agent.model = new DummyLlm();
-  }
-
-  // Traverse subagents
-  const subAgents = agent.subAgents;
-  if (subAgents && Array.isArray(subAgents)) {
-    for (const sub of subAgents) {
-      injectDummyLlm(sub);
+/**
+ * Points every instantiated agent at its own replay model.
+ *
+ * The registry is used rather than a sub-agent tree walk because an agent
+ * reachable only through an AgentTool is absent from that tree, and would keep
+ * its configured model and call a real one.
+ */
+function injectReplayLlm(
+  agents: BaseAgent[],
+  recordings: Recording[],
+  context: {userMessageIndex: number},
+) {
+  for (const agent of agents) {
+    if (isLlmAgent(agent)) {
+      agent.model = new ReplayLlm({agentName: agent.name, recordings, context});
     }
   }
 }

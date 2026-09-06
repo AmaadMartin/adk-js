@@ -4,13 +4,51 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Session} from '@google/adk';
+import {Session, StreamingMode} from '@google/adk';
 import camelcaseKeys from 'camelcase-keys';
 import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
+import {isFileNotFoundError} from '../utils/file_utils.js';
+
+/**
+ * Returns the recordings and session file names holding the goldens of the
+ * given streaming mode.
+ *
+ * A test case carries one pair per mode, because an SSE run records the
+ * partial responses a non-streaming run never produces.
+ */
+export function goldenFileNames(streamingMode: StreamingMode): {
+  recordings: string;
+  session: string;
+} {
+  switch (streamingMode) {
+    case StreamingMode.SSE:
+      return {
+        recordings: 'generated-recordings-sse.yaml',
+        session: 'generated-session-sse.yaml',
+      };
+    case StreamingMode.NONE:
+      return {
+        recordings: 'generated-recordings.yaml',
+        session: 'generated-session.yaml',
+      };
+    default:
+      throw new Error(`Unsupported streaming mode: ${streamingMode}`);
+  }
+}
+
+/** Reads a YAML file and camel-cases its keys. */
+async function loadYamlMapping<T>(filePath: string): Promise<T> {
+  const content = await fs.readFile(filePath, 'utf-8');
+  const parsed = yaml.load(content);
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(`${filePath} must be a YAML mapping`);
+  }
+  return camelcaseKeys(parsed, {deep: true}) as T;
+}
 
 /**
  * batchLoadYamlTestDefs will recursively search the directory given
@@ -18,14 +56,18 @@ import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
  */
 export async function batchLoadYamlTestDefs(
   directory: string,
+  streamingMode: StreamingMode,
 ): Promise<Map<string, TestInfo>> {
   // Tests have 3 parts:
   //
   // 1. spec.yaml - the defined test config and input
-  // 2. generated-recordings.yaml - the recorded event information
-  // 3. generated-session.yaml - the recorded session information
+  // 2. generated-recordings[-sse].yaml - the recorded event information
+  // 3. generated-session[-sse].yaml - the recorded session information
   //
-  // Assume any directory with a spec.yaml is a test with all 3 files
+  // The -sse goldens hold the StreamingMode.SSE recording of the same test.
+  // Assume any directory with a spec.yaml is a test, and skip it when the
+  // goldens of the selected mode were never recorded.
+  const goldens = goldenFileNames(streamingMode);
   const files = fg.stream('**/spec.{yaml,yml}', {
     cwd: directory,
     absolute: true,
@@ -40,48 +82,33 @@ export async function batchLoadYamlTestDefs(
     // Test directory
     const baseDir = path.posix.dirname(normalizedFile);
 
-    // Spec file
-    const specFile = path.posix.join(baseDir, 'spec.yaml');
-    const filePath = specFile;
-    const content = await fs.readFile(filePath, 'utf-8');
-    const parsedSpec = yaml.load(content);
-    if (typeof parsedSpec !== 'object' || parsedSpec === null) {
-      throw new Error('Spec file must be a YAML mapping');
-    }
-    const testSpec = camelcaseKeys(parsedSpec, {
-      deep: true,
-    }) as TestSpec;
-
-    // Session file
-    const sessionFile = path.posix.join(baseDir, 'generated-session.yaml');
-    const sessionContent = await fs.readFile(sessionFile, 'utf-8');
-    const parsedSession = yaml.load(sessionContent);
-    if (typeof parsedSession !== 'object' || parsedSession === null) {
-      throw new Error('Session file must be a YAML mapping');
-    }
-    const session = camelcaseKeys(parsedSession, {
-      deep: true,
-    }) as Session;
-
-    // Recordings file
-    const recordingsFile = path.posix.join(
-      baseDir,
-      'generated-recordings.yaml',
-    );
-    const recordingsContent = await fs.readFile(recordingsFile, 'utf-8');
-    const parsedRecordings = yaml.load(recordingsContent);
-    if (typeof parsedRecordings !== 'object' || parsedRecordings === null) {
-      throw new Error('Recording file must be a YAML mapping');
-    }
-    const recordings = camelcaseKeys(parsedRecordings, {
-      deep: true,
-    }) as Recordings;
-
     // Make test names unique by including relative file path from given root dir
     const normalizedDir = directory.replaceAll('\\', '/');
     const relativePath = path.posix.relative(normalizedDir, baseDir);
     const parsedPath = path.posix.parse(relativePath);
     const name = path.posix.join(parsedPath.dir, parsedPath.name);
+
+    // Spec file
+    const testSpec = await loadYamlMapping<TestSpec>(
+      path.posix.join(baseDir, 'spec.yaml'),
+    );
+
+    let session: Session;
+    let recordings: Recordings;
+    try {
+      session = await loadYamlMapping<Session>(
+        path.posix.join(baseDir, goldens.session),
+      );
+      recordings = await loadYamlMapping<Recordings>(
+        path.posix.join(baseDir, goldens.recordings),
+      );
+    } catch (error: unknown) {
+      if (isFileNotFoundError(error)) {
+        console.log('Skipping test', name, '- no', streamingMode, 'goldens');
+        continue;
+      }
+      throw error;
+    }
 
     tests.set(name, {
       name: name,

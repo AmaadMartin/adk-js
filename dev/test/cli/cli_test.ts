@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {LogLevel, setLogLevel, StreamingMode} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
@@ -35,6 +36,10 @@ vi.mock('../../src/cli/deploy/cli_deploy_cloud_run', () => ({
 
 vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
+}));
+
+vi.mock('../../src/integration/run_integration_tests', () => ({
+  runIntegrationTests: vi.fn(),
 }));
 
 vi.mock('../../src/version', () => ({
@@ -466,6 +471,43 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('command: integration conformance', () => {
+    it('should replay the non-streaming goldens by default', async () => {
+      await parse(['integration', 'conformance']);
+
+      expect(runIntegrationTests).toHaveBeenCalledWith(
+        expect.objectContaining({
+          streamingMode: StreamingMode.NONE,
+          forceRunAll: false,
+        }),
+      );
+    });
+
+    it('should replay the SSE goldens when --streaming_mode sse is set', async () => {
+      await parse(['integration', 'conformance', '--streaming_mode', 'sse']);
+
+      expect(runIntegrationTests).toHaveBeenCalledWith(
+        expect.objectContaining({streamingMode: StreamingMode.SSE}),
+      );
+    });
+
+    it('should reject a streaming mode that has no goldens', async () => {
+      const stderr = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+
+      await expect(
+        parse(['integration', 'conformance', '--streaming_mode', 'bidi']),
+      ).rejects.toThrow();
+
+      expect(stderr.mock.calls.join('')).toContain(
+        "option '--streaming_mode <mode>' argument 'bidi' is invalid. " +
+          'Allowed choices are none, sse.',
+      );
+      expect(runIntegrationTests).not.toHaveBeenCalled();
     });
   });
 });

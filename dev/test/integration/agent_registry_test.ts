@@ -13,7 +13,10 @@ import {
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('AgentRegistry', () => {
@@ -199,6 +202,35 @@ describe('AgentRegistry', () => {
     expect(() => agentRegistry.getAgent('bad_agent')).toThrow(
       'Agent missing_agent not found in registry (referenced by AgentTool in bad_agent)',
     );
+  });
+
+  it('should list an agent reachable only through an AgentTool', () => {
+    const subConfig: YamlAgentConfig = {
+      name: 'sub_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: false,
+    };
+    const parentConfig: YamlAgentConfig = {
+      name: 'parent_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: true,
+      tools: [{name: 'AgentTool', args: {agent: {configPath: 'sub_path'}}}],
+    };
+
+    agentRegistry.registerAgentConfig('sub_path', subConfig);
+    agentRegistry.registerAgentConfig('parent_path', parentConfig);
+    const parent = agentRegistry.getAgent('parent_path');
+
+    expect(parent?.subAgents).toEqual([]);
+    expect(
+      agentRegistry.instantiatedAgents().map((agent) => agent.name),
+    ).toEqual(['sub_agent', 'parent_agent']);
   });
 
   it('should instantiate MCPToolset', () => {

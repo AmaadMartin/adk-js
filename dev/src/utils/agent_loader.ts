@@ -17,6 +17,7 @@ import {
   createTempDir,
   isFile,
   isFileExists,
+  isFileNotFoundError,
   isFolderExists,
   loadFileData,
   removeFolder,
@@ -167,7 +168,7 @@ export class AgentFile {
     try {
       await fsPromises.stat(this.filePath);
     } catch (e) {
-      if ((e as {code: string}).code === 'ENOENT') {
+      if (isFileNotFoundError(e)) {
         throw new AgentFileLoadingError(
           `Agent file ${this.filePath} does not exists`,
         );

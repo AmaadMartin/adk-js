@@ -4,13 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BasePlugin,
-  BaseTool,
-  Context,
-  LlmRequest,
-  LlmResponse,
-} from '@google/adk';
+import {BasePlugin, BaseTool, Context} from '@google/adk';
 import {Recording} from './test_types.js';
 
 export class ReplayPlugin extends BasePlugin {
@@ -19,34 +13,6 @@ export class ReplayPlugin extends BasePlugin {
     private context: {userMessageIndex: number},
   ) {
     super('replay-plugin');
-  }
-
-  override async beforeModelCallback({
-    callbackContext,
-  }: {
-    callbackContext: Context;
-    llmRequest: LlmRequest;
-  }): Promise<LlmResponse | undefined> {
-    const agentName = callbackContext.agentName;
-    const index = this.recordings.findIndex(
-      (r) =>
-        r.userMessageIndex === this.context.userMessageIndex &&
-        r.agentName === agentName &&
-        r.llmRecording?.llmResponse &&
-        // replay internal flag to mark event as consumed
-        !(r as unknown as {_consumed: boolean})._consumed,
-    );
-
-    if (index === -1) {
-      throw new Error(
-        `No LLM recording found for agent ${agentName} at turn ${this.context.userMessageIndex}`,
-      );
-    }
-
-    const rec = this.recordings[index];
-    (rec as unknown as {_consumed: boolean})._consumed = true;
-
-    return rec.llmRecording!.llmResponse!;
   }
 
   override async beforeToolCallback(params: {
