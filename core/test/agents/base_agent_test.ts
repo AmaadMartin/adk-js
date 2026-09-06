@@ -8,6 +8,8 @@ import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
   BaseAgentConfig,
+  BasePlugin,
+  Context,
   Event,
   FunctionTool,
   InvocationContext,
@@ -15,7 +17,9 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
 } from '@google/adk';
+import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
 class MockAgent extends BaseAgent {
@@ -38,6 +42,157 @@ class MockAgent extends BaseAgent {
     _context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
     // Not needed for this test
+  }
+}
+
+/** An agent that records whether its body ran, to prove a short-circuit. */
+class BodyFlagAgent extends BaseAgent {
+  bodyRan = false;
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.bodyRan = true;
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      branch: context.branch,
+      content: {role: 'model', parts: [{text: `Response from ${this.name}`}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for this test
+  }
+}
+
+/** An agent whose live body yields one event. */
+class LiveAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for this test
+  }
+
+  protected async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      branch: context.branch,
+      content: {
+        role: 'model',
+        parts: [{text: `Live response from ${this.name}`}],
+      },
+    });
+  }
+}
+
+class RecordingPlugin extends BasePlugin {
+  readonly before: Array<{agentName: string; invocationId: string}> = [];
+  readonly after: Array<{agentName: string; invocationId: string}> = [];
+
+  constructor(
+    name = 'recorder',
+    private readonly beforeContent?: Content,
+    private readonly afterContent?: Content,
+  ) {
+    super(name);
+  }
+
+  override async beforeAgentCallback({
+    agent,
+    callbackContext,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+  }): Promise<Content | undefined> {
+    this.before.push({
+      agentName: agent.name,
+      invocationId: callbackContext.invocationId,
+    });
+    return this.beforeContent;
+  }
+
+  override async afterAgentCallback({
+    agent,
+    callbackContext,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+  }): Promise<Content | undefined> {
+    this.after.push({
+      agentName: agent.name,
+      invocationId: callbackContext.invocationId,
+    });
+    return this.afterContent;
+  }
+}
+
+/** A plugin that writes session state from the before hook and returns nothing. */
+class StateWritingBeforePlugin extends BasePlugin {
+  constructor() {
+    super('before_state_writer');
+  }
+
+  override async beforeAgentCallback({
+    callbackContext,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+  }): Promise<Content | undefined> {
+    callbackContext.state.set('visited', true);
+    return undefined;
+  }
+}
+
+/** A plugin that writes session state from the after hook and returns nothing. */
+class StateWritingAfterPlugin extends BasePlugin {
+  constructor() {
+    super('after_state_writer');
+  }
+
+  override async afterAgentCallback({
+    callbackContext,
+  }: {
+    agent: BaseAgent;
+    callbackContext: Context;
+  }): Promise<Content | undefined> {
+    callbackContext.state.set('done', true);
+    return undefined;
+  }
+}
+
+/** A plugin that aborts the invocation from the before hook. */
+class BeforeAbortPlugin extends BasePlugin {
+  called = false;
+
+  constructor(private readonly controller: AbortController) {
+    super('before_aborter');
+  }
+
+  override async beforeAgentCallback(): Promise<Content | undefined> {
+    this.called = true;
+    this.controller.abort();
+    return undefined;
+  }
+}
+
+/** A plugin that aborts the invocation from the after hook. */
+class AfterAbortPlugin extends BasePlugin {
+  called = false;
+
+  constructor(private readonly controller: AbortController) {
+    super('after_aborter');
+  }
+
+  override async afterAgentCallback(): Promise<Content | undefined> {
+    this.called = true;
+    this.controller.abort();
+    return undefined;
   }
 }
 
@@ -296,6 +451,267 @@ describe('BaseAgent', () => {
       expect(clone).toBeInstanceOf(MockAgent);
       expect(clone.name).toBe('mock');
       expect(clone.description).toBe('a mock');
+    });
+  });
+
+  describe('plugin agent callbacks', () => {
+    const createContext = (
+      agent: BaseAgent,
+      plugins: BasePlugin[],
+      abortSignal?: AbortSignal,
+    ): InvocationContext =>
+      new InvocationContext({
+        invocationId: 'plugin-invocation',
+        agent,
+        session: createSession({id: 'test-session', appName: 'test-app'}),
+        pluginManager: new PluginManager(plugins),
+        abortSignal,
+      });
+
+    const drain = async (
+      events: AsyncGenerator<Event, void, void>,
+    ): Promise<Event[]> => {
+      const collected: Event[] = [];
+      for await (const event of events) {
+        collected.push(event);
+      }
+      return collected;
+    };
+
+    const textOf = (event: Event): string | undefined =>
+      event.content?.parts?.[0]?.text;
+
+    it('reports a normal run to the before hook without changing the events', async () => {
+      const plugin = new RecordingPlugin();
+      let agentCallbackRan = false;
+      const agent = new MockAgent({
+        name: 'probe_agent',
+        beforeAgentCallback: [
+          async () => {
+            agentCallbackRan = true;
+            return undefined;
+          },
+        ],
+      });
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(plugin.before).toEqual([
+        {agentName: 'probe_agent', invocationId: 'plugin-invocation'},
+      ]);
+      expect(agentCallbackRan).toBe(true);
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('Response from probe_agent');
+    });
+
+    it('lets the before hook short-circuit the agent and its own callbacks', async () => {
+      const plugin = new RecordingPlugin('recorder', {
+        role: 'model',
+        parts: [{text: 'from plugin'}],
+      });
+      let agentCallbackRan = false;
+      const agent = new BodyFlagAgent({
+        name: 'probe_agent',
+        beforeAgentCallback: [
+          async () => {
+            agentCallbackRan = true;
+            return undefined;
+          },
+        ],
+      });
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('from plugin');
+      expect(agentCallbackRan).toBe(false);
+      expect(agent.bodyRan).toBe(false);
+    });
+
+    it('reports a normal run to the after hook without changing the events', async () => {
+      const plugin = new RecordingPlugin();
+      const agent = new MockAgent({name: 'probe_agent'});
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(plugin.after).toEqual([
+        {agentName: 'probe_agent', invocationId: 'plugin-invocation'},
+      ]);
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('Response from probe_agent');
+    });
+
+    it('lets the after hook replace the result and skip the agent callbacks', async () => {
+      const plugin = new RecordingPlugin('recorder', undefined, {
+        role: 'model',
+        parts: [{text: 'after plugin'}],
+      });
+      let agentCallbackRan = false;
+      const agent = new MockAgent({
+        name: 'probe_agent',
+        afterAgentCallback: [
+          async () => {
+            agentCallbackRan = true;
+            return {role: 'model', parts: [{text: 'after agent'}]};
+          },
+        ],
+      });
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(textOf(events[0])).toBe('Response from probe_agent');
+      expect(textOf(events[1])).toBe('after plugin');
+      expect(agentCallbackRan).toBe(false);
+    });
+
+    it('consults plugins in registration order and takes the first content', async () => {
+      const first = new RecordingPlugin('first');
+      const second = new RecordingPlugin('second', {
+        role: 'model',
+        parts: [{text: 'second wins'}],
+      });
+      const third = new RecordingPlugin('third', {
+        role: 'model',
+        parts: [{text: 'third never runs'}],
+      });
+      const agent = new BodyFlagAgent({name: 'probe_agent'});
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [first, second, third])),
+      );
+
+      expect(first.before).toHaveLength(1);
+      expect(second.before).toHaveLength(1);
+      expect(third.before).toHaveLength(0);
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('second wins');
+      expect(agent.bodyRan).toBe(false);
+    });
+
+    it('dispatches the hooks for a live run too', async () => {
+      const plugin = new RecordingPlugin();
+      const agent = new LiveAgent({name: 'live_agent'});
+
+      const events = await drain(agent.runLive(createContext(agent, [plugin])));
+
+      expect(plugin.before).toEqual([
+        {agentName: 'live_agent', invocationId: 'plugin-invocation'},
+      ]);
+      expect(plugin.after).toHaveLength(1);
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('Live response from live_agent');
+    });
+
+    it('emits nothing extra when no plugin and no agent callback exists', async () => {
+      const agent = new MockAgent({name: 'probe_agent'});
+
+      const events = await drain(agent.runAsync(createContext(agent, [])));
+
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('Response from probe_agent');
+    });
+
+    it('emits a contentless event for a state delta written by the before hook', async () => {
+      const plugin = new StateWritingBeforePlugin();
+      const agent = new MockAgent({name: 'probe_agent'});
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(events[0].content).toBeUndefined();
+      expect(events[0].actions.stateDelta).toEqual({visited: true});
+      expect(textOf(events[1])).toBe('Response from probe_agent');
+    });
+
+    it('emits a contentless event for a state delta written by the after hook', async () => {
+      const plugin = new StateWritingAfterPlugin();
+      const agent = new MockAgent({name: 'probe_agent'});
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(events).toHaveLength(2);
+      expect(textOf(events[0])).toBe('Response from probe_agent');
+      expect(events[1].content).toBeUndefined();
+      expect(events[1].actions.stateDelta).toEqual({done: true});
+    });
+
+    it("runs the agent's own before callback when the plugins return nothing", async () => {
+      const plugin = new RecordingPlugin();
+      const agent = new BodyFlagAgent({
+        name: 'probe_agent',
+        beforeAgentCallback: [
+          async () => ({role: 'model', parts: [{text: 'from agent'}]}),
+        ],
+      });
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(plugin.before).toHaveLength(1);
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('from agent');
+      expect(agent.bodyRan).toBe(false);
+    });
+
+    it("runs the agent's own after callback when the plugins return nothing", async () => {
+      const plugin = new RecordingPlugin();
+      const agent = new MockAgent({
+        name: 'probe_agent',
+        afterAgentCallback: [
+          async () => ({role: 'model', parts: [{text: 'from agent'}]}),
+        ],
+      });
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin])),
+      );
+
+      expect(plugin.after).toHaveLength(1);
+      expect(events).toHaveLength(2);
+      expect(textOf(events[1])).toBe('from agent');
+    });
+
+    it('emits nothing when a plugin aborts from the before hook', async () => {
+      const controller = new AbortController();
+      const agent = new BodyFlagAgent({name: 'probe_agent'});
+      const plugin = new BeforeAbortPlugin(controller);
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin], controller.signal)),
+      );
+
+      expect(plugin.called).toBe(true);
+      expect(events).toEqual([]);
+      expect(agent.bodyRan).toBe(false);
+    });
+
+    it('emits only the body event when a plugin aborts from the after hook', async () => {
+      const controller = new AbortController();
+      const agent = new MockAgent({name: 'probe_agent'});
+      const plugin = new AfterAbortPlugin(controller);
+
+      const events = await drain(
+        agent.runAsync(createContext(agent, [plugin], controller.signal)),
+      );
+
+      expect(plugin.called).toBe(true);
+      expect(controller.signal.aborted).toBe(true);
+      expect(events).toHaveLength(1);
+      expect(textOf(events[0])).toBe('Response from probe_agent');
     });
   });
 });

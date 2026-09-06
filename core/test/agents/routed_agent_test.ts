@@ -9,11 +9,12 @@ import {
   BaseAgentConfig,
   Event,
   InvocationContext,
-  InvocationContextParams,
   LlmAgent,
+  PluginManager,
   RoutedAgent,
   Session,
   createEvent,
+  createSession,
   isRoutedAgent,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
@@ -65,8 +66,11 @@ function createTestContext(params: {
     invocationId: params.invocationId ?? 'test-invocation',
     branch: params.branch ?? 'test-branch',
     agent: params.agent,
-    session: params.session,
-  } as unknown as InvocationContextParams);
+    session:
+      params.session ??
+      createSession({id: 'test-session', appName: 'test-app'}),
+    pluginManager: new PluginManager(),
+  });
 }
 
 describe('RoutedAgent', () => {
