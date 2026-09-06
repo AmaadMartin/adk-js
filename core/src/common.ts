@@ -751,6 +751,19 @@ export type {
   SdkConversation,
   SessionContinuationMode,
 } from './labs/antigravity/sdk_types.js';
+export {
+  AzureOpenAiResponsesLlm,
+  OpenAiResponsesLlm,
+} from './labs/openai/openai_responses_llm.js';
+export type {
+  AzureOpenAiResponsesLlmParams,
+  OpenAiApiKeyProvider,
+  OpenAiRequestOptions,
+  OpenAiResponsesApi,
+  OpenAiResponsesClient,
+  OpenAiResponsesLlmParams,
+  ResponseCreateBody,
+} from './labs/openai/openai_responses_llm.js';
 export {addEventsToMemory, addMemory} from './memory/base_memory_service.js';
 export type {
   AddEventsToMemoryRequest,
