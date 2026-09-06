@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {Context} from '../agents/context.js';
+
 /**
  * Represents a tool confirmation configuration.
  * @experimental  (Experimental, subject to change)
@@ -98,4 +100,42 @@ export class IntentMismatchError extends Error {
  */
 export function isIntentMismatchError(e: unknown): e is IntentMismatchError {
   return e instanceof Error && e.name === 'IntentMismatchError';
+}
+
+/**
+ * Applies the human-approval gate to a call that has already been decided to
+ * need one.
+ *
+ * @param toolName The name of the gated tool, used in the hint and the error.
+ * @param toolContext The context of the call.
+ * @return `undefined` when the call may proceed, or the function response to
+ *     surface in place of running it — a request for approval on the first
+ *     pass, or a rejection once the user declined.
+ * @throws If the call has no context, so there is nobody to ask.
+ */
+export function applyConfirmationGate(
+  toolName: string,
+  toolContext?: Context,
+): {error: string} | undefined {
+  if (!toolContext) {
+    throw new Error(
+      `Tool '${toolName}' requires confirmation but no tool context was provided.`,
+    );
+  }
+  if (!toolContext.toolConfirmation) {
+    toolContext.requestConfirmation({
+      hint:
+        `Please approve or reject the tool call ${toolName}() by ` +
+        'responding with a FunctionResponse with an expected ' +
+        'ToolConfirmation payload.',
+    });
+    toolContext.actions.skipSummarization = true;
+    return {
+      error: 'This tool call requires confirmation, please approve or reject.',
+    };
+  }
+  if (!toolContext.toolConfirmation.confirmed) {
+    return {error: 'This tool call is rejected.'};
+  }
+  return undefined;
 }

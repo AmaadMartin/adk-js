@@ -6,10 +6,16 @@
 
 import {
   IntentMismatchError,
-  ToolConfirmation,
   isIntentMismatchError,
+  ToolConfirmation,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+
+// `applyConfirmationGate` is internal to the tools layer, so it is imported by
+// path rather than from the package barrel.
+import {applyConfirmationGate} from '../../src/tools/tool_confirmation.js';
+
+import {createTestToolContext} from './mcp/mcp_context_test_utils.js';
 
 describe('ToolConfirmation', () => {
   it('stores all provided fields', () => {
@@ -95,5 +101,43 @@ describe('IntentMismatchError', () => {
   it('does not match an unrelated error or a non-error', () => {
     expect(isIntentMismatchError(new Error('nope'))).toBe(false);
     expect(isIntentMismatchError('IntentMismatchError')).toBe(false);
+  });
+});
+
+describe('applyConfirmationGate', () => {
+  it('asks the user when the call carries no confirmation', () => {
+    const toolContext = createTestToolContext();
+
+    const result = applyConfirmationGate('risky_tool', toolContext);
+
+    expect(result).toEqual({
+      error: 'This tool call requires confirmation, please approve or reject.',
+    });
+    expect(toolContext.eventActions.requestedToolConfirmations).toHaveProperty(
+      'test-function-call-id',
+    );
+    expect(toolContext.actions.skipSummarization).toBe(true);
+  });
+
+  it('refuses the call when the user declined', () => {
+    const toolContext = createTestToolContext();
+    toolContext.toolConfirmation = new ToolConfirmation({confirmed: false});
+
+    expect(applyConfirmationGate('risky_tool', toolContext)).toEqual({
+      error: 'This tool call is rejected.',
+    });
+  });
+
+  it('lets the call through once the user approved', () => {
+    const toolContext = createTestToolContext();
+    toolContext.toolConfirmation = new ToolConfirmation({confirmed: true});
+
+    expect(applyConfirmationGate('risky_tool', toolContext)).toBeUndefined();
+  });
+
+  it('throws when there is no context to ask through', () => {
+    expect(() => applyConfirmationGate('risky_tool')).toThrow(
+      "Tool 'risky_tool' requires confirmation but no tool context was provided.",
+    );
   });
 });
