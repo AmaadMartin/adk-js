@@ -374,6 +374,15 @@ export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
+export {ConnectionsClient} from './tools/application_integration_tool/clients/connections_client.js';
+export type {
+  ActionSchema,
+  ConnectionDetails,
+  ConnectionsClientOptions,
+  EntitySchemaAndOperations,
+} from './tools/application_integration_tool/clients/connections_client.js';
+export {IntegrationClient} from './tools/application_integration_tool/clients/integration_client.js';
+export type {IntegrationClientOptions} from './tools/application_integration_tool/clients/integration_client.js';
 export * from './tools/base_tool.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
