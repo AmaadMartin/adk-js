@@ -24,6 +24,7 @@ import {
   convertInteractionToLlmResponse,
   convertStepToParts,
   convertToolsConfigToInteractionsFormat,
+  ExtendedInteraction,
   extractSystemInstruction,
   generateContentViaInteractions,
   getLatestUserContents,
@@ -740,6 +741,44 @@ describe('interactions_utils', () => {
         totalTokenCount: 30,
       });
       expect(response.finishReason).toBe('STOP');
+    });
+
+    it('should carry the environment id of a completed interaction', () => {
+      const interaction: ExtendedInteraction = {
+        id: 'int-env',
+        status: 'completed',
+        environment_id: 'env-42',
+        steps: [],
+      };
+
+      expect(convertInteractionToLlmResponse(interaction).environmentId).toBe(
+        'env-42',
+      );
+    });
+
+    it('should carry the environment id of a failed interaction', () => {
+      const interaction: ExtendedInteraction = {
+        id: 'int-env-failed',
+        status: 'failed',
+        environment_id: 'env-43',
+        error: {code: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded'},
+      };
+
+      expect(convertInteractionToLlmResponse(interaction).environmentId).toBe(
+        'env-43',
+      );
+    });
+
+    it('should leave the environment id absent when the API sends none', () => {
+      const interaction: ExtendedInteraction = {
+        id: 'int-no-env',
+        status: 'completed',
+        steps: [],
+      };
+
+      expect(
+        convertInteractionToLlmResponse(interaction).environmentId,
+      ).toBeUndefined();
     });
 
     it('should convert failed interaction response', () => {

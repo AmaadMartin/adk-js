@@ -544,6 +544,7 @@ export function convertInteractionToLlmResponse(
       errorCode: errorCode,
       errorMessage: errorMsg,
       interactionId: interaction.id,
+      environmentId: interaction.environment_id,
     };
   }
 
@@ -581,6 +582,7 @@ export function convertInteractionToLlmResponse(
       interaction.status === 'completed' ||
       interaction.status === 'requires_action',
     interactionId: interaction.id,
+    environmentId: interaction.environment_id,
   };
 }
 

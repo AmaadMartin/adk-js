@@ -107,6 +107,16 @@ export interface LlmResponse {
    */
   interactionId?: string;
 
+  /**
+   * The execution environment ID from the interactions API.
+   *
+   * Populated when an interactions-API agent provisions or reuses a sandbox
+   * environment; persisted on the resulting Event so a later turn can reuse
+   * the same environment. Mirrors `LlmResponse.environment_id` in
+   * google/adk-python `models/llm_response.py`.
+   */
+  environmentId?: string;
+
   /** The model version used to generate the response. */
   modelVersion?: string;
 
