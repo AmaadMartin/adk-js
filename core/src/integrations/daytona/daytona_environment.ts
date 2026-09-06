@@ -62,6 +62,14 @@ export interface DaytonaEnvironmentOptions {
   client?: Daytona;
 }
 
+/** The fields every Daytona SDK error carries, read structurally. */
+interface DaytonaErrorFields {
+  name: string;
+  message?: unknown;
+  code?: unknown;
+  statusCode?: unknown;
+}
+
 /**
  * Returns `err`'s fields when it is a Daytona SDK error, otherwise `undefined`.
  *
@@ -70,12 +78,21 @@ export interface DaytonaEnvironmentOptions {
  * working when a runtime holds two copies of it — neither of which is true of
  * `instanceof`.
  */
-function daytonaErrorFields(err: unknown): Record<string, unknown> | undefined {
+function daytonaErrorFields(err: unknown): DaytonaErrorFields | undefined {
   const record = asRecord(err);
-  const name = record?.['name'];
-  return typeof name === 'string' && name.startsWith(DAYTONA_ERROR_PREFIX)
-    ? record
-    : undefined;
+  if (record === undefined) {
+    return undefined;
+  }
+  const name = record['name'];
+  if (typeof name !== 'string' || !name.startsWith(DAYTONA_ERROR_PREFIX)) {
+    return undefined;
+  }
+  return {
+    name,
+    message: record['message'],
+    code: record['code'],
+    statusCode: record['statusCode'],
+  };
 }
 
 /** True when `err` is the SDK reporting that a command exceeded its timeout. */
@@ -84,10 +101,9 @@ function isDaytonaTimeout(err: unknown): boolean {
   if (fields === undefined) {
     return false;
   }
-  const message = fields['message'];
   return (
-    fields['code'] === PROCESS_EXECUTION_TIMEOUT_CODE ||
-    (typeof message === 'string' && /timeout/i.test(message))
+    fields.code === PROCESS_EXECUTION_TIMEOUT_CODE ||
+    (typeof fields.message === 'string' && /timeout/i.test(fields.message))
   );
 }
 
@@ -98,9 +114,9 @@ function isDaytonaNotFound(err: unknown): boolean {
     return false;
   }
   return (
-    fields['code'] === FILE_NOT_FOUND_CODE ||
-    fields['statusCode'] === HTTP_NOT_FOUND ||
-    String(fields['name']).endsWith('NotFoundError')
+    fields.code === FILE_NOT_FOUND_CODE ||
+    fields.statusCode === HTTP_NOT_FOUND ||
+    fields.name.endsWith('NotFoundError')
   );
 }
 
