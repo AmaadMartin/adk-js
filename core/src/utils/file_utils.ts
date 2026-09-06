@@ -17,12 +17,33 @@ import {File} from '../code_executors/code_execution_utils.js';
  * starts with the same string, e.g. base dir `/tmp/agent` wrongly "contains"
  * `/tmp/agent-evil/x`. Requiring the trailing separator (or exact equality)
  * closes that gap.
+ *
+ * Both arguments must already be resolved. The check is lexical, so it does not
+ * survive symlinks, hardlinks or bind mounts.
  */
-function isInsideDir(resolvedPath: string, resolvedBaseDir: string): boolean {
+export function isInsideDir(
+  resolvedPath: string,
+  resolvedBaseDir: string,
+): boolean {
   return (
     resolvedPath === resolvedBaseDir ||
     resolvedPath.startsWith(resolvedBaseDir + path.sep)
   );
+}
+
+/**
+ * Reports whether a path exists, following symlinks.
+ *
+ * @param target The path to test.
+ * @return True when `target` resolves to something on disk.
+ */
+export async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.stat(target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
