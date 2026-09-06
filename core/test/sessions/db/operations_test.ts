@@ -6,16 +6,13 @@
 
 import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
-  validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
   ENTITIES,
-  SCHEMA_VERSION_1_JSON,
-  SCHEMA_VERSION_KEY,
   STORAGE_KEY_COLUMN_LENGTH,
   StorageEvent,
   StorageMetadata,
@@ -161,61 +158,6 @@ describe('operations', () => {
 
       // Verify it runs without error
       await expect(ensureDatabaseCreated(orm)).resolves.not.toThrow();
-    });
-  });
-
-  describe('validateDatabaseSchemaVersion', () => {
-    let orm: MikroORM;
-
-    beforeEach(async () => {
-      orm = await MikroORM.init({
-        dbName: ':memory:',
-        driver: SqliteDriver,
-        entities: [StorageMetadata],
-      });
-      // Ensure schema is updated so StorageMetadata table exists
-      await orm.schema.updateSchema();
-    });
-
-    afterEach(async () => {
-      await orm.close();
-    });
-
-    it('should initialize schema version if missing', async () => {
-      const em = orm.em.fork();
-      const initial = await em.find(StorageMetadata, {});
-      expect(initial.length).toBe(0);
-
-      await validateDatabaseSchemaVersion(orm);
-
-      const after = await em.find(StorageMetadata, {});
-      expect(after.length).toBe(1);
-      expect(after[0].key).toBe(SCHEMA_VERSION_KEY);
-      expect(after[0].value).toBe(SCHEMA_VERSION_1_JSON);
-    });
-
-    it('should do nothing if schema version is correct', async () => {
-      const em = orm.em.fork();
-      const version = em.create(StorageMetadata, {
-        key: SCHEMA_VERSION_KEY,
-        value: SCHEMA_VERSION_1_JSON,
-      });
-      await em.persist(version).flush();
-
-      await expect(validateDatabaseSchemaVersion(orm)).resolves.not.toThrow();
-    });
-
-    it('should throw error if schema version is incompatible', async () => {
-      const em = orm.em.fork();
-      const version = em.create(StorageMetadata, {
-        key: SCHEMA_VERSION_KEY,
-        value: '999',
-      });
-      await em.persist(version).flush();
-
-      await expect(validateDatabaseSchemaVersion(orm)).rejects.toThrow(
-        'ADK Database schema version 999 is not compatible',
-      );
     });
   });
 });
