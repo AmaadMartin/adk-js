@@ -18,12 +18,35 @@ class TestExecutor extends BaseCodeExecutor {
   }
 }
 
+/** A subclass that narrows the inherited timeout to a finite default. */
+class TimeoutExecutor extends BaseCodeExecutor {
+  override timeoutSeconds = 5;
+
+  async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    return {stdout: '', stderr: '', outputFiles: []};
+  }
+}
+
 describe('BaseCodeExecutor', () => {
   it('should have default values', () => {
     const executor = new TestExecutor();
     expect(executor.optimizeDataFile).toBe(false);
     expect(executor.stateful).toBe(false);
     expect(executor.errorRetryAttempts).toBe(2);
+  });
+
+  it('defaults timeoutSeconds to undefined', () => {
+    expect(new TestExecutor().timeoutSeconds).toBeUndefined();
+  });
+
+  it('allows timeoutSeconds to be set through a BaseCodeExecutor reference', () => {
+    const executor: BaseCodeExecutor = new TestExecutor();
+    executor.timeoutSeconds = 42;
+    expect(executor.timeoutSeconds).toBe(42);
+  });
+
+  it('allows a subclass to override the default timeout', () => {
+    expect(new TimeoutExecutor().timeoutSeconds).toBe(5);
   });
 
   it('should have default delimiters', () => {

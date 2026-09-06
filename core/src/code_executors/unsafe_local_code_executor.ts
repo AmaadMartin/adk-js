@@ -38,6 +38,9 @@ const POWERSHELL_BASE_ARGS = [
  */
 const CMD_BASE_ARGS = ['/D', '/c'] as const;
 
+/** Default wall-clock timeout for a single local execution, in seconds. */
+const DEFAULT_TIMEOUT_SECONDS = 30;
+
 /**
  * Whether `commandPath` names Windows PowerShell (`powershell`) or PowerShell
  * 7+ (`pwsh`). `path.win32` splits on both separators on every platform.
@@ -138,14 +141,15 @@ function getExtensionForLanguage(
  * Use with caution and only for trusted code.
  */
 export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
-  private readonly timeoutSeconds: number;
+  /** Always finite: an unbounded run would pin a host process. */
+  override timeoutSeconds: number;
   private readonly nodeCommandPath: string;
   private readonly pythonCommandPath: string;
   private readonly shellCommandPath: string;
 
   constructor(options: UnsafeLocalCodeExecutorOptions = {}) {
     super();
-    this.timeoutSeconds = options.timeoutSeconds ?? 30;
+    this.timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
     this.nodeCommandPath = options.commandPath ?? process.execPath;
     this.pythonCommandPath =
       options.pythonCommandPath ?? (IS_WINDOWS ? 'python' : 'python3');

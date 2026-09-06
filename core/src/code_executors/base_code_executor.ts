@@ -70,6 +70,9 @@ export abstract class BaseCodeExecutor {
    */
   errorRetryAttempts = 2;
 
+  /** The fallback timeout in seconds for the code execution. */
+  timeoutSeconds?: number;
+
   /**
    * The list of the enclosing delimiters to identify the code blocks.
    * For example, the delimiter('```javascript\\n', '\\n```') can be used to

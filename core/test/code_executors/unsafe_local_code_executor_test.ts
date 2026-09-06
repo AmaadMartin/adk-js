@@ -562,4 +562,62 @@ describe('UnsafeLocalCodeExecutor', () => {
       });
     });
   });
+
+  describe('timeoutSeconds', () => {
+    beforeEach(() => {
+      // Return a child process that immediately exits with code 0, so these
+      // tests observe the spawn options without running a real interpreter.
+      spawnMock.mockImplementation(() => {
+        const child = new EventEmitter();
+        setImmediate(() => child.emit('close', 0, null));
+        return child;
+      });
+    });
+
+    async function runTrivialCode(
+      codeExecutor: UnsafeLocalCodeExecutor,
+    ): Promise<void> {
+      await codeExecutor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("hi");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+    }
+
+    it('defaults timeoutSeconds to 30', () => {
+      expect(new UnsafeLocalCodeExecutor().timeoutSeconds).toBe(30);
+    });
+
+    it('takes timeoutSeconds from the constructor options', () => {
+      expect(
+        new UnsafeLocalCodeExecutor({timeoutSeconds: 5}).timeoutSeconds,
+      ).toBe(5);
+    });
+
+    it('passes the default timeout to spawn when none is configured', async () => {
+      await runTrivialCode(new UnsafeLocalCodeExecutor());
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({timeout: 30000}),
+      );
+    });
+
+    it('passes a timeoutSeconds assigned after construction to spawn', async () => {
+      const codeExecutor = new UnsafeLocalCodeExecutor();
+      codeExecutor.timeoutSeconds = 1;
+
+      await runTrivialCode(codeExecutor);
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({timeout: 1000}),
+      );
+    });
+  });
 });
