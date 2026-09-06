@@ -158,6 +158,13 @@ const ADK_EVENT_ID_REGEX = /^[a-zA-Z0-9]{8}$/;
 const INVOCATION_ID_REGEX =
   /^e-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
+/**
+ * Matches the loopback URL a test server prints on start-up, e.g.
+ * `http://localhost:41234`, `http://127.0.0.1:41234` or `http://[::1]:41234`.
+ */
+const SERVER_URL_REGEX =
+  /http:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):([0-9]+)/i;
+
 const IGNORE_FIELDS = [
   'id',
   'invocationId',
@@ -289,70 +296,85 @@ export abstract class BaseTestServer {
     serverName: string;
     timeoutMs: number;
   }): Promise<void> {
-    this.serverProcess = spawnProcess();
+    const serverProcess = spawnProcess();
+    this.serverProcess = serverProcess;
 
-    await new Promise<void>((resolve, reject) => {
-      let started = false;
-      const stdoutChunks: string[] = [];
+    // Appended to only during the handshake, to explain a premature exit.
+    const stdoutChunks: string[] = [];
+    let releaseStartHandshake = () => {};
 
-      this.serverProcess!.stdout.on('data', (data) => {
-        const message = data.toString();
-        stdoutChunks.push(message);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onStdout = (data: Buffer) => {
+          const message = data.toString();
+          stdoutChunks.push(message);
 
-        // Find URL like http://localhost:12345
-        const urlMatch = message.match(/http:\/\/localhost:([0-9]+)/i);
-        if (urlMatch && urlMatch[1]) {
-          const parsedPort = parseInt(urlMatch[1], 10);
-          if (parsedPort > 0) {
-            this.port = parsedPort;
-            this.url = `http://${this.host}:${this.port}`;
+          const urlMatch = message.match(SERVER_URL_REGEX);
+          if (urlMatch) {
+            const parsedPort = parseInt(urlMatch[1], 10);
+            if (parsedPort > 0) {
+              this.port = parsedPort;
+              this.url = `http://${this.host}:${this.port}`;
+            }
           }
-        }
 
-        if (message.includes(startMessage)) {
-          started = true;
-          console.log(successLogMessage);
-          resolve();
-        }
-      });
+          if (message.includes(startMessage)) {
+            console.log(successLogMessage);
+            resolve();
+          }
+        };
 
-      this.serverProcess!.stderr.on('data', (data) => {
-        console.error(`${serverName} Stderr: ${data.toString()}`);
-      });
-
-      this.serverProcess!.on('error', (error) => {
-        console.error(`${serverName} Error: ${error.message}`);
-
-        reject(
-          new Error(
-            `Failed to start ${serverName.toLowerCase()}: ${error.message}`,
-          ),
-        );
-      });
-
-      this.serverProcess!.on('exit', (code) => {
-        console.error(`${serverName} exited with code ${code}`);
-
-        if (!started) {
+        // Only attached during the handshake, so any exit seen here is
+        // premature.
+        const onExit = (code: number | null) => {
           console.error(
             `${serverName} Captured stdout before premature exit:\n${stdoutChunks.join('')}`,
           );
           reject(
             new Error(`${serverName} exited prematurely with code ${code}`),
           );
-        }
-      });
+        };
 
-      setTimeout(() => {
-        if (!started) {
+        const startTimer = setTimeout(() => {
           reject(
             new Error(
               `Timeout waiting for ${serverName.toLowerCase()} to start.`,
             ),
           );
-        }
-      }, timeoutMs);
-    });
+        }, timeoutMs);
+
+        releaseStartHandshake = () => {
+          clearTimeout(startTimer);
+          // stdout stays in flowing mode after this, so it keeps draining and
+          // the child never blocks on a full pipe.
+          serverProcess.stdout.off('data', onStdout);
+          serverProcess.off('exit', onExit);
+        };
+
+        serverProcess.stdout.on('data', onStdout);
+        serverProcess.on('exit', onExit);
+
+        // stderr logging and the 'error' listener intentionally outlive the
+        // handshake: an 'error' event with no listener is thrown by
+        // EventEmitter and would crash the test worker, and a failed kill()
+        // emits one after the handshake.
+        serverProcess.stderr.on('data', (data: Buffer) => {
+          console.error(`${serverName} Stderr: ${data.toString()}`);
+        });
+
+        serverProcess.on('error', (error) => {
+          console.error(`${serverName} Error: ${error.message}`);
+
+          reject(
+            new Error(
+              `Failed to start ${serverName.toLowerCase()}: ${error.message}`,
+            ),
+          );
+        });
+      });
+    } finally {
+      releaseStartHandshake();
+    }
   }
 
   async stop(): Promise<void> {
