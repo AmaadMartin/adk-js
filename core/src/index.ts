@@ -9,6 +9,14 @@
 export * from './a2a/index.js';
 export {InvocationContext} from './agents/invocation_context.js';
 export type {WorkflowInstructionScope} from './agents/invocation_context.js';
+// Node-only: the thread id is a `node:crypto` digest, so these stay out of
+// `common.ts` and therefore out of the web bundle.
+export {LangGraphAgent, isLangGraphAgent} from './agents/langgraph_agent.js';
+export type {
+  CompiledLangGraph,
+  LangGraphAgentConfig,
+  LangGraphThreadConfig,
+} from './agents/langgraph_agent.js';
 export {FileArtifactService} from './artifacts/file_artifact_service.js';
 export {GcsArtifactService} from './artifacts/gcs_artifact_service.js';
 export {getArtifactServiceFromUri} from './artifacts/registry.js';
