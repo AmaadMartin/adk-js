@@ -27,6 +27,7 @@ import {
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v3';
+import {z as z4} from 'zod/v4';
 import {createIc} from './test_helpers.js';
 
 /** Runs `tool` the way an `LlmAgent` tool-call step does. */
@@ -75,6 +76,47 @@ describe('NodeTool error paths', () => {
     });
     const result = await runTool(new NodeTool(target), {request: '21'});
     expect(result).toEqual({got: 21});
+  });
+
+  it('runs a Zod v4 object schema holding a transform', async () => {
+    // Zod v4 refuses to serialize a `.transform()`, so nothing on this path may
+    // ask it to: the object declaration comes from `zodObjectToSchema`.
+    const target = node(
+      (_ctx: NodeContext, input: {q: string}) => ({got: input.q}),
+      {
+        name: 'v4_object_transformer',
+        inputSchema: z4.object({q: z4.string().transform((s) => s.trim())}),
+      },
+    );
+    const tool = new NodeTool(target);
+    expect(tool._getDeclaration().parameters).toMatchObject({
+      type: Type.OBJECT,
+      properties: {q: {type: Type.STRING}},
+    });
+    expect(await runTool(tool, {q: '  kelp  '})).toEqual({got: 'kelp'});
+  });
+
+  it('runs a Zod v4 scalar schema holding a transform', async () => {
+    const target = node((_ctx: NodeContext, input: number) => ({got: input}), {
+      name: 'v4_scalar_transformer',
+      inputSchema: z4.string().transform(Number),
+    });
+    const tool = new NodeTool(target);
+    // No JSON Schema form, so the declaration carries no parameters rather
+    // than the tool call failing.
+    expect(tool._getDeclaration().parametersJsonSchema).toBeUndefined();
+    expect(await runTool(tool, {request: '21'})).toEqual({got: 21});
+  });
+
+  it('runs a node whose Zod v4 output schema holds a transform', async () => {
+    const target = node((_ctx: NodeContext) => 'gold', {
+      name: 'v4_output_transformer',
+      inputSchema: z4.object({}),
+      outputSchema: z4.string().transform((s) => s.toUpperCase()),
+    });
+    const tool = new NodeTool(target);
+    expect(tool._getDeclaration().responseJsonSchema).toBeUndefined();
+    expect(await runTool(tool, {})).toBe('GOLD');
   });
 
   it('returns a run error when the node throws', async () => {

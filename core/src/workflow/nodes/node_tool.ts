@@ -10,6 +10,7 @@ import {isBaseAgent} from '../../agents/base_agent.js';
 import {Context} from '../../agents/context.js';
 import {BaseTool, RunAsyncToolRequest} from '../../tools/base_tool.js';
 import {formatError} from '../../utils/error_utils.js';
+import {logger} from '../../utils/logger.js';
 import {parseWithSchema, SchemaLike, toJsonSchema} from '../../utils/schema.js';
 import {
   isZodObject,
@@ -35,13 +36,31 @@ const NODE_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.workflow.nodeTool');
 const MAX_NODE_TOOL_DEPTH = 8;
 
 /**
- * Renders a node's schema as the JSON Schema a declaration carries, without the
- * `$schema` dialect key. Zod's serializers emit that key; JSON Schema does not
- * allow it on a nested subschema, and adk-python's `model_json_schema()` never
- * produces it.
+ * Renders a node's schema as the JSON Schema a declaration carries, or
+ * `undefined` when the schema has no JSON Schema form.
+ *
+ * Zod v4 refuses to serialize a schema containing a `.transform()`. Such a
+ * schema still runs — the node validates its input with it — so the declaration
+ * leaves the field out rather than failing every call to the tool. That is what
+ * the model saw before these fields existed.
+ *
+ * The `$schema` dialect key is dropped: JSON Schema does not allow it on a
+ * nested subschema, and adk-python's `model_json_schema()` never emits one.
  */
-function toDeclarationSchema(schema: SchemaLike): Record<string, unknown> {
-  const {$schema: _dialect, ...rest} = toJsonSchema(schema);
+function toDeclarationSchema(
+  schema: SchemaLike,
+): Record<string, unknown> | undefined {
+  let json: Record<string, unknown>;
+  try {
+    json = toJsonSchema(schema);
+  } catch (e: unknown) {
+    logger.debug(
+      `NodeTool: schema has no JSON Schema form, omitting it from the ` +
+        `declaration: ${formatError(e)}`,
+    );
+    return undefined;
+  }
+  const {$schema: _dialect, ...rest} = json;
   return rest;
 }
 
@@ -117,8 +136,12 @@ export class NodeTool extends BaseTool {
       isLongRunning: true,
     });
     this.node = node;
+    // A Zod object answers this without being serialized, which a Zod v4 schema
+    // holding a `.transform()` cannot be.
     this.inputIsObject =
-      !node.inputSchema || toJsonSchema(node.inputSchema)['type'] === 'object';
+      !node.inputSchema ||
+      isZodObject(node.inputSchema) ||
+      toDeclarationSchema(node.inputSchema)?.['type'] === 'object';
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -133,15 +156,18 @@ export class NodeTool extends BaseTool {
         declaration.parameters = zodObjectToSchema(schema);
       } else {
         const json = toDeclarationSchema(schema);
-        declaration.parametersJsonSchema = this.inputIsObject
-          ? json
-          : wrapScalarSchema(json);
+        if (json) {
+          declaration.parametersJsonSchema = this.inputIsObject
+            ? json
+            : wrapScalarSchema(json);
+        }
       }
     }
     if (this.node.outputSchema) {
-      declaration.responseJsonSchema = toDeclarationSchema(
-        this.node.outputSchema,
-      );
+      const json = toDeclarationSchema(this.node.outputSchema);
+      if (json) {
+        declaration.responseJsonSchema = json;
+      }
     }
     return declaration;
   }
