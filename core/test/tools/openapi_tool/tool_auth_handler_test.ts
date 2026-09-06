@@ -8,8 +8,13 @@ import {
   AuthCredential,
   AuthCredentialTypes,
   Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  PluginManager,
   ToolAuthHandler,
 } from '@google/adk';
+import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it, vi} from 'vitest';
 import {State} from '../../../src/sessions/state.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
@@ -262,5 +267,185 @@ describe('ToolAuthHandler', () => {
       'oauth2_existing_exchanged_credential',
     );
     expect(stored?.http?.credentials.token).toBe('exchanged-token');
+  });
+
+  describe('user-interactive OAuth2 grants', () => {
+    const FUNCTION_CALL_ID = 'function-call-1';
+
+    const CLIENT_CREDENTIAL: AuthCredential = {
+      authType: AuthCredentialTypes.OAUTH2,
+      oauth2: {clientId: 'client-id', clientSecret: 'client-secret'},
+    };
+
+    const AUTHORIZATION_CODE_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://example.com/auth',
+          tokenUrl: 'https://example.com/token',
+          scopes: {},
+        },
+      },
+    };
+
+    // A real Context, so `requestCredential` mints the sign-in URI through the
+    // production AuthHandler and records it on the event actions, and
+    // `getAuthResponse` reads the client's answer back out of session state.
+    function createToolContext(state: Record<string, unknown> = {}): Context {
+      return new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({
+            id: 'session-1',
+            appName: 'app',
+            userId: 'user',
+            state,
+          }),
+          pluginManager: new PluginManager(),
+        }),
+        functionCallId: FUNCTION_CALL_ID,
+      });
+    }
+
+    it('asks the client to sign in for the authorization-code grant', async () => {
+      const context = createToolContext();
+
+      const result = await new ToolAuthHandler(
+        context,
+        AUTHORIZATION_CODE_SCHEME,
+        CLIENT_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('pending');
+      // The exchanger would have returned `exchanged-token`, so an absent
+      // credential proves the exchanger never ran.
+      expect(result.authCredential).toBeUndefined();
+      const requested =
+        context.eventActions.requestedAuthConfigs[FUNCTION_CALL_ID];
+      expect(requested?.exchangedAuthCredential?.oauth2?.authUri).toContain(
+        'client_id=client-id',
+      );
+    });
+
+    it('exchanges a client-credentials credential without asking the user', async () => {
+      const context = createToolContext();
+
+      const result = await new ToolAuthHandler(
+        context,
+        {
+          type: 'oauth2',
+          flows: {
+            clientCredentials: {
+              tokenUrl: 'https://example.com/token',
+              scopes: {},
+            },
+          },
+        },
+        CLIENT_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.http?.credentials.token).toBe(
+        'exchanged-token',
+      );
+      expect(context.eventActions.requestedAuthConfigs).toEqual({});
+    });
+
+    it('uses a configured OAuth2 credential that already carries an access token', async () => {
+      const context = createToolContext();
+
+      const result = await new ToolAuthHandler(
+        context,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            ...CLIENT_CREDENTIAL.oauth2,
+            accessToken: 'preprovisioned-token',
+          },
+        },
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(context.eventActions.requestedAuthConfigs).toEqual({});
+    });
+
+    it('uses a configured bearer credential on an authorization-code scheme', async () => {
+      const context = createToolContext();
+
+      const result = await new ToolAuthHandler(
+        context,
+        AUTHORIZATION_CODE_SCHEME,
+        {
+          authType: AuthCredentialTypes.HTTP,
+          http: {scheme: 'bearer', credentials: {token: 'static-token'}},
+        },
+      ).prepareAuthCredentials();
+
+      // Only an OAuth2/OIDC credential needs a token minted for it; a bearer
+      // token the developer already holds authorizes the request as it is.
+      expect(result.state).toBe('done');
+      expect(context.eventActions.requestedAuthConfigs).toEqual({});
+    });
+
+    it('exchanges the credential the client returned after signing in', async () => {
+      // What the client fills in on the second leg: AuthHandler reads the auth
+      // response from this session state key.
+      const context = createToolContext({
+        'temp:default_openapi_key': {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {
+            ...CLIENT_CREDENTIAL.oauth2,
+            authResponseUri: 'https://example.com/callback?code=abc',
+          },
+        },
+      });
+
+      const result = await new ToolAuthHandler(
+        context,
+        AUTHORIZATION_CODE_SCHEME,
+        CLIENT_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      expect(result.state).toBe('done');
+      expect(result.authCredential?.http?.credentials.token).toBe(
+        'exchanged-token',
+      );
+      const stored = context.state.get<AuthCredential>(
+        'oauth2_existing_exchanged_credential',
+      );
+      expect(stored?.http?.credentials.token).toBe('exchanged-token');
+    });
+
+    it('asks the client to sign in for an OAuth2 credential with no oauth2 field', async () => {
+      const context = createToolContext();
+
+      const prepared = new ToolAuthHandler(context, AUTHORIZATION_CODE_SCHEME, {
+        authType: AuthCredentialTypes.OAUTH2,
+      }).prepareAuthCredentials();
+
+      // A credential this malformed authorizes nothing, so it takes the
+      // sign-in path and hits AuthHandler's own validation there. Reading it
+      // must not raise a TypeError of its own.
+      await expect(prepared).rejects.toThrowError(
+        'Auth Scheme oauth2 requires oauth2 in authCredential.',
+      );
+    });
+
+    it('leaves an unclassifiable oauth2 scheme to the exchanger', async () => {
+      const context = createToolContext();
+
+      const result = await new ToolAuthHandler(
+        context,
+        {type: 'oauth2', flows: {}},
+        CLIENT_CREDENTIAL,
+      ).prepareAuthCredentials();
+
+      // Fail open: a scheme whose grant type cannot be determined keeps its
+      // existing behaviour rather than stranding the tool in `pending`.
+      expect(result.state).toBe('done');
+      expect(context.eventActions.requestedAuthConfigs).toEqual({});
+    });
   });
 });

@@ -6,14 +6,54 @@
 
 import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../auth/auth_credential.js';
+import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
 import {experimental} from '../../../utils/experimental.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
 export interface AuthPreparationResult {
   state: 'pending' | 'done';
   authCredential?: AuthCredential;
+}
+
+/**
+ * Whether a token for `credential` can only be minted once the end user has
+ * signed in.
+ *
+ * The two-legged `clientCredentials` flow authenticates the application
+ * itself, so a configured `{clientId, clientSecret}` is all it needs. The
+ * `authorizationCode` grant mints a token against a user's consent: until one
+ * comes back the configured credential authorizes nothing, and handing it to
+ * the exchanger only raises a missing-authorization-code error.
+ *
+ * Narrows `_external_exchange_required` from adk-python's
+ * `tool_auth_handler.py` to the one grant that needs a human and that
+ * `OAuth2CredentialExchanger` can finish afterwards. The `implicit` and
+ * `password` grants also need a human, but neither the exchanger nor the
+ * `response_type=code` URI `AuthHandler` builds can complete them, so asking
+ * the user to sign in for those would only replace one dead end with another.
+ */
+function requiresUserSignIn(
+  authScheme: AuthScheme,
+  credential: AuthCredential,
+): boolean {
+  if (
+    credential.authType !== AuthCredentialTypes.OAUTH2 &&
+    credential.authType !== AuthCredentialTypes.OPEN_ID_CONNECT
+  ) {
+    return false;
+  }
+
+  if (credential.oauth2?.accessToken) {
+    return false;
+  }
+
+  return determineGrantType(authScheme) === OAuthGrantType.AUTHORIZATION_CODE;
 }
 
 class ToolContextCredentialStore {
@@ -90,9 +130,16 @@ export class ToolAuthHandler {
     // the client. Otherwise fall back to the credential the tool was
     // configured with: schemes such as `apiKey`, `http` and `serviceAccount`
     // need no user interaction, so requesting one would strand the tool in
-    // `pending` forever.
+    // `pending` forever. A user-interactive OAuth2 grant is the exception: its
+    // configured client id and secret cannot authorize anything until the user
+    // has signed in.
     const authResponseCredential = this.context.getAuthResponse(authConfig);
-    const credential = authResponseCredential ?? this.authCredential;
+    const configuredCredential =
+      this.authCredential &&
+      requiresUserSignIn(this.authScheme, this.authCredential)
+        ? undefined
+        : this.authCredential;
+    const credential = authResponseCredential ?? configuredCredential;
 
     if (!credential) {
       // No credential to work with, so ask the client for one.
