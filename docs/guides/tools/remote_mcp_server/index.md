@@ -20,25 +20,27 @@ the tools. ADK never connects to the server itself. Only remote servers work
 here, over HTTP or streamable HTTP; a server you launch as a local subprocess
 has no URL to forward.
 
-The class is a specification, not a toolset. It carries no `getTools()` and it
-executes nothing. adk-js does not yet have `ManagedAgent`, the agent that
-forwards the specification to the backend, so nothing in the SDK consumes a
-`RemoteMcpServer` today. The type and its mapping ship first so that the
-specification is stable when that agent lands.
+`RemoteMcpServer` is a specification, not a toolset. It is a plain interface:
+it carries no `getTools()` and it executes nothing. adk-js does not yet have
+`ManagedAgent`, the agent that forwards the specification to the backend, so
+nothing in the SDK consumes a `RemoteMcpServer` today. The type and its mapping
+ship first so that the specification is stable when that agent lands.
 
 ## Get started
 
 ```typescript
 import {RemoteMcpServer} from '@google/adk';
 
-const maps = new RemoteMcpServer({
+const maps: RemoteMcpServer = {
   url: 'https://mcp.example.com/mcp',
   name: 'maps',
   allowedTools: ['search_places'],
-});
+};
 ```
 
-Only `url` is required. Every other field is optional.
+Only `url` is required. Every other field is optional. TypeScript rejects a key
+that is not one of the five, so a typo is a compile error rather than a setting
+that silently does nothing.
 
 ## Headers
 
@@ -54,27 +56,27 @@ import {ReadonlyContext, RemoteMcpServer} from '@google/adk';
 
 declare function mintKey(userId: string): Promise<string>;
 
-const maps = new RemoteMcpServer({
+const maps: RemoteMcpServer = {
   url: 'https://mcp.example.com/mcp',
   headers: {'X-Static': 'v'},
   headerProvider: async (context: ReadonlyContext) => ({
     'X-Goog-Api-Key': await mintKey(context.userId),
   }),
-});
+};
 ```
 
 ADK copies `headers`, then assigns the callback's output over the copy. The
-callback wins on a key conflict. The copy means resolution never changes the
-specification you built: `maps.headers` holds the same values after a turn as
-before.
+callback wins on a key conflict. The copy means building the param never
+changes the specification you wrote: `maps.headers` holds the same values after
+a turn as before.
 
-An error thrown by `headerProvider` propagates out of resolution. ADK does not
+An error thrown by `headerProvider` propagates to the caller. ADK does not
 catch it and does not fall back to the static headers, so a failed token mint
 fails the turn instead of sending a request the server will reject.
 
 ## What crosses the wire
 
-The resolved specification becomes one `mcp_server` tool param:
+The specification becomes one `mcp_server` tool param:
 
 ```json
 {
@@ -87,30 +89,10 @@ The resolved specification becomes one `mcp_server` tool param:
 ```
 
 The param keys stay in snake case, because that is what the API reads. The
-class fields stay in camel case, because that is what TypeScript reads.
+interface fields stay in camel case, because that is what TypeScript reads.
 
 A field you did not set is left out. A field you set to an empty value is sent:
 `allowedTools: []` becomes `"allowed_tools": [{"tools": []}]`, which tells the
 backend that no tool on that server is callable. `headers` is the one
 exception — an empty header record adds no key, because there is nothing to
 send.
-
-## Validation
-
-The constructor checks its options at runtime and throws
-`InputValidationError` on an unknown key or a field of the wrong type.
-
-```typescript
-import {RemoteMcpServer, RemoteMcpServerOptions} from '@google/adk';
-
-declare const configText: string;
-
-// Throws InputValidationError if the document carries an unknown key.
-const options: RemoteMcpServerOptions = JSON.parse(configText);
-const server = new RemoteMcpServer(options);
-```
-
-TypeScript already rejects a stray key in an object literal, so the runtime
-check is for the callers it cannot see: a configuration document, or plain
-JavaScript. The message names the offending keys and never repeats a value,
-because a header value is a credential.

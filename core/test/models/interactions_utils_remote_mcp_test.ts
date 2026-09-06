@@ -9,7 +9,8 @@
  * `tests/unittests/models/test_interactions_utils.py::TestBuildMcpServerParam`
  * and the `resolve_mcp_*` tests in
  * `tests/unittests/agents/test_managed_agent.py`. The `it()` strings keep the
- * Python test names so a reader can find the original.
+ * Python test names so a reader can find the original. The last three tests
+ * are adk-js only: they cover edges the reference suite does not reach.
  */
 
 import {
@@ -17,21 +18,15 @@ import {
   PluginManager,
   ReadonlyContext,
   RemoteMcpServer,
-  RemoteMcpServerOptions,
   createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
-import {
-  buildMcpServerParam,
-  resolveRemoteMcpServerParam,
-} from '../../src/models/interactions_utils.js';
+import {buildMcpServerParam} from '../../src/models/interactions_utils.js';
 
 const DEFAULT_URL = 'https://mcp.example.com/mcp';
 
-function makeServer(
-  options: Partial<RemoteMcpServerOptions> = {},
-): RemoteMcpServer {
-  return new RemoteMcpServer({url: DEFAULT_URL, ...options});
+function makeServer(options: Partial<RemoteMcpServer> = {}): RemoteMcpServer {
+  return {url: DEFAULT_URL, ...options};
 }
 
 function makeContext(): ReadonlyContext {
@@ -45,49 +40,52 @@ function makeContext(): ReadonlyContext {
 }
 
 describe('buildMcpServerParam', () => {
-  it('test_minimal_url_only', () => {
-    expect(buildMcpServerParam(makeServer(), {})).toEqual({
+  it('test_minimal_url_only', async () => {
+    await expect(
+      buildMcpServerParam(makeServer(), makeContext()),
+    ).resolves.toEqual({
       type: 'mcp_server',
       url: DEFAULT_URL,
     });
   });
 
-  it('test_with_name', () => {
-    expect(buildMcpServerParam(makeServer({name: 'maps'}), {}).name).toBe(
-      'maps',
+  it('test_with_name', async () => {
+    const param = await buildMcpServerParam(
+      makeServer({name: 'maps'}),
+      makeContext(),
     );
+
+    expect(param.name).toBe('maps');
   });
 
-  it('test_with_headers', () => {
-    const param = buildMcpServerParam(makeServer(), {'X-Goog-Api-Key': 'k'});
+  it('test_with_headers', async () => {
+    const server = makeServer({headers: {'X-Goog-Api-Key': 'k'}});
+
+    const param = await buildMcpServerParam(server, makeContext());
 
     expect(param.headers).toEqual({'X-Goog-Api-Key': 'k'});
   });
 
-  it('test_with_allowed_tools', () => {
+  it('test_with_allowed_tools', async () => {
     const server = makeServer({allowedTools: ['search_places']});
 
-    expect(buildMcpServerParam(server, {}).allowed_tools).toEqual([
-      {tools: ['search_places']},
-    ]);
+    const param = await buildMcpServerParam(server, makeContext());
+
+    expect(param.allowed_tools).toEqual([{tools: ['search_places']}]);
   });
 
-  it('test_omits_unset_fields', () => {
-    const param = buildMcpServerParam(makeServer(), {});
+  it('test_omits_unset_fields', async () => {
+    const param = await buildMcpServerParam(makeServer(), makeContext());
 
     expect(param).not.toHaveProperty('name');
     expect(param).not.toHaveProperty('headers');
     expect(param).not.toHaveProperty('allowed_tools');
   });
-});
 
-describe('resolveRemoteMcpServerParam', () => {
   it('test_resolve_mcp_basic_mapping', async () => {
     const server = makeServer({name: 'example', allowedTools: ['a']});
 
-    await expect(
-      resolveRemoteMcpServerParam(server, makeContext()),
-    ).resolves.toEqual({
+    await expect(buildMcpServerParam(server, makeContext())).resolves.toEqual({
       type: 'mcp_server',
       url: DEFAULT_URL,
       name: 'example',
@@ -104,7 +102,7 @@ describe('resolveRemoteMcpServerParam', () => {
       },
     });
 
-    const param = await resolveRemoteMcpServerParam(server, makeContext());
+    const param = await buildMcpServerParam(server, makeContext());
 
     expect(called).toBe(true);
     expect(param.headers).toEqual({Authorization: 'Bearer tok'});
@@ -115,7 +113,7 @@ describe('resolveRemoteMcpServerParam', () => {
       headerProvider: async () => ({Authorization: 'Bearer async'}),
     });
 
-    const param = await resolveRemoteMcpServerParam(server, makeContext());
+    const param = await buildMcpServerParam(server, makeContext());
 
     expect(param.headers).toEqual({Authorization: 'Bearer async'});
   });
@@ -129,7 +127,7 @@ describe('resolveRemoteMcpServerParam', () => {
       },
     });
 
-    await resolveRemoteMcpServerParam(server, makeContext());
+    await buildMcpServerParam(server, makeContext());
 
     expect(seenUserId).toBe('u-1');
   });
@@ -140,7 +138,7 @@ describe('resolveRemoteMcpServerParam', () => {
       headerProvider: () => ({Shared: 'dynamic', 'X-Dyn': 'd'}),
     });
 
-    const param = await resolveRemoteMcpServerParam(server, makeContext());
+    const param = await buildMcpServerParam(server, makeContext());
 
     expect(param.headers).toEqual({
       'X-Static': 's',
@@ -152,7 +150,7 @@ describe('resolveRemoteMcpServerParam', () => {
   it('test_resolve_mcp_no_header_provider_static_only', async () => {
     const server = makeServer({headers: {'X-Static': 's'}});
 
-    const param = await resolveRemoteMcpServerParam(server, makeContext());
+    const param = await buildMcpServerParam(server, makeContext());
 
     expect(param.headers).toEqual({'X-Static': 's'});
   });
@@ -164,15 +162,15 @@ describe('resolveRemoteMcpServerParam', () => {
       },
     });
 
-    await expect(
-      resolveRemoteMcpServerParam(server, makeContext()),
-    ).rejects.toThrow('token mint failed');
+    await expect(buildMcpServerParam(server, makeContext())).rejects.toThrow(
+      'token mint failed',
+    );
   });
 
   it('test_resolve_mcp_empty_header_provider_omits_headers', async () => {
     const server = makeServer({headerProvider: () => ({})});
 
-    const param = await resolveRemoteMcpServerParam(server, makeContext());
+    const param = await buildMcpServerParam(server, makeContext());
 
     expect(param).not.toHaveProperty('headers');
   });
@@ -184,9 +182,48 @@ describe('resolveRemoteMcpServerParam', () => {
       headerProvider: () => ({Authorization: 'Bearer tok'}),
     });
 
-    await resolveRemoteMcpServerParam(server, makeContext());
+    await buildMcpServerParam(server, makeContext());
 
     expect(server.headers).toEqual({'X-Static': 's'});
     expect(originalHeaders).toEqual({'X-Static': 's'});
+  });
+
+  it('carries every field of a fully populated spec', async () => {
+    const server: RemoteMcpServer = {
+      url: DEFAULT_URL,
+      name: 'example',
+      headers: {'X-Static': 'v'},
+      allowedTools: ['a', 'b'],
+      headerProvider: () => ({Authorization: 'Bearer t'}),
+    };
+
+    await expect(buildMcpServerParam(server, makeContext())).resolves.toEqual({
+      type: 'mcp_server',
+      url: DEFAULT_URL,
+      name: 'example',
+      headers: {'X-Static': 'v', Authorization: 'Bearer t'},
+      allowed_tools: [{tools: ['a', 'b']}],
+    });
+  });
+
+  it('emits an empty allowed_tools list and an empty name', async () => {
+    const server = makeServer({name: '', allowedTools: []});
+
+    await expect(buildMcpServerParam(server, makeContext())).resolves.toEqual({
+      type: 'mcp_server',
+      url: DEFAULT_URL,
+      name: '',
+      allowed_tools: [{tools: []}],
+    });
+  });
+
+  it('does not alias the spec allowedTools array', async () => {
+    const server = makeServer({allowedTools: ['a']});
+
+    const param = await buildMcpServerParam(server, makeContext());
+    expect(param.allowed_tools).toEqual([{tools: ['a']}]);
+    param.allowed_tools?.[0].tools?.push('b');
+
+    expect(server.allowedTools).toEqual(['a']);
   });
 });
