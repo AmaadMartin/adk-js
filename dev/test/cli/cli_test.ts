@@ -11,7 +11,9 @@ import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {AdkLogger} from '../../src/utils/logger.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -37,6 +39,12 @@ vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
 }));
 
+vi.mock('../../src/integration/run_integration_tests', () => ({
+  // The factory-argument fake survives the suite's `vi.restoreAllMocks()`;
+  // an implementation installed with `mockResolvedValue` would not.
+  runIntegrationTests: vi.fn(async () => 0),
+}));
+
 vi.mock('../../src/version', () => ({
   version: '1.0.0-test',
 }));
@@ -51,15 +59,19 @@ vi.mock('@google/adk', async (importOriginal) => {
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
+  let originalExitCode: typeof process.exitCode;
 
   beforeEach(() => {
     vi.clearAllMocks();
     program = createProgram();
     program.exitOverride();
+    originalExitCode = process.exitCode;
+    process.exitCode = 0;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    process.exitCode = originalExitCode;
   });
 
   const parse = async (args: string[]) => {
@@ -466,6 +478,81 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('command: integration conformance', () => {
+    it('should pass parsed options to runIntegrationTests', async () => {
+      await parse([
+        'integration',
+        'conformance',
+        '--agents_dir',
+        '/a',
+        '--tests_dir',
+        '/t',
+        '--force',
+      ]);
+
+      expect(runIntegrationTests).toHaveBeenCalledWith({
+        agentsDir: '/a',
+        testsDir: '/t',
+        forceRunAll: true,
+      });
+    });
+
+    it('should wait for the conformance run before the action resolves', async () => {
+      let finishRun!: (failed: number) => void;
+      vi.mocked(runIntegrationTests).mockReturnValue(
+        new Promise<number>((resolve) => {
+          finishRun = resolve;
+        }),
+      );
+
+      let settled = false;
+      const parsed = parse(['integration', 'conformance']).then(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(settled).toBe(false);
+
+      finishRun(0);
+      await parsed;
+
+      expect(settled).toBe(true);
+    });
+
+    it('should exit with status 1 when a conformance test failed', async () => {
+      vi.mocked(runIntegrationTests).mockResolvedValue(2);
+
+      await parse(['integration', 'conformance']);
+
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('should leave the exit code alone when every test passed', async () => {
+      vi.mocked(runIntegrationTests).mockResolvedValue(0);
+
+      await parse(['integration', 'conformance']);
+
+      expect(process.exitCode).toBe(0);
+    });
+
+    it('should exit with status 1 when the conformance run throws', async () => {
+      const errorSpy = vi
+        .spyOn(AdkLogger.prototype, 'error')
+        .mockImplementation(() => {});
+      vi.mocked(runIntegrationTests).mockRejectedValue(new Error('boom'));
+
+      await expect(
+        parse(['integration', 'conformance']),
+      ).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Error running conformance tests:',
+        'boom',
+      );
+      expect(process.exitCode).toBe(1);
     });
   });
 });

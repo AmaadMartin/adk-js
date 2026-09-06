@@ -565,11 +565,25 @@ export function createProgram(): Command {
     )
     .option('--force', 'Force run skipped tests.')
     .action(async (options: Record<string, string>) => {
-      runIntegrationTests({
-        agentsDir: options['agents_dir'],
-        testsDir: options['tests_dir'],
-        forceRunAll: getBoolean(options['force']),
-      });
+      try {
+        const failedCount = await runIntegrationTests({
+          agentsDir: options['agents_dir'],
+          testsDir: options['tests_dir'],
+          forceRunAll: getBoolean(options['force']),
+        });
+
+        if (failedCount > 0) {
+          // Not `process.exit()`: the run has just written its summary, and
+          // exiting immediately discards stdout writes still pending on a pipe.
+          process.exitCode = 1;
+        }
+      } catch (error) {
+        logger.error(
+          'Error running conformance tests:',
+          (error as Error).message,
+        );
+        process.exitCode = 1;
+      }
     });
 
   return program;

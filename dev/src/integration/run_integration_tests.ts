@@ -11,6 +11,12 @@ import {AgentRegistry} from './agent_registry.js';
 import {IntegrationRegistry} from './integration_registry.js';
 import {TestRunner} from './test_runner.js';
 
+/**
+ * Runs every conformance test found under `testsDir` against the agents found
+ * under `agentsDir`.
+ *
+ * @returns the number of tests that failed.
+ */
 export async function runIntegrationTests({
   agentsDir,
   testsDir,
@@ -19,7 +25,7 @@ export async function runIntegrationTests({
   agentsDir: string;
   testsDir: string;
   forceRunAll: boolean;
-}) {
+}): Promise<number> {
   console.log(`Loading agents from ${agentsDir}`);
   const agentConfigs = await batchLoadYamlAgentConfig(agentsDir);
   console.log(agentConfigs.size, 'agents found');
@@ -75,4 +81,6 @@ export async function runIntegrationTests({
   console.log('Skipped tests:', skippedTests.join(', '));
   console.log('Failed tests:', failedTests.join(', '));
   console.log('\n');
+
+  return failedTests.length;
 }
