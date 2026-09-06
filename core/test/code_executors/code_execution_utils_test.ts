@@ -14,6 +14,7 @@ import {
   convertCodeExecutionParts,
   extractCodeAndTruncateContent,
   getEncodedFileContent,
+  getFileContentAsBase64,
 } from '../../src/code_executors/code_execution_utils.js';
 import {base64Encode} from '../../src/utils/env_aware_utils.js';
 
@@ -36,6 +37,67 @@ describe('getEncodedFileContent', () => {
     const result = getEncodedFileContent('');
     // empty string is valid base64 (empty), so it should come back unchanged or encoded
     expect(typeof result).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getFileContentAsBase64
+// ---------------------------------------------------------------------------
+describe('getFileContentAsBase64', () => {
+  it('encodes a utf-8 file', () => {
+    const result = getFileContentAsBase64({
+      name: 'report.md',
+      content: '# Notes\n',
+      contentEncoding: FileContentEncoding.UTF8,
+      mimeType: 'text/markdown',
+    });
+
+    expect(result).toBe('IyBOb3Rlcwo=');
+    expect(Buffer.from(result, 'base64').toString('utf-8')).toBe('# Notes\n');
+  });
+
+  it('passes a base64 file through unchanged', () => {
+    const result = getFileContentAsBase64({
+      name: 'plot.png',
+      content: 'iVBORw0KGgo=',
+      contentEncoding: FileContentEncoding.BASE64,
+      mimeType: 'image/png',
+    });
+
+    expect(result).toBe('iVBORw0KGgo=');
+    expect(result).not.toBe(base64Encode('iVBORw0KGgo='));
+  });
+
+  it('treats a missing encoding as base64', () => {
+    const result = getFileContentAsBase64({
+      name: 'plot.png',
+      content: 'iVBORw0KGgo=',
+      mimeType: 'image/png',
+    });
+
+    expect(result).toBe('iVBORw0KGgo=');
+  });
+
+  it('encodes utf-8 text that is itself valid base64', () => {
+    const result = getFileContentAsBase64({
+      name: 'notes.txt',
+      content: 'data',
+      contentEncoding: FileContentEncoding.UTF8,
+      mimeType: 'text/plain',
+    });
+
+    expect(result).toBe('ZGF0YQ==');
+  });
+
+  it('handles empty utf-8 content', () => {
+    const result = getFileContentAsBase64({
+      name: 'empty.txt',
+      content: '',
+      contentEncoding: FileContentEncoding.UTF8,
+      mimeType: 'text/plain',
+    });
+
+    expect(result).toBe('');
   });
 });
 

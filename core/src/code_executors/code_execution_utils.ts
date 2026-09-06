@@ -113,6 +113,25 @@ export function getEncodedFileContent(data: string): string {
   return isBase64Encoded(data) ? data : base64Encode(data);
 }
 
+/**
+ * Returns an output file's content as base64, the encoding
+ * `Part.inlineData.data` is defined to carry.
+ *
+ * The encoding is read off the file rather than guessed: a file whose
+ * `contentEncoding` is UTF8 holds raw text and must be encoded, one that is
+ * already BASE64 is passed through so it is not encoded twice. A file that
+ * declares no encoding is treated as base64, which is what the executors
+ * predating `contentEncoding` emit.
+ *
+ * @param file The file whose content to encode.
+ * @return The file content as base64.
+ */
+export function getFileContentAsBase64(file: File): string {
+  return file.contentEncoding === FileContentEncoding.UTF8
+    ? base64Encode(file.content)
+    : file.content;
+}
+
 // Type to be used for regex matching of code blocks.
 interface CodeGroupMatch {
   groups?: {prefix?: string; codeStr?: string};
