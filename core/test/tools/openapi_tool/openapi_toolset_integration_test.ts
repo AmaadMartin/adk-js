@@ -198,4 +198,66 @@ describe('OpenAPIToolset Integration', () => {
     expect(requestUrl.pathname).toBe('/v1/users/..%2F..%2Fadmin%2Fexport');
     expect(requestUrl.searchParams.get('key')).toBe('test-api-key');
   });
+
+  it('should call a public endpoint that opts out of the global security', async () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.3',
+      info: {title: 'Status API', version: '1.0.0'},
+      servers: [{url: 'https://api.example.com'}],
+      security: [{ApiKeyAuth: []}],
+      paths: {
+        '/status': {
+          get: {
+            operationId: 'getStatus',
+            security: [],
+            responses: {'200': {description: 'ok'}},
+          },
+        },
+        '/private': {
+          get: {
+            operationId: 'getPrivate',
+            responses: {'200': {description: 'ok'}},
+          },
+        },
+      },
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: {type: 'apiKey', in: 'query', name: 'key'},
+        },
+      },
+    };
+    const tools = await new OpenAPIToolset({
+      specDict: spec,
+    }).getTools();
+    const statusTool = tools.find((tool) => tool.name === 'get_status');
+    const privateTool = tools.find((tool) => tool.name === 'get_private');
+    if (!statusTool || !privateTool) {
+      expect.fail('the toolset did not create both tools');
+    }
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response('{"ok":true}', {
+        headers: {'content-type': 'application/json'},
+      }),
+    );
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'invocation-1',
+        agent: new LlmAgent({name: 'test_agent'}),
+        session: createSession({id: 'session-1', appName: 'test_app'}),
+        pluginManager: new PluginManager(),
+      }),
+      functionCallId: 'function-call-1',
+    });
+
+    const statusResult = await statusTool.runAsync({args: {}, toolContext});
+    const privateResult = await privateTool.runAsync({args: {}, toolContext});
+
+    expect(statusResult).toEqual({ok: true});
+    expect(privateResult).toEqual({
+      pending: true,
+      message: 'Needs your authorization to access your data.',
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
 });
