@@ -119,6 +119,26 @@ on `RunConfig.streamingMode`:
 - `StreamingMode.NONE`, the default: only non-partial responses become events.
 - `StreamingMode.SSE`: every response becomes an event, partials included.
 
+## Request headers
+
+Every interaction carries the ADK tracking header `x-goog-api-client`, whose
+`google-adk` token is suffixed `+managed_agent`. The headers are attached per
+request, so an injected `apiClient` is attributed the same way a lazily built
+one is.
+
+Add your own headers through `RunConfig.httpOptions`:
+
+```ts
+const runConfig: RunConfig = {httpOptions: {headers: {'x-tenant': 'acme'}}};
+```
+
+A header of yours that the tracking set does not use is sent unchanged. On
+`x-goog-api-client` your tokens are appended to the ADK tokens, and a token
+already present is not repeated.
+
+`@google/genai` replaces `user-agent` with its own SDK string on every
+non-browser request, so that header does not carry the ADK tokens.
+
 ## Failure modes
 
 A backend failure never propagates out of the run. The agent catches it and
