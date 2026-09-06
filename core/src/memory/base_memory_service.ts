@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Event} from '../events/event.js';
 import {Session} from '../sessions/session.js';
 
 import {MemoryEntry} from './memory_entry.js';
@@ -36,6 +37,52 @@ export interface SearchMemoryRequest {
 }
 
 /**
+ * The parameters for `addEventsToMemory`.
+ */
+export interface AddEventsToMemoryRequest {
+  /** The app name associated with the memory to write. */
+  appName: string;
+
+  /** The user ID whose memory is being written. */
+  userId: string;
+
+  /**
+   * The events to add. Treated as an incremental delta, not as the full
+   * session.
+   */
+  events: Event[];
+
+  /** Optional session ID used to partition the memory. */
+  sessionId?: string;
+
+  /**
+   * Optional, portable metadata for memory generation. Supported keys are
+   * defined by each implementation.
+   */
+  customMetadata?: Record<string, unknown>;
+}
+
+/**
+ * The parameters for `addMemory`.
+ */
+export interface AddMemoryRequest {
+  /** The app name associated with the memory to write. */
+  appName: string;
+
+  /** The user ID whose memory is being written. */
+  userId: string;
+
+  /** The explicit memory items to write. */
+  memories: MemoryEntry[];
+
+  /**
+   * Optional, portable metadata for the write. Supported keys are defined by
+   * each implementation.
+   */
+  customMetadata?: Record<string, unknown>;
+}
+
+/**
  * Base interface for memory services.
  *
  * The service provides functionalities to ingest sessions into memory so that
@@ -49,6 +96,28 @@ export interface BaseMemoryService {
    * @return A promise that resolves when the session is added to the memory.
    */
   addSessionToMemory(session: Session): Promise<void>;
+
+  /**
+   * Adds an explicit list of events to the memory.
+   *
+   * Optional: a service that only supports full-session ingestion omits the
+   * member, so a caller narrows it before calling.
+   *
+   * @param request The request describing the events to add.
+   * @return A promise that resolves when the events are added to the memory.
+   */
+  addEventsToMemory?(request: AddEventsToMemoryRequest): Promise<void>;
+
+  /**
+   * Adds explicit memory items to the memory.
+   *
+   * Optional: a service that only generates memory from events omits the
+   * member, so a caller narrows it before calling.
+   *
+   * @param request The request describing the memory items to write.
+   * @return A promise that resolves when the memory items are written.
+   */
+  addMemory?(request: AddMemoryRequest): Promise<void>;
 
   /**
    * Searches for sessions that match the query.
