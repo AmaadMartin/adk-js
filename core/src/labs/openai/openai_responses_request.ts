@@ -14,9 +14,11 @@
 import {
   Content,
   ContentUnion,
+  FileData,
   FunctionCallingConfigMode,
   FunctionDeclaration,
   FunctionResponse,
+  Blob as GenaiBlob,
   GenerateContentConfig,
   Part,
   PartUnion,
@@ -334,33 +336,32 @@ function toResponsesRole(role: string | undefined): ResponsesRole {
   }
 }
 
-/** Converts an inline-data part into Responses input content. */
+/** Converts inline data into Responses input content. */
 function inlineDataToInputContent(
-  part: Part,
+  inlineData: GenaiBlob,
 ): OpenAI.Responses.ResponseInputContent {
-  const inlineData = part.inlineData;
-  const mimeType = inlineData?.mimeType || 'application/octet-stream';
+  const mimeType = inlineData.mimeType || 'application/octet-stream';
   // `Blob.data` is already base64 in @google/genai, where the reference
   // implementation holds raw bytes and encodes them here.
-  const dataUrl = `data:${mimeType};base64,${inlineData?.data ?? ''}`;
+  const dataUrl = `data:${mimeType};base64,${inlineData.data ?? ''}`;
   switch (mimeType.split('/')[0]) {
     case 'image':
       return {type: 'input_image', detail: 'auto', image_url: dataUrl};
     default:
       return {
         type: 'input_file',
-        filename: inlineData?.displayName || 'inline_data',
+        filename: inlineData.displayName || 'inline_data',
         file_data: dataUrl,
       };
   }
 }
 
-/** Converts a file-data part into Responses input content. */
+/** Converts file data into Responses input content. */
 function fileDataToInputContent(
-  part: Part,
+  fileData: FileData,
 ): OpenAI.Responses.ResponseInputContent {
-  const fileUri = part.fileData?.fileUri ?? '';
-  const mimeType = part.fileData?.mimeType ?? '';
+  const fileUri = fileData.fileUri ?? '';
+  const mimeType = fileData.mimeType ?? '';
   switch (mimeType.split('/')[0]) {
     case 'image':
       return {type: 'input_image', detail: 'auto', image_url: fileUri};
@@ -464,6 +465,24 @@ function addFunctionResponse(
   });
 }
 
+/**
+ * Adds media content to the builder.
+ *
+ * A Responses assistant turn takes no media, so it is dropped with a warning
+ * rather than sent as an input block the API rejects.
+ */
+function addMedia(
+  builder: InputItemBuilder,
+  role: ResponsesRole,
+  content: OpenAI.Responses.ResponseInputContent,
+): void {
+  if (role === 'assistant') {
+    logger.warn('Media data is not supported in Responses assistant turns.');
+    return;
+  }
+  builder.addContent(content);
+}
+
 /** Adds a text part to the builder, honouring the turn's role. */
 function addText(
   builder: InputItemBuilder,
@@ -506,18 +525,10 @@ export function contentToResponseInputItems(
       logSkippedReasoningPart(part);
     } else if (part.text) {
       addText(builder, part.text, role);
-    } else if (part.inlineData || part.fileData) {
-      if (role === 'assistant') {
-        logger.warn(
-          'Media data is not supported in Responses assistant turns.',
-        );
-      } else {
-        builder.addContent(
-          part.inlineData
-            ? inlineDataToInputContent(part)
-            : fileDataToInputContent(part),
-        );
-      }
+    } else if (part.inlineData) {
+      addMedia(builder, role, inlineDataToInputContent(part.inlineData));
+    } else if (part.fileData) {
+      addMedia(builder, role, fileDataToInputContent(part.fileData));
     } else {
       const text = codePartToText(part);
       if (text) {

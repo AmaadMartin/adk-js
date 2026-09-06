@@ -252,7 +252,7 @@ export class OpenAiResponsesLlm extends BaseLlm {
    *
    * Field names stay snake_case because they go on the wire.
    */
-  getResponseCreateBody(llmRequest: LlmRequest): ResponseCreateBody {
+  private getResponseCreateBody(llmRequest: LlmRequest): ResponseCreateBody {
     const config = llmRequest.config ?? {};
     const body: ResponseCreateBody = {
       model: llmRequest.model ?? this.model,
@@ -314,7 +314,7 @@ export class OpenAiResponsesLlm extends BaseLlm {
   }
 
   /** Flattens a request's contents into Responses input items. */
-  getResponseInput(
+  private getResponseInput(
     llmRequest: LlmRequest,
   ): OpenAI.Responses.ResponseInputItem[] {
     // One sanitizer per request, so a substituted call ID is stable across the

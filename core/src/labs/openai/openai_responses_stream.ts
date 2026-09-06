@@ -233,14 +233,11 @@ export class StreamAccumulator {
       return responseToLlmResponse(this.response, this.includeResponseMetadata);
     }
 
+    // Every function call is registered as an output item as it arrives, so
+    // walking the output items in order covers them too.
     const parts: Part[] = [];
     for (const [key, item] of this.outputItems) {
       parts.push(...this.accumulatedParts(key, item));
-    }
-    for (const [key, call] of this.functionCalls) {
-      if (!this.outputItems.has(key)) {
-        parts.push(accumulatedFunctionCallPart(call));
-      }
     }
     if (parts.length === 0) {
       return undefined;
