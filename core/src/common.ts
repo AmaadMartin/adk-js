@@ -80,6 +80,16 @@ export type {
 } from './agents/user_input_request.js';
 export {createResumabilityConfig} from './apps/resumability_config.js';
 export type {ResumabilityConfig} from './apps/resumability_config.js';
+export {
+  ARTIFACT_URI_SCHEME,
+  getArtifactUri,
+  isArtifactRef,
+  parseArtifactUri,
+} from './artifacts/artifact_util.js';
+export type {
+  GetArtifactUriRequest,
+  ParsedArtifactUri,
+} from './artifacts/artifact_util.js';
 export type {
   BaseArtifactService,
   DeleteArtifactRequest,
