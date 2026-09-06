@@ -15,7 +15,6 @@ import {LIVE_INPUT_MIME_TYPE, toLiveInput} from '../../utils/audio_utils.js';
 import {base64DecodeBytes, base64Encode} from '../../utils/env_aware_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {evalModel, type EvalModel} from '../common.js';
-import type {Evaluator} from '../evaluator.js';
 import {addDefaultRetryOptionsIfNotPresent} from '../retry_options_utils.js';
 import {
   llmUserSimulatorConfigShape,
@@ -290,10 +289,13 @@ export class LlmAudioUserSimulator implements UserSimulator {
   /**
    * Always throws: this simulator scores nothing of its own.
    *
+   * The return type is `never`, not the interface's `Evaluator | undefined`,
+   * because the method has no returning path.
+   *
    * @throws {NotImplementedError} Always. adk-python raises
    *   `NotImplementedError` here too.
    */
-  getSimulationEvaluator(): Evaluator | undefined {
+  getSimulationEvaluator(): never {
     throw new NotImplementedError(NO_SIMULATION_EVALUATOR_ERROR);
   }
 
