@@ -12,6 +12,8 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
+import {AdkLogger} from '../../src/utils/logger.js';
+import {installShutdownHandlers} from '../../src/utils/shutdown.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
   return {
@@ -20,6 +22,11 @@ vi.mock('../../src/server/adk_api_server', () => {
     })),
   };
 });
+
+// The real module removes the worker's signal listeners on install.
+vi.mock('../../src/utils/shutdown', () => ({
+  installShutdownHandlers: vi.fn(),
+}));
 
 vi.mock('../../src/cli/cli_create', () => ({
   createAgent: vi.fn(),
@@ -166,6 +173,16 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
     });
+
+    it('should hand the started server to the shutdown handlers', async () => {
+      await parse(['web']);
+
+      const instance = vi.mocked(AdkApiServer).mock.results[0].value;
+      expect(installShutdownHandlers).toHaveBeenCalledExactlyOnceWith(
+        instance,
+        expect.any(AdkLogger),
+      );
+    });
   });
 
   describe('command: api_server', () => {
@@ -192,6 +209,16 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should hand the started server to the shutdown handlers', async () => {
+      await parse(['api_server']);
+
+      const instance = vi.mocked(AdkApiServer).mock.results[0].value;
+      expect(installShutdownHandlers).toHaveBeenCalledExactlyOnceWith(
+        instance,
+        expect.any(AdkLogger),
+      );
     });
   });
 
