@@ -5,6 +5,7 @@
  */
 
 import {
+  EntityManager,
   FilterQuery,
   LockMode,
   Options as MikroDBOptions,
@@ -36,6 +37,7 @@ import {
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
+import {StaleSessionError} from './errors.js';
 import {createSession, Session} from './session.js';
 import {State} from './state.js';
 
@@ -61,6 +63,32 @@ export function isDatabaseConnectionString(uri?: string): boolean {
 }
 
 /**
+ * Returns whether a session without a revision marker still holds the newest
+ * stored event.
+ *
+ * A marker-less session (built by hand, copied, or round-tripped through JSON)
+ * can carry a rounded or stale `lastUpdateTime` that does not represent a lost
+ * write, so the event history decides instead of the timestamp. The ordering
+ * breaks timestamp ties on id so the newest stored event is unambiguous.
+ */
+async function isSessionAtStorageRevision(
+  em: EntityManager,
+  session: Session,
+): Promise<boolean> {
+  const latestStored = await em.findOne(
+    StorageEvent,
+    {
+      appName: session.appName,
+      userId: session.userId,
+      sessionId: session.id,
+    },
+    {orderBy: [{timestamp: 'DESC'}, {id: 'DESC'}]},
+  );
+
+  return latestStored?.id === session.events.at(-1)?.id;
+}
+
+/**
  * A session service that uses a SQL database for storage via MikroORM.
  */
 export class DatabaseSessionService extends BaseSessionService {
@@ -68,6 +96,15 @@ export class DatabaseSessionService extends BaseSessionService {
   private initialized = false;
   private options?: MikroDBOptions;
   private connectionString?: string;
+  /**
+   * The exact `update_time` of the row each handed-out session was built from.
+   *
+   * adk-python keeps this marker in a pydantic `PrivateAttr`, which
+   * `model_dump()` excludes. The TypeScript analogue is out-of-band storage:
+   * the dev server serializes a `Session` straight to JSON, so an enumerable
+   * field would leak into its HTTP response shape.
+   */
+  private readonly storageRevisions = new WeakMap<Session, number>();
 
   constructor(connectionStringOrOptions: MikroDBOptions | string) {
     super();
@@ -181,7 +218,7 @@ export class DatabaseSessionService extends BaseSessionService {
       sessionState,
     );
 
-    return createSession({
+    const session = createSession({
       id,
       appName,
       userId,
@@ -189,6 +226,8 @@ export class DatabaseSessionService extends BaseSessionService {
       events: [],
       lastUpdateTime: storageSession.createTime.getTime(),
     });
+    this.storageRevisions.set(session, storageSession.updateTime.getTime());
+    return session;
   }
 
   async getSession({
@@ -241,7 +280,7 @@ export class DatabaseSessionService extends BaseSessionService {
       storageSession.state,
     );
 
-    return createSession({
+    const session = createSession({
       id: sessionId,
       appName,
       userId,
@@ -249,6 +288,8 @@ export class DatabaseSessionService extends BaseSessionService {
       events: storageEvents.map((se) => se.eventData),
       lastUpdateTime: storageSession.updateTime.getTime(),
     });
+    this.storageRevisions.set(session, storageSession.updateTime.getTime());
+    return session;
   }
 
   async listSessions({
@@ -341,7 +382,7 @@ export class DatabaseSessionService extends BaseSessionService {
     const sessions = storageSessions.map((ss) => {
       const uState = userStateMap[ss.userId] || {};
       const merged = mergeStates(appState, uState, ss.state);
-      return createSession({
+      const session = createSession({
         id: ss.id,
         appName: ss.appName,
         userId: ss.userId,
@@ -349,6 +390,8 @@ export class DatabaseSessionService extends BaseSessionService {
         events: [],
         lastUpdateTime: ss.updateTime.getTime(),
       });
+      this.storageRevisions.set(session, ss.updateTime.getTime());
+      return session;
     });
 
     return {sessions, ...paginationMeta};
@@ -366,6 +409,13 @@ export class DatabaseSessionService extends BaseSessionService {
     await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
   }
 
+  /**
+   * Appends an event to a session and persists it.
+   *
+   * @throws {StaleSessionError} If storage has moved past the revision the
+   *   supplied session represents. The event is not stored and the session is
+   *   left untouched, so the caller can reload it and decide whether to retry.
+   */
   override async appendEvent({
     session,
     event,
@@ -419,26 +469,19 @@ export class DatabaseSessionService extends BaseSessionService {
         txEm.persist(userStateModel);
       }
 
-      // Stale session check
-      if (storageSession.updateTime.getTime() > session.lastUpdateTime) {
-        // Reload state
-        const events = await txEm.find(
-          StorageEvent,
-          {
-            appName: session.appName,
-            userId: session.userId,
-            sessionId: session.id,
-          },
-          {orderBy: {timestamp: 'ASC'}},
-        );
-
-        const mergedState = mergeStates(
-          appStateModel.state,
-          userStateModel.state,
-          storageSession.state,
-        );
-        session.state = mergedState;
-        session.events = events.map((e) => e.eventData);
+      const storageRevision = storageSession.updateTime.getTime();
+      const knownRevision = this.storageRevisions.get(session);
+      if (knownRevision !== undefined) {
+        // This service handed out the session, so it carries the exact revision
+        // of the row it was built from.
+        if (knownRevision !== storageRevision) {
+          throw new StaleSessionError();
+        }
+      } else if (
+        storageRevision > session.lastUpdateTime &&
+        !(await isSessionAtStorageRevision(txEm, session))
+      ) {
+        throw new StaleSessionError();
       }
 
       if (event.actions && event.actions.stateDelta) {
@@ -508,6 +551,7 @@ export class DatabaseSessionService extends BaseSessionService {
         session.events.push(event);
       }
       session.lastUpdateTime = storageSession.updateTime.getTime();
+      this.storageRevisions.set(session, storageSession.updateTime.getTime());
     });
 
     return event;

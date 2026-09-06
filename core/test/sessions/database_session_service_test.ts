@@ -7,8 +7,12 @@
 import {
   createEvent,
   createEventActions,
+  createSession,
   DatabaseSessionService,
   Event,
+  isStaleSessionError,
+  Session,
+  StaleSessionError,
   State,
 } from '@google/adk';
 import {MikroORM} from '@mikro-orm/core';
@@ -700,6 +704,297 @@ describe('DatabaseSessionService', () => {
       })) as {id: string; updateTime: Date};
 
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
+    });
+  });
+
+  describe('appendEvent stale session rejection', () => {
+    const appName = 'stale-app';
+    const userId = 'stale-user';
+
+    async function loadSession(sessionId: string): Promise<Session> {
+      const session = await service.getSession({appName, userId, sessionId});
+      if (!session) {
+        expect.fail(`session ${sessionId} was not found`);
+      }
+      return session;
+    }
+
+    it('rejects an append from a handle that another writer moved past', async () => {
+      await service.createSession({appName, userId, sessionId: 's-marker'});
+      const handleA = await loadSession('s-marker');
+      const handleB = await loadSession('s-marker');
+
+      const eventB = createEvent({
+        timestamp: Date.now(),
+        actions: createEventActions({stateDelta: {'writer': 'b'}}),
+      });
+      await service.appendEvent({session: handleB, event: eventB});
+
+      const eventsBefore = handleA.events;
+      const stateBefore = handleA.state;
+      const lastUpdateTimeBefore = handleA.lastUpdateTime;
+      const eventA = createEvent({
+        timestamp: Date.now() + 1000,
+        actions: createEventActions({stateDelta: {'writer': 'a'}}),
+      });
+
+      const error = await service
+        .appendEvent({session: handleA, event: eventA})
+        .catch((e: unknown) => e);
+
+      expect(isStaleSessionError(error)).toBe(true);
+      expect(error).toBeInstanceOf(StaleSessionError);
+      expect((error as StaleSessionError).message).toMatch(
+        /modified in storage/,
+      );
+
+      // The rejected handle is left exactly as the caller had it.
+      expect(handleA.events).toBe(eventsBefore);
+      expect(handleA.events).toHaveLength(0);
+      expect(handleA.state).toBe(stateBefore);
+      expect(handleA.state['writer']).toBeUndefined();
+      expect(handleA.lastUpdateTime).toBe(lastUpdateTimeBefore);
+
+      const reloaded = await loadSession('s-marker');
+      expect(reloaded.events.map((e) => e.id)).toEqual([eventB.id]);
+      expect(reloaded.state['writer']).toBe('b');
+    });
+
+    it('accepts sequential appends through one handle, including one that moves update_time backwards', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-sequential',
+      });
+
+      const base = Date.now();
+      const e1 = createEvent({timestamp: base});
+      const e2 = createEvent({timestamp: base + 1000});
+      const e3 = createEvent({timestamp: base - 5000});
+
+      await service.appendEvent({session, event: e1});
+      await service.appendEvent({session, event: e2});
+      await service.appendEvent({session, event: e3});
+
+      expect(session.events.map((e) => e.id)).toEqual([e1.id, e2.id, e3.id]);
+      expect(session.lastUpdateTime).toBe(base - 5000);
+
+      const reloaded = await loadSession('s-sequential');
+      expect(reloaded.events).toHaveLength(3);
+    });
+
+    it('accepts an append through a handle listSessions returned', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-listed',
+      });
+      await service.appendEvent({session, event: createEvent()});
+
+      const listed = await service.listSessions({appName, userId});
+      const handle = listed.sessions.find((s) => s.id === 's-listed');
+      if (!handle) {
+        expect.fail('listSessions did not return s-listed');
+      }
+
+      const event = createEvent({timestamp: Date.now() + 1000});
+      await expect(service.appendEvent({session: handle, event})).resolves.toBe(
+        event,
+      );
+    });
+
+    it('rejects a createSession handle after a concurrent writer backdated the row', async () => {
+      const created = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-created-marker',
+      });
+
+      const writer = await loadSession('s-created-marker');
+      await service.appendEvent({
+        session: writer,
+        event: createEvent({timestamp: created.lastUpdateTime - 5000}),
+      });
+
+      await expect(
+        service.appendEvent({session: created, event: createEvent()}),
+      ).rejects.toThrow(StaleSessionError);
+    });
+
+    it('rejects a getSession handle after a concurrent writer backdated the row', async () => {
+      await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-loaded-marker',
+      });
+      const handleA = await loadSession('s-loaded-marker');
+      const handleB = await loadSession('s-loaded-marker');
+
+      await service.appendEvent({
+        session: handleB,
+        event: createEvent({timestamp: handleA.lastUpdateTime - 5000}),
+      });
+
+      await expect(
+        service.appendEvent({session: handleA, event: createEvent()}),
+      ).rejects.toThrow(StaleSessionError);
+    });
+
+    it('rejects a listSessions handle after a concurrent writer backdated the row', async () => {
+      await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-listed-marker',
+      });
+
+      const listed = await service.listSessions({appName, userId});
+      const handle = listed.sessions.find((s) => s.id === 's-listed-marker');
+      if (!handle) {
+        expect.fail('listSessions did not return s-listed-marker');
+      }
+
+      const writer = await loadSession('s-listed-marker');
+      await service.appendEvent({
+        session: writer,
+        event: createEvent({timestamp: handle.lastUpdateTime - 5000}),
+      });
+
+      await expect(
+        service.appendEvent({session: handle, event: createEvent()}),
+      ).rejects.toThrow(StaleSessionError);
+    });
+
+    it('accepts a marker-less handle that still holds the newest stored event', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-fallback-current',
+      });
+      await service.appendEvent({session, event: createEvent()});
+
+      const loaded = await loadSession('s-fallback-current');
+      const copy = createSession({
+        ...loaded,
+        lastUpdateTime: loaded.lastUpdateTime - 1000,
+      });
+
+      const event = createEvent({timestamp: Date.now() + 1000});
+      await expect(service.appendEvent({session: copy, event})).resolves.toBe(
+        event,
+      );
+    });
+
+    it('rejects a marker-less handle that no longer holds the newest stored event', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-fallback-behind',
+      });
+      await service.appendEvent({session, event: createEvent()});
+
+      const loaded = await loadSession('s-fallback-behind');
+      const copy = createSession({
+        ...loaded,
+        lastUpdateTime: loaded.lastUpdateTime - 1000,
+      });
+
+      const writer = await loadSession('s-fallback-behind');
+      await service.appendEvent({
+        session: writer,
+        event: createEvent({timestamp: Date.now() + 1000}),
+      });
+
+      const event = createEvent({timestamp: Date.now() + 2000});
+      await expect(service.appendEvent({session: copy, event})).rejects.toThrow(
+        StaleSessionError,
+      );
+    });
+
+    it('rejects a marker-less empty handle when storage holds events', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-empty-behind',
+      });
+      await service.appendEvent({session, event: createEvent()});
+
+      const copy = createSession({
+        id: 's-empty-behind',
+        appName,
+        userId,
+        events: [],
+        lastUpdateTime: session.lastUpdateTime - 1000,
+      });
+
+      const event = createEvent({timestamp: Date.now() + 1000});
+      await expect(service.appendEvent({session: copy, event})).rejects.toThrow(
+        StaleSessionError,
+      );
+    });
+
+    it('accepts a marker-less empty handle when storage holds no events', async () => {
+      const created = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-empty-current',
+      });
+
+      const copy = createSession({
+        id: 's-empty-current',
+        appName,
+        userId,
+        events: [],
+        lastUpdateTime: created.lastUpdateTime - 1000,
+      });
+
+      const event = createEvent({timestamp: Date.now() + 1000});
+      await expect(service.appendEvent({session: copy, event})).resolves.toBe(
+        event,
+      );
+    });
+
+    it('breaks a timestamp tie on event id when checking a marker-less handle', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-tied',
+      });
+
+      const tiedTimestamp = Date.now();
+      const tied = ['e-a', 'e-b', 'e-c'].map((id) =>
+        createEvent({id, timestamp: tiedTimestamp}),
+      );
+      for (const event of tied) {
+        await service.appendEvent({session, event});
+      }
+
+      const atLatest = createSession({
+        id: 's-tied',
+        appName,
+        userId,
+        events: tied,
+        lastUpdateTime: tiedTimestamp - 1000,
+      });
+      await expect(
+        service.appendEvent({
+          session: atLatest,
+          event: createEvent({timestamp: tiedTimestamp + 1000}),
+        }),
+      ).resolves.toBeDefined();
+
+      const atFirst = createSession({
+        id: 's-tied',
+        appName,
+        userId,
+        events: [tied[0]],
+        lastUpdateTime: tiedTimestamp - 1000,
+      });
+      await expect(
+        service.appendEvent({
+          session: atFirst,
+          event: createEvent({timestamp: tiedTimestamp + 2000}),
+        }),
+      ).rejects.toThrow(StaleSessionError);
     });
   });
 });
