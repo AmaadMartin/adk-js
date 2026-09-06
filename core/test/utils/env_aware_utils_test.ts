@@ -59,6 +59,46 @@ describe('env_aware_utils', () => {
     it('should return false for undefined', () => {
       expect(getBooleanEnvVar('NON_EXISTENT_VAR')).toBe(false);
     });
+
+    it('should return true for "true" with surrounding whitespace', () => {
+      for (const value of [' true', 'true ', ' true ', '\ttrue\n']) {
+        process.env = {...originalEnv, 'TEST_VAR': value};
+        expect(getBooleanEnvVar('TEST_VAR')).toBe(true);
+      }
+    });
+
+    it('should return true for "1" with surrounding whitespace', () => {
+      for (const value of [' 1', '1 ', ' 1 ']) {
+        process.env = {...originalEnv, 'TEST_VAR': value};
+        expect(getBooleanEnvVar('TEST_VAR')).toBe(true);
+      }
+    });
+
+    it('should return true for padded mixed-case "TRUE"', () => {
+      process.env = {...originalEnv, 'TEST_VAR': '  TRUE  '};
+      expect(getBooleanEnvVar('TEST_VAR')).toBe(true);
+    });
+
+    it('should return false for whitespace-only values', () => {
+      for (const value of [' ', '   ', '\n']) {
+        process.env = {...originalEnv, 'TEST_VAR': value};
+        expect(getBooleanEnvVar('TEST_VAR')).toBe(false);
+      }
+    });
+
+    it('should return false for "false" and "0" with surrounding whitespace', () => {
+      for (const value of [' false ', ' 0 ']) {
+        process.env = {...originalEnv, 'TEST_VAR': value};
+        expect(getBooleanEnvVar('TEST_VAR')).toBe(false);
+      }
+    });
+
+    it('should return false for unrecognized tokens regardless of whitespace', () => {
+      for (const value of [' yes ', ' on ', ' 2 ']) {
+        process.env = {...originalEnv, 'TEST_VAR': value};
+        expect(getBooleanEnvVar('TEST_VAR')).toBe(false);
+      }
+    });
   });
 
   describe('randomUUID', () => {

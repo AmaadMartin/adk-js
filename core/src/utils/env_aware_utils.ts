@@ -123,6 +123,10 @@ export function isBase64Encoded(data: string): boolean {
 /**
  * Gets the boolean value of the given environment variable.
  *
+ * The variable is enabled when its value is `true` or `1`, ignoring case and
+ * surrounding whitespace, which values sourced from `.env` files and shell
+ * heredocs routinely carry. Everything else, including unset, is `false`.
+ *
  * @param envVar The environment variable to get the value of.
  * @return The boolean value of the environment variable.
  */
@@ -131,7 +135,7 @@ export function getBooleanEnvVar(envVar: string): boolean {
     return false;
   }
 
-  const envVarValue = (process.env[envVar] || '').toLowerCase();
+  const envVarValue = (process.env[envVar] || '').trim().toLowerCase();
 
   return ['true', '1'].includes(envVarValue);
 }
