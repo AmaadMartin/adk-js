@@ -62,6 +62,13 @@ export {
   INTERACTIONS_REQUEST_PROCESSOR,
   InteractionsRequestProcessor,
 } from './agents/processors/interactions_request_processor.js';
+export {
+  OUTPUT_SCHEMA_INSTRUCTION,
+  OUTPUT_SCHEMA_REQUEST_PROCESSOR,
+  OutputSchemaRequestProcessor,
+  SET_MODEL_RESPONSE_TOOL_NAME,
+} from './agents/processors/output_schema_request_processor.js';
+export {SingleFlow} from './agents/processors/single_flow.js';
 export {ReadonlyContext} from './agents/readonly_context.js';
 export {RoutedAgent, isRoutedAgent} from './agents/routed_agent.js';
 export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
