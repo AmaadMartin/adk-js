@@ -717,6 +717,34 @@ describe('interactions_utils', () => {
         expected,
       );
     });
+
+    it('should convert computerUse to a computer_use tool', () => {
+      const config: GenerateContentConfig = {
+        tools: [{computerUse: {}}],
+      };
+
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual([
+        {type: 'computer_use'},
+      ]);
+    });
+
+    it('should keep computer_use alongside the other server-side tools', () => {
+      const config: GenerateContentConfig = {
+        tools: [
+          {googleSearch: {}},
+          {codeExecution: {}},
+          {urlContext: {}},
+          {computerUse: {}},
+        ],
+      };
+
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual([
+        {type: 'google_search'},
+        {type: 'code_execution'},
+        {type: 'url_context'},
+        {type: 'computer_use'},
+      ]);
+    });
   });
 
   describe('convertInteractionToLlmResponse', () => {
@@ -2356,6 +2384,14 @@ describe('agent interactions', () => {
       await expect(
         collect(createInteractions(client, {createParams: CREATE_PARAMS})),
       ).rejects.toThrow(/non-streaming response/);
+    });
+  });
+
+  describe('convertToolsConfigToInteractionsFormat', () => {
+    it('emits a computer_use tool, which the agent also accepts', () => {
+      expect(
+        convertToolsConfigToInteractionsFormat({tools: [{computerUse: {}}]}),
+      ).toEqual([{type: 'computer_use'}]);
     });
   });
 
