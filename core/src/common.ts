@@ -275,6 +275,8 @@ export {InMemorySessionService} from './sessions/in_memory_session_service.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
+export {BaseGoogleCredentialsConfig} from './tools/_google_credentials.js';
+export type {GoogleCredentialsConfigOptions} from './tools/_google_credentials.js';
 export {AgentTool, isAgentTool} from './tools/agent_tool.js';
 export type {AgentToolConfig} from './tools/agent_tool.js';
 export {BaseTool, isBaseTool} from './tools/base_tool.js';
@@ -369,6 +371,11 @@ export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
+export {
+  SPANNER_DEFAULT_SCOPE,
+  SPANNER_TOKEN_CACHE_KEY,
+  SpannerCredentialsConfig,
+} from './tools/spanner/spanner_credentials.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
