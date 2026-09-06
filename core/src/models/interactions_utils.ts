@@ -956,8 +956,7 @@ export async function* generateContentViaInteractions(
  *
  * @param server The server description.
  * @param resolvedHeaders The static headers already merged with any
- *     header-provider output, as {@link resolveRemoteMcpServerHeaders}
- *     returns them.
+ *     header-provider output, as `resolveRemoteMcpServerHeaders` returns them.
  * @return The tool param.
  */
 export function buildMcpServerParam(

@@ -31,30 +31,20 @@ This is the TypeScript counterpart of `RemoteMcpServer` in
 
 ## Get started
 
-Describe a server and validate the description:
+Describe a server:
 
 ```ts
-import {createRemoteMcpServer} from '@google/adk';
+import type {RemoteMcpServer} from '@google/adk';
 
-const server = createRemoteMcpServer({
+const server: RemoteMcpServer = {
   url: 'https://api.example.com/mcp',
   name: 'places',
   headers: {'X-Api-Version': '2'},
   allowedTools: ['search_places', 'place_details'],
-});
+};
 ```
 
-Resolve its headers for one turn, from a `ReadonlyContext`:
-
-```ts
-import {resolveRemoteMcpServerHeaders} from '@google/adk';
-
-const headers = await resolveRemoteMcpServerHeaders(server, context);
-// {'X-Api-Version': '2'}
-```
-
-ADK maps the description and those headers to the `mcp_server` tool param it
-sends to the Interactions API:
+ADK maps that to the `mcp_server` tool param it sends to the Interactions API:
 
 ```json
 {
@@ -66,19 +56,15 @@ sends to the Interactions API:
 }
 ```
 
-That mapping is `buildMcpServerParam` in
-`core/src/models/interactions_utils.ts`. It is internal plumbing and is not
-exported from the package.
+The five fields:
 
-## The five fields
-
-| Field            | Meaning                                                       |
-| ---------------- | ------------------------------------------------------------- |
-| `url`            | Full URL of the endpoint. Required, and it must not be empty. |
-| `name`           | Optional label for the server.                                |
-| `headers`        | Static headers sent on every turn, such as a fixed API key.   |
-| `allowedTools`   | Restricts which of the server's tools the model can call.     |
-| `headerProvider` | Mints headers at request time, once per turn.                 |
+| Field            | Meaning                                                     |
+| ---------------- | ----------------------------------------------------------- |
+| `url`            | Full URL of the endpoint. Required.                         |
+| `name`           | Optional label for the server.                              |
+| `headers`        | Static headers sent on every turn, such as a fixed API key. |
+| `allowedTools`   | Restricts which of the server's tools the model can call.   |
+| `headerProvider` | Mints headers at request time, once per turn.               |
 
 The configuration fields are camelCase because they stay inside the process. The
 tool param uses `allowed_tools`, because that key crosses the API boundary and
@@ -92,25 +78,23 @@ the context of that turn. Use it for a credential that expires, such as a bearer
 token:
 
 ```ts
-import {createRemoteMcpServer} from '@google/adk';
-import type {ReadonlyContext} from '@google/adk';
+import type {ReadonlyContext, RemoteMcpServer} from '@google/adk';
 
-const server = createRemoteMcpServer({
+const server: RemoteMcpServer = {
   url: 'https://api.example.com/mcp',
   headers: {'X-Api-Version': '2'},
   headerProvider: async (context: ReadonlyContext) => ({
     Authorization: `Bearer ${await mintToken(context.userId)}`,
   }),
-});
+};
 ```
 
-`resolveRemoteMcpServerHeaders` copies the static headers first, then assigns
-the provider output over the copy. **The provider wins on a key conflict.** The
-copy means the description's own `headers` object never changes, so the same
-description is safe to reuse across turns.
+ADK copies the static headers first, then assigns the provider output over the
+copy. **The provider wins on a key conflict.** The copy means your `headers`
+object never changes, so the same description is safe to reuse across turns.
 
-An error from the provider propagates to the caller. A failed token mint is
-loud, not a silently missing `Authorization` header.
+An error from the provider propagates. A failed token mint is loud, not a
+silently missing `Authorization` header.
 
 The param omits `headers` when the resolved headers are empty, so a provider
 that returns `{}` for a server with no static headers sends no header key at
@@ -122,30 +106,3 @@ all.
 `undefined`, not on emptiness: an empty array is a meaningful restriction and is
 forwarded as `[{tools: []}]`. Leave the field unset to expose every tool the
 server advertises.
-
-## Validation
-
-`createRemoteMcpServer` takes `unknown` on purpose. TypeScript rejects an
-unknown key only on a fresh object literal, so a widened object and a
-plain-JavaScript caller both reach the function unchecked. It rejects an unknown
-key and a field of the wrong type at runtime, and throws `InputValidationError`
-naming what was wrong:
-
-```ts
-createRemoteMcpServer({url: 'https://api.example.com/mcp', bogus: 1});
-// InputValidationError: RemoteMcpServer does not accept the fields: bogus.
-
-createRemoteMcpServer({url: ''});
-// InputValidationError: RemoteMcpServer.url must not be empty.
-```
-
-It returns a new object, so a later edit of the argument cannot change the
-validated description.
-
-## What is not here yet
-
-The agent that sends these params does not exist in adk-js yet. adk-python
-resolves a `RemoteMcpServer` inside `ManagedAgent`, which calls
-`interactions.create` with the resolved tool list. This module ships the
-description, the validation, the header merge and the mapping. The wiring that
-calls them lands with `ManagedAgent`.

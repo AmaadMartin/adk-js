@@ -324,10 +324,6 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
-export {
-  createRemoteMcpServer,
-  resolveRemoteMcpServerHeaders,
-} from './tools/remote_mcp_server.js';
 export type {
   RemoteMcpHeaderProvider,
   RemoteMcpServer,

@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {z} from 'zod';
 import type {ReadonlyContext} from '../agents/readonly_context.js';
-import {InputValidationError} from '../errors/input_validation_error.js';
 
 /**
  * Mints the headers of one remote MCP turn.
@@ -54,63 +52,6 @@ export interface RemoteMcpServer {
 
   /** Mints headers at request time, once per turn. */
   headerProvider?: RemoteMcpHeaderProvider;
-}
-
-const remoteMcpServerSchema = z.strictObject(
-  {
-    url: z
-      .string({error: 'must be a string.'})
-      .min(1, {error: 'must not be empty.'}),
-    name: z.string({error: 'must be a string.'}).optional(),
-    headers: z
-      .record(z.string(), z.string({error: 'must be a string.'}), {
-        error: 'must be a record of strings.',
-      })
-      .optional(),
-    allowedTools: z
-      .array(z.string({error: 'must be a string.'}), {
-        error: 'must be an array of strings.',
-      })
-      .optional(),
-    headerProvider: z
-      .custom<RemoteMcpHeaderProvider>((value) => typeof value === 'function', {
-        error: 'must be a function.',
-      })
-      .optional(),
-  },
-  {error: 'must be an object.'},
-);
-
-/**
- * Validates a description of a remote MCP server.
- *
- * TypeScript rejects an unknown key only on a fresh object literal, so a
- * widened object and a plain-JavaScript caller both reach this function
- * unchecked. This function rejects an unknown key and a field of the wrong
- * type at runtime, which is what the adk-python model does with
- * `extra='forbid'`. It returns a new object, so a later edit of the argument
- * cannot change the validated description.
- *
- * @param spec The description to validate.
- * @return The validated description.
- * @throws InputValidationError When a key is unknown, when `url` is missing or
- *     empty, or when a field has the wrong type.
- */
-export function createRemoteMcpServer(spec: unknown): RemoteMcpServer {
-  const result = remoteMcpServerSchema.safeParse(spec);
-  if (result.success) {
-    return result.data;
-  }
-  const issue = result.error.issues[0];
-  if (issue.code === 'unrecognized_keys') {
-    throw new InputValidationError(
-      `RemoteMcpServer does not accept the fields: ${issue.keys.join(', ')}.`,
-    );
-  }
-  const target = issue.path.length
-    ? `RemoteMcpServer.${issue.path.join('.')}`
-    : 'RemoteMcpServer';
-  throw new InputValidationError(`${target} ${issue.message}`);
 }
 
 /**

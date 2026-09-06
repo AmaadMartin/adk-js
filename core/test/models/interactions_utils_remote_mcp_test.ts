@@ -23,9 +23,7 @@ import {
   PluginManager,
   ReadonlyContext,
   RemoteMcpServer,
-  createRemoteMcpServer,
   createSession,
-  resolveRemoteMcpServerHeaders,
 } from '@google/adk';
 import {GenerateContentConfig} from '@google/genai';
 import {describe, expect, it} from 'vitest';
@@ -33,6 +31,9 @@ import {
   buildMcpServerParam,
   convertToolsConfigToInteractionsFormat,
 } from '../../src/models/interactions_utils.js';
+import {resolveRemoteMcpServerHeaders} from '../../src/tools/remote_mcp_server.js';
+
+const URL = 'https://mcp.example.com/mcp';
 
 /** Builds a real ReadonlyContext over a real session and plugin manager. */
 function makeContext(userId = 'user-1'): ReadonlyContext {
@@ -54,37 +55,28 @@ async function resolveParam(server: RemoteMcpServer, context = makeContext()) {
 }
 
 describe('buildMcpServerParam', () => {
-  const server = () =>
-    createRemoteMcpServer({url: 'https://mcp.example.com/mcp'});
-
   it('test_minimal_url_only', () => {
-    expect(buildMcpServerParam(server(), {})).toEqual({
+    expect(buildMcpServerParam({url: URL}, {})).toEqual({
       type: 'mcp_server',
-      url: 'https://mcp.example.com/mcp',
+      url: URL,
     });
   });
 
   it('test_with_name', () => {
-    const param = buildMcpServerParam(
-      createRemoteMcpServer({url: 'https://mcp.example.com/mcp', name: 'maps'}),
-      {},
-    );
+    const param = buildMcpServerParam({url: URL, name: 'maps'}, {});
 
     expect(param.name).toBe('maps');
   });
 
   it('test_with_headers', () => {
-    const param = buildMcpServerParam(server(), {'X-Goog-Api-Key': 'k'});
+    const param = buildMcpServerParam({url: URL}, {'X-Goog-Api-Key': 'k'});
 
     expect(param.headers).toEqual({'X-Goog-Api-Key': 'k'});
   });
 
   it('test_with_allowed_tools', () => {
     const param = buildMcpServerParam(
-      createRemoteMcpServer({
-        url: 'https://mcp.example.com/mcp',
-        allowedTools: ['search_places'],
-      }),
+      {url: URL, allowedTools: ['search_places']},
       {},
     );
 
@@ -92,7 +84,7 @@ describe('buildMcpServerParam', () => {
   });
 
   it('test_omits_unset_fields', () => {
-    const param = buildMcpServerParam(server(), {});
+    const param = buildMcpServerParam({url: URL}, {});
 
     expect(param).not.toHaveProperty('name');
     expect(param).not.toHaveProperty('headers');
@@ -101,11 +93,7 @@ describe('buildMcpServerParam', () => {
 
   it('forwards an empty name and an empty allowedTools list', () => {
     const param = buildMcpServerParam(
-      createRemoteMcpServer({
-        url: 'https://mcp.example.com/mcp',
-        name: '',
-        allowedTools: [],
-      }),
+      {url: URL, name: '', allowedTools: []},
       {},
     );
 
@@ -114,29 +102,26 @@ describe('buildMcpServerParam', () => {
   });
 
   it('does not alias the description allowedTools array', () => {
-    const spec = createRemoteMcpServer({
-      url: 'https://mcp.example.com/mcp',
-      allowedTools: ['a'],
-    });
+    const server: RemoteMcpServer = {url: URL, allowedTools: ['a']};
 
-    const param = buildMcpServerParam(spec, {});
+    const param = buildMcpServerParam(server, {});
     param.allowed_tools![0].tools!.push('b');
 
-    expect(spec.allowedTools).toEqual(['a']);
+    expect(server.allowedTools).toEqual(['a']);
   });
 });
 
 describe('resolveRemoteMcpServerHeaders', () => {
   it('test_resolve_mcp_basic_mapping', async () => {
-    const server = createRemoteMcpServer({
-      url: 'https://mcp.example.com/mcp',
+    const server: RemoteMcpServer = {
+      url: URL,
       name: 'example',
       allowedTools: ['a'],
-    });
+    };
 
     expect(await resolveParam(server)).toEqual({
       type: 'mcp_server',
-      url: 'https://mcp.example.com/mcp',
+      url: URL,
       name: 'example',
       allowed_tools: [{tools: ['a']}],
     });
@@ -144,13 +129,13 @@ describe('resolveRemoteMcpServerHeaders', () => {
 
   it('test_resolve_mcp_sync_header_provider', async () => {
     let called = false;
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headerProvider: () => {
         called = true;
         return {Authorization: 'Bearer tok'};
       },
-    });
+    };
 
     const param = await resolveParam(server);
 
@@ -159,10 +144,10 @@ describe('resolveRemoteMcpServerHeaders', () => {
   });
 
   it('test_resolve_mcp_async_header_provider', async () => {
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headerProvider: async () => ({Authorization: 'Bearer async'}),
-    });
+    };
 
     expect((await resolveParam(server)).headers).toEqual({
       Authorization: 'Bearer async',
@@ -170,11 +155,11 @@ describe('resolveRemoteMcpServerHeaders', () => {
   });
 
   it('test_resolve_mcp_merges_static_and_dynamic_dynamic_wins', async () => {
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headers: {'X-Static': 's', Shared: 'static'},
       headerProvider: () => ({Shared: 'dynamic', 'X-Dyn': 'd'}),
-    });
+    };
 
     expect((await resolveParam(server)).headers).toEqual({
       'X-Static': 's',
@@ -184,21 +169,21 @@ describe('resolveRemoteMcpServerHeaders', () => {
   });
 
   it('test_resolve_mcp_no_header_provider_static_only', async () => {
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headers: {'X-Static': 's'},
-    });
+    };
 
     expect((await resolveParam(server)).headers).toEqual({'X-Static': 's'});
   });
 
   it('test_resolve_mcp_header_provider_error_propagates', async () => {
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headerProvider: () => {
         throw new Error('token mint failed');
       },
-    });
+    };
 
     await expect(resolveParam(server)).rejects.toThrow('token mint failed');
   });
@@ -208,11 +193,10 @@ describe('resolveRemoteMcpServerHeaders', () => {
     // have; here the two params are built by the two functions a ManagedAgent
     // would call and collected into one tool list.
     const config: GenerateContentConfig = {tools: [{googleSearch: {}}]};
-    const server = createRemoteMcpServer({url: 'https://x/mcp'});
 
     const params = [
       ...convertToolsConfigToInteractionsFormat(config),
-      await resolveParam(server),
+      await resolveParam({url: 'https://x/mcp'}),
     ];
 
     expect(params).toContainEqual({type: 'google_search'});
@@ -220,20 +204,20 @@ describe('resolveRemoteMcpServerHeaders', () => {
   });
 
   it('test_resolve_mcp_empty_header_provider_omits_headers', async () => {
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headerProvider: () => ({}),
-    });
+    };
 
     expect(await resolveParam(server)).not.toHaveProperty('headers');
   });
 
   it('test_resolve_mcp_does_not_mutate_spec_headers', async () => {
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headers: {'X-Static': 's'},
       headerProvider: () => ({Authorization: 'Bearer tok'}),
-    });
+    };
 
     await resolveParam(server);
 
@@ -241,23 +225,24 @@ describe('resolveRemoteMcpServerHeaders', () => {
   });
 
   it('returns an empty record when the server declares no headers', async () => {
-    const server = createRemoteMcpServer({url: 'https://x/mcp'});
-
-    expect(await resolveRemoteMcpServerHeaders(server, makeContext())).toEqual(
-      {},
+    const headers = await resolveRemoteMcpServerHeaders(
+      {url: 'https://x/mcp'},
+      makeContext(),
     );
+
+    expect(headers).toEqual({});
   });
 
   it('passes the turn context to the header provider', async () => {
     const context = makeContext('user-42');
     let seen: ReadonlyContext | undefined;
-    const server = createRemoteMcpServer({
+    const server: RemoteMcpServer = {
       url: 'https://x/mcp',
       headerProvider: (ctx: ReadonlyContext) => {
         seen = ctx;
         return {Authorization: `Bearer ${ctx.userId}`};
       },
-    });
+    };
 
     const headers = await resolveRemoteMcpServerHeaders(server, context);
 
