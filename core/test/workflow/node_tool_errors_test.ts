@@ -17,18 +17,21 @@ import {
   Context,
   Event,
   FunctionNode,
+  getFunctionResponses,
+  InMemoryRunner,
   InvocationContext,
+  LlmAgent,
+  node,
   NodeContext,
   NodeTool,
   RequestInput,
   Workflow,
-  node,
 } from '@google/adk';
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {z} from 'zod/v3';
 import {z as z4} from 'zod/v4';
-import {createIc} from './test_helpers.js';
+import {createIc, ScriptedLlm} from './test_helpers.js';
 
 /** Runs `tool` the way an `LlmAgent` tool-call step does. */
 function runTool(
@@ -117,6 +120,42 @@ describe('NodeTool error paths', () => {
     const tool = new NodeTool(target);
     expect(tool._getDeclaration().responseJsonSchema).toBeUndefined();
     expect(await runTool(tool, {})).toBe('GOLD');
+  });
+
+  it('serves a v4 transforming node through a whole agent turn', async () => {
+    // The declaration is built while the agent starts, so a schema that cannot
+    // be serialized used to end the turn with an uncaught error.
+    const target = node(
+      (_ctx: NodeContext, input: {q: string}) => ({got: input.q}),
+      {
+        name: 'trimmer',
+        inputSchema: z4.object({q: z4.string().transform((s) => s.trim())}),
+      },
+    );
+    const agent = new LlmAgent({
+      name: 'trimming_agent',
+      model: new ScriptedLlm([
+        {functionCall: {id: 'fc-1', name: 'trimmer', args: {q: '  kelp  '}}},
+        'Finished.',
+      ]),
+      tools: [target],
+    });
+    const runner = new InMemoryRunner({agent, appName: agent.name});
+    const session = await runner.sessionService.createSession({
+      appName: agent.name,
+      userId: 'u1',
+    });
+    const events: Event[] = [];
+    for await (const event of runner.runAsync({
+      userId: 'u1',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'Trim it.'}]},
+    })) {
+      events.push(event);
+    }
+    const responses = events.flatMap((event) => getFunctionResponses(event));
+    expect(responses).toHaveLength(1);
+    expect(responses[0].response).toEqual({got: 'kelp'});
   });
 
   it('returns a run error when the node throws', async () => {
