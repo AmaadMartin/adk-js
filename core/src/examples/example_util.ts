@@ -108,20 +108,21 @@ export function convertExamplesToText(
  *   when `examples` is a provider. Ignored when `examples` is an array.
  * @param model - Optional model name forwarded to
  *   {@link convertExamplesToText} to select the function-call fence style.
- * @returns A formatted string ready to be appended to a system instruction.
+ * @returns A promise of a formatted string ready to be appended to a system
+ *   instruction.
  * @throws {Error} When `examples` is neither an array nor a
- *   {@link BaseExampleProvider}.
+ *   {@link BaseExampleProvider}. The promise rejects with that error.
  */
-export function buildExampleSi(
+export async function buildExampleSi(
   examples: Example[] | BaseExampleProvider,
   query: string,
   model?: string,
-): string {
+): Promise<string> {
   if (Array.isArray(examples)) {
     return convertExamplesToText(examples, model);
   }
   if (isBaseExampleProvider(examples)) {
-    return convertExamplesToText(examples.getExamples(query), model);
+    return convertExamplesToText(await examples.getExamples(query), model);
   }
 
   throw new Error('Invalid example configuration');

@@ -21,6 +21,15 @@ class FixedExampleProvider extends BaseExampleProvider {
   }
 }
 
+class AsyncExampleProvider extends BaseExampleProvider {
+  constructor(private readonly examples: Example[]) {
+    super();
+  }
+  override async getExamples(_query: string): Promise<Example[]> {
+    return this.examples;
+  }
+}
+
 const SIMPLE_EXAMPLE: Example = {
   input: {parts: [{text: 'What is 2+2?'}]},
   output: [{role: 'model', parts: [{text: '4'}]}],
@@ -106,8 +115,8 @@ describe('convertExamplesToText', () => {
 });
 
 describe('buildExampleSi', () => {
-  it('delegates to convertExamplesToText when given an array', () => {
-    const result = buildExampleSi(
+  it('delegates to convertExamplesToText when given an array', async () => {
+    const result = await buildExampleSi(
       [SIMPLE_EXAMPLE],
       'query',
       'gemini-2.0-flash',
@@ -116,22 +125,28 @@ describe('buildExampleSi', () => {
     expect(result).toContain('4');
   });
 
-  it('calls getExamples on a BaseExampleProvider', () => {
+  it('calls getExamples on a BaseExampleProvider', async () => {
     const provider = new FixedExampleProvider([SIMPLE_EXAMPLE]);
-    const result = buildExampleSi(provider, 'my query');
+    const result = await buildExampleSi(provider, 'my query');
     expect(result).toContain('What is 2+2?');
   });
 
-  it('passes the model string through to the provider path', () => {
+  it('passes the model string through to the provider path', async () => {
     const provider = new FixedExampleProvider([FUNCTION_CALL_EXAMPLE]);
-    const result = buildExampleSi(provider, 'query', 'gemini-1.5-pro');
+    const result = await buildExampleSi(provider, 'query', 'gemini-1.5-pro');
     expect(result).toContain('```tool_code');
   });
 
-  it('throws an error for invalid input', () => {
+  it('throws an error for invalid input', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(() => buildExampleSi({} as any, 'query')).toThrow(
+    await expect(buildExampleSi({} as any, 'query')).rejects.toThrow(
       'Invalid example configuration',
     );
+  });
+
+  it('awaits a provider that resolves its examples', async () => {
+    const provider = new AsyncExampleProvider([SIMPLE_EXAMPLE]);
+    const result = await buildExampleSi(provider, 'my query');
+    expect(result).toContain('What is 2+2?');
   });
 });

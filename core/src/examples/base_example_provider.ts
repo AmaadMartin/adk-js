@@ -45,7 +45,8 @@ export abstract class BaseExampleProvider {
    * Returns a list of examples for a given query.
    *
    * @param query The query to get examples for.
-   * @return A list of Example objects.
+   * @return A list of Example objects, or a promise of one when the provider
+   *   fetches them remotely.
    */
-  abstract getExamples(query: string): Example[];
+  abstract getExamples(query: string): Example[] | Promise<Example[]>;
 }
