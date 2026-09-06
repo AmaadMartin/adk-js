@@ -22,6 +22,7 @@ import {
 
 // Mock google-auth-library
 let shouldAuthThrow = false;
+let shouldRefreshThrow = false;
 let mockQuotaProjectId: string | undefined = 'quota-project-123';
 let mockClientQuotaProjectId: string | undefined = 'quota-project-123';
 
@@ -34,8 +35,11 @@ vi.mock('google-auth-library', () => {
             return Promise.reject(new Error('Auth error'));
           }
           return Promise.resolve({
-            getRequestHeaders: vi.fn().mockResolvedValue({
-              'Authorization': 'Bearer fake-token',
+            getRequestHeaders: vi.fn().mockImplementation(() => {
+              if (shouldRefreshThrow) {
+                return Promise.reject(new Error('Auth error'));
+              }
+              return Promise.resolve({'Authorization': 'Bearer fake-token'});
             }),
             quotaProjectId: mockClientQuotaProjectId,
           });
@@ -870,10 +874,27 @@ describe('AgentRegistry', () => {
 
       try {
         await expect(badRegistry.getAuthHeaders()).rejects.toThrow(
-          'Failed to refresh Google Cloud credentials: Auth error',
+          'Failed to get default Google Cloud credentials: Auth error',
         );
       } finally {
         shouldAuthThrow = false;
+      }
+    });
+
+    it('should throw a refresh error if getRequestHeaders throws in getAuthHeaders', async () => {
+      shouldRefreshThrow = true;
+
+      const badRegistry = new AgentRegistry({
+        projectId: 'test-project',
+        location: 'global',
+      });
+
+      try {
+        await expect(badRegistry.getAuthHeaders()).rejects.toThrow(
+          'Failed to refresh Google Cloud credentials: Auth error',
+        );
+      } finally {
+        shouldRefreshThrow = false;
       }
     });
 
