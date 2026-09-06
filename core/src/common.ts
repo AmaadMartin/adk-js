@@ -558,6 +558,7 @@ export {
   DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
   DEFAULT_USER_SIMULATOR_VOICE_NAME,
   LLM_AUDIO_USER_SIMULATOR_TYPE,
+  LlmAudioUserSimulator,
   parseLlmAudioUserSimulatorConfig,
 } from './evaluation/simulation/llm_audio_user_simulator.js';
 export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
@@ -1378,6 +1379,13 @@ export type {
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export type {VertexRagRetrievalToolParams} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
+export {
+  LIVE_INPUT_MIME_TYPE,
+  LIVE_INPUT_RATE_HZ,
+  parseSampleRate,
+  resamplePcm16,
+  toLiveInput,
+} from './utils/audio_utils.js';
 export {snakeToLowerCamel} from './utils/case_utils.js';
 export {
   EVAL_CLIENT_LABEL,

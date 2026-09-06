@@ -147,6 +147,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [LlmAsJudge](evaluation/llm_as_judge/index.md) - Grading an agent's
   invocations with a judge model, and how sampling, parallelism and a failed
   sample are handled.
+- [LlmAudioUserSimulator](evaluation/llm_audio_user_simulator/index.md) - Speaking a simulated user's turns, so an eval case can drive an agent that takes audio input.
 - [Running an eval locally](evaluation/local_eval_service/index.md) - Running an
   agent over an eval set in your own process, scoring the invocations it
   produced, and registering the metric that scores them.
