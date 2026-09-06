@@ -194,6 +194,45 @@ export function generateRequestConfirmationEvent({
   });
 }
 
+/**
+ * Detects the error type a tool reports for a response it resolved with,
+ * for telemetry purposes.
+ *
+ * Never throws and never modifies the response: telemetry must not be able to
+ * break tool execution. Detection is skipped entirely while the tool is
+ * requesting auth or a confirmation, because the response of such a call is a
+ * control signal rather than a failure.
+ *
+ * @param tool The tool whose response is being inspected.
+ * @param toolContext The context of the call that just completed.
+ * @param response The raw value the tool resolved with.
+ * @return The error type reported by the tool's `detectErrorInResponse` hook,
+ *     or undefined when no error was detected, no hook is declared, or the
+ *     hook misbehaved.
+ */
+function detectErrorTypeForTelemetry(
+  tool: BaseTool,
+  toolContext: Context,
+  response: unknown,
+): string | undefined {
+  try {
+    if (
+      !isEmpty(toolContext.actions.requestedAuthConfigs) ||
+      !isEmpty(toolContext.actions.requestedToolConfirmations)
+    ) {
+      return undefined;
+    }
+    const errorType: unknown = tool.detectErrorInResponse?.(response);
+    return typeof errorType === 'string' ? errorType : undefined;
+  } catch (e: unknown) {
+    logger.error(
+      `Error detecting error type for telemetry from tool ${tool.name}.`,
+      e,
+    );
+    return undefined;
+  }
+}
+
 async function callToolAsync(
   tool: BaseTool,
   args: Record<string, any>, // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -213,6 +252,7 @@ async function callToolAsync(
           toolContext,
           toolContext.invocationContext,
         ),
+        errorType: detectErrorTypeForTelemetry(tool, toolContext, result),
       });
       return result;
     } finally {

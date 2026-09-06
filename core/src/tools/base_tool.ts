@@ -193,6 +193,25 @@ export abstract class BaseTool {
   }
 
   /**
+   * Classifies a response this tool returned as a failure, for telemetry.
+   *
+   * Tools that report a failure in-band — resolving with `{status: 'ERROR'}`
+   * instead of throwing — otherwise render as a successful `execute_tool`
+   * span. Implementing this hook labels that span with the returned error
+   * type.
+   *
+   * The hook is telemetry-only: it must not mutate the response and must not
+   * throw. It is not consulted when the tool has requested auth or a
+   * confirmation, because the placeholder response of such a call is a
+   * control signal rather than a failure.
+   *
+   * @param response The value this tool resolved with in `runAsync`.
+   * @return The error type to report (e.g. `'TOOL_ERROR'`), or undefined when
+   *     the response is not a failure.
+   */
+  detectErrorInResponse?(response: unknown): string | undefined;
+
+  /**
    * The Google API LLM variant to use.
    */
   get apiVariant() {

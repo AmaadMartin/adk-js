@@ -16,7 +16,7 @@
  */
 
 import {Content} from '@google/genai';
-import {context, Context, trace} from '@opentelemetry/api';
+import {context, Context, SpanStatusCode, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -26,6 +26,7 @@ import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {version} from '../version.js';
 
+const ERROR_TYPE = 'error.type';
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
 const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
 const GEN_AI_CONVERSATION_ID = 'gen_ai.conversation.id';
@@ -153,17 +154,23 @@ export interface TraceToolCallParams {
   tool: BaseTool;
   args: Record<string, unknown>;
   functionResponseEvent: Event;
+  /**
+   * Error type the tool reported for a response it did not throw on (e.g.
+   * 'TOOL_ERROR'). When set, the span is marked as failed.
+   */
+  errorType?: string;
 }
 
 /**
  * Traces tool call.
  *
- * @param params The parameters object containing tool, args, and function response event.
+ * @param params The parameters object containing tool, args, function response event, and error type.
  */
 export function traceToolCall({
   tool,
   args,
   functionResponseEvent,
+  errorType,
 }: TraceToolCallParams): void {
   const span = trace.getActiveSpan();
   if (!span) return;
@@ -182,6 +189,15 @@ export function traceToolCall({
       ? safeJsonSerialize(args)
       : '{}',
   });
+
+  if (errorType) {
+    span.setAttributes({[ERROR_TYPE]: errorType});
+    // Without an explicit error status the span renders as successful, which
+    // hides tools that reported a failure as a response instead of throwing.
+    // The message repeats the type rather than the response so no tool content
+    // lands in an attribute the content toggle cannot gate.
+    span.setStatus({code: SpanStatusCode.ERROR, message: errorType});
+  }
 
   // Tracing tool response
   let toolCallId = '<not specified>';
