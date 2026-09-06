@@ -10,81 +10,75 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {createRunner} from '../../../integration/test_case_utils.js';
 import {AdkGoServer} from './go_backend/go_server.js';
 
-const TIMEOUT = 60000;
+/**
+ * Readiness budget (ms) for the Go server, replacing AdkGoServer's 30s default:
+ * its cold `go run .` compile measured 41.8s on macos-latest. Must stay below
+ * the `cross-language` hookTimeout in vitest.config.ts so a server that never
+ * comes up reports its own diagnostic rather than a generic hook timeout.
+ */
+const SERVER_START_TIMEOUT_MS = 90000;
 
-describe(
-  'A2A ADK Cross-Language Integration: TS <--A2A--> Go',
-  () => {
-    let goServer: AdkGoServer;
+describe('A2A ADK Cross-Language Integration: TS <--A2A--> Go', () => {
+  let goServer: AdkGoServer;
 
-    beforeAll(async () => {
-      goServer = new AdkGoServer({
-        serverDir: path.resolve(__dirname, 'go_backend'),
-        startFailureTimeout: TIMEOUT,
-      });
-      await goServer.start();
-    }, TIMEOUT);
+  beforeAll(async () => {
+    goServer = new AdkGoServer({
+      serverDir: path.resolve(__dirname, 'go_backend'),
+      startFailureTimeout: SERVER_START_TIMEOUT_MS,
+    });
+    await goServer.start();
+  });
 
-    afterAll(async () => {
-      await goServer.stop();
-    }, TIMEOUT);
+  afterAll(async () => {
+    await goServer.stop();
+  });
 
-    it(
-      'Should connect to Go agent and receive mock response',
-      async () => {
-        const remoteA2AAgent = new RemoteA2AAgent({
-          name: 'remote_go_agent',
-          description: 'A mock Go agent for testing over a2a',
-          agentCard: `${goServer.url}/a2a/basic_agent/`,
-        });
+  it('Should connect to Go agent and receive mock response', async () => {
+    const remoteA2AAgent = new RemoteA2AAgent({
+      name: 'remote_go_agent',
+      description: 'A mock Go agent for testing over a2a',
+      agentCard: `${goServer.url}/a2a/basic_agent/`,
+    });
 
-        const runner = await createRunner(remoteA2AAgent);
-        const events: Event[] = [];
+    const runner = await createRunner(remoteA2AAgent);
+    const events: Event[] = [];
 
-        for await (const event of runner.run('Hello Go Agent From TS!')) {
-          events.push(event);
-        }
+    for await (const event of runner.run('Hello Go Agent From TS!')) {
+      events.push(event);
+    }
 
-        expect(events.length).toBeGreaterThan(0);
-        const containsExpectedText = events.some((e) =>
-          e.content?.parts?.some((p) =>
-            p.text?.includes('Hello from Go test agent'),
-          ),
-        );
-        expect(containsExpectedText).toBe(true);
-      },
-      TIMEOUT,
+    expect(events.length).toBeGreaterThan(0);
+    const containsExpectedText = events.some((e) =>
+      e.content?.parts?.some((p) =>
+        p.text?.includes('Hello from Go test agent'),
+      ),
     );
+    expect(containsExpectedText).toBe(true);
+  });
 
-    it(
-      'Should handle InputRequired from Go agent',
-      async () => {
-        const remoteA2AAgent = new RemoteA2AAgent({
-          name: 'remote_hitl_agent',
-          description: 'A mock hitl agent',
-          agentCard: `${goServer.url}/a2a/hitl_agent/`,
-        });
+  it('Should handle InputRequired from Go agent', async () => {
+    const remoteA2AAgent = new RemoteA2AAgent({
+      name: 'remote_hitl_agent',
+      description: 'A mock hitl agent',
+      agentCard: `${goServer.url}/a2a/hitl_agent/`,
+    });
 
-        const runner = await createRunner(remoteA2AAgent);
-        const events: Event[] = [];
+    const runner = await createRunner(remoteA2AAgent);
+    const events: Event[] = [];
 
-        for await (const event of runner.run('Need approval')) {
-          events.push(event);
-        }
+    for await (const event of runner.run('Need approval')) {
+      events.push(event);
+    }
 
-        expect(events.length).toBe(1);
-        const hasApprovalTool = events.some((event) =>
-          event.content?.parts?.some(
-            (part) => part.functionCall?.name === 'request_approval',
-          ),
-        );
-        const lastEvent = events[events.length - 1];
-        expect(lastEvent.longRunningToolIds).toBeDefined();
-        expect(hasApprovalTool).toBe(true);
-        expect(lastEvent.longRunningToolIds).toContain('call-123');
-      },
-      TIMEOUT,
+    expect(events.length).toBe(1);
+    const hasApprovalTool = events.some((event) =>
+      event.content?.parts?.some(
+        (part) => part.functionCall?.name === 'request_approval',
+      ),
     );
-  },
-  TIMEOUT,
-);
+    const lastEvent = events[events.length - 1];
+    expect(lastEvent.longRunningToolIds).toBeDefined();
+    expect(hasApprovalTool).toBe(true);
+    expect(lastEvent.longRunningToolIds).toContain('call-123');
+  });
+});

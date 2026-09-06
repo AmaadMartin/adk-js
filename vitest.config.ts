@@ -20,6 +20,22 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Hook budget (ms) for the `cross-language` project: `beforeAll` in
+ * tests/cross_language/a2a/ts_go compiles and boots a Go A2A server, measured
+ * at 41.8s on macos-latest. Twice that suite's 90s `startFailureTimeout`, so a
+ * server that never comes up reports its own diagnostic first.
+ */
+const CROSS_LANGUAGE_HOOK_TIMEOUT_MS = 180000;
+
+/**
+ * Test budget (ms) for the `cross-language` project: unlike `integration`, the
+ * test bodies also shell out to `go run .`, so the first test of a run pays a
+ * cold Go compile — measured at 34.6s on macos-latest. ~3.5x that, for headroom
+ * on contended runners. Per-file `it()`/hook timeouts still override both.
+ */
+const CROSS_LANGUAGE_TEST_TIMEOUT_MS = 120000;
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -107,6 +123,8 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
+          hookTimeout: CROSS_LANGUAGE_HOOK_TIMEOUT_MS,
+          testTimeout: CROSS_LANGUAGE_TEST_TIMEOUT_MS,
           alias: {
             '@google/adk': path.resolve(__dirname, './core/src'),
             '@google/adk-integrations': path.resolve(
