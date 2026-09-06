@@ -67,14 +67,14 @@ export interface MockRequest {
  * Base class for mock strategies.
  *
  * A mock strategy answers a tool call with a simulated response, so an agent
- * can be exercised without the tool's real backend. Subclass it and implement
+ * can be exercised without the tool's real backend. Subclass it and override
  * {@link BaseMockStrategy.mock}.
  *
  * WARNING: This feature is **experimental** and its API or behavior may change
  * in future releases.
  */
 @experimental
-export abstract class BaseMockStrategy {
+export class BaseMockStrategy {
   constructor() {
     if (!isFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION)) {
       throw new Error(
@@ -86,10 +86,14 @@ export abstract class BaseMockStrategy {
   /**
    * Generates a mock response for one tool call.
    *
-   * @param request The tool call to answer.
+   * @param _request The tool call to answer.
    * @returns The response to hand back in place of the tool's own.
    */
-  abstract mock(request: MockRequest): Promise<Record<string, unknown>>;
+  async mock(_request: MockRequest): Promise<Record<string, unknown>> {
+    throw new Error(
+      'BaseMockStrategy.mock() is not implemented. Subclass BaseMockStrategy and override mock().',
+    );
+  }
 }
 
 /**

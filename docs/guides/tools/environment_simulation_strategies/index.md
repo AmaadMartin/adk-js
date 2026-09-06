@@ -18,27 +18,23 @@ there, so a later consuming call stays consistent with it. The object is
 mutated in place. `toolConnectionMap`, `environmentData` and `tracing` are
 optional, and describe the wider environment the call happens in.
 
-Two classes ship here. `BaseMockStrategy` is `abstract` and declares `mock()`
-abstract, so a subclass that forgets to implement it fails to compile rather
-than at the first tool call. `TracingMockStrategy` is a placeholder: it carries
-the model name and generation config a real implementation would use, and
-always returns `{status: 'error', errorMessage: 'Not implemented'}`. adk-python
-ships the same placeholder, and its simulation engine builds it for the
-`MOCK_STRATEGY_TRACING` config value.
+Two classes ship here. `BaseMockStrategy` is concrete, and its `mock()` throws
+`Error('BaseMockStrategy.mock() is not implemented. ...')`. A subclass that
+forgets to override `mock()` therefore fails at the first tool call, which is
+what adk-python's `MockStrategy` does. `TracingMockStrategy` is a placeholder:
+it carries the model name and generation config a real implementation would
+use, and always returns `{status: 'error', errorMessage: 'Not implemented'}`.
+adk-python ships the same placeholder, and its simulation engine builds it for
+the `MOCK_STRATEGY_TRACING` config value.
 
-Construction requires the `ENVIRONMENT_SIMULATION` feature. The feature is on
-by default, and constructing a strategy with it off throws
+Construction requires the `ENVIRONMENT_SIMULATION` feature. The feature is
+experimental and on by default. Constructing a strategy with it off throws
 `Error('Feature ENVIRONMENT_SIMULATION is not enabled.')`.
 
 ## Get started
 
 ```ts
-import {
-  BaseMockStrategy,
-  FeatureName,
-  MockRequest,
-  withTemporaryFeatureOverride,
-} from '@google/adk';
+import {BaseMockStrategy, MockRequest} from '@google/adk';
 
 class AlwaysSunnyStrategy extends BaseMockStrategy {
   override async mock(request: MockRequest): Promise<Record<string, unknown>> {
@@ -51,25 +47,19 @@ class AlwaysSunnyStrategy extends BaseMockStrategy {
   }
 }
 
-const response = await withTemporaryFeatureOverride(
-  FeatureName.ENVIRONMENT_SIMULATION,
-  true,
-  async () => {
-    const strategy = new AlwaysSunnyStrategy();
-    return strategy.mock({
-      tool: weatherTool,
-      args: {city: 'Zurich'},
-      toolContext,
-      stateStore: {},
-    });
-  },
-);
+const response = await new AlwaysSunnyStrategy().mock({
+  tool: weatherTool,
+  args: {city: 'Zurich'},
+  toolContext,
+  stateStore: {},
+});
 ```
 
-`withTemporaryFeatureOverride` restores the previous setting when the callback
-finishes. To enable the feature for a whole process instead, set the
-`ADK_ENABLE_ENVIRONMENT_SIMULATION` environment variable, or call
-`overrideFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION, true)`.
+To turn the feature off, set the `ADK_DISABLE_ENVIRONMENT_SIMULATION`
+environment variable, or call
+`overrideFeatureEnabled(FeatureName.ENVIRONMENT_SIMULATION, false)`. In a test,
+`withTemporaryFeatureOverride` restores the previous setting when its callback
+finishes.
 
 ## Keeping simulated calls consistent
 
