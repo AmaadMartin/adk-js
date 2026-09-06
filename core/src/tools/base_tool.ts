@@ -6,6 +6,10 @@
 
 import {FunctionDeclaration, Tool} from '@google/genai';
 
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../errors/tool_execution_error.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {getGoogleLlmVariant} from '../utils/variant_utils.js';
 
@@ -35,6 +39,16 @@ export interface BaseToolParams {
   description: string;
   isLongRunning?: boolean;
 }
+
+/**
+ * The declared args of one tool in a configuration file.
+ *
+ * Structural (`object`) rather than an index signature on purpose: a subclass
+ * that narrows {@link BaseTool.fromConfig} to its own config interface must
+ * stay assignable to this type, and a TypeScript interface is not assignable
+ * to an index-signature type.
+ */
+export type ToolArgsConfig = object;
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -87,6 +101,19 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Internal and unstable — framework code sets this, external code must not.
+   *
+   * When true, the framework skips the automatic `FunctionResponse` build for
+   * a call whose `runAsync` resolves to nothing, because another orchestrator
+   * emits the matching response later in the conversation. A `runAsync` that
+   * resolves to a value is handled normally.
+   *
+   * Unlike {@link isLongRunning}, which shares the skip-on-empty behaviour,
+   * this does not add the call id to `event.longRunningToolIds`.
+   */
+  defersResponse = false;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
@@ -95,6 +122,38 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
+  }
+
+  /**
+   * Builds a tool from its declared args in a configuration file.
+   *
+   * The returned tool is an instance of the class this was called on, so
+   * `MyTool.fromConfig(...)` resolves to a `MyTool`. The default
+   * implementation forwards every config entry to the constructor after
+   * checking the entries `BaseTool` itself reads. A subclass whose
+   * constructor needs more than a plain forward overrides this method.
+   *
+   * @param config The tool's declared args. A config file is a trust
+   *   boundary, so the declared shape is checked rather than assumed.
+   * @param _configAbsPath The absolute path of the config file the
+   *   declaration came from. Unused here — no entry `BaseTool` reads names a
+   *   file — and accepted so one loader can call every tool's `fromConfig`
+   *   the same way.
+   * @return The tool instance.
+   * @throws {ToolExecutionError} If the config does not declare a non-empty
+   *   `name` and a `description`.
+   */
+  static async fromConfig(
+    config: ToolArgsConfig,
+    _configAbsPath?: string,
+  ): Promise<BaseTool> {
+    // Constructing the receiving class from a config bag is unsound by
+    // nature, so the assertion cannot be typed away. Annotating `this`
+    // instead rejects any subclass whose constructor takes extra required
+    // params (TS2684), and returning a generic `T` breaks every subclass that
+    // narrows this signature (TS2417).
+    const ctor = this as unknown as new (params: BaseToolParams) => BaseTool;
+    return new ctor(toBaseToolParams(config));
   }
 
   /**
@@ -198,6 +257,43 @@ export abstract class BaseTool {
   get apiVariant() {
     return getGoogleLlmVariant();
   }
+}
+
+/**
+ * The config is rejected without echoing it back: a tool's declared args can
+ * carry credentials.
+ */
+function invalidToolConfig(requirement: string): ToolExecutionError {
+  return new ToolExecutionError(
+    `Invalid tool config: ${requirement}.`,
+    ToolErrorType.BAD_REQUEST,
+  );
+}
+
+/**
+ * Checks the config entries `BaseTool` reads and returns the constructor
+ * params. Unrecognized entries pass through untouched, so a subclass whose
+ * params object carries extra fields still receives them.
+ *
+ * The runtime checks are not redundant with the declared type: a loader
+ * parses a config file, so what arrives is whatever the file held.
+ */
+function toBaseToolParams(config: ToolArgsConfig): BaseToolParams {
+  if (typeof config !== 'object' || config === null) {
+    throw invalidToolConfig('the config must be a non-null object');
+  }
+  const entries: Record<string, unknown> = {...config};
+  const {name, description, isLongRunning} = entries;
+  if (typeof name !== 'string' || name === '') {
+    throw invalidToolConfig('`name` must be a non-empty string');
+  }
+  if (typeof description !== 'string') {
+    throw invalidToolConfig('`description` must be a string');
+  }
+  if (isLongRunning !== undefined && typeof isLongRunning !== 'boolean') {
+    throw invalidToolConfig('`isLongRunning` must be a boolean');
+  }
+  return {...entries, name, description, isLongRunning};
 }
 
 function findToolWithFunctionDeclarations(

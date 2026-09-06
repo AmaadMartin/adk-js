@@ -135,6 +135,27 @@ function createStartJobTool(mutate: (toolContext: Context) => void) {
   });
 }
 
+/**
+ * Builds a tool that defers its response. The flag is assigned after
+ * construction because it is not a tool option: framework-internal tools set
+ * it, and `FunctionTool` does not accept it.
+ */
+function createDeferringTool(
+  execute: (
+    args: Record<string, never>,
+    toolContext?: Context,
+  ) => Promise<unknown>,
+) {
+  const tool = new FunctionTool({
+    name: 'delegate',
+    description: 'delegates the call and answers it later',
+    parameters: z.object({}),
+    execute,
+  });
+  tool.defersResponse = true;
+  return tool;
+}
+
 describe('handleFunctionCallList', () => {
   let invocationContext: InvocationContext;
   let pluginManager: PluginManager;
@@ -775,6 +796,87 @@ describe('handleFunctionCallList', () => {
       status: 'pending',
     });
     expect(event!.actions.stateDelta).toEqual({jobStarted: true});
+  });
+
+  it.each([
+    ['undefined', async () => undefined],
+    ['null', async () => null],
+  ])(
+    'should emit no event when a deferring tool returns %s',
+    async (_label, execute) => {
+      const delegate = createDeferringTool(execute);
+
+      const event = await handleFunctionCallList({
+        invocationContext,
+        functionCalls: [callFor(delegate)],
+        toolsDict: {delegate},
+        beforeToolCallbacks: [],
+        afterToolCallbacks: [],
+      });
+
+      expect(event).toBeNull();
+    },
+  );
+
+  it('should emit the function response of a deferring tool that does respond', async () => {
+    const delegate = createDeferringTool(async () => ({status: 'answered'}));
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(delegate)],
+      toolsDict: {delegate},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      status: 'answered',
+    });
+  });
+
+  it('should emit the function response of a deferring tool that returns an empty string', async () => {
+    const delegate = createDeferringTool(async () => '');
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(delegate)],
+      toolsDict: {delegate},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content!.parts![0].functionResponse!.response).toEqual({
+      result: '',
+    });
+  });
+
+  it('should emit a content-less event carrying the actions of a silent deferring tool', async () => {
+    const delegate = createDeferringTool(async (_args, toolContext) => {
+      toolContext!.state.set('delegated', true);
+      return undefined;
+    });
+
+    const event = await handleFunctionCallList({
+      invocationContext,
+      functionCalls: [callFor(delegate)],
+      toolsDict: {delegate},
+      beforeToolCallbacks: [],
+      afterToolCallbacks: [],
+    });
+
+    expect(event!.content).toBeUndefined();
+    expect(event!.actions.stateDelta).toEqual({delegated: true});
+  });
+});
+
+describe('getLongRunningFunctionCalls with a deferring tool', () => {
+  it('should not mark the call of a deferring tool as long running', () => {
+    const delegate = createDeferringTool(async () => undefined);
+    const call = {id: 'defer_1', name: delegate.name, args: {}};
+
+    const ids = getLongRunningFunctionCalls([call], {delegate});
+
+    expect(ids.size).toBe(0);
   });
 });
 
