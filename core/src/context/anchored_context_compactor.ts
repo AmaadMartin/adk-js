@@ -95,8 +95,9 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
   async compact(invocationContext: InvocationContext): Promise<void> {
     const events = invocationContext.session.events;
     const activeEvents = this.getActiveEvents(events);
+    const firstEvent = activeEvents[0];
     const hasScratchpad =
-      activeEvents.length > 0 && isScratchpadEvent(activeEvents[0]);
+      activeEvents.length > 0 && isScratchpadEvent(firstEvent);
     const rawEvents = hasScratchpad ? activeEvents.slice(1) : activeEvents;
 
     if (rawEvents.length <= this.eventRetentionSize) {
@@ -118,9 +119,8 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     let scratchpadEvent: CompactedEvent;
 
     if (hasScratchpad) {
-      const existingScratchpad = activeEvents[0] as CompactedEvent;
       scratchpadEvent = await this.summarizer.summarize([
-        existingScratchpad,
+        firstEvent,
         ...rawEventsToCompact,
       ]);
     } else {
@@ -128,11 +128,11 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
     }
 
     // Ensure the event is marked as scratchpad and has system author.
-    const updatedScratchpad = {
+    const updatedScratchpad: CompactedEvent = {
       ...scratchpadEvent,
       isScratchpad: true,
       author: 'system',
-    } as CompactedEvent;
+    };
 
     // Reconstruct the events list: inactive events + new scratchpad + active retained events
     const inactiveEvents = events.slice(0, events.indexOf(activeEvents[0]));

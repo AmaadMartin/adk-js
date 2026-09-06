@@ -11,15 +11,16 @@ import {
   isScratchpadEvent,
 } from '@google/adk';
 import {createUserContent} from '@google/genai';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, assert, beforeEach, describe, expect, it, vi} from 'vitest';
 import {GeminiWithMockResponses} from '../../test_case_utils.js';
 import {rootAgent} from './agent.js';
 
 function getActiveEvents(events: Event[]): Event[] {
   let scratchpad: CompactedEvent | undefined = undefined;
   for (let i = events.length - 1; i >= 0; i--) {
-    if (isScratchpadEvent(events[i])) {
-      scratchpad = events[i] as CompactedEvent;
+    const event = events[i];
+    if (isScratchpadEvent(event)) {
+      scratchpad = event;
       break;
     }
   }
@@ -158,9 +159,12 @@ describe('Anchored Context Compaction', () => {
     let activeEvents = getActiveEvents(updatedSession!.events);
 
     expect(activeEvents.length).toBe(4); // Scratchpad + Retained Model 2 + Turn 3 User + Turn 3 Model
-    expect(isScratchpadEvent(activeEvents[0])).toBe(true);
+    assert(
+      isScratchpadEvent(activeEvents[0]),
+      'the first active event should be the scratchpad',
+    );
     expect(activeEvents[0].author).toBe('system');
-    expect((activeEvents[0] as CompactedEvent).compactedContent).toBe(
+    expect(activeEvents[0].compactedContent).toBe(
       'Compacted summary of turn 1 and 2.',
     );
     expect(activeEvents[1].content?.parts?.[0].text).toBe(
@@ -191,9 +195,12 @@ describe('Anchored Context Compaction', () => {
     activeEvents = getActiveEvents(updatedSession!.events);
 
     expect(activeEvents.length).toBe(4); // Scratchpad 2 + Retained Model 3 + Turn 4 User + Turn 4 Model
-    expect(isScratchpadEvent(activeEvents[0])).toBe(true);
+    assert(
+      isScratchpadEvent(activeEvents[0]),
+      'the first active event should be the scratchpad',
+    );
     expect(activeEvents[0].author).toBe('system');
-    expect((activeEvents[0] as CompactedEvent).compactedContent).toBe(
+    expect(activeEvents[0].compactedContent).toBe(
       'Compacted summary including turn 3 and 4.',
     );
     expect(activeEvents[1].content?.parts?.[0].text).toBe(
