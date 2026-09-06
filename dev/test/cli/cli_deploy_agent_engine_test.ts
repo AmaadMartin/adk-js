@@ -12,12 +12,17 @@ import {
   deployToAgentEngine,
   DeployToAgentEngineOptions,
 } from '../../src/cli/deploy/cli_deploy_agent_engine.js';
+import {
+  ARTIFACT_SERVICE_URI_ENV_VAR,
+  SESSION_SERVICE_URI_ENV_VAR,
+} from '../../src/cli/deploy/deploy_utils.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   createTempDir,
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
@@ -26,6 +31,10 @@ declare global {
 }
 
 const mockReaddir = vi.hoisted(() => vi.fn().mockResolvedValue(['file1.js']));
+
+const SESSION_URI_PASSWORD = 'sw0rdf1sh';
+const CREDENTIALED_SESSION_URI = `postgresql://adk:${SESSION_URI_PASSWORD}@db.example:5432/adk`;
+const ARTIFACT_URI = 'gs://private-bucket';
 
 type Callback = (error: Error | null, result?: unknown) => void;
 
@@ -368,10 +377,70 @@ describe('deployToAgentEngine', () => {
               cpu: '1',
               memory: '2Gi',
             },
+            env: [
+              {
+                name: SESSION_SERVICE_URI_ENV_VAR,
+                value: 'http://session-service',
+              },
+              {
+                name: ARTIFACT_SERVICE_URI_ENV_VAR,
+                value: 'http://artifact-service',
+              },
+            ],
           },
         },
       },
     });
+  });
+
+  it('should set the service URIs as deployment environment variables', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      sessionServiceUri: CREDENTIALED_SESSION_URI,
+      artifactServiceUri: ARTIFACT_URI,
+    });
+
+    expect(mockCreateInternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          spec: expect.objectContaining({
+            deploymentSpec: expect.objectContaining({
+              env: [
+                {
+                  name: SESSION_SERVICE_URI_ENV_VAR,
+                  value: CREDENTIALED_SESSION_URI,
+                },
+                {name: ARTIFACT_SERVICE_URI_ENV_VAR, value: ARTIFACT_URI},
+              ],
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('should not write the service URIs into the image it builds', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      sessionServiceUri: CREDENTIALED_SESSION_URI,
+      artifactServiceUri: ARTIFACT_URI,
+    });
+
+    const call = vi
+      .mocked(saveToFile)
+      .mock.calls.find(([filePath]) => filePath.endsWith('Dockerfile'));
+    if (!call) {
+      expect.fail('no Dockerfile path was passed to saveToFile');
+    }
+    const [, dockerfile] = call;
+    if (typeof dockerfile !== 'string') {
+      expect.fail(`Dockerfile content was written as ${typeof dockerfile}`);
+    }
+    expect(dockerfile).toContain(
+      `--session_service_uri="$${SESSION_SERVICE_URI_ENV_VAR}"`,
+    );
+    expect(dockerfile).not.toContain(SESSION_URI_PASSWORD);
+    expect(dockerfile).not.toContain(ARTIFACT_URI);
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {
