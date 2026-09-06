@@ -24,6 +24,16 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {BigQueryAgentAnalyticsPlugin} from './plugins/bigquery_agent_analytics_plugin.js';
+export type {
+  AnalyticsContentFormatter,
+  AnalyticsRetryConfig,
+  BigQueryAgentAnalyticsPluginOptions,
+  BigQueryLoggerConfig,
+} from './plugins/bigquery_analytics_config.js';
+export {AnalyticsEventType} from './plugins/bigquery_analytics_schema.js';
+export {AnalyticsDropReason} from './plugins/bigquery_analytics_writer.js';
+export type {BigQueryCredentials} from './plugins/bigquery_analytics_writer.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';

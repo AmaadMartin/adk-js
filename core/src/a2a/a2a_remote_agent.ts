@@ -114,6 +114,28 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
 }
 
 /**
+ * A unique symbol to identify ADK remote A2A agent classes.
+ * Defined once and shared by all RemoteA2AAgent instances.
+ */
+const REMOTE_A2A_AGENT_SIGNATURE_SYMBOL = Symbol.for(
+  'google.adk.remoteA2aAgent',
+);
+
+/**
+ * Type guard to check if an object is an instance of RemoteA2AAgent.
+ * @param obj The object to check.
+ * @returns True if the object is an instance of RemoteA2AAgent, false otherwise.
+ */
+export function isRemoteA2AAgent(obj: unknown): obj is RemoteA2AAgent {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    REMOTE_A2A_AGENT_SIGNATURE_SYMBOL in obj &&
+    obj[REMOTE_A2A_AGENT_SIGNATURE_SYMBOL] === true
+  );
+}
+
+/**
  * RemoteA2AAgent delegates execution to a remote agent using the A2A protocol.
  *
  * @remarks
@@ -121,6 +143,9 @@ export interface RemoteA2AAgentConfig extends BaseAgentConfig {
  * uninitialized instance that re-resolves its client and card on first use.
  */
 export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
+  /** A unique symbol to identify ADK remote A2A agent class. */
+  readonly [REMOTE_A2A_AGENT_SIGNATURE_SYMBOL] = true;
+
   private client?: Client;
   private card?: AgentCard;
   private isInitialized = false;

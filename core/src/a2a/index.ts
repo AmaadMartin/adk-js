@@ -9,7 +9,11 @@
  * Also re-exported from `@google/adk`.
  */
 
-export {AGENT_CARD_PATH, RemoteA2AAgent} from './a2a_remote_agent.js';
+export {
+  AGENT_CARD_PATH,
+  RemoteA2AAgent,
+  isRemoteA2AAgent,
+} from './a2a_remote_agent.js';
 export type {
   A2AStreamEventData,
   AfterA2ARequestCallback,
