@@ -4,37 +4,196 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../../agents/context.js';
-import {AuthCredential} from '../../../auth/auth_credential.js';
+import {
+  AuthCredential,
+  AuthCredentialTypes,
+} from '../../../auth/auth_credential.js';
+import {AuthScheme, OAuthGrantType} from '../../../auth/auth_schemes.js';
 import {AuthConfig} from '../../../auth/auth_tool.js';
+import {
+  credentialIdentity,
+  deriveCredentialKey,
+} from '../../../auth/credential_key.js';
+import {
+  AuthCredentialMissingError,
+  BaseCredentialExchanger,
+  ExchangeResult,
+} from '../../../auth/exchanger/base_credential_exchanger.js';
+import {determineGrantType} from '../../../auth/oauth2/oauth2_credential_exchanger.js';
+import {OAuth2CredentialRefresher} from '../../../auth/oauth2/oauth2_credential_refresher.js';
+import {formatError} from '../../../utils/error_utils.js';
 import {experimental} from '../../../utils/experimental.js';
+import {logger} from '../../../utils/logger.js';
 import {AutoAuthCredentialExchanger} from '../auth/credential_exchangers/auto_auth_credential_exchanger.js';
 
+/** What {@link ToolAuthHandler.prepareAuthCredentials} resolved to. */
 export interface AuthPreparationResult {
+  /** Whether the tool can authenticate now, or waits for a credential. */
   state: 'pending' | 'done';
+  authScheme?: AuthScheme;
   authCredential?: AuthCredential;
 }
 
-class ToolContextCredentialStore {
+/**
+ * Reads and writes the credential a tool has already obtained.
+ *
+ * This is a structural interface, so any object of this shape can be injected:
+ * an in-memory store in a test, or a store backed by a secret manager.
+ */
+export interface CredentialStore {
+  /** Returns the key the credential for this pair is stored under. */
+  getCredentialKey(
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<string>;
+
+  /** Returns the stored credential for this pair, if there is one. */
+  getCredential(
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<AuthCredential | undefined>;
+
+  /** Stores a credential under `key`. */
+  storeCredential(key: string, credential: AuthCredential): Promise<void>;
+}
+
+/** Options for {@link ToolAuthHandler}. */
+export interface ToolAuthHandlerOptions {
+  /** Names the key the credential is stored and requested under. */
+  credentialKey?: string;
+  /** Exchanges the credential. Defaults to an exchanger picked by type. */
+  credentialExchanger?: BaseCredentialExchanger;
+  /** Holds the credential between tool calls. Defaults to the session state. */
+  credentialStore?: CredentialStore;
+}
+
+/** Scheme types that authenticate through an OAuth2 authorization server. */
+const OAUTH_SCHEME_TYPES: ReadonlySet<string> = new Set([
+  'oauth2',
+  'openIdConnect',
+]);
+
+/** Credential types that carry an `oauth2` block. */
+const OAUTH_CREDENTIAL_TYPES: ReadonlySet<AuthCredentialTypes> = new Set([
+  AuthCredentialTypes.OAUTH2,
+  AuthCredentialTypes.OPEN_ID_CONNECT,
+]);
+
+/** Suffix of the session state key holding a tool's credential. */
+const STORE_KEY_SUFFIX = '_existing_exchanged_credential';
+
+function isOAuthScheme(authScheme: AuthScheme): boolean {
+  return OAUTH_SCHEME_TYPES.has(authScheme.type);
+}
+
+/**
+ * Reports whether the client has to supply a credential before the tool can
+ * authenticate.
+ *
+ * An OAuth2 or OpenID Connect credential holding no access token needs a
+ * consent round trip. The `client_credentials` grant is the exception, and a
+ * deliberate divergence from adk-python: adk-js exchanges that grant itself,
+ * machine to machine, so routing it to the client would strand the tool in
+ * `pending` for a user who has nothing to approve.
+ */
+function externalExchangeRequired(
+  authScheme: AuthScheme,
+  credential: AuthCredential,
+): boolean {
+  if (!OAUTH_CREDENTIAL_TYPES.has(credential.authType)) {
+    return false;
+  }
+  if (credential.oauth2?.accessToken) {
+    return false;
+  }
+  return determineGrantType(authScheme) !== OAuthGrantType.CLIENT_CREDENTIALS;
+}
+
+/**
+ * Throws when the credential a consent round trip needs is absent or
+ * incomplete. The authorization server rejects the round trip without a client
+ * id and a client secret, so the tool cannot recover from either being
+ * missing.
+ */
+function assertConsentCredentialComplete(
+  authScheme: AuthScheme,
+  authCredential?: AuthCredential,
+): void {
+  if (!isOAuthScheme(authScheme)) {
+    return;
+  }
+  const oauth2 = authCredential?.oauth2;
+  if (!oauth2) {
+    throw new Error(
+      `auth credential is empty for scheme ${authScheme.type}. Create an ` +
+        'AuthCredential with an oauth2 field.',
+    );
+  }
+  if (!oauth2.clientId) {
+    throw new AuthCredentialMissingError(
+      'OAuth2 credentials clientId is missing.',
+    );
+  }
+  if (!oauth2.clientSecret) {
+    throw new AuthCredentialMissingError(
+      'OAuth2 credentials clientSecret is missing.',
+    );
+  }
+}
+
+/** Holds a tool's credential in the session state. */
+export class ToolContextCredentialStore implements CredentialStore {
   constructor(private readonly context: Context) {}
 
-  getCredentialKey(authScheme?: OpenAPIV3.SecuritySchemeObject): string {
-    const schemeName = authScheme?.type || 'default';
-    return `${schemeName}_existing_exchanged_credential`;
+  async getCredentialKey(
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<string> {
+    const identity = await credentialIdentity(authScheme, authCredential);
+    return `${identity}${STORE_KEY_SUFFIX}`;
   }
 
-  getCredential(
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
-  ): AuthCredential | undefined {
-    const key = this.getCredentialKey(authScheme);
+  /**
+   * Returns the key earlier releases stored the credential under, which was
+   * derived from the scheme type alone.
+   */
+  getLegacyCredentialKey(authScheme?: AuthScheme): string {
+    return `${authScheme?.type ?? 'default'}${STORE_KEY_SUFFIX}`;
+  }
+
+  async getCredential(
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
+  ): Promise<AuthCredential | undefined> {
+    const key = await this.getCredentialKey(authScheme, authCredential);
     // Read through the State API so we see values persisted from previous
     // tool calls. `context.state` is a `State` instance, not a plain object;
     // bracket access would bypass its value/delta store and always miss.
-    return this.context.state.get<AuthCredential>(key);
+    const stored = this.context.state.get<AuthCredential>(key);
+    if (stored) {
+      return stored;
+    }
+
+    // The two formats never collide: a derived key always carries a scheme
+    // digest and a credential digest, and the legacy key has neither.
+    const legacyKey = this.getLegacyCredentialKey(authScheme);
+    const legacy = this.context.state.get<AuthCredential>(legacyKey);
+    if (!legacy) {
+      return undefined;
+    }
+
+    // Copy the credential to the current key rather than moving it, so that a
+    // rollback to an earlier release still finds it.
+    logger.debug('Migrating a tool credential from the legacy key.');
+    this.context.state.set(key, legacy);
+    return legacy;
   }
 
-  storeCredential(key: string, credential: AuthCredential) {
+  async storeCredential(
+    key: string,
+    credential: AuthCredential,
+  ): Promise<void> {
     // Use State.set so the credential is recorded in the state delta and
     // persisted to the session. A plain assignment (`state[key] = ...`) sets
     // an own property on the State instance that is never committed, so the
@@ -45,78 +204,139 @@ class ToolContextCredentialStore {
 
 @experimental
 export class ToolAuthHandler {
+  private readonly authScheme?: AuthScheme;
+  private readonly authCredential?: AuthCredential;
+  private readonly credentialExchanger: BaseCredentialExchanger;
+  private readonly credentialStore: CredentialStore;
+  private readonly credentialKey?: string;
+
   constructor(
     private readonly context: Context,
-    private readonly authScheme?: OpenAPIV3.SecuritySchemeObject,
-    private readonly authCredential?: AuthCredential,
-    private readonly credentialKey?: string,
-  ) {}
+    authScheme?: AuthScheme,
+    authCredential?: AuthCredential,
+    options: ToolAuthHandlerOptions = {},
+  ) {
+    // Copy both, because the storage key is derived from them. A caller that
+    // mutates its credential after construction would otherwise re-point the
+    // handler at a different storage slot mid-invocation.
+    this.authScheme = authScheme ? structuredClone(authScheme) : undefined;
+    this.authCredential = authCredential
+      ? structuredClone(authCredential)
+      : undefined;
+    this.credentialExchanger =
+      options.credentialExchanger ?? new AutoAuthCredentialExchanger();
+    this.credentialStore =
+      options.credentialStore ?? new ToolContextCredentialStore(context);
+    this.credentialKey = options.credentialKey;
+  }
 
   @experimental
   public static fromToolContext(
     context: Context,
-    authScheme?: OpenAPIV3.SecuritySchemeObject,
+    authScheme?: AuthScheme,
     authCredential?: AuthCredential,
-    options: {credentialKey?: string} = {},
+    options: ToolAuthHandlerOptions = {},
   ): ToolAuthHandler {
-    return new ToolAuthHandler(
-      context,
-      authScheme,
-      authCredential,
-      options.credentialKey,
-    );
+    return new ToolAuthHandler(context, authScheme, authCredential, options);
   }
 
   @experimental
   public async prepareAuthCredentials(): Promise<AuthPreparationResult> {
-    if (!this.authScheme) {
+    const authScheme = this.authScheme;
+    if (!authScheme) {
       return {state: 'done'};
     }
 
-    const store = new ToolContextCredentialStore(this.context);
-    const existingCredential = store.getCredential(this.authScheme);
+    const existing = await this.getExistingCredential();
+    let credential = existing ?? this.authCredential;
+    let fromAuthResponse = false;
 
-    if (existingCredential) {
-      return {state: 'done', authCredential: existingCredential};
+    // OAuth2 authorization code and OpenID Connect need a multi-step exchange
+    // that only the client can complete: client id and secret, then an
+    // authorization code, then an access token.
+    if (!credential || externalExchangeRequired(authScheme, credential)) {
+      const authConfig = await this.buildAuthConfig(authScheme);
+      credential = this.context.getAuthResponse(authConfig);
+      if (!credential) {
+        assertConsentCredentialComplete(authScheme, this.authCredential);
+        this.context.requestCredential(authConfig);
+        return {
+          state: 'pending',
+          authScheme,
+          authCredential: this.authCredential,
+        };
+      }
+      // Store what the client supplied before exchanging it. That is the
+      // durable credential: it carries the refresh token a later invocation
+      // refreshes with, which the exchanged credential does not.
+      fromAuthResponse = true;
+      await this.storeCredential(credential);
     }
 
-    const authConfig: AuthConfig = {
-      authScheme: this.authScheme,
+    let result: ExchangeResult;
+    try {
+      result = await this.credentialExchanger.exchange({
+        authScheme,
+        authCredential: credential,
+      });
+    } catch (error: unknown) {
+      // An exchange fails for environmental reasons far more often than for
+      // programming ones: expired application default credentials, an
+      // unreachable metadata server, a token endpoint that refused the
+      // request. Rejecting here would abort the whole invocation, so the tool
+      // calls the API unauthenticated and reports what the API says.
+      logger.error(`Failed to exchange credential: ${formatError(error)}`);
+      return {state: 'done', authScheme};
+    }
+
+    // An exchange costs a round trip, so its result is worth persisting. The
+    // auth response path already stored the credential it has to keep.
+    if (result.wasExchanged && !fromAuthResponse) {
+      await this.storeCredential(result.credential);
+    }
+
+    return {state: 'done', authScheme, authCredential: result.credential};
+  }
+
+  private async buildAuthConfig(authScheme: AuthScheme): Promise<AuthConfig> {
+    return {
+      authScheme,
       rawAuthCredential: this.authCredential,
-      credentialKey: this.credentialKey || 'default_openapi_key',
+      // The auth response lands in `temp:<credentialKey>`, so a key shared by
+      // every OpenAPI tool would let one tool consume another tool's response.
+      credentialKey:
+        this.credentialKey ??
+        (await deriveCredentialKey(authScheme, this.authCredential)),
     };
+  }
 
-    // A credential returned by an auth response was supplied interactively by
-    // the client. Otherwise fall back to the credential the tool was
-    // configured with: schemes such as `apiKey`, `http` and `serviceAccount`
-    // need no user interaction, so requesting one would strand the tool in
-    // `pending` forever.
-    const authResponseCredential = this.context.getAuthResponse(authConfig);
-    const credential = authResponseCredential ?? this.authCredential;
-
-    if (!credential) {
-      // No credential to work with, so ask the client for one.
-      this.context.requestCredential(authConfig);
-
-      return {state: 'pending'};
+  /** Returns the stored credential, refreshed and re-stored when expired. */
+  private async getExistingCredential(): Promise<AuthCredential | undefined> {
+    const existing = await this.credentialStore.getCredential(
+      this.authScheme,
+      this.authCredential,
+    );
+    if (!existing?.oauth2) {
+      return existing;
     }
 
-    const exchanger = new AutoAuthCredentialExchanger();
-    const result = await exchanger.exchange({
-      authScheme: this.authScheme,
-      authCredential: credential,
-    });
-
-    // Only cache what cannot cheaply be obtained again: an auth response is
-    // readable once, and an exchange costs a round trip. A statically
-    // configured credential that needed no exchange is already available on
-    // every invocation, so persisting it to session state would only copy a
-    // secret into the session store for nothing.
-    if (authResponseCredential || result.wasExchanged) {
-      const key = store.getCredentialKey(this.authScheme);
-      store.storeCredential(key, result.credential);
+    const refresher = new OAuth2CredentialRefresher();
+    if (!(await refresher.isRefreshNeeded(existing))) {
+      return existing;
     }
 
-    return {state: 'done', authCredential: result.credential};
+    // Persist the refreshed credential, so a provider that rotates its refresh
+    // token on every refresh does not invalidate the stored one.
+    const refreshed = await refresher.refresh(existing, this.authScheme);
+    await this.storeCredential(refreshed);
+    return refreshed;
+  }
+
+  private async storeCredential(credential: AuthCredential): Promise<void> {
+    const key = await this.credentialStore.getCredentialKey(
+      this.authScheme,
+      this.authCredential,
+    );
+    await this.credentialStore.storeCredential(key, credential);
   }
 }
