@@ -80,3 +80,30 @@ export function redactUriPassword(uri: string): string {
       : `${uri.slice(0, schemeEnd)}://<unparseable URI, redacted>`;
   }
 }
+
+/**
+ * Returns an identifier for a URI that is safe to write to a log.
+ *
+ * Unlike {@link redactUriPassword}, which keeps everything it does not
+ * recognise as a secret, this keeps only the scheme and the last path segment.
+ * A signed URL carries its credential in a query parameter whose name varies
+ * by provider, so dropping the whole authority and query is the only way to be
+ * sure none of it is logged. What survives is enough to recognise the file.
+ *
+ * Returns `<unknown>` for a string that is not a parseable URI, rather than
+ * echoing it.
+ */
+export function redactUriForLog(uri: string): string {
+  let scheme: string;
+  let path: string;
+  try {
+    const url = new URL(uri);
+    scheme = url.protocol.replace(/:$/, '');
+    path = url.pathname;
+  } catch {
+    return '<unknown>';
+  }
+  const segments = path.split('/').filter(Boolean);
+  const tail = segments[segments.length - 1];
+  return tail ? `${scheme}://<redacted>/${tail}` : `${scheme}://<redacted>`;
+}

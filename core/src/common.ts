@@ -14,6 +14,7 @@ export type {
   SingleAgentCallback,
 } from './agents/base_agent.js';
 export {Context} from './agents/context.js';
+export type {ContextCacheConfig} from './agents/context_cache_config.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
@@ -212,6 +213,42 @@ export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
+export {LiteLlm} from './models/lite_llm.js';
+export type {LiteLlmParams} from './models/lite_llm.js';
+export {FetchLiteLlmClient} from './models/lite_llm_client.js';
+export type {
+  FetchLiteLlmClientParams,
+  LiteLlmClient,
+} from './models/lite_llm_client.js';
+export type {
+  AudioContentObject,
+  CacheControl,
+  CacheControlInjectionPoint,
+  ChatMessage,
+  Choice,
+  CompletionArgs,
+  CompletionTokensDetails,
+  ContentObject,
+  FileContentObject,
+  FileUrlObject,
+  ImageContentObject,
+  MessageContent,
+  MessageRole,
+  ModelResponse,
+  ModelResponseStream,
+  PromptTokensDetails,
+  RawUsage,
+  StreamChoice,
+  TextContentObject,
+  ThinkingBlock,
+  ToolCall,
+  ToolCallFunction,
+  ToolChoice,
+  ToolParam,
+  ToolSpec,
+  Usage,
+  VideoContentObject,
+} from './models/lite_llm_types.js';
 export type {LlmRequest} from './models/llm_request.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
@@ -344,6 +381,7 @@ export type {
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
 export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export type {JsonObject, JsonValue} from './utils/json_utils.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';

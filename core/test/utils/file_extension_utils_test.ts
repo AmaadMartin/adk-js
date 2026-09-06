@@ -10,8 +10,13 @@ import {
   FileContentEncoding,
 } from '../../src/code_executors/code_execution_utils.js';
 import {
+  audioFormatFromMimeType,
   getMimeTypeAndEncoding,
   getScriptLanguageByExtension,
+  guessMimeTypeFromFileName,
+  inferMimeTypeFromUri,
+  mediaKindFromMimeType,
+  normalizeMimeType,
 } from '../../src/utils/file_extension_utils.js';
 
 describe('getMimeTypeAndEncoding', () => {
@@ -125,5 +130,85 @@ describe('getScriptLanguageByExtension', () => {
         getScriptLanguageByExtension('.sh'),
       );
     });
+  });
+});
+
+describe('normalizeMimeType', () => {
+  it('drops parameters and casing', () => {
+    expect(normalizeMimeType(' Text/Plain; charset=utf-8 ')).toBe('text/plain');
+  });
+});
+
+describe('mediaKindFromMimeType', () => {
+  it.each([
+    ['image/png', 'image'],
+    ['video/mp4', 'video'],
+  ])('maps %s', (mimeType, expected) => {
+    expect(mediaKindFromMimeType(mimeType)).toBe(expected);
+  });
+
+  it.each([['audio/mpeg'], ['application/pdf'], ['text/plain']])(
+    'returns undefined for %s',
+    (mimeType) => {
+      expect(mediaKindFromMimeType(mimeType)).toBeUndefined();
+    },
+  );
+});
+
+describe('audioFormatFromMimeType', () => {
+  it.each([
+    ['audio/mpeg', 'mp3'],
+    ['audio/x-wav', 'wav'],
+    ['audio/wave', 'wav'],
+    ['audio/vnd.wave', 'wav'],
+    ['audio/ogg', 'ogg'],
+    ['audio/x-flac', 'flac'],
+  ])('maps %s to %s', (mimeType, expected) => {
+    expect(audioFormatFromMimeType(mimeType)).toBe(expected);
+  });
+});
+
+describe('guessMimeTypeFromFileName', () => {
+  it('reads a known extension', () => {
+    expect(guessMimeTypeFromFileName('report.PDF')).toBe('application/pdf');
+  });
+
+  it('returns undefined for an unknown extension', () => {
+    expect(guessMimeTypeFromFileName('archive.zzz')).toBeUndefined();
+  });
+
+  it('returns undefined when there is no extension', () => {
+    expect(guessMimeTypeFromFileName('README')).toBeUndefined();
+    expect(guessMimeTypeFromFileName('.hidden')).toBeUndefined();
+  });
+});
+
+describe('inferMimeTypeFromUri', () => {
+  it('reads the extension of the last path segment', () => {
+    expect(inferMimeTypeFromUri('gs://bucket/report.pdf')).toBe(
+      'application/pdf',
+    );
+  });
+
+  it('skips a numeric version segment', () => {
+    expect(inferMimeTypeFromUri('gs://bucket/report.pdf/0')).toBe(
+      'application/pdf',
+    );
+  });
+
+  it('skips a versions/<n> suffix', () => {
+    expect(inferMimeTypeFromUri('gs://bucket/report.pdf/versions/3')).toBe(
+      'application/pdf',
+    );
+  });
+
+  it('reads a path that is not a valid absolute URL', () => {
+    expect(inferMimeTypeFromUri('folder/notes.md?v=1')).toBe('text/markdown');
+  });
+
+  it('returns undefined when the URI has no usable segment', () => {
+    expect(inferMimeTypeFromUri('https://example.com/')).toBeUndefined();
+    expect(inferMimeTypeFromUri('gs://bucket/7')).toBeUndefined();
+    expect(inferMimeTypeFromUri('gs://bucket/versions/7')).toBeUndefined();
   });
 });
