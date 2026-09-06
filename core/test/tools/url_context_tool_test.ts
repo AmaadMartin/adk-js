@@ -4,7 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmAgent,
+  LlmRequest,
+  PluginManager,
+  URL_CONTEXT,
+  UrlContextTool,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
@@ -15,6 +24,21 @@ function makeRequest(model?: string, tools = []): LlmRequest {
     toolsDict: {},
     liveConnectConfig: {},
   } as unknown as LlmRequest;
+}
+
+function makeToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'url-context-test',
+      agent: new LlmAgent({name: 'url_context_test_agent'}),
+      session: createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('UrlContextTool', () => {
@@ -47,6 +71,17 @@ describe('UrlContextTool', () => {
       await tool.processLlmRequest({
         llmRequest: req,
         toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+
+    it('adds urlContext for an EAP model', async () => {
+      const tool = new UrlContextTool();
+      const req = makeRequest('gemini-flash-early-exp');
+      await tool.processLlmRequest({
+        llmRequest: req,
+        toolContext: makeToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);

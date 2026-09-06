@@ -53,6 +53,46 @@ describe('isGemini2OrAbove', () => {
       });
     }
   });
+
+  describe('EAP models', () => {
+    const eapModels = [
+      'gemini-flash-early-exp',
+      'gemini-flash-early-exp3',
+      'gemini-flash-early-exp12',
+      'gemini-flash-lite-early-exp',
+      'gemini-pro-early-exp',
+      'gemini-flash_lite-early-exp',
+      'projects/my-project/locations/us-central1/publishers/google/models/gemini-flash-early-exp',
+    ];
+
+    for (const model of eapModels) {
+      it(`should return true for EAP model: ${model}`, () => {
+        expect(isGemini2OrAbove(model)).toBe(true);
+      });
+    }
+
+    const nonEapModels = [
+      'gemini-flash-early',
+      'gemini-early-exp-flash',
+      'gemini-early-exp',
+      'gemini-flash-early-exp-001',
+      'gemini-Flash-early-exp',
+      'my-gemini-flash-early-exp',
+      'claude-3.7-sonnet',
+    ];
+
+    for (const model of nonEapModels) {
+      it(`should return false for non-EAP model: ${model}`, () => {
+        expect(isGemini2OrAbove(model)).toBe(false);
+      });
+    }
+
+    it('should not let the EAP pattern reclassify a Gemini 1.x model', () => {
+      // The EAP character class excludes '.', so a 1.x name carrying the
+      // suffix cannot match and stays below the 2.0 bar.
+      expect(isGemini2OrAbove('gemini-1.5-flash-early-exp')).toBe(false);
+    });
+  });
 });
 
 describe('isGemini3xFlashLive', () => {
