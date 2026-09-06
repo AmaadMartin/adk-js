@@ -6,7 +6,7 @@
 
 /**
  * The behaviour adk-python's suite does not reach: the config defaults, the
- * missing-engine error, the reflection wiring, and the error paths.
+ * default engine, the reflection wiring, and the error paths.
  */
 
 import {
@@ -201,28 +201,22 @@ describe('GEPARootAgentPromptOptimizer config', () => {
 });
 
 describe('GEPARootAgentPromptOptimizer.optimize', () => {
-  it('refuses to run without an engine and never calls the sampler', async () => {
+  it('runs the bundled engine and scores with the sampler', async () => {
     const sampler = createSampler();
 
-    await expect(
-      new GEPARootAgentPromptOptimizer().optimize({
-        initialAgent: createAgent(),
-        sampler,
-      }),
-    ).rejects.toThrow(
-      'GEPARootAgentPromptOptimizer requires a GEPA engine, which ADK does ' +
-        'not bundle.',
-    );
-    expect(sampler.calls).toHaveLength(0);
-  });
+    const result = await new GEPARootAgentPromptOptimizer({
+      optimizerModel: FAKE_MODEL,
+      maxMetricCalls: 6,
+    }).optimize({initialAgent: createAgent(), sampler});
 
-  it('names the config field that supplies an engine', async () => {
-    await expect(
-      new GEPARootAgentPromptOptimizer().optimize({
-        initialAgent: createAgent(),
-        sampler: createSampler(),
-      }),
-    ).rejects.toThrow(/`config\.engine`/);
+    expect(sampler.calls[0].exampleSet).toBe('validation');
+    expect(sampler.calls[0].batch).toEqual(VALIDATION_IDS);
+    expect(sampler.calls.length).toBeGreaterThan(1);
+    expect(
+      result.optimizedAgents.map(
+        ({optimizedAgent}) => optimizedAgent.instruction,
+      ),
+    ).toEqual(['Initial instruction']);
   });
 
   it('warns that it leaves sub-agent instructions alone', async () => {
