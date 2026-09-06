@@ -347,6 +347,79 @@ describe('RequestDrivenMetricReader lifecycle', () => {
     await meterProvider.shutdown();
   });
 
+  it('measures overdue from the current busy period, not an older collect', async () => {
+    // A collect from an earlier busy period must not make a fresh short
+    // request look overdue. Otherwise point 4 fires on that request's first
+    // inference span, stamps the floor, and mutes the drain that carries its
+    // points.
+    const {clock, reader, meterProvider} = createFixture();
+
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 5_000;
+    expect(reader.noteRequestEnd()).toBe(true);
+    await reader.submitCollect();
+
+    // A long idle gap, then a short request.
+    clock.t = 100_000;
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 101_000;
+    expect(reader.noteGenerateContentStart()).toBe(false);
+
+    // Once this busy period itself runs long, point 4 does fire.
+    clock.t = 115_000;
+    expect(reader.noteGenerateContentStart()).toBe(true);
+
+    await meterProvider.shutdown();
+  });
+
+  it('advances the guidepost grid past a collect', async () => {
+    const {clock, reader, meterProvider} = createFixture();
+
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 11_000;
+    // The guidepost at 10000 fires here, and the grid moves to 20000.
+    expect(reader.noteRequestStart()).toBe(true);
+    await reader.submitCollect();
+
+    clock.t = 14_000;
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 19_999;
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 20_000;
+    expect(reader.noteRequestStart()).toBe(true);
+
+    await meterProvider.shutdown();
+  });
+
+  it('defers a muted guidepost by a whole period', async () => {
+    // Point 3 skips the guidepost, so the next start does not pick it up as
+    // soon as the floor allows; it waits for the following guidepost.
+    const {clock, exporter, reader, meterProvider} = createFixture();
+
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 9_000;
+    expect(reader.noteRequestEnd()).toBe(true);
+    await reader.submitCollect();
+
+    clock.t = 9_500;
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 10_000;
+    // The guidepost is due but sits inside the floor, so it is muted.
+    expect(reader.noteRequestStart()).toBe(false);
+
+    clock.t = 12_500;
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 19_999;
+    expect(reader.noteRequestStart()).toBe(false);
+    expect(exporter.exports).toHaveLength(1);
+
+    // The next guidepost, one period on, does fire.
+    clock.t = 20_000;
+    expect(reader.noteRequestStart()).toBe(true);
+
+    await meterProvider.shutdown();
+  });
+
   it('keeps the in-flight count at zero when an end has no start', async () => {
     const {clock, reader, meterProvider} = createFixture();
 
