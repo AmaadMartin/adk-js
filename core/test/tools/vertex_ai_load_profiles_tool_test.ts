@@ -15,31 +15,26 @@ import {
   InvocationContext,
   LlmRequest,
   PluginManager,
-  ProfileRetrievingMemoryService,
-  RunAsyncToolRequest,
   VertexAiLoadProfilesTool,
+  VertexAiMemoryBankService,
 } from '@google/adk';
 import {Type} from '@google/genai';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
-class FakeMemoryService implements ProfileRetrievingMemoryService {
-  readonly calls: Array<[string, string]> = [];
+// The service builds a `Client` from the package root when no client is
+// passed. The tool never reaches the SDK, so an inert client is enough.
+vi.mock('@google-cloud/vertexai', () => ({
+  Client: class {
+    readonly agentEnginesInternal = {memories: {}};
+  },
+}));
 
-  constructor(private readonly profiles: MemoryProfile[]) {}
-
-  async retrieveProfiles(request: {
-    appName: string;
-    userId: string;
-  }): Promise<MemoryProfile[]> {
-    this.calls.push([request.appName, request.userId]);
-    return this.profiles;
-  }
-}
-
-class RejectingMemoryService implements ProfileRetrievingMemoryService {
-  async retrieveProfiles(): Promise<MemoryProfile[]> {
-    throw new Error('memory bank unavailable');
-  }
+function createMemoryService(profiles: MemoryProfile[]) {
+  const service = new VertexAiMemoryBankService({agentEngineId: 'test-engine'});
+  const retrieveProfiles = vi
+    .spyOn(service, 'retrieveProfiles')
+    .mockResolvedValue(profiles);
+  return {service, retrieveProfiles};
 }
 
 function createToolContext(): Context {
@@ -62,11 +57,11 @@ function createLlmRequest(): LlmRequest {
 
 describe('VertexAiLoadProfilesTool ported from adk-python', () => {
   it('test_load_profiles_returns_profile_payloads', async () => {
-    const memoryService = new FakeMemoryService([
+    const {service, retrieveProfiles} = createMemoryService([
       {schemaId: 'user-profile', profile: {name: 'Kim'}},
       {schemaId: 'empty', profile: {}},
     ]);
-    const tool = new VertexAiLoadProfilesTool({memoryService});
+    const tool = new VertexAiLoadProfilesTool(service);
 
     const result = await tool.runAsync({
       args: {},
@@ -74,21 +69,24 @@ describe('VertexAiLoadProfilesTool ported from adk-python', () => {
     });
 
     expect(result).toEqual({profiles: [{name: 'Kim'}]});
-    expect(memoryService.calls).toEqual([['test-app', 'test-user']]);
+    expect(retrieveProfiles.mock.calls).toEqual([
+      [{appName: 'test-app', userId: 'test-user'}],
+    ]);
   });
 
-  // adk-js decides the declaration shape centrally, in
-  // `FunctionTool._getDeclaration`, so this tool has no feature flag of its own
-  // to toggle. The Python test's enabled-flag counterpart has no equivalent
-  // here.
+  // adk-js decides the JSON-schema declaration shape centrally, so this tool
+  // has no feature flag of its own to toggle. The Python test's enabled-flag
+  // counterpart has no equivalent here.
   it('test_get_declaration_with_json_schema_feature_disabled', () => {
-    const tool = new VertexAiLoadProfilesTool({
-      memoryService: new FakeMemoryService([]),
-    });
+    const {service} = createMemoryService([]);
+    const tool = new VertexAiLoadProfilesTool(service);
 
     const declaration = tool._getDeclaration();
 
     expect(declaration.name).toBe('load_profiles');
+    expect(declaration.description).toBe(
+      'Loads structured user profiles for the current user.',
+    );
     expect(declaration.parametersJsonSchema).toBeUndefined();
     expect(declaration.parameters).toEqual({
       type: Type.OBJECT,
@@ -97,9 +95,8 @@ describe('VertexAiLoadProfilesTool ported from adk-python', () => {
   });
 
   it('test_process_llm_request_registers_tool_only', async () => {
-    const tool = new VertexAiLoadProfilesTool({
-      memoryService: new FakeMemoryService([]),
-    });
+    const {service} = createMemoryService([]);
+    const tool = new VertexAiLoadProfilesTool(service);
     const llmRequest = createLlmRequest();
 
     await tool.processLlmRequest({
@@ -119,9 +116,8 @@ describe('VertexAiLoadProfilesTool ported from adk-python', () => {
 
 describe('VertexAiLoadProfilesTool adk-js specific', () => {
   it('returns no profiles when the service has none', async () => {
-    const tool = new VertexAiLoadProfilesTool({
-      memoryService: new FakeMemoryService([]),
-    });
+    const {service} = createMemoryService([]);
+    const tool = new VertexAiLoadProfilesTool(service);
 
     const result = await tool.runAsync({
       args: {},
@@ -132,12 +128,11 @@ describe('VertexAiLoadProfilesTool adk-js specific', () => {
   });
 
   it('drops a profile that carries no payload', async () => {
-    const tool = new VertexAiLoadProfilesTool({
-      memoryService: new FakeMemoryService([
-        {schemaId: 'absent'},
-        {schemaId: 'user-profile', profile: {name: 'Kim'}},
-      ]),
-    });
+    const {service} = createMemoryService([
+      {schemaId: 'absent'},
+      {schemaId: 'user-profile', profile: {name: 'Kim'}},
+    ]);
+    const tool = new VertexAiLoadProfilesTool(service);
 
     const result = await tool.runAsync({
       args: {},
@@ -148,12 +143,11 @@ describe('VertexAiLoadProfilesTool adk-js specific', () => {
   });
 
   it('keeps the order the service returned', async () => {
-    const tool = new VertexAiLoadProfilesTool({
-      memoryService: new FakeMemoryService([
-        {schemaId: 'first', profile: {order: 1}},
-        {schemaId: 'second', profile: {order: 2}},
-      ]),
-    });
+    const {service} = createMemoryService([
+      {schemaId: 'first', profile: {order: 1}},
+      {schemaId: 'second', profile: {order: 2}},
+    ]);
+    const tool = new VertexAiLoadProfilesTool(service);
 
     const result = await tool.runAsync({
       args: {},
@@ -163,29 +157,13 @@ describe('VertexAiLoadProfilesTool adk-js specific', () => {
     expect(result).toEqual({profiles: [{order: 1}, {order: 2}]});
   });
 
-  it('reports a missing tool context as a failed tool call', async () => {
-    const tool = new VertexAiLoadProfilesTool({
-      memoryService: new FakeMemoryService([]),
-    });
-    // `RunAsyncToolRequest.toolContext` is required, so a typed caller cannot
-    // omit it. This reproduces the untyped caller the guard exists for.
-    const request = {args: {}} satisfies Omit<
-      RunAsyncToolRequest,
-      'toolContext'
-    >;
-
-    await expect(tool.runAsync(request as RunAsyncToolRequest)).rejects.toThrow(
-      "Error in tool 'load_profiles': Tool 'load_profiles' requires a tool context.",
-    );
-  });
-
-  it('reports a failing service as a failed tool call', async () => {
-    const tool = new VertexAiLoadProfilesTool({
-      memoryService: new RejectingMemoryService(),
-    });
+  it('propagates a failure from the memory service', async () => {
+    const {service, retrieveProfiles} = createMemoryService([]);
+    retrieveProfiles.mockRejectedValue(new Error('memory bank unavailable'));
+    const tool = new VertexAiLoadProfilesTool(service);
 
     await expect(
       tool.runAsync({args: {}, toolContext: createToolContext()}),
-    ).rejects.toThrow("Error in tool 'load_profiles': memory bank unavailable");
+    ).rejects.toThrow('memory bank unavailable');
   });
 });

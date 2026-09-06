@@ -11,6 +11,7 @@ import {
   GenerateAgentEngineMemoriesConfig,
   GenerateMemoriesRequestDirectContentsSourceEvent,
   MemoryMetadataValue,
+  MemoryProfile,
 } from '@google-cloud/vertexai/build/src/genai/types.js';
 import {Content, createUserContent} from '@google/genai';
 import {Event} from '../events/event.js';
@@ -233,6 +234,34 @@ export class VertexAiMemoryBankService implements BaseMemoryService {
     }
 
     return {memories: memoryEvents};
+  }
+
+  /**
+   * Retrieves the structured profiles for a scope, one per registered schema.
+   *
+   * Profiles are a Vertex Memory Bank capability distinct from memory search:
+   * a scope-keyed lookup rather than a semantic query. It is not part of
+   * `BaseMemoryService`.
+   */
+  async retrieveProfiles(request: {
+    appName: string;
+    userId: string;
+  }): Promise<MemoryProfile[]> {
+    const response = await this.memories.retrieveProfiles({
+      name: `reasoningEngines/${this.agentEngineId}`,
+      scope: {
+        app_name: request.appName,
+        user_id: request.userId,
+      },
+    });
+
+    const profiles = Object.values(response.profiles ?? {});
+    logger.debug(
+      profiles.length > 0
+        ? `Retrieved ${profiles.length} memory profiles.`
+        : 'Retrieved no memory profiles.',
+    );
+    return profiles;
   }
 
   private async addEventsToMemoryFromEvents(request: {

@@ -9,15 +9,14 @@
  *
  * `VertexAiLoadProfilesTool` takes no arguments. It reads the app name and the
  * user id from the tool context, so the model cannot ask for another user's
- * profiles.
+ * profiles. The agent engine must have structured memory schemas configured,
+ * and the schema id you configure there keys each returned profile.
  *
- * This sample injects a fixed service so that it runs without a provisioned
- * Agent Engine. One of its two profiles carries no payload, and the tool drops
- * it. Swap in any service that implements `ProfileRetrievingMemoryService` to
- * read real profiles from Vertex AI Memory Bank.
- *
- * Run (calls the model):
- *   export GOOGLE_API_KEY=<your api key>
+ * Run (makes real API calls):
+ *   export GOOGLE_CLOUD_PROJECT=<your project>
+ *   export GOOGLE_CLOUD_LOCATION=<your location>
+ *   export AGENT_ENGINE_ID=<your agent engine id>
+ *   gcloud auth application-default login
  *   npm run sample -- samples/tools/vertex_ai_load_profiles/agent.ts
  *
  * Ask: "What do you know about me?"
@@ -25,21 +24,20 @@
 
 import {
   LlmAgent,
-  ProfileRetrievingMemoryService,
   VertexAiLoadProfilesTool,
+  VertexAiMemoryBankService,
 } from '@google/adk';
 
-class FixedProfiles implements ProfileRetrievingMemoryService {
-  async retrieveProfiles(request: {appName: string; userId: string}) {
-    return [
-      {
-        schemaId: 'user-profile',
-        profile: {name: 'Kim', tone: 'concise', userId: request.userId},
-      },
-      {schemaId: 'purchase-history', profile: {}},
-    ];
-  }
+const agentEngineId = process.env['AGENT_ENGINE_ID'];
+if (!agentEngineId) {
+  throw new Error('Set AGENT_ENGINE_ID to an agent engine id.');
 }
+
+const memoryService = new VertexAiMemoryBankService({
+  projectId: process.env['GOOGLE_CLOUD_PROJECT'],
+  location: process.env['GOOGLE_CLOUD_LOCATION'],
+  agentEngineId,
+});
 
 export const rootAgent = new LlmAgent({
   name: 'vertex_ai_load_profiles_agent',
@@ -48,5 +46,5 @@ export const rootAgent = new LlmAgent({
   instruction:
     'Call load_profiles before you answer anything about the user. Answer ' +
     'in the tone the profile asks for.',
-  tools: [new VertexAiLoadProfilesTool({memoryService: new FixedProfiles()})],
+  tools: [new VertexAiLoadProfilesTool(memoryService)],
 });

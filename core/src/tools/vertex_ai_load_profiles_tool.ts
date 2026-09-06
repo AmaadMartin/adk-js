@@ -4,66 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// The package root re-exports the legacy `build/src/types` module, which does
-// not declare `MemoryProfile`. This deep path is the only route to it, and it
-// is the one `memory/vertex_ai_memory_bank_service.ts` already uses.
-import {MemoryProfile} from '@google-cloud/vertexai/build/src/genai/types.js';
+import {FunctionDeclaration, Type} from '@google/genai';
 
-import {Context} from '../agents/context.js';
-import {FunctionTool} from './function_tool.js';
-
-const LOAD_PROFILES_TOOL_NAME = 'load_profiles';
-
-/**
- * The Vertex Memory Bank capability this tool needs: a scope-keyed lookup of
- * the structured profiles registered against an `(appName, userId)` pair.
- *
- * The tool depends on this shape rather than on `VertexAiMemoryBankService`
- * itself, because profile retrieval is not part of `BaseMemoryService` and the
- * tool never needs the rest of the service.
- */
-export interface ProfileRetrievingMemoryService {
-  retrieveProfiles(request: {
-    appName: string;
-    userId: string;
-  }): Promise<MemoryProfile[]>;
-}
-
-/** Constructor options for {@link VertexAiLoadProfilesTool}. */
-export interface VertexAiLoadProfilesToolOptions {
-  /** The service the tool reads profiles from. */
-  memoryService: ProfileRetrievingMemoryService;
-}
-
-/**
- * Reads the profiles for the caller's scope and returns their payloads.
- *
- * A profile with no payload carries nothing for the model to read, so it is
- * dropped rather than returned as an empty object.
- */
-async function loadProfiles(
-  memoryService: ProfileRetrievingMemoryService,
-  toolContext?: Context,
-): Promise<{profiles: Array<Record<string, unknown>>}> {
-  if (!toolContext) {
-    throw new Error(
-      `Tool '${LOAD_PROFILES_TOOL_NAME}' requires a tool context.`,
-    );
-  }
-
-  const profiles = await memoryService.retrieveProfiles({
-    appName: toolContext.invocationContext.appName,
-    userId: toolContext.userId,
-  });
-
-  return {
-    profiles: profiles.flatMap((entry) =>
-      entry.profile && Object.keys(entry.profile).length > 0
-        ? [entry.profile]
-        : [],
-    ),
-  };
-}
+import {VertexAiMemoryBankService} from '../memory/vertex_ai_memory_bank_service.js';
+import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /**
  * A tool that loads the current user's structured profiles from Vertex Memory
@@ -76,31 +20,51 @@ async function loadProfiles(
  * every turn.
  *
  * The tool takes no arguments. It reads the app name and the user id from the
- * tool context, and returns one payload per non-empty profile.
- *
- * Pass any service that implements {@link ProfileRetrievingMemoryService}. See
- * `docs/guides/tools/vertex_ai_load_profiles/index.md` for a runnable one.
+ * tool context, so the model cannot ask for another user's profiles.
  *
  * @example
  * ```ts
- * import {LlmAgent, ProfileRetrievingMemoryService, VertexAiLoadProfilesTool} from '@google/adk';
- *
- * function buildConcierge(memoryService: ProfileRetrievingMemoryService) {
- *   return new LlmAgent({
- *     name: 'concierge',
- *     model: 'gemini-2.5-flash',
- *     tools: [new VertexAiLoadProfilesTool({memoryService})],
- *   });
- * }
+ * const memoryService = new VertexAiMemoryBankService({agentEngineId: '456'});
+ * const agent = new LlmAgent({
+ *   name: 'concierge',
+ *   model: 'gemini-2.5-flash',
+ *   tools: [new VertexAiLoadProfilesTool(memoryService)],
+ * });
  * ```
  */
-export class VertexAiLoadProfilesTool extends FunctionTool {
-  constructor(options: VertexAiLoadProfilesToolOptions) {
+export class VertexAiLoadProfilesTool extends BaseTool {
+  constructor(private readonly memoryService: VertexAiMemoryBankService) {
     super({
-      name: LOAD_PROFILES_TOOL_NAME,
+      name: 'load_profiles',
       description: 'Loads structured user profiles for the current user.',
-      execute: (_args, toolContext) =>
-        loadProfiles(options.memoryService, toolContext),
     });
+  }
+
+  override _getDeclaration(): FunctionDeclaration {
+    return {
+      name: this.name,
+      description: this.description,
+      parameters: {type: Type.OBJECT, properties: {}},
+    };
+  }
+
+  override async runAsync({toolContext}: RunAsyncToolRequest): Promise<{
+    profiles: Array<Record<string, unknown>>;
+  }> {
+    const profiles = await this.memoryService.retrieveProfiles({
+      appName: toolContext.invocationContext.appName,
+      userId: toolContext.userId,
+    });
+
+    // An empty payload is dropped, matching Python's falsy check on the
+    // profile body. `{}` is truthy in JavaScript, so the length test carries
+    // that behaviour.
+    return {
+      profiles: profiles.flatMap((entry) =>
+        entry.profile && Object.keys(entry.profile).length > 0
+          ? [entry.profile]
+          : [],
+      ),
+    };
   }
 }
