@@ -10,7 +10,8 @@ import fg from 'fast-glob';
 import yaml from 'js-yaml';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import {Recordings, TestInfo, TestSpec} from '../integration/test_types.js';
+import {Recordings, TestInfo} from '../integration/test_types.js';
+import {parseTestSpec} from './test_spec_schema.js';
 
 /**
  * batchLoadYamlTestDefs will recursively search the directory given
@@ -48,9 +49,7 @@ export async function batchLoadYamlTestDefs(
     if (typeof parsedSpec !== 'object' || parsedSpec === null) {
       throw new Error('Spec file must be a YAML mapping');
     }
-    const testSpec = camelcaseKeys(parsedSpec, {
-      deep: true,
-    }) as TestSpec;
+    const testSpec = parseTestSpec(camelcaseKeys(parsedSpec, {deep: true}));
 
     // Session file
     const sessionFile = path.posix.join(baseDir, 'generated-session.yaml');
