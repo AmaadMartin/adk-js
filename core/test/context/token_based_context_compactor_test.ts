@@ -255,4 +255,36 @@ describe('TokenBasedContextCompactor', () => {
 
     expect(await compactor.shouldCompact(context)).toBe(false);
   });
+
+  it('should append nothing when the summarizer declines', async () => {
+    const decliningSummarizer: BaseSummarizer = {
+      async summarize(): Promise<CompactedEvent | null> {
+        return null;
+      },
+    };
+    const compactor = new TokenBasedContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer: decliningSummarizer,
+    });
+
+    const context = createMockInvocationContext([
+      createMockEvent('1', 5),
+      createMockEvent('2', 8),
+      createMockEvent('3', 12),
+      createMockEvent('4', 15),
+    ]);
+
+    expect(await compactor.shouldCompact(context)).toBe(true);
+
+    await compactor.compact(context);
+
+    expect(context.session.events.length).toBe(4);
+    expect(context.session.events.map((event) => event.id)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+    ]);
+  });
 });

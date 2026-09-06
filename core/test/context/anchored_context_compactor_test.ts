@@ -266,4 +266,33 @@ describe('AnchoredContextCompactor', () => {
     expect(context.session.events[2].id).toBe('3');
     expect(context.session.events[3].id).toBe('4');
   });
+
+  it('should not mutate history when the summarizer declines', async () => {
+    const decliningSummarizer: BaseSummarizer = {
+      async summarize(): Promise<CompactedEvent | null> {
+        return null;
+      },
+    };
+    const compactor = new AnchoredContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer: decliningSummarizer,
+    });
+
+    const originalEvents = [
+      createMockEvent('1', 5),
+      createMockEvent('2', 5),
+      createMockEvent('3', 5),
+      createMockEvent('4', 5),
+    ];
+    const context = createMockInvocationContext([...originalEvents]);
+
+    await compactor.compact(context);
+
+    expect(context.session.events.length).toBe(4);
+    expect(context.session.events[0]).toBe(originalEvents[0]);
+    expect(context.session.events[1]).toBe(originalEvents[1]);
+    expect(context.session.events[2]).toBe(originalEvents[2]);
+    expect(context.session.events[3]).toBe(originalEvents[3]);
+  });
 });
