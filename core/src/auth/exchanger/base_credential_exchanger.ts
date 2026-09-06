@@ -41,3 +41,18 @@ export interface BaseCredentialExchanger {
     authCredential: AuthCredential;
   }): Promise<ExchangeResult>;
 }
+
+/**
+ * Error raised when a required authentication credential is missing.
+ *
+ * {@link CredentialExchangeError} reports that an exchange failed. This error
+ * reports that there was nothing to exchange. The two are unrelated classes, so
+ * a `catch` on one does not catch the other. Keep the credential itself out of
+ * the message: an error string reaches logs and bug reports.
+ */
+export class AuthCredentialMissingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AuthCredentialMissingError';
+  }
+}

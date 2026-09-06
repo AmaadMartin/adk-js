@@ -5,13 +5,14 @@
  */
 
 import {JWT} from 'google-auth-library';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   AuthCredential,
   AuthCredentialTypes,
 } from '../../../src/auth/auth_credential.js';
 import {AutoAuthCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/auto_auth_credential_exchanger.js';
 import {ServiceAccountCredentialExchanger} from '../../../src/tools/openapi_tool/auth/credential_exchangers/service_account_exchanger.js';
+import {resetServiceAccountTokenCache} from '../../../src/tools/openapi_tool/auth/credential_exchangers/token_cache.js';
 
 vi.mock('google-auth-library', () => {
   return {
@@ -24,6 +25,12 @@ vi.mock('google-auth-library', () => {
       }),
     })),
   };
+});
+
+// The exchanger caches tokens in a module-level map, so a case that expects a
+// fresh exchange has to start from an empty cache.
+beforeEach(() => {
+  resetServiceAccountTokenCache();
 });
 
 describe('AutoAuthCredentialExchanger', () => {
@@ -78,6 +85,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       },
     };
 
@@ -131,6 +139,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       },
     };
 
@@ -148,7 +157,7 @@ describe('ServiceAccountCredentialExchanger', () => {
         authCredential: credential as unknown as AuthCredential,
       }),
     ).rejects.toThrow(
-      'Failed to exchange explicit service account token: Failed to get access token from explicit credentials',
+      'Failed to exchange service account token: Failed to get access token from explicit credentials',
     );
   });
 
@@ -161,6 +170,7 @@ describe('ServiceAccountCredentialExchanger', () => {
           clientEmail: 'test@example.com',
           privateKey: 'key',
         },
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
       },
     };
 
@@ -177,8 +187,6 @@ describe('ServiceAccountCredentialExchanger', () => {
       exchanger.exchange({
         authCredential: credential as unknown as AuthCredential,
       }),
-    ).rejects.toThrow(
-      'Failed to exchange explicit service account token: Auth failed',
-    );
+    ).rejects.toThrow('Failed to exchange service account token: Auth failed');
   });
 });
