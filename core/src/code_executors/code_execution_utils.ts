@@ -54,6 +54,50 @@ export enum CodeExecutionLanguage {
 }
 
 /**
+ * The languages the default code block fences declare. Keyed by the fence tag,
+ * i.e. the leading delimiter with its backticks and whitespace stripped.
+ */
+const CODE_FENCE_LANGUAGES: Record<string, CodeExecutionLanguage> = {
+  tool_code: CodeExecutionLanguage.PYTHON,
+  python: CodeExecutionLanguage.PYTHON,
+  javascript: CodeExecutionLanguage.JAVASCRIPT,
+  typescript: CodeExecutionLanguage.TYPESCRIPT,
+  bash: CodeExecutionLanguage.SHELL,
+  sh: CodeExecutionLanguage.SHELL,
+};
+
+/**
+ * Resolves the language a code fence declares.
+ *
+ * An executor may define custom delimiters such as `['<code>', '</code>']`,
+ * and those blocks ran as Python before the fence tag was honoured, so an
+ * unrecognised tag keeps falling back to Python.
+ *
+ * @param leadingDelimiter The matched opening delimiter of the code block.
+ * @return The language the fence declares.
+ */
+function fenceLanguage(leadingDelimiter: string): CodeExecutionLanguage {
+  const tag = leadingDelimiter.trim().replace(/^`+/, '').trim().toLowerCase();
+  return CODE_FENCE_LANGUAGES[tag] ?? CodeExecutionLanguage.PYTHON;
+}
+
+/**
+ * A code block extracted from model content, with the language its fence
+ * declared.
+ */
+export interface ExtractedCode {
+  /**
+   * The code inside the block, without its delimiters.
+   * */
+  code: string;
+
+  /**
+   * The language the block's opening delimiter declared.
+   * */
+  language: CodeExecutionLanguage;
+}
+
+/**
  * A structure that contains the input of code execution.
  * */
 export interface CodeExecutionInput {
@@ -113,13 +157,6 @@ export function getEncodedFileContent(data: string): string {
   return isBase64Encoded(data) ? data : base64Encode(data);
 }
 
-// Type to be used for regex matching of code blocks.
-interface CodeGroupMatch {
-  groups?: {prefix?: string; codeStr?: string};
-  index?: number;
-  length?: number;
-}
-
 /**
  * Extracts the first code block from the content and truncate everything after
  * it.
@@ -127,14 +164,15 @@ interface CodeGroupMatch {
  * @param content The mutable content to extract the code from.
  * @param codeBlockDelimiters The list of the enclosing delimiters to identify
  *     the code blocks.
- * @return The first code block if found, otherwise None.
+ * @return The first code block and the language its fence declared, or
+ *     undefined when the content holds no code block.
  */
 export function extractCodeAndTruncateContent(
   content: Content,
   codeBlockDelimiters: Array<[string, string]>,
-): string {
+): ExtractedCode | undefined {
   if (!content.parts?.length) {
-    return '';
+    return undefined;
   }
 
   // Extract the code from the executable code parts if there're no associated
@@ -147,14 +185,17 @@ export function extractCodeAndTruncateContent(
         !content.parts[i + 1].codeExecutionResult)
     ) {
       content.parts = content.parts.slice(0, i + 1);
-      return part.executableCode.code!;
+      const code = part.executableCode.code;
+      // `Language` in `@google/genai` has no member besides `PYTHON`, so an
+      // executable code part carries no other language to honour.
+      return code ? {code, language: CodeExecutionLanguage.PYTHON} : undefined;
     }
   }
 
   // Extract the code from the text parts.
   const textParts = content.parts.filter((part) => part.text);
   if (!textParts.length) {
-    return '';
+    return undefined;
   }
 
   const firstTextPart = cloneDeep(textParts[0])!;
@@ -168,15 +209,21 @@ export function extractCodeAndTruncateContent(
     .map((d) => d[1])
     .join('|');
   const match = new RegExp(
-    `(?<prefix>.*?)(${leadingDelimiterPattern})(?<codeStr>.*?)(${trailingDelimiterPattern})(?<suffix>.*?)$`,
+    `(?<prefix>.*?)(?<leading>${leadingDelimiterPattern})(?<codeStr>.*?)(${trailingDelimiterPattern})(?<suffix>.*?)$`,
     's',
-  ).exec(responseText) as unknown as CodeGroupMatch | null;
+  ).exec(responseText);
 
-  const {prefix, codeStr} = match?.groups || {};
+  // `leading` is a mandatory element of the pattern, so a match always defines
+  // it, but `RegExpExecArray` only types groups as an index signature.
+  const groups = match?.groups as
+    | {prefix?: string; leading: string; codeStr?: string}
+    | undefined;
 
-  if (!codeStr) {
-    return '';
+  if (!groups?.codeStr) {
+    return undefined;
   }
+
+  const {prefix, leading, codeStr} = groups;
 
   content.parts = [];
 
@@ -186,7 +233,7 @@ export function extractCodeAndTruncateContent(
   }
   content.parts.push(buildExecutableCodePart(codeStr));
 
-  return codeStr;
+  return {code: codeStr, language: fenceLanguage(leading)};
 }
 
 /**

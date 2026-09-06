@@ -6,22 +6,41 @@
 
 import {
   BaseAgent,
+  InMemoryArtifactService,
   InvocationContext,
   LlmAgent,
   LlmRequest,
   PluginManager,
   createSession,
 } from '@google/adk';
-import {describe, expect, it} from 'vitest';
+import {Outcome} from '@google/genai';
+import {describe, expect, it, vi} from 'vitest';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
   CodeExecutionResponseProcessor,
 } from '../../../src/agents/processors/code_execution_request_processor.js';
+import {ScopedArtifactService} from '../../../src/artifacts/scoped_artifact_service.js';
 import {
   BaseCodeExecutor,
   ExecuteCodeParams,
 } from '../../../src/code_executors/base_code_executor.js';
-import {CodeExecutionResult} from '../../../src/code_executors/code_execution_utils.js';
+import {
+  CodeExecutionInput,
+  CodeExecutionLanguage,
+  CodeExecutionResult,
+} from '../../../src/code_executors/code_execution_utils.js';
+import {CodeExecutorContext} from '../../../src/code_executors/code_executor_context.js';
+import {UnsafeLocalCodeExecutor} from '../../../src/code_executors/unsafe_local_code_executor.js';
+import {State} from '../../../src/sessions/state.js';
+import {base64Encode} from '../../../src/utils/env_aware_utils.js';
+
+/**
+ * Two cases in this file drive a real `UnsafeLocalCodeExecutor`, which spawns
+ * an interpreter. Budget by what is under test: that executor's own default
+ * timeout is 30s, and a harness that gives up sooner can never observe the
+ * behaviour it covers. This is a ceiling, not a delay.
+ */
+vi.setConfig({testTimeout: 30_000});
 
 class MockBaseAgent extends BaseAgent {
   constructor(name: string) {
@@ -37,6 +56,16 @@ class TestCodeExecutor extends BaseCodeExecutor {
   }
 }
 
+/** A code executor that records the input it was dispatched. */
+class RecordingCodeExecutor extends BaseCodeExecutor {
+  lastInput?: CodeExecutionInput;
+
+  async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    this.lastInput = params.codeExecutionInput;
+    return {stdout: 'ok', stderr: '', outputFiles: []};
+  }
+}
+
 function createMockInvocationContext(agent: BaseAgent): InvocationContext {
   return new InvocationContext({
     invocationId: 'test-invocation',
@@ -48,6 +77,14 @@ function createMockInvocationContext(agent: BaseAgent): InvocationContext {
       userId: 'test-user',
     }),
     pluginManager: new PluginManager([]),
+    // Reaching the executor also reaches the result post-processor, which
+    // requires an artifact service.
+    artifactService: new ScopedArtifactService(
+      new InMemoryArtifactService(),
+      'test-app',
+      'test-user',
+      'test-session',
+    ),
   });
 }
 
@@ -217,5 +254,177 @@ describe('CodeExecutionResponseProcessor', () => {
 
       expect(events).toHaveLength(0);
     });
+  });
+});
+
+describe('CodeExecutionResponseProcessor dispatch language', () => {
+  const responseProcessor = new CodeExecutionResponseProcessor();
+
+  function createAgentWithRecorder(): {
+    agent: LlmAgent;
+    executor: RecordingCodeExecutor;
+  } {
+    const executor = new RecordingCodeExecutor();
+    return {
+      agent: new LlmAgent({
+        name: 'agent-with-recorder',
+        model: 'gemini-2.5-flash',
+        codeExecutor: executor,
+      }),
+      executor,
+    };
+  }
+
+  it.each([
+    ['tool_code', 'my_function()', CodeExecutionLanguage.PYTHON],
+    ['python', 'print("hi")', CodeExecutionLanguage.PYTHON],
+    ['javascript', 'console.log(1)', CodeExecutionLanguage.JAVASCRIPT],
+    ['typescript', 'const x: number = 1', CodeExecutionLanguage.TYPESCRIPT],
+    ['bash', 'echo "hello"', CodeExecutionLanguage.SHELL],
+    ['sh', 'echo "hello"', CodeExecutionLanguage.SHELL],
+  ])(
+    'dispatches a %s block as its own language',
+    async (fence, code, language) => {
+      const {agent, executor} = createAgentWithRecorder();
+      const ctx = createMockInvocationContext(agent);
+
+      await collectEvents(
+        responseProcessor.runAsync(ctx, {
+          partial: false,
+          content: {
+            role: 'model',
+            parts: [{text: `\`\`\`${fence}\n${code}\n\`\`\``}],
+          },
+        }),
+      );
+
+      expect(executor.lastInput?.language).toBe(language);
+      expect(executor.lastInput?.code).toBe(code);
+    },
+  );
+
+  it('keeps the surrounding behaviour for a non-python fence', async () => {
+    const {agent, executor} = createAgentWithRecorder();
+    const ctx = createMockInvocationContext(agent);
+    const llmResponse = {
+      partial: false,
+      content: {role: 'model', parts: [{text: '```bash\necho "hello"\n```'}]},
+    };
+
+    const events = await collectEvents(
+      responseProcessor.runAsync(ctx, llmResponse),
+    );
+
+    expect(events).toHaveLength(2);
+    expect(llmResponse.content).toBeUndefined();
+    expect(executor.lastInput?.language).toBe(CodeExecutionLanguage.SHELL);
+  });
+
+  it('dispatches python for an executor with custom delimiters', async () => {
+    const executor = new RecordingCodeExecutor();
+    executor.codeBlockDelimiters = [['<code>', '</code>']];
+    const agent = new LlmAgent({
+      name: 'agent-custom-delimiters',
+      model: 'gemini-2.5-flash',
+      codeExecutor: executor,
+    });
+    const ctx = createMockInvocationContext(agent);
+
+    await collectEvents(
+      responseProcessor.runAsync(ctx, {
+        partial: false,
+        content: {role: 'model', parts: [{text: '<code>echo "hello"</code>'}]},
+      }),
+    );
+
+    expect(executor.lastInput?.language).toBe(CodeExecutionLanguage.PYTHON);
+  });
+
+  it('keeps python for the data file preprocessing code, which is not model output', async () => {
+    const executor = new RecordingCodeExecutor();
+    executor.optimizeDataFile = true;
+    const agent = new LlmAgent({
+      name: 'agent-optimize-data-file',
+      model: 'gemini-2.5-flash',
+      codeExecutor: executor,
+    });
+    const ctx = createMockInvocationContext(agent);
+    const llmRequest = createLlmRequest({
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: 'text/csv',
+                data: base64Encode('a,b\n1,2\n'),
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    await collectEvents(
+      CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(ctx, llmRequest),
+    );
+
+    expect(executor.lastInput?.language).toBe(CodeExecutionLanguage.PYTHON);
+    expect(executor.lastInput?.code).toContain('explore_df');
+  });
+});
+
+describe('CodeExecutionResponseProcessor with a real local executor', () => {
+  const responseProcessor = new CodeExecutionResponseProcessor();
+
+  it('runs a shell fence through the shell interpreter', async () => {
+    const agent = new LlmAgent({
+      name: 'agent-unsafe-local',
+      model: 'gemini-2.5-flash',
+      codeExecutor: new UnsafeLocalCodeExecutor(),
+    });
+    const ctx = createMockInvocationContext(agent);
+
+    const events = await collectEvents(
+      responseProcessor.runAsync(ctx, {
+        partial: false,
+        content: {role: 'model', parts: [{text: '```bash\necho hello\n```'}]},
+      }),
+    );
+
+    const resultPart = events[1].content?.parts?.[0];
+    expect(resultPart?.codeExecutionResult?.outcome).toBe(Outcome.OUTCOME_OK);
+    expect(resultPart?.text).toContain('hello');
+  });
+
+  it('reports a language the executor cannot run without ending the invocation', async () => {
+    const agent = new LlmAgent({
+      name: 'agent-unsupported-language',
+      model: 'gemini-2.5-flash',
+      codeExecutor: new UnsafeLocalCodeExecutor(),
+    });
+    const ctx = createMockInvocationContext(agent);
+
+    const events = await collectEvents(
+      responseProcessor.runAsync(ctx, {
+        partial: false,
+        content: {
+          role: 'model',
+          parts: [{text: '```typescript\nconst x: number = 1\n```'}],
+        },
+      }),
+    );
+
+    const resultPart = events[1].content?.parts?.[0];
+    expect(resultPart?.codeExecutionResult?.outcome).toBe(
+      Outcome.OUTCOME_FAILED,
+    );
+    expect(resultPart?.text).toContain('Unsupported language: typescript');
+    // The failure feeds the error retry loop rather than aborting the run.
+    expect(
+      new CodeExecutorContext(new State(ctx.session.state)).getErrorCount(
+        ctx.invocationId,
+      ),
+    ).toBe(1);
   });
 });

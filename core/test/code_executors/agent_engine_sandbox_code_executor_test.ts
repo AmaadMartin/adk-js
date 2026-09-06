@@ -285,6 +285,28 @@ describe('AgentEngineSandboxCodeExecutor', () => {
       expect(result.outputFiles[0].mimeType).toBe('image/png');
     });
 
+    it.each([
+      CodeExecutionLanguage.SHELL,
+      CodeExecutionLanguage.TYPESCRIPT,
+      CodeExecutionLanguage.POWERSHELL,
+      CodeExecutionLanguage.WINDOWS_CMD,
+      CodeExecutionLanguage.UNSPECIFIED,
+    ])('reports %s in stderr instead of throwing', async (language) => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {code: 'echo hi', language, inputFiles: []},
+      });
+
+      expect(result.stderr).toBe(
+        `Unsupported language for Agent Engine Sandbox: ${language}`,
+      );
+      expect(result.stdout).toBe('');
+      expect(result.outputFiles).toHaveLength(0);
+      expect(
+        mockClient.agentEnginesInternal.sandboxes.executeCodeInternal,
+      ).not.toHaveBeenCalled();
+    });
+
     it('guesses mime type if missing in output', async () => {
       mockClient.agentEnginesInternal.sandboxes.executeCodeInternal.mockResolvedValue(
         {

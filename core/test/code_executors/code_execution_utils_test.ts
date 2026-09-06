@@ -131,14 +131,18 @@ const PYTHON_DELIMITERS: Array<[string, string]> = [
 ];
 
 describe('extractCodeAndTruncateContent', () => {
-  it('returns empty string when content has no parts', () => {
+  it('returns undefined when content has no parts', () => {
     const content = {parts: [], role: 'model'};
-    expect(extractCodeAndTruncateContent(content, PYTHON_DELIMITERS)).toBe('');
+    expect(
+      extractCodeAndTruncateContent(content, PYTHON_DELIMITERS),
+    ).toBeUndefined();
   });
 
-  it('returns empty string when parts is undefined', () => {
+  it('returns undefined when parts is undefined', () => {
     const content = {role: 'model'} as unknown as Content;
-    expect(extractCodeAndTruncateContent(content, PYTHON_DELIMITERS)).toBe('');
+    expect(
+      extractCodeAndTruncateContent(content, PYTHON_DELIMITERS),
+    ).toBeUndefined();
   });
 
   it('extracts code from executableCode part without following result', () => {
@@ -148,7 +152,7 @@ describe('extractCodeAndTruncateContent', () => {
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe(code);
+    expect(result?.code).toBe(code);
     expect(content.parts).toHaveLength(1);
   });
 
@@ -163,7 +167,7 @@ describe('extractCodeAndTruncateContent', () => {
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe('x=1');
+    expect(result?.code).toBe('x=1');
   });
 
   it('extracts code block from text parts', () => {
@@ -172,7 +176,7 @@ describe('extractCodeAndTruncateContent', () => {
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe('print("hello")');
+    expect(result?.code).toBe('print("hello")');
   });
 
   it('extracts code and preserves prefix text', () => {
@@ -181,7 +185,7 @@ describe('extractCodeAndTruncateContent', () => {
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe('x = 1');
+    expect(result?.code).toBe('x = 1');
     // prefix text part should be present
     const textParts = content.parts.filter(
       (p) => p.text && !('executableCode' in p),
@@ -191,22 +195,22 @@ describe('extractCodeAndTruncateContent', () => {
     );
   });
 
-  it('returns empty string when no code block found in text', () => {
+  it('returns undefined when no code block found in text', () => {
     const content = {
       parts: [{text: 'just some text, no code block'}],
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe('');
+    expect(result).toBeUndefined();
   });
 
-  it('returns empty string when parts exist but none have text or executableCode', () => {
+  it('returns undefined when parts exist but none have text or executableCode', () => {
     const content = {
       parts: [{inlineData: {mimeType: 'image/png', data: 'abc'}}],
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe('');
+    expect(result).toBeUndefined();
   });
 
   it('truncates content after the first executableCode part', () => {
@@ -221,7 +225,7 @@ describe('extractCodeAndTruncateContent', () => {
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
     // first executableCode has no following codeExecutionResult, so it's extracted
-    expect(result).toBe(code1);
+    expect(result?.code).toBe(code1);
     expect(content.parts).toHaveLength(1);
   });
 
@@ -231,7 +235,7 @@ describe('extractCodeAndTruncateContent', () => {
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe('my_function()');
+    expect(result?.code).toBe('my_function()');
   });
 
   it('handles multi-part text joined together', () => {
@@ -240,7 +244,104 @@ describe('extractCodeAndTruncateContent', () => {
       role: 'model',
     };
     const result = extractCodeAndTruncateContent(content, PYTHON_DELIMITERS);
-    expect(result).toBe('my_code()');
+    expect(result?.code).toBe('my_code()');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractCodeAndTruncateContent: language of the matched fence
+// ---------------------------------------------------------------------------
+const DEFAULT_DELIMITERS: Array<[string, string]> = [
+  ['```tool_code\n', '\n```'],
+  ['```python\n', '\n```'],
+  ['```javascript\n', '\n```'],
+  ['```typescript\n', '\n```'],
+  ['```bash\n', '\n```'],
+  ['```sh\n', '\n```'],
+];
+
+describe('language of the matched fence', () => {
+  it.each([
+    ['tool_code', CodeExecutionLanguage.PYTHON],
+    ['python', CodeExecutionLanguage.PYTHON],
+    ['javascript', CodeExecutionLanguage.JAVASCRIPT],
+    ['typescript', CodeExecutionLanguage.TYPESCRIPT],
+    ['bash', CodeExecutionLanguage.SHELL],
+    ['sh', CodeExecutionLanguage.SHELL],
+  ])('maps the %s fence to its language', (fence, language) => {
+    const content = {
+      parts: [{text: `\`\`\`${fence}\nsnippet()\n\`\`\``}],
+      role: 'model',
+    };
+    expect(extractCodeAndTruncateContent(content, DEFAULT_DELIMITERS)).toEqual({
+      code: 'snippet()',
+      language,
+    });
+  });
+
+  it('falls back to python for a custom delimiter pair', () => {
+    const content = {
+      parts: [{text: '<code>echo hi</code>'}],
+      role: 'model',
+    };
+    expect(
+      extractCodeAndTruncateContent(content, [['<code>', '</code>']]),
+    ).toEqual({code: 'echo hi', language: CodeExecutionLanguage.PYTHON});
+  });
+
+  it('reads the fence tag case-insensitively', () => {
+    const content = {
+      parts: [{text: '```BASH\necho hi\n```'}],
+      role: 'model',
+    };
+    expect(
+      extractCodeAndTruncateContent(content, [['```BASH\n', '\n```']]),
+    ).toEqual({code: 'echo hi', language: CodeExecutionLanguage.SHELL});
+  });
+
+  it('uses the language of the earliest fence when several are present', () => {
+    const content = {
+      parts: [
+        {text: 'first:\n```bash\necho hi\n```\nthen:\n```python\nx=1\n```'},
+      ],
+      role: 'model',
+    };
+    expect(extractCodeAndTruncateContent(content, DEFAULT_DELIMITERS)).toEqual({
+      code: 'echo hi',
+      language: CodeExecutionLanguage.SHELL,
+    });
+  });
+
+  it('reports python for an executableCode part', () => {
+    const content = {
+      parts: [{executableCode: {code: 'x=1', language: Language.PYTHON}}],
+      role: 'model',
+    };
+    expect(extractCodeAndTruncateContent(content, DEFAULT_DELIMITERS)).toEqual({
+      code: 'x=1',
+      language: CodeExecutionLanguage.PYTHON,
+    });
+  });
+
+  it('returns undefined for an executableCode part carrying no code', () => {
+    const content = {
+      parts: [{executableCode: {language: Language.PYTHON}}],
+      role: 'model',
+    };
+    expect(
+      extractCodeAndTruncateContent(content, DEFAULT_DELIMITERS),
+    ).toBeUndefined();
+    expect(content.parts).toHaveLength(1);
+  });
+
+  it('returns undefined for a fence with an empty body', () => {
+    const content = {
+      parts: [{text: '```bash\n\n```'}],
+      role: 'model',
+    };
+    expect(
+      extractCodeAndTruncateContent(content, DEFAULT_DELIMITERS),
+    ).toBeUndefined();
   });
 });
 
