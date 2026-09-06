@@ -13,6 +13,7 @@ permissions:
 jobs:
   welcome:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v3
       - uses: actions/github-script@v6

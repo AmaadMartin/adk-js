@@ -9,6 +9,7 @@ on:
 jobs:
   run-tests:
     runs-on: macos-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
