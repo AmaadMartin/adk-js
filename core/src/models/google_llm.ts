@@ -15,12 +15,14 @@ import {
 
 import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {AsyncQueue} from '../utils/async_queue.js';
 import {StreamingResponseAggregator} from '../utils/streaming_utils.js';
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {LlmCapabilities} from './capabilities.js';
 import {GeminiLlmConnection} from './gemini_llm_connection.js';
 import {generateContentViaInteractions} from './interactions_utils.js';
 import {LlmRequest} from './llm_request.js';
@@ -147,6 +149,10 @@ export class Gemini extends BaseLlm {
   private _trackingHeaders?: Record<string, string>;
   private _liveApiVersion?: string;
   private _liveApiClient?: GoogleGenAI;
+
+  override get capabilities(): LlmCapabilities {
+    return {outputSchemaAndTools: canUseOutputSchemaWithTools(this.model)};
+  }
 
   /**
    * Sends a request to the Gemini model.
