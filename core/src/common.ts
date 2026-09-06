@@ -155,6 +155,19 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {
+  EvalCriterion,
+  ResponseEvaluator,
+  VertexEvalMetric,
+} from './evaluation/response_evaluator.js';
+export type {
+  EvalBackend,
+  EvalDatasetRow,
+  EvalRunResult,
+  EvalTurn,
+  EvaluateOptions,
+  ToolUse,
+} from './evaluation/response_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
@@ -374,7 +387,21 @@ export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
 export * from './sessions/base_session_service.js';
+export {APIHubToolset} from './tools/apihub_tool/apihub_toolset.js';
+export type {APIHubToolsetOptions} from './tools/apihub_tool/apihub_toolset.js';
+export type {BaseAPIHubClient} from './tools/apihub_tool/clients/apihub_client.js';
 export * from './tools/base_tool.js';
+export type {
+  DiscoveryDocument,
+  DiscoveryMethod,
+  DiscoveryParameter,
+  DiscoveryResource,
+  DiscoverySchema,
+} from './tools/google_api_tool/discovery_document.js';
+export {
+  GoogleApiToOpenApiConverter,
+  convertDiscoveryDocument,
+} from './tools/google_api_tool/googleapi_to_openapi_converter.js';
 export {OpenApiSpecParser} from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export type {
   OperationEndpoint,
