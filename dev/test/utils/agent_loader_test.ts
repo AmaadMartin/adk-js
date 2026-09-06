@@ -33,6 +33,7 @@ vi.mock('../../src/utils/file_utils.js', () => ({
   isFile: vi.fn(),
   isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
+  loadFileData: vi.fn(),
   removeFolder: vi.fn(),
   tryToFindFileRecursively: vi.fn(),
 }));
@@ -123,6 +124,28 @@ export const agent1 = new FakeAgent('agent1');
 export const agent2 = new FakeAgent('agent2');
 `;
 
+const agentEsmContent = `
+import {BaseAgent} from '@google/adk';
+
+class FakeAgentEsm extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+export const rootAgent = new FakeAgentEsm('agentEsm');
+`;
+
+const agentCjsContent = `
+const {BaseAgent} = require('@google/adk');
+
+class FakeAgentCjs extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.rootAgent = new FakeAgentCjs('agentCjs');
+`;
+
 const appJsContent = `
 const {App, BaseAgent} = require('@google/adk');
 
@@ -181,7 +204,17 @@ describe('AgentLoader', () => {
         return false;
       }
     });
-    (fileUtils.isFileExists as Mock).mockImplementation(() => true);
+    (fileUtils.isFileExists as Mock).mockImplementation(async (filePath) => {
+      try {
+        const stat = await fs.stat(filePath as string);
+        return stat.isFile();
+      } catch {
+        return false;
+      }
+    });
+    (fileUtils.loadFileData as Mock).mockImplementation(async (filePath) =>
+      JSON.parse(await fs.readFile(filePath as string, 'utf-8')),
+    );
     (fileUtils.isFolderExists as Mock).mockImplementation(
       async (folderPath) => {
         try {
@@ -561,6 +594,128 @@ describe('AgentLoader', () => {
       await expect(agentFile.load()).rejects.toThrow(
         `Agent file ${agentPath} does not exists`,
       );
+    });
+  });
+
+  describe('module type resolution', () => {
+    async function writeAgent(
+      dir: string,
+      name: string,
+      content: string,
+      packageJson?: string,
+    ) {
+      await fs.mkdir(dir, {recursive: true});
+      if (packageJson !== undefined) {
+        await fs.writeFile(path.join(dir, 'package.json'), packageJson);
+      }
+      const agentPath = path.join(dir, `${name}.js`);
+      await fs.writeFile(agentPath, content);
+      (esbuild.build as Mock).mockImplementation(
+        async (options: {outfile: string}) => {
+          await fs.writeFile(options.outfile, content);
+        },
+      );
+      return agentPath;
+    }
+
+    it('compiles to ESM when the nearest package.json is type: module', async () => {
+      const agentPath = await writeAgent(
+        path.join(tempAgentsDir, 'esm_pkg'),
+        'esm_agent',
+        agentEsmContent,
+        JSON.stringify({name: 'esm-pkg', type: 'module'}),
+      );
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agentEsm');
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        outfile: compiledPath('esm_agent.mjs'),
+        format: 'esm',
+      });
+      await agentFile.dispose();
+    });
+
+    it('compiles to CJS when the nearest package.json is type: commonjs', async () => {
+      const agentPath = await writeAgent(
+        path.join(tempAgentsDir, 'cjs_pkg'),
+        'cjs_agent',
+        agentCjsContent,
+        JSON.stringify({name: 'cjs-pkg', type: 'commonjs'}),
+      );
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agentCjs');
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        outfile: compiledPath('cjs_agent.cjs'),
+        format: 'cjs',
+      });
+      await agentFile.dispose();
+    });
+
+    it('falls back to CJS when package.json is malformed', async () => {
+      const agentPath = await writeAgent(
+        path.join(tempAgentsDir, 'broken_pkg'),
+        'broken_agent',
+        agentCjsContent,
+        '{ "type": "module"',
+      );
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agentCjs');
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        outfile: compiledPath('broken_agent.cjs'),
+        format: 'cjs',
+      });
+      await agentFile.dispose();
+    });
+
+    it('walks up to the parent directory when no package.json sits next to the agent', async () => {
+      const rootDir = path.join(tempAgentsDir, 'esm_root');
+      await fs.mkdir(rootDir, {recursive: true});
+      await fs.writeFile(
+        path.join(rootDir, 'package.json'),
+        JSON.stringify({name: 'esm-root', type: 'module'}),
+      );
+      const agentPath = await writeAgent(
+        path.join(rootDir, 'nested'),
+        'nested_agent',
+        agentEsmContent,
+      );
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agentEsm');
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        outfile: compiledPath('nested_agent.mjs'),
+        format: 'esm',
+      });
+      await agentFile.dispose();
+    });
+
+    it('stops at the filesystem root and defaults to CJS when no package.json exists', async () => {
+      (fileUtils.isFileExists as Mock).mockImplementation(async () => false);
+      const agentPath = await writeAgent(
+        path.join(tempAgentsDir, 'no_pkg'),
+        'no_pkg_agent',
+        agentCjsContent,
+      );
+
+      const agentFile = new AgentFile(agentPath);
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agentCjs');
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        outfile: compiledPath('no_pkg_agent.cjs'),
+        format: 'cjs',
+      });
+      await agentFile.dispose();
     });
   });
 
