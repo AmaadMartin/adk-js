@@ -25,10 +25,11 @@ export interface AnchoredContextCompactorOptions {
 
 /**
  * A context compactor that maintains a single persistent 'Scratchpad' or
- * 'State Tracker' event at the top of the context history.
+ * 'State Tracker' event at the head of the active history view.
  *
  * When compaction is triggered, it merges new raw events into the existing
- * Scratchpad event and discards them from the active history view.
+ * Scratchpad event and appends the result. The session log keeps the events
+ * the Scratchpad covers, and they drop out of the active view.
  */
 export class AnchoredContextCompactor implements BaseContextCompactor {
   private readonly tokenThreshold: number;
@@ -134,18 +135,6 @@ export class AnchoredContextCompactor implements BaseContextCompactor {
       author: 'system',
     } as CompactedEvent;
 
-    // Reconstruct the events list: inactive events + new scratchpad + active retained events
-    const inactiveEvents = events.slice(0, events.indexOf(activeEvents[0]));
-    const retainedRawEvents = rawEvents.slice(retainStartIndex);
-
-    const newEventsList = [
-      ...inactiveEvents,
-      updatedScratchpad,
-      ...retainedRawEvents,
-    ];
-
-    // Mutate the original session events array.
-    events.length = 0;
-    events.push(...newEventsList);
+    events.push(updatedScratchpad);
   }
 }
