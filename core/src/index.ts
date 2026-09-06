@@ -43,6 +43,9 @@ export {
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
+// Also available as `@google/adk/integrations/redis`. Kept out of `common.js`,
+// which also feeds the web build, because node-redis is Node-only.
+export * from './integrations/redis/redis_session_service.js';
 export * from './telemetry/google_cloud.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/mcp`, which does not evaluate the rest
