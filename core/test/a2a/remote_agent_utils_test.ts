@@ -17,7 +17,7 @@ import {AdkMetadataKeys} from '../../src/a2a/metadata_converter_utils.js';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {createEvent} from '../../src/events/event.js';
-import {Session} from '../../src/sessions/session.js';
+import {createSession} from '../../src/sessions/session.js';
 
 describe('remote_agent_utils', () => {
   const mockAgent = {
@@ -102,13 +102,21 @@ describe('remote_agent_utils', () => {
 
   describe('getUserFunctionCallAt', () => {
     it('should return undefined for invalid index', () => {
-      const session = {events: []} as unknown as Session;
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [],
+      });
       expect(getUserFunctionCallAt(session, 0)).toBeUndefined();
     });
 
     it('should return undefined if event author is not user', () => {
       const event = createEvent({author: 'agent'});
-      const session = {events: [event]} as unknown as Session;
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [event],
+      });
       expect(getUserFunctionCallAt(session, 0)).toBeUndefined();
     });
 
@@ -117,7 +125,11 @@ describe('remote_agent_utils', () => {
         author: 'user',
         content: {role: 'user', parts: [{text: 'hello'}]},
       });
-      const session = {events: [event]} as unknown as Session;
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [event],
+      });
       expect(getUserFunctionCallAt(session, 0)).toBeUndefined();
     });
 
@@ -142,9 +154,11 @@ describe('remote_agent_utils', () => {
         },
       });
 
-      const session = {
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
         events: [requestEvent, responseEvent],
-      } as unknown as Session;
+      });
 
       const result = getUserFunctionCallAt(session, 1);
       expect(result).toBeDefined();
@@ -202,7 +216,11 @@ describe('remote_agent_utils', () => {
         author: 'user',
         content: {role: 'user', parts: [{text: 'hello'}]},
       });
-      const session = {events: [event1]} as unknown as Session;
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [event1],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       expect(result.parts.length).toBe(1);
@@ -223,9 +241,11 @@ describe('remote_agent_utils', () => {
         content: {role: 'user', parts: [{text: 'new message'}]},
       });
 
-      const session = {
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
         events: [remoteResponse, newUserMessage],
-      } as unknown as Session;
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       expect(result.parts.length).toBe(1);
@@ -239,7 +259,11 @@ describe('remote_agent_utils', () => {
         content: {role: 'model', parts: [{text: 'other response'}]},
       });
 
-      const session = {events: [otherAgent]} as unknown as Session;
+      const session = createSession({
+        id: 'test-session',
+        appName: 'test-app',
+        events: [otherAgent],
+      });
 
       const result = toMissingRemoteSessionParts(mockCtx, session);
       expect(result.parts.length).toBe(2); // "For context:" and "[other-agent] said: ..."
