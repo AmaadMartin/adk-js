@@ -19,12 +19,62 @@
  * ```
  */
 
+import {
+  EventarcPublishStatus,
+  publishMessage,
+  type EventarcToolConfig,
+  type PublishMessageInput,
+  type PublishMessageResult,
+} from '@google/adk';
+import type {
+  Context as OtelContext,
+  TextMapPropagator,
+  TextMapSetter,
+} from '@opentelemetry/api';
 import {expect} from 'vitest';
 import type {
   CloudEvent,
   PublisherClientOptions,
   PublishRequest,
 } from '../../../src/integrations/eventarc/sdk.js';
+
+/** The trace headers {@link StubPropagator} writes. */
+export const STUB_TRACE_HEADERS: Record<string, string> = {
+  traceparent: '00-testtrace-testid-01',
+  tracestate: 'teststate=1',
+};
+
+/**
+ * A propagator that writes fixed trace headers, standing in for the W3C one
+ * an application installs. adk-python's test patches `inject` the same way.
+ */
+export class StubPropagator implements TextMapPropagator {
+  constructor(private readonly keys = Object.keys(STUB_TRACE_HEADERS)) {}
+
+  inject(
+    _context: OtelContext,
+    carrier: unknown,
+    setter: TextMapSetter<unknown>,
+  ): void {
+    for (const key of this.keys) {
+      setter.set(carrier, key, STUB_TRACE_HEADERS[key]);
+    }
+  }
+
+  extract(context: OtelContext): OtelContext {
+    return context;
+  }
+
+  fields(): string[] {
+    return this.keys;
+  }
+}
+
+/** The message bus the tests publish to. */
+export const BUS = 'projects/test/locations/global/messageBuses/my-bus';
+
+/** The settings the tests publish with. */
+export const SETTINGS: EventarcToolConfig = {projectId: 'test-project'};
 
 /** One recorded call to `publish`. */
 export interface RecordedPublish {
@@ -99,4 +149,22 @@ export function eventAttributes(
       value.ceString ?? undefined,
     ]),
   );
+}
+
+/** Publishes with the shared bus, type, source and settings. */
+export async function publish(
+  input: Partial<PublishMessageInput> = {},
+): Promise<PublishMessageResult> {
+  return publishMessage(
+    {bus: BUS, type: 'com.example.test', source: '//test/source', ...input},
+    {toolConfig: SETTINGS},
+  );
+}
+
+/** The `error_details` of a result the test expects to be an error. */
+export function errorDetails(result: PublishMessageResult): string {
+  if (result.status !== EventarcPublishStatus.ERROR) {
+    expect.fail(`expected an error result, got ${JSON.stringify(result)}`);
+  }
+  return result.error_details;
 }
