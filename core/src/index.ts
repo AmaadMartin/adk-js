@@ -24,6 +24,12 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {OciGenAiLlm} from './models/oci_genai_llm.js';
+export type {
+  OciAuthType,
+  OciGenAiLlmParams,
+  OciReasoningEffort,
+} from './models/oci_genai_llm.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
