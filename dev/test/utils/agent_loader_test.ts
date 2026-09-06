@@ -24,6 +24,7 @@ import {App, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
+  FileModuleType,
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
@@ -86,6 +87,17 @@ class FakeAgent2 extends BaseAgent {
     }
 }
 exports.rootAgent = new FakeAgent2('agent2');
+`;
+
+const agent2MjsContentMocked = `
+import {BaseAgent} from '@google/adk';
+
+class FakeAgent2 extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+export const rootAgent = new FakeAgent2('agent2');
 `;
 
 const agent3JsContent = `
@@ -439,6 +451,91 @@ describe('AgentLoader', () => {
       await agentFile.dispose();
     });
 
+    it('inherits the compile and bundle defaults when only moduleType is given', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.mjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2MjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {
+        moduleType: FileModuleType.ESM,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent2');
+      expect(esbuild.build).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outfile: compiledAgentPath,
+          format: 'esm',
+          bundle: true,
+          minify: true,
+        }),
+      );
+
+      await agentFile.dispose();
+    });
+
+    it('inherits the bundle default when only compile is given', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {compile: true});
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent2');
+      expect(esbuild.build).toHaveBeenCalledWith(
+        expect.objectContaining({bundle: true, minify: true}),
+      );
+
+      await agentFile.dispose();
+    });
+
+    it('inherits the compile default when only bundle is given', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent2.ts');
+      await fs.writeFile(agentPath, agent2TsContent);
+
+      const compiledAgentPath = compiledPath('agent2.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent2CjsContentMocked);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath, {bundle: false});
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent2');
+      expect(esbuild.build).toHaveBeenCalledWith(
+        expect.objectContaining({bundle: false, minify: false}),
+      );
+
+      await agentFile.dispose();
+    });
+
+    it('does not compile when compile and bundle are explicitly false', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      await agentFile.load();
+
+      expect(esbuild.build).not.toHaveBeenCalled();
+
+      await agentFile.dispose();
+    });
+
     it('loads agent with default export', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent_default.js');
       await fs.writeFile(agentPath, agentDefaultExportContent);
@@ -760,6 +857,27 @@ describe('AgentLoader', () => {
       const agentLoader = new AgentLoader(tempAgentsDir);
       const agents = await agentLoader.listAgents();
       expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
+      await agentLoader.disposeAll();
+    });
+
+    it('forwards options merged with the defaults to every agent file', async () => {
+      // The third positional argument pins that `watchForChanges` kept its slot.
+      const agentLoader = new AgentLoader(
+        tempAgentsDir,
+        {bundle: false},
+        false,
+      );
+
+      const agents = await agentLoader.listAgents();
+
+      // `compile` fell back to its default, so every agent was still built,
+      // while the caller's explicit `bundle: false` survived the merge.
+      expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
+      expect(esbuild.build).toHaveBeenCalledTimes(3);
+      for (const [buildOptions] of (esbuild.build as Mock).mock.calls) {
+        expect(buildOptions).toMatchObject({bundle: false, minify: false});
+      }
+
       await agentLoader.disposeAll();
     });
 

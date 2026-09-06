@@ -79,6 +79,9 @@ export interface AgentLoadFailure {
 
 /**
  * Options for loading an agent file.
+ *
+ * Omitted fields fall back to the compile/bundle defaults; a field passed
+ * explicitly as `undefined` does not (plain spread merge).
  */
 export interface AgentFileOptions {
   compile?: boolean;
@@ -150,11 +153,14 @@ export class AgentFile {
   private disposed = false;
   private agent?: RunnableRoot;
   private app?: App;
+  private readonly options: AgentFileOptions;
 
   constructor(
     private readonly filePath: string,
-    private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
-  ) {}
+    options: AgentFileOptions = {},
+  ) {
+    this.options = {...DEFAULT_AGENT_FILE_OPTIONS, ...options};
+  }
 
   async load(): Promise<RunnableRoot | App> {
     if (this.app) {
@@ -384,7 +390,8 @@ export class AgentLoader {
 
   constructor(
     private readonly agentsDirPath: string = process.cwd(),
-    private readonly options = DEFAULT_AGENT_FILE_OPTIONS,
+    // Defaulted per field by the AgentFile these are forwarded to.
+    private readonly options: AgentFileOptions = {},
     private readonly watchForChanges = false,
   ) {
     // Do cleanups on exit
