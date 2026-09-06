@@ -32,9 +32,28 @@ const MAX_HTTP_STATUS = 599;
  * not a non-null object. Used to safely inspect duck-typed error shapes without
  * resorting to `any`.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Reads an HTTP status off a duck-typed error, or `undefined` when it carries
+ * none. Three shapes are supported: `.status` directly, a numeric `.code` (as
+ * the MCP SDK's `StreamableHTTPError` uses), and `.response.status` as
+ * axios/httpx nest it. A value outside the HTTP status range is not a status.
+ */
+export function readHttpStatus(err: unknown): number | undefined {
+  const record = asRecord(err);
+  const status =
+    record?.['status'] ??
+    record?.['code'] ??
+    asRecord(record?.['response'])?.['status'];
+  return typeof status === 'number' &&
+    status >= MIN_HTTP_STATUS &&
+    status <= MAX_HTTP_STATUS
+    ? status
     : undefined;
 }
 
@@ -81,13 +100,7 @@ function extractHttpDetails(err: unknown): string | undefined {
     return undefined;
   }
   const response = asRecord(record['response']);
-  const rawStatus = record['status'] ?? record['code'] ?? response?.['status'];
-  const status =
-    typeof rawStatus === 'number' &&
-    rawStatus >= MIN_HTTP_STATUS &&
-    rawStatus <= MAX_HTTP_STATUS
-      ? rawStatus
-      : undefined;
+  const status = readHttpStatus(err);
   const statusText = firstString(
     record['statusText'],
     response?.['statusText'],
