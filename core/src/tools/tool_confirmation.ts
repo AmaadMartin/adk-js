@@ -5,6 +5,15 @@
  */
 
 /**
+ * Returned as `partial` while a tool call waits for the client to confirm or
+ * reject it. Every tool that gates on a confirmation returns this same text,
+ * so a client recognises the paused state without knowing which tool produced
+ * it.
+ */
+export const REQUIRE_CONFIRMATION_MESSAGE =
+  'This tool call needs external confirmation before completion.';
+
+/**
  * Represents a tool confirmation configuration.
  * @experimental  (Experimental, subject to change)
  */
