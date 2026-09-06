@@ -15,11 +15,8 @@ import {
   removePublisherClient,
   type PublisherClientRequest,
 } from './client.js';
-import {
-  DEFAULT_PUBLISH_TIMEOUT_MS,
-  type EventarcCredentialsConfig,
-  type EventarcToolConfig,
-} from './config.js';
+import {DEFAULT_PUBLISH_TIMEOUT_MS, type EventarcToolConfig} from './config.js';
+import type {EventarcCredentialsConfig} from './eventarc_credentials.js';
 import type {
   CloudEvent,
   CloudEventAttributeValue,

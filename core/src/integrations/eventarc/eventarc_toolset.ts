@@ -12,7 +12,15 @@ import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {experimental} from '../../utils/experimental.js';
 import {cleanupClients} from './client.js';
-import type {EventarcCredentialsConfig, EventarcToolConfig} from './config.js';
+import type {EventarcToolConfig} from './config.js';
+import {
+  buildDomainSpecificTool,
+  type CreatePublishToolOptions,
+} from './domain_specific_publish.js';
+import {
+  validateEventarcCredentialsConfig,
+  type EventarcCredentialsConfig,
+} from './eventarc_credentials.js';
 import {publishMessage, publishMessageSchema} from './message_tool.js';
 
 /** The name the model calls the publishing tool by. */
@@ -69,6 +77,7 @@ export class EventarcToolset extends BaseToolset {
     super(options.toolFilter ?? [], options.prefix);
     this.toolConfig = options.toolConfig ?? {};
     this.credentialsConfig = options.credentialsConfig ?? {};
+    validateEventarcCredentialsConfig(this.credentialsConfig);
 
     const name = this.prefix
       ? `${this.prefix}_${PUBLISH_MESSAGE_TOOL_NAME}`
@@ -104,6 +113,26 @@ export class EventarcToolset extends BaseToolset {
       }
       return true;
     });
+  }
+
+  /**
+   * Builds a publish tool with its CloudEvent attributes bound in advance,
+   * adds it to the toolset, and returns it.
+   *
+   * Use it when the application already knows what it publishes and only the
+   * payload, or a field or two, comes from the model.
+   *
+   * @param options What to bind and what to ask the model for.
+   * @return The tool, already added to this toolset.
+   * @throws {InputValidationError} If any binding is invalid.
+   */
+  createPublishTool(options: CreatePublishToolOptions): BaseTool {
+    const tool = buildDomainSpecificTool(options, {
+      credentialsConfig: this.credentialsConfig,
+      toolConfig: this.toolConfig,
+    });
+    this.tools.push(tool);
+    return tool;
   }
 
   /** Closes every publisher client the tools opened. */
