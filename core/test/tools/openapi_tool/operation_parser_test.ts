@@ -92,4 +92,85 @@ describe('OperationParser', () => {
     expect(schema).toBeTruthy();
     expect(schema.title).toBe('testOp_Arguments');
   });
+
+  describe('getReturnValue', () => {
+    it('should return the schema of the 2xx response', () => {
+      const op: OpenAPIV3.OperationObject = {
+        operationId: 'testOp',
+        responses: {
+          '200': {
+            description: 'OK',
+            content: {
+              'application/json': {
+                schema: {type: 'object', properties: {id: {type: 'integer'}}},
+              },
+            },
+          },
+        },
+      };
+
+      const returnValue = new OperationParser(op).getReturnValue();
+
+      expect(returnValue).toEqual({
+        originalName: '',
+        paramLocation: '',
+        paramSchema: {type: 'object', properties: {id: {type: 'integer'}}},
+        required: true,
+        name: 'return',
+      });
+    });
+
+    it('should return the schema of the lowest 2xx response', () => {
+      const op: OpenAPIV3.OperationObject = {
+        operationId: 'testOp',
+        responses: {
+          '202': {
+            description: 'Accepted',
+            content: {'application/json': {schema: {type: 'boolean'}}},
+          },
+          '200': {
+            description: 'OK',
+            content: {'application/json': {schema: {type: 'string'}}},
+          },
+        },
+      };
+
+      expect(new OperationParser(op).getReturnValue().paramSchema.type).toBe(
+        'string',
+      );
+    });
+
+    const emptySchemaCases: Array<[string, OpenAPIV3.ResponsesObject]> = [
+      ['the operation declares no responses', {}],
+      ['no response is 2xx', {'404': {description: 'Not found'}}],
+      ['the 2xx response is a reference', {'200': {$ref: '#/x'}}],
+      ['the 2xx response has no content', {'200': {description: 'OK'}}],
+      [
+        'the 2xx response declares no media type',
+        {'200': {description: 'OK', content: {}}},
+      ],
+      [
+        'the 2xx schema is an unresolved reference',
+        {
+          '200': {
+            description: 'OK',
+            content: {'application/json': {schema: {$ref: '#/x'}}},
+          },
+        },
+      ],
+    ];
+
+    it.each(emptySchemaCases)(
+      'should return an empty schema when %s',
+      (_, responses) => {
+        const returnValue = new OperationParser({
+          operationId: 'testOp',
+          responses,
+        }).getReturnValue();
+
+        expect(returnValue.paramSchema).toEqual({});
+        expect(returnValue.name).toBe('return');
+      },
+    );
+  });
 });

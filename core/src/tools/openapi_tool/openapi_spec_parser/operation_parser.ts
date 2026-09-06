@@ -25,7 +25,7 @@ export interface ApiParameter {
 @experimental
 export class OperationParser {
   private params: ApiParameter[] = [];
-  private returnValue?: ApiParameter;
+  private readonly returnValue: ApiParameter;
   private preservePropertyNames: boolean;
 
   constructor(
@@ -35,7 +35,7 @@ export class OperationParser {
     this.preservePropertyNames = options.preservePropertyNames ?? false;
     this.processOperationParameters();
     this.processRequestBody();
-    this.processReturnValue();
+    this.returnValue = this.parseReturnValue();
     this.dedupeParamNames();
   }
 
@@ -136,7 +136,7 @@ export class OperationParser {
     }
   }
 
-  private processReturnValue() {
+  private parseReturnValue(): ApiParameter {
     const responses = this.operation.responses || {};
     // Find first 2xx response
     const validCodes = Object.keys(responses).filter((k) => k.startsWith('2'));
@@ -157,7 +157,7 @@ export class OperationParser {
       }
     }
 
-    this.returnValue = {
+    return {
       originalName: '',
       paramLocation: '',
       paramSchema: returnSchema,
@@ -186,6 +186,19 @@ export class OperationParser {
   @experimental
   public getParameters(): ApiParameter[] {
     return this.params;
+  }
+
+  /**
+   * Gets the operation's return value, taken from its lowest 2xx response.
+   *
+   * The schema is empty when the operation declares no 2xx response, or when
+   * that response carries no usable schema.
+   *
+   * @returns The parsed return value.
+   */
+  @experimental
+  public getReturnValue(): ApiParameter {
+    return this.returnValue;
   }
 
   /**
