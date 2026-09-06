@@ -47,7 +47,6 @@ export class AdkTsApiServer extends BaseTestServer {
         });
       },
       startMessage: 'ADK API Server started',
-      successLogMessage: `Test ADK API Server started`,
       serverName: 'CLI',
       timeoutMs: this.params.startFailureTimeout || DEFAULT_TIMEOUT,
     });

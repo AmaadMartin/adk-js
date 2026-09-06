@@ -47,6 +47,19 @@ const EXPECTED_POWERSHELL_ARGS = [
   expect.stringMatching(/script\.ps1$/),
 ];
 
+/**
+ * `it()` budget (ms) for the cases that spawn a real interpreter rather than
+ * the mocked `spawn` used by the `spawn arguments` suite below. The `unit:core`
+ * project sets no `testTimeout`, so these inherit Vitest's 5000 ms default,
+ * which is not a process-start budget: on Windows the default shell is Windows
+ * PowerShell, whose cold start under V8 coverage instrumentation on a loaded CI
+ * runner does not reliably fit. The value is above `UnsafeLocalCodeExecutor`'s
+ * own 30 s default execution timeout on purpose, so a genuinely stuck
+ * interpreter fails with the executor's timeout message instead of an opaque
+ * Vitest timeout.
+ */
+const REAL_INTERPRETER_TIMEOUT_MS = 40000;
+
 function createMockInvocationContext(): InvocationContext {
   const agent = new LlmAgent({
     name: 'test_agent',
@@ -230,21 +243,25 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('should execute shell code and return stdout', async () => {
-    const params: ExecuteCodeParams = {
-      invocationContext,
-      codeExecutionInput: {
-        code: 'echo "Hello, Shell!"',
-        language: CodeExecutionLanguage.SHELL,
-        inputFiles: [],
-      },
-    };
+  it(
+    'should execute shell code and return stdout',
+    async () => {
+      const params: ExecuteCodeParams = {
+        invocationContext,
+        codeExecutionInput: {
+          code: 'echo "Hello, Shell!"',
+          language: CodeExecutionLanguage.SHELL,
+          inputFiles: [],
+        },
+      };
 
-    const result = await executor.executeCode(params);
+      const result = await executor.executeCode(params);
 
-    expect(result.stdout).toContain('Hello, Shell!');
-    expect(result.stderr).toBe('');
-  });
+      expect(result.stdout).toContain('Hello, Shell!');
+      expect(result.stderr).toBe('');
+    },
+    REAL_INTERPRETER_TIMEOUT_MS,
+  );
 
   it('should return error for unsupported language', async () => {
     const params: ExecuteCodeParams = {
