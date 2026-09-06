@@ -11,6 +11,7 @@ import {
   Context,
   createRestApiTool,
   OpenApiSpecParser,
+  OperationParser,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -750,6 +751,54 @@ describe('RestApiTool Utilities', () => {
 
       expect(result.url).toBe('http://api.example.com/users/123/posts');
       expect(result.headers).toEqual({});
+    });
+
+    it('should route an array request body to the whole body', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/items',
+        method: 'POST',
+      };
+      const operation: OpenAPIV3.OperationObject = {
+        operationId: 'uploadItems',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {type: 'array', items: {type: 'string'}},
+            },
+          },
+        },
+        responses: {},
+      };
+      const parameters = new OperationParser(operation).getParameters();
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        array: ['a', 'b'],
+      });
+
+      expect(result.body).toEqual(['a', 'b']);
+      expect(result.bodyData).toEqual({});
+    });
+
+    it('should route an unnamed body parameter to the whole body', () => {
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/items',
+        method: 'POST',
+      };
+      const operation: OpenAPIV3.OperationObject = {
+        operationId: 'legacyBody',
+        parameters: [{name: '', in: 'body', schema: {type: 'object'}}],
+        responses: {},
+      };
+      const parameters = new OperationParser(operation).getParameters();
+
+      const result = prepareRequestParams(endpoint, parameters, {
+        '': {id: 1},
+      });
+
+      expect(result.body).toEqual({id: 1});
+      expect(result.bodyData).toEqual({});
     });
 
     describe('path parameter encoding', () => {
