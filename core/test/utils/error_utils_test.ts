@@ -5,7 +5,7 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {formatError} from '../../src/utils/error_utils.js';
+import {formatError, timeoutErrorName} from '../../src/utils/error_utils.js';
 
 const TRUNCATION_MARKER = '... [truncated]';
 const MAX_RESPONSE_BODY_LENGTH = 1000;
@@ -206,5 +206,78 @@ describe('formatError', () => {
       response: {status: 502, text: 'text body'},
     });
     expect(formatError(err)).toContain('text body');
+  });
+});
+
+describe('timeoutErrorName', () => {
+  it('names a bare abort timeout', () => {
+    const err = new DOMException(
+      'The operation was aborted due to timeout',
+      'TimeoutError',
+    );
+    expect(timeoutErrorName(err)).toBe('TimeoutError');
+  });
+
+  it('names an undici timeout two cause levels down', () => {
+    const transport = Object.assign(new Error('Connect Timeout Error'), {
+      name: 'ConnectTimeoutError',
+      code: 'UND_ERR_CONNECT_TIMEOUT',
+    });
+    const err = new TypeError('fetch failed', {
+      cause: new Error('socket', {cause: transport}),
+    });
+    expect(timeoutErrorName(err)).toBe('ConnectTimeoutError');
+  });
+
+  it('names a timeout held by an AggregateError', () => {
+    const err = new AggregateError([
+      new Error('first attempt'),
+      Object.assign(new Error('read stalled'), {name: 'BodyTimeoutError'}),
+    ]);
+    expect(timeoutErrorName(err)).toBe('BodyTimeoutError');
+  });
+
+  it('reports the code when the name is not a timeout name', () => {
+    const err = Object.assign(new Error('connect ETIMEDOUT'), {
+      code: 'ETIMEDOUT',
+    });
+    expect(timeoutErrorName(err)).toBe('ETIMEDOUT');
+  });
+
+  it('reports the code of a timeout that carries no name', () => {
+    expect(timeoutErrorName({code: 'UND_ERR_HEADERS_TIMEOUT'})).toBe(
+      'UND_ERR_HEADERS_TIMEOUT',
+    );
+  });
+
+  it('prefers a timeout name over the code that accompanies it', () => {
+    const err = Object.assign(new Error('read stalled'), {
+      name: 'BodyTimeoutError',
+      code: 'UND_ERR_BODY_TIMEOUT',
+    });
+    expect(timeoutErrorName(err)).toBe('BodyTimeoutError');
+  });
+
+  it('returns undefined for a plain error', () => {
+    expect(timeoutErrorName(new Error('boom'))).toBeUndefined();
+  });
+
+  it('returns undefined for a null, a string and a number', () => {
+    expect(timeoutErrorName(null)).toBeUndefined();
+    expect(timeoutErrorName('TimeoutError')).toBeUndefined();
+    expect(timeoutErrorName(42)).toBeUndefined();
+  });
+
+  it('returns on a self-referential cause cycle', () => {
+    const err: Error & {cause?: unknown} = new Error('cyclic');
+    err.cause = err;
+    expect(timeoutErrorName(err)).toBeUndefined();
+  });
+
+  it('returns on a cycle between two aggregated errors', () => {
+    const first = new AggregateError([], 'first');
+    const second = new AggregateError([first], 'second');
+    first.errors.push(second);
+    expect(timeoutErrorName(second)).toBeUndefined();
   });
 });
