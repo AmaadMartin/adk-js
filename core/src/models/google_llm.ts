@@ -6,18 +6,26 @@
 
 import {
   Blob,
-  createPartFromText,
   FileData,
   GoogleGenAI,
+  GoogleGenAIOptions,
   HttpOptions,
+  HttpRetryOptions,
   LiveServerMessage,
+  SpeechConfig,
 } from '@google/genai';
 
+import {asResourceExhaustedError} from '../errors/resource_exhausted_error.js';
 import {isBrowser, isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
+import {asSafePartForLlm} from '../utils/part_utils.js';
 import {GoogleLLMVariant} from '../utils/variant_utils.js';
 
 import {AsyncQueue} from '../utils/async_queue.js';
+import {
+  normalizeBaseUrlAndApiVersion,
+  NormalizedBaseUrl,
+} from '../utils/base_url_utils.js';
 import {StreamingResponseAggregator} from '../utils/streaming_utils.js';
 import {BaseLlm} from './base_llm.js';
 import {BaseLlmConnection} from './base_llm_connection.js';
@@ -61,9 +69,50 @@ export interface GeminiParams {
    * Whether to use the Interactions API for stateful conversations.
    */
   useInteractionsApi?: boolean;
+  /**
+   * The base URL for the service endpoint. A Google API version suffix in the
+   * path (e.g. a trailing `/v1alpha`) is lifted out into the API version.
+   */
+  baseUrl?: string;
+  /**
+   * The API version for the non-live service endpoint.
+   *
+   * For the Vertex AI backend the google-genai SDK defaults to `v1beta1`,
+   * which exposes preview features. Set this to `v1` for the GA endpoint.
+   * When unset, the `GOOGLE_GENAI_API_VERSION` environment variable is
+   * consulted, and finally the SDK's own default applies. A version embedded
+   * in `baseUrl` wins over this field.
+   */
+  apiVersion?: string;
+  /**
+   * A pre-configured google-genai client. When set it serves both the
+   * generate-content and the live path, and ADK constructs no client of its
+   * own, so `clientKwargs` is ignored.
+   */
+  client?: GoogleGenAI;
+  /**
+   * Extra options for the google-genai client constructor. They are merged
+   * over the options ADK computes, so they win.
+   */
+  clientKwargs?: Partial<GoogleGenAIOptions>;
+  /**
+   * The retry policy for failed responses. It applies to the non-live client
+   * only.
+   */
+  retryOptions?: HttpRetryOptions;
+  /**
+   * The speech configuration for live sessions. It overrides a speech config
+   * already on the request.
+   */
+  speechConfig?: SpeechConfig;
 }
 
 const GEMINI_MODEL_SYMBOL = Symbol.for('google.adk.geminiModel');
+const API_VERSION_ENV_VARIABLE_NAME = 'GOOGLE_GENAI_API_VERSION';
+const ENTERPRISE_MODEL_PREFIX = 'projects/';
+// Inline data carries no filename, so this stands in for the artifact name
+// `asSafePartForLlm` requires.
+const INLINE_FILE_ARTIFACT_NAME = 'inline-file';
 
 /**
  * Type guard to check if an object is an instance of Gemini.
@@ -90,6 +139,12 @@ export class Gemini extends BaseLlm {
   private readonly location?: string;
   private readonly headers?: Record<string, string>;
   readonly useInteractionsApi: boolean;
+  private readonly apiVersion?: string;
+  private readonly client?: GoogleGenAI;
+  private readonly clientKwargs?: Partial<GoogleGenAIOptions>;
+  private readonly retryOptions?: HttpRetryOptions;
+  private readonly speechConfig?: SpeechConfig;
+  private readonly normalizedBaseUrl: NormalizedBaseUrl;
 
   /**
    * @param params The parameters for creating a Gemini instance.
@@ -102,6 +157,12 @@ export class Gemini extends BaseLlm {
     location,
     headers,
     useInteractionsApi,
+    baseUrl,
+    apiVersion,
+    client,
+    clientKwargs,
+    retryOptions,
+    speechConfig,
   }: GeminiParams) {
     if (!model) {
       model = 'gemini-2.5-flash';
@@ -127,6 +188,12 @@ export class Gemini extends BaseLlm {
     this.headers = headers;
     this.vertexai = !!params.vertexai;
     this.useInteractionsApi = !!useInteractionsApi;
+    this.apiVersion = apiVersion;
+    this.client = client;
+    this.clientKwargs = clientKwargs;
+    this.retryOptions = retryOptions;
+    this.speechConfig = speechConfig;
+    this.normalizedBaseUrl = normalizeBaseUrlAndApiVersion(baseUrl);
   }
 
   /**
@@ -136,6 +203,10 @@ export class Gemini extends BaseLlm {
    */
   static override readonly supportedModels: Array<string | RegExp> = [
     /gemini-.*/,
+    // Gemma 4+ works natively with Gemini (no workarounds needed).
+    /gemma-4.*/,
+    // model optimizer pattern
+    /model-optimizer-.*/,
     // fine-tuned vertex endpoint pattern
     /projects\/.+\/locations\/.+\/endpoints\/.+/,
     // vertex gemini long name
@@ -160,10 +231,6 @@ export class Gemini extends BaseLlm {
     stream = false,
     abortSignal?: AbortSignal,
   ): AsyncGenerator<LlmResponse, void> {
-    if (this.useInteractionsApi) {
-      yield* generateContentViaInteractions(this.apiClient, llmRequest, stream);
-      return;
-    }
     this.preprocessRequest(llmRequest);
     this.maybeAppendUserContent(llmRequest);
     logger.info(
@@ -174,64 +241,108 @@ export class Gemini extends BaseLlm {
       llmRequest.config = {};
     }
 
-    if (llmRequest.config.httpOptions) {
-      llmRequest.config.httpOptions.headers = {
-        ...llmRequest.config.httpOptions.headers,
-        ...this.trackingHeaders,
-      };
+    // Tracking headers always go on the request, because per-request HTTP
+    // options override the ones the client was constructed with.
+    const httpOptions = llmRequest.config.httpOptions ?? {};
+    httpOptions.headers = {...httpOptions.headers, ...this.trackingHeaders};
+    const apiVersion = this.normalizedBaseUrl.apiVersion ?? this.apiVersion;
+    if (apiVersion && !httpOptions.apiVersion) {
+      httpOptions.apiVersion = apiVersion;
     }
+    llmRequest.config.httpOptions = httpOptions;
 
     if (abortSignal) {
       llmRequest.config.abortSignal = abortSignal;
     }
 
-    if (stream) {
-      const streamResult = await this.apiClient.models.generateContentStream({
-        model: llmRequest.model ?? this.model,
-        contents: llmRequest.contents,
-        config: llmRequest.config,
-      });
+    try {
+      if (this.useInteractionsApi) {
+        yield* generateContentViaInteractions(
+          this.apiClient,
+          llmRequest,
+          stream,
+        );
+        return;
+      }
 
-      const aggregator = new StreamingResponseAggregator();
-      for await (const response of streamResult) {
-        for await (const llmResponse of aggregator.processResponse(response)) {
-          yield llmResponse;
+      if (stream) {
+        const streamResult = await this.apiClient.models.generateContentStream({
+          model: llmRequest.model ?? this.model,
+          contents: llmRequest.contents,
+          config: llmRequest.config,
+        });
+
+        const aggregator = new StreamingResponseAggregator();
+        for await (const response of streamResult) {
+          for await (const llmResponse of aggregator.processResponse(
+            response,
+          )) {
+            yield llmResponse;
+          }
         }
+        const finalResponse = aggregator.close();
+        if (finalResponse) {
+          yield finalResponse;
+        }
+      } else {
+        const response = await this.apiClient.models.generateContent({
+          model: llmRequest.model ?? this.model,
+          contents: llmRequest.contents,
+          config: llmRequest.config,
+        });
+        yield createLlmResponse(response);
       }
-      const finalResponse = aggregator.close();
-      if (finalResponse) {
-        yield finalResponse;
-      }
-    } else {
-      const response = await this.apiClient.models.generateContent({
-        model: llmRequest.model ?? this.model,
-        contents: llmRequest.contents,
-        config: llmRequest.config,
-      });
-      yield createLlmResponse(response);
+    } catch (e: unknown) {
+      throw asResourceExhaustedError(e) ?? e;
     }
   }
 
   protected getHttpOptions(): HttpOptions {
-    return {headers: {...this.trackingHeaders, ...this.headers}};
+    // The SDK skips an undefined scalar when it merges these over its own
+    // defaults, so an unresolved value leaves the default in place.
+    return {
+      headers: {...this.trackingHeaders, ...this.headers},
+      baseUrl: this.normalizedBaseUrl.baseUrl,
+      retryOptions: this.retryOptions,
+      apiVersion: this.configuredApiVersion(),
+    };
+  }
+
+  /**
+   * Returns the API version configured for the non-live endpoint.
+   *
+   * The `apiVersion` field wins over the `GOOGLE_GENAI_API_VERSION`
+   * environment variable. A version embedded in `baseUrl` wins over both.
+   */
+  private configuredApiVersion(): string | undefined {
+    return (
+      this.normalizedBaseUrl.apiVersion ||
+      this.apiVersion ||
+      (isBrowser() ? undefined : process.env[API_VERSION_ENV_VARIABLE_NAME]) ||
+      undefined
+    );
+  }
+
+  /** Options ADK computes for both clients, before `clientKwargs`. */
+  private clientOptions(): Partial<GoogleGenAIOptions> {
+    const backendOptions: Partial<GoogleGenAIOptions> = this.vertexai
+      ? {vertexai: true, project: this.project, location: this.location}
+      : {apiKey: this.apiKey};
+    if (this.model.startsWith(ENTERPRISE_MODEL_PREFIX)) {
+      backendOptions.enterprise = true;
+    }
+    return backendOptions;
   }
 
   get apiClient(): GoogleGenAI {
-    if (this._apiClient) {
-      return this._apiClient;
+    if (this.client) {
+      return this.client;
     }
-
-    if (this.vertexai) {
+    if (!this._apiClient) {
       this._apiClient = new GoogleGenAI({
-        vertexai: this.vertexai,
-        project: this.project,
-        location: this.location,
+        ...this.clientOptions(),
         httpOptions: this.getHttpOptions(),
-      });
-    } else {
-      this._apiClient = new GoogleGenAI({
-        apiKey: this.apiKey,
-        httpOptions: this.getHttpOptions(),
+        ...this.clientKwargs,
       });
     }
     return this._apiClient;
@@ -248,9 +359,14 @@ export class Gemini extends BaseLlm {
 
   get liveApiVersion(): string {
     if (!this._liveApiVersion) {
+      // The `apiVersion` field and the environment variable are deliberately
+      // ignored here: the live endpoint has its own per-backend version.
       // Vertex uses the beta API; the AI Studio backend uses v1alpha.
       this._liveApiVersion =
-        this.apiBackend === GoogleLLMVariant.VERTEX_AI ? 'v1beta1' : 'v1alpha';
+        this.normalizedBaseUrl.apiVersion ??
+        (this.apiBackend === GoogleLLMVariant.VERTEX_AI
+          ? 'v1beta1'
+          : 'v1alpha');
     }
     return this._liveApiVersion;
   }
@@ -259,24 +375,24 @@ export class Gemini extends BaseLlm {
     return {
       headers: this.trackingHeaders,
       apiVersion: this.liveApiVersion,
+      baseUrl: this.normalizedBaseUrl.baseUrl,
     };
   }
 
   get liveApiClient(): GoogleGenAI {
+    if (this.client) {
+      return this.client;
+    }
     if (!this._liveApiClient) {
-      if (this.vertexai) {
-        this._liveApiClient = new GoogleGenAI({
-          vertexai: this.vertexai,
-          project: this.project,
-          location: this.location || 'global',
-          httpOptions: this.getLiveHttpOptions(),
-        });
-      } else {
-        this._liveApiClient = new GoogleGenAI({
-          apiKey: this.apiKey,
-          httpOptions: this.getLiveHttpOptions(),
-        });
+      const options = this.clientOptions();
+      if (options.vertexai) {
+        options.location = this.location || 'global';
       }
+      this._liveApiClient = new GoogleGenAI({
+        ...options,
+        httpOptions: this.getLiveHttpOptions(),
+        ...this.clientKwargs,
+      });
     }
     return this._liveApiClient;
   }
@@ -302,17 +418,43 @@ export class Gemini extends BaseLlm {
       llmRequest.liveConnectConfig.httpOptions.apiVersion = this.liveApiVersion;
     }
 
-    if (llmRequest.config?.systemInstruction) {
-      llmRequest.liveConnectConfig.systemInstruction = {
-        role: 'system',
-        // TODO - b/425992518: validate type casting works well.
-        parts: [
-          createPartFromText(llmRequest.config.systemInstruction as string),
-        ],
-      };
+    if (this.speechConfig) {
+      llmRequest.liveConnectConfig.speechConfig = this.speechConfig;
     }
 
+    // Assigned unconditionally: with no system instruction the wire format is
+    // still a system Content holding one empty part, so skipping the
+    // assignment changes what every live connect sends.
+    const systemInstruction = llmRequest.config?.systemInstruction;
+    llmRequest.liveConnectConfig.systemInstruction = {
+      role: 'system',
+      parts: [
+        {
+          text:
+            typeof systemInstruction === 'string'
+              ? systemInstruction
+              : undefined,
+        },
+      ],
+    };
+
     llmRequest.liveConnectConfig.tools = llmRequest.config?.tools;
+
+    if (llmRequest.config?.thinkingConfig !== undefined) {
+      llmRequest.liveConnectConfig.thinkingConfig =
+        llmRequest.config.thinkingConfig;
+    }
+
+    // Safety settings come from the agent's generate-content config, which only
+    // populates `config`. Forward them so a live run honours the same
+    // configuration, but let an explicit live value win.
+    if (
+      llmRequest.config?.safetySettings !== undefined &&
+      llmRequest.liveConnectConfig.safetySettings === undefined
+    ) {
+      llmRequest.liveConnectConfig.safetySettings =
+        llmRequest.config.safetySettings;
+    }
 
     // Gemini API (AI Studio) rejects `sessionResumption.transparent`; it is a
     // Vertex-only flag. Strip it so callers can set a uniform resumption config
@@ -362,6 +504,25 @@ export class Gemini extends BaseLlm {
             removeDisplayNameIfPresent(part.fileData);
           }
         }
+      }
+    }
+
+    if (
+      llmRequest.config?.tools?.some(
+        (tool) => 'computerUse' in tool && !!tool.computerUse,
+      )
+    ) {
+      llmRequest.config.systemInstruction = undefined;
+    }
+
+    // An unsupported inline type (a DOCX dropped into the UI, say) reaches the
+    // model as plain text instead of raw bytes it cannot read.
+    if (llmRequest.contents) {
+      for (const content of llmRequest.contents) {
+        if (!content.parts) continue;
+        content.parts = content.parts.map((part) =>
+          asSafePartForLlm(part, INLINE_FILE_ARTIFACT_NAME),
+        );
       }
     }
   }
