@@ -4,6 +4,61 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Context} from '../agents/context.js';
+
+/**
+ * Decides, per call, whether a tool needs a human to approve its arguments.
+ */
+export type RequireConfirmationPredicate = (
+  args: Record<string, unknown>,
+  toolContext?: Context,
+) => boolean | Promise<boolean>;
+
+/**
+ * Evaluates the confirmation gate for one tool call.
+ *
+ * Each tool resolves its own `requireConfirmation` first, because each types
+ * its predicate over its own argument shape. What they share is the gate below.
+ *
+ * @return `undefined` when the tool may run. Otherwise the function response
+ *     payload to surface instead of running: a request for confirmation on the
+ *     first pass, or a rejection once the user declined.
+ * @throws If the call needs confirmation but has no tool context to raise the
+ *     request into.
+ */
+export async function checkToolConfirmation(options: {
+  toolName: string;
+  requireConfirmation: boolean;
+  toolContext?: Context;
+}): Promise<{error: string} | undefined> {
+  const {toolName, requireConfirmation, toolContext} = options;
+
+  if (!requireConfirmation) {
+    return undefined;
+  }
+  if (!toolContext) {
+    throw new Error(
+      `Tool '${toolName}' requires confirmation but no tool context was provided.`,
+    );
+  }
+  if (!toolContext.toolConfirmation) {
+    toolContext.requestConfirmation({
+      hint:
+        `Please approve or reject the tool call ${toolName}() by ` +
+        'responding with a FunctionResponse with an expected ' +
+        'ToolConfirmation payload.',
+    });
+    toolContext.actions.skipSummarization = true;
+    return {
+      error: 'This tool call requires confirmation, please approve or reject.',
+    };
+  }
+  if (!toolContext.toolConfirmation.confirmed) {
+    return {error: 'This tool call is rejected.'};
+  }
+  return undefined;
+}
+
 /**
  * Represents a tool confirmation configuration.
  * @experimental  (Experimental, subject to change)
