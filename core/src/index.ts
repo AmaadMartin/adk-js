@@ -24,6 +24,17 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {
+  CLOUD_TTS_MODEL_NAME,
+  CloudTtsErrorCode,
+  CloudTtsLlm,
+  DEFAULT_TTS_AUDIO_ENCODING,
+  DEFAULT_TTS_LANGUAGE_CODE,
+  DEFAULT_TTS_VOICE_NAME,
+  type CloudTtsClient,
+  type CloudTtsLlmParams,
+  type CloudTtsVoiceSelection,
+} from './evaluation/simulation/cloud_tts_llm.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
