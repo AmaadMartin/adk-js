@@ -61,6 +61,20 @@ export function isNodeErrorReported(
   return reportedInvocationIds.get(error) === invocationId;
 }
 
+/**
+ * Drops a claim so the same error object can be reported again.
+ *
+ * The other way to keep one event per attempt: claim on every attempt and
+ * release before the retry, rather than peek with {@link isNodeErrorReported}
+ * and claim once. An unreleased claim still stops an outer node — or
+ * `Workflow.reportNodeError` — from repeating a failure it only propagated.
+ */
+export function releaseNodeErrorReport(error: unknown): void {
+  if (typeof error === 'object' && error !== null) {
+    reportedInvocationIds.delete(error);
+  }
+}
+
 export function createNodeErrorEvent(
   params: CreateNodeErrorEventParams,
 ): NodeErrorEvent {

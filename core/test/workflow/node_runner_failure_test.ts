@@ -16,17 +16,28 @@
  * A `test_`-prefixed name is a verbatim port and names a test in the reference
  * file. The class-name test is adk-js's own: it pins the rung this change added
  * to `errorCodeOf`, which the reference covers only inside its other tests.
+ *
+ * The last suite covers the native-event guard. Those cases are adk-js's own
+ * too — adk-python has no equivalent, because its framework overwrites an
+ * event's author.
  */
 
 import {describe, expect, it} from 'vitest';
-import {Event} from '../../src/events/event.js';
+import {createEvent, Event} from '../../src/events/event.js';
 import {node} from '../../src/workflow/node.js';
+import {NodeContext} from '../../src/workflow/node_context.js';
 import {
   isNodeErrorEvent,
   NodeErrorEvent,
 } from '../../src/workflow/node_error_event.js';
 import {Workflow} from '../../src/workflow/workflow.js';
-import {driveWorkflow, FnNode, runFailingChildNode} from './test_helpers.js';
+import {
+  driveWorkflow,
+  FnNode,
+  GenNode,
+  runChildNode,
+  runFailingChildNode,
+} from './test_helpers.js';
 
 function errorEvents(events: Event[]): Event[] {
   return events.filter((e) => e.errorCode !== undefined);
@@ -219,5 +230,93 @@ describe('node_runner — error events on failure', () => {
 
     expect(failed).toHaveLength(1);
     expect(failed[0].errorCode).toBe('ETIMEDOUT');
+  });
+  it('reports a plain error without a status or code', async () => {
+    // The reference's own fallback is `UNKNOWN_ERROR`; adk-js reaches the
+    // class-name rung first, so a plain `Error` codes as `Error`.
+    const errNode = new FnNode('ErrNode', () => {
+      throw new Error('no code');
+    });
+
+    const {events} = await runFailingChildNode(errNode);
+    const failed = nodeErrorEvents(events);
+
+    expect(failed).toHaveLength(1);
+    expect(failed[0].errorType).toBe('Error');
+    expect(failed[0].errorCode).toBe('Error');
+  });
+});
+
+describe('node_runner \u2014 only the node\u2019s own events decide route and transfer', () => {
+  it('adopts a route from an event the node authored', async () => {
+    const n = new GenNode('mine', async function* () {
+      yield createEvent({author: 'mine', route: 'branch_a'});
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.route).toBe('branch_a');
+  });
+
+  it('ignores a route from an event a sub-agent authored', async () => {
+    const n = new GenNode('parent', async function* () {
+      yield createEvent({author: 'sub_agent', route: 'branch_a'});
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.route).toBeUndefined();
+  });
+
+  it('adopts transferToAgent from an event the node authored', async () => {
+    const n = new GenNode('mine', async function* () {
+      yield createEvent({
+        author: 'mine',
+        actions: {transferToAgent: 'specialist'},
+      });
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.actions.transferToAgent).toBe('specialist');
+  });
+
+  it('ignores transferToAgent from an event a sub-agent authored', async () => {
+    const n = new GenNode('parent', async function* () {
+      yield createEvent({
+        author: 'sub_agent',
+        actions: {transferToAgent: 'specialist'},
+      });
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.actions.transferToAgent).toBeUndefined();
+  });
+
+  it('treats an unauthored event as the node\u2019s own', async () => {
+    const n = new GenNode('anon', async function* () {
+      yield createEvent({route: 'branch_a'});
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.route).toBe('branch_a');
+  });
+
+  it('sets the output from a messageAsOutput event that carries none', async () => {
+    const n = new GenNode('speaker', async function* (_ctx: NodeContext) {
+      yield createEvent({
+        content: {role: 'model', parts: [{text: 'the answer'}]},
+        nodeInfo: {messageAsOutput: true},
+      });
+    });
+
+    const {child} = await runChildNode(n);
+
+    expect(child.output).toEqual({
+      role: 'model',
+      parts: [{text: 'the answer'}],
+    });
   });
 });

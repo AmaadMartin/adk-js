@@ -322,6 +322,44 @@ describe('mergeEventActions', () => {
     expect(result.setModelResponse).toEqual({v: 1});
   });
 
+  it('uses last-writer-wins for agentState', () => {
+    const result = mergeEventActions([
+      createEventActions({agentState: {input: 'first'}}),
+      createEventActions({agentState: {input: 'second'}}),
+    ]);
+    expect(result.agentState).toEqual({input: 'second'});
+  });
+
+  it('uses last-writer-wins for endOfAgent', () => {
+    const result = mergeEventActions([
+      createEventActions({endOfAgent: false}),
+      createEventActions({endOfAgent: true}),
+    ]);
+    expect(result.endOfAgent).toBe(true);
+  });
+
+  it('carries agentState and endOfAgent from a source that sets neither twice', () => {
+    // A merge drops any field it does not name. These two were added to
+    // EventActions after the merge was written, so a caller that replaces an
+    // event's actions with a merge result lost its resume checkpoint and its
+    // end-of-agent marker.
+    const result = mergeEventActions([
+      createEventActions({agentState: {input: 'x'}, endOfAgent: true}),
+      createEventActions({stateDelta: {k: 'v'}}),
+    ]);
+    expect(result.agentState).toEqual({input: 'x'});
+    expect(result.endOfAgent).toBe(true);
+    expect(result.stateDelta).toEqual({k: 'v'});
+  });
+
+  it('leaves agentState and endOfAgent unset when no source sets them', () => {
+    const result = mergeEventActions([
+      createEventActions({stateDelta: {k: 1}}),
+    ]);
+    expect(result.agentState).toBeUndefined();
+    expect(result.endOfAgent).toBeUndefined();
+  });
+
   it('applies target as the base before merging sources', () => {
     const target = createEventActions({stateDelta: {base: 'val'}});
     const result = mergeEventActions(

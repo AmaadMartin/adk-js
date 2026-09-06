@@ -17,7 +17,22 @@ import {
 } from '../../src/workflow/errors.js';
 import {NodeContext} from '../../src/workflow/node_context.js';
 import {executeChildNode} from '../../src/workflow/node_runner.js';
-import {createIc, drain, driveNode, FnNode} from './test_helpers.js';
+import {createIc, driveNode, FnNode} from './test_helpers.js';
+
+/** Closes `channel` and returns everything buffered on it. */
+async function collect(channel: AsyncQueue<Event>): Promise<Event[]> {
+  channel.close();
+  const events: Event[] = [];
+  for await (const event of channel) {
+    events.push(event);
+  }
+  return events;
+}
+
+/** Whether `event` carries a state delta holding `key`. */
+function hasStateDelta(event: Event, key: string): boolean {
+  return event.actions?.stateDelta?.[key] !== undefined;
+}
 
 // --- Tests ----------------------------------------------------------------
 
@@ -118,10 +133,11 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
     expect(child.state.get('counter')).toBe(7);
     // The write leaves the context on the node's own event: the runner moves
     // every pending delta onto the event it pushes, and clears it there.
-    const events = await drain(channel);
-    expect(events.map((e) => e.actions.stateDelta)).toContainEqual({
-      counter: 7,
-    });
+    const withDelta = (await collect(channel)).filter((e) =>
+      hasStateDelta(e, 'counter'),
+    );
+    expect(withDelta).toHaveLength(1);
+    expect(withDelta[0].actions.stateDelta['counter']).toBe(7);
     expect(child.actions.stateDelta).toEqual({});
   });
 
@@ -200,12 +216,10 @@ describe('Phase 1 — node execution & the push/pull bridge', () => {
     // The failed first attempt's write must not survive into the committed
     // delta — only the successful attempt's write reaches an event, and the
     // runner clears the context's own delta once it has moved it there.
-    const events = await drain(channel);
-    const committed = Object.assign(
-      {},
-      ...events.map((e) => e.actions.stateDelta),
-    );
-    expect(committed).toEqual({'attempt-2': 2});
+    const committed = (await collect(channel))
+      .map((e) => e.actions?.stateDelta)
+      .filter((delta) => delta && Object.keys(delta).length > 0);
+    expect(committed).toEqual([{'attempt-2': 2}]);
     expect(child.actions.stateDelta).toEqual({});
   });
 

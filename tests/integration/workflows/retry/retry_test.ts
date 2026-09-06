@@ -16,6 +16,7 @@
  * sample's own draws are interleaved with it.
  */
 
+import {isNodeErrorEvent} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {mulberry32} from '../_harness/rng.js';
 import {allEvents, finalOutput, runSample} from '../_harness/sample_harness.js';
@@ -53,10 +54,15 @@ describe('workflow sample: retry', () => {
     expect(texts).toContain('The weather is sunny');
 
     // One error event per failed attempt: attempts 1 and 2 throw, attempt 3
-    // succeeds.
-    const errors = events.filter((e) => e.errorCode !== undefined);
-    expect(errors.map((e) => e.errorCode)).toEqual(['HTTPError', 'HTTPError']);
-    expect(errors.map((e) => e.errorMessage)).toEqual([
+    // succeeds. The run still succeeds.
+    const errorEvents = events.filter(isNodeErrorEvent);
+    expect(errorEvents).toHaveLength(2);
+    expect(errorEvents.map((e) => e.attemptCount)).toEqual([1, 2]);
+    expect(errorEvents.map((e) => e.errorCode)).toEqual([
+      'HTTPError',
+      'HTTPError',
+    ]);
+    expect(errorEvents.map((e) => e.errorMessage)).toEqual([
       'HTTP Error 500: Internal Server Error',
       'HTTP Error 500: Internal Server Error',
     ]);

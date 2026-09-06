@@ -319,12 +319,12 @@ describe('NodeErrorEvent — retries and timeouts', () => {
     const {errorEvents} = await driveExpectingFailure(wf, 'x');
 
     expect(attempts).toBe(3);
+    expect(errorEvents).toHaveLength(3);
     expect(errorEvents.map((e) => e.attemptCount)).toEqual([1, 2, 3]);
-    expect(errorEvents.map((e) => e.errorMessage)).toEqual([
-      'still broken',
-      'still broken',
-      'still broken',
-    ]);
+    for (const event of errorEvents) {
+      expect(event.author).toBe('flaky');
+      expect(event.errorMessage).toBe('still broken');
+    }
   });
 
   it('emits for a genuine timeout, identifying it as one', async () => {

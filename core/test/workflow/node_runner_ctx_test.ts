@@ -13,6 +13,9 @@
  * Test names are kept verbatim so the two suites can be read side by side.
  * Where adk-js deliberately behaves differently the test asserts what adk-js
  * does and says why.
+ *
+ * adk-python tests `is not None`; adk-js treats `undefined` as "no output" and
+ * `null` as a legitimate output value, so these assert on `undefined`.
  */
 
 import {describe, expect, it} from 'vitest';
@@ -161,6 +164,26 @@ describe('node_runner — ctx.route', () => {
     // A route the node assigned rather than emitted still reaches the session:
     // the run ends with an event carrying it.
     expect(events.map((e) => e.route)).toEqual([undefined, 'branch_a']);
+  });
+
+  it('emits the route on its own event when no event carried it', async () => {
+    // eslint-disable-next-line require-yield -- a GenNode body is a generator; this one deliberately yields nothing.
+    const n = new GenNode('n', async function* (ctx: NodeContext) {
+      ctx.route = 'branch_a';
+    });
+
+    const {events} = await runChildNode(n);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].route).toBe('branch_a');
+  });
+
+  it('emits nothing when the node leaves no output, route or delta', async () => {
+    const n = new GenNode('n', async function* () {});
+
+    const {events} = await runChildNode(n);
+
+    expect(events).toHaveLength(0);
   });
 });
 
@@ -351,6 +374,21 @@ describe('node_runner — event enrichment', () => {
     const {events} = await runChildNode(n);
 
     expect(events[0].author).toBe('my_node');
+  });
+
+  // Deliberately NOT named after adk-python's
+  // `test_preset_author_overridden_by_framework`, which asserts the opposite:
+  // adk-python always stamps the node name, adk-js keeps an author the node
+  // set. That divergence is what makes the native-event guard meaningful here,
+  // because a sub-agent's author survives to be compared against the node name.
+  it('keeps an author the node set on its own event', async () => {
+    const n = new GenNode('framework', async function* () {
+      yield createEvent({author: 'preset', content: undefined});
+    });
+
+    const {events} = await runChildNode(n);
+
+    expect(events[0].author).toBe('preset');
   });
 
   it('test_override_branch_used_in_node_runner', async () => {

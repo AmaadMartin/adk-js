@@ -359,6 +359,8 @@ describe('runNodeAsInvocation — the workflow output reaches the caller once', 
 
     expect(withOutput).toHaveLength(1);
     expect(withOutput[0].output).toBe('assigned');
+    // The node's own end-of-run flush carries the value out, so the event
+    // names the node that produced it rather than the enclosing workflow.
     expect(withOutput[0].author).toBe('quiet');
   });
 });

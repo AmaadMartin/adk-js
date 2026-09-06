@@ -300,7 +300,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    every source are combined via `Object.assign`. Later sources win on
  *    duplicate keys.
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`,
- *    `setModelResponse`, `rewindBeforeInvocationId`, `compaction`) —
+ *    `transferReason`, `route`, `setModelResponse`,
+ *    `rewindBeforeInvocationId`, `compaction`, `agentState`, `endOfAgent`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
  * 3. **List fields** (`renderUiWidgets`) — the widgets of every source are
@@ -308,6 +309,9 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  *    nothing, so the result stays `undefined` when no source sets it.
  *    Parallel function responses each render their own widget, and
  *    last-writer-wins would drop every widget but the last.
+ *
+ * Every field of {@link EventActions} is covered. A field added to that type
+ * must be added here too, or a merge silently drops it.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -377,6 +381,12 @@ export function mergeEventActions(
     }
     if (source.compaction !== undefined) {
       result.compaction = source.compaction;
+    }
+    if (source.agentState !== undefined) {
+      result.agentState = source.agentState;
+    }
+    if (source.endOfAgent !== undefined) {
+      result.endOfAgent = source.endOfAgent;
     }
   }
   return result;

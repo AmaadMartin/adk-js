@@ -357,4 +357,5 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Workflow
 
 - [BaseNode](workflow/base_node/index.md) - Node names, static node paths, and how a node's output is serialized onto an event.
+- [Event branches in a node run](workflow/node_branches/index.md) - Which branch a node's events carry, and how a node redirects it.
 - [Workflow nodes](workflow/node/index.md) - Building a node from a function, tool, agent or node, subclassing `WorkflowNode`, and running a node once per item of a list input.

@@ -291,7 +291,11 @@ export class Workflow extends BaseNode {
       // An entry that hands back a child's value verbatim is reporting an
       // output the child already emitted; a second event for it would deliver
       // one result as two. A value the entry computed itself has no event yet,
-      // so the node runner still flushes one.
+      // so the node runner still flushes one. Runs record their output by
+      // value, so this compares values rather than provenance: an entry that
+      // independently computed a primitive some child also produced reads as
+      // passing that child's value back. The value still reaches the stream on
+      // the child's event, so what is lost is a duplicate, not the result.
       ctx.outputEmitted = [...dynamicState.runs.values()].some((run) =>
         Object.is(run.output, output),
       );
