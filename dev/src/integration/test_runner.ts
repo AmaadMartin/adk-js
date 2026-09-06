@@ -157,7 +157,15 @@ function validateSession(actual: Session, expected: Session) {
   assert.deepStrictEqual(actualEvents, expectedEvents);
 }
 
-function normalizeEvent(event: Event): FilteredEvent {
+/**
+ * Strips the fields that vary between two runs of the same test.
+ *
+ * Removes the generated identifiers (`id`, `timestamp`, `invocationId`,
+ * `longRunningToolIds`) and the non-serializable symbol brands, so a replayed
+ * event can be compared against the same event loaded from a recorded YAML
+ * session. Mutates and returns the event it is given.
+ */
+export function normalizeEvent(event: Event): FilteredEvent {
   const filteredEvent = event as FilteredEvent;
   filterEventFields(filteredEvent);
   removeEmptyAndUndefinedFields(
@@ -212,6 +220,14 @@ function filterPartFields(part: FilteredPart) {
 }
 
 function filterEventFields(event: FilteredEvent) {
+  // `assert.deepStrictEqual` compares own symbol properties, and an event
+  // loaded from a recorded YAML session can never have one. Every brand a
+  // runtime event carries, such as the one `createEvent` stamps, is therefore
+  // noise in the comparison.
+  for (const brand of Object.getOwnPropertySymbols(event)) {
+    Reflect.deleteProperty(event, brand);
+  }
+
   /* eslint-disable @typescript-eslint/no-explicit-any */
   delete (event as any).id;
   delete (event as any).timestamp;
