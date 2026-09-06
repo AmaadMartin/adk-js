@@ -380,6 +380,44 @@ describe('CLI Entrypoint', () => {
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
     });
+
+    it('should pass otelToCloud to deployToCloudRun when --otel_to_cloud is set', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--project=my-proj',
+        '--region=us-west1',
+        '--otel_to_cloud',
+      ]);
+
+      const args = (deployToCloudRun as Mock).mock.calls[0][0];
+      expect(args).toMatchObject({otelToCloud: true});
+      // A recognised flag must not also be passed through as an unknown one,
+      // which gcloud would reject.
+      expect(args.extraGcloudArgs).toEqual([]);
+    });
+
+    it('should default otelToCloud to false when --otel_to_cloud is omitted', async () => {
+      await parse(['deploy', 'cloud_run']);
+
+      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+        otelToCloud: false,
+      });
+    });
+
+    it('should honour --otel_to_cloud=false', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--otel_to_cloud=false',
+      ]);
+
+      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+        otelToCloud: false,
+      });
+    });
   });
 
   describe('command: deploy agent_engine', () => {
