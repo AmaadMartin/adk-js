@@ -15,6 +15,7 @@ import {
   Graph as WorkflowGraph,
   isAgentTool,
   isBaseAgent,
+  isBaseRetrievalTool,
   isBaseTool,
   isFunctionTool,
   isLlmAgent,
@@ -558,10 +559,13 @@ function getNodeName(toolOrAgent: BaseAgent | BaseTool): string {
   throw new Error(`Unsupported tool type: ${toolOrAgent}`);
 }
 
-// TODO: Support BaseRetrievalTool
 function getNodeCaption(toolOrAgent: BaseAgent | BaseTool): string {
   if (isBaseAgent(toolOrAgent)) {
     return `🤖 ${toolOrAgent.name}`;
+  }
+
+  if (isBaseRetrievalTool(toolOrAgent)) {
+    return `🔎 ${toolOrAgent.name}`;
   }
 
   if (isFunctionTool(toolOrAgent)) {
@@ -581,10 +585,13 @@ function getNodeCaption(toolOrAgent: BaseAgent | BaseTool): string {
   return `❓ Unsupported tool type: ${typeof toolOrAgent}`;
 }
 
-// TODO: Support BaseRetrievalTool
 function getNodeShape(toolOrAgent: BaseAgent | BaseTool): string {
   if (isBaseAgent(toolOrAgent)) {
     return 'ellipse';
+  }
+
+  if (isBaseRetrievalTool(toolOrAgent)) {
+    return 'cylinder';
   }
 
   if (isFunctionTool(toolOrAgent)) {
@@ -600,7 +607,6 @@ function getNodeShape(toolOrAgent: BaseAgent | BaseTool): string {
   return 'cylinder';
 }
 
-// TODO: Support BaseRetrievalTool
 function shouldBuildAgentCluster(toolOrAgent: BaseAgent | BaseTool): boolean {
   if (isSequentialAgent(toolOrAgent)) {
     return true;

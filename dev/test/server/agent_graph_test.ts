@@ -5,6 +5,7 @@
  */
 
 import {
+  BaseRetrievalTool,
   createEvent,
   DEFAULT_ROUTE,
   Edge,
@@ -25,6 +26,16 @@ import {
   getAgentGraphAsDot,
   getWorkflowHighlights,
 } from '../../src/server/agent_graph.js';
+
+class DocsRetrieval extends BaseRetrievalTool {
+  constructor() {
+    super({name: 'docsRetrieval', description: 'Searches the product docs.'});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return 'a hit';
+  }
+}
 
 describe('AgentGraph', () => {
   it('generates a DOT graph for a simple LlmAgent with a FunctionTool', async () => {
@@ -227,6 +238,34 @@ describe('AgentGraph', () => {
     expect(dotGraph).toContain(
       'label = "cluster_parallelAgent (Parallel Agent)"',
     );
+  });
+
+  it('draws a retrieval tool as a magnifier-labelled cylinder', async () => {
+    const agent = new LlmAgent({
+      name: 'testAgent',
+      tools: [new DocsRetrieval()],
+    });
+
+    const dotGraph = await getAgentGraphAsDot(agent, []);
+
+    expect(nodeBlock(dotGraph, 'docsRetrieval')).toContain(
+      'label = "🔎 docsRetrieval"',
+    );
+    expect(nodeBlock(dotGraph, 'docsRetrieval')).toContain(
+      'shape = "cylinder"',
+    );
+  });
+
+  it('keeps a retrieval tool out of a cluster', async () => {
+    const agent = new LlmAgent({
+      name: 'testAgent',
+      tools: [new DocsRetrieval()],
+    });
+
+    const dotGraph = await getAgentGraphAsDot(agent, []);
+
+    expect(dotGraph).not.toContain('cluster_docsRetrieval');
+    expect(dotGraph).toContain('"testAgent" -> "docsRetrieval"');
   });
 });
 
