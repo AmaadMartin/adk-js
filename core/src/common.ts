@@ -398,7 +398,6 @@ export {AsyncQueue} from './utils/async_queue.js';
 export {
   LIVE_INPUT_MIME_TYPE,
   LIVE_INPUT_RATE_HZ,
-  LIVE_OUTPUT_RATE_HZ,
   parseSampleRate,
   resamplePcm16,
   toLiveInput,
