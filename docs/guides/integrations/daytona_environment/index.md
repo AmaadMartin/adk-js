@@ -84,10 +84,6 @@ const env = new DaytonaEnvironment({
 Every field is optional. `apiKey` and `apiUrl` are handed to the SDK, which
 falls back to its own environment variables for whichever one you leave out.
 
-You can also pass a `client` you built yourself. That client belongs to you:
-`close()` deletes the sandbox but does not dispose the client, so you can share
-one client across several environments.
-
 ## Paths
 
 A relative path is resolved against `/workspaces`. An absolute path is used as

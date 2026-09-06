@@ -35,9 +35,6 @@ const DAYTONA_ERROR_PREFIX = 'Daytona';
 /** `code` of the SDK's `DaytonaProcessExecutionTimeoutError`. */
 const PROCESS_EXECUTION_TIMEOUT_CODE = 'PROCESS_EXECUTION_TIMEOUT';
 
-/** `code` of the SDK's `DaytonaFileNotFoundError`. */
-const FILE_NOT_FOUND_CODE = 'FILE_NOT_FOUND';
-
 /** `statusCode` the SDK copies from an HTTP 404 response. */
 const HTTP_NOT_FOUND = 404;
 
@@ -53,13 +50,12 @@ export interface DaytonaEnvironmentOptions {
   apiUrl?: string;
   /** Environment variables set inside the sandbox. */
   envVars?: Record<string, string>;
-  /**
-   * A pre-configured client. One is created on `initialize()` when omitted.
-   *
-   * A client passed here belongs to the caller: `close()` deletes the sandbox
-   * but does not dispose the client.
-   */
-  client?: Daytona;
+}
+
+/** The client and sandbox of a live session, created and torn down together. */
+interface DaytonaSession {
+  client: Daytona;
+  sandbox: Sandbox;
 }
 
 /** The fields every Daytona SDK error carries, read structurally. */
@@ -114,7 +110,6 @@ function isDaytonaNotFound(err: unknown): boolean {
     return false;
   }
   return (
-    fields.code === FILE_NOT_FOUND_CODE ||
     fields.statusCode === HTTP_NOT_FOUND ||
     fields.name.endsWith('NotFoundError')
   );
@@ -214,11 +209,7 @@ export class DaytonaEnvironment extends BaseEnvironment {
   private readonly apiKey?: string;
   private readonly apiUrl?: string;
   private readonly envVars?: Record<string, string>;
-  /** The client in use, whether the caller supplied it or `initialize()` made it. */
-  private client?: Daytona;
-  /** Set only for a client this environment made, and therefore has to dispose. */
-  private ownedClient?: Daytona;
-  private sandbox?: Sandbox;
+  private session?: DaytonaSession;
 
   constructor(options: DaytonaEnvironmentOptions = {}) {
     super();
@@ -227,7 +218,6 @@ export class DaytonaEnvironment extends BaseEnvironment {
     this.apiKey = options.apiKey;
     this.apiUrl = options.apiUrl;
     this.envVars = options.envVars;
-    this.client = options.client;
   }
 
   /**
@@ -236,14 +226,14 @@ export class DaytonaEnvironment extends BaseEnvironment {
    * @throws If the sandbox is not started.
    */
   override get workingDir(): string {
-    if (this.sandbox === undefined) {
+    if (this.session === undefined) {
       throw new Error(NOT_STARTED_MESSAGE);
     }
     return SANDBOX_HOME;
   }
 
   /**
-   * Creates the sandbox, and the client when the caller supplied none.
+   * Creates the client and the sandbox.
    *
    * Returns immediately when a sandbox is already live.
    *
@@ -251,36 +241,36 @@ export class DaytonaEnvironment extends BaseEnvironment {
    *   credentials or the create request.
    */
   override async initialize(): Promise<void> {
-    if (this.sandbox !== undefined) {
+    if (this.session !== undefined) {
       return;
     }
-    if (this.client === undefined) {
-      this.ownedClient = await this.createClient();
-      this.client = this.ownedClient;
+    const client = await this.createClient();
+    try {
+      this.session = {client, sandbox: await this.createSandbox(client)};
+    } catch (err: unknown) {
+      // The SDK's constructor opens an event socket, so a client that never
+      // reached a session still has to be disposed.
+      await client[Symbol.asyncDispose]();
+      throw err;
     }
-    this.sandbox = await this.createSandbox(this.client);
     this.initialized = true;
   }
 
   /**
-   * Deletes the sandbox, and disposes the client when this environment made it.
+   * Deletes the sandbox and disposes the client.
    *
-   * Returns immediately when no sandbox is live. A client the caller passed to
-   * the constructor is left alone: the caller owns it.
+   * Returns immediately when no sandbox is live.
    */
   override async close(): Promise<void> {
-    if (this.sandbox === undefined) {
+    const session = this.session;
+    if (session === undefined) {
       return;
     }
-    await this.sandbox.delete();
-    this.sandbox = undefined;
-    if (this.ownedClient !== undefined) {
-      // Releases the client's HTTP sessions, so repeated create/close cycles
-      // do not leak sockets.
-      await this.ownedClient[Symbol.asyncDispose]();
-      this.ownedClient = undefined;
-      this.client = undefined;
-    }
+    await session.sandbox.delete();
+    // Releases the client's HTTP sessions and its event socket, so repeated
+    // create/close cycles do not leak them.
+    await session.client[Symbol.asyncDispose]();
+    this.session = undefined;
     this.initialized = false;
   }
 
@@ -406,11 +396,11 @@ export class DaytonaEnvironment extends BaseEnvironment {
 
   /** Returns the live sandbox, telling Daytona it is still in use. */
   private async ensureSandbox(): Promise<Sandbox> {
-    const sandbox = this.sandbox;
-    if (sandbox === undefined) {
+    const session = this.session;
+    if (session === undefined) {
       throw new Error(NOT_STARTED_MESSAGE);
     }
-    await sandbox.refreshActivity();
-    return sandbox;
+    await session.sandbox.refreshActivity();
+    return session.sandbox;
   }
 }

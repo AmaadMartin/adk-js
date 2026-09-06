@@ -6,12 +6,12 @@
 
 /**
  * `DaytonaEnvironment` behaviour the adk-python reference suite does not
- * cover, because the Python contract does not have it: byte writes, an
- * injected client, the error shapes only the TypeScript SDK raises, and the
- * failure paths of every method.
+ * cover, because the Python contract does not have it: byte writes, the error
+ * shapes only the TypeScript SDK raises, and the failure paths of every
+ * method.
  */
 
-import type {Daytona, DaytonaConfig} from '@daytona/sdk';
+import type {DaytonaConfig} from '@daytona/sdk';
 import {DaytonaEnvironment} from '@google/adk';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -77,6 +77,19 @@ describe('DaytonaEnvironment', () => {
 
       expect(DaytonaMock).toHaveBeenCalledTimes(2);
     });
+
+    it('disposes the client when creating the sandbox fails', async () => {
+      const failure = createDaytonaError('DaytonaForbiddenError', 'denied', {
+        statusCode: 403,
+      });
+      client.create.mockRejectedValue(failure);
+      const env = new DaytonaEnvironment();
+
+      await expect(env.initialize()).rejects.toBe(failure);
+
+      expect(client[Symbol.asyncDispose]).toHaveBeenCalledTimes(1);
+      expect(env.isInitialized).toBe(false);
+    });
   });
 
   describe('close', () => {
@@ -89,18 +102,17 @@ describe('DaytonaEnvironment', () => {
       expect(env.isInitialized).toBe(false);
     });
 
-    it('leaves an injected client for its owner to dispose', async () => {
-      // The mocked constructor hands back the fake, typed as the real client.
-      const {Daytona} = await import('@daytona/sdk');
-      const injected: Daytona = new Daytona();
-      const env = new DaytonaEnvironment({client: injected});
-
+    it('leaves the sandbox in place when deleting it fails', async () => {
+      const failure = createDaytonaError('DaytonaConflictError', 'busy', {
+        statusCode: 409,
+      });
+      sandbox.delete.mockRejectedValue(failure);
+      const env = new DaytonaEnvironment();
       await env.initialize();
-      await env.close();
 
-      expect(DaytonaMock).toHaveBeenCalledTimes(1);
-      expect(client.create).toHaveBeenCalledTimes(1);
-      expect(sandbox.delete).toHaveBeenCalledTimes(1);
+      await expect(env.close()).rejects.toBe(failure);
+
+      // The client stays alive so the caller can retry close().
       expect(client[Symbol.asyncDispose]).not.toHaveBeenCalled();
     });
   });
@@ -230,7 +242,7 @@ describe('DaytonaEnvironment', () => {
       );
     });
 
-    it('reports ENOENT for the SDK file-not-found code', async () => {
+    it('reports ENOENT for the SDK file-not-found subclass', async () => {
       const notFound = createDaytonaError(
         'DaytonaFileNotFoundError',
         'no such file',
