@@ -24,6 +24,13 @@ export {
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
+export {
+  CloudTtsLlm,
+  // CloudTtsClient is named by CloudTtsLlmParams.client, so typedoc requires
+  // it here; nothing else in this module is public API.
+  type CloudTtsClient,
+  type CloudTtsLlmParams,
+} from './evaluation/simulation/cloud_tts_llm.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
