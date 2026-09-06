@@ -16,6 +16,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
+  LlmAgent,
   requiresUserInput,
   RunnableRoot,
   Runner,
@@ -328,6 +329,8 @@ export interface RunAgentOptions {
   otelToCloud?: boolean;
   agentFileLoadOptions?: AgentFileOptions;
   reloadAgents?: boolean;
+  /** Model for agents in the tree that set none. Applied process-wide. */
+  defaultLlmModel?: string;
 }
 export async function runAgent(options: RunAgentOptions): Promise<void> {
   const userId = 'test_user';
@@ -342,6 +345,12 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   const loaded = await agentFile.load();
   const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
   const app = isApp(loaded) ? loaded : undefined;
+
+  // Model resolution is lazy, so the override still reaches an agent that was
+  // already constructed by the load above.
+  if (options.defaultLlmModel) {
+    LlmAgent.setDefaultModel(options.defaultLlmModel);
+  }
 
   let session = await sessionService.createSession({
     appName: app?.name ?? rootAgent.name,
