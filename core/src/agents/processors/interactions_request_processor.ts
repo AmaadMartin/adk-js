@@ -31,7 +31,9 @@ export class InteractionsRequestProcessor implements BaseLlmRequestProcessor {
       const events = invocationContext.session.events;
       for (let i = events.length - 1; i >= 0; i--) {
         const event = events[i];
-        // Skip events not belonging to the current branch or author
+        // The interactionId check is not redundant: a branch/author match
+        // without an id is skipped so the scan continues to an older event
+        // that has one.
         if (
           event.branch === invocationContext.branch &&
           event.author === agent.name &&
