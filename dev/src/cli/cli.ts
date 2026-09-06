@@ -451,43 +451,53 @@ export function createProgram(): Command {
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_DEPLOY_OPTION)
-    .action(async (agentPath: string, options: Record<string, string>) => {
-      const extraGcloudArgs = [];
-      for (const arg of process.argv.slice(5)) {
-        let argName = arg.replace(/^-+/, '');
-        if (argName.includes('=')) {
-          argName = argName.split('=')[0];
-        }
-        if (argName in options) {
-          continue;
-        }
+    .addHelpText(
+      'after',
+      '\nUnrecognised flags are forwarded to `gcloud run deploy`. Put the\n' +
+        'agent directory before them, or use `--` to separate them:\n' +
+        '  adk deploy cloud_run . -- --no-allow-unauthenticated --min-instances=2\n',
+    )
+    .action(
+      async (
+        agentsDir: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        // Commander merges leftover operands and unrecognised options into
+        // `command.args`, stopping operands at the first unrecognised option,
+        // so an unknown gcloud flag in slot 0 would otherwise be bound to
+        // `[agents_dir]`.
+        const firstFlag = command.args.findIndex(
+          (arg) => arg.length > 1 && arg.startsWith('-'),
+        );
+        const extraGcloudArgs =
+          firstFlag === -1 ? [] : command.args.slice(firstFlag);
+        const agentPath = firstFlag === 0 ? process.cwd() : agentsDir;
 
-        extraGcloudArgs.push(arg);
-      }
-
-      try {
-        await deployToCloudRun({
-          agentPath: getAbsolutePath(agentPath),
-          project: options['project'],
-          region: options['region'],
-          serviceName: options['service_name'],
-          tempFolder: options['temp_folder'],
-          port: parseInt(options['port'], 10),
-          withUi: getBoolean(options['with_ui']),
-          logLevel: options['log_level'],
-          adkVersion: options['adk_version'],
-          allowOrigins: options['allow_origins'],
-          sessionServiceUri: options['session_service_uri'],
-          artifactServiceUri: options['artifact_service_uri'],
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          a2aAuthToken: options['a2a_auth_token'],
-          extraGcloudArgs,
-        });
-      } catch (error) {
-        logger.error('Error deploying agent:', (error as Error).message);
-      }
-    });
+        try {
+          await deployToCloudRun({
+            agentPath: getAbsolutePath(agentPath),
+            project: options['project'],
+            region: options['region'],
+            serviceName: options['service_name'],
+            tempFolder: options['temp_folder'],
+            port: parseInt(options['port'], 10),
+            withUi: getBoolean(options['with_ui']),
+            logLevel: options['log_level'],
+            adkVersion: options['adk_version'],
+            allowOrigins: options['allow_origins'],
+            sessionServiceUri: options['session_service_uri'],
+            artifactServiceUri: options['artifact_service_uri'],
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            a2aAuthToken: options['a2a_auth_token'],
+            extraGcloudArgs,
+          });
+        } catch (error) {
+          logger.error('Error deploying agent:', (error as Error).message);
+        }
+      },
+    );
 
   const registerAgentEngineCommand = (cmd: Command) => {
     cmd

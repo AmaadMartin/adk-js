@@ -64,7 +64,6 @@ describe('CLI Entrypoint', () => {
 
   const parse = async (args: string[]) => {
     try {
-      process.argv = args;
       await program.parseAsync(['node', 'cli_entrypoint.js', ...args]);
     } catch (e: unknown) {
       if ((e as {code: string}).code !== 'commander.exit') {
@@ -379,6 +378,63 @@ describe('CLI Entrypoint', () => {
       // A recognised flag must not also be passed through as an unknown one,
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
+    });
+
+    it('should forward every unknown flag when no agent directory is given', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        '--no-allow-unauthenticated',
+        '--min-instances=2',
+      ]);
+
+      const args = (deployToCloudRun as Mock).mock.calls[0][0];
+      expect(args.extraGcloudArgs).toEqual([
+        '--no-allow-unauthenticated',
+        '--min-instances=2',
+      ]);
+      expect(args.agentPath).toBe(process.cwd());
+    });
+
+    it('should forward every unknown flag exactly once after an agent directory', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--project=my-proj',
+        '--no-allow-unauthenticated',
+        '--min-instances=2',
+      ]);
+
+      const args = (deployToCloudRun as Mock).mock.calls[0][0];
+      expect(args.extraGcloudArgs).toEqual([
+        '--no-allow-unauthenticated',
+        '--min-instances=2',
+      ]);
+      expect(args.agentPath).toContain('my-agent-path');
+      expect(args.project).toBe('my-proj');
+    });
+
+    it('should forward the value of a space-separated unknown flag', async () => {
+      await parse(['deploy', 'cloud_run', '--min-instances', '2']);
+
+      const args = (deployToCloudRun as Mock).mock.calls[0][0];
+      expect(args.extraGcloudArgs).toEqual(['--min-instances', '2']);
+      expect(args.agentPath).toBe(process.cwd());
+    });
+
+    it('should forward args after a -- separator', async () => {
+      await parse([
+        'deploy',
+        'cloud_run',
+        './my-agent-path',
+        '--',
+        '--no-allow-unauthenticated',
+      ]);
+
+      const args = (deployToCloudRun as Mock).mock.calls[0][0];
+      expect(args.extraGcloudArgs).toEqual(['--no-allow-unauthenticated']);
+      expect(args.agentPath).toContain('my-agent-path');
     });
   });
 
