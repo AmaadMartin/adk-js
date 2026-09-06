@@ -37,6 +37,10 @@ export {
   validateSkillDir,
 } from './skills/loader.js';
 export {
+  SqliteSpanExporter,
+  type SqliteSpanExporterOptions,
+} from './telemetry/sqlite_span_exporter.js';
+export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
