@@ -445,4 +445,157 @@ describe('toGeminiSchema', () => {
       ],
     });
   });
+
+  it('converts oneOf branches into anyOf', () => {
+    const input = {
+      oneOf: [{type: 'string'}, {type: 'integer'}],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      anyOf: [{type: Type.STRING}, {type: Type.INTEGER}],
+    });
+  });
+
+  it('converts a oneOf property and drops unsupported keywords', () => {
+    const input: MCPToolSchema = {
+      type: 'object',
+      properties: {
+        body: {
+          oneOf: [
+            {
+              type: 'object',
+              properties: {area: {type: 'string', example: 'north'}},
+            },
+            {type: 'integer', format: 'uint8'},
+          ],
+        },
+      },
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        body: {
+          anyOf: [
+            {type: Type.OBJECT, properties: {area: {type: Type.STRING}}},
+            {type: Type.INTEGER},
+          ],
+        },
+      },
+    });
+  });
+
+  it('merges oneOf branches after anyOf branches declared first', () => {
+    const input = {
+      anyOf: [{type: 'boolean'}],
+      oneOf: [{type: 'string'}],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      anyOf: [{type: Type.BOOLEAN}, {type: Type.STRING}],
+    });
+  });
+
+  it('merges anyOf branches after oneOf branches declared first', () => {
+    const input = {
+      oneOf: [{type: 'string'}],
+      anyOf: [{type: 'boolean'}],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      anyOf: [{type: Type.STRING}, {type: Type.BOOLEAN}],
+    });
+  });
+
+  it('handles oneOf with a null branch by picking the non-null type', () => {
+    const input = {
+      oneOf: [{type: 'string'}, {type: 'null'}],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      nullable: true,
+    });
+  });
+
+  it('keeps the description of a oneOf schema', () => {
+    const input = {
+      description: 'a filter value',
+      oneOf: [{type: 'string'}, {type: 'integer'}],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      description: 'a filter value',
+      anyOf: [{type: Type.STRING}, {type: Type.INTEGER}],
+    });
+  });
+
+  it('keeps a oneOf that is not an array untouched', () => {
+    const input = {
+      type: 'string' as const,
+      oneOf: 'not a list of schemas',
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({type: Type.STRING});
+  });
+
+  it('defaults items to string for an array without items', () => {
+    const input = {
+      type: 'array' as const,
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.ARRAY,
+      items: {type: Type.STRING},
+    });
+    expect(schema?.nullable).toBeUndefined();
+  });
+
+  it('defaults items to string for a nullable array without items', () => {
+    const input = {
+      type: ['array', 'null'],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.ARRAY,
+      items: {type: Type.STRING},
+      nullable: true,
+    });
+  });
+
+  it('defaults items to string for a nested array property without items', () => {
+    const input: MCPToolSchema = {
+      type: 'object',
+      properties: {
+        tags: {type: 'array'},
+      },
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        tags: {type: Type.ARRAY, items: {type: Type.STRING}},
+      },
+    });
+  });
 });

@@ -49,6 +49,33 @@ const getTypeFromArrayItem = (
   return mcpType?.type?.toLowerCase?.();
 };
 
+/**
+ * Rewrites `oneOf` as `anyOf` on a copy of the schema.
+ *
+ * Gemini's `Schema` has no `oneOf` and the conversion drops unknown keywords,
+ * so a `oneOf` property would reach the model with no type at all. `anyOf`
+ * keeps the branch types; it also accepts a value that matches more than one
+ * branch. A schema may declare both keywords, so the branches accumulate in
+ * declaration order instead of one keyword overwriting the other.
+ */
+function widenOneOfToAnyOf(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Array.isArray(schema.oneOf)) {
+    return schema;
+  }
+  const widened: Record<string, unknown> = {};
+  const branches: unknown[] = [];
+  for (const [key, value] of Object.entries(schema)) {
+    if ((key === 'anyOf' || key === 'oneOf') && Array.isArray(value)) {
+      branches.push(...value);
+    } else {
+      widened[key] = value;
+    }
+  }
+  return {...widened, anyOf: branches};
+}
+
 export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
   if (!mcpSchema) {
     return undefined;
@@ -56,6 +83,7 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function recursiveConvert(mcp: any): Schema {
+    mcp = widenOneOfToAnyOf(mcp);
     const sourceType = mcp.anyOf ?? mcp.type;
     let isNullable = false;
     let nonNullTypes;
@@ -151,9 +179,11 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
         geminiSchema.required = mcp.required;
       }
     } else if (geminiType === Type.ARRAY) {
-      if (mcp.items) {
-        geminiSchema.items = recursiveConvert(mcp.items);
-      }
+      // An array declared without an element type reaches the model with
+      // nothing to fill in, so default it to string as adk-python does.
+      geminiSchema.items = mcp.items
+        ? recursiveConvert(mcp.items)
+        : {type: Type.STRING};
     }
     return geminiSchema;
   }
