@@ -864,17 +864,19 @@ function textContent(text: string): models.TextContent {
   return {type: OciContentType.Text, text};
 }
 
-/** Builds a function-call part from a tool call of a response or a stream. */
+/**
+ * Builds a function-call part from a tool call of a response or a stream. OCI
+ * gives every tool call an id, and a streamed call that has not carried one
+ * yet holds the empty string, so the part always names one.
+ */
 function functionCallPart(call: {
-  id?: string;
+  id: string;
   name?: string;
   arguments?: string;
 }): Part {
   return {
     functionCall: {
-      // An absent id becomes empty, as `interactions_utils` and adk-python
-      // both normalise it.
-      id: call.id ?? '',
+      id: call.id,
       name: call.name,
       args: parseJsonObject(call.arguments),
     },
