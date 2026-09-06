@@ -18,11 +18,22 @@ import {
   isFile,
   isFolderExists,
   loadFileData,
+  saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
 declare global {
   var fsMockTempFolder: string | undefined;
   var fsMockReaddir: Mock | undefined;
+}
+
+function writtenDockerFile(): string {
+  const call = (saveToFile as Mock).mock.calls.find(([filePath]) =>
+    String(filePath).endsWith('Dockerfile'),
+  );
+  if (!call) {
+    expect.fail('No Dockerfile was written');
+  }
+  return String(call[1]);
 }
 
 const mockReaddir = vi.hoisted(() => vi.fn().mockResolvedValue(['file1.js']));
@@ -120,7 +131,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return mockFs;
 });
 
-vi.mock('../../src/utils/agent_loader.js', () => ({
+vi.mock('../../src/utils/agent_loader.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/agent_loader.js')>()),
   AgentLoader: vi.fn().mockImplementation(() => ({
     listAgents: vi.fn().mockResolvedValue(['agent1']),
     getAgentFile: vi.fn().mockResolvedValue({
@@ -748,5 +760,23 @@ describe('deployToAgentEngine', () => {
     await expect(deployToAgentEngine(options)).rejects.toThrow(
       'Reasoning Engine update failed: [Code 404] Resource not found',
     );
+  });
+
+  it('should forward agentFileLoadOptions into the generated Dockerfile', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true, bundle: true},
+    });
+
+    expect(writtenDockerFile()).toContain('--compile=false --bundle=false');
+  });
+
+  it('should keep the Dockerfile free of --compile/--bundle when the deploy step did not bundle', async () => {
+    await deployToAgentEngine({
+      ...defaultOptions,
+      agentFileLoadOptions: {compile: true, bundle: false},
+    });
+
+    expect(writtenDockerFile()).not.toContain('--compile=false');
   });
 });

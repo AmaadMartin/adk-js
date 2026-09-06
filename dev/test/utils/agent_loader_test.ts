@@ -98,6 +98,26 @@ class FakeAgent3 extends BaseAgent {
 }
 exports.rootAgent = new FakeAgent3('agent3');`;
 
+const agentStagedMjsContent = `
+import {BaseAgent} from '@google/adk';
+
+class FakeStagedEsmAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+export const rootAgent = new FakeStagedEsmAgent('agentStagedEsm');`;
+
+const agentStagedCjsContent = `
+const {BaseAgent} = require('@google/adk');
+
+class FakeStagedCjsAgent extends BaseAgent {
+  constructor(name) {
+    super({ name });
+  }
+}
+exports.rootAgent = new FakeStagedCjsAgent('agentStagedCjs');`;
+
 const agentDefaultExportContent = `;
 import {BaseAgent} from '@google/adk';
 
@@ -435,6 +455,54 @@ describe('AgentLoader', () => {
         bundle: false,
       });
       await agentFile.load();
+      expect(agentFile.getFilePath()).toEqual(agentPath);
+      await agentFile.dispose();
+    });
+
+    it('skips esbuild and the temp dir when compiling is disabled', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agent1');
+      expect(esbuild.build).not.toHaveBeenCalled();
+      expect(fileUtils.createTempDir).not.toHaveBeenCalled();
+      await agentFile.dispose();
+    });
+
+    it('loads a staged .mjs artifact without compiling it', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent_staged.mjs');
+      await fs.writeFile(agentPath, agentStagedMjsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agentStagedEsm');
+      expect(esbuild.build).not.toHaveBeenCalled();
+      expect(agentFile.getFilePath()).toEqual(agentPath);
+      await agentFile.dispose();
+    });
+
+    it('loads a staged .cjs artifact without compiling it', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent_staged.cjs');
+      await fs.writeFile(agentPath, agentStagedCjsContent);
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: false,
+        bundle: false,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('agentStagedCjs');
+      expect(esbuild.build).not.toHaveBeenCalled();
       expect(agentFile.getFilePath()).toEqual(agentPath);
       await agentFile.dispose();
     });
