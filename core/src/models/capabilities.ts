@@ -13,7 +13,7 @@ import {z} from 'zod';
  * a capability nobody reads. Every capability has a default, so a snapshot is
  * always fully resolved.
  */
-export const LlmCapabilitiesSchema = z.strictObject({
+const LlmCapabilitiesSchema = z.strictObject({
   outputSchemaAndTools: z.boolean().default(false),
 });
 
@@ -35,16 +35,18 @@ export interface LlmCapabilities {
 /**
  * Validates `init` and returns a frozen capability snapshot.
  *
- * The parameter is `unknown` because the factory exists to check input the
- * compiler has not: a parsed configuration file, a plugin's return value, or an
- * object spread from an older snapshot. A caller passing a typed literal
- * already gets excess-property checking from {@link LlmCapabilities}.
+ * A caller holding a typed literal gets excess-property checking from
+ * `Partial<LlmCapabilities>`. Validation still runs, because input can arrive
+ * from a source the compiler never saw, such as a parsed configuration file.
  *
  * @param init Capability values to apply over the defaults.
- * @return A frozen snapshot. Assigning to one of its fields throws a
- *     `TypeError`, because ES modules run in strict mode.
+ * @return A frozen snapshot. Assigning to one of its fields is rejected: a
+ *     strict-mode caller gets a `TypeError`, and any other caller gets a
+ *     silent no-op.
  * @throws A `ZodError` if `init` holds an unknown key or a wrong-typed value.
  */
-export function createLlmCapabilities(init: unknown = {}): LlmCapabilities {
+export function createLlmCapabilities(
+  init: Partial<LlmCapabilities> = {},
+): LlmCapabilities {
   return Object.freeze(LlmCapabilitiesSchema.parse(init));
 }
