@@ -104,6 +104,60 @@ The tool always returns a record, never an exception:
 tool generated. A validation failure, a missing SDK and a rejected publish all
 come back as `ERROR` with the reason in `error_details`.
 
+## Domain-specific tools
+
+`publish_message` asks the model for every attribute. When the application
+already knows what it publishes, bind the attributes ahead of the call with
+`createPublishTool`, and the model is asked only for what is left:
+
+```ts
+import {AgentProvided, EventarcToolset, OMIT} from '@google/adk';
+import {z} from 'zod';
+
+const toolset = new EventarcToolset({
+  toolConfig: {projectId: 'my-project'},
+});
+
+const escalate = toolset.createPublishTool({
+  name: 'report_escalation',
+  description: 'Reports that a support case needs a human.',
+  bus: 'projects/my-project/locations/us-central1/messageBuses/my-bus',
+  ceAttributesBinding: {
+    type: 'com.example.support.escalated',
+    source: '//support/agent',
+    subject: new AgentProvided({description: 'Short escalation reason.'}),
+    time: OMIT,
+  },
+  payloadSchema: z.object({caseId: z.string(), priority: z.string()}),
+});
+```
+
+The tool is added to the toolset and also returned, so an agent given
+`tools: [toolset]` picks it up.
+
+Each attribute takes one of four things:
+
+| Binding                            | Meaning                                                  |
+| ---------------------------------- | -------------------------------------------------------- |
+| a string                           | the same value on every event                            |
+| a function                         | computed per call, as `(payload, toolContext) => string` |
+| `new AgentProvided({description})` | the model supplies it                                    |
+| `OMIT`                             | leave the attribute off the event                        |
+
+`AgentProvided` without a `default` becomes a required tool parameter, so the
+model must supply it. With a `default` the parameter is optional.
+
+A function binding always receives `(payload, toolContext)`, in that order. To
+read only the context, name the payload and ignore it:
+`(_payload, ctx) => ...`. This is where the port differs from adk-python, which
+reads a lambda's parameter names to decide the order.
+
+`type` and `source` are required and cannot be `OMIT`. `id` and `specversion`
+may be bound but cannot be `OMIT`, because every CloudEvent carries them. A
+custom attribute key must be lowercase alphanumeric and must not shadow a
+standard attribute. `createPublishTool` checks all of this when it builds the
+tool, so a misconfigured tool fails at startup rather than mid-conversation.
+
 ## Authentication
 
 With no `credentialsConfig` the client uses Application Default Credentials,
@@ -119,6 +173,12 @@ const toolset = new EventarcToolset({
   credentialsConfig: {keyFilename: process.env.EVENTARC_KEY_FILE},
 });
 ```
+
+Name at most one credential source. A config carrying both `credentials` and
+`keyFilename` is rejected when the toolset is built, because Google's auth
+library silently prefers one and the deployment would then publish under an
+identity you did not choose. An incomplete credential body is rejected the same
+way.
 
 The whole deployment publishes as one identity. There is no per-end-user OAuth
 handshake, which is where this port differs from adk-python's `GoogleTool`.
