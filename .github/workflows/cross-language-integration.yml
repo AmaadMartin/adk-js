@@ -22,6 +22,14 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Cache npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: npm-cross-language-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-cross-language-${{ runner.os }}-
+
       - name: Install dependencies
         run: npm install
 

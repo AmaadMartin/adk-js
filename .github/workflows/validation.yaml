@@ -32,6 +32,20 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Resolve npm cache directory
+        id: npm-cache-dir
+        shell: bash
+        # tr strips the carriage return npm emits on the Windows runner.
+        run: echo "dir=$(npm config get cache | tr -d '\r')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.dir }}
+          key: npm-validation-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-validation-${{ runner.os }}-
+
       - name: Install dependencies
         run: npm install
 
