@@ -184,6 +184,42 @@ Instructions content`,
       await fs.rm(tempDir, {recursive: true, force: true});
     });
 
+    it('throws error if the skill directory does not exist', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const missingDir = path.join(tempDir, 'no-such-skill');
+
+      await expect(loadSkillFromDir(missingDir)).rejects.toThrow(
+        `Skill directory '${missingDir}' not found.`,
+      );
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('throws error if the skill path is a regular file', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const filePath = path.join(tempDir, 'not-a-dir.txt');
+      await fs.writeFile(filePath, 'just a file');
+
+      await expect(loadSkillFromDir(filePath)).rejects.toThrow(
+        `Skill directory '${filePath}' not found.`,
+      );
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('reports the resolved directory path when SKILL.md is missing', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      // Unnormalized but valid path: resolves to skillDir.
+      await expect(loadSkillFromDir(`${skillDir}${path.sep}.`)).rejects.toThrow(
+        `not found in '${skillDir}'.`,
+      );
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
     it('throws error if skill name does not match directory name', async () => {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
       const skillDir = path.join(tempDir, 'wrong-name');
@@ -328,7 +364,7 @@ Instructions`,
       const problems = await validateSkillDir(testPath);
       expect(problems.length).toBe(1);
       expect(problems[0]).toContain(
-        `SKILL.md (or any case variation like skill.md) not found in '${path.resolve(testPath)}'.`,
+        `Skill directory '${path.resolve(testPath)}' not found.`,
       );
     });
 

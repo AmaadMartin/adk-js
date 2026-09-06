@@ -287,10 +287,19 @@ export async function validateSkillDir(skillDir: string): Promise<string[]> {
  *
  * @param skillDir - The path to the skill directory.
  * @returns A promise that resolves to a Skill object containing only frontmatter and instructions.
- * @throws {Error} If the skill file cannot be found or parsed.
+ * @throws {Error} If the skill directory does not exist, is not a directory, or
+ *   contains no SKILL.md, or if SKILL.md cannot be parsed.
  */
 async function loadSkillFile(skillDir: string): Promise<Skill> {
   const resolvedDir = path.resolve(skillDir);
+
+  // A missing path and a non-directory path collapse into one message, matching
+  // adk-python's `if not skill_dir.is_dir()` gate in skills/_utils.py.
+  const stats = await fs.stat(resolvedDir).catch(() => null);
+  if (!stats?.isDirectory()) {
+    throw new Error(`Skill directory '${resolvedDir}' not found.`);
+  }
+
   let skillMdPath = '';
   let content = '';
 
@@ -316,7 +325,7 @@ async function loadSkillFile(skillDir: string): Promise<Skill> {
 
   if (!skillMdPath) {
     throw new Error(
-      `SKILL.md (or any case variation like skill.md) not found in '${skillDir}'.`,
+      `SKILL.md (or any case variation like skill.md) not found in '${resolvedDir}'.`,
     );
   }
 
