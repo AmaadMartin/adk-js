@@ -952,6 +952,11 @@ export {
   type PerItemFailuresCounter,
   type ToolFailureResponse,
 } from './plugins/_reflect_retry_utils.js';
+export {
+  AutoTracingPlugin,
+  DEFAULT_MAX_WALK_DEPTH,
+  type AutoTracingPluginOptions,
+} from './plugins/auto_tracing_plugin.js';
 export {BasePlugin, ContextCompactionTrigger} from './plugins/base_plugin.js';
 export {
   ContextFilterPlugin,
