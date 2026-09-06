@@ -100,6 +100,23 @@ export class DatabaseSessionService extends BaseSessionService {
     this.initialized = true;
   }
 
+  /**
+   * Closes the database connection.
+   *
+   * The sqlite driver holds an open connection on the event loop, so a
+   * short-lived process that never calls this never exits. Safe to call more
+   * than once, and on a service that was never used.
+   */
+  async close(): Promise<void> {
+    if (!this.orm) {
+      return;
+    }
+    const orm = this.orm;
+    this.orm = undefined;
+    this.initialized = false;
+    await orm.close();
+  }
+
   async createSession({
     appName,
     userId,

@@ -5,26 +5,38 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  BaseArtifactService,
-  BaseSessionService,
-  LogLevel,
-  getArtifactServiceFromUri,
-  getSessionServiceFromUri,
-  setLogLevel as setAdkCoreLogLevel,
-} from '@google/adk';
+import {LogLevel, setLogLevel as setAdkCoreLogLevel} from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
+import * as path from 'node:path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
 import {getAbsolutePath} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
+import {toMessage} from '../utils/value_utils.js';
 import {version} from '../version.js';
 import {createAgent} from './cli_create.js';
-import {runAgent} from './cli_run.js';
+import {runAgent, runOnceCli} from './cli_run.js';
+import {
+  maybePromptForTelemetryConsent,
+  registerTelemetryCommands,
+} from './cli_telemetry.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
+import {
+  applyFeatureOverrides,
+  DISABLE_FEATURES_OPTION,
+  ENABLE_FEATURES_OPTION,
+} from './feature_options.js';
+import {
+  closeServices,
+  MEMORY_SERVICE_URI_OPTION,
+  NO_USE_LOCAL_STORAGE_OPTION,
+  resolveServices,
+  resolveUseLocalStorage,
+  USE_LOCAL_STORAGE_OPTION,
+} from './service_options.js';
 
 dotenv.config({quiet: true});
 
@@ -50,22 +62,6 @@ function getLogLevelFromOptions(options: {
   }
 
   return LogLevel.INFO;
-}
-
-function getSessionServiceFromOptions(options: {
-  session_service_uri?: string;
-}): BaseSessionService {
-  return getSessionServiceFromUri(
-    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://',
-  );
-}
-
-function getArtifactServiceFromOptions(options: {
-  artifact_service_uri?: string;
-}): BaseArtifactService | undefined {
-  return getArtifactServiceFromUri(
-    options['artifact_service_uri'] || 'memory://',
-  );
 }
 
 function getAgentFileOptions(options: {
@@ -214,6 +210,90 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
 );
 
+/** What distinguishes the `web` command from the `api_server` command. */
+interface ServerCommandOptions {
+  name: string;
+  description: string;
+  /** Whether to serve the developer UI alongside the API. */
+  serveDebugUI: boolean;
+  startFailureMessage: string;
+}
+
+/**
+ * Registers one of the two commands that serve an agents directory.
+ *
+ * `web` and `api_server` take the same options and start the same server, so
+ * they are declared once here and differ only by {@link ServerCommandOptions}.
+ */
+function addServerCommand(
+  program: Command,
+  logger: AdkLogger,
+  server: ServerCommandOptions,
+): void {
+  program
+    .command(server.name)
+    .description(server.description)
+    .addArgument(AGENT_DIR_ARGUMENT)
+    .addOption(HOST_OPTION)
+    .addOption(PORT_OPTION)
+    .addOption(ORIGINS_OPTION)
+    .addOption(ALLOWED_HOSTS_OPTION)
+    .addOption(VERBOSE_OPTION)
+    .addOption(LOG_LEVEL_OPTION)
+    .addOption(SESSION_SERVICE_URI_OPTION)
+    .addOption(ARTIFACT_SERVICE_URI_OPTION)
+    .addOption(OTEL_TO_CLOUD_OPTION)
+    .addOption(COMPILE_AGENT_FILE)
+    .addOption(BUNDLE_AGENT_FILE)
+    .addOption(AGENT_FILE_MODULE_TYPE)
+    .addOption(A2A_OPTION)
+    .addOption(A2A_AUTH_TOKEN_OPTION)
+    .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(ENABLE_FEATURES_OPTION)
+    .addOption(DISABLE_FEATURES_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
+    .addOption(USE_LOCAL_STORAGE_OPTION)
+    .addOption(NO_USE_LOCAL_STORAGE_OPTION)
+    .action(
+      async (
+        agentsDir: string,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        applyFeatureOverrides(command);
+        const logLevel = getLogLevelFromOptions(options);
+        setAdkCoreLogLevel(logLevel);
+
+        try {
+          await new AdkApiServer({
+            logLevel,
+            agentsDir: getAbsolutePath(agentsDir),
+            host: options['host'],
+            port: parseInt(options['port'], 10),
+            serveDebugUI: server.serveDebugUI,
+            allowOrigins: options['allow_origins'],
+            allowedHosts: getAllowedHosts(options['allowed_hosts']),
+            ...resolveServices({
+              baseDir: getAbsolutePath(agentsDir),
+              sessionServiceUri: options['session_service_uri'],
+              artifactServiceUri: options['artifact_service_uri'],
+              memoryServiceUri: options['memory_service_uri'],
+              useLocalStorage: resolveUseLocalStorage(command),
+            }),
+            otelToCloud: options['otel_to_cloud'] ? true : false,
+            agentFileLoadOptions: getAgentFileOptions(options),
+            a2a: getBoolean(options['a2a']),
+            a2aAuthToken: options['a2a_auth_token'],
+            reloadAgents: getBoolean(options['reload_agents']),
+          }).start();
+        } catch (error) {
+          logger.error(server.startFailureMessage, toMessage(error));
+          process.exit(1);
+        }
+      },
+    );
+}
+
 /**
  * Creates the ADK CLI program.
  * @returns The ADK CLI program.
@@ -232,100 +312,25 @@ export function createProgram(): Command {
       console.log(version);
     });
 
-  program
-    .command('web')
-    .description('Start ADK web server')
-    .addArgument(AGENT_DIR_ARGUMENT)
-    .addOption(HOST_OPTION)
-    .addOption(PORT_OPTION)
-    .addOption(ORIGINS_OPTION)
-    .addOption(ALLOWED_HOSTS_OPTION)
-    .addOption(VERBOSE_OPTION)
-    .addOption(LOG_LEVEL_OPTION)
-    .addOption(SESSION_SERVICE_URI_OPTION)
-    .addOption(ARTIFACT_SERVICE_URI_OPTION)
-    .addOption(OTEL_TO_CLOUD_OPTION)
-    .addOption(COMPILE_AGENT_FILE)
-    .addOption(BUNDLE_AGENT_FILE)
-    .addOption(AGENT_FILE_MODULE_TYPE)
-    .addOption(A2A_OPTION)
-    .addOption(A2A_AUTH_TOKEN_OPTION)
-    .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
+  registerTelemetryCommands(program);
 
-      try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: true,
-          allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
+  program.hook('preSubcommand', async (_program, subcommand) => {
+    await maybePromptForTelemetryConsent(subcommand.name(), process.argv);
+  });
 
-        await server.start();
-      } catch (error) {
-        logger.error('Error starting web server:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+  addServerCommand(program, logger, {
+    name: 'web',
+    description: 'Start ADK web server',
+    serveDebugUI: true,
+    startFailureMessage: 'Error starting web server:',
+  });
 
-  program
-    .command('api_server')
-    .description('Start ADK API server')
-    .addArgument(AGENT_DIR_ARGUMENT)
-    .addOption(HOST_OPTION)
-    .addOption(PORT_OPTION)
-    .addOption(ORIGINS_OPTION)
-    .addOption(ALLOWED_HOSTS_OPTION)
-    .addOption(VERBOSE_OPTION)
-    .addOption(LOG_LEVEL_OPTION)
-    .addOption(SESSION_SERVICE_URI_OPTION)
-    .addOption(ARTIFACT_SERVICE_URI_OPTION)
-    .addOption(OTEL_TO_CLOUD_OPTION)
-    .addOption(COMPILE_AGENT_FILE)
-    .addOption(BUNDLE_AGENT_FILE)
-    .addOption(AGENT_FILE_MODULE_TYPE)
-    .addOption(A2A_OPTION)
-    .addOption(A2A_AUTH_TOKEN_OPTION)
-    .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentsDir: string, options: Record<string, string>) => {
-      const logLevel = getLogLevelFromOptions(options);
-      setAdkCoreLogLevel(logLevel);
-
-      try {
-        const server = new AdkApiServer({
-          logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
-          host: options['host'],
-          port: parseInt(options['port'], 10),
-          serveDebugUI: false,
-          allowOrigins: options['allow_origins'],
-          allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          a2a: getBoolean(options['a2a']),
-          a2aAuthToken: options['a2a_auth_token'],
-          reloadAgents: getBoolean(options['reload_agents']),
-        });
-        await server.start();
-      } catch (error) {
-        logger.error('Error starting API server:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+  addServerCommand(program, logger, {
+    name: 'api_server',
+    description: 'Start ADK API server',
+    serveDebugUI: false,
+    startFailureMessage: 'Error starting API server:',
+  });
 
   program
     .command('create')
@@ -369,6 +374,26 @@ export function createProgram(): Command {
     .command('run')
     .description('Runs agent')
     .argument('<agent>', 'Agent file path (.js or .ts)')
+    .argument(
+      '[query]',
+      'Optional. The user message to send to the agent for a single-step run. Without it, run opens the interactive prompt.',
+    )
+    .option(
+      '--state <string>',
+      'Optional. Initial session state, as a JSON object.',
+    )
+    .option(
+      '--timeout <string>',
+      'Optional. Budget for one query, e.g. 30 (seconds), 30s or 5m.',
+    )
+    .option(
+      '--in_memory',
+      'Optional. Keep the session, artifacts and memory in memory, overriding every other storage option.',
+    )
+    .option(
+      '--jsonl',
+      'Optional. Print one JSON object per event on stdout instead of human-readable text.',
+    )
     .option(
       '--save_session [boolean]',
       'Optional. Whether to save the session to a json file on exit.',
@@ -395,27 +420,76 @@ export function createProgram(): Command {
     .addOption(BUNDLE_AGENT_FILE)
     .addOption(AGENT_FILE_MODULE_TYPE)
     .addOption(RELOAD_AGENTS_OPTION)
-    .action(async (agentPath: string, options: Record<string, string>) => {
-      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+    .addOption(ENABLE_FEATURES_OPTION)
+    .addOption(DISABLE_FEATURES_OPTION)
+    .addOption(MEMORY_SERVICE_URI_OPTION)
+    .addOption(USE_LOCAL_STORAGE_OPTION)
+    .addOption(NO_USE_LOCAL_STORAGE_OPTION)
+    .action(
+      async (
+        agentPath: string,
+        query: string | undefined,
+        options: Record<string, string>,
+        command: Command,
+      ) => {
+        applyFeatureOverrides(command);
+        setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
-      try {
-        await runAgent({
-          agentPath,
-          inputFile: options['replay'],
-          savedSessionFile: options['resume'],
-          saveSession: getBoolean(options['save_session']),
-          sessionId: options['session_id'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
-          otelToCloud: options['otel_to_cloud'] ? true : false,
-          agentFileLoadOptions: getAgentFileOptions(options),
-          reloadAgents: getBoolean(options['reload_agents']),
+        const services = resolveServices({
+          baseDir: path.dirname(getAbsolutePath(agentPath)),
+          sessionServiceUri: options['session_service_uri'],
+          artifactServiceUri: options['artifact_service_uri'],
+          memoryServiceUri: options['memory_service_uri'],
+          useLocalStorage: resolveUseLocalStorage(command),
+          inMemory: getBoolean(options['in_memory']),
         });
-      } catch (error) {
-        logger.error('Error running agent:', (error as Error).message);
-        process.exit(1);
-      }
-    });
+
+        let exitCode = 0;
+        try {
+          // adk-python switches to the single-shot run on the query alone, so
+          // a piped stdin still reaches the interactive prompt.
+          if (query !== undefined) {
+            exitCode = await runOnceCli({
+              agentPath,
+              query,
+              stateStr: options['state'],
+              sessionId: options['session_id'],
+              replay: options['replay'],
+              timeout: options['timeout'],
+              jsonl: getBoolean(options['jsonl']),
+              ...services,
+              agentFileLoadOptions: getAgentFileOptions(options),
+            });
+          } else {
+            await runAgent({
+              agentPath,
+              inputFile: options['replay'],
+              savedSessionFile: options['resume'],
+              saveSession: getBoolean(options['save_session']),
+              sessionId: options['session_id'],
+              stateStr: options['state'],
+              timeout: options['timeout'],
+              jsonl: getBoolean(options['jsonl']),
+              ...services,
+              otelToCloud: options['otel_to_cloud'] ? true : false,
+              agentFileLoadOptions: getAgentFileOptions(options),
+              reloadAgents: getBoolean(options['reload_agents']),
+            });
+          }
+        } catch (error) {
+          logger.error('Error running agent:', toMessage(error));
+          exitCode = 1;
+        } finally {
+          // The database session service keeps a sqlite connection on the
+          // event loop, so the command never exits until it is released.
+          await closeServices(services);
+        }
+
+        if (exitCode !== 0) {
+          process.exit(exitCode);
+        }
+      },
+    );
 
   const DEPLOY_COMMAND = program
     .command('deploy')
@@ -515,6 +589,7 @@ export function createProgram(): Command {
       .addOption(AGENT_FILE_MODULE_TYPE)
       .addOption(A2A_OPTION)
       .addOption(AGENT_ENGINE_ID_OPTION)
+      .addOption(MEMORY_SERVICE_URI_OPTION)
       .action(async (agentPath: string, options: Record<string, string>) => {
         try {
           await deployToAgentEngine({
@@ -532,6 +607,7 @@ export function createProgram(): Command {
             allowOrigins: options['allow_origins'],
             sessionServiceUri: options['session_service_uri'],
             artifactServiceUri: options['artifact_service_uri'],
+            memoryServiceUri: options['memory_service_uri'],
             agentFileLoadOptions: getAgentFileOptions(options),
             a2a: getBoolean(options['a2a']),
             agentEngineId: options['agent_engine_id'],
