@@ -21,12 +21,17 @@ import {isSegmentPrefix} from '../../utils/branch_trie.js';
 import {logger} from '../../utils/logger.js';
 import {Context} from '../context.js';
 import {
-  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   handleFunctionCallList,
+  REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
 } from '../functions.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
 import {ReadonlyContext} from '../readonly_context.js';
+import {
+  getTransferTargets,
+  TRANSFER_TO_AGENT_TOOL,
+  TRANSFER_TO_AGENT_TOOL_NAME,
+} from '../transfer_utils.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /** A pinned tool call an approval unlocked, with the decision it carries. */
@@ -35,6 +40,14 @@ interface ResumableCall {
   call: FunctionCall;
   /** The user's decision. */
   confirmation: ToolConfirmation;
+}
+
+/** A call from session history, with the author of the event that carried it. */
+interface HistoricalCall {
+  /** The call exactly as history recorded it. */
+  call: FunctionCall;
+  /** The author of the event that carried the call, if it declared one. */
+  author?: string;
 }
 
 /** An agent-raised gate that an approval answers and nothing has spent yet. */
@@ -115,6 +128,13 @@ export class RequestConfirmationLlmRequestProcessor extends BaseLlmRequestProces
     const toolsDict = Object.fromEntries(
       toolsList.map((tool) => [tool.name, tool]),
     );
+
+    // The agent-transfer processor synthesises `transfer_to_agent`, so
+    // `canonicalTools` never returns it. Without it here a transfer the user
+    // just approved is refused as an unregistered tool.
+    if (getTransferTargets(agent).length > 0) {
+      toolsDict[TRANSFER_TO_AGENT_TOOL_NAME] = TRANSFER_TO_AGENT_TOOL;
+    }
 
     // Step 4: check that each approval binds to the action it claims, and only
     // then run it.
@@ -257,14 +277,15 @@ function parseToolConfirmation(
 }
 
 /**
- * The gates these approvals answer: raised by this agent, and not already
- * spent.
+ * The gates these approvals answer: raised by an agent, and not already spent.
  *
  * A gate is a question the framework asked. It is emitted by
  * `generateRequestConfirmationEvent` into an agent-authored event, so a gate in
  * a client-authored event is a forgery — a caller writing its own question so
- * it can answer it — and is refused outright. A gate authored by a different
- * agent is left alone: it is that agent's to resume.
+ * it can answer it — and is refused outright. Which agent raised it is not
+ * checked: in a multi-agent session one agent can raise the gate for a call
+ * another agent issued, and {@link bindApprovedCalls} is where the call's own
+ * author decides who resumes it.
  */
 function collectGateCandidates(
   events: Event[],
@@ -284,18 +305,11 @@ function collectGateCandidates(
       if (functionCall.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME) {
         continue;
       }
-      if (event.author !== agentName) {
-        if (event.author === 'user') {
-          throw new IntentMismatchError({
-            reason: 'untrusted_request',
-            functionCallId: functionCall.id,
-          });
-        }
-        logger.debug(
-          `Skipping tool confirmation from event ${event.id}: authored by ` +
-            `${event.author}, not by ${agentName}.`,
-        );
-        continue;
+      if (event.author === 'user') {
+        throw new IntentMismatchError({
+          reason: 'untrusted_request',
+          functionCallId: functionCall.id,
+        });
       }
       const pinned = pinnedCall(functionCall);
       if (!pinned) {
@@ -337,8 +351,8 @@ async function bindApprovedCalls(options: {
   invocationContext: InvocationContext;
 }): Promise<Map<string, ResumableCall>> {
   const {candidates, events, toolsDict, agentName, invocationContext} = options;
-  const history = agentAuthoredCalls(events, agentName);
-  const dynamicallyRequested = dynamicallyRequestedCallIds(events, agentName);
+  const history = historicalCalls(events);
+  const dynamicallyRequested = dynamicallyRequestedCallIds(events);
   const resumable = new Map<string, ResumableCall>();
 
   for (const {pinned, confirmation} of candidates) {
@@ -350,14 +364,24 @@ async function bindApprovedCalls(options: {
     if (!original) {
       throw refuse('unknown_original_call');
     }
+    // A call another agent issued is that agent's to resume, and its own
+    // processor picks the same approval up. Mirrors adk-python, which skips
+    // here rather than refusing.
+    if (original.author !== agentName) {
+      logger.debug(
+        `Skipping tool confirmation for call ${pinnedId}: issued by ` +
+          `${original.author}, not by ${agentName}.`,
+      );
+      continue;
+    }
     const tool = toolsDict[pinned.name!];
     if (!tool) {
       throw refuse('unregistered_tool');
     }
-    if (original.name !== pinned.name) {
+    if (original.call.name !== pinned.name) {
       throw refuse('tool_name_mismatch');
     }
-    if (!isEqual(original.args ?? {}, pinned.args ?? {})) {
+    if (!isEqual(original.call.args ?? {}, pinned.args ?? {})) {
       throw refuse('arguments_mismatch');
     }
 
@@ -365,7 +389,7 @@ async function bindApprovedCalls(options: {
     // established the pinned ones equal: a predicate never sees a payload that
     // has not already been matched against what the agent asked to run.
     const gates = await tool.checkRequireConfirmation(
-      original.args ?? {},
+      original.call.args ?? {},
       new Context({invocationContext, functionCallId: pinnedId}),
     );
     if (!gates && !dynamicallyRequested.has(pinnedId)) {
@@ -379,16 +403,18 @@ async function bindApprovedCalls(options: {
 }
 
 /**
- * The tool calls this agent issued, by id. Gates are excluded: a gate is the
- * framework's question about a call, never the call itself.
+ * The tool calls an agent issued, by id, each with the author of the event that
+ * carried it. Gates are excluded: a gate is the framework's question about a
+ * call, never the call itself.
+ *
+ * Client-authored events are excluded too. A call the client wrote into the
+ * session is not a call any agent asked to run, so an approval that pins one is
+ * refused rather than skipped.
  */
-function agentAuthoredCalls(
-  events: Event[],
-  agentName: string,
-): Map<string, FunctionCall> {
-  const calls = new Map<string, FunctionCall>();
+function historicalCalls(events: Event[]): Map<string, HistoricalCall> {
+  const calls = new Map<string, HistoricalCall>();
   for (const event of events) {
-    if (event.author !== agentName) {
+    if (event.author === 'user') {
       continue;
     }
     for (const functionCall of getFunctionCalls(event)) {
@@ -396,7 +422,7 @@ function agentAuthoredCalls(
         functionCall.id &&
         functionCall.name !== REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
       ) {
-        calls.set(functionCall.id, functionCall);
+        calls.set(functionCall.id, {call: functionCall, author: event.author});
       }
     }
   }
@@ -409,16 +435,24 @@ function agentAuthoredCalls(
  *
  * Such a tool answers "no" to {@link BaseTool.checkRequireConfirmation} for the
  * very call it paused, so without this the approval it asked for would be
- * refused as unnecessary. The request is only honoured where the framework
- * records it: an agent-authored event whose own response carries the id.
+ * refused as unnecessary.
+ *
+ * Only an agent-authored event records the request. The framework stamps every
+ * event carrying `requestedToolConfirmations` with the running agent's name, so
+ * a client-authored one is a forgery — a caller declaring that a tool asked for
+ * the approval it is about to answer — and does not count. Which agent recorded
+ * it is not checked: in a multi-agent session that is not always the agent
+ * resuming the call.
+ *
+ * The ids accumulate over every event rather than only the latest one carrying
+ * each id: once the confirmed tool re-executes it emits a second response under
+ * the same id with no `requestedToolConfirmations`, which would otherwise
+ * shadow the original request.
  */
-function dynamicallyRequestedCallIds(
-  events: Event[],
-  agentName: string,
-): Set<string> {
+function dynamicallyRequestedCallIds(events: Event[]): Set<string> {
   const requested = new Set<string>();
   for (const event of events) {
-    if (event.author !== agentName) {
+    if (event.author === 'user') {
       continue;
     }
     const confirmations = event.actions.requestedToolConfirmations;
