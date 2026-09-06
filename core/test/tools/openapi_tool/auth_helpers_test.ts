@@ -14,6 +14,7 @@ import {
   applyCredential,
   createApiKeyScheme,
   createBearerScheme,
+  validateAuthScheme,
 } from '../../../src/tools/openapi_tool/auth/auth_helpers.js';
 
 describe('auth_helpers', () => {
@@ -134,6 +135,65 @@ describe('auth_helpers', () => {
         type: 'http',
         scheme: 'bearer',
       });
+    });
+  });
+
+  describe('validateAuthScheme', () => {
+    it.each([
+      ['apiKey', {type: 'apiKey', name: 'X-API-Key', in: 'header'}],
+      ['http', {type: 'http', scheme: 'bearer'}],
+      [
+        'oauth2',
+        {
+          type: 'oauth2',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: 'https://example.com/auth',
+              tokenUrl: 'https://example.com/token',
+              scopes: {},
+            },
+          },
+        },
+      ],
+      [
+        'openIdConnect',
+        {
+          type: 'openIdConnect',
+          openIdConnectUrl:
+            'https://example.com/.well-known/openid-configuration',
+        },
+      ],
+    ])('should accept a valid %s scheme', (_type, scheme) => {
+      expect(() => validateAuthScheme(scheme)).not.toThrow();
+    });
+
+    it.each([
+      ['a scheme with no type', {name: 'X-API-Key'}],
+      ['a scheme that is not an object', null],
+      ['a scheme that is a string', 'apiKey'],
+    ])('should reject %s', (_label, scheme) => {
+      expect(() => validateAuthScheme(scheme)).toThrow(
+        "Missing 'type' field in security scheme.",
+      );
+    });
+
+    it('should reject an unsupported type', () => {
+      expect(() => validateAuthScheme({type: 'basic'})).toThrow(
+        'Invalid security scheme type: basic',
+      );
+    });
+
+    it.each([
+      [{type: 'apiKey', in: 'header'}, "'name' must be a string"],
+      [{type: 'apiKey', name: 'X-API-Key'}, "'in' must be a string"],
+      [{type: 'http'}, "'scheme' must be a string"],
+      [{type: 'oauth2'}, "'flows' must be an object"],
+      [{type: 'oauth2', flows: []}, "'flows' must be an object"],
+      [{type: 'openIdConnect'}, "'openIdConnectUrl' must be a string"],
+    ])('should reject %j', (scheme, message) => {
+      expect(() => validateAuthScheme(scheme)).toThrow(
+        `Invalid security scheme data: ${message}.`,
+      );
     });
   });
 });

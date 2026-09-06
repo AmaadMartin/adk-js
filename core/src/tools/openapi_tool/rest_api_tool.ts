@@ -9,9 +9,14 @@ import {OpenAPIV3} from 'openapi-types';
 import {Context} from '../../agents/context.js';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
+import {
+  FeatureName,
+  isFeatureEnabled,
+} from '../../features/feature_registry.js';
 import {experimental} from '../../utils/experimental.js';
+import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
-import {applyCredential} from './auth/auth_helpers.js';
+import {applyCredential, validateAuthScheme} from './auth/auth_helpers.js';
 import {
   ApiParameter,
   OperationParser,
@@ -41,6 +46,9 @@ export class RestApiTool extends BaseTool {
     } = {},
   ) {
     super({name, description});
+    if (authScheme !== undefined) {
+      validateAuthScheme(authScheme);
+    }
     this.authScheme = authScheme;
     this.authCredential = authCredential;
     this.headerProvider = options.headerProvider;
@@ -50,6 +58,7 @@ export class RestApiTool extends BaseTool {
 
   @experimental
   public configureAuthScheme(authScheme: OpenAPIV3.SecuritySchemeObject) {
+    validateAuthScheme(authScheme);
     this.authScheme = authScheme;
   }
 
@@ -66,10 +75,17 @@ export class RestApiTool extends BaseTool {
   @experimental
   override _getDeclaration(): FunctionDeclaration {
     const schema = this.operationParser.getJsonSchema();
+    if (isFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL)) {
+      return {
+        name: this.name,
+        description: this.description,
+        parametersJsonSchema: schema,
+      };
+    }
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: toGeminiSchema(schema),
     };
   }
 
@@ -138,11 +154,14 @@ export class RestApiTool extends BaseTool {
         body: body as BodyInit,
       });
 
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        return await response.json();
-      } else {
-        return await response.text();
+      // The body is read once: a `fetch` body is a single-use stream. The
+      // parse needs its own catch, or a plain-text 200 reaches the outer
+      // catch and is reported as a transport failure.
+      const bodyText = await response.text();
+      try {
+        return JSON.parse(bodyText);
+      } catch {
+        return {text: bodyText};
       }
     } catch (error) {
       return {

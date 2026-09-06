@@ -102,7 +102,37 @@ describe('OpenAPIToolset Integration', () => {
       toolContext: mockContext as unknown as Context,
     });
 
-    expect(result).toBe('plain text response');
+    expect(result).toEqual({text: 'plain text response'});
+  });
+
+  it('should parse a JSON body served under a text content type', async () => {
+    const toolset = new OpenAPIToolset({
+      specStr: truanonSpec,
+      specType: 'yaml',
+    });
+    const tools = await toolset.getTools();
+    const getProfileTool = tools.find((t) => t.name === 'get_profile');
+
+    const mockResponse = {status: 'success', data: {confirmed: true}};
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(JSON.stringify(mockResponse), {
+        headers: {'content-type': 'text/plain; charset=utf-8'},
+      }),
+    );
+
+    const result = await getProfileTool!.runAsync({
+      args: {id: 'user1', service: 'myservice'},
+      toolContext: new Context({
+        invocationContext: new InvocationContext({
+          invocationId: 'invocation-1',
+          agent: new LlmAgent({name: 'test_agent'}),
+          session: createSession({id: 'session-1', appName: 'test_app'}),
+          pluginManager: new PluginManager(),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(mockResponse);
   });
 
   it('should handle fetch error', async () => {

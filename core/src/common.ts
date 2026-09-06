@@ -381,7 +381,10 @@ export type {
   ParsedOperation,
 } from './tools/openapi_tool/openapi_spec_parser/openapi_spec_parser.js';
 export {OperationParser} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
-export type {ApiParameter} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
+export type {
+  ApiParameter,
+  ToolArgumentsSchema,
+} from './tools/openapi_tool/openapi_spec_parser/operation_parser.js';
 export {ToolAuthHandler} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export type {AuthPreparationResult} from './tools/openapi_tool/openapi_spec_parser/tool_auth_handler.js';
 export {OpenAPIToolset} from './tools/openapi_tool/openapi_toolset.js';

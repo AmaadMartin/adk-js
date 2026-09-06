@@ -10,10 +10,20 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  FeatureName,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  OpenAPIToolset,
+  OperationEndpoint,
+  OperationParser,
+  overrideFeatureEnabled,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -305,7 +315,7 @@ describe('RestApiTool', () => {
     expect(declaration).toEqual({
       name: 'test_tool',
       description: 'description',
-      parameters: mockSchema,
+      parameters: {type: Type.OBJECT, properties: {}},
     });
   });
 
@@ -593,6 +603,7 @@ describe('RestApiTool', () => {
           name === 'content-type' ? 'application/json' : null,
       },
       json: async () => jsonResponse,
+      text: async () => JSON.stringify(jsonResponse),
     });
 
     const result = await tool.runAsync({
@@ -622,7 +633,10 @@ describe('RestApiTool', () => {
       name: 'X-API-Key',
       in: 'header',
     } as unknown as OpenAPIV3.SecuritySchemeObject;
-    const authCredential = {apiKey: 'test-key'} as unknown as AuthCredential;
+    const authCredential: AuthCredential = {
+      authType: AuthCredentialTypes.API_KEY,
+      apiKey: 'test-key',
+    };
 
     tool.configureAuthScheme(authScheme);
     tool.configureAuthCredential(authCredential);
@@ -1151,5 +1165,189 @@ describe('RestApiTool Utilities', () => {
         'Content-Type': 'application/json',
       });
     });
+  });
+});
+
+const ENDPOINT: OperationEndpoint = {
+  baseUrl: 'http://api.example.com',
+  path: '/test',
+  method: 'GET',
+};
+
+const OPERATION: OpenAPIV3.OperationObject = {responses: {}};
+
+const QUERY_OPERATION: OpenAPIV3.OperationObject = {
+  operationId: 'test_op',
+  parameters: [
+    {name: 'q', in: 'query', required: true, schema: {type: 'string'}},
+  ],
+  responses: {},
+};
+
+/** Stubs `fetch` with a response whose body is `body`. */
+function stubFetch(body: string, contentType = 'application/json'): void {
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    headers: {get: () => contentType},
+    text: async () => body,
+  });
+}
+
+function newContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'session-1', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: 'function-call-1',
+  });
+}
+
+describe('RestApiTool declaration', () => {
+  afterEach(() => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, undefined);
+  });
+
+  it('should convert the schema to a Gemini schema when the flag is off', () => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, false);
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      ENDPOINT,
+      QUERY_OPERATION,
+    );
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.parametersJsonSchema).toBeUndefined();
+    expect(declaration.parameters).toEqual({
+      type: Type.OBJECT,
+      properties: {q: {type: Type.STRING}},
+      required: ['q'],
+    });
+  });
+
+  it('should pass the raw schema through when the flag is on', () => {
+    overrideFeatureEnabled(FeatureName.JSON_SCHEMA_FOR_FUNC_DECL, true);
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      ENDPOINT,
+      QUERY_OPERATION,
+    );
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.parameters).toBeUndefined();
+    expect(declaration.parametersJsonSchema).toEqual(
+      new OperationParser(QUERY_OPERATION).getJsonSchema(),
+    );
+  });
+});
+
+describe('RestApiTool response parsing', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [
+      'a JSON body served as text/plain',
+      '{"ok":true}',
+      'text/plain',
+      {ok: true},
+    ],
+    [
+      'a JSON body served as application/json',
+      '{"ok":true}',
+      'application/json',
+      {ok: true},
+    ],
+    [
+      'a body that is not JSON',
+      'plain text',
+      'text/plain',
+      {text: 'plain text'},
+    ],
+    ['an empty body', '', 'application/json', {text: ''}],
+    ['a JSON string body', '"hi"', 'application/json', 'hi'],
+    ['a JSON number body', '42', 'application/json', 42],
+  ])('should return %s', async (_label, body, contentType, expected) => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      ENDPOINT,
+      OPERATION,
+    );
+    stubFetch(body, contentType);
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: newContext(),
+    });
+
+    expect(result).toEqual(expected);
+  });
+
+  it('should report a transport failure rather than a parse failure', async () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      ENDPOINT,
+      OPERATION,
+    );
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: newContext(),
+    });
+
+    expect(result).toEqual({
+      error: 'Failed to execute API call: network down',
+    });
+  });
+});
+
+describe('RestApiTool auth scheme validation', () => {
+  it('should reject a scheme a specification declares without its name', () => {
+    const spec = {
+      openapi: '3.0.0',
+      info: {title: 'test', version: '1.0.0'},
+      servers: [{url: 'http://api.example.com'}],
+      paths: {
+        '/test': {
+          get: {
+            operationId: 'get_test',
+            security: [{apiKey: []}],
+            responses: {},
+          },
+        },
+      },
+      components: {
+        securitySchemes: {apiKey: {type: 'apiKey', in: 'header'}},
+      },
+    };
+
+    expect(() => new OpenAPIToolset({specStr: JSON.stringify(spec)})).toThrow(
+      "Invalid security scheme data: 'name' must be a string.",
+    );
+  });
+
+  it('should reject a scheme the setter reads from configuration', () => {
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      ENDPOINT,
+      OPERATION,
+    );
+    const scheme: OpenAPIV3.SecuritySchemeObject =
+      JSON.parse('{"type":"http"}');
+
+    expect(() => tool.configureAuthScheme(scheme)).toThrow(
+      "Invalid security scheme data: 'scheme' must be a string.",
+    );
   });
 });
