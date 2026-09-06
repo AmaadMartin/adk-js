@@ -15,9 +15,9 @@ import {
   copyAgentFiles,
   createDockerFile,
   createDockerFileContent,
-  createPackageJson,
   resolveDefaultFromGcloudConfig,
   spawnAsync,
+  stageDependencyFiles,
 } from './deploy_utils.js';
 
 export {createDockerFileContent, type CreateDockerFileContentOptions};
@@ -195,8 +195,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
     console.info('Copying agent source files...');
     await copyAgentFiles(agentLoader, path.join(tempFolder, 'agents', appName));
 
-    console.info('Creating package.json...');
-    await createPackageJson(agentDir, tempFolder);
+    const hasLockfile = await stageDependencyFiles(agentDir, tempFolder);
 
     console.info('Creating Dockerfile...');
     await createDockerFile(tempFolder, {
@@ -209,6 +208,8 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
       allowOrigins: options.allowOrigins,
       otelToCloud: options.otelToCloud,
       a2a: options.a2a,
+      adkVersion: options.adkVersion,
+      hasLockfile,
     });
 
     console.info('Deploying to Cloud Run...');
