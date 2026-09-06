@@ -313,6 +313,9 @@ export async function createAgent(options: AgentCreationOptions) {
     console.log(`  - ${file}`);
   });
   console.log(
+    '\n⚠️  WARNING: Secrets (like GOOGLE_API_KEY) are stored in .env.',
+  );
+  console.log(
     `Run 'cd ${options.agentName} && npm run web' to start the agent in a web interface`,
   );
 }

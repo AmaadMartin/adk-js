@@ -316,4 +316,85 @@ describe('createAgent', () => {
       expect(removeFolder).not.toHaveBeenCalled();
     });
   });
+
+  describe('Secret Warning', () => {
+    const WARNING_TEXT =
+      'WARNING: Secrets (like GOOGLE_API_KEY) are stored in .env.';
+
+    // The suite-wide console.log spy from beforeAll is torn down by
+    // afterEach's restoreAllMocks, so each case installs its own.
+    const spyOnLog = () =>
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    it('should warn that secrets are stored in .env after listing files', async () => {
+      const logSpy = spyOnLog();
+
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        apiKey: 'my-api-key',
+      });
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(WARNING_TEXT),
+      );
+
+      const messages = logSpy.mock.calls.map((call) => String(call[0]));
+      const listingIndex = messages.findIndex((message) =>
+        message.includes('Created the following files in'),
+      );
+      const warningIndex = messages.findIndex((message) =>
+        message.includes(WARNING_TEXT),
+      );
+      expect(listingIndex).toBeGreaterThanOrEqual(0);
+      expect(warningIndex).toBeGreaterThan(listingIndex);
+    });
+
+    it('should warn that secrets are stored in .env for a Vertex AI backend', async () => {
+      const logSpy = spyOnLog();
+
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        project: 'my-project',
+        region: 'us-central1',
+      });
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(WARNING_TEXT),
+      );
+    });
+
+    it('should print the parity line verbatim, without the api key value', async () => {
+      const logSpy = spyOnLog();
+
+      await createAgent({
+        ...getFreshOptions(),
+        forceYes: true,
+        apiKey: 'my-api-key',
+      });
+
+      const warning = logSpy.mock.calls
+        .map((call) => String(call[0]))
+        .find((message) => message.includes(WARNING_TEXT));
+      // Byte-for-byte identical to the adk-python banner tail. This also pins
+      // that the api key value is absent, and that a suffix such as
+      // `.env.local` cannot slip past the substring assertions above.
+      expect(warning).toBe(`\n⚠️  ${WARNING_TEXT}`);
+    });
+
+    it('should not warn when the create flow exits before writing files', async () => {
+      const logSpy = spyOnLog();
+      (isFolderExists as Mock).mockResolvedValue(true);
+      (select as Mock).mockResolvedValueOnce(false); // Overwrite = No
+
+      await expect(createAgent(getFreshOptions())).rejects.toThrow(
+        /process\.exit/,
+      );
+
+      expect(logSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining(WARNING_TEXT),
+      );
+    });
+  });
 });
