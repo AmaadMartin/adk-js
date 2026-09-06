@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
 import {
   InvocationContext,
   WorkflowInstructionScope,
@@ -20,8 +19,8 @@ import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
 } from '../tools/finish_task_tool.js';
+import {nodeInputToUserContent} from '../utils/content_utils.js';
 import {logger} from '../utils/logger.js';
-import {isContent} from './base_node.js';
 import {NodeContext} from './node_context.js';
 
 /**
@@ -89,7 +88,7 @@ async function appendNodeInputAsUserTurn(
     author: 'user',
     invocationId: ctx.invocationId,
     branch: ctx.branch,
-    content: toUserContent(nodeInput),
+    content: nodeInputToUserContent(nodeInput),
   });
   if (ctx.isolationScope) {
     userEvent.isolationScope = ctx.isolationScope;
@@ -243,15 +242,4 @@ function isFinishTaskSuccessResponse(event: Event): boolean {
     const response = (fr.response ?? {}) as {result?: unknown};
     return response.result === FINISH_TASK_SUCCESS_RESULT;
   });
-}
-
-/** Converts an arbitrary node input into a user-role `Content`. */
-function toUserContent(input: unknown): Content {
-  if (isContent(input)) {
-    return {...input, role: 'user'};
-  }
-  if (typeof input === 'string') {
-    return {role: 'user', parts: [{text: input}]};
-  }
-  return {role: 'user', parts: [{text: JSON.stringify(input)}]};
 }

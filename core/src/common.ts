@@ -47,6 +47,8 @@ export type {
 } from './agents/llm_agent.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig} from './agents/loop_agent.js';
+export {ManagedAgent, isManagedAgent} from './agents/managed_agent.js';
+export type {ManagedAgentConfig} from './agents/managed_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
 export {AgentTransferLlmRequestProcessor} from './agents/processors/agent_transfer_llm_request_processor.js';
 export {
@@ -324,6 +326,11 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
+export {RemoteMcpServer, isRemoteMcpServer} from './tools/remote_mcp_server.js';
+export type {
+  McpHeaderProvider,
+  RemoteMcpServerParams,
+} from './tools/remote_mcp_server.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {

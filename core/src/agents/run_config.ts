@@ -7,6 +7,7 @@
 import {
   AudioTranscriptionConfig,
   ContextWindowCompressionConfig,
+  HttpOptions,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
@@ -121,6 +122,14 @@ export interface RunConfig {
    * decision; interactive front-ends (e.g. `adk run`) opt in explicitly.
    */
   plainTextToolConfirmation?: boolean;
+
+  /**
+   * Per-request HTTP options forwarded to the model or interactions call.
+   *
+   * `headers` set here are merged with the ADK tracking headers, so a caller
+   * can add its own without losing attribution.
+   */
+  httpOptions?: HttpOptions;
 
   /**
    * Request-level metadata passed from an incoming A2A request or caller.
