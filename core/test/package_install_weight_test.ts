@@ -57,6 +57,7 @@ const OPTIONAL_SUBSYSTEM_PEERS = [
   '@modelcontextprotocol/sdk',
   '@toolbox-sdk/core',
   'express',
+  'openai',
   'sqlite3',
 ];
 
@@ -90,6 +91,7 @@ describe('core/package.json install weight', () => {
     '@modelcontextprotocol/sdk',
     '@toolbox-sdk/core',
     'express',
+    'openai',
     'sqlite3',
   ])(
     '%s is still a devDependency so the repo can build and test against it',

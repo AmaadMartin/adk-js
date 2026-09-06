@@ -205,6 +205,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Interactions API conversation chaining](models/interactions_api/index.md) - Chaining a turn onto the previous one by id, and how branch scoping decides which events the scan can see.
 - [LiteLlm](models/lite_llm/index.md) - Running an agent on a non-Gemini model over the OpenAI chat-completions protocol.
 - [LlmRequest](models/llm_request/index.md) - The request object ADK builds for one model call, and the rules that keep it valid for the provider.
+- [OpenAILlm](models/openai/index.md) - Running an agent on a GPT model, or on
+  any host that speaks the OpenAI Chat Completions API.
 
 ### Optimization
 
