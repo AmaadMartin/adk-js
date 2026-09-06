@@ -19,6 +19,9 @@ export const REQUEST_CREDENTIAL_FUNCTION_CALL_NAME = 'adk_request_credential';
 /** The function call the framework emits to ask a client for input. */
 export const REQUEST_INPUT_FUNCTION_CALL_NAME = 'adk_request_input';
 
+/** The function call the framework emits to hand control to another agent. */
+export const TRANSFER_TO_AGENT_FUNCTION_CALL_NAME = 'transfer_to_agent';
+
 /**
  * Names reserved for the framework's own control-plane calls.
  *
@@ -31,6 +34,19 @@ const RESERVED_FUNCTION_CALL_NAMES: ReadonlySet<string> = new Set([
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   REQUEST_INPUT_FUNCTION_CALL_NAME,
+]);
+
+/**
+ * Names reserved for the framework's own tool dispatch.
+ *
+ * Kept beside {@link RESERVED_FUNCTION_CALL_NAMES} so the two lists are read
+ * together. They answer different questions — that set refuses a call a client
+ * wrote, this one refuses a tool an external server advertises — but a new
+ * control-plane call belongs in both.
+ */
+export const RESERVED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...RESERVED_FUNCTION_CALL_NAMES,
+  TRANSFER_TO_AGENT_FUNCTION_CALL_NAME,
 ]);
 
 /**
