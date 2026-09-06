@@ -66,6 +66,10 @@ function createMockInvocationContext(): InvocationContext {
   });
 }
 
+// This suite starts a real interpreter. Process creation on a cold CI runner
+// can exhaust Vitest's 5000ms default. 60000ms also clears the executor's own
+// 30s SIGKILL deadline, so a hung child reports `Code execution timed out after
+// 30 seconds.` instead. Cases that never spawn override the budget back down.
 describe('UnsafeLocalCodeExecutor', () => {
   let executor: UnsafeLocalCodeExecutor;
   const invocationContext = createMockInvocationContext();
@@ -246,6 +250,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
+  // No process is created: executeCode returns at the language guard.
   it('should return error for unsupported language', async () => {
     const params: ExecuteCodeParams = {
       invocationContext,
@@ -260,7 +265,7 @@ describe('UnsafeLocalCodeExecutor', () => {
 
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('Unsupported language: unspecified');
-  });
+  }, 5000);
 
   it('should respect pythonCommandPath', async () => {
     const customExecutor = new UnsafeLocalCodeExecutor({
@@ -413,6 +418,7 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].mimeType).toBe('application/json');
   });
 
+  // This block stubs spawn, so no process is created.
   describe('spawn arguments', () => {
     beforeEach(() => {
       // Return a child process that immediately exits with code 0, so the
@@ -561,5 +567,5 @@ describe('UnsafeLocalCodeExecutor', () => {
         );
       });
     });
-  });
-});
+  }, 5000);
+}, 60000);
