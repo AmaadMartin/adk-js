@@ -954,6 +954,15 @@ export async function* generateContentViaInteractions(
   }
 }
 
+/** Whether `value` is the SSE stream `interactions.create` returns. */
+function isSseStream(
+  value: unknown,
+): value is AsyncIterable<ExtendedInteractionSSEEvent> {
+  return (
+    typeof value === 'object' && value !== null && Symbol.asyncIterator in value
+  );
+}
+
 /**
  * Reads the execution environment id an Interactions SSE event carries.
  *
@@ -969,6 +978,25 @@ export function extractStreamEnvironmentId(
   event: ExtendedInteractionSSEEvent,
 ): string | undefined {
   return event.interaction?.environment_id ?? event.environment_id;
+}
+
+/**
+ * The part of a `GoogleGenAI` client that an agent interaction calls.
+ *
+ * Declared structurally so the transport depends on the one call it makes
+ * rather than on a concrete class. A runtime that resolves `@google/genai`
+ * twice holds two unrelated `GoogleGenAI` classes, so a nominal dependency
+ * would reject a perfectly good client. A real `GoogleGenAI` satisfies this.
+ */
+export interface InteractionsClient {
+  readonly interactions: {
+    create(
+      params: Interactions.CreateAgentInteractionParamsStreaming & {
+        stream: true;
+      },
+      options: {fetchOptions: {headers?: Record<string, string>}},
+    ): Promise<unknown>;
+  };
 }
 
 /** Options for {@link createInteractions}. */
@@ -994,14 +1022,20 @@ export interface CreateInteractionsOptions {
  * @yields One response per SSE event that maps to one.
  */
 export async function* createInteractions(
-  apiClient: GoogleGenAI,
+  apiClient: InteractionsClient,
   options: CreateInteractionsOptions,
 ): AsyncGenerator<LlmResponse, void, void> {
   const {createParams, extraHeaders} = options;
-  const responses = (await apiClient.interactions.create(
+  const responses = await apiClient.interactions.create(
     {...createParams, stream: true},
     {fetchOptions: {headers: extraHeaders}},
-  )) as AsyncIterable<ExtendedInteractionSSEEvent>;
+  );
+  if (!isSseStream(responses)) {
+    throw new Error(
+      'interactions.create returned a non-streaming response; only the ' +
+        'streaming form of an agent interaction is supported.',
+    );
+  }
 
   const aggregatedParts: Part[] = [];
   let interactionId: string | undefined;
