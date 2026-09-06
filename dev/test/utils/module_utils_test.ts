@@ -59,6 +59,35 @@ describe('importModuleFile', () => {
     });
   });
 
+  it('inlines a neighbour the TypeScript file imports', async () => {
+    // The compiled file runs from a temp directory, where './helper.js' no
+    // longer names anything.
+    await write('helper.ts', 'export const helper = "from the neighbour";\n');
+    const filePath = await write(
+      'importer.ts',
+      `import {helper} from './helper.js';
+       export const value = helper;
+      `,
+    );
+
+    expect(await importModuleFile(filePath)).toMatchObject({
+      value: 'from the neighbour',
+    });
+  });
+
+  it('keeps a package import external so the process shares one copy', async () => {
+    const filePath = await write(
+      'external.ts',
+      `import * as path from 'node:path';
+       export const joined: string = path.join('a', 'b');
+      `,
+    );
+
+    expect(await importModuleFile(filePath)).toMatchObject({
+      joined: path.join('a', 'b'),
+    });
+  });
+
   it('compiles a .cts file to CommonJS', async () => {
     const filePath = await write(
       'legacy.cts',

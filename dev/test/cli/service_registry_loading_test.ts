@@ -287,20 +287,24 @@ describe('loadServicesModule', () => {
     ).toMatchObject({fromScript: 'scriptonly://x'});
   });
 
-  it('registers a scheme declared in a TypeScript services file', async () => {
+  it('compiles and runs a TypeScript services file', async () => {
+    // A TypeScript script is bundled, so an import of the module under test
+    // would be inlined and register on a private copy. What this pins is that
+    // the file compiles and runs; that its registrations are read is covered
+    // by tests/integration/service_registry.
+    const marker = path.join(dir, 'ran.txt');
     await write(
       'services.ts',
-      `${scriptSource('scripttypescript')}
+      `import * as fs from 'node:fs';
+
 const scheme: string = 'scripttypescript';
-export type Declared = typeof scheme;
+fs.writeFileSync(${JSON.stringify(marker)}, scheme);
 `,
     );
 
     await loadServicesModule(dir);
 
-    expect(
-      await getServiceRegistry().createSessionService('scripttypescript://x'),
-    ).toBeDefined();
+    expect(await fs.readFile(marker, 'utf-8')).toBe('scripttypescript');
   });
 
   it('lets the script replace a scheme the YAML declared', async () => {

@@ -25,11 +25,12 @@ const OUTPUT_FORMATS: Record<string, 'esm' | 'cjs'> = {
 };
 
 /**
- * Transpiles rather than bundles.
+ * Bundles the file's own neighbours and leaves its packages alone.
  *
- * A bundle inlines `@google/adk-devtools`, giving the imported file its own
- * copy of every module singleton. A file that registers itself against a
- * process-wide registry would then register against a second, unread one.
+ * The compiled file lands in a temp directory, so a relative import has to be
+ * inlined or it no longer resolves. A package import must stay external: were
+ * `@google/adk-devtools` inlined, the file would get a private copy of every
+ * module singleton, and a registration would land on a registry nobody reads.
  */
 async function transpileTypeScript(
   filePath: string,
@@ -41,7 +42,7 @@ async function transpileTypeScript(
     outputDir,
     path.parse(filePath).name + outputExtension,
   );
-  // The transpiled file keeps its bare imports, so it needs the project's
+  // The compiled file keeps its package imports, so it needs the project's
   // packages reachable from where it now sits.
   await linkProjectNodeModules(outputDir, sourceDir);
 
@@ -51,7 +52,8 @@ async function transpileTypeScript(
     target: 'node16',
     platform: 'node',
     format: OUTPUT_FORMATS[outputExtension],
-    bundle: false,
+    bundle: true,
+    packages: 'external',
   });
 
   return outfile;
