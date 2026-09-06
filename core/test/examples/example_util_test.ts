@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {InputValidationError} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {BaseExampleProvider} from '../../src/examples/base_example_provider.js';
 import {Example} from '../../src/examples/example.js';
 import {
   buildExampleSi,
   convertExamplesToText,
+  validateExamples,
 } from '../../src/examples/example_util.js';
 
 class FixedExampleProvider extends BaseExampleProvider {
@@ -133,5 +135,69 @@ describe('buildExampleSi', () => {
     expect(() => buildExampleSi({} as any, 'query')).toThrow(
       'Invalid example configuration',
     );
+  });
+});
+
+describe('validateExamples', () => {
+  it('accepts a valid list', () => {
+    expect(() =>
+      validateExamples([SIMPLE_EXAMPLE, FUNCTION_CALL_EXAMPLE]),
+    ).not.toThrow();
+  });
+
+  it('accepts an empty list', () => {
+    expect(() => validateExamples([])).not.toThrow();
+  });
+
+  it('rejects an entry without an output', () => {
+    expect(() => validateExamples([{input: {parts: [{text: 'q'}]}}])).toThrow(
+      InputValidationError,
+    );
+  });
+
+  it('rejects an entry without an input', () => {
+    expect(() =>
+      validateExamples([{output: [{role: 'model', parts: [{text: 'a'}]}]}]),
+    ).toThrow(InputValidationError);
+  });
+
+  it('rejects an output that is not an array', () => {
+    expect(() =>
+      validateExamples([
+        {
+          input: {parts: [{text: 'q'}]},
+          output: {role: 'model', parts: [{text: 'a'}]},
+        },
+      ]),
+    ).toThrow(InputValidationError);
+  });
+
+  it('rejects input parts that are not an array', () => {
+    expect(() => validateExamples([{input: {parts: 'q'}, output: []}])).toThrow(
+      InputValidationError,
+    );
+  });
+
+  it('rejects a value that is not a list at all', () => {
+    expect(() => validateExamples('not a list')).toThrow(
+      /expected array, received string/,
+    );
+  });
+
+  it('names the offending index and field in the message', () => {
+    expect(() => validateExamples([{input: {parts: [{text: 'q'}]}}])).toThrow(
+      /at \[0\]\.output/,
+    );
+  });
+
+  it('accepts unknown keys on a content object', () => {
+    expect(() =>
+      validateExamples([
+        {
+          input: {role: 'user', parts: [{text: 'q', thought: true}]},
+          output: [{role: 'model', parts: [{text: 'a'}], newField: 1}],
+        },
+      ]),
+    ).not.toThrow();
   });
 });
