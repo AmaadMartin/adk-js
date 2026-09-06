@@ -13,6 +13,8 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {codeConfigSchema} from './agents/common_configs.js';
+export type {CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -148,13 +150,136 @@ export type {TruncatingContextCompactorOptions} from './context/truncating_conte
 export {BaseEnvironment} from './environment/base_environment.js';
 export type {ExecutionResult} from './environment/base_environment.js';
 export {AlreadyExistsError} from './errors/already_exists_error.js';
-export {InputValidationError} from './errors/input_validation_error.js';
+export {
+  InputValidationError,
+  isInputValidationError,
+} from './errors/input_validation_error.js';
 export {NotFoundError} from './errors/not_found_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {evalModel} from './evaluation/common.js';
+export type {
+  EvalModel,
+  EvalModelOptions,
+  ExtraKeysPolicy,
+} from './evaluation/common.js';
+export {DEFAULT_LIVE_TIMEOUT_SECONDS} from './evaluation/constants.js';
+export {
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+  isIntermediateData,
+  isInvocationEvents,
+  validateEvalCase,
+} from './evaluation/eval_case.js';
+export type {
+  ConversationScenario,
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
+} from './evaluation/eval_case.js';
+export {
+  DEFAULT_EVAL_CONFIG,
+  getEvalMetricsFromConfig,
+  getEvaluationCriteriaOrDefault,
+  parseEvalConfig,
+} from './evaluation/eval_config.js';
+export type {
+  Criterion,
+  CustomMetricConfig,
+  EvalConfig,
+  LiveModelConfig,
+  UserSimulatorConfig,
+} from './evaluation/eval_config.js';
+export {
+  DEFAULT_JUDGE_MODEL,
+  DEFAULT_JUDGE_NUM_SAMPLES,
+  DEFAULT_JUDGE_PARALLELISM_LIMIT,
+  DEFAULT_USER_SIMULATOR_STOP_SIGNAL,
+  EvalStatus,
+  PrebuiltMetrics,
+  ToolTrajectoryMatchType,
+  getConfigCustomFunctionPath,
+  getMetricThreshold,
+  normalizeToolTrajectoryMatchType,
+  parseBaseCriterion,
+  parseEvalMetric,
+  parseEvalMetricResult,
+  parseHallucinationsCriterion,
+  parseInterval,
+  parseJudgeModelOptions,
+  parseLlmAsAJudgeCriterion,
+  parseLlmBackedUserSimulatorCriterion,
+  parseMetricInfo,
+  parseMetricValueInfo,
+  parseRubricsBasedCriterion,
+  parseToolTrajectoryCriterion,
+  resolveJudgeModelOptions,
+  setConfigCustomFunctionPath,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricCriterion,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
+  HallucinationsCriterion,
+  Interval,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricValueInfo,
+  ResolvedJudgeModelOptions,
+  RubricsBasedCriterion,
+  Threshold,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export {parseRubric, parseRubricScore} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export {
+  DEFAULT_USER_SIMULATOR_AUDIO_MODEL,
+  DEFAULT_USER_SIMULATOR_LANGUAGE_CODE,
+  DEFAULT_USER_SIMULATOR_VOICE_NAME,
+  LLM_AUDIO_USER_SIMULATOR_TYPE,
+} from './evaluation/simulation/llm_audio_user_simulator.js';
+export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
+export {LLM_BACKED_USER_SIMULATOR_TYPE} from './evaluation/simulation/llm_backed_user_simulator.js';
+export type {LlmBackedUserSimulatorConfig} from './evaluation/simulation/llm_backed_user_simulator.js';
+export {
+  DEFAULT_MAX_ALLOWED_INVOCATIONS,
+  DEFAULT_USER_SIMULATOR_MODEL,
+  DEFAULT_USER_SIMULATOR_THINKING_BUDGET,
+  UserSimulatorStatus,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  BaseUserSimulatorConfig,
+  LlmUserSimulatorConfig,
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
