@@ -10,7 +10,7 @@ This index is the only table of contents. A guide that is not listed here is unr
 
 ### Tools
 
-- [MCP connection parameters](tools/mcp_connection_params/index.md) - Choosing an MCP transport, bounding the handshake with a timeout, and controlling server-side session termination.
+- [MCP connection parameters](tools/mcp_connection_params/index.md) - Choosing an MCP transport, bounding every request with a timeout, and controlling server-side session termination.
 
 #### Retrieval
 
