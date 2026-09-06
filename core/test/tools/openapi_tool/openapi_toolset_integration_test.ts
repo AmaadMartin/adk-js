@@ -102,7 +102,7 @@ describe('OpenAPIToolset Integration', () => {
       toolContext: mockContext as unknown as Context,
     });
 
-    expect(result).toBe('plain text response');
+    expect(result).toEqual({text: 'plain text response'});
   });
 
   it('should handle fetch error', async () => {
