@@ -198,4 +198,55 @@ describe('OpenAPIToolset Integration', () => {
     expect(requestUrl.pathname).toBe('/v1/users/..%2F..%2Fadmin%2Fexport');
     expect(requestUrl.searchParams.get('key')).toBe('test-api-key');
   });
+
+  it('should declare a parameter description to the model', async () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.3',
+      info: {title: 'Pets API', version: '1.0.0'},
+      servers: [{url: 'https://api.example.com'}],
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'findPetsByStatus',
+            parameters: [
+              {$ref: '#/components/parameters/StatusParam'},
+              {name: 'limit', in: 'query', schema: {type: 'integer'}},
+            ],
+            responses: {'200': {description: 'ok'}},
+          },
+        },
+      },
+      components: {
+        parameters: {
+          StatusParam: {
+            name: 'status',
+            in: 'query',
+            description: 'Status values that need to be considered for filter',
+            schema: {type: 'string'},
+          },
+        },
+      },
+    };
+    const toolset = new OpenAPIToolset({
+      specStr: JSON.stringify(spec),
+      specType: 'json',
+    });
+
+    const tools = await toolset.getTools();
+
+    const findPetsTool = tools.find((t) => t.name === 'find_pets_by_status');
+    if (!findPetsTool) expect.fail('find_pets_by_status tool was not created');
+    expect(findPetsTool._getDeclaration()?.parameters).toEqual({
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          description: 'Status values that need to be considered for filter',
+        },
+        limit: {type: 'integer'},
+      },
+      required: undefined,
+      title: 'findPetsByStatus_Arguments',
+    });
+  });
 });
