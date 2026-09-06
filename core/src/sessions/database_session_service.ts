@@ -217,12 +217,14 @@ export class DatabaseSessionService extends BaseSessionService {
     };
 
     if (config?.afterTimestamp) {
-      eventWhere.timestamp = {$gt: new Date(config.afterTimestamp)};
+      eventWhere.timestamp = {$gte: new Date(config.afterTimestamp)};
     }
 
-    // Get latest numRecentEvents events or all events in DESC order
+    // Break timestamp ties on id so tied events cannot come back in a different
+    // order on each read, which would shuffle a replayed conversation and make
+    // numRecentEvents truncate at an arbitrary point inside the tie.
     const storageEvents = await em.find(StorageEvent, eventWhere, {
-      orderBy: {timestamp: 'DESC'},
+      orderBy: {timestamp: 'DESC', id: 'DESC'},
       limit: config?.numRecentEvents,
     });
     // Reverse the events to maintain the original order as we get events in DESC order
