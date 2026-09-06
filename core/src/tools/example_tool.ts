@@ -4,16 +4,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseExampleProvider} from '../examples/base_example_provider.js';
-import {Example} from '../examples/example.js';
+import {
+  ToolErrorType,
+  ToolExecutionError,
+} from '../errors/tool_execution_error.js';
+import {
+  BaseExampleProvider,
+  isBaseExampleProvider,
+} from '../examples/base_example_provider.js';
+import {Example, isExampleArray} from '../examples/example.js';
 import {buildExampleSi} from '../examples/example_util.js';
 import {appendInstructions} from '../models/llm_request.js';
+import {resolveFullyQualifiedName} from '../utils/module_utils.js';
 
 import {
   BaseTool,
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
 } from './base_tool.js';
+
+/**
+ * The declarative configuration of an {@link ExampleTool}, as an agent config
+ * file supplies it.
+ *
+ * It differs from the constructor argument because a config file cannot hold a
+ * provider object. It names one instead.
+ */
+export interface ExampleToolConfig {
+  /**
+   * The few-shot examples themselves, or a fully-qualified name of the form
+   * `<module specifier>#<export>` that resolves to a
+   * {@link BaseExampleProvider} exported by user code.
+   */
+  examples: Example[] | string;
+}
 
 /**
  * A tool that adds (few-shot) examples to the LLM request.
@@ -30,6 +54,44 @@ export class ExampleTool extends BaseTool {
       name: 'example_tool',
       description: 'example tool',
     });
+  }
+
+  /**
+   * Builds a tool from its declarative configuration.
+   *
+   * @param config The tool configuration read from an agent config file.
+   * @param configAbsPath Absolute path of that config file. A relative module
+   *   specifier in `config.examples` resolves against its directory.
+   * @return The configured tool.
+   * @throws {ToolExecutionError} When `examples` names a value that is not a
+   *   {@link BaseExampleProvider}, or is neither a name nor a list of
+   *   examples.
+   * @throws {InputValidationError} When `examples` is a name that does not
+   *   resolve.
+   */
+  static async fromConfig(
+    config: ExampleToolConfig,
+    configAbsPath: string,
+  ): Promise<ExampleTool> {
+    const {examples} = config;
+    if (typeof examples === 'string') {
+      const provider = await resolveFullyQualifiedName(examples, configAbsPath);
+      if (!isBaseExampleProvider(provider)) {
+        throw new ToolExecutionError(
+          'Example provider must be an instance of BaseExampleProvider.',
+          ToolErrorType.BAD_REQUEST,
+        );
+      }
+      return new ExampleTool(provider);
+    }
+    if (isExampleArray(examples)) {
+      return new ExampleTool(examples);
+    }
+    throw new ToolExecutionError(
+      'Example tool config must be a list of examples or a fully-qualified ' +
+        'name to a BaseExampleProvider object in code.',
+      ToolErrorType.BAD_REQUEST,
+    );
   }
 
   override async runAsync(_request: RunAsyncToolRequest): Promise<unknown> {
