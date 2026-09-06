@@ -342,7 +342,7 @@ describe('AgentGepaAdapter batch routing', () => {
     expect(() =>
       createAdapter().makeReflectiveDataset(
         {[AGENT_PROMPT_NAME]: 'Prompt'},
-        {outputs: [{}, {}], scores: [0.9, 0.1], trajectories: [{t: 1}]},
+        {scores: [0.9, 0.1], trajectories: [{t: 1}]},
         ['component1'],
       ),
     ).toThrow(
@@ -355,7 +355,7 @@ describe('AgentGepaAdapter batch routing', () => {
     expect(() =>
       createAdapter().makeReflectiveDataset(
         {[AGENT_PROMPT_NAME]: 'Prompt'},
-        {outputs: [], scores: []},
+        {scores: []},
         ['component1'],
       ),
     ).toThrow(
@@ -366,7 +366,7 @@ describe('AgentGepaAdapter batch routing', () => {
   it('serves the same records to every requested component', () => {
     const dataset = createAdapter().makeReflectiveDataset(
       {[AGENT_PROMPT_NAME]: 'Prompt'},
-      {outputs: [{}], scores: [0.5], trajectories: [{t: 1}]},
+      {scores: [0.5], trajectories: [{t: 1}]},
       ['one', 'two'],
     );
 

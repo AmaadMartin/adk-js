@@ -7,12 +7,10 @@
 /**
  * The GEPA engine contract that {@link
  * ../optimization/gepa_root_agent_prompt_optimizer.GEPARootAgentPromptOptimizer}
- * and {@link
- * ../optimization/gepa_root_agent_optimizer.GEPARootAgentOptimizer} drive.
+ * drives.
  *
- * ADK does not bundle a GEPA search engine. adk-python imports the PyPI
- * package `gepa`; npm has no first-party equivalent, so the caller supplies an
- * engine that implements these types.
+ * ADK ships one implementation, {@link DefaultGepaEngine}. A caller who wants
+ * another search writes these types instead.
  */
 
 /**
@@ -22,19 +20,16 @@
 export type ReflectionLm = (prompt: string) => Promise<string>;
 
 /** Per-example results for one candidate over one batch. */
-export interface EvaluationBatch<OutputT, TrajectoryT> {
-  /** One entry per batch example, in batch order. */
-  outputs: OutputT[];
-
+export interface EvaluationBatch {
   /** One score per batch example, in batch order. Higher is better. */
   scores: number[];
 
   /** Absent unless the engine asked for traces. */
-  trajectories?: TrajectoryT[] | null;
+  trajectories?: Array<Record<string, unknown>>;
 }
 
 /** The bridge between a GEPA engine and the system being optimized. */
-export interface GepaAdapter<DataInstT, TrajectoryT, OutputT> {
+export interface GepaAdapter {
   /**
    * Scores one candidate over one batch of examples.
    *
@@ -43,10 +38,10 @@ export interface GepaAdapter<DataInstT, TrajectoryT, OutputT> {
    * @param captureTraces Whether the engine needs trajectories back.
    */
   evaluate(
-    batch: DataInstT[],
+    batch: string[],
     candidate: Record<string, string>,
     captureTraces?: boolean,
-  ): Promise<EvaluationBatch<OutputT, TrajectoryT>>;
+  ): Promise<EvaluationBatch>;
 
   /**
    * Turns an evaluated batch into the records the reflection model reads.
@@ -58,7 +53,7 @@ export interface GepaAdapter<DataInstT, TrajectoryT, OutputT> {
    */
   makeReflectiveDataset(
     candidate: Record<string, string>,
-    evalBatch: EvaluationBatch<OutputT, TrajectoryT>,
+    evalBatch: EvaluationBatch,
     componentsToUpdate: string[],
   ): Record<string, Array<Record<string, unknown>>>;
 
@@ -92,11 +87,7 @@ export interface GepaOptimizeParams {
   valset: string[];
 
   /** The bridge back to the system being optimized. */
-  adapter: GepaAdapter<
-    string,
-    Record<string, unknown>,
-    Record<string, unknown>
-  >;
+  adapter: GepaAdapter;
 
   /** The maximum number of evaluations the search may make. */
   maxMetricCalls: number;
@@ -120,7 +111,7 @@ export interface GepaRunResult {
   valAggregateScores: number[];
 
   /** The full engine result, for callers that want more than the front. */
-  toDict(): Record<string, unknown>;
+  details: Record<string, unknown>;
 }
 
 /** A GEPA search engine. */

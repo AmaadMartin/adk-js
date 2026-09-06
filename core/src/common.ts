@@ -234,10 +234,7 @@ export {
   proposeWithReflection,
   renderReflectionPrompt,
 } from './optimization/default_gepa_engine.js';
-export type {
-  CandidateSelectionStrategy,
-  DefaultGepaEngineOptions,
-} from './optimization/default_gepa_engine.js';
+export type {DefaultGepaEngineOptions} from './optimization/default_gepa_engine.js';
 export type {
   EvaluationBatch,
   GepaAdapter,
@@ -250,7 +247,6 @@ export {
   AGENT_PROMPT_NAME,
   AgentGepaAdapter,
   GEPARootAgentPromptOptimizer,
-  MISSING_GEPA_DEPENDENCIES_MESSAGE,
 } from './optimization/gepa_root_agent_prompt_optimizer.js';
 export type {
   AgentGepaAdapterParams,

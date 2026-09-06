@@ -42,7 +42,7 @@ export interface AgentWithScores {
   optimizedAgent: LlmAgent;
 
   /** The overall score of the optimized agent. */
-  overallScore?: number;
+  overallScore: number;
 }
 
 /** Base shape for optimizer final results. */

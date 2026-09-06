@@ -23,7 +23,6 @@ import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {
   metricCalls,
-  parentPrompts,
   ProposingTableAdapter,
   ScriptedReflector,
   TableAdapter,
@@ -321,32 +320,7 @@ describe('DefaultGepaEngine parent selection', () => {
     'Rewrite two': {v1: 1, v2: 0, t1: 0.9},
   };
 
-  it("'current-best' reflects on the highest-mean candidate", async () => {
-    const adapter = new TableAdapter(FRONT_SCORES);
-    const reflector = new ScriptedReflector([
-      'Rewrite one',
-      'Rewrite two',
-      'Rewrite two',
-    ]);
-
-    await new DefaultGepaEngine({
-      candidateSelectionStrategy: 'current-best',
-    }).optimize(
-      optimizeParams(adapter, reflector, {
-        maxMetricCalls: 12,
-      }),
-    );
-
-    // Means: seed 0.5, 'Rewrite one' 0.7, 'Rewrite two' 0.5. Round three picks
-    // 'Rewrite one' again, which needs both arms of the running maximum.
-    expect(parentPrompts(adapter)).toEqual([
-      SEED_PROMPT,
-      'Rewrite one',
-      'Rewrite one',
-    ]);
-  });
-
-  it("'pareto' keeps every non-dominated candidate selectable", async () => {
+  it('keeps every non-dominated candidate selectable', async () => {
     const adapter = new TableAdapter(FRONT_SCORES);
     const reflector = new ScriptedReflector([
       'Rewrite one',
@@ -390,7 +364,7 @@ describe('DefaultGepaEngine parent selection', () => {
           params,
         ),
       );
-      runs.push({evaluations: adapter.evaluations, result: result.toDict()});
+      runs.push({evaluations: adapter.evaluations, result: result.details});
     }
 
     expect(runs[0]).toEqual(runs[1]);
@@ -405,7 +379,7 @@ describe('DefaultGepaEngine result', () => {
       optimizeParams(adapter, new ScriptedReflector([BETTER_PROMPT])),
     );
 
-    expect(result.toDict()).toEqual({
+    expect(result.details).toEqual({
       candidates: [
         {[AGENT_PROMPT_NAME]: SEED_PROMPT},
         {[AGENT_PROMPT_NAME]: BETTER_PROMPT},
@@ -430,7 +404,7 @@ describe('DefaultGepaEngine result', () => {
       join(runDir, 'nested', 'gepa_result.json'),
       'utf8',
     );
-    expect(JSON.parse(written)).toEqual(result.toDict());
+    expect(JSON.parse(written)).toEqual(result.details);
   });
 
   it('writes nothing when no runDir is set', async () => {

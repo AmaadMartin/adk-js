@@ -75,13 +75,13 @@ export class PhraseCoverageSampler extends Sampler<UnstructuredSamplingResult> {
 
   override async sampleAndScore({
     candidate,
-    exampleSet = Sampler.VALIDATION_SET,
+    exampleSet = 'validation',
     batch,
     captureFullEvalData = false,
   }: SampleAndScoreParams): Promise<UnstructuredSamplingResult> {
     const ids =
       batch ??
-      (exampleSet === Sampler.TRAIN_SET
+      (exampleSet === 'train'
         ? this.getTrainExampleIds()
         : this.getValidationExampleIds());
     const instruction = requireStaticInstruction(candidate);
@@ -121,7 +121,7 @@ export class TwoCandidateEngine implements GepaEngine {
     return {
       candidates,
       valAggregateScores,
-      toDict: () => ({tried: candidates.length}),
+      details: {tried: candidates.length},
     };
   }
 }

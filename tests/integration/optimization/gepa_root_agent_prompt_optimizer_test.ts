@@ -189,7 +189,7 @@ class HillClimbingEngine implements GepaEngine {
     return {
       candidates,
       valAggregateScores,
-      toDict: () => ({rounds: this.rounds, tried: candidates.length}),
+      details: {rounds: this.rounds, tried: candidates.length},
     };
   }
 }

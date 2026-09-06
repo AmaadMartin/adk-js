@@ -17,6 +17,7 @@ import type {
   OptimizerResult,
   UnstructuredSamplingResult,
 } from './data_types.js';
+import {DefaultGepaEngine} from './default_gepa_engine.js';
 import type {EvaluationBatch, GepaAdapter, GepaEngine} from './gepa_engine.js';
 import {
   generateReflectionResponse,
@@ -35,17 +36,6 @@ const MISSING_EXAMPLE_SCORE = 0;
 
 /** The reflection model's thinking budget, in tokens. */
 const DEFAULT_THINKING_BUDGET = 10240;
-
-/**
- * Reported when the bundled GEPA search engine cannot be loaded.
- *
- * It mirrors adk-python raising `ImportError` with
- * `MISSING_EVAL_DEPENDENCIES_MESSAGE` when the `gepa` package is absent.
- */
-export const MISSING_GEPA_DEPENDENCIES_MESSAGE =
-  'The bundled GEPA search engine could not be loaded, so this optimization ' +
-  'has no search to run. Pass your own implementation of the GepaEngine ' +
-  'interface as `config.engine`.';
 
 /** Configuration options for {@link GEPARootAgentPromptOptimizer}. */
 export interface GEPARootAgentPromptOptimizerConfig {
@@ -88,7 +78,7 @@ const DEFAULT_CONFIG: Required<
 /** The final result of a {@link GEPARootAgentPromptOptimizer} run. */
 export interface GEPARootAgentPromptOptimizerResult extends OptimizerResult<AgentWithScores> {
   /** The raw result the GEPA engine reported. */
-  gepaResult?: Record<string, unknown>;
+  gepaResult: Record<string, unknown>;
 }
 
 /** Parameters for the {@link AgentGepaAdapter} constructor. */
@@ -106,11 +96,7 @@ export interface AgentGepaAdapterParams {
  * It clones the initial agent with each candidate instruction, and delegates
  * the scoring to the caller's {@link Sampler}.
  */
-export class AgentGepaAdapter implements GepaAdapter<
-  string,
-  Record<string, unknown>,
-  Record<string, unknown>
-> {
+export class AgentGepaAdapter implements GepaAdapter {
   private readonly initialAgent: LlmAgent;
   private readonly sampler: Sampler<UnstructuredSamplingResult>;
   private readonly trainExampleIds: Set<string>;
@@ -127,9 +113,7 @@ export class AgentGepaAdapter implements GepaAdapter<
     batch: string[],
     candidate: Record<string, string>,
     captureTraces = false,
-  ): Promise<
-    EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
-  > {
+  ): Promise<EvaluationBatch> {
     const prompt = candidate[AGENT_PROMPT_NAME];
     logger.info(`Evaluating agent on batch [${batch}] with prompt:\n${prompt}`);
 
@@ -155,15 +139,12 @@ export class AgentGepaAdapter implements GepaAdapter<
       evalData.push(result.data?.[exampleId] ?? {});
     }
 
-    return {outputs: evalData, scores, trajectories: evalData};
+    return {scores, trajectories: evalData};
   }
 
   makeReflectiveDataset(
     candidate: Record<string, string>,
-    evalBatch: EvaluationBatch<
-      Record<string, unknown>,
-      Record<string, unknown>
-    >,
+    evalBatch: EvaluationBatch,
     componentsToUpdate: string[],
   ): Record<string, Array<Record<string, unknown>>> {
     const {scores, trajectories} = evalBatch;
@@ -239,35 +220,12 @@ export class GEPARootAgentPromptOptimizer extends AgentOptimizer<
   }
 
   /**
-   * Returns the caller's engine, or loads the bundled one.
-   *
-   * The bundled engine is imported on first use, so a caller who supplies
-   * `config.engine` never loads it. That mirrors adk-python importing `gepa`
-   * inside `optimize` rather than at module scope.
-   *
-   * @throws {@link MISSING_GEPA_DEPENDENCIES_MESSAGE} when the bundled engine
-   *     module cannot be loaded.
-   */
-  private async resolveEngine(): Promise<GepaEngine> {
-    if (this.config.engine) {
-      return this.config.engine;
-    }
-    try {
-      const {DefaultGepaEngine} = await import('./default_gepa_engine.js');
-      return new DefaultGepaEngine();
-    } catch (cause) {
-      throw new Error(MISSING_GEPA_DEPENDENCIES_MESSAGE, {cause});
-    }
-  }
-
-  /**
    * Runs the GEPA search over the root agent's instruction.
    *
    * @param params The agent to start from, and the sampler that scores
    *     candidates. Only the root agent's instruction is optimized.
    * @returns The Pareto front of optimized agents, plus the raw engine result.
-   * @throws If the bundled engine cannot be loaded, or if the initial
-   *     instruction is not a static string.
+   * @throws If the initial instruction is not a static string.
    */
   override async optimize({
     initialAgent,
@@ -281,7 +239,7 @@ export class GEPARootAgentPromptOptimizer extends AgentOptimizer<
     }
 
     logger.info('Setting up the GEPA optimizer...');
-    const engine = await this.resolveEngine();
+    const engine = this.config.engine ?? new DefaultGepaEngine();
 
     const trainIds = sampler.getTrainExampleIds();
     const valIds = sampler.getValidationExampleIds();
@@ -331,7 +289,7 @@ export class GEPARootAgentPromptOptimizer extends AgentOptimizer<
         }),
         overallScore: valAggregateScores[index],
       })),
-      gepaResult: engineResult.toDict(),
+      gepaResult: engineResult.details,
     };
   }
 }

@@ -17,33 +17,8 @@ import type {
 /** The file {@link DefaultGepaEngine} writes into `runDir`. */
 const RESULT_FILE_NAME = 'gepa_result.json';
 
-/** The parent selection strategy a run uses when the caller names none. */
-const DEFAULT_CANDIDATE_SELECTION_STRATEGY: CandidateSelectionStrategy =
-  'pareto';
-
-/** Reported when the validation set is empty. */
-const EMPTY_VALSET_MESSAGE =
-  'A GEPA run needs at least one validation example.';
-
-/** Reported when the training set is empty. */
-const EMPTY_TRAINSET_MESSAGE =
-  'A GEPA run needs at least one training example.';
-
-/**
- * How the search picks the parent candidate to reflect on each round.
- *
- * - `'pareto'` samples uniformly from the candidates no other candidate
- *   dominates over the per-example validation scores.
- * - `'current-best'` takes the candidate with the highest mean validation
- *   score.
- */
-export type CandidateSelectionStrategy = 'pareto' | 'current-best';
-
 /** Options for {@link DefaultGepaEngine}. */
 export interface DefaultGepaEngineOptions {
-  /** The parent selection strategy. Defaults to `'pareto'`. */
-  candidateSelectionStrategy?: CandidateSelectionStrategy;
-
   /**
    * Seeds the random number generator, which makes a run reproducible.
    * Defaults to `Math.random`.
@@ -136,16 +111,7 @@ function paretoFront(pool: PoolEntry[]): PoolEntry[] {
 }
 
 /** Picks the candidate the next round reflects on. */
-function selectParent(
-  pool: PoolEntry[],
-  strategy: CandidateSelectionStrategy,
-  rng: () => number,
-): PoolEntry {
-  if (strategy === 'current-best') {
-    return pool.reduce((best, entry) =>
-      entry.mean > best.mean ? entry : best,
-    );
-  }
+function selectParent(pool: PoolEntry[], rng: () => number): PoolEntry {
   const front = paretoFront(pool);
   return front[Math.floor(rng() * front.length)];
 }
@@ -216,10 +182,10 @@ function validateSearchInputs({
   maxMetricCalls,
 }: GepaOptimizeParams): void {
   if (valset.length === 0) {
-    throw new Error(EMPTY_VALSET_MESSAGE);
+    throw new Error('A GEPA run needs at least one validation example.');
   }
   if (trainset.length === 0) {
-    throw new Error(EMPTY_TRAINSET_MESSAGE);
+    throw new Error('A GEPA run needs at least one training example.');
   }
   if (maxMetricCalls < valset.length) {
     throw new Error(
@@ -230,20 +196,23 @@ function validateSearchInputs({
   }
 }
 
-/** Builds the result the engine reports, and the dictionary form of it. */
+/** Builds the result the engine reports. */
 function buildRunResult(
   pool: PoolEntry[],
   totalMetricCalls: number,
 ): GepaRunResult {
   const candidates = pool.map((entry) => entry.candidate);
   const valAggregateScores = pool.map((entry) => entry.mean);
-  const dict = {
+  return {
     candidates,
     valAggregateScores,
-    bestScore: Math.max(...valAggregateScores),
-    totalMetricCalls,
+    details: {
+      candidates,
+      valAggregateScores,
+      bestScore: Math.max(...valAggregateScores),
+      totalMetricCalls,
+    },
   };
-  return {candidates, valAggregateScores, toDict: () => dict};
 }
 
 /**
@@ -260,13 +229,9 @@ function buildRunResult(
  * same loop rather than a port of that package.
  */
 export class DefaultGepaEngine implements GepaEngine {
-  private readonly strategy: CandidateSelectionStrategy;
   private readonly seed?: number;
 
   constructor(options: DefaultGepaEngineOptions = {}) {
-    this.strategy =
-      options.candidateSelectionStrategy ??
-      DEFAULT_CANDIDATE_SELECTION_STRATEGY;
     this.seed = options.seed;
   }
 
@@ -305,7 +270,7 @@ export class DefaultGepaEngine implements GepaEngine {
     ];
 
     while (totalMetricCalls < maxMetricCalls) {
-      const parent = selectParent(pool, this.strategy, rng);
+      const parent = selectParent(pool, rng);
       const minibatch = sampleMinibatch(trainset, reflectionMinibatchSize, rng);
 
       // A round scores the parent and the child on the same minibatch, so it
@@ -362,7 +327,7 @@ export class DefaultGepaEngine implements GepaEngine {
       await mkdir(runDir, {recursive: true});
       await writeFile(
         join(runDir, RESULT_FILE_NAME),
-        JSON.stringify(result.toDict(), null, 2),
+        JSON.stringify(result.details, null, 2),
       );
     }
     return result;

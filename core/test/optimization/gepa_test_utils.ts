@@ -77,14 +77,14 @@ export class FakeGepaEngine implements GepaEngine {
  *
  * @param candidates The candidates on the Pareto front.
  * @param valAggregateScores One validation score per candidate.
- * @param dict What `toDict` reports.
+ * @param details What the engine reports beyond the front.
  */
 export function runResult(
   candidates: Array<Record<string, string>>,
   valAggregateScores: number[],
-  dict: Record<string, unknown> = {},
+  details: Record<string, unknown> = {},
 ): GepaRunResult {
-  return {candidates, valAggregateScores, toDict: () => dict};
+  return {candidates, valAggregateScores, details};
 }
 
 /** Returns the single `optimize` call the engine received. */

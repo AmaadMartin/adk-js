@@ -25,20 +25,13 @@ export interface EvaluateCall {
   captureTraces: boolean;
 }
 
-/** The adapter shape {@link DefaultGepaEngine} drives. */
-type PromptAdapter = GepaAdapter<
-  string,
-  Record<string, unknown>,
-  Record<string, unknown>
->;
-
 /**
  * An adapter that scores a prompt from a fixed table and records every call.
  *
  * It supplies no `proposeNewTexts`, so an engine falls back to its own
  * proposer.
  */
-export class TableAdapter implements PromptAdapter {
+export class TableAdapter implements GepaAdapter {
   /** Every `evaluate` call, in order. */
   readonly evaluations: EvaluateCall[] = [];
 
@@ -48,9 +41,7 @@ export class TableAdapter implements PromptAdapter {
     batch: string[],
     candidate: Record<string, string>,
     captureTraces = false,
-  ): Promise<
-    EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
-  > {
+  ): Promise<EvaluationBatch> {
     const prompt = candidate[AGENT_PROMPT_NAME];
     this.evaluations.push({batch, prompt, captureTraces});
     const row = this.scores[prompt];
@@ -58,7 +49,6 @@ export class TableAdapter implements PromptAdapter {
       throw new Error(`The score table has no row for prompt "${prompt}".`);
     }
     return {
-      outputs: batch.map((id) => ({id})),
       scores: batch.map((id) => row[id]),
       trajectories: batch.map((id) => ({id, prompt})),
     };
@@ -66,10 +56,7 @@ export class TableAdapter implements PromptAdapter {
 
   makeReflectiveDataset(
     candidate: Record<string, string>,
-    evalBatch: EvaluationBatch<
-      Record<string, unknown>,
-      Record<string, unknown>
-    >,
+    evalBatch: EvaluationBatch,
     componentsToUpdate: string[],
   ): Record<string, Array<Record<string, unknown>>> {
     const rows = evalBatch.scores.map((score, index) => ({
@@ -129,12 +116,4 @@ export function metricCalls(adapter: TableAdapter): number {
     (total, call) => total + call.batch.length,
     0,
   );
-}
-
-/** Returns the prompt of every candidate the engine reflected on. */
-export function parentPrompts(adapter: TableAdapter): string[] {
-  return adapter.evaluations
-    .filter((call) => call.captureTraces)
-    .filter((_call, index) => index % 2 === 0)
-    .map((call) => call.prompt);
 }

@@ -99,24 +99,20 @@ parent. A kept child is scored on the validation set and joins the pool. Every
 evaluated example is one metric call, and the engine starts no round it cannot
 pay for, so a run never exceeds `maxMetricCalls`.
 
-Construct it yourself to change either option:
+Each round picks its parent uniformly among the candidates no other candidate
+beats on every validation example. Construct the engine yourself to make that
+choice reproducible:
 
 ```ts
 import {DefaultGepaEngine, GEPARootAgentPromptOptimizer} from '@google/adk';
 
 new GEPARootAgentPromptOptimizer({
-  engine: new DefaultGepaEngine({
-    candidateSelectionStrategy: 'current-best',
-    seed: 42,
-  }),
+  engine: new DefaultGepaEngine({seed: 42}),
 });
 ```
 
-- `candidateSelectionStrategy` is `'pareto'` by default, which picks uniformly
-  among the candidates no other candidate beats on every validation example.
-  `'current-best'` always reflects on the highest mean instead.
-- `seed` makes a run reproducible. Without it the engine uses `Math.random`,
-  so two runs over the same inputs can take different paths.
+Without a `seed` the engine uses `Math.random`, so two runs over the same
+inputs can take different paths.
 
 With `runDir` set, the engine writes the final result to
 `<runDir>/gepa_result.json` and creates the directory if it is missing. It
@@ -144,9 +140,6 @@ the response text with the model's thoughts removed.
 
 ## Failure modes
 
-- The bundled engine module fails to load: `optimize` throws
-  `MISSING_GEPA_DEPENDENCIES_MESSAGE`, keeps the load failure as the error's
-  `cause`, and names `config.engine` as the way round it.
 - An empty training set, an empty validation set, or a `maxMetricCalls` below
   the validation-set size: the bundled engine throws, naming the input.
 - A non-string `instruction`: `optimize` throws, naming the invocation context

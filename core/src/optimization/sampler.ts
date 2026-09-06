@@ -37,7 +37,7 @@ export interface SampleAndScoreParams {
 
   /**
    * The set of examples to evaluate the candidate agent on. Defaults to
-   * {@link Sampler.VALIDATION_SET} when omitted.
+   * `'validation'` when omitted.
    */
   exampleSet?: ExampleSet;
 
@@ -65,12 +65,6 @@ export interface SampleAndScoreParams {
 export abstract class Sampler<
   SamplingResultT extends SamplingResult = SamplingResult,
 > {
-  /** The example set used to search for a better agent. */
-  static readonly TRAIN_SET = 'train';
-
-  /** The example set used to score the agent an optimizer settled on. */
-  static readonly VALIDATION_SET = 'validation';
-
   /**
    * A unique symbol to identify ADK sampler classes.
    */

@@ -81,7 +81,6 @@ describe('AgentGepaAdapter', () => {
     expect(sampler.calls[0].captureFullEvalData).toBe(true);
     expect(sampler.calls[0].candidate.instruction).toBe('New prompt');
     expect(evalBatch.scores).toEqual([0.8]);
-    expect(evalBatch.outputs).toEqual([{output: 'result'}]);
     expect(evalBatch.trajectories).toEqual([{output: 'result'}]);
   });
 
@@ -104,7 +103,7 @@ describe('AgentGepaAdapter', () => {
     expect(sampler.calls[0].exampleSet).toBe('validation');
     expect(sampler.calls[0].batch).toEqual(['val1']);
     expect(sampler.calls[0].captureFullEvalData).toBe(false);
-    expect(evalBatch.outputs).toEqual([{}]);
+    expect(evalBatch.trajectories).toEqual([{}]);
   });
 
   it('test_adapter_evaluate_missing_example_id_in_scores', async () => {
@@ -118,9 +117,7 @@ describe('AgentGepaAdapter', () => {
       sampler,
     });
 
-    let evalBatch:
-      | EvaluationBatch<Record<string, unknown>, Record<string, unknown>>
-      | undefined;
+    let evalBatch: EvaluationBatch | undefined;
     const warnings = await collectWarnings(async () => {
       evalBatch = await adapter.evaluate(TRAIN_IDS, {
         [AGENT_PROMPT_NAME]: 'New prompt',
@@ -131,7 +128,6 @@ describe('AgentGepaAdapter', () => {
       'Example train2 missing from sampling result; scoring it 0.',
     );
     expect(evalBatch?.scores).toEqual([0.8, 0]);
-    expect(evalBatch?.outputs).toEqual([{output: 'result'}, {}]);
     expect(evalBatch?.trajectories).toEqual([{output: 'result'}, {}]);
   });
 
@@ -148,11 +144,7 @@ describe('AgentGepaAdapter', () => {
 
     const dataset = adapter.makeReflectiveDataset(
       {[AGENT_PROMPT_NAME]: 'Prompt'},
-      {
-        outputs: [{o: 1}, {o: 2}],
-        scores: [0.9, 0.1],
-        trajectories: [{t: 1}, {t: 2}],
-      },
+      {scores: [0.9, 0.1], trajectories: [{t: 1}, {t: 2}]},
       ['component1'],
     );
 
@@ -174,13 +166,9 @@ describe('AgentGepaAdapter', () => {
       sampler,
     });
 
-    expect(() =>
-      adapter.makeReflectiveDataset(
-        {},
-        {outputs: [], scores: [], trajectories: null},
-        [],
-      ),
-    ).toThrow(/without captured trajectories/);
+    expect(() => adapter.makeReflectiveDataset({}, {scores: []}, [])).toThrow(
+      /without captured trajectories/,
+    );
   });
 });
 
