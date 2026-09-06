@@ -78,17 +78,13 @@ const remoteMcpAgent = new ManagedAgent({
   tools: [exampleMcpServer],
 });
 
-/**
- * A single-turn specialist. `mode: 'single_turn'` marks it as an inline tool of
- * a parent `LlmAgent` rather than a transfer target.
- */
+/** A specialist the root agent delegates a single summarization turn to. */
 const summarizer = new ManagedAgent({
   name: 'managed_summarizer',
   description: 'Summarizes a passage in two sentences.',
   agentId: AGENT_ID,
   environment: {type: 'remote'},
   instruction: 'Summarize the input in exactly two sentences.',
-  mode: 'single_turn',
 });
 
 /** Delegates to the managed specialists and composes the answer. */

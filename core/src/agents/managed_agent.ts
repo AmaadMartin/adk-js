@@ -123,14 +123,6 @@ export interface ManagedAgentConfig extends BaseAgentConfig {
   tools?: ManagedAgentTool[];
 
   /**
-   * Composition mode. Only `single_turn` is supported: the agent runs as an
-   * inline single-turn tool of a parent `LlmAgent`, keeping its own events in
-   * the shared session. Leaving it unset keeps the agent usable as a transfer
-   * target.
-   */
-  mode?: 'single_turn';
-
-  /**
    * A client to call instead of the lazily created one. It is used as given:
    * ADK attaches no headers and no `httpOptions` to it.
    */
@@ -201,9 +193,6 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
   /** The server-side tools this agent offers the backend. */
   readonly tools: ManagedAgentTool[];
 
-  /** The composition mode, when one was set. */
-  readonly mode?: 'single_turn';
-
   private cachedApiClient?: ManagedAgentClient;
 
   constructor(config: ManagedAgentConfig) {
@@ -213,7 +202,6 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
     this.agentConfig = config.agentConfig;
     this.instruction = config.instruction ?? '';
     this.tools = config.tools ?? [];
-    this.mode = config.mode;
     if (config.apiClient) {
       validateClientLocation(config.apiClient);
       this.cachedApiClient = config.apiClient;

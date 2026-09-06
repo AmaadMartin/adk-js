@@ -833,18 +833,6 @@ describe('managed agent parity', () => {
     });
   });
 
-  describe('mode', () => {
-    it('test_mode_defaults_to_none', () => {
-      expect(new ManagedAgent({name: 'm', agentId: 'a'}).mode).toBeUndefined();
-    });
-
-    it('test_mode_single_turn_is_accepted', () => {
-      expect(
-        new ManagedAgent({name: 'm', agentId: 'a', mode: 'single_turn'}).mode,
-      ).toBe('single_turn');
-    });
-  });
-
   describe('canonicalInstruction and instruction plumbing', () => {
     it('test_canonical_instruction_str', async () => {
       const agent = new ManagedAgent({
@@ -1175,7 +1163,6 @@ describe('managed agent parity', () => {
       const agent = new ManagedAgent({
         name: 'm',
         agentId: 'a',
-        mode: 'single_turn',
         apiClient: fakeClient(),
       });
       const nodeContext = new NodeContext({

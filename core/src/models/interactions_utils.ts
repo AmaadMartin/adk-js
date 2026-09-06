@@ -1113,9 +1113,9 @@ export interface InteractionsRequestLogParams {
 /**
  * Renders an interactions request as a debug log string.
  *
- * The steps and tools sections are JSON, truncated to
- * {@link MAX_LOGGED_SECTION_LENGTH} characters so one turn cannot write an
- * unbounded amount to the log. Mirrors `build_interactions_request_log` in
+ * Every section is bounded, so one turn cannot write an unbounded amount to
+ * the log. A tool is rendered by type rather than dumped, so a credential it
+ * carries never reaches the log. Mirrors `build_interactions_request_log` in
  * google/adk-python `models/interactions_utils.py`, in a condensed layout.
  *
  * @param params The request fields to render.
@@ -1134,9 +1134,9 @@ export function buildInteractionsRequestLog(
     LOG_SEPARATOR,
     `System Instruction: ${params.systemInstruction || '(none)'}`,
     LOG_SEPARATOR,
-    `Input Steps: ${formatLogSection(params.inputSteps)}`,
+    `Input Steps: ${formatStepsLog(params.inputSteps)}`,
     LOG_SEPARATOR,
-    `Tools: ${formatLogSection(params.tools)}`,
+    `Tools: ${formatToolsLog(params.tools)}`,
     LOG_SEPARATOR,
   ].join('\n');
 }
@@ -1150,13 +1150,42 @@ const MAX_LOGGED_SECTION_LENGTH = 1000;
 /** Marker appended to a request-log section that was truncated. */
 const LOG_TRUNCATION_MARKER = '... [truncated]';
 
-/** Renders one request-log section as bounded JSON. */
-function formatLogSection(value: unknown[] | undefined): string {
-  if (value === undefined || value.length === 0) {
-    return '(none)';
+/** Bounds one request-log section so a turn cannot write an unbounded amount. */
+function truncateLogSection(section: string): string {
+  return section.length > MAX_LOGGED_SECTION_LENGTH
+    ? section.slice(0, MAX_LOGGED_SECTION_LENGTH) + LOG_TRUNCATION_MARKER
+    : section;
+}
+
+/** Renders the input steps as bounded JSON. */
+function formatStepsLog(steps: Interactions.Step[]): string {
+  return steps.length === 0
+    ? '(none)'
+    : truncateLogSection(JSON.stringify(steps));
+}
+
+/**
+ * Renders one tool as its type, plus the name and description of a function
+ * tool.
+ *
+ * A tool param can carry a credential: an `mcp_server` carries the headers a
+ * `RemoteMcpServer.headerProvider` minted for this turn. Rendering the type
+ * keeps that out of the log, which is the reason `_build_tool_log` in
+ * google/adk-python `models/interactions_utils.py` renders a non-function tool
+ * the same way. The function arm drops the parameter schema the reference
+ * prints, which the caller already holds.
+ */
+function formatToolLog(tool: Interactions.Tool): string {
+  if (tool.type !== 'function') {
+    return tool.type;
   }
-  const json = JSON.stringify(value);
-  return json.length > MAX_LOGGED_SECTION_LENGTH
-    ? json.slice(0, MAX_LOGGED_SECTION_LENGTH) + LOG_TRUNCATION_MARKER
-    : json;
+  const description = tool.description ? `: ${tool.description}` : '';
+  return `function ${tool.name ?? 'unknown'}${description}`;
+}
+
+/** Renders the tools section, bounded, without any credential a tool carries. */
+function formatToolsLog(tools: Interactions.Tool[] | undefined): string {
+  return tools === undefined || tools.length === 0
+    ? '(none)'
+    : truncateLogSection(tools.map(formatToolLog).join(', '));
 }

@@ -2462,7 +2462,47 @@ describe('agent interactions', () => {
       expect(log).toContain('Previous Interaction ID: int_prev');
       expect(log).toContain('System Instruction: Be terse.');
       expect(log).toContain('"type":"user_input"');
-      expect(log).toContain('"type":"google_search"');
+      expect(log).toContain('Tools: google_search');
+    });
+
+    it('never writes the headers an mcp_server tool carries', () => {
+      const log = buildInteractionsRequestLog({
+        model: 'agents/a',
+        inputSteps: [],
+        tools: [
+          buildMcpServerParam(
+            {url: 'https://api.example.com/mcp', name: 'example'},
+            {Authorization: 'Bearer SUPER-SECRET-TOKEN'},
+          ),
+        ],
+        stream: true,
+      });
+
+      expect(log).toContain('Tools: mcp_server');
+      expect(log).not.toContain('SUPER-SECRET-TOKEN');
+      expect(log).not.toContain('Authorization');
+      expect(log).not.toContain('api.example.com');
+    });
+
+    it('names a function tool and drops its parameter schema', () => {
+      const log = buildInteractionsRequestLog({
+        model: 'agents/a',
+        inputSteps: [],
+        tools: [
+          {
+            type: 'function',
+            name: 'lookup',
+            description: 'Looks a record up.',
+            parameters: {type: 'object', properties: {apiKey: {type: 'string'}}},
+          },
+          {type: 'function'},
+        ],
+        stream: true,
+      });
+
+      expect(log).toContain('function lookup: Looks a record up.');
+      expect(log).toContain('function unknown');
+      expect(log).not.toContain('apiKey');
     });
 
     it('marks an absent section rather than rendering an empty one', () => {
@@ -2492,6 +2532,17 @@ describe('agent interactions', () => {
 
       expect(log).toContain('... [truncated]');
       expect(log).not.toContain('x'.repeat(1200));
+    });
+
+    it('truncates a tools section that would otherwise be unbounded', () => {
+      const log = buildInteractionsRequestLog({
+        model: 'agents/a',
+        inputSteps: [],
+        tools: Array.from({length: 200}, () => ({type: 'google_search'})),
+        stream: true,
+      });
+
+      expect(log).toContain('... [truncated]');
     });
   });
 });

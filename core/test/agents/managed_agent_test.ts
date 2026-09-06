@@ -30,7 +30,6 @@ import {
   LlmRequest,
   ManagedAgent,
   ManagedAgentClient,
-  ManagedAgentConfig,
   ManagedAgentTool,
   PluginManager,
   RemoteMcpServer,
@@ -73,15 +72,6 @@ async function runAgent(agent: ManagedAgent): Promise<Event[]> {
 
 describe('ManagedAgent', () => {
   describe('compile-time rejections that the reference checks at runtime', () => {
-    it('test_mode_chat_is_rejected', () => {
-      // The reference catches a pydantic ValidationError. Here `mode` is a
-      // literal union, so `'chat'` never compiles; pinning the union is the
-      // assertion.
-      expectTypeOf<ManagedAgentConfig['mode']>().toEqualTypeOf<
-        'single_turn' | undefined
-      >();
-    });
-
     it('test_remote_mcp_server_forbids_extra_fields', () => {
       // The reference asserts pydantic's `extra='forbid'`. TypeScript rejects
       // an unknown property on an object literal at compile time, so there is
