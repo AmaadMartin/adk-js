@@ -14,12 +14,15 @@ import {
 } from '../../../src/sessions/db/operations.js';
 import {
   ENTITIES,
-  EVENT_TIMESTAMP_PRECISION,
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
   STORAGE_KEY_COLUMN_LENGTH,
+  STORAGE_TIMESTAMP_PRECISION,
+  StorageAppState,
   StorageEvent,
   StorageMetadata,
+  StorageSession,
+  StorageUserState,
 } from '../../../src/sessions/db/schema.js';
 import {logger} from '../../../src/utils/logger.js';
 
@@ -79,7 +82,30 @@ describe('operations', () => {
 
       expect(
         orm.getMetadata().get(StorageEvent).properties.timestamp.length,
-      ).toBe(EVENT_TIMESTAMP_PRECISION);
+      ).toBe(STORAGE_TIMESTAMP_PRECISION);
+    });
+
+    it('requests sub-second precision for session and state timestamps', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+
+      const metadata = orm.getMetadata();
+
+      expect(metadata.get(StorageSession).properties.createTime.length).toBe(
+        STORAGE_TIMESTAMP_PRECISION,
+      );
+      expect(metadata.get(StorageSession).properties.updateTime.length).toBe(
+        STORAGE_TIMESTAMP_PRECISION,
+      );
+      expect(metadata.get(StorageAppState).properties.updateTime.length).toBe(
+        STORAGE_TIMESTAMP_PRECISION,
+      );
+      expect(metadata.get(StorageUserState).properties.updateTime.length).toBe(
+        STORAGE_TIMESTAMP_PRECISION,
+      );
     });
   });
 
