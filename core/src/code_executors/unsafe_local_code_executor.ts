@@ -76,7 +76,7 @@ async function createTempScriptFile(
   code: string,
   language: CodeExecutionLanguage,
   shellCommandPath?: string,
-): Promise<{filePath: string; tempDir: string}> {
+): Promise<{filePath: string; tempDir: string; scaffoldFiles: Set<string>}> {
   // mkdtemp names the directory itself and creates it exclusively at 0o700.
   const tempDir = await fs.mkdtemp(
     path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'),
@@ -86,7 +86,22 @@ async function createTempScriptFile(
   const filePath = path.join(tempDir, `script${ext}`);
   await fs.writeFile(filePath, code);
 
-  return {filePath, tempDir};
+  const scaffoldFiles = new Set([path.basename(filePath)]);
+  if (language === CodeExecutionLanguage.JAVASCRIPT) {
+    // Pins the script's module system to the scratch directory instead of
+    // inheriting `"type"` from whichever package encloses `os.tmpdir()`. No
+    // `"type"` field on purpose: that matches a package-less `/tmp`, so
+    // `require()` and `import` programs both keep working, where `"commonjs"`
+    // would reject `import` syntax that works today. Written before
+    // `materializeFiles`, so this manifest beats an input file of the same
+    // name; that input lands as `package_2.json` instead. The precedence is
+    // deliberate: an input `{"type": "module"}` would otherwise re-break
+    // module resolution for every `require()` program.
+    await fs.writeFile(path.join(tempDir, 'package.json'), '{}\n');
+    scaffoldFiles.add('package.json');
+  }
+
+  return {filePath, tempDir, scaffoldFiles};
 }
 
 function getExtensionForLanguage(
@@ -293,8 +308,8 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
             continue;
           }
 
-          // Skip the script file
-          if (relativeFilePath === path.basename(filePath)) {
+          // Skip the files the executor itself put in the scratch directory.
+          if (res.scaffoldFiles.has(relativeFilePath)) {
             continue;
           }
 

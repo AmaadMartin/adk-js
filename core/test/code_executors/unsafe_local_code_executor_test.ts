@@ -15,9 +15,10 @@ import {
   createSession,
 } from '@google/adk';
 import {EventEmitter} from 'node:events';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Only `spawn` is mocked; it defaults to the real implementation (see
 // `beforeEach`) so the pre-existing tests still execute real scripts.
@@ -33,6 +34,10 @@ const {spawn: realSpawn} =
   );
 
 const POWERSHELL_COMMAND = os.platform() === 'win32' ? 'powershell' : 'pwsh';
+
+// Captured before any environment stubbing so the ESM host package is still
+// created under the host's real temporary root.
+const REAL_TMPDIR = os.tmpdir();
 
 const POWERSHELL_FLAGS = [
   '-NoLogo',
@@ -411,6 +416,109 @@ describe('UnsafeLocalCodeExecutor', () => {
     expect(result.outputFiles![0].content).toBe('{"hello":"world"}');
     expect(result.outputFiles![0].contentEncoding).toBe('utf-8');
     expect(result.outputFiles![0].mimeType).toBe('application/json');
+  });
+
+  it('does not report the generated module-scope manifest as an output file', async () => {
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'const fs = require("node:fs"); fs.writeFileSync("out.txt", "written");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    expect(result.stderr).toBe('');
+    expect(result.outputFiles?.map((f) => f.name)).toEqual(['out.txt']);
+  });
+
+  // Node resolves a `.js` file's module system from the nearest enclosing
+  // `package.json`, so a temporary root inside an ESM package used to make
+  // every `require()` program fail.
+  describe('scratch directory module scope', () => {
+    let esmPackageDir: string;
+
+    beforeEach(async () => {
+      esmPackageDir = await fs.mkdtemp(
+        path.join(REAL_TMPDIR, 'adk_js_esm_host_'),
+      );
+      await fs.writeFile(
+        path.join(esmPackageDir, 'package.json'),
+        JSON.stringify({name: 'esm-host', type: 'module'}),
+      );
+      vi.stubEnv('TMPDIR', esmPackageDir);
+      vi.stubEnv('TMP', esmPackageDir);
+      vi.stubEnv('TEMP', esmPackageDir);
+    });
+
+    afterEach(async () => {
+      vi.unstubAllEnvs();
+      await fs.rm(esmPackageDir, {recursive: true, force: true});
+    });
+
+    it('runs a require()-based program when the temporary directory is nested inside an ES module package', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'const os = require("node:os"); console.log("cjs ran on", typeof os.platform());',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('cjs ran on');
+    });
+
+    // Node warns about the manifest having no `"type"` field, so stderr is not
+    // empty here. Pinning `"commonjs"` instead would break this program.
+    it('runs an import-based program when the temporary directory is nested inside an ES module package', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'import os from "node:os"; console.log("esm ran on", typeof os.platform());',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stdout).toContain('esm ran on');
+      expect(result.stderr).not.toContain('Cannot use import statement');
+    });
+
+    // The manifest deliberately beats an input file of the same name: an input
+    // `{"type": "module"}` would otherwise re-break module resolution.
+    it('gives the module-scope manifest precedence over an input file named package.json', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: [
+            'const fs = require("node:fs");',
+            'console.log(JSON.stringify({',
+            '  manifest: fs.readFileSync("package.json", "utf8"),',
+            '  input: fs.readFileSync("package_2.json", "utf8"),',
+            '}));',
+          ].join('\n'),
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [
+            {
+              name: 'package.json',
+              content: '{"type":"module"}',
+              contentEncoding: FileContentEncoding.UTF8,
+              mimeType: 'application/json',
+            },
+          ],
+        },
+      });
+
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual({
+        manifest: '{}\n',
+        input: '{"type":"module"}',
+      });
+    });
   });
 
   describe('spawn arguments', () => {
