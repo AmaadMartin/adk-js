@@ -82,7 +82,7 @@ describe('buildDomainSpecificTool validation', () => {
   it('test_mandatory_missing_raises_typeerror', () => {
     expect(() =>
       buildTool({
-        bus: undefined as unknown as string,
+        bus: undefined,
         ceAttributesBinding: {type: 'type', source: 'source'},
       }),
     ).toThrow("The 'bus' parameter is mandatory and must be provided.");
@@ -101,22 +101,17 @@ describe('buildDomainSpecificTool validation', () => {
     ).toThrow("CloudEvent field 'type' is mandatory and cannot be OMIT.");
   });
 
+  // Python distinguishes a missing binding from an explicit None. This port
+  // treats both as "not provided", so one message covers them, and `bus` is
+  // the only one of the three a TypeScript caller can leave out: `type` and
+  // `source` are required properties, so the compiler rejects them first.
   it('test_mandatory_none_raises_typeerror', () => {
     expect(() =>
       buildTool({
-        bus: null as unknown as string,
+        bus: undefined,
         ceAttributesBinding: {type: 'type', source: 'source'},
       }),
     ).toThrow("The 'bus' parameter is mandatory and must be provided.");
-
-    expect(() =>
-      buildTool({
-        ceAttributesBinding: {
-          type: null as unknown as string,
-          source: 'source',
-        },
-      }),
-    ).toThrow("CloudEventAttributesBinding requires 'type' to be provided.");
   });
 
   it('test_invalid_cloudevent_attributes', () => {

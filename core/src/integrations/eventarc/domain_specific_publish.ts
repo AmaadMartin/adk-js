@@ -147,7 +147,9 @@ function isResolver(
 
 /** Rejects a `bus` binding that cannot produce a value. */
 function validateBus(bus: AttributeBinding): void {
-  if (bus === undefined || bus === null) {
+  // `== null` catches both null and undefined, which a JavaScript caller can
+  // supply even though the type forbids them.
+  if (bus == null) {
     throw new InputValidationError(
       "The 'bus' parameter is mandatory and must be provided.",
     );
@@ -165,7 +167,7 @@ function validateReservedAttributes(
 ): void {
   for (const field of MANDATORY_ATTRIBUTES) {
     const value = binding[field];
-    if (value === undefined || value === null) {
+    if (value == null) {
       throw new InputValidationError(
         `CloudEventAttributesBinding requires '${field}' to be provided.`,
       );
