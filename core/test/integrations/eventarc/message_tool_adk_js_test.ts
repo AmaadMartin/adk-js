@@ -95,6 +95,37 @@ describe('publishMessage payloads', () => {
   });
 });
 
+describe('publishMessage validation stricter than adk-python', () => {
+  beforeEach(async () => {
+    await cleanupClients();
+    resetEventarcFake();
+  });
+
+  afterEach(async () => {
+    await cleanupClients();
+  });
+
+  it('rejects base64 holding characters outside the alphabet', async () => {
+    const res = await publish({data: 'aGVsbG8h!!', is_base64_encoded: true});
+
+    expect(errorDetails(res)).toContain('Invalid base64 string');
+  });
+
+  it('rejects a custom attribute key outside ASCII', async () => {
+    const res = await publish({custom_attributes: {café: 'val'}});
+
+    expect(errorDetails(res)).toContain(
+      'Invalid custom attribute key: caf\u00e9',
+    );
+  });
+
+  it('rejects a date with no time of day', async () => {
+    const res = await publish({time: '2026-01-01'});
+
+    expect(errorDetails(res)).toContain('Invalid RFC 3339 time format');
+  });
+});
+
 describe('publishMessage tracing', () => {
   beforeEach(async () => {
     await cleanupClients();
