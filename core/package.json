@@ -176,6 +176,7 @@
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/spanner": "^8.11.0",
     "@google-cloud/storage": "^7.17.1",
+    "@google-cloud/text-to-speech": "^6.4.1",
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph": "^1.4.13",
     "@mikro-orm/sqlite": "^6.6.6",
@@ -209,6 +210,7 @@
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/spanner": "^8.11.0",
     "@google-cloud/storage": "^7.17.1",
+    "@google-cloud/text-to-speech": "^6.4.1",
     "@langchain/core": "^1.2.9",
     "@mikro-orm/mariadb": "^6.6.6",
     "@mikro-orm/mssql": "^6.6.6",
@@ -258,6 +260,9 @@
       "optional": true
     },
     "@google-cloud/storage": {
+      "optional": true
+    },
+    "@google-cloud/text-to-speech": {
       "optional": true
     },
     "@langchain/core": {

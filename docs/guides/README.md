@@ -208,6 +208,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 ### Models
 
 - [CacheMetadata](models/cache_metadata/index.md) - Describing the context cache that served a response, and deciding when to refresh it.
+- [CloudTtsLlm](models/cloud_tts_llm/index.md) - A BaseLlm that renders the text of a request as speech through Google Cloud Text-to-Speech.
 - [ConformanceTestGemini and the replay normalizers](models/conformance_replay/index.md) - Replaying a recorded model call, and verifying the request that asked for it.
 - [GeminiContextCacheManager](models/context_caching/index.md) - Reusing a
   stable Gemini prompt prefix through an explicit server-side context cache.

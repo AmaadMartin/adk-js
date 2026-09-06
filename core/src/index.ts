@@ -71,6 +71,13 @@ export {
   LocalEvalSetsManager,
   loadEvalSetFromFile,
 } from './evaluation/local_eval_sets_manager.js';
+export {
+  CloudTtsLlm,
+  // CloudTtsClient is named by CloudTtsLlmParams.client, so typedoc requires
+  // it here; nothing else in this module is public API.
+  type CloudTtsClient,
+  type CloudTtsLlmParams,
+} from './evaluation/simulation/cloud_tts_llm.js';
 export {VertexAiExampleStore} from './examples/vertex_ai_example_store.js';
 export {E2BEnvironment} from './integrations/e2b/e2b_environment.js';
 export type {E2BEnvironmentOptions} from './integrations/e2b/e2b_environment.js';
