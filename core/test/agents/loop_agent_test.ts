@@ -11,9 +11,9 @@ import {
   InvocationContext,
   LoopAgent,
   PluginManager,
-  Session,
   createEvent,
   createEventActions,
+  createSession,
   isLoopAgent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -76,14 +76,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
     });
 
@@ -114,14 +114,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
     });
 
@@ -160,14 +160,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
     });
 
@@ -199,14 +199,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
       abortSignal: controller.signal,
     });
@@ -243,14 +243,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
     });
 
@@ -281,14 +281,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
     });
 
@@ -327,14 +327,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
     });
 
@@ -366,14 +366,14 @@ describe('LoopAgent', () => {
     const parentContext = new InvocationContext({
       invocationId: 'test-invocation',
       agent: loopAgent,
-      session: {
+      session: createSession({
         id: 'test-session',
         appName: 'test-app',
         userId: 'test-user',
         state: {},
         events: [],
         lastUpdateTime: Date.now(),
-      } as unknown as Session,
+      }),
       pluginManager: new PluginManager(),
       abortSignal: controller.signal,
     });
