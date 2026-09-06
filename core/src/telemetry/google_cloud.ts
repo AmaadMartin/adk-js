@@ -13,6 +13,7 @@ import {GoogleAuth} from 'google-auth-library';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
+import {MIN_EXPORT_INTERVAL_MS} from './agent_engine_metric_exporter.js';
 import {OtelExportersConfig, OTelHooks} from './setup.js';
 
 const GCP_PROJECT_ERROR_MESSAGE =
@@ -56,7 +57,7 @@ async function createCloudMetricReader(
   );
   return new PeriodicExportingMetricReader({
     exporter: new MetricExporter({projectId}),
-    exportIntervalMillis: 5000,
+    exportIntervalMillis: MIN_EXPORT_INTERVAL_MS,
   });
 }
 
