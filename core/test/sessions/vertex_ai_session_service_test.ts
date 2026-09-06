@@ -1045,6 +1045,124 @@ describe('VertexAiSessionService', () => {
 
       expect(result.sessions.map((s) => s.id)).toEqual(['s2', 's3']);
     });
+
+    it('offset beyond total → empty sessions with correct metadata', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({
+        appName: '12345',
+        userId: 'testUser',
+        limit: 2,
+        offset: 10,
+      });
+
+      expect(result.sessions).toEqual([]);
+      expect(result.totalItems).toBe(1);
+      expect(result.totalPages).toBe(1);
+    });
+
+    it('limit=0 returns empty sessions and totalPages=0', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({
+        appName: '12345',
+        userId: 'testUser',
+        limit: 0,
+      });
+
+      expect(result.sessions).toEqual([]);
+      expect(result.totalItems).toBe(1);
+      expect(result.totalPages).toBe(0);
+    });
+
+    it('order without limit returns all sessions sorted with page=1', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'testUser',
+            updateTime: '2026-01-02T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s2',
+            userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({
+        appName: '12345',
+        userId: 'testUser',
+        order: 'desc',
+      });
+
+      expect(result.sessions.map((s) => s.id)).toEqual(['s1', 's2']);
+      expect(result.page).toBe(1);
+      expect(result.limit).toBe(2);
+      expect(result.totalItems).toBe(2);
+      expect(result.totalPages).toBe(1);
+    });
+
+    it('page takes precedence over offset when both are provided', async () => {
+      mockClient.listInternal.mockResolvedValue({
+        sessions: [
+          {
+            name: 'projects/p/locations/l/sessions/s1',
+            userId: 'testUser',
+            updateTime: '2026-01-01T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s2',
+            userId: 'testUser',
+            updateTime: '2026-01-02T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s3',
+            userId: 'testUser',
+            updateTime: '2026-01-03T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s4',
+            userId: 'testUser',
+            updateTime: '2026-01-04T00:00:00Z',
+          },
+          {
+            name: 'projects/p/locations/l/sessions/s5',
+            userId: 'testUser',
+            updateTime: '2026-01-05T00:00:00Z',
+          },
+        ],
+      });
+
+      const result = await service.listSessions({
+        appName: '12345',
+        userId: 'testUser',
+        page: 2,
+        limit: 2,
+        offset: 0,
+        order: 'asc',
+      });
+
+      expect(result.sessions.map((s) => s.id)).toEqual(['s3', 's4']);
+      expect(result.page).toBe(2);
+    });
   });
 
   describe('deleteSession', () => {
