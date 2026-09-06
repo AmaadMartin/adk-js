@@ -25,8 +25,15 @@ import {
   trimTempDeltaState,
 } from './base_session_service.js';
 import {
+  assertSupportedDatabaseUri,
   ensureDatabaseCreated,
+  forkForRead,
+  forkForWrite,
   getConnectionOptionsFromUri,
+  getDatabaseBackend,
+  namesSupportedDatabaseBackend,
+  openDatabaseOrm,
+  supportsRowLevelLocking,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
@@ -46,18 +53,7 @@ import {State} from './state.js';
  * @returns True if the URI is a database connection URI, false otherwise.
  */
 export function isDatabaseConnectionString(uri?: string): boolean {
-  if (!uri) {
-    return false;
-  }
-
-  return (
-    uri.startsWith('postgres://') ||
-    uri.startsWith('postgresql://') ||
-    uri.startsWith('mysql://') ||
-    uri.startsWith('mariadb://') ||
-    uri.startsWith('mssql://') ||
-    uri.startsWith('sqlite://')
-  );
+  return !!uri && namesSupportedDatabaseBackend(uri);
 }
 
 /**
@@ -65,15 +61,35 @@ export function isDatabaseConnectionString(uri?: string): boolean {
  */
 export class DatabaseSessionService extends BaseSessionService {
   private orm?: MikroORM;
-  private initialized = false;
+  private connection?: Promise<void>;
   private options?: MikroDBOptions;
   private connectionString?: string;
+  private readonly optionOverrides?: Partial<MikroDBOptions>;
 
-  constructor(connectionStringOrOptions: MikroDBOptions | string) {
+  /**
+   * @param connectionStringOrOptions A connection URI, or MikroORM options.
+   * @param overrides Options applied on top of the ones the URI implies, for
+   *   example a wider pool or a replacement liveness probe. They cannot be
+   *   combined with an options object, which already carries them.
+   */
+  constructor(
+    connectionStringOrOptions: MikroDBOptions | string,
+    overrides?: Partial<MikroDBOptions>,
+  ) {
     super();
     if (typeof connectionStringOrOptions === 'string') {
+      // Reject a bad URI here rather than at the first query, matching
+      // adk-python's engine construction.
+      assertSupportedDatabaseUri(connectionStringOrOptions);
       this.connectionString = connectionStringOrOptions;
+      this.optionOverrides = overrides;
     } else {
+      if (overrides) {
+        throw new Error(
+          'Overrides cannot be combined with an options object. Apply them to' +
+            ' the options directly.',
+        );
+      }
       if (!connectionStringOrOptions.driver) {
         throw new Error('Driver is required when passing options object.');
       }
@@ -86,18 +102,54 @@ export class DatabaseSessionService extends BaseSessionService {
   }
 
   async init() {
-    if (this.initialized) {
+    // Memoize the in-flight connection so concurrent callers share one ORM,
+    // and so `close()` can never race an `init()` into leaking one.
+    this.connection ??= this.connect();
+    try {
+      await this.connection;
+    } catch (error: unknown) {
+      this.connection = undefined;
+      throw error;
+    }
+  }
+
+  private async connect(): Promise<void> {
+    if (this.connectionString && (!this.options || !this.options.driver)) {
+      this.options = await getConnectionOptionsFromUri(
+        this.connectionString,
+        this.optionOverrides,
+      );
+    }
+
+    const orm = await openDatabaseOrm(this.options!, this.connectionString);
+    await ensureDatabaseCreated(orm);
+    await validateDatabaseSchemaVersion(orm);
+    this.orm = orm;
+  }
+
+  /**
+   * Returns pooled connections and releases the database.
+   *
+   * Safe before {@link init} and safe to call twice. A later {@link init}
+   * reopens the database.
+   */
+  async close(): Promise<void> {
+    const connection = this.connection;
+    this.connection = undefined;
+    if (!connection) {
       return;
     }
 
-    if (this.connectionString && (!this.options || !this.options.driver)) {
-      this.options = await getConnectionOptionsFromUri(this.connectionString);
-    }
+    // A failed connection has nothing to close, and its error already reached
+    // whoever called `init()`.
+    await connection.catch(() => {});
+    const orm = this.orm;
+    this.orm = undefined;
+    await orm?.close();
+  }
 
-    this.orm = await MikroORM.init(this.options!);
-    await ensureDatabaseCreated(this.orm!);
-    await validateDatabaseSchemaVersion(this.orm!);
-    this.initialized = true;
+  async [Symbol.asyncDispose](): Promise<void> {
+    return this.close();
   }
 
   async createSession({
@@ -107,7 +159,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForWrite(this.orm!);
 
     const id = sessionId || randomUUID();
     const now = new Date();
@@ -198,7 +250,7 @@ export class DatabaseSessionService extends BaseSessionService {
     config,
   }: GetSessionRequest): Promise<Session | undefined> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForRead(this.orm!);
 
     const storageSession = await em.findOne(StorageSession, {
       appName,
@@ -260,7 +312,7 @@ export class DatabaseSessionService extends BaseSessionService {
     order,
   }: ListSessionsRequest): Promise<ListSessionsResponse> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForRead(this.orm!);
 
     const where: FilterQuery<StorageSession> = {appName};
     if (userId) {
@@ -360,7 +412,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: DeleteSessionRequest): Promise<void> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForWrite(this.orm!);
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
     await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
@@ -371,13 +423,19 @@ export class DatabaseSessionService extends BaseSessionService {
     event,
   }: AppendEventRequest): Promise<Event> {
     await this.init();
-    const em = this.orm!.em.fork();
+    const em = forkForWrite(this.orm!);
 
     if (event.partial) {
       return event;
     }
 
     const trimmedEvent = trimTempDeltaState(event);
+    // sqlite compiles `FOR UPDATE` away, and mssql turns it into a table hint
+    // adk-python never takes. Only the dialects adk-python locks are asked
+    // for a row-level lock.
+    const lockMode = supportsRowLevelLocking(getDatabaseBackend(this.orm!))
+      ? LockMode.PESSIMISTIC_WRITE
+      : undefined;
 
     await em.transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
@@ -387,7 +445,7 @@ export class DatabaseSessionService extends BaseSessionService {
           userId: session.userId,
           id: session.id,
         },
-        {lockMode: LockMode.PESSIMISTIC_WRITE},
+        {lockMode},
       );
 
       if (!storageSession) {
