@@ -8,6 +8,10 @@ import {ActivityEnd, ActivityStart, Blob, Content} from '@google/genai';
 
 /**
  * Request sent to live agents.
+ *
+ * When several fields are set, the realtime signals are processed by priority
+ * (highest first): `activityStart` > `activityEnd` > `audioStreamEnd` >
+ * `blob`. `stateDelta` is applied whatever the other fields hold.
  */
 export interface LiveRequest {
   /** If set, send the content to the model in turn-by-turn mode. */
@@ -18,8 +22,25 @@ export interface LiveRequest {
   activityStart?: ActivityStart;
   /** If set, signal the end of user activity to the model. */
   activityEnd?: ActivityEnd;
+  /**
+   * If set, signal the end of the audio stream to the model, for example
+   * because the microphone was turned off. Only used when voice activity
+   * detection is enabled.
+   */
+  audioStreamEnd?: boolean;
   /** If set, close the queue. */
   close?: boolean;
+  /**
+   * If set, the content is a partial turn update that does not complete the
+   * current model turn.
+   */
+  partial?: boolean;
+  /**
+   * If set, these state changes are applied to the session, so they take
+   * effect even when the request carries no content, or carries a partial or
+   * function-response turn.
+   */
+  stateDelta?: Record<string, unknown>;
 }
 
 /** Function type for resolving a Promise with a LiveRequest. */
@@ -119,9 +140,11 @@ export class LiveRequestQueue {
   /**
    * Sends a content object to the queue.
    * @param content The content to send.
+   * @param partial If true, the content is a partial turn update that does not
+   *     complete the current model turn.
    */
-  sendContent(content: Content) {
-    this.send({content});
+  sendContent(content: Content, partial?: boolean) {
+    this.send({content, partial});
   }
 
   /**
@@ -144,6 +167,14 @@ export class LiveRequestQueue {
    */
   sendActivityEnd() {
     this.send({activityEnd: {}});
+  }
+
+  /**
+   * Sends an audio stream end signal to force the model to flush the audio it
+   * has buffered.
+   */
+  sendAudioStreamEnd() {
+    this.send({audioStreamEnd: true});
   }
 
   /**

@@ -69,6 +69,7 @@ import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
+import {dispatchLiveRequest} from './live_send.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
@@ -1057,10 +1058,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         ? AbortSignal.any([invocationContext.abortSignal, sendAbort.signal])
         : sendAbort.signal;
       const sendTask = this.runSendLoop(
+        invocationContext,
         connection,
         invocationContext.liveRequestQueue,
         combinedAbort,
-        invocationContext.abortSignal,
       );
       sendTask.catch((error) => {
         logger.error('Error in live send loop:', error);
@@ -1157,11 +1158,12 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   private async runSendLoop(
+    invocationContext: InvocationContext,
     connection: BaseLlmConnection,
     liveRequestQueue: LiveRequestQueue,
     sendAbortSignal?: AbortSignal,
-    invocationAbortSignal?: AbortSignal,
   ): Promise<void> {
+    const invocationAbortSignal = invocationContext.abortSignal;
     while (true) {
       if (sendAbortSignal?.aborted || invocationAbortSignal?.aborted) {
         return;
@@ -1179,7 +1181,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         throw error;
       }
       try {
-        await this.dispatchLiveRequest(connection, liveRequest);
+        await dispatchLiveRequest(invocationContext, connection, liveRequest);
       } catch (error) {
         if (sendAbortSignal?.aborted || invocationAbortSignal?.aborted) {
           logger.debug('Send failed after teardown:', error);
@@ -1194,31 +1196,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       if (liveRequest.close) {
         return;
       }
-    }
-  }
-
-  private async dispatchLiveRequest(
-    connection: BaseLlmConnection,
-    liveRequest: LiveRequest,
-  ): Promise<void> {
-    if (liveRequest.close) {
-      await connection.close();
-      return;
-    }
-    if (liveRequest.activityStart) {
-      await connection.sendActivityStart?.();
-      return;
-    }
-    if (liveRequest.activityEnd) {
-      await connection.sendActivityEnd?.();
-      return;
-    }
-    if (liveRequest.blob) {
-      await connection.sendRealtime(liveRequest.blob);
-      return;
-    }
-    if (liveRequest.content) {
-      await connection.sendContent(liveRequest.content);
     }
   }
 

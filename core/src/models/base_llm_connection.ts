@@ -31,8 +31,10 @@ export interface BaseLlmConnection {
    * responses.
    *
    * @param content The content to send to the model.
+   * @param partial If true, the content is a partial turn update that does not
+   *     complete the current model turn.
    */
-  sendContent(content: Content): Promise<void>;
+  sendContent(content: Content, partial?: boolean): Promise<void>;
 
   /**
    * Sends a chunk of audio or a frame of video to the model in realtime.
@@ -55,6 +57,12 @@ export interface BaseLlmConnection {
    * for models that support manual activity boundaries.
    */
   sendActivityEnd?(): Promise<void>;
+
+  /**
+   * Optionally signals that the audio input stream has ended, for models that
+   * buffer realtime audio and support an explicit flush.
+   */
+  sendAudioStreamEnd?(): Promise<void>;
 
   /**
    * Receives the model response using the llm server connection.
