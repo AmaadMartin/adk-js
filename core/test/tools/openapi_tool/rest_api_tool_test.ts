@@ -333,7 +333,7 @@ describe('RestApiTool', () => {
               type: 'object',
               additionalProperties: false,
               properties: {
-                note: {type: ['string', 'null']} as OpenAPIV3.SchemaObject,
+                note: {type: 'string', nullable: true},
               },
             },
           },
