@@ -43,13 +43,12 @@ export async function isFileExists(folderPath: string): Promise<boolean> {
   }
 }
 
-/** Create a new folder at the specific path */
+/**
+ * Create a new folder at the specific path. Rejects with the underlying
+ * `fs.mkdir` error.
+ */
 export async function createFolder(folderPath: string): Promise<void> {
-  try {
-    await fs.mkdir(folderPath);
-  } catch (e) {
-    console.error(`Failed to create folder ${folderPath}`, e);
-  }
+  return fs.mkdir(folderPath);
 }
 
 /** Remove a folder at the specified location */

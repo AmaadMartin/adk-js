@@ -315,5 +315,19 @@ describe('createAgent', () => {
       );
       expect(removeFolder).not.toHaveBeenCalled();
     });
+
+    it('should surface the mkdir failure instead of continuing to write files', async () => {
+      const eacces = Object.assign(
+        new Error("EACCES: permission denied, mkdir '/ro/test-agent'"),
+        {code: 'EACCES', syscall: 'mkdir', path: '/ro/test-agent'},
+      );
+      (isFolderExists as Mock).mockResolvedValue(false);
+      (createFolder as Mock).mockRejectedValue(eacces);
+
+      await expect(
+        createAgent({...getFreshOptions(), forceYes: true}),
+      ).rejects.toThrow(/EACCES: permission denied, mkdir/);
+      expect(saveToFile).not.toHaveBeenCalled();
+    });
   });
 });

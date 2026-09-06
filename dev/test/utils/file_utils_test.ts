@@ -7,6 +7,7 @@ import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 
 import {
+  createFolder,
   createTempDir,
   isFile,
   isFileExists,
@@ -183,5 +184,22 @@ describe('file_utils', () => {
   it('isFileExists returns false for directories', async () => {
     fsPromises.stat.mockResolvedValue({isFile: () => false});
     await expect(isFileExists('/dir')).resolves.toBe(false);
+  });
+
+  it('createFolder creates the directory at the given path', async () => {
+    fsPromises.mkdir.mockResolvedValue(undefined);
+
+    await expect(createFolder('/some/dir')).resolves.toBeUndefined();
+    expect(fsPromises.mkdir).toHaveBeenCalledWith('/some/dir');
+  });
+
+  it('createFolder rejects with the original fs error instead of swallowing it', async () => {
+    const eacces = Object.assign(
+      new Error("EACCES: permission denied, mkdir '/ro/x'"),
+      {code: 'EACCES', syscall: 'mkdir', path: '/ro/x'},
+    );
+    fsPromises.mkdir.mockRejectedValue(eacces);
+
+    await expect(createFolder('/ro/x')).rejects.toBe(eacces);
   });
 });
