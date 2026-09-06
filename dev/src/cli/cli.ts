@@ -111,7 +111,7 @@ function getAllowedHosts(option?: string): string[] | undefined {
 
 const AGENT_DIR_ARGUMENT = new Argument(
   '[agents_dir]',
-  'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js or agents_dir/{agentName}/agent.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent) or a Workflow',
+  'Agent file or directory of agents to serve. For directory the internal structure should be agents_dir/{agentName}.js, agents_dir/{agentName}/app.js, agents_dir/{agentName}/agent.js or agents_dir/{agentName}/index.js. Agent file should has export of the rootAgent as instance of BaseAgent (e.g LlmAgent) or a Workflow',
 ).default(process.cwd());
 const HOST_OPTION = new Option(
   '-h, --host <string>',
