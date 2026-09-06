@@ -752,6 +752,74 @@ describe('RestApiTool Utilities', () => {
       expect(result.headers).toEqual({});
     });
 
+    describe('base URL normalization', () => {
+      it('should not double the slash when baseUrl ends with a slash', () => {
+        const result = prepareRequestParams(
+          {baseUrl: 'https://api.example.com/', path: '/v1/x', method: 'GET'},
+          [],
+          {},
+        );
+
+        expect(result.url).toBe('https://api.example.com/v1/x');
+      });
+
+      it('should strip only one trailing slash', () => {
+        const result = prepareRequestParams(
+          {baseUrl: 'https://api.example.com//', path: '/v1/x', method: 'GET'},
+          [],
+          {},
+        );
+
+        expect(result.url).toBe('https://api.example.com//v1/x');
+      });
+
+      it('should leave a baseUrl without a trailing slash unchanged', () => {
+        const result = prepareRequestParams(
+          {baseUrl: 'https://api.example.com', path: '/v1/x', method: 'GET'},
+          [],
+          {},
+        );
+
+        expect(result.url).toBe('https://api.example.com/v1/x');
+      });
+
+      it('should handle an empty baseUrl', () => {
+        const result = prepareRequestParams(
+          {baseUrl: '', path: '/no_base', method: 'GET'},
+          [],
+          {},
+        );
+
+        expect(result.url).toBe('/no_base');
+      });
+
+      it('should resolve a path parameter and an embedded query under a trailing slash', () => {
+        const parameters: ApiParameter[] = [
+          {
+            name: 'user_id',
+            originalName: 'user_id',
+            paramLocation: 'path',
+            paramSchema: {},
+            required: true,
+          },
+        ];
+
+        const result = prepareRequestParams(
+          {
+            baseUrl: 'https://api.example.com/',
+            path: '/v1/users/{user_id}?view=full',
+            method: 'GET',
+          },
+          parameters,
+          {user_id: '123'},
+        );
+
+        expect(result.url).toBe(
+          'https://api.example.com/v1/users/123?view=full',
+        );
+      });
+    });
+
     describe('path parameter encoding', () => {
       const usersEndpoint = {
         baseUrl: 'http://api.example.com',
