@@ -381,6 +381,40 @@ describe('InMemorySessionService', () => {
       expect(desc.sessions.map((s) => s.id)).toEqual(['s1', 's2']);
     });
 
+    it('tie-breaks by userId before id when lastUpdateTime values are equal', async () => {
+      const appName = 'app';
+      const sa = await service.createSession({
+        appName,
+        userId: 'user-a',
+        sessionId: 'z-session',
+      });
+      const sb = await service.createSession({
+        appName,
+        userId: 'user-b',
+        sessionId: 'a-session',
+      });
+      await service.appendEvent({
+        session: sa,
+        event: createEvent({timestamp: 1000}),
+      });
+      await service.appendEvent({
+        session: sb,
+        event: createEvent({timestamp: 1000}),
+      });
+
+      const asc = await service.listSessions({appName, order: 'asc'});
+      expect(asc.sessions.map((s) => [s.userId, s.id])).toEqual([
+        ['user-a', 'z-session'],
+        ['user-b', 'a-session'],
+      ]);
+
+      const desc = await service.listSessions({appName, order: 'desc'});
+      expect(desc.sessions.map((s) => [s.userId, s.id])).toEqual([
+        ['user-a', 'z-session'],
+        ['user-b', 'a-session'],
+      ]);
+    });
+
     it('limit returns only N sessions', async () => {
       const appName = 'app';
       const userId = 'user';
