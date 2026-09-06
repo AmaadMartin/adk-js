@@ -14,6 +14,8 @@ import {
 import {Content, Type} from '@google/genai';
 import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 
+import {finalizeDynamicInstructions} from '../../../src/models/llm_request.js';
+
 /**
  * Builds a {@link LoadMcpResourceTool} backed by a minimal mock toolset. Only
  * `listResources`/`readResource` are exercised by the tool, so those are the
@@ -95,9 +97,20 @@ describe('LoadMcpResourceTool', () => {
       const llmRequest = makeLlmRequest([]);
 
       await tool.processLlmRequest({toolContext, llmRequest});
+      finalizeDynamicInstructions(llmRequest);
 
       expect(llmRequest.config?.systemInstruction).toContain('res1');
       expect(llmRequest.config?.systemInstruction).toContain('res2');
+    });
+
+    it('contributes the resource list as a dynamic instruction', async () => {
+      listResources.mockResolvedValue(['res1', 'res2']);
+      const llmRequest = makeLlmRequest([]);
+
+      await tool.processLlmRequest({toolContext, llmRequest});
+
+      expect(llmRequest.dynamicInstructions).toHaveLength(1);
+      expect(llmRequest.config?.systemInstruction).toBeUndefined();
     });
 
     it('does not inject instructions when there are no resources', async () => {
