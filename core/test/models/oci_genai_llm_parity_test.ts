@@ -31,8 +31,8 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   fakeOciClient,
   firstText,
-  functionDefinitionName,
   isDedicatedServing,
+  isFunctionDefinition,
   isJsonSchemaFormat,
   isOnDemandServing,
   makeOciResponse,
@@ -855,7 +855,11 @@ describe('call parameters', () => {
     );
     const tools = client.lastChatRequest().tools;
     expect(tools).toHaveLength(1);
-    expect(functionDefinitionName(tools?.[0])).toBe('get_weather');
+    const tool = tools?.[0];
+    if (!isFunctionDefinition(tool)) {
+      expect.fail('Expected a function tool definition.');
+    }
+    expect(tool.name).toBe('get_weather');
   });
 });
 

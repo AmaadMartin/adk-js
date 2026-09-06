@@ -27,7 +27,7 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {z} from 'zod/v4';
 
 import {
-  functionDefinitionName,
+  isFunctionDefinition,
   isGenericChatRequest,
 } from '../../../../core/test/models/oci_genai_test_utils.js';
 import {createRunner} from '../../test_case_utils.js';
@@ -302,9 +302,11 @@ describe('OCIGenAILlm against a local inference endpoint', () => {
     expect(calls).toContain('get_temperature');
     expect(results[0]).toMatchObject({city: 'Chicago', celsius: 22});
     const chatRequest = lastChatRequest();
-    expect(functionDefinitionName(chatRequest.tools?.[0])).toBe(
-      'get_temperature',
-    );
+    const tool = chatRequest.tools?.[0];
+    if (!isFunctionDefinition(tool)) {
+      expect.fail('Expected a function tool definition.');
+    }
+    expect(tool.name).toBe('get_temperature');
     const messages = chatRequest.messages ?? [];
     expect(messages.some((m) => m.role === 'TOOL')).toBe(true);
   });
