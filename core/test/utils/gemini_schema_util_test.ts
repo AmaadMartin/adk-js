@@ -445,4 +445,337 @@ describe('toGeminiSchema', () => {
       ],
     });
   });
+
+  it('forwards object and string bounds as strings', () => {
+    const input = {
+      type: 'object',
+      minProperties: 1,
+      maxProperties: 10,
+      properties: {
+        firstName: {type: 'string', minLength: 1, maxLength: 50},
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      minProperties: '1',
+      maxProperties: '10',
+      properties: {
+        firstName: {type: Type.STRING, minLength: '1', maxLength: '50'},
+      },
+    });
+  });
+
+  it('forwards array bounds as strings', () => {
+    const input = {
+      type: 'array',
+      minItems: 1,
+      maxItems: 5,
+      items: {type: 'string'},
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.ARRAY,
+      minItems: '1',
+      maxItems: '5',
+      items: {type: Type.STRING},
+    });
+  });
+
+  it('forwards a numeric range as numbers, including zero', () => {
+    const input = {type: 'integer', minimum: 0, maximum: 100};
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.INTEGER,
+      minimum: 0,
+      maximum: 100,
+    });
+  });
+
+  it('forwards falsy constraint values', () => {
+    const input = {
+      type: 'string',
+      default: '',
+      title: '',
+      pattern: '',
+      minLength: 0,
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      default: '',
+      title: '',
+      pattern: '',
+      minLength: '0',
+    });
+  });
+
+  it('forwards a false default on a boolean node', () => {
+    const input = {type: 'boolean', default: false};
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({type: Type.BOOLEAN, default: false});
+  });
+
+  it('drops a constraint whose value is null', () => {
+    const input = {
+      type: 'string',
+      minLength: null,
+      pattern: null,
+      minimum: null,
+      default: null,
+      propertyOrdering: null,
+      format: null,
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({type: Type.STRING});
+  });
+
+  it('forwards pattern, default and title verbatim', () => {
+    const input = {
+      type: 'string',
+      pattern: '^[a-z]+$',
+      default: 'abc',
+      title: 'Name',
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      pattern: '^[a-z]+$',
+      default: 'abc',
+      title: 'Name',
+    });
+  });
+
+  it('forwards propertyOrdering', () => {
+    const input = {
+      type: 'object',
+      propertyOrdering: ['name', 'age'],
+      properties: {
+        name: {type: 'string'},
+        age: {type: 'integer'},
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      propertyOrdering: ['name', 'age'],
+      properties: {
+        name: {type: Type.STRING},
+        age: {type: Type.INTEGER},
+      },
+    });
+  });
+
+  it('keeps int32 and int64 on an integer node and drops any other format', () => {
+    const input = {
+      type: 'object',
+      properties: {
+        small: {type: 'integer', format: 'int32'},
+        big: {type: 'integer', format: 'int64'},
+        unsupported: {type: 'integer', format: 'unsigned'},
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        small: {type: Type.INTEGER, format: 'int32'},
+        big: {type: Type.INTEGER, format: 'int64'},
+        unsupported: {type: Type.INTEGER},
+      },
+    });
+  });
+
+  it('keeps date-time and enum on a string node and drops any other format', () => {
+    const input = {
+      type: 'object',
+      properties: {
+        when: {type: 'string', format: 'date-time'},
+        choice: {type: 'string', format: 'enum'},
+        day: {type: 'string', format: 'date'},
+        address: {type: 'string', format: 'email'},
+        blob: {type: 'string', format: 'byte'},
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        when: {type: Type.STRING, format: 'date-time'},
+        choice: {type: Type.STRING, format: 'enum'},
+        day: {type: Type.STRING},
+        address: {type: Type.STRING},
+        blob: {type: Type.STRING},
+      },
+    });
+  });
+
+  it('keeps int32 on a number node and drops float and double', () => {
+    const input = {
+      type: 'object',
+      properties: {
+        count: {type: 'number', format: 'int32'},
+        ratio: {type: 'number', format: 'float'},
+        precise: {type: 'number', format: 'double'},
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        count: {type: Type.NUMBER, format: 'int32'},
+        ratio: {type: Type.NUMBER},
+        precise: {type: Type.NUMBER},
+      },
+    });
+  });
+
+  it('drops a format on a node that declares no type', () => {
+    const input = {
+      format: 'date-time',
+      properties: {
+        field1: {format: 'int32'},
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        field1: {type: Type.TYPE_UNSPECIFIED},
+      },
+    });
+  });
+
+  it('drops a format that only an inferred type would license', () => {
+    const input = {enum: ['2026-01-01'], format: 'date-time'};
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      enum: ['2026-01-01'],
+    });
+  });
+
+  it('filters constraints at every nesting depth', () => {
+    const input = {
+      type: 'object',
+      properties: {
+        nested: {
+          type: 'object',
+          properties: {
+            when: {type: 'string', format: 'date-time', minLength: 3},
+            link: {type: 'string', format: 'uri'},
+          },
+        },
+        tags: {
+          type: 'array',
+          items: {type: 'string', format: 'uri', minLength: 2},
+        },
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        nested: {
+          type: Type.OBJECT,
+          properties: {
+            when: {type: Type.STRING, format: 'date-time', minLength: '3'},
+            link: {type: Type.STRING},
+          },
+        },
+        tags: {
+          type: Type.ARRAY,
+          items: {type: Type.STRING, minLength: '2'},
+        },
+      },
+    });
+  });
+
+  it('filters a format per anyOf branch', () => {
+    const input = {
+      anyOf: [
+        {type: 'string', format: 'email'},
+        {type: 'integer', format: 'int32'},
+        {type: 'string', format: 'date-time'},
+      ],
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      anyOf: [
+        {type: Type.STRING},
+        {type: Type.INTEGER, format: 'int32'},
+        {type: Type.STRING, format: 'date-time'},
+      ],
+    });
+  });
+
+  it('keeps constraints when a nullable union collapses to one type', () => {
+    const input = {
+      type: ['string', 'null'],
+      minLength: 2,
+      format: 'date-time',
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.STRING,
+      description: undefined,
+      nullable: true,
+      minLength: '2',
+      format: 'date-time',
+    });
+  });
+
+  it('drops keywords the Gemini schema does not model', () => {
+    const input = {
+      type: 'object',
+      additionalProperties: false,
+      uniqueItems: true,
+      exclusiveMinimum: 1,
+      somethingElse: 'x',
+      properties: {
+        a: {type: 'string', multipleOf: 2},
+      },
+    };
+
+    const schema = toGeminiSchema(input as unknown as MCPToolSchema);
+
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        a: {type: Type.STRING},
+      },
+    });
+  });
 });
