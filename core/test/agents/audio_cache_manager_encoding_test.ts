@@ -104,6 +104,24 @@ describe('AudioCacheManager audio encoding', () => {
     expect(Array.from(fromBase64(saved!))).toEqual([9]);
   });
 
+  it('counts a chunk with no data as zero bytes, as a flush writes it', () => {
+    const ctx = createTestContext();
+
+    ctx.inputRealtimeCache = [
+      {
+        role: 'user',
+        data: {data: toBase64(Uint8Array.from([9])), mimeType: 'audio/pcm'},
+        timestamp: 1000,
+      },
+      {role: 'user', data: {mimeType: 'audio/pcm'}, timestamp: 2000},
+    ];
+
+    const stats = manager.getCacheStats(ctx);
+
+    expect(stats.inputChunks).toBe(2);
+    expect(stats.inputBytes).toBe(1);
+  });
+
   it('takes the mime type from the first entry', async () => {
     const artifactService = new RecordingArtifactService();
     const ctx = createTestContext({artifactService});

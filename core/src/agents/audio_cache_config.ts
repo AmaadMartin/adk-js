@@ -4,20 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/** Ten mebibytes. */
-const DEFAULT_MAX_CACHE_SIZE_BYTES = 10 * 1024 * 1024;
-
-/** Five minutes. */
-const DEFAULT_MAX_CACHE_DURATION_SECONDS = 300;
-
-const DEFAULT_AUTO_FLUSH_THRESHOLD = 100;
-
-const DEFAULTS = {
-  maxCacheSizeBytes: DEFAULT_MAX_CACHE_SIZE_BYTES,
-  maxCacheDurationSeconds: DEFAULT_MAX_CACHE_DURATION_SECONDS,
-  autoFlushThreshold: DEFAULT_AUTO_FLUSH_THRESHOLD,
-};
-
 /**
  * The bounds an {@link AudioCacheManager} advertises for its realtime audio
  * caches.
@@ -51,8 +37,12 @@ export interface AudioCacheConfig {
 export function createAudioCacheConfig(
   params: Partial<AudioCacheConfig> = {},
 ): AudioCacheConfig {
-  // No bounds validation, unlike createContextCacheConfig: adk-python's
-  // AudioCacheConfig is a plain class with no validators, so rejecting a value
-  // it accepts would be a divergence rather than parity.
-  return {...DEFAULTS, ...params};
+  // adk-python's AudioCacheConfig has no validators, so no bound is rejected
+  // here either.
+  return {
+    maxCacheSizeBytes: 10 * 1024 * 1024, // 10 MiB
+    maxCacheDurationSeconds: 300, // 5 minutes
+    autoFlushThreshold: 100,
+    ...params,
+  };
 }
