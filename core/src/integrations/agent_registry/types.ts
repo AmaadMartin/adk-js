@@ -62,6 +62,10 @@ export interface Endpoint {
   attributes?: Record<string, unknown>;
 }
 
+// Agent Identity owns the scheme; re-exported here so the existing import path
+// keeps working.
+export type {GcpAuthProviderScheme} from '../agent_identity/gcp_auth_provider_scheme.js';
+
 export interface McpServer {
   name?: string;
   displayName?: string;

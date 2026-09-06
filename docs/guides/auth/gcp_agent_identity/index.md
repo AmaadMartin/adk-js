@@ -38,6 +38,46 @@ The service answers in one of four states, and the provider maps each one:
 - **Pending.** The provider polls once a second for ten seconds, then rejects.
 - **Consent rejected.** The provider rejects.
 
+## The scheme
+
+| Field         | Required | Meaning                                        |
+| ------------- | -------- | ---------------------------------------------- |
+| `type`        | yes      | Always `'gcpAuthProviderScheme'`.              |
+| `name`        | yes      | The auth provider resource to use.             |
+| `scopes`      | no       | The OAuth2 scopes to request.                  |
+| `continueUri` | no       | Where the user lands after consent. See below. |
+
+The `type` literal and the resource `name` are the whole minimum. That is a
+two-legged configuration: the agent acts as itself, and no user consents to
+anything.
+
+```ts
+import {GcpAuthProviderScheme} from '@google/adk';
+
+const twoLegged: GcpAuthProviderScheme = {
+  type: 'gcpAuthProviderScheme',
+  name: 'projects/my-project/locations/global/authProviders/spotify-2lo',
+};
+```
+
+Add `scopes` and `continueUri` for a three-legged configuration, where the agent
+acts on behalf of a user who grants consent. The scheme at the top of this page
+is one.
+
+`continueUri` is not the standard OAuth2 redirect URI. It re-authenticates the
+user to prevent a phishing attack, and it finalises the managed OAuth flow. You
+host it, not Google, preferably alongside the agent client's web server. A
+two-legged configuration never redirects a user, so it needs none.
+
+### Differences from adk-python
+
+The Python class is a pydantic model and this is a TypeScript interface, so two
+things do not carry over. `type` has no default, so every construction site
+writes the literal. Python's model config sets `extra="allow"`, which keeps
+fields the model does not declare; the interface drops them, because preserving
+them would need an index signature that turns off type checking for every
+consumer.
+
 ## Get started
 
 Register the provider once, under the scheme's `type`, then ask it for a
@@ -123,27 +163,6 @@ Set `AGENT_IDENTITY_CREDENTIALS_TARGET_HOST` to send requests somewhere other
 than `agentidentitycredentials.googleapis.com`. The provider reads it when it
 builds its client.
 
-You can replace the whole backend, which is how the unit tests drive the router
-without a network:
-
-```ts
-import {
-  AuthCredentialTypes,
-  CredentialsProvider,
-  GcpAuthProvider,
-} from '@google/adk';
-
-const agentIdentityProvider: CredentialsProvider = {
-  async getAuthCredential() {
-    return {
-      authType: AuthCredentialTypes.HTTP,
-      http: {scheme: 'Bearer', credentials: {token: 'test-token'}},
-    };
-  },
-};
-const provider = new GcpAuthProvider({agentIdentityProvider});
-```
-
 ## Failure modes
 
 Every failure rejects with an `Error`.
@@ -151,6 +170,7 @@ Every failure rejects with an `Error`.
 | Condition                                     | Message                                                                                                   |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | The scheme is not a `gcpAuthProviderScheme`   | `Expected GcpAuthProviderScheme, got <type>`                                                              |
+| The scheme names an IAM connector             | `IAM Connector auth providers are not supported yet: '<name>'.`                                           |
 | No context, or no user id                     | `GcpAuthProvider requires a context with a valid user_id.`                                                |
 | The service call failed                       | `Failed to retrieve credential for user '<id>' on provider '<name>'.`, with the original error as `cause` |
 | The user refused consent                      | `Operation failed: User consent rejected.`                                                                |
@@ -161,13 +181,8 @@ Every failure rejects with an `Error`.
 
 ## IAM connector resource names
 
-A scheme naming `projects/<p>/locations/<l>/connectors/<c>` routes to a separate
-delegate. adk-js has no IAM Connector Credentials client, so the provider
-rejects unless you pass your own:
-
-```ts
-new GcpAuthProvider({iamConnectorProvider: myConnectorProvider});
-```
+adk-js has no IAM Connector Credentials client, so a scheme naming
+`projects/<p>/locations/<l>/connectors/<c>` rejects.
 
 ## Testing it against the real service
 
