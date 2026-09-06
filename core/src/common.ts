@@ -155,6 +155,41 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {
+  InferenceStatus,
+  createEvaluateConfig,
+  createInferenceConfig,
+} from './evaluation/base_eval_service.js';
+export type {
+  BaseEvalService,
+  EvaluateConfig,
+  EvaluateRequest,
+  InferenceConfig,
+  InferenceRequest,
+  InferenceResult,
+} from './evaluation/base_eval_service.js';
+export type {
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+} from './evaluation/eval_case.js';
+export {EvalStatus} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
+} from './evaluation/eval_metrics.js';
+export type {EvalCaseResult} from './evaluation/eval_result.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
