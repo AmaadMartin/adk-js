@@ -6,14 +6,49 @@
 
 import {toJsonSerializable} from '../utils/json_utils.js';
 import {logger} from '../utils/logger.js';
-import {extractStateDelta, ScopedStateDelta} from './base_session_service.js';
+import {
+  ScopedStateDelta,
+  extractStateDelta as splitStateDelta,
+} from './base_session_service.js';
 import {carryDeltaStamps} from './state_write_order.js';
+
+/**
+ * Applies a list request's pagination to sessions the caller has already
+ * ordered.
+ *
+ * A backend that cannot page in the store — an in-memory map, a Firestore
+ * collection-group query with no cheap count — reads the whole match set and
+ * slices it here.
+ */
+export {paginateSessions} from './base_session_service.js';
 
 /** Logged once per call that had to replace at least one state value. */
 const LOSSY_STATE_WARNING =
   'Failed to serialize session state; some values are not JSON-serializable' +
   ' (e.g. callables) and will be replaced with a string representation in the' +
   ' persisted state.';
+
+/**
+ * A state map split by the scope its keys belong to.
+ *
+ * The keys in `app` and `user` have lost their `app:` and `user:` prefix: that
+ * is the form a session service writes to its shared app-state and user-state
+ * records.
+ */
+export type StateDelta = ScopedStateDelta;
+
+/**
+ * Splits a state map into its app, user and session scopes.
+ *
+ * `temp:` keys are dropped: they live only for the current invocation and no
+ * session service persists them. An omitted state is read as an empty one, so
+ * a caller that has nothing to write still gets three empty buckets.
+ */
+export function extractStateDelta(
+  state: Record<string, unknown> = {},
+): StateDelta {
+  return splitStateDelta(state);
+}
 
 /**
  * Returns `value` as `T` when it is a decodable model payload, else undefined.
@@ -37,12 +72,13 @@ export function decodeModel<T>(value: unknown): T | undefined {
 /**
  * Coerces every value of a state map into a JSON-serializable form.
  *
- * A service that persists state to a JSON column must use this. A value JSON
- * cannot represent — a function, a symbol, a `BigInt`, a circular structure —
- * is replaced with a string stand-in, so one bad value cannot fail the whole
- * write or vanish without trace. Rich types with a `toJSON` method, `Date`
- * among them, keep their faithful representation. The value itself is never
- * logged.
+ * A service that persists state to a JSON column or a JSON document field must
+ * use this rather than writing the raw map. A value JSON cannot represent — a
+ * function, a symbol, a `BigInt`, a circular structure — is replaced with a
+ * string stand-in, so one bad value cannot fail the whole write or vanish
+ * without trace. Rich types with a `toJSON` method, `Date` among them, keep
+ * their faithful representation. One warning is logged when a replacement was
+ * needed, so a lossy write is diagnosable. The value itself is never logged.
  *
  * The result is a null-prototype map, for the reason `trimTempState`
  * documents: a `__proto__` key assigned to a plain object literal reaches the

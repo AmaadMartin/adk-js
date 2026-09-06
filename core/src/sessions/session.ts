@@ -54,12 +54,14 @@ export interface Session {
   lastUpdateTime: number;
 
   /**
-   * The exact storage revision this session was loaded at, set by persistent
+   * The opaque storage revision this session was loaded at, set by persistent
    * session services.
    *
-   * `DatabaseSessionService` compares it against the row on the next write, so
-   * a session one process read does not overwrite a session another process
-   * read earlier.
+   * A session service that does optimistic concurrency control stamps this
+   * when it loads the session, and checks it again on the next write. A
+   * mismatch means another writer changed the session in storage since, so
+   * the write is rejected with `StaleSessionError` instead of overwriting the
+   * newer history. A service that does no such check leaves it unset.
    *
    * This is internal bookkeeping: callers should not set it. A session built
    * by hand, or read from a service that tracks no revision, leaves it

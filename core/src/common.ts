@@ -315,7 +315,10 @@ export {
   isResourceExhaustedError,
 } from './errors/resource_exhausted_error.js';
 export {SessionNotFoundError} from './errors/session_not_found_error.js';
-export {StaleSessionError} from './errors/stale_session_error.js';
+export {
+  StaleSessionError,
+  isStaleSessionError,
+} from './errors/stale_session_error.js';
 export {
   ToolErrorType,
   ToolExecutionError,
@@ -645,6 +648,8 @@ export {
   pruneThoughts,
   setEventMessage,
   stringifyContent,
+  transformToCamelCaseEvent,
+  transformToSnakeCaseEvent,
 } from './events/event.js';
 export type {
   CreateEventParams,
@@ -965,6 +970,12 @@ export {
 export type {ReadonlyStateView} from './sessions/readonly_state.js';
 export {createSession} from './sessions/session.js';
 export type {CompositeSessionKey, Session} from './sessions/session.js';
+export {
+  extractStateDelta,
+  makeJsonSafeState,
+  paginateSessions,
+} from './sessions/session_util.js';
+export type {StateDelta} from './sessions/session_util.js';
 export {State, StateSchemaError, isStateSchemaError} from './sessions/state.js';
 export {
   COMPLETION_DETAILS_EVENT_NAME,
@@ -1283,10 +1294,15 @@ export {
   runWithClientLabel,
 } from './utils/client_labels.js';
 export {deprecated} from './utils/deprecated.js';
-export {getBooleanEnvVar} from './utils/env_aware_utils.js';
+export {getBooleanEnvVar, randomUUID} from './utils/env_aware_utils.js';
 export {getHttpDebugInfo} from './utils/http_debug_utils.js';
 export type {HttpDebugRecord, HttpExchange} from './utils/http_debug_utils.js';
-export type {JsonObject, JsonValue} from './utils/json_utils.js';
+export {toJsonSafe} from './utils/json_utils.js';
+export type {
+  JsonObject,
+  JsonSafeResult,
+  JsonValue,
+} from './utils/json_utils.js';
 export {
   LogLevel,
   getLogger,
@@ -1302,6 +1318,8 @@ export {
   isGemini3xFlashLive,
   isGemini3xLive,
 } from './utils/model_name.js';
+export {loadOptionalPeer} from './utils/optional_peer.js';
+export type {OptionalPeer} from './utils/optional_peer.js';
 export type {SchemaLike} from './utils/schema.js';
 export {zodObjectToSchema} from './utils/simple_zod_to_json.js';
 export type {

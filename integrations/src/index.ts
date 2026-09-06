@@ -9,6 +9,11 @@ export {
   FirestoreMemoryService,
 } from './firestore/firestore_memory_service.js';
 export type {FirestoreMemoryServiceOptions} from './firestore/firestore_memory_service.js';
+export {
+  DEFAULT_ROOT_COLLECTION,
+  FirestoreSessionService,
+} from './firestore/firestore_session_service.js';
+export type {FirestoreSessionServiceOptions} from './firestore/firestore_session_service.js';
 export {DEFAULT_STOP_WORDS} from './firestore/stop_words.js';
 export * from './slack/slack_runner.js';
 export {version} from './version.js';
