@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {StorageOptions} from '@google-cloud/storage';
+
 import {
   BaseGoogleCredentialsConfig,
   type GoogleCredentialsConfigOptions,
@@ -43,3 +45,20 @@ export class GCSCredentialsConfig extends BaseGoogleCredentialsConfig {
     this.tokenCacheKey = GCS_TOKEN_CACHE_KEY;
   }
 }
+
+/**
+ * How a {@link GcsToolset} authenticates to Cloud Storage.
+ *
+ * The fields are taken from the Cloud Storage SDK's own `StorageOptions`, so
+ * they forward to the client verbatim. Supply a key file, inline credentials
+ * or an `AuthClient`; omit all three to use Application Default Credentials.
+ *
+ * This is the client-level counterpart of {@link GCSCredentialsConfig}, which
+ * ports adk-python's interactive end-user handshake. That flow needs
+ * `GoogleTool`, which adk-js does not have, so the toolset authenticates the
+ * Cloud Storage client instead.
+ */
+export type GcsCredentialsConfig = Pick<
+  StorageOptions,
+  'scopes' | 'keyFilename' | 'authClient' | 'credentials'
+>;

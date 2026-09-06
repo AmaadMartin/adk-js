@@ -213,6 +213,9 @@ export * from './integrations/api_registry/api_registry.js';
 // Exported here rather than from `common.ts`, which also feeds the web build:
 // the Firestore client is Node-only.
 export * from './integrations/firestore/firestore_session_service.js';
+// Exported here rather than from `common.ts`, which also feeds the web build:
+// the Cloud Storage toolset loads the Node-only `@google-cloud/storage`.
+export * from './integrations/gcs/index.js';
 export * from './integrations/langchain/langchain_tool.js';
 export * from './integrations/parameter_manager/parameter_client.js';
 export * from './integrations/secret_manager/secret_client.js';
