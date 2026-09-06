@@ -27,6 +27,11 @@ const CANNED_RESPONSE = {
   output: [],
 };
 
+/** The part of a request init the recorder reads. */
+interface RecordedRequestInit {
+  body?: unknown;
+}
+
 /** Records the JSON body of each request instead of sending it. */
 class FetchRecorder {
   /** The parsed body of the most recent request. */
@@ -34,7 +39,7 @@ class FetchRecorder {
 
   readonly fetch = async (
     _input: string | URL | Request,
-    init?: RequestInit,
+    init?: RecordedRequestInit,
   ): Promise<Response> => {
     this.body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return new Response(JSON.stringify(CANNED_RESPONSE), {
