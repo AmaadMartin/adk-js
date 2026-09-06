@@ -13,6 +13,7 @@ import {
   isFolderExists,
   listFiles,
   loadFileData,
+  removeFolder,
   saveToFile,
   tryToFindFileRecursively,
 } from '../../src/utils/file_utils.js';
@@ -183,5 +184,31 @@ describe('file_utils', () => {
   it('isFileExists returns false for directories', async () => {
     fsPromises.stat.mockResolvedValue({isFile: () => false});
     await expect(isFileExists('/dir')).resolves.toBe(false);
+  });
+
+  it('removeFolder removes the folder recursively', async () => {
+    fsPromises.rm.mockResolvedValue(undefined);
+
+    await expect(removeFolder('/some/dir')).resolves.toBeUndefined();
+    expect(fsPromises.rm).toHaveBeenCalledWith('/some/dir', {recursive: true});
+  });
+
+  it('removeFolder rejects with the original fs error instead of swallowing it', async () => {
+    const eacces = Object.assign(
+      new Error("EACCES: permission denied, rm '/ro/x'"),
+      {code: 'EACCES', syscall: 'rm', path: '/ro/x'},
+    );
+    fsPromises.rm.mockRejectedValue(eacces);
+
+    await expect(removeFolder('/ro/x')).rejects.toBe(eacces);
+  });
+
+  it('listFiles returns an empty array when the directory cannot be read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fsPromises.readdir.mockRejectedValue(
+      new Error('EACCES: permission denied, scandir'),
+    );
+
+    await expect(listFiles('/unreadable')).resolves.toEqual([]);
   });
 });

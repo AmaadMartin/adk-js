@@ -315,5 +315,30 @@ describe('createAgent', () => {
       );
       expect(removeFolder).not.toHaveBeenCalled();
     });
+
+    it('should surface a failed overwrite instead of writing into the stale folder', async () => {
+      const eacces = Object.assign(
+        new Error("EACCES: permission denied, rm '/ro/test-agent'"),
+        {code: 'EACCES', syscall: 'rm', path: '/ro/test-agent'},
+      );
+      (isFolderExists as Mock).mockResolvedValue(true);
+      (removeFolder as Mock).mockRejectedValue(eacces);
+
+      await expect(
+        createAgent({...getFreshOptions(), forceYes: true}),
+      ).rejects.toThrow(/EACCES: permission denied, rm/);
+      expect(createFolder).not.toHaveBeenCalled();
+      expect(saveToFile).not.toHaveBeenCalled();
+    });
+
+    it('should still finish when the post-create file listing comes back empty', async () => {
+      (isFolderExists as Mock).mockResolvedValue(false);
+      (listFiles as Mock).mockResolvedValue([]);
+
+      await expect(
+        createAgent({...getFreshOptions(), forceYes: true}),
+      ).resolves.toBeUndefined();
+      expect(saveToFile).toHaveBeenCalled();
+    });
   });
 });

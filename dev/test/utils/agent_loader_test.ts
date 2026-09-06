@@ -410,6 +410,46 @@ describe('AgentLoader', () => {
       );
     });
 
+    it('dispose resolves when the temp folder cannot be removed', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+        return Promise.resolve();
+      });
+      (fileUtils.removeFolder as Mock).mockRejectedValueOnce(
+        Object.assign(new Error('EACCES: permission denied, rm'), {
+          code: 'EACCES',
+        }),
+      );
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+
+      await expect(agentFile.dispose()).resolves.toBeUndefined();
+      expect(fileUtils.removeFolder).toHaveBeenCalled();
+    });
+
+    it('dispose resolves when the compiled artifact is already gone', async () => {
+      const agentPath = path.join(tempAgentsDir, 'agent1.js');
+      await fs.writeFile(agentPath, agent1JsContent);
+
+      const compiledAgentPath = compiledPath('agent1.cjs');
+      (esbuild.build as Mock).mockImplementation(async () => {
+        await fs.writeFile(compiledAgentPath, agent1JsContent);
+        return Promise.resolve();
+      });
+
+      const agentFile = new AgentFile(agentPath);
+      await agentFile.load();
+      await fs.rm(compiledAgentPath);
+
+      await expect(agentFile.dispose()).resolves.toBeUndefined();
+      expect(fileUtils.removeFolder).toHaveBeenCalledWith(tempLoaderDir);
+    });
+
     it('returns cleanup file path if compiled', async () => {
       const agentPath = path.join(tempAgentsDir, 'agent2.ts');
       const compiledAgentPath = compiledPath('agent2.cjs');

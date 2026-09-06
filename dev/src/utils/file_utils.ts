@@ -52,16 +52,24 @@ export async function createFolder(folderPath: string): Promise<void> {
   }
 }
 
-/** Remove a folder at the specified location */
+/**
+ * Remove a folder and everything under it.
+ *
+ * Rejects with the underlying `fs.rm` error. Callers for which removal is
+ * best-effort must catch it at the call site.
+ */
 export async function removeFolder(folderPath: string): Promise<void> {
-  try {
-    await fs.rm(folderPath, {recursive: true});
-  } catch (e) {
-    console.error(`Failed to remove folder ${folderPath}`, e);
-  }
+  return fs.rm(folderPath, {recursive: true});
 }
 
-/** List files within a directory */
+/**
+ * List the entries of a directory.
+ *
+ * Returns an empty array if the directory cannot be read, so an empty result
+ * is indistinguishable from an unreadable directory. Only use this where a
+ * missing listing is cosmetic; a caller that acts on the result must read the
+ * directory itself.
+ */
 export async function listFiles(folderPath: string): Promise<string[]> {
   try {
     return await fs.readdir(folderPath);
