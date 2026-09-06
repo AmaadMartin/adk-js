@@ -16,6 +16,15 @@ import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
+import {StorageEvent, StorageSession} from '../../src/sessions/db/schema.js';
+
+/** Reaches the service's private MikroORM handle; tests only. */
+function ormOf(service: DatabaseSessionService): MikroORM {
+  return (service as unknown as {orm: MikroORM}).orm;
+}
+
+/** Matches the SGR colour escapes the MikroORM logger wraps messages in. */
+const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[\\d+m`, 'g');
 
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
@@ -700,6 +709,209 @@ describe('DatabaseSessionService', () => {
       })) as {id: string; updateTime: Date};
 
       expect(storedSession.updateTime.getTime()).toBe(timestamp);
+    });
+  });
+
+  describe('appendEvent atomicity', () => {
+    const appName = 'test-app';
+    const userId = 'test-user';
+
+    /**
+     * Makes the `sessions.update_time` write fail, so that an append fails
+     * after the event insert has already been issued.
+     *
+     * The `WHEN` clause matters: a flush also rewrites the session row with
+     * its existing timestamps, and blocking that write would abort the append
+     * before it reaches the `update_time` change under test.
+     */
+    async function blockSessionUpdate(): Promise<void> {
+      const orm = ormOf(service);
+      await orm.em
+        .getConnection()
+        .execute(
+          `CREATE TRIGGER block_session_update BEFORE UPDATE OF update_time ON sessions ` +
+            `WHEN NEW.update_time <> OLD.update_time ` +
+            `BEGIN SELECT RAISE(ABORT, 'update_time write blocked'); END;`,
+        );
+    }
+
+    it('should append an event in a single transaction', async () => {
+      const queryLog: string[] = [];
+      const loggingService = new DatabaseSessionService({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        allowGlobalContext: true,
+        debug: ['query'],
+        colors: false,
+        logger: (message: string) => queryLog.push(message),
+      });
+
+      try {
+        await loggingService.init();
+        const session = await loggingService.createSession({
+          appName,
+          userId,
+          sessionId: 's-single-tx',
+        });
+
+        queryLog.length = 0;
+        await loggingService.appendEvent({
+          session,
+          event: createEvent({
+            timestamp: Date.now(),
+            actions: createEventActions({stateDelta: {'count': 1}}),
+          }),
+        });
+
+        // MikroORM's `colors` flag is process-global
+        // (`process.env.MIKRO_ORM_COLORS`), so another service in this suite
+        // can re-enable it after this one opted out.
+        const statements = queryLog.map((message) =>
+          message.replace(ANSI_ESCAPE, '').replace('[query] ', '').trim(),
+        );
+        const beginIndex = statements.indexOf('begin');
+        const commitIndex = statements.indexOf('commit');
+
+        expect(statements.filter((s) => s === 'begin')).toHaveLength(1);
+        expect(statements.filter((s) => s === 'commit')).toHaveLength(1);
+        expect(statements.filter((s) => s.startsWith('rollback'))).toHaveLength(
+          0,
+        );
+
+        const updateIndexes = statements
+          .map((statement, index) => ({statement, index}))
+          .filter(({statement}) =>
+            /^update .*sessions.* set .*update_time/.test(statement),
+          )
+          .map(({index}) => index);
+
+        expect(updateIndexes.length).toBeGreaterThan(0);
+        for (const index of updateIndexes) {
+          expect(index).toBeGreaterThan(beginIndex);
+          expect(index).toBeLessThan(commitIndex);
+        }
+      } finally {
+        await ormOf(loggingService).close();
+      }
+    });
+
+    it('should not persist the event when the session update fails', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-rollback',
+      });
+      const createUpdateTime = session.lastUpdateTime;
+
+      await blockSessionUpdate();
+
+      await expect(
+        service.appendEvent({
+          session,
+          event: createEvent({timestamp: Date.now() + 1000}),
+        }),
+      ).rejects.toThrow('update_time write blocked');
+
+      const em = ormOf(service).em.fork();
+      const storedEvents = await em.find(StorageEvent, {
+        sessionId: 's-rollback',
+      });
+      const storedSession = await em.findOne(StorageSession, {
+        id: 's-rollback',
+      });
+
+      expect(storedEvents).toHaveLength(0);
+      expect(storedSession?.updateTime.getTime()).toBe(createUpdateTime);
+    });
+
+    it('should leave the in-memory session untouched when the append fails', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-untouched',
+        state: {'count': 0},
+      });
+      const eventCount = session.events.length;
+      const lastUpdateTime = session.lastUpdateTime;
+      const state = {...session.state};
+
+      await blockSessionUpdate();
+
+      await expect(
+        service.appendEvent({
+          session,
+          event: createEvent({
+            timestamp: Date.now() + 1000,
+            actions: createEventActions({stateDelta: {'count': 1}}),
+          }),
+        }),
+      ).rejects.toThrow('update_time write blocked');
+
+      expect(session.events).toHaveLength(eventCount);
+      expect(session.lastUpdateTime).toBe(lastUpdateTime);
+      expect(session.state).toEqual(state);
+    });
+
+    it('should reload events from storage when the in-memory session is stale', async () => {
+      const staleSession = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-stale',
+      });
+      const freshSession = await service.getSession({
+        appName,
+        userId,
+        sessionId: 's-stale',
+      });
+      if (!freshSession) {
+        expect.fail('expected the session to be readable');
+      }
+
+      const firstEvent = createEvent({
+        timestamp: Date.now() + 60_000,
+        actions: createEventActions({stateDelta: {'written-by': 'fresh'}}),
+      });
+      await service.appendEvent({session: freshSession, event: firstEvent});
+
+      const secondEvent = createEvent({timestamp: Date.now() + 61_000});
+      await service.appendEvent({session: staleSession, event: secondEvent});
+
+      expect(staleSession.events.map((e) => e.id)).toEqual([
+        firstEvent.id,
+        secondEvent.id,
+      ]);
+      expect(staleSession.state['written-by']).toBe('fresh');
+      expect(staleSession.lastUpdateTime).toBe(secondEvent.timestamp);
+    });
+
+    it('should replace an event that was already appended', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's-replace',
+      });
+
+      const event = createEvent({timestamp: Date.now()});
+      await service.appendEvent({session, event});
+
+      const revised = createEvent({
+        id: event.id,
+        timestamp: event.timestamp + 1000,
+        author: 'agent',
+      });
+      await service.appendEvent({session, event: revised});
+
+      expect(session.events).toHaveLength(1);
+      expect(session.events[0].author).toBe('agent');
+      expect(session.lastUpdateTime).toBe(revised.timestamp);
+
+      const em = ormOf(service).em.fork();
+      const storedEvents = await em.find(StorageEvent, {
+        sessionId: 's-replace',
+      });
+
+      expect(storedEvents).toHaveLength(1);
+      expect(storedEvents[0].eventData.author).toBe('agent');
     });
   });
 });

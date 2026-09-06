@@ -379,7 +379,7 @@ export class DatabaseSessionService extends BaseSessionService {
 
     const trimmedEvent = trimTempDeltaState(event);
 
-    await em.transactional(async (txEm) => {
+    const result = await em.transactional(async (txEm) => {
       const storageSession = await txEm.findOne(
         StorageSession,
         {
@@ -420,8 +420,8 @@ export class DatabaseSessionService extends BaseSessionService {
       }
 
       // Stale session check
+      let reloadedEvents: Event[] | undefined;
       if (storageSession.updateTime.getTime() > session.lastUpdateTime) {
-        // Reload state
         const events = await txEm.find(
           StorageEvent,
           {
@@ -432,13 +432,7 @@ export class DatabaseSessionService extends BaseSessionService {
           {orderBy: {timestamp: 'ASC'}},
         );
 
-        const mergedState = mergeStates(
-          appStateModel.state,
-          userStateModel.state,
-          storageSession.state,
-        );
-        session.state = mergedState;
-        session.events = events.map((e) => e.eventData);
+        reloadedEvents = events.map((e) => e.eventData);
       }
 
       if (event.actions && event.actions.stateDelta) {
@@ -490,25 +484,32 @@ export class DatabaseSessionService extends BaseSessionService {
         });
         txEm.persist(newStorageEvent);
       }
-      await txEm.commit();
 
       storageSession.updateTime = new Date(event.timestamp);
 
-      const newMergedState = mergeStates(
-        appStateModel.state,
-        userStateModel.state,
-        storageSession.state,
-      );
-      session.state = newMergedState;
-
-      const index = session.events.findIndex((e) => e.id === event.id);
-      if (index >= 0) {
-        session.events[index] = event;
-      } else {
-        session.events.push(event);
-      }
-      session.lastUpdateTime = storageSession.updateTime.getTime();
+      return {
+        mergedState: mergeStates(
+          appStateModel.state,
+          userStateModel.state,
+          storageSession.state,
+        ),
+        updateTime: storageSession.updateTime.getTime(),
+        reloadedEvents,
+      };
     });
+
+    // The caller's session is mutated only once the transaction has committed,
+    // so a failed append leaves it untouched.
+    session.events = result.reloadedEvents ?? session.events;
+    session.state = result.mergedState;
+
+    const index = session.events.findIndex((e) => e.id === event.id);
+    if (index >= 0) {
+      session.events[index] = event;
+    } else {
+      session.events.push(event);
+    }
+    session.lastUpdateTime = result.updateTime;
 
     return event;
   }
