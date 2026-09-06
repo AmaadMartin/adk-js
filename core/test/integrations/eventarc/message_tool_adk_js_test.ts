@@ -53,6 +53,14 @@ describe('publishMessage payloads', () => {
     expect(errorDetails(res)).toContain('Failed to serialize data to JSON');
   });
 
+  it('rejects unpadded base64, as adk-python does', async () => {
+    // Every character is in the alphabet, so only the length check can reject
+    // it. adk-python raises `Incorrect padding` for the same input.
+    const res = await publish({data: 'aGVsbG8', is_base64_encoded: true});
+
+    expect(errorDetails(res)).toContain('Invalid base64 string');
+  });
+
   it('renders a non-JSON payload with String', async () => {
     const res = await publish({data: 42, datacontenttype: 'text/plain'});
 
@@ -106,7 +114,9 @@ describe('publishMessage validation stricter than adk-python', () => {
   });
 
   it('rejects base64 holding characters outside the alphabet', async () => {
-    const res = await publish({data: 'aGVsbG8h!!', is_base64_encoded: true});
+    // The length is already a multiple of four, so only the alphabet check can
+    // reject it. adk-python discards the four `!` and decodes `hello!`.
+    const res = await publish({data: 'aGVsbG8h!!!!', is_base64_encoded: true});
 
     expect(errorDetails(res)).toContain('Invalid base64 string');
   });
