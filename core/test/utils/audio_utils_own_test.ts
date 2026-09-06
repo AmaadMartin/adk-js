@@ -19,23 +19,7 @@ import {
   type MockInstance,
 } from 'vitest';
 import {logger} from '../../src/utils/logger.js';
-
-/** Builds little-endian signed 16-bit PCM bytes from integer samples. */
-function pcm(samples: number[]): Uint8Array {
-  const bytes = new Uint8Array(samples.length * 2);
-  const view = new DataView(bytes.buffer);
-  samples.forEach((sample, index) => view.setInt16(index * 2, sample, true));
-  return bytes;
-}
-
-function samplesOf(bytes: Uint8Array): number[] {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const decoded: number[] = [];
-  for (let offset = 0; offset + 1 < bytes.length; offset += 2) {
-    decoded.push(view.getInt16(offset, true));
-  }
-  return decoded;
-}
+import {pcm, ramp, samplesOf} from './pcm_fixtures.js';
 
 describe('audio_utils (adk-js specific)', () => {
   describe('toLiveInput', () => {
@@ -50,10 +34,7 @@ describe('audio_utils (adk-js specific)', () => {
     });
 
     it('warns and assumes the output rate when the mime type is absent', () => {
-      const result = toLiveInput(
-        pcm(Array.from({length: 600}, (_unused, i) => i)),
-        undefined,
-      );
+      const result = toLiveInput(pcm(ramp(600)), undefined);
 
       expect(samplesOf(result)).toHaveLength(400);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('no `rate=`'));

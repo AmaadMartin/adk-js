@@ -21,52 +21,24 @@ import {
   UserSimulatorStatus,
   type Event,
   type NextUserMessage,
-  type UserSimulator,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {pcm, ramp} from '../../utils/pcm_fixtures.js';
+import {
+  decode,
+  encode,
+  ScriptedUserSimulator,
+  textMessage,
+} from './audio_simulator_fixtures.js';
 import {FakeLlm} from './fake_llm.js';
 
 const NO_EVENTS: Event[] = [];
-
-function encode(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64');
-}
-
-function decode(data: string | undefined): Uint8Array {
-  return new Uint8Array(Buffer.from(data ?? '', 'base64'));
-}
-
-/** Builds little-endian signed 16-bit PCM bytes from integer samples. */
-function pcm(samples: number[]): Uint8Array {
-  const bytes = new Uint8Array(samples.length * 2);
-  const view = new DataView(bytes.buffer);
-  samples.forEach((sample, index) => view.setInt16(index * 2, sample, true));
-  return bytes;
-}
-
-function ramp(count: number): number[] {
-  return Array.from({length: count}, (_unused, index) => index);
-}
-
-/** A wrapped simulator that replays one scripted result per call. */
-class ScriptedUserSimulator implements UserSimulator {
-  constructor(private readonly result: NextUserMessage) {}
-
-  async getNextUserMessage(_events: Event[]): Promise<NextUserMessage> {
-    return this.result;
-  }
-}
 
 function buildSimulator(result?: NextUserMessage) {
   const audioLlm = new FakeLlm();
   const simulator = new LlmAudioUserSimulator({
     config: parseLlmAudioUserSimulatorConfig({audioModel: 'test-audio-model'}),
-    textSimulator: new ScriptedUserSimulator(
-      result ?? {
-        status: UserSimulatorStatus.SUCCESS,
-        userMessage: {parts: [{text: 'hello'}], role: 'user'},
-      },
-    ),
+    textSimulator: new ScriptedUserSimulator([result ?? textMessage('hello')]),
     audioLlm,
   });
   return {simulator, audioLlm};
@@ -375,9 +347,9 @@ describe('LlmAudioUserSimulator (adk-js specific)', () => {
       const audioLlm = new FakeLlm();
       const simulator = new LlmAudioUserSimulator({
         config: {type: LLM_AUDIO_USER_SIMULATOR_TYPE},
-        textSimulator: new ScriptedUserSimulator({
-          status: UserSimulatorStatus.STOP_SIGNAL_DETECTED,
-        }),
+        textSimulator: new ScriptedUserSimulator([
+          {status: UserSimulatorStatus.STOP_SIGNAL_DETECTED},
+        ]),
         audioLlm,
       });
       audioLlm.responses.push({
@@ -409,9 +381,9 @@ describe('LlmAudioUserSimulator (adk-js specific)', () => {
     });
 
     it('gives each simulator its own audio configuration object', async () => {
-      const textSimulator = new ScriptedUserSimulator({
-        status: UserSimulatorStatus.STOP_SIGNAL_DETECTED,
-      });
+      const textSimulator = new ScriptedUserSimulator([
+        {status: UserSimulatorStatus.STOP_SIGNAL_DETECTED},
+      ]);
       const first = new FakeLlm();
       const second = new FakeLlm();
       const audioPart = {
@@ -459,9 +431,9 @@ describe('LlmAudioUserSimulator (adk-js specific)', () => {
         () =>
           new LlmAudioUserSimulator({
             config,
-            textSimulator: new ScriptedUserSimulator({
-              status: UserSimulatorStatus.STOP_SIGNAL_DETECTED,
-            }),
+            textSimulator: new ScriptedUserSimulator([
+              {status: UserSimulatorStatus.STOP_SIGNAL_DETECTED},
+            ]),
             audioLlm: new FakeLlm(),
           }),
       ).not.toThrow();
@@ -472,9 +444,9 @@ describe('LlmAudioUserSimulator (adk-js specific)', () => {
         () =>
           new LlmAudioUserSimulator({
             config: parseLlmAudioUserSimulatorConfig({}),
-            textSimulator: new ScriptedUserSimulator({
-              status: UserSimulatorStatus.STOP_SIGNAL_DETECTED,
-            }),
+            textSimulator: new ScriptedUserSimulator([
+              {status: UserSimulatorStatus.STOP_SIGNAL_DETECTED},
+            ]),
           }),
       ).toThrow(/cloud_tts/);
     });
