@@ -28,7 +28,10 @@ const loaderState = vi.hoisted(() => ({
 vi.mock('../../src/utils/agent_loader.js', () => ({
   AgentFile: class {
     async load(): Promise<RunnableRoot> {
-      return loaderState.agent!;
+      if (!loaderState.agent) {
+        throw new Error('loaderState.agent was not set');
+      }
+      return loaderState.agent;
     }
     async [Symbol.asyncDispose](): Promise<void> {}
   },

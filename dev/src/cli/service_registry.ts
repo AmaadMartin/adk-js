@@ -61,15 +61,16 @@ const logger = new AdkLogger({label: 'ServiceRegistry', colorize: {all: true}});
 /** Builds one service from the URI that named it. */
 export type ServiceFactory<T> = (uri: string) => T | Promise<T>;
 
+/** The kinds a `type` field may name. A2A task stores are not among them. */
+const SERVICE_KINDS = ['session', 'artifact', 'memory'] as const;
+
 /** The service kinds a `services.yaml` entry can declare. */
-export type ServiceKind = 'session' | 'artifact' | 'memory';
+export type ServiceKind = (typeof SERVICE_KINDS)[number];
 
 /** The file names read from the agent directory, in the order they apply. */
 const YAML_FILE_NAMES = ['services.yaml', 'services.yml'];
 const SCRIPT_FILE_NAMES = [
   'services.ts',
-  'services.mts',
-  'services.cts',
   'services.js',
   'services.mjs',
   'services.cjs',
@@ -81,9 +82,6 @@ const EXPORT_NAME_SEPARATOR = '#';
 /** RFC 3986 scheme: a letter, then letters, digits, `+`, `-` or `.`. */
 const URI_SCHEME_PATTERN = /^([a-zA-Z][a-zA-Z0-9+.-]*):/;
 
-/** The kinds a `type` field may name. A2A task stores are not among them. */
-const SERVICE_KINDS = new Set<string>(['session', 'artifact', 'memory']);
-
 const SERVICE_ENTRY_SCHEMA = z.object({
   scheme: z.string().min(1),
   type: z.string().min(1),
@@ -93,7 +91,7 @@ const SERVICE_ENTRY_SCHEMA = z.object({
 const SERVICES_DOCUMENT_SCHEMA = z.object({services: z.array(z.unknown())});
 
 function isServiceKind(value: string): value is ServiceKind {
-  return SERVICE_KINDS.has(value);
+  return SERVICE_KINDS.some((kind) => kind === value);
 }
 
 function parseUriScheme(uri: string): string | undefined {
@@ -231,25 +229,20 @@ async function registerEntry(
     return;
   }
 
+  // One factory serves whichever kind the entry named: the class comes from a
+  // dynamic import, so nothing here can narrow it further than the register
+  // method it is handed to.
+  const factory = await createFactoryFromClassPath<
+    BaseSessionService & BaseArtifactService & BaseMemoryService
+  >(classPath, dir);
+
   switch (type) {
     case 'session':
-      target.registerSessionService(
-        scheme,
-        await createFactoryFromClassPath(classPath, dir),
-      );
-      return;
+      return target.registerSessionService(scheme, factory);
     case 'artifact':
-      target.registerArtifactService(
-        scheme,
-        await createFactoryFromClassPath(classPath, dir),
-      );
-      return;
+      return target.registerArtifactService(scheme, factory);
     case 'memory':
-      target.registerMemoryService(
-        scheme,
-        await createFactoryFromClassPath(classPath, dir),
-      );
-      return;
+      return target.registerMemoryService(scheme, factory);
   }
 }
 

@@ -9,6 +9,6 @@ export {
   getServiceRegistry,
   loadServicesModule,
 } from './cli/service_registry.js';
-export type {ServiceFactory, ServiceKind} from './cli/service_registry.js';
+export type {ServiceFactory} from './cli/service_registry.js';
 export {AdkApiClient} from './server/adk_api_client.js';
 export {AdkApiServer} from './server/adk_api_server.js';
