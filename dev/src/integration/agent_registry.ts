@@ -8,9 +8,12 @@ import {
   AgentTool,
   BaseAgent,
   LlmAgent,
+  LOAD_ARTIFACTS,
+  LOAD_MEMORY,
   LoopAgent,
   MCPToolset,
   ParallelAgent,
+  PRELOAD_MEMORY,
   SequentialAgent,
 } from '@google/adk';
 import * as path from 'node:path';
@@ -22,12 +25,17 @@ import {
 } from './agent_types.js';
 import {AnyFunctionTool, IntegrationRegistry} from './integration_registry.js';
 
-const BUILTIN_TOOLS = [
+// Names dropped from the tool list: tools whose processLlmRequest() rejects the
+// replay harness's DummyLlm model name, plus exit_loop.
+const SKIPPED_BUILTIN_TOOLS = [
   'exit_loop',
   'google_search',
   'url_context',
   'google_maps_grounding',
 ];
+
+// Built-in tools that run client-side, resolved by their canonical tool name.
+const BUILTIN_TOOL_INSTANCES = [LOAD_MEMORY, PRELOAD_MEMORY, LOAD_ARTIFACTS];
 
 export class AgentRegistry {
   private agents = new Map<string, BaseAgent>();
@@ -135,9 +143,15 @@ export class AgentRegistry {
 
       const tools = config.tools
         ?.map((toolConfig) => {
-          // Built in tools are skipped
-          if (BUILTIN_TOOLS.includes(toolConfig.name)) {
+          if (SKIPPED_BUILTIN_TOOLS.includes(toolConfig.name)) {
             return undefined;
+          }
+
+          const builtinTool = BUILTIN_TOOL_INSTANCES.find(
+            (tool) => tool.name === toolConfig.name,
+          );
+          if (builtinTool) {
+            return builtinTool;
           }
 
           if (toolConfig.name == 'LongRunningFunctionTool') {
@@ -174,7 +188,6 @@ export class AgentRegistry {
 
           return this.findToolOrThrow(toolConfig.name);
         })
-        // remove entries for built-in tools
         .filter((tool) => tool !== undefined);
 
       const options = {

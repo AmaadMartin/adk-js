@@ -8,12 +8,18 @@ import {
   AgentTool,
   FunctionTool,
   LlmAgent,
+  LOAD_ARTIFACTS,
+  LOAD_MEMORY,
   MCPToolset,
+  PRELOAD_MEMORY,
   SingleAgentCallback,
 } from '@google/adk';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {AgentRegistry} from '../../src/integration/agent_registry.js';
-import {YamlAgentConfig} from '../../src/integration/agent_types.js';
+import {
+  AgentClass,
+  YamlAgentConfig,
+} from '../../src/integration/agent_types.js';
 import {IntegrationRegistry} from '../../src/integration/integration_registry.js';
 
 describe('AgentRegistry', () => {
@@ -264,7 +270,12 @@ describe('AgentRegistry', () => {
       description: 'desc',
       instruction: 'inst',
       agentClass: 'LlmAgent',
-      tools: [{name: 'exit_loop'}],
+      tools: [
+        {name: 'exit_loop'},
+        {name: 'google_search'},
+        {name: 'url_context'},
+        {name: 'google_maps_grounding'},
+      ],
     } as unknown as YamlAgentConfig;
 
     agentRegistry.registerAgentConfig('builtin_agent', config);
@@ -272,5 +283,38 @@ describe('AgentRegistry', () => {
 
     expect(retrieved).toBeDefined();
     expect(retrieved.tools.length).toBe(0);
+  });
+
+  it('should attach client-side built-in tools named in a config', () => {
+    const tool = new FunctionTool({
+      name: 'custom_tool',
+      description: 'desc',
+      execute: async () => ({}),
+    });
+    integrationRegistry.registerTool('custom_tool', tool);
+
+    const config: YamlAgentConfig = {
+      name: 'builtin_tools_agent',
+      model: 'model',
+      description: 'desc',
+      instruction: 'inst',
+      agentClass: AgentClass.LlmAgent,
+      isRootAgent: false,
+      tools: [
+        {name: 'preload_memory'},
+        {name: 'load_memory'},
+        {name: 'load_artifacts'},
+        {name: 'custom_tool'},
+      ],
+    };
+
+    agentRegistry.registerAgentConfig('builtin_tools_agent', config);
+    const retrieved = agentRegistry.getAgent('builtin_tools_agent') as LlmAgent;
+
+    expect(retrieved.tools).toHaveLength(4);
+    expect(retrieved.tools[0]).toBe(PRELOAD_MEMORY);
+    expect(retrieved.tools[1]).toBe(LOAD_MEMORY);
+    expect(retrieved.tools[2]).toBe(LOAD_ARTIFACTS);
+    expect(retrieved.tools[3]).toBe(tool);
   });
 });
