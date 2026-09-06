@@ -69,7 +69,11 @@ export class AdkLogger implements Logger {
       },
       level: 'error',
       format: winston.format.combine(...formats),
-      transports: [new winston.transports.Console()],
+      transports: [
+        // Winston matches stderrLevels against the raw level name on
+        // info[LEVEL], so these stay lowercase despite the upper-casing format.
+        new winston.transports.Console({stderrLevels: ['warn', 'error']}),
+      ],
     });
   }
 
