@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, URL_CONTEXT, UrlContextTool} from '@google/adk';
+import {
+  Context,
+  createSession,
+  InvocationContext,
+  LlmRequest,
+  PluginManager,
+  URL_CONTEXT,
+  UrlContextTool,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 function makeRequest(model?: string, tools = []): LlmRequest {
@@ -15,6 +23,20 @@ function makeRequest(model?: string, tools = []): LlmRequest {
     toolsDict: {},
     liveConnectConfig: {},
   } as unknown as LlmRequest;
+}
+
+/**
+ * A real {@link Context}, so the managed-agent tests do not have to cast one.
+ * The tool reads nothing off it, but the signature requires it.
+ */
+function managedToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv1',
+      session: createSession({id: 's1', appName: 'test', userId: 'user'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('UrlContextTool', () => {
@@ -100,7 +122,7 @@ describe('UrlContextTool', () => {
 
       await new UrlContextTool().processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: managedToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);
@@ -116,7 +138,7 @@ describe('UrlContextTool', () => {
 
       await new UrlContextTool().processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: managedToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{urlContext: {}}]);

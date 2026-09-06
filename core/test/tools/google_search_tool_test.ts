@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GOOGLE_SEARCH, GoogleSearchTool, LlmRequest} from '@google/adk';
+import {
+  Context,
+  createSession,
+  GOOGLE_SEARCH,
+  GoogleSearchTool,
+  InvocationContext,
+  LlmRequest,
+  PluginManager,
+} from '@google/adk';
 import {Tool} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 
@@ -16,6 +24,20 @@ function makeRequest(model?: string, tools: Tool[] = []): LlmRequest {
     toolsDict: {},
     liveConnectConfig: {},
   };
+}
+
+/**
+ * A real {@link Context}, so the managed-agent tests do not have to cast one.
+ * The tool reads nothing off it, but the signature requires it.
+ */
+function managedToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv1',
+      session: createSession({id: 's1', appName: 'test', userId: 'user'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
 }
 
 describe('GoogleSearchTool', () => {
@@ -101,7 +123,7 @@ describe('GoogleSearchTool', () => {
 
       await new GoogleSearchTool().processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: managedToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);
@@ -117,7 +139,7 @@ describe('GoogleSearchTool', () => {
 
       await new GoogleSearchTool().processLlmRequest({
         llmRequest: req,
-        toolContext: {} as never,
+        toolContext: managedToolContext(),
       });
 
       expect(req.config!.tools).toEqual([{googleSearch: {}}]);

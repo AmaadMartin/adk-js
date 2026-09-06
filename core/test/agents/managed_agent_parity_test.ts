@@ -85,11 +85,10 @@ function scriptStream(responses: LlmResponse[]): void {
   );
 }
 
-/** Scripts `createInteractions` to throw `error` instead of yielding. */
+/** Scripts `createInteractions` to fail on its first response. */
 function scriptFailure(error: unknown): void {
-  // eslint-disable-next-line require-yield -- the seam's AsyncGenerator return type is fixed; this double only throws.
   vi.mocked(createInteractions).mockImplementation(async function* () {
-    throw error;
+    yield await Promise.reject<LlmResponse>(error);
   });
 }
 

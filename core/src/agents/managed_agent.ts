@@ -363,8 +363,11 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
     );
   }
 
-  // eslint-disable-next-line require-yield -- BaseAgent mandates an AsyncGenerator; the live API serves no Managed Agents surface, so there is nothing to emit.
-  protected async *runLiveImpl(): AsyncGenerator<Event, void, void> {
+  /**
+   * Declared as a plain method rather than a generator: it never emits, and a
+   * generator body with no `yield` would need a lint suppression to say so.
+   */
+  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
     throw new Error(
       'ManagedAgent does not support live (bidirectional) runs; use runAsync.',
     );
