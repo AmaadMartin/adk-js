@@ -6,6 +6,24 @@
 
 export {ActiveStreamingTool} from './agents/active_streaming_tool.js';
 export type {ActiveStreamingToolParams} from './agents/active_streaming_tool.js';
+export {
+  agentConfigDiscriminator,
+  baseAgentYamlConfigSchema,
+  llmAgentYamlConfigSchema,
+  loopAgentYamlConfigSchema,
+  parallelAgentYamlConfigSchema,
+  parseAgentConfig,
+  sequentialAgentYamlConfigSchema,
+} from './agents/agent_config.js';
+export type {
+  AgentConfig,
+  AgentConfigTag,
+  BaseAgentYamlConfig,
+  LlmAgentYamlConfig,
+  LoopAgentYamlConfig,
+  ParallelAgentYamlConfig,
+  SequentialAgentYamlConfig,
+} from './agents/agent_config.js';
 export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
@@ -13,6 +31,11 @@ export type {
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
+export {
+  agentRefConfigSchema,
+  codeConfigSchema,
+} from './agents/common_configs.js';
+export type {AgentRefConfig, CodeConfig} from './agents/common_configs.js';
 export {Context} from './agents/context.js';
 export {
   REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
@@ -326,6 +349,8 @@ export {
 } from './tools/preload_memory_tool.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
+export {toolArgsConfigSchema, toolConfigSchema} from './tools/tool_configs.js';
+export type {ToolArgsConfig, ToolConfig} from './tools/tool_configs.js';
 export {
   IntentMismatchError,
   ToolConfirmation,

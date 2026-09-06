@@ -13,6 +13,21 @@ export function resetDeprecationWarnings(): void {
   warnedItems.clear();
 }
 
+/**
+ * Logs `reason` the first time `key` is seen, and stays silent afterwards.
+ *
+ * `key` identifies the deprecated item, so one deprecation never silences
+ * another. Use this for a deprecated function or entry point, and
+ * {@link deprecated} for a deprecated class.
+ */
+export function warnDeprecatedOnce(key: string, reason: string): void {
+  if (warnedItems.has(key)) {
+    return;
+  }
+  warnedItems.add(key);
+  logger.warn(reason);
+}
+
 // `any[]` rather than `unknown[]`: a class whose constructor takes a typed
 // config (every agent) is not assignable to `new (...args: unknown[]) => …`,
 // so the stricter signature would reject exactly the classes this decorates.
@@ -36,10 +51,7 @@ export function deprecated(reason: string) {
     const className = (target as Function).name;
     const wrapped = class extends (target as Constructor) {
       constructor(...args: unknown[]) {
-        if (!warnedItems.has(className)) {
-          logger.warn(reason);
-          warnedItems.add(className);
-        }
+        warnDeprecatedOnce(className, reason);
         // eslint-disable-next-line constructor-super -- super is required, ESLint can't figure it out.
         super(...args);
       }
