@@ -24,6 +24,7 @@ import {App, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
+  FileModuleType,
   replaceDirnamePlugin,
 } from '../../src/utils/agent_loader.js';
 import * as fileUtils from '../../src/utils/file_utils.js';
@@ -145,6 +146,28 @@ class FakeAgentForApp extends BaseAgent {
 }
 const agent = new FakeAgentForApp('agent_for_app_default');
 export default new App({ name: 'test_app_default', rootAgent: agent });
+`;
+
+const esmModuleFixture = `
+import {BaseAgent} from '@google/adk';
+
+class FakeEsmModuleAgent extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+export const rootAgent = new FakeEsmModuleAgent('esmModuleAgent');
+`;
+
+const cjsModuleFixture = `
+const {BaseAgent} = require('@google/adk');
+
+class FakeCjsModuleAgent extends BaseAgent {
+  constructor(name) {
+    super({name});
+  }
+}
+exports.rootAgent = new FakeCjsModuleAgent('cjsModuleAgent');
 `;
 
 describe('AgentLoader', () => {
@@ -715,6 +738,119 @@ describe('AgentLoader', () => {
       expect(result).toMatchObject({
         loader: 'js',
       });
+    });
+  });
+
+  describe('module type resolution from file extension', () => {
+    async function writeCompiledFixture(fileName: string, content: string) {
+      const agentPath = path.join(tempAgentsDir, fileName);
+      await fs.writeFile(agentPath, content);
+      (esbuild.build as Mock).mockImplementation(
+        async (options: {outfile: string}) => {
+          await fs.writeFile(options.outfile, content);
+        },
+      );
+      return agentPath;
+    }
+
+    it.each([
+      {
+        source: 'ext_mjs_agent.mjs',
+        outfile: 'ext_mjs_agent.mjs',
+        format: 'esm',
+        content: esmModuleFixture,
+        agentName: 'esmModuleAgent',
+      },
+      {
+        source: 'ext_mts_agent.mts',
+        outfile: 'ext_mts_agent.mjs',
+        format: 'esm',
+        content: esmModuleFixture,
+        agentName: 'esmModuleAgent',
+      },
+      {
+        source: 'ext_cjs_agent.cjs',
+        outfile: 'ext_cjs_agent.cjs',
+        format: 'cjs',
+        content: cjsModuleFixture,
+        agentName: 'cjsModuleAgent',
+      },
+      {
+        source: 'ext_cts_agent.cts',
+        outfile: 'ext_cts_agent.cjs',
+        format: 'cjs',
+        content: cjsModuleFixture,
+        agentName: 'cjsModuleAgent',
+      },
+      {
+        source: 'ext_unsupported_agent.jsx',
+        outfile: 'ext_unsupported_agent.cjs',
+        format: 'cjs',
+        content: cjsModuleFixture,
+        agentName: 'cjsModuleAgent',
+      },
+    ])(
+      'compiles $source as $format without reading package.json',
+      async ({source, outfile, format, content, agentName}) => {
+        const agentPath = await writeCompiledFixture(source, content);
+
+        const agentFile = new AgentFile(agentPath);
+        const agent = await agentFile.load();
+
+        expect(agent.name).toEqual(agentName);
+        expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+          outfile: compiledPath(outfile),
+          format,
+        });
+        expect(fileUtils.isFileExists).not.toHaveBeenCalled();
+
+        await agentFile.dispose();
+      },
+    );
+
+    it('prefers an explicit ESM moduleType over the package.json lookup', async () => {
+      const agentPath = await writeCompiledFixture(
+        'ext_explicit_esm_agent.js',
+        esmModuleFixture,
+      );
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: true,
+        moduleType: FileModuleType.ESM,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('esmModuleAgent');
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        outfile: compiledPath('ext_explicit_esm_agent.mjs'),
+        format: 'esm',
+      });
+      expect(fileUtils.isFileExists).not.toHaveBeenCalled();
+
+      await agentFile.dispose();
+    });
+
+    it('prefers an explicit CJS moduleType over the .mjs extension', async () => {
+      const agentPath = await writeCompiledFixture(
+        'ext_explicit_cjs_agent.mjs',
+        cjsModuleFixture,
+      );
+
+      const agentFile = new AgentFile(agentPath, {
+        compile: true,
+        bundle: true,
+        moduleType: FileModuleType.CJS,
+      });
+      const agent = await agentFile.load();
+
+      expect(agent.name).toEqual('cjsModuleAgent');
+      expect((esbuild.build as Mock).mock.calls[0][0]).toMatchObject({
+        outfile: compiledPath('ext_explicit_cjs_agent.cjs'),
+        format: 'cjs',
+      });
+
+      await agentFile.dispose();
     });
   });
 
