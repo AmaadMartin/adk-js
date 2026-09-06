@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LogLevel, setLogLevel} from '@google/adk';
+import {
+  DatabaseSessionService,
+  getArtifactServiceFromUri,
+  getSessionServiceFromUri,
+  InMemoryArtifactService,
+  InMemorySessionService,
+  LogLevel,
+  setLogLevel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -49,6 +57,67 @@ vi.mock('@google/adk', async (importOriginal) => {
   };
 });
 
+/** A URI scheme the CLI help text names, with a URI that exercises it. */
+interface ServiceUriScheme {
+  scheme: string;
+  sampleUri: string;
+}
+
+/**
+ * Schemes named in the session help text. `vertexai://` is routed by the
+ * registry but deliberately undocumented, because
+ * `core/src/sessions/registry.ts` discards the URI and builds a
+ * `VertexAiSessionService` that throws without a project and location.
+ */
+const SESSION_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
+  {scheme: 'memory://', sampleUri: 'memory://'},
+  {scheme: 'postgres://', sampleUri: 'postgres://user:pw@localhost:5432/adk'},
+  {
+    scheme: 'postgresql://',
+    sampleUri: 'postgresql://user:pw@localhost:5432/adk',
+  },
+  {scheme: 'mysql://', sampleUri: 'mysql://user:pw@localhost:3306/adk'},
+  {scheme: 'mariadb://', sampleUri: 'mariadb://user:pw@localhost:3306/adk'},
+  {scheme: 'mssql://', sampleUri: 'mssql://user:pw@localhost:1433/adk'},
+  {scheme: 'sqlite://', sampleUri: 'sqlite://./adk_sessions.db'},
+  {scheme: 'sqlite://:memory:', sampleUri: 'sqlite://:memory:'},
+];
+
+/** Schemes named in the artifact help text. */
+const ARTIFACT_SERVICE_URI_SCHEMES: ServiceUriScheme[] = [
+  {scheme: 'memory://', sampleUri: 'memory://'},
+  {scheme: 'gs://', sampleUri: 'gs://my-bucket'},
+  {scheme: 'file://', sampleUri: 'file:///tmp/adk-artifacts'},
+];
+
+/**
+ * Returns the help description registered for `longFlag` on the `web` command.
+ *
+ * The service URI options are single shared `Option` instances added to every
+ * command, so reading `web`'s registration reads the text all five render.
+ */
+function webOptionDescription(
+  program: ReturnType<typeof createProgram>,
+  longFlag: string,
+): string {
+  const web = program.commands.find((command) => command.name() === 'web');
+  if (!web) {
+    expect.fail('The `web` command is not registered');
+  }
+
+  const option = web.options.find((o) => o.long === longFlag);
+  if (!option) {
+    expect.fail(`The \`web\` command does not register ${longFlag}`);
+  }
+
+  return option.description;
+}
+
+/** Returns the options the CLI passed to the first `AdkApiServer` it built. */
+function servedOptions() {
+  return vi.mocked(AdkApiServer).mock.calls[0][0];
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -60,6 +129,7 @@ describe('CLI Entrypoint', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   const parse = async (args: string[]) => {
@@ -466,6 +536,91 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+  });
+
+  describe('service URI help text', () => {
+    it('names only session service URI schemes the registry accepts', () => {
+      const description = webOptionDescription(
+        program,
+        '--session_service_uri',
+      );
+
+      for (const {scheme, sampleUri} of SESSION_SERVICE_URI_SCHEMES) {
+        expect(description).toContain(scheme);
+        expect(() => getSessionServiceFromUri(sampleUri)).not.toThrow();
+      }
+    });
+
+    it('names only artifact service URI schemes the registry accepts', () => {
+      const description = webOptionDescription(
+        program,
+        '--artifact_service_uri',
+      );
+
+      for (const {scheme, sampleUri} of ARTIFACT_SERVICE_URI_SCHEMES) {
+        expect(description).toContain(scheme);
+        expect(() => getArtifactServiceFromUri(sampleUri)).not.toThrow();
+      }
+    });
+
+    it('documents the DATABASE_URL fall-back and the memory:// default', () => {
+      const description = webOptionDescription(
+        program,
+        '--session_service_uri',
+      );
+
+      expect(description).toContain('DATABASE_URL');
+      expect(description).toContain('if that is unset too, memory://');
+    });
+
+    it('documents the memory:// default for artifacts', () => {
+      const description = webOptionDescription(
+        program,
+        '--artifact_service_uri',
+      );
+
+      expect(description).toContain('If unset, memory://');
+    });
+  });
+
+  describe('service URI fall-backs', () => {
+    it('uses DATABASE_URL when --session_service_uri is omitted', async () => {
+      vi.stubEnv('DATABASE_URL', 'sqlite://:memory:');
+
+      await parse(['web']);
+
+      expect(servedOptions().sessionService).toBeInstanceOf(
+        DatabaseSessionService,
+      );
+    });
+
+    it('falls back to an in-memory session service when neither is set', async () => {
+      vi.stubEnv('DATABASE_URL', undefined);
+
+      await parse(['web']);
+
+      expect(servedOptions().sessionService).toBeInstanceOf(
+        InMemorySessionService,
+      );
+    });
+
+    it('prefers --session_service_uri over DATABASE_URL', async () => {
+      vi.stubEnv('DATABASE_URL', 'sqlite://:memory:');
+
+      await parse(['web', '--session_service_uri', 'memory://']);
+
+      expect(servedOptions().sessionService).toBeInstanceOf(
+        InMemorySessionService,
+      );
+    });
+
+    it('falls back to an in-memory artifact service when the flag is omitted', async () => {
+      await parse(['web']);
+
+      expect(servedOptions().artifactService).toBeInstanceOf(
+        InMemoryArtifactService,
+      );
     });
   });
 });
