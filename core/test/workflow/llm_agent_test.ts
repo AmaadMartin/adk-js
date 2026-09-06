@@ -84,8 +84,8 @@ function echoAgent(name = 'echo'): LlmAgent {
 /**
  * An agent whose instruction is `template`, answering with the instruction as
  * the model received it — i.e. after placeholder resolution. The agent's own
- * identity preamble comes first in the system instruction, so the reply is the
- * last non-empty line of it.
+ * identity preamble follows it in the system instruction, so the reply is the
+ * first non-empty line of it.
  */
 function templateProbeAgent(template: string, name = 'probe'): LlmAgent {
   return new LlmAgent({
@@ -95,7 +95,7 @@ function templateProbeAgent(template: string, name = 'probe'): LlmAgent {
       const lines = String(request.config?.systemInstruction ?? '')
         .split('\n')
         .filter((line) => line.trim());
-      return lines[lines.length - 1] ?? '';
+      return lines[0] ?? '';
     }),
   });
 }

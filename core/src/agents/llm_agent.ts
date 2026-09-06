@@ -7,7 +7,6 @@
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
-import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
@@ -42,7 +41,6 @@ import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
 
 import {logger} from '../utils/logger.js';
-import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
@@ -65,21 +63,12 @@ import {
   handleFunctionCallsAsync,
 } from './functions.js';
 
-import {AUTH_PREPROCESSOR} from '../auth/auth_preprocessor.js';
 import {BaseContextCompactor} from '../context/base_context_compactor.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {LiveRequest, LiveRequestQueue} from './live_request_queue.js';
 import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_llm_request_processor.js';
-import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
-import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
-import {CONTENT_REQUEST_PROCESSOR} from './processors/content_request_processor.js';
-import {ContextCompactorRequestProcessor} from './processors/context_compactor_request_processor.js';
-import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
-import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from './processors/instructions_llm_request_processor.js';
-import {INTERACTIONS_REQUEST_PROCESSOR} from './processors/interactions_request_processor.js';
-import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_confirmation_llm_request_processor.js';
-import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_llm_request_processor.js';
-import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
+import {SET_MODEL_RESPONSE_TOOL_NAME} from './processors/output_schema_request_processor.js';
+import {SingleFlow} from './processors/single_flow.js';
 import {ReadonlyContext} from './readonly_context.js';
 import {StreamingMode} from './run_config.js';
 
@@ -537,44 +526,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.afterToolCallback = config.afterToolCallback;
     this.codeExecutor = config.codeExecutor;
 
-    // TODO - b/425992518: Define these processor arrays.
-    // Orders matter, don't change. Append new processors to the end
-    this.requestProcessors = config.requestProcessors ?? [
-      BASIC_LLM_REQUEST_PROCESSOR,
-      AUTH_PREPROCESSOR,
-      IDENTITY_LLM_REQUEST_PROCESSOR,
-      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
-      REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
-      REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
-      CONTENT_REQUEST_PROCESSOR,
-      INTERACTIONS_REQUEST_PROCESSOR,
-      CODE_EXECUTION_REQUEST_PROCESSOR,
-      TOOL_FILTER_REQUEST_PROCESSOR,
-    ];
-
-    if (
-      !config.requestProcessors &&
-      config.contextCompactors &&
-      config.contextCompactors.length > 0
-    ) {
-      // Find where CONTENT_REQUEST_PROCESSOR is to place compaction immediately before it.
-      const contentIndex = this.requestProcessors.indexOf(
-        CONTENT_REQUEST_PROCESSOR,
-      );
-      if (contentIndex !== -1) {
-        this.requestProcessors.splice(
-          contentIndex,
-          0,
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
-      } else {
-        this.requestProcessors.push(
-          new ContextCompactorRequestProcessor(config.contextCompactors),
-        );
-      }
-    }
-
-    this.responseProcessors = config.responseProcessors ?? [];
+    const flow = new SingleFlow(config.contextCompactors);
+    this.requestProcessors = config.requestProcessors ?? flow.requestProcessors;
+    this.responseProcessors =
+      config.responseProcessors ?? flow.responseProcessors;
 
     // Preserve the agent transfer behavior.
     const agentTransferDisabled =
@@ -1481,24 +1436,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       // Task mode: the agent completes by calling `finish_task` (whose params
       // mirror the output schema) rather than emitting structured output.
       allTools.push(this.finishTaskTool);
-    } else if (
-      this.outputSchema &&
-      allTools.length > 0 &&
-      !canUseOutputSchemaWithTools(this.canonicalModel.model)
-    ) {
-      const setModelResponseTool = new FunctionTool({
-        name: 'set_model_response',
-        description:
-          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-        parameters: this.outputSchema,
-        execute: async (args, toolContext) => {
-          if (toolContext) {
-            toolContext.actions.skipSummarization = true;
-          }
-          return JSON.stringify(args);
-        },
-      });
-      allTools.push(setModelResponseTool);
     }
     // Collect turn metadata and event actions
     // TODO - b/425992518: misleading, this is passing metadata.
@@ -1525,8 +1462,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
         // The allowedTools set is populated by request processors.
         return (
           !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name) ||
-          tool.name === 'set_model_response'
+          llmRequest.allowedTools.includes(tool.name)
         );
       });
 
@@ -1660,7 +1596,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     if (mergedEvent.content) {
       const functionCalls = getFunctionCalls(mergedEvent);
       const setModelResponseCall = functionCalls.find(
-        (call) => call.name === 'set_model_response',
+        (call) => call.name === SET_MODEL_RESPONSE_TOOL_NAME,
       );
       if (setModelResponseCall) {
         const args = setModelResponseCall.args;
