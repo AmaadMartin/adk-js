@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {CompactedEvent, createEvent} from '@google/adk';
+import {createEvent} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -13,6 +13,7 @@ import {
   mergeFunctionResponseEvents,
   removeClientFunctionCallId,
 } from '../../../src/agents/processors/content_processor_utils.js';
+import {createCompactedEvent} from '../../../src/events/compacted_event.js';
 
 describe('getContents', () => {
   it('should handle object responses in convertForeignEvent', () => {
@@ -471,14 +472,15 @@ describe('getContents', () => {
   });
 
   it('should convert CompactedEvent correctly', () => {
-    const compactedEvent = {
-      isCompacted: true,
+    const compactedEvent = createCompactedEvent({
       author: 'user',
       compactedContent: 'synthesized summary',
       timestamp: 12345,
       invocationId: 'inv1',
       branch: 'main',
-    } as unknown as CompactedEvent;
+      startTime: 0,
+      endTime: 12345,
+    });
 
     const contents = getContents([compactedEvent], 'my_agent');
     expect(contents).toHaveLength(1);
