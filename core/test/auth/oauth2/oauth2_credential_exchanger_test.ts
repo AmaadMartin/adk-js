@@ -110,6 +110,56 @@ describe('OAuth2CredentialExchanger', () => {
       expect(result.wasExchanged).toBe(true);
       expect(result.credential.oauth2?.accessToken).toBe('new-token');
     });
+
+    it('exchanges an authorization code for an OpenIdConnect scheme that omits grantTypesSupported', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {
+        oauth2: {clientId: 'id', clientSecret: 'secret', authCode: 'code'},
+      } as AuthCredential;
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
+        scopes: ['openid'],
+      };
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockClear();
+      vi.mocked(oauth2Utils.fetchOAuth2Tokens).mockResolvedValue({
+        accessToken: 'new-token',
+      });
+
+      const result = await exchanger.exchange({authCredential, authScheme});
+
+      expect(result.wasExchanged).toBe(true);
+      expect(result.credential.oauth2?.accessToken).toBe('new-token');
+      expect(oauth2Utils.fetchOAuth2Tokens).toHaveBeenCalledOnce();
+    });
+
+    it('throws CredentialExchangeError for an OpenIdConnect scheme that omits grantTypesSupported when the credential is incomplete', async () => {
+      const exchanger = new OAuth2CredentialExchanger();
+      const authCredential = {oauth2: {}} as AuthCredential;
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
+        scopes: ['openid'],
+      };
+
+      vi.mocked(oauth2Utils.getTokenEndpoint).mockReturnValue(
+        'https://example.com/token',
+      );
+
+      await expect(
+        exchanger.exchange({authCredential, authScheme}),
+      ).rejects.toThrow(CredentialExchangeError);
+    });
   });
 
   describe('determineGrantType', () => {
@@ -138,9 +188,14 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns CLIENT_CREDENTIALS for OpenIdConnect with client_credentials in grantTypesSupported', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
         grantTypesSupported: ['client_credentials'],
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.CLIENT_CREDENTIALS,
@@ -148,9 +203,14 @@ describe('OAuth2CredentialExchanger', () => {
     });
 
     it('returns AUTHORIZATION_CODE for OpenIdConnect without client_credentials in grantTypesSupported', () => {
-      const authScheme = {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
         grantTypesSupported: ['authorization_code'],
-      } as AuthScheme;
+      };
 
       expect(determineGrantType(authScheme)).toBe(
         OAuthGrantType.AUTHORIZATION_CODE,
@@ -159,6 +219,46 @@ describe('OAuth2CredentialExchanger', () => {
 
     it('returns undefined if no flows or grantTypesSupported', () => {
       const authScheme = {} as AuthScheme;
+
+      expect(determineGrantType(authScheme)).toBeUndefined();
+    });
+
+    it('returns AUTHORIZATION_CODE for an OpenIdConnect scheme that omits grantTypesSupported', () => {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
+        scopes: ['openid'],
+      };
+
+      expect(determineGrantType(authScheme)).toBe(
+        OAuthGrantType.AUTHORIZATION_CODE,
+      );
+    });
+
+    it('returns AUTHORIZATION_CODE for an OpenIdConnect scheme with an empty grantTypesSupported', () => {
+      const authScheme: AuthScheme = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+        authorizationEndpoint: 'https://example.com/auth',
+        tokenEndpoint: 'https://example.com/token',
+        grantTypesSupported: [],
+      };
+
+      expect(determineGrantType(authScheme)).toBe(
+        OAuthGrantType.AUTHORIZATION_CODE,
+      );
+    });
+
+    it('returns undefined for an apiKey scheme', () => {
+      const authScheme: AuthScheme = {
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'header',
+      };
 
       expect(determineGrantType(authScheme)).toBeUndefined();
     });

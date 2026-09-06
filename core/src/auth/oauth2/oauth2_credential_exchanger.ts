@@ -73,13 +73,16 @@ export function determineGrantType(
     return getOAuthGrantTypeFromFlow(authScheme.flows);
   }
 
-  if ((authScheme as OpenIdConnectWithConfig).grantTypesSupported) {
+  if (authScheme.type === 'openIdConnect') {
     const oidcScheme = authScheme as OpenIdConnectWithConfig;
 
     if (oidcScheme.grantTypesSupported?.includes('client_credentials')) {
       return OAuthGrantType.CLIENT_CREDENTIALS;
     }
 
+    // OpenID Connect Discovery 1.0 section 3 makes grant_types_supported
+    // OPTIONAL and defaults it to ["authorization_code", "implicit"], so a
+    // provider that omits it still supports the authorization code grant.
     return OAuthGrantType.AUTHORIZATION_CODE;
   }
   return undefined;
