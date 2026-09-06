@@ -44,9 +44,7 @@ export interface EventarcToolConfig {
 // where the neighbouring Pub/Sub config uses `z.strictObject`.
 const eventarcToolConfigSchema = z.object({
   projectId: z.string().optional(),
-  publishTimeout: z
-    .number()
-    .default(EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS),
+  publishTimeout: z.number().default(EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS),
 });
 
 /**
