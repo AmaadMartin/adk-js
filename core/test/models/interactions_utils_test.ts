@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import {
   Content,
   FinishReason,
@@ -16,6 +14,7 @@ import {
   Language,
   Outcome,
   Part,
+  Type,
 } from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {
@@ -24,10 +23,18 @@ import {
   convertInteractionToLlmResponse,
   convertStepToParts,
   convertToolsConfigToInteractionsFormat,
+  ExtendedInteraction,
+  ExtendedInteractionSSEEvent,
   extractSystemInstruction,
   generateContentViaInteractions,
   getLatestUserContents,
+  ReceivedStep,
 } from '../../src/models/interactions_utils.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
+
+function createLlmRequest(overrides: Partial<LlmRequest>): LlmRequest {
+  return {contents: [], toolsDict: {}, liveConnectConfig: {}, ...overrides};
+}
 
 describe('interactions_utils', () => {
   describe('getLatestUserContents', () => {
@@ -256,7 +263,7 @@ describe('interactions_utils', () => {
               type: 'image',
               data: 'base64data',
               mime_type: 'image/png',
-            } as any,
+            },
           ],
         },
       ]);
@@ -282,7 +289,7 @@ describe('interactions_utils', () => {
               type: 'image',
               uri: 'gs://bucket/img.png',
               mime_type: 'image/png',
-            } as any,
+            },
           ],
         },
       ]);
@@ -341,7 +348,7 @@ describe('interactions_utils', () => {
           {
             thought: true,
             thoughtSignature: 'sig-data-string',
-          } as any,
+          },
         ],
       };
       expect(convertContentToSteps(content)).toEqual([
@@ -372,7 +379,7 @@ describe('interactions_utils', () => {
               type: 'audio',
               data: 'audiodata',
               mime_type: 'audio/mp3',
-            } as any,
+            },
           ],
         },
       ]);
@@ -398,7 +405,7 @@ describe('interactions_utils', () => {
               type: 'video',
               data: 'videodata',
               mime_type: 'video/mp4',
-            } as any,
+            },
           ],
         },
       ]);
@@ -424,7 +431,7 @@ describe('interactions_utils', () => {
               type: 'document',
               data: 'docdata',
               mime_type: 'application/pdf',
-            } as any,
+            },
           ],
         },
       ]);
@@ -450,7 +457,7 @@ describe('interactions_utils', () => {
               type: 'audio',
               uri: 'gs://bucket/audio.mp3',
               mime_type: 'audio/mp3',
-            } as any,
+            },
           ],
         },
       ]);
@@ -476,7 +483,7 @@ describe('interactions_utils', () => {
               type: 'video',
               uri: 'gs://bucket/video.mp4',
               mime_type: 'video/mp4',
-            } as any,
+            },
           ],
         },
       ]);
@@ -502,7 +509,7 @@ describe('interactions_utils', () => {
               type: 'document',
               uri: 'gs://bucket/doc.pdf',
               mime_type: 'application/pdf',
-            } as any,
+            },
           ],
         },
       ]);
@@ -527,7 +534,7 @@ describe('interactions_utils', () => {
               type: 'document',
               data: 'docdata',
               mime_type: '',
-            } as any,
+            },
           ],
         },
       ]);
@@ -552,7 +559,7 @@ describe('interactions_utils', () => {
               type: 'document',
               uri: 'gs://bucket/doc.pdf',
               mime_type: '',
-            } as any,
+            },
           ],
         },
       ]);
@@ -587,7 +594,7 @@ describe('interactions_utils', () => {
 
   describe('convertToolsConfigToInteractionsFormat', () => {
     it('should convert function declarations and built-in tools', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         tools: [
           {
             functionDeclarations: [
@@ -595,9 +602,9 @@ describe('interactions_utils', () => {
                 name: 'tool1',
                 description: 'desc1',
                 parameters: {
-                  type: 'OBJECT',
+                  type: Type.OBJECT,
                   properties: {
-                    param1: {type: 'STRING'},
+                    param1: {type: Type.STRING},
                   },
                   required: ['param1'],
                 },
@@ -626,13 +633,11 @@ describe('interactions_utils', () => {
         {type: 'code_execution'},
       ];
 
-      expect(convertToolsConfigToInteractionsFormat(config as any)).toEqual(
-        expected,
-      );
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual(expected);
     });
 
     it('should convert function declarations without required parameters', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         tools: [
           {
             functionDeclarations: [
@@ -640,9 +645,9 @@ describe('interactions_utils', () => {
                 name: 'tool1_no_req',
                 description: 'desc_no_req',
                 parameters: {
-                  type: 'OBJECT',
+                  type: Type.OBJECT,
                   properties: {
-                    param1: {type: 'STRING'},
+                    param1: {type: Type.STRING},
                   },
                 },
               },
@@ -666,13 +671,11 @@ describe('interactions_utils', () => {
         },
       ];
 
-      expect(convertToolsConfigToInteractionsFormat(config as any)).toEqual(
-        expected,
-      );
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual(expected);
     });
 
     it('should convert function declarations with parametersJsonSchema and urlContext', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         tools: [
           {
             functionDeclarations: [
@@ -705,15 +708,13 @@ describe('interactions_utils', () => {
         {type: 'url_context'},
       ];
 
-      expect(convertToolsConfigToInteractionsFormat(config as any)).toEqual(
-        expected,
-      );
+      expect(convertToolsConfigToInteractionsFormat(config)).toEqual(expected);
     });
   });
 
   describe('convertInteractionToLlmResponse', () => {
     it('should convert successful interaction response', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'completed',
         steps: [
@@ -728,7 +729,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
 
       expect(response.interactionId).toBe('int-123');
       expect(response.turnComplete).toBe(true);
@@ -743,7 +744,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert failed interaction response', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'failed',
         error: {
@@ -752,7 +753,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
 
       expect(response.interactionId).toBe('int-123');
       expect(response.errorCode).toBe('RESOURCE_EXHAUSTED');
@@ -760,23 +761,23 @@ describe('interactions_utils', () => {
     });
 
     it('should convert failed interaction response with missing error details', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'failed',
         error: {},
       };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.errorCode).toBe('UNKNOWN_ERROR');
       expect(response.errorMessage).toBe('Unknown error');
     });
 
     it('should handle missing token counts in usage', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'completed',
         usage: {},
       };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.usageMetadata).toEqual({
         promptTokenCount: 0,
         candidatesTokenCount: 0,
@@ -785,11 +786,11 @@ describe('interactions_utils', () => {
     });
 
     it('should handle requires_action status', () => {
-      const interaction = {
+      const interaction: ExtendedInteraction = {
         id: 'int-123',
         status: 'requires_action',
       };
-      const response = convertInteractionToLlmResponse(interaction as any);
+      const response = convertInteractionToLlmResponse(interaction);
       expect(response.turnComplete).toBe(true);
       expect(response.finishReason).toBe('STOP');
     });
@@ -797,7 +798,7 @@ describe('interactions_utils', () => {
 
   describe('convertInteractionEventToLlmResponse', () => {
     it('should handle step.delta text event', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'text',
@@ -806,7 +807,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -824,7 +825,7 @@ describe('interactions_utils', () => {
       const aggregatedParts: Part[] = [];
 
       // 1. Step Start
-      const startEvent = {
+      const startEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.start',
         step: {
           type: 'function_call',
@@ -833,7 +834,7 @@ describe('interactions_utils', () => {
         },
       };
       let response = convertInteractionEventToLlmResponse(
-        startEvent as any,
+        startEvent,
         aggregatedParts,
         'int-1',
       );
@@ -850,7 +851,7 @@ describe('interactions_utils', () => {
       });
 
       // 2. Step Delta (arguments chunk 1)
-      const deltaEvent1 = {
+      const deltaEvent1: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'arguments_delta',
@@ -858,7 +859,7 @@ describe('interactions_utils', () => {
         },
       };
       response = convertInteractionEventToLlmResponse(
-        deltaEvent1 as any,
+        deltaEvent1,
         aggregatedParts,
         'int-1',
       );
@@ -866,7 +867,7 @@ describe('interactions_utils', () => {
       expect(aggregatedParts[0].partMetadata?.accumulatedArgs).toBe('{"x":');
 
       // 3. Step Delta (arguments chunk 2)
-      const deltaEvent2 = {
+      const deltaEvent2: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'arguments_delta',
@@ -874,7 +875,7 @@ describe('interactions_utils', () => {
         },
       };
       response = convertInteractionEventToLlmResponse(
-        deltaEvent2 as any,
+        deltaEvent2,
         aggregatedParts,
         'int-1',
       );
@@ -882,11 +883,11 @@ describe('interactions_utils', () => {
       expect(aggregatedParts[0].partMetadata?.accumulatedArgs).toBe('{"x": 1}');
 
       // 4. Step Stop
-      const stopEvent = {
+      const stopEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.stop',
       };
       response = convertInteractionEventToLlmResponse(
-        stopEvent as any,
+        stopEvent,
         aggregatedParts,
         'int-1',
       );
@@ -914,7 +915,7 @@ describe('interactions_utils', () => {
 
     it('should handle step.start thought event', () => {
       const aggregatedParts: Part[] = [];
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.start',
         step: {
           type: 'thought',
@@ -922,7 +923,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -939,13 +940,13 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update completed event', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'completed',
       };
       const aggregatedParts: Part[] = [{text: 'final text'}];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -962,7 +963,7 @@ describe('interactions_utils', () => {
 
   describe('generateContentViaInteractions', () => {
     it('should handle non-streaming call', async () => {
-      const mockInteraction = {
+      const mockInteraction: ExtendedInteraction = {
         id: 'int-999',
         status: 'completed',
         steps: [
@@ -979,14 +980,14 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         false,
       );
       const responses = [];
@@ -1017,7 +1018,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle streaming call', async () => {
-      const mockEvents = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -1056,14 +1057,14 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello stream'}]}],
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         true,
       );
       const responses = [];
@@ -1105,7 +1106,7 @@ describe('interactions_utils', () => {
     });
 
     it('should trim history when previousInteractionId is present', async () => {
-      const mockInteraction = {
+      const mockInteraction: ExtendedInteraction = {
         id: 'int-999',
         status: 'completed',
         steps: [
@@ -1122,7 +1123,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [
           {role: 'user', parts: [{text: 'Turn 1'}]},
@@ -1130,11 +1131,11 @@ describe('interactions_utils', () => {
           {role: 'user', parts: [{text: 'Turn 2'}]},
         ],
         previousInteractionId: 'int-prev',
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         false,
       );
       const responses = [];
@@ -1160,7 +1161,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle streaming call with interaction event and extract interaction ID', async () => {
-      const mockEvents = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -1195,14 +1196,14 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         true,
       );
       const responses = [];
@@ -1226,7 +1227,7 @@ describe('interactions_utils', () => {
     });
 
     it('should pass all generation config parameters', async () => {
-      const mockInteraction = {
+      const mockInteraction: ExtendedInteraction = {
         id: 'int-999',
         status: 'completed',
         steps: [
@@ -1243,7 +1244,7 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
         config: {
@@ -1256,11 +1257,11 @@ describe('interactions_utils', () => {
           frequencyPenalty: 0.5,
           tools: [{functionDeclarations: [{name: 'my_tool'}]}],
         } as GenerateContentConfig,
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         false,
       );
       for await (const _ of generator) {
@@ -1319,18 +1320,18 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
         config: {
           tools: [{functionDeclarations: [{name: 'my_tool'}]}],
           temperature: 0.5,
         } as GenerateContentConfig,
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         true,
       );
       for await (const _ of generator) {
@@ -1363,17 +1364,17 @@ describe('interactions_utils', () => {
 
   describe('convertStepToParts', () => {
     it('should return empty array for empty or invalid step', () => {
-      expect(convertStepToParts(null as any)).toEqual([]);
-      expect(convertStepToParts({} as any)).toEqual([]);
-      expect(convertStepToParts({type: 'invalid'} as any)).toEqual([]);
+      expect(convertStepToParts(null)).toEqual([]);
+      expect(convertStepToParts({})).toEqual([]);
+      expect(convertStepToParts({type: 'invalid'})).toEqual([]);
     });
 
     it('should convert model_output step with text content', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'model_output',
         content: [{type: 'text', text: 'hello'}],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           text: 'hello',
         },
@@ -1381,11 +1382,11 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with text content missing text', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'model_output',
         content: [{type: 'text'}],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           text: '',
         },
@@ -1393,13 +1394,13 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_call step', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'function_call',
         id: 'call-1',
         name: 'my_tool',
         arguments: {a: 1},
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           functionCall: {
             id: 'call-1',
@@ -1411,12 +1412,12 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_call step with missing arguments', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'function_call',
         id: 'call-1',
         name: 'my_tool',
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           functionCall: {
             id: 'call-1',
@@ -1428,14 +1429,14 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_call step with signature', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'function_call',
         id: 'call-1',
         name: 'my_tool',
         arguments: {a: 1},
         signature: 'sig-123',
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           functionCall: {
             id: 'call-1',
@@ -1448,12 +1449,12 @@ describe('interactions_utils', () => {
     });
 
     it('should convert function_result step', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'function_result',
         call_id: 'call-1',
         result: {res: 'ok'},
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           functionResponse: {
             id: 'call-1',
@@ -1465,7 +1466,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with image content (data)', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'model_output',
         content: [
           {
@@ -1475,7 +1476,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           inlineData: {
             data: 'base64data',
@@ -1486,7 +1487,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with image content (uri)', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'model_output',
         content: [
           {
@@ -1496,7 +1497,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           fileData: {
             fileUri: 'gs://bucket/img.png',
@@ -1507,7 +1508,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with audio content (data)', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'model_output',
         content: [
           {
@@ -1517,7 +1518,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           inlineData: {
             data: 'base64data',
@@ -1528,7 +1529,7 @@ describe('interactions_utils', () => {
     });
 
     it('should convert model_output step with audio content (uri)', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'model_output',
         content: [
           {
@@ -1538,7 +1539,7 @@ describe('interactions_utils', () => {
           },
         ],
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           fileData: {
             fileUri: 'gs://bucket/audio.mp3',
@@ -1549,11 +1550,11 @@ describe('interactions_utils', () => {
     });
 
     it('should convert thought step', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'thought',
         signature: 'sig-123',
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           thought: true,
           thoughtSignature: 'sig-123',
@@ -1562,12 +1563,12 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_result step', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'code_execution_result',
         result: 'output text',
         is_error: false,
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           codeExecutionResult: {
             output: 'output text',
@@ -1576,12 +1577,12 @@ describe('interactions_utils', () => {
         },
       ]);
 
-      const stepError = {
+      const stepError: ReceivedStep = {
         type: 'code_execution_result',
         result: 'error text',
         is_error: true,
       };
-      expect(convertStepToParts(stepError as any)).toEqual([
+      expect(convertStepToParts(stepError)).toEqual([
         {
           codeExecutionResult: {
             output: 'error text',
@@ -1592,11 +1593,11 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_result step with missing result', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'code_execution_result',
         is_error: false,
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           codeExecutionResult: {
             output: '',
@@ -1607,14 +1608,14 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_call step', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'code_execution_call',
         arguments: {
           code: 'print(1)',
           language: 'PYTHON',
         },
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           executableCode: {
             code: 'print(1)',
@@ -1625,10 +1626,10 @@ describe('interactions_utils', () => {
     });
 
     it('should convert code_execution_call step with missing arguments', () => {
-      const step = {
+      const step: ReceivedStep = {
         type: 'code_execution_call',
       };
-      expect(convertStepToParts(step as any)).toEqual([
+      expect(convertStepToParts(step)).toEqual([
         {
           executableCode: {
             code: '',
@@ -1641,7 +1642,7 @@ describe('interactions_utils', () => {
 
   describe('convertInteractionEventToLlmResponse extra cases', () => {
     it('should handle step.delta image event (data)', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'image',
@@ -1651,7 +1652,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1674,7 +1675,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle step.delta image event (uri)', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'image',
@@ -1684,7 +1685,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1707,7 +1708,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update failed event', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'failed',
         error: {
@@ -1715,11 +1716,7 @@ describe('interactions_utils', () => {
           message: 'user cancelled',
         },
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'CANCELLED',
         errorMessage: 'user cancelled',
@@ -1729,15 +1726,11 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update failed event with missing error', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'failed',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'UNKNOWN_ERROR',
         errorMessage: 'Unknown error',
@@ -1747,13 +1740,13 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update completed event with aggregated parts', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'completed',
       };
       const parts = [{text: 'part 1'}];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         parts,
         'int-1',
       );
@@ -1767,16 +1760,12 @@ describe('interactions_utils', () => {
     });
 
     it('should handle error event', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'error',
         code: 'INTERNAL',
         message: 'internal error',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'INTERNAL',
         errorMessage: 'internal error',
@@ -1786,14 +1775,10 @@ describe('interactions_utils', () => {
     });
 
     it('should handle error event with missing code and message', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'error',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         errorCode: 'UNKNOWN_ERROR',
         errorMessage: 'Unknown error',
@@ -1803,15 +1788,15 @@ describe('interactions_utils', () => {
     });
 
     it('should return null if event.delta is missing in step.delta event', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
       };
-      expect(convertInteractionEventToLlmResponse(event as any, [])).toBeNull();
+      expect(convertInteractionEventToLlmResponse(event, [])).toBeNull();
     });
 
     it('should handle step.delta thought_signature event', () => {
       // 1. Start the function call step
-      const startEvent = {
+      const startEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.start',
         step: {
           type: 'function_call',
@@ -1820,14 +1805,14 @@ describe('interactions_utils', () => {
         },
       };
       const aggregatedParts: Part[] = [];
-      convertInteractionEventToLlmResponse(startEvent as any, aggregatedParts);
+      convertInteractionEventToLlmResponse(startEvent, aggregatedParts);
 
       expect(aggregatedParts.length).toBe(1);
       expect(aggregatedParts[0].functionCall).toBeDefined();
       expect(aggregatedParts[0].thoughtSignature).toBeUndefined();
 
       // 2. Stream the signature delta
-      const deltaEvent = {
+      const deltaEvent: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'thought_signature',
@@ -1835,7 +1820,7 @@ describe('interactions_utils', () => {
         },
       };
       const response = convertInteractionEventToLlmResponse(
-        deltaEvent as any,
+        deltaEvent,
         aggregatedParts,
         'int-1',
       );
@@ -1845,7 +1830,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle event with camelCase eventType', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         eventType: 'step.delta',
         delta: {
           type: 'text',
@@ -1854,7 +1839,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1862,7 +1847,7 @@ describe('interactions_utils', () => {
     });
 
     it('should handle step.delta text event with missing text', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'step.delta',
         delta: {
           type: 'text',
@@ -1870,7 +1855,7 @@ describe('interactions_utils', () => {
       };
       const aggregatedParts: Part[] = [];
       const response = convertInteractionEventToLlmResponse(
-        event as any,
+        event,
         aggregatedParts,
         'int-1',
       );
@@ -1878,15 +1863,11 @@ describe('interactions_utils', () => {
     });
 
     it('should handle interaction.status_update requires_action event', () => {
-      const event = {
+      const event: ExtendedInteractionSSEEvent = {
         event_type: 'interaction.status_update',
         status: 'requires_action',
       };
-      const response = convertInteractionEventToLlmResponse(
-        event as any,
-        [],
-        'int-1',
-      );
+      const response = convertInteractionEventToLlmResponse(event, [], 'int-1');
       expect(response).toEqual({
         content: undefined,
         partial: false,
@@ -1897,8 +1878,8 @@ describe('interactions_utils', () => {
     });
 
     it('should return null for unknown event type', () => {
-      const event = {event_type: 'unknown'};
-      expect(convertInteractionEventToLlmResponse(event as any, [])).toBeNull();
+      const event: ExtendedInteractionSSEEvent = {event_type: 'unknown'};
+      expect(convertInteractionEventToLlmResponse(event, [])).toBeNull();
     });
   });
 
@@ -2033,7 +2014,7 @@ describe('interactions_utils', () => {
           {
             thought: true,
             thoughtSignature: 'sig-123',
-          } as any,
+          },
         ],
       };
       expect(convertContentToSteps(content)).toEqual([
@@ -2057,7 +2038,7 @@ describe('interactions_utils', () => {
     });
 
     it('should extract text from Content systemInstruction', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         systemInstruction: {
           role: 'system',
           parts: [{text: 'line 1'}, {text: 'line 2'}],
@@ -2067,13 +2048,11 @@ describe('interactions_utils', () => {
     });
 
     it('should return undefined if systemInstruction is object but has no parts', () => {
-      expect(
-        extractSystemInstruction({systemInstruction: {} as any}),
-      ).toBeUndefined();
+      expect(extractSystemInstruction({systemInstruction: {}})).toBeUndefined();
     });
 
     it('should return undefined if Content systemInstruction parts have no text', () => {
-      const config = {
+      const config: GenerateContentConfig = {
         systemInstruction: {
           role: 'system',
           parts: [{}],
@@ -2085,7 +2064,7 @@ describe('interactions_utils', () => {
 
   describe('generateContentViaInteractions extra streaming cases', () => {
     it('should handle streaming call with interaction.created event and extract interaction ID from interaction object', async () => {
-      const mockEvents = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'interaction.created',
           interaction: {id: 'int-start-id'},
@@ -2123,14 +2102,14 @@ describe('interactions_utils', () => {
         },
       };
 
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         true,
       );
       const responses = [];
@@ -2152,7 +2131,7 @@ describe('interactions_utils', () => {
     });
 
     it('should extract interaction ID from interactionId (camelCase) in streaming event', async () => {
-      const mockEvents = [
+      const mockEvents: ExtendedInteractionSSEEvent[] = [
         {
           event_type: 'step.start',
           step: {
@@ -2178,14 +2157,14 @@ describe('interactions_utils', () => {
           create: vi.fn().mockResolvedValue(mockStream),
         },
       };
-      const llmRequest = {
+      const llmRequest = createLlmRequest({
         model: 'gemini-2.5-flash',
         contents: [{role: 'user', parts: [{text: 'Hello'}]}],
-      };
+      });
 
       const generator = generateContentViaInteractions(
-        mockApiClient as any,
-        llmRequest as any,
+        mockApiClient,
+        llmRequest,
         true,
       );
       const responses = [];
