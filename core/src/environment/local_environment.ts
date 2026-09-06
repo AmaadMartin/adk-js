@@ -10,6 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {experimental} from '../utils/experimental.js';
 import {logger} from '../utils/logger.js';
+import {collectChildOutput} from '../utils/shell_utils.js';
 import {BaseEnvironment, ExecutionResult} from './base_environment.js';
 
 /** Prefix for the temporary workspace created when no `workingDir` is given. */
@@ -128,50 +129,14 @@ export class LocalEnvironment extends BaseEnvironment {
       env: {...process.env, ...this.envVars},
     });
 
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
-
-    let timedOut = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    if (timeoutSeconds !== undefined) {
-      timer = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGKILL');
-        // Killing the shell does not kill a command it forked rather than
-        // exec'd, and that survivor keeps the pipes open, which would hold
-        // 'close' back until it exits on its own. Release the read ends so
-        // the timeout is actually enforced.
-        child.stdout.destroy();
-        child.stderr.destroy();
-      }, timeoutSeconds * 1000);
-    }
-
-    try {
-      const exitCode = await new Promise<number>((resolve, reject) => {
-        // 'close' rather than 'exit': the stdio streams are drained by then.
-        child.on('close', (code, signal) => {
-          // Node reports either an exit code or the terminating signal; Python
-          // reports the negative signal number (`-9` for SIGKILL), so map back.
-          resolve(
-            signal === null ? (code ?? 0) : -os.constants.signals[signal],
-          );
-        });
-        child.on('error', reject);
-      });
-      return {
-        exitCode,
-        // Decode once, so a multi-byte character split across two chunks is
-        // not corrupted. Invalid bytes become U+FFFD, matching Python's
-        // `errors='replace'`.
-        stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf-8'),
-        timedOut,
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+    const {stdout, stderr, returncode, timedOut} = await collectChildOutput(
+      child,
+      timeoutSeconds ?? null,
+      // Killing the shell leaves a command it forked rather than exec'd
+      // running; collectChildOutput releases the pipes that survivor holds.
+      () => child.kill('SIGKILL'),
+    );
+    return {exitCode: returncode, stdout, stderr, timedOut};
   }
 
   /**
