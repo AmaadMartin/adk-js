@@ -5,8 +5,10 @@
  */
 
 import {getClientLabels} from '../utils/client_labels.js';
+import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 
 import {BaseLlmConnection} from './base_llm_connection.js';
+import {createLlmCapabilities, LlmCapabilities} from './capabilities.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
 
@@ -55,6 +57,19 @@ export abstract class BaseLlm {
    * List of supported models in regex for LlmRegistry.
    */
   static readonly supportedModels: Array<string | RegExp> = [];
+
+  /**
+   * Capabilities this model resolves right now.
+   *
+   * The base resolution reads the model name and the backend variant, so it
+   * follows a change to either. Override this getter in a model whose name
+   * does not reveal what it supports.
+   */
+  get capabilities(): LlmCapabilities {
+    return createLlmCapabilities({
+      outputSchemaAndTools: canUseOutputSchemaWithTools(this.model),
+    });
+  }
 
   /**
    * Generates one content from the given contents and tools.

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isGemini2OrAbove} from './model_name.js';
+import {isGeminiModel} from './model_name.js';
 import {getGoogleLlmVariant, GoogleLLMVariant} from './variant_utils.js';
 
 /**
@@ -12,9 +12,12 @@ import {getGoogleLlmVariant, GoogleLLMVariant} from './variant_utils.js';
  * time as tools, which is strictly more reliable than the prompt-based
  * `set_model_response` workaround.
  *
- * Early Access Program model names encode no numeric version, so
- * `isGemini2OrAbove` rejects them even on Vertex AI. The Python
- * implementation accepts them; that gap lives in the shared predicate.
+ * The test is membership in the Gemini family, with no version floor, so an
+ * Early Access Program name such as `gemini-flash-early-exp` qualifies.
+ *
+ * This resolves a model name. Read `model.capabilities.outputSchemaAndTools`
+ * when a model instance is in hand, because a model can override the getter to
+ * report a capability that its name does not reveal.
  *
  * @param modelString A simple or path-based model name.
  * @return True if the model supports an output schema alongside tools.
@@ -22,6 +25,6 @@ import {getGoogleLlmVariant, GoogleLLMVariant} from './variant_utils.js';
 export function canUseOutputSchemaWithTools(modelString: string): boolean {
   return (
     getGoogleLlmVariant() === GoogleLLMVariant.VERTEX_AI &&
-    isGemini2OrAbove(modelString)
+    isGeminiModel(modelString)
   );
 }
