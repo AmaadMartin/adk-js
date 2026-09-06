@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {isGemini2OrAbove, isGemini3xFlashLive} from '@google/adk';
+import {
+  isGemini2OrAbove,
+  isGemini35LiveTranslate,
+  isGemini3xFlashLive,
+  isGemini3xLive,
+} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('isGemini2OrAbove', () => {
@@ -78,5 +83,46 @@ describe('isGemini3xFlashLive', () => {
     expect(isGemini3xFlashLive('gemini-3.0-flash')).toBe(false);
     expect(isGemini3xFlashLive(undefined)).toBe(false);
     expect(isGemini3xFlashLive('')).toBe(false);
+  });
+});
+
+describe('isGemini3xLive', () => {
+  it('should return true for every Gemini 3.x Live model', () => {
+    expect(isGemini3xLive('gemini-3.1-live-preview')).toBe(true);
+    expect(isGemini3xLive('gemini-3.1-flash-live-preview')).toBe(true);
+    expect(
+      isGemini3xLive(
+        'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.1-live-001',
+      ),
+    ).toBe(true);
+  });
+
+  it('should return false for Live Translate and non-live models', () => {
+    expect(isGemini3xLive('gemini-3.5-live-translate-preview')).toBe(false);
+    expect(isGemini3xLive('gemini-3.1-flash')).toBe(false);
+    expect(isGemini3xLive('gemini-2.5-flash')).toBe(false);
+    expect(isGemini3xLive('gemini-2.5-flash-preview-native-audio')).toBe(false);
+    expect(isGemini3xLive(undefined)).toBe(false);
+    expect(isGemini3xLive('')).toBe(false);
+  });
+});
+
+describe('isGemini35LiveTranslate', () => {
+  it('should return true for Live Translate models', () => {
+    expect(isGemini35LiveTranslate('gemini-3.5-live-translate-preview')).toBe(
+      true,
+    );
+    expect(
+      isGemini35LiveTranslate(
+        'projects/my-project/locations/us-central1/publishers/google/models/gemini-3.5-live-translate-001',
+      ),
+    ).toBe(true);
+  });
+
+  it('should return false for other models', () => {
+    expect(isGemini35LiveTranslate('gemini-3.5-flash-live')).toBe(false);
+    expect(isGemini35LiveTranslate('gemini-2.5-flash')).toBe(false);
+    expect(isGemini35LiveTranslate(undefined)).toBe(false);
+    expect(isGemini35LiveTranslate('')).toBe(false);
   });
 });

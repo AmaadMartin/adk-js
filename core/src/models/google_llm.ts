@@ -344,7 +344,12 @@ export class Gemini extends BaseLlm {
         },
       },
     });
-    return new GeminiLlmConnection(liveSession, modelVersion, messageQueue);
+    return new GeminiLlmConnection(
+      liveSession,
+      modelVersion,
+      messageQueue,
+      this.apiBackend,
+    );
   }
 
   private preprocessRequest(llmRequest: LlmRequest): void {
