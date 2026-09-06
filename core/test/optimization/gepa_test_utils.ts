@@ -93,22 +93,43 @@ export function onlyOptimizeCall(engine: FakeGepaEngine): GepaOptimizeParams {
   return engine.calls[0];
 }
 
+/** What {@link collectLogs} captured. */
+export interface CollectedLogs {
+  /** Every message logged at `debug`, in order. */
+  debugs: string[];
+
+  /** Every message logged at `info`, in order. */
+  infos: string[];
+
+  /** Every message logged at `warn`, in order. */
+  warnings: string[];
+}
+
+/** Joins one log call's arguments the way the real logger renders them. */
+function renderLogCall(args: unknown[]): string {
+  return args.map((arg) => String(arg)).join(' ');
+}
+
 /**
- * Runs `body` with a logger that collects warnings.
+ * Runs `body` with a logger that collects what it logs.
  *
- * @returns Every warning logged while `body` ran, in order.
+ * @returns The messages logged while `body` ran, per level, in order.
  */
-export async function collectWarnings(
+export async function collectLogs(
   body: () => Promise<void>,
-): Promise<string[]> {
-  const warnings: string[] = [];
+): Promise<CollectedLogs> {
+  const collected: CollectedLogs = {debugs: [], infos: [], warnings: []};
   setLogger({
     setLogLevel: () => {},
     log: () => {},
-    debug: () => {},
-    info: () => {},
+    debug: (...args: unknown[]) => {
+      collected.debugs.push(renderLogCall(args));
+    },
+    info: (...args: unknown[]) => {
+      collected.infos.push(renderLogCall(args));
+    },
     warn: (...args: unknown[]) => {
-      warnings.push(args.map((arg) => String(arg)).join(' '));
+      collected.warnings.push(renderLogCall(args));
     },
     error: () => {},
   });
@@ -117,5 +138,16 @@ export async function collectWarnings(
   } finally {
     resetLogger();
   }
-  return warnings;
+  return collected;
+}
+
+/**
+ * Runs `body` with a logger that collects warnings.
+ *
+ * @returns Every warning logged while `body` ran, in order.
+ */
+export async function collectWarnings(
+  body: () => Promise<void>,
+): Promise<string[]> {
+  return (await collectLogs(body)).warnings;
 }
