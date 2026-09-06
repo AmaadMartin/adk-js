@@ -106,6 +106,16 @@ describe('isDefaultEventActions', () => {
   it.each(nonDefaults)('returns false when %s', (_label, overrides) => {
     expect(isDefaultEventActions(createEventActions(overrides))).toBe(false);
   });
+
+  it('returns false when setModelResponse is set', () => {
+    const actions = createEventActions({setModelResponse: {answer: 42}});
+    expect(isDefaultEventActions(actions)).toBe(false);
+  });
+
+  it('returns true when setModelResponse is left undefined', () => {
+    const actions = createEventActions({setModelResponse: undefined});
+    expect(isDefaultEventActions(actions)).toBe(true);
+  });
 });
 
 describe('mergeEventActions', () => {
@@ -242,6 +252,22 @@ describe('mergeEventActions', () => {
       target,
     );
     expect(result.stateDelta).toEqual({base: 'val', extra: 'new'});
+  });
+
+  it('carries setModelResponse across, last writer winning', () => {
+    const result = mergeEventActions([
+      createEventActions({setModelResponse: {answer: 1}}),
+      createEventActions({setModelResponse: {answer: 2}}),
+    ]);
+    expect(result.setModelResponse).toEqual({answer: 2});
+  });
+
+  it('keeps an earlier setModelResponse when a later source omits it', () => {
+    const result = mergeEventActions([
+      createEventActions({setModelResponse: {answer: 1}}),
+      createEventActions({escalate: true}),
+    ]);
+    expect(result.setModelResponse).toEqual({answer: 1});
   });
 
   it('ignores falsy sources', () => {

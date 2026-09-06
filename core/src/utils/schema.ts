@@ -126,6 +126,57 @@ export function toJsonSchema(schema: SchemaLike): Record<string, unknown> {
 }
 
 /**
+ * The shape of a schema, as far as a function declaration is concerned.
+ *
+ * - `'object'` — an object with declared fields, which a declaration can
+ *   expose one parameter at a time.
+ * - `'objectArray'` — an array of such objects.
+ * - `'value'` — anything else: a primitive, a map, an array of primitives, or
+ *   a schema that has no JSON Schema rendering at all.
+ */
+export type SchemaShape = 'object' | 'objectArray' | 'value';
+
+/**
+ * Classifies a {@link SchemaLike} by its top-level shape.
+ *
+ * The classification runs over {@link toJsonSchema}, so every dialect is judged
+ * the same way. A schema that cannot be rendered degrades to `'value'` for the
+ * same reason {@link parseWithSchema} leaves such a schema unenforced: treating
+ * it as an opaque value keeps the data flowing, and refusing it does not.
+ */
+export function schemaShape(schema: SchemaLike): SchemaShape {
+  let document: Record<string, unknown>;
+  try {
+    document = toJsonSchema(schema);
+  } catch {
+    return 'value';
+  }
+  if (describesObject(document)) {
+    return 'object';
+  }
+  if (document['type'] === 'array' && describesObject(document['items'])) {
+    return 'objectArray';
+  }
+  return 'value';
+}
+
+/** Whether a JSON Schema document describes an object with declared fields. */
+function describesObject(document: unknown): boolean {
+  // An array schema that declares no `items` reaches this with `undefined`.
+  const {properties, type, additionalProperties} = (document ?? {}) as {
+    properties?: unknown;
+    type?: unknown;
+    additionalProperties?: unknown;
+  };
+  if (properties !== undefined) {
+    return true;
+  }
+  // A map schema is an object whose keys are not declared, so it has no fields
+  // to name one by one and travels as a single value instead.
+  return type === 'object' && additionalProperties === undefined;
+}
+
+/**
  * Compiles a plain JSON Schema into a validator, for schemas that survive only
  * in serialized form — a `RequestInput.responseSchema` reaches the resume that
  * answers it as the JSON Schema recorded on the interrupt event, not as the
