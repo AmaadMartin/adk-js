@@ -239,6 +239,10 @@ export class Runner {
    *
    * @param params.userId The user ID of the session.
    * @param params.sessionId The session ID of the session.
+   * @param params.invocationId The invocation ID to resume. Set this to
+   *     continue an invocation that paused, so the agents under it pick up
+   *     from their recorded checkpoints instead of starting over. Requires a
+   *     resumable runner; a new invocation starts otherwise.
    * @param params.newMessage A new message to append to the session.
    * @param params.stateDelta An optional state delta to apply to the session.
    * @param params.runConfig The run config for the agent.
@@ -248,6 +252,7 @@ export class Runner {
   async *runAsync(params: {
     userId: string;
     sessionId: string;
+    invocationId?: string;
     newMessage: Content;
     stateDelta?: Record<string, unknown>;
     runConfig?: RunConfig;
@@ -318,7 +323,7 @@ export class Runner {
             sessionService: this.sessionService,
             memoryService: this.memoryService,
             credentialService: this.credentialService,
-            invocationId: newInvocationContextId(),
+            invocationId: params.invocationId ?? newInvocationContextId(),
             agent: isBaseAgent(this.agent) ? this.agent : undefined,
             session,
             userContent: newMessage,
@@ -326,7 +331,10 @@ export class Runner {
             a2aMetadata: runConfig.a2aMetadata,
             pluginManager: this.pluginManager,
             abortSignal: params.abortSignal,
+            resumabilityConfig: this.resumabilityConfig,
           });
+
+          invocationContext.populateInvocationAgentStates();
 
           // =========================================================================
           // Preprocess plugins on user message
@@ -716,6 +724,7 @@ export class Runner {
             liveRequestQueue: params.liveRequestQueue,
             abortSignal: params.abortSignal,
             liveSessionResumptionHandle: params.liveSessionResumptionHandle,
+            resumabilityConfig: this.resumabilityConfig,
           });
 
           invocationContext.agent = this.determineAgentForResumption(

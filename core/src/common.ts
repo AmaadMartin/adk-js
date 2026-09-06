@@ -10,6 +10,7 @@ export {BaseAgent, isBaseAgent} from './agents/base_agent.js';
 export type {
   AfterAgentCallback,
   BaseAgentConfig,
+  BaseAgentState,
   BeforeAgentCallback,
   SingleAgentCallback,
 } from './agents/base_agent.js';
@@ -68,6 +69,7 @@ export type {AgentRouter, RoutedAgentConfig} from './agents/routed_agent.js';
 export {StreamingMode} from './agents/run_config.js';
 export type {RunConfig} from './agents/run_config.js';
 export {SequentialAgent, isSequentialAgent} from './agents/sequential_agent.js';
+export type {SequentialAgentState} from './agents/sequential_agent.js';
 export type {TranscriptionEntry} from './agents/transcription_entry.js';
 export {
   getPendingUserInputRequests,

@@ -6,7 +6,10 @@
 
 import {InvocationContext, ReadonlyContext} from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
-import {injectSessionState} from '../../src/agents/instructions.js';
+import {
+  appendInstruction,
+  injectSessionState,
+} from '../../src/agents/instructions.js';
 
 /**
  * Builds a minimal ReadonlyContext backed by a plain-object invocation context.
@@ -399,5 +402,39 @@ describe('injectSessionState', () => {
         await injectSessionState('{tone}: <City.city from lookup> now', ctx),
       ).toBe('formal: Rome now');
     });
+  });
+});
+
+describe('appendInstruction', () => {
+  it('concatenates onto a string instruction', () => {
+    expect(appendInstruction('base.', ' suffix.')).toBe('base. suffix.');
+  });
+
+  it('wraps a provider so it stays callable', async () => {
+    const provider = appendInstruction(() => 'from provider.', ' suffix.');
+    expect(typeof provider).toBe('function');
+    if (typeof provider !== 'function') {
+      expect.fail('appendInstruction must return a provider');
+    }
+    expect(await provider(makeContext())).toBe('from provider. suffix.');
+  });
+
+  it('awaits an async provider before appending', async () => {
+    const provider = appendInstruction(async () => 'async.', ' suffix.');
+    if (typeof provider !== 'function') {
+      expect.fail('appendInstruction must return a provider');
+    }
+    expect(await provider(makeContext())).toBe('async. suffix.');
+  });
+
+  it('passes the context through to the wrapped provider', async () => {
+    const context = makeContext();
+    const inner = vi.fn(() => 'x');
+    const provider = appendInstruction(inner, 'y');
+    if (typeof provider !== 'function') {
+      expect.fail('appendInstruction must return a provider');
+    }
+    await provider(context);
+    expect(inner).toHaveBeenCalledWith(context);
   });
 });

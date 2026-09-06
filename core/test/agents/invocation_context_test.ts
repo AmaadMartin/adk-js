@@ -13,6 +13,7 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createResumabilityConfig,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -170,5 +171,379 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+/**
+ * Builds a context with the given session events, optionally resumable.
+ */
+function makeAgentStateContext(
+  options: {
+    events?: Event[];
+    isResumable?: boolean;
+    invocationId?: string;
+  } = {},
+): InvocationContext {
+  const session = makeSession();
+  session.events = options.events ?? [];
+  return new InvocationContext({
+    invocationId: options.invocationId ?? 'inv-1',
+    agent: new LoopAgent({name: 'root'}),
+    session,
+    pluginManager: new PluginManager(),
+    resumabilityConfig:
+      options.isResumable === undefined
+        ? undefined
+        : createResumabilityConfig({isResumable: options.isResumable}),
+  });
+}
+
+describe('InvocationContext.isResumable', () => {
+  it('is false when no resumability config is given', () => {
+    expect(makeAgentStateContext().isResumable).toBe(false);
+  });
+
+  it('is false when the config disables resumability', () => {
+    expect(makeAgentStateContext({isResumable: false}).isResumable).toBe(false);
+  });
+
+  it('is true when the config enables resumability', () => {
+    expect(makeAgentStateContext({isResumable: true}).isResumable).toBe(true);
+  });
+
+  it('survives the spread that builds a child context', () => {
+    const parent = makeAgentStateContext({isResumable: true});
+    const child = new InvocationContext({
+      ...parent,
+      agent: new LoopAgent({name: 'child'}),
+    });
+    expect(child.isResumable).toBe(true);
+    // The maps are shared by reference, which is what makes resume work.
+    child.setAgentState('child', {agentState: {step: 1}});
+    expect(parent.agentStates['child']).toEqual({step: 1});
+  });
+});
+
+describe('InvocationContext.setAgentState', () => {
+  it('records a state and clears the end-of-agent flag', () => {
+    const ctx = makeAgentStateContext();
+    ctx.setAgentState('a', {endOfAgent: true});
+    ctx.setAgentState('a', {agentState: {current_sub_agent: 'b'}});
+    expect(ctx.agentStates['a']).toEqual({current_sub_agent: 'b'});
+    expect(ctx.endOfAgents['a']).toBe(false);
+  });
+
+  it('sets the end-of-agent flag and drops the state', () => {
+    const ctx = makeAgentStateContext();
+    ctx.setAgentState('a', {agentState: {current_sub_agent: 'b'}});
+    ctx.setAgentState('a', {endOfAgent: true});
+    expect(ctx.endOfAgents['a']).toBe(true);
+    expect('a' in ctx.agentStates).toBe(false);
+  });
+
+  it('ignores the state when end-of-agent is also set', () => {
+    const ctx = makeAgentStateContext();
+    ctx.setAgentState('a', {agentState: {x: 1}, endOfAgent: true});
+    expect(ctx.endOfAgents['a']).toBe(true);
+    expect('a' in ctx.agentStates).toBe(false);
+  });
+
+  it('clears both entries when neither option is given', () => {
+    const ctx = makeAgentStateContext();
+    ctx.setAgentState('a', {agentState: {x: 1}});
+    ctx.setAgentState('a');
+    expect('a' in ctx.agentStates).toBe(false);
+    expect('a' in ctx.endOfAgents).toBe(false);
+  });
+});
+
+describe('InvocationContext.populateInvocationAgentStates', () => {
+  it('does nothing when the invocation is not resumable', () => {
+    const ctx = makeAgentStateContext({
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          actions: {agentState: {current_sub_agent: 'b'}},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.agentStates).toEqual({});
+    expect(ctx.endOfAgents).toEqual({});
+  });
+
+  it('records a checkpoint carried by an event', () => {
+    const ctx = makeAgentStateContext({
+      isResumable: true,
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          actions: {agentState: {current_sub_agent: 'b'}},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.agentStates['a']).toEqual({current_sub_agent: 'b'});
+    expect(ctx.endOfAgents['a']).toBe(false);
+  });
+
+  it('marks an agent finished and drops its checkpoint', () => {
+    const ctx = makeAgentStateContext({
+      isResumable: true,
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          actions: {agentState: {current_sub_agent: 'b'}},
+        }),
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          actions: {endOfAgent: true},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.endOfAgents['a']).toBe(true);
+    expect('a' in ctx.agentStates).toBe(false);
+  });
+
+  it('seeds an empty state for an agent that produced content without one', () => {
+    const ctx = makeAgentStateContext({
+      isResumable: true,
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          content: {role: 'model', parts: [{text: 'hi'}]},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.agentStates['a']).toEqual({});
+    expect(ctx.endOfAgents['a']).toBe(false);
+  });
+
+  it('ignores a user event and an event from another invocation', () => {
+    const ctx = makeAgentStateContext({
+      isResumable: true,
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'hi'}]},
+        }),
+        createEvent({
+          invocationId: 'inv-other',
+          author: 'a',
+          actions: {agentState: {current_sub_agent: 'b'}},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.agentStates).toEqual({});
+  });
+
+  it('keys a workflow event by its node path rather than its author', () => {
+    const ctx = makeAgentStateContext({
+      isResumable: true,
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          nodeInfo: {path: 'flow.a'},
+          actions: {agentState: {current_sub_agent: 'b'}},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.agentStates['flow.a']).toEqual({current_sub_agent: 'b'});
+    expect('a' in ctx.agentStates).toBe(false);
+  });
+
+  it('skips an event with no author and no node path', () => {
+    const ctx = makeAgentStateContext({
+      isResumable: true,
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          content: {role: 'model', parts: [{text: 'hi'}]},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.agentStates).toEqual({});
+  });
+
+  it('leaves an already-recorded state alone for a later content event', () => {
+    const ctx = makeAgentStateContext({
+      isResumable: true,
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          actions: {agentState: {current_sub_agent: 'b'}},
+        }),
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          content: {role: 'model', parts: [{text: 'hi'}]},
+        }),
+      ],
+    });
+    ctx.populateInvocationAgentStates();
+    expect(ctx.agentStates['a']).toEqual({current_sub_agent: 'b'});
+  });
+});
+
+describe('InvocationContext.shouldPauseInvocation', () => {
+  function longRunningCallEvent(callId: string): Event {
+    return createEvent({
+      invocationId: 'inv-1',
+      author: 'a',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: callId, name: 'ask_human', args: {}}}],
+      },
+      longRunningToolIds: [callId],
+    });
+  }
+
+  it('is false for an event with no long-running tool ids', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'a',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'c1', name: 'ask_human', args: {}}}],
+      },
+    });
+    expect(makeAgentStateContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('is false for an event with no function calls', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'a',
+      content: {role: 'model', parts: [{text: 'hi'}]},
+      longRunningToolIds: ['c1'],
+    });
+    expect(makeAgentStateContext().shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('is true for an unanswered long-running call', () => {
+    const event = longRunningCallEvent('c1');
+    const ctx = makeAgentStateContext({events: [event]});
+    expect(ctx.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('is true when the event is not in the session history yet', () => {
+    const event = longRunningCallEvent('c1');
+    expect(makeAgentStateContext().shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('is false when a later user event resolves the call in a sub-branch', () => {
+    const event = longRunningCallEvent('c1');
+    const ctx = makeAgentStateContext({
+      events: [
+        event,
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'user',
+          branch: 'root.ask_human@c1',
+          content: {role: 'user', parts: [{text: 'answer'}]},
+        }),
+      ],
+    });
+    expect(ctx.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('is true when the resolving user event precedes the call', () => {
+    const event = longRunningCallEvent('c1');
+    const ctx = makeAgentStateContext({
+      events: [
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'user',
+          branch: 'root.ask_human@c1',
+          content: {role: 'user', parts: [{text: 'answer'}]},
+        }),
+        event,
+      ],
+    });
+    expect(ctx.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('is true when a later event on the sub-branch is not from the user', () => {
+    const event = longRunningCallEvent('c1');
+    const ctx = makeAgentStateContext({
+      events: [
+        event,
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'a',
+          branch: 'root.ask_human@c1',
+          content: {role: 'model', parts: [{text: 'still working'}]},
+        }),
+      ],
+    });
+    expect(ctx.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('is true when a later user event carries no branch', () => {
+    const event = longRunningCallEvent('c1');
+    const ctx = makeAgentStateContext({
+      events: [
+        event,
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'answer'}]},
+        }),
+      ],
+    });
+    expect(ctx.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('ignores a function call that is not long-running', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'a',
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: {id: 'c1', name: 'lookup', args: {}}},
+          {functionCall: {id: 'c2', name: 'ask_human', args: {}}},
+        ],
+      },
+      longRunningToolIds: ['c2'],
+    });
+    const ctx = makeAgentStateContext({
+      events: [
+        event,
+        createEvent({
+          invocationId: 'inv-1',
+          author: 'user',
+          branch: 'root.ask_human@c2',
+          content: {role: 'user', parts: [{text: 'answer'}]},
+        }),
+      ],
+    });
+    expect(ctx.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('ignores a function call with no id', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'a',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'ask_human', args: {}}}],
+      },
+      longRunningToolIds: ['c1'],
+    });
+    expect(makeAgentStateContext().shouldPauseInvocation(event)).toBe(false);
   });
 });
