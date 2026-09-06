@@ -18,9 +18,10 @@ import dotenv from 'dotenv';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
-import {getAbsolutePath} from '../utils/file_utils.js';
+import {getAbsolutePath, isFolderExists} from '../utils/file_utils.js';
 import {AdkLogger} from '../utils/logger.js';
 import {version} from '../version.js';
+import {rebuildAgentTests, runAgentTests} from './agent_test_runner.js';
 import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
@@ -414,6 +415,51 @@ export function createProgram(): Command {
       } catch (error) {
         logger.error('Error running agent:', (error as Error).message);
         process.exit(1);
+      }
+    });
+
+  program
+    .command('test')
+    .description(
+      'Replays recorded agent test files under the given folder against a ' +
+        'mocked model and reports pass/fail',
+    )
+    .argument(
+      '[folder]',
+      'Folder containing agents and their tests/*.json files',
+      process.cwd(),
+    )
+    .option(
+      '--rebuild',
+      'Rebuild test files by running the real agent with the recorded user messages.',
+    )
+    .addOption(VERBOSE_OPTION)
+    .addOption(LOG_LEVEL_OPTION)
+    .addOption(COMPILE_AGENT_FILE)
+    .addOption(BUNDLE_AGENT_FILE)
+    .addOption(AGENT_FILE_MODULE_TYPE)
+    .action(async (folder: string, options: Record<string, string>) => {
+      setAdkCoreLogLevel(getLogLevelFromOptions(options));
+
+      const absoluteFolder = getAbsolutePath(folder);
+      if (!(await isFolderExists(absoluteFolder))) {
+        logger.error(`Not a folder: ${absoluteFolder}`);
+        process.exitCode = 2;
+        return;
+      }
+
+      const testOptions = {
+        folder: absoluteFolder,
+        agentFileLoadOptions: getAgentFileOptions(options),
+      };
+      if (options['rebuild']) {
+        await rebuildAgentTests(testOptions);
+        return;
+      }
+
+      const results = await runAgentTests(testOptions);
+      if (results.some((result) => result.status === 'failed')) {
+        process.exitCode = 1;
       }
     });
 
