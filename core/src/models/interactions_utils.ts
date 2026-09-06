@@ -535,16 +535,14 @@ export function buildMcpServerParam(
  * Describes tools for a log line, by type alone.
  *
  * A tool can carry a credential: a remote MCP server's headers are minted per
- * turn and may hold a bearer token. So the description names the type, plus a
- * function tool's name, and nothing else. Mirrors `_build_tool_log` in
+ * turn and may hold a bearer token. So the description names the type and
+ * nothing else, as `_build_tool_log` does for a non-function tool in
  * google/adk-python `models/interactions_utils.py`.
  */
 export function describeInteractionsTools(
   tools: Interactions.Tool[],
 ): string[] {
-  return tools.map((tool) =>
-    tool.type === 'function' ? `function ${tool.name}` : tool.type,
-  );
+  return tools.map((tool) => tool.type);
 }
 
 /**

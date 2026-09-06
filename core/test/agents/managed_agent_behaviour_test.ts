@@ -204,6 +204,22 @@ describe('ManagedAgent tool acceptance uses the in-model flag', () => {
     expect('tools' in (await requestBody(backend.requests[0]))).toBe(false);
   });
 
+  it('still forwards a raw tool that follows one dropping the config', async () => {
+    const backend = fakeBackend();
+    const agent = new ManagedAgent({
+      name: 'mgr',
+      agentId: 'agents/a',
+      tools: [new ConfigClearingTool(), {urlContext: {}}],
+      apiClient: devApiClient(),
+    });
+
+    await collect(agent, userCtx('hi'));
+
+    expect((await requestBody(backend.requests[0])).tools).toEqual([
+      {type: 'url_context'},
+    ]);
+  });
+
   it('forwards the built-in url context tool', async () => {
     const backend = fakeBackend();
     const agent = new ManagedAgent({

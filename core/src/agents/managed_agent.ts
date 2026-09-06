@@ -383,7 +383,10 @@ export class ManagedAgent extends BaseAgent<ManagedAgentConfig> {
             `computerUse: ${JSON.stringify(tool)}`,
         );
       }
-      llmRequest.config!.tools = [...(llmRequest.config!.tools ?? []), tool];
+      // An earlier tool may have dropped the config, so re-establish it rather
+      // than fail on the property access.
+      llmRequest.config ??= {};
+      llmRequest.config.tools = [...(llmRequest.config.tools ?? []), tool];
     }
 
     return [
