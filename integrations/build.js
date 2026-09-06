@@ -40,6 +40,8 @@ function build({
   entry = 'index.ts',
 }) {
   const buildOptions = {
+    entryPoints: bundle ? [`./src/${entry}`] : ['./src/**/*.ts'],
+    outdir: `./dist/${targetDir}`,
     target: platformBuildTargets[platform],
     platform,
     format,
@@ -53,14 +55,6 @@ function build({
   // Prepend license header to the top of the file
   if (format === 'cjs' || bundle) {
     buildOptions.banner = {js: licenseHeaderText};
-  }
-
-  if (bundle) {
-    buildOptions.entryPoints = [`./src/${entry}`];
-    buildOptions.outfile = `./dist/${targetDir}/index.js`;
-  } else {
-    buildOptions.entryPoints = ['./src/**/*.ts'];
-    buildOptions.outdir = `./dist/${targetDir}`;
   }
 
   if (format === 'esm') {
