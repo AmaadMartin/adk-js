@@ -145,4 +145,168 @@ describe('client_labels', () => {
       }).toThrow('Client label must be a non-empty string.');
     });
   });
+
+  describe('runWithClientLabel with an async generator callback', () => {
+    const label = 'generator-label';
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
+
+    async function* labelProbe(): AsyncGenerator<string[], void> {
+      yield getClientLabels();
+      await tick();
+      yield getClientLabels();
+    }
+
+    it('should apply the label at the first yield', async () => {
+      const generator = runWithClientLabel(label, () => labelProbe());
+
+      const first = await generator.next();
+
+      expect(first.value).toContain(label);
+      expect(first.value).toHaveLength(3);
+    });
+
+    it('should keep the label across an await inside the body', async () => {
+      const generator = runWithClientLabel(label, () => labelProbe());
+
+      await generator.next();
+      const second = await generator.next();
+
+      expect(second.value).toContain(label);
+    });
+
+    it('should apply the label when consumed with for await', async () => {
+      const seen: string[][] = [];
+
+      for await (const labels of runWithClientLabel(label, () =>
+        labelProbe(),
+      )) {
+        seen.push(labels);
+      }
+
+      expect(seen).toHaveLength(2);
+      expect(seen[0]).toContain(label);
+      expect(seen[1]).toContain(label);
+    });
+
+    it('should run a finally block reached by an early break inside the label scope', async () => {
+      let captured: string[] = [];
+      async function* withCleanup(): AsyncGenerator<number, void> {
+        try {
+          yield 1;
+          await tick();
+          yield 2;
+        } finally {
+          captured = getClientLabels();
+        }
+      }
+
+      for await (const _value of runWithClientLabel(label, () =>
+        withCleanup(),
+      )) {
+        break;
+      }
+
+      expect(captured).toContain(label);
+    });
+
+    it('should resume inside the label scope when throw() is called', async () => {
+      let captured: string[] = [];
+      async function* withCatch(): AsyncGenerator<number, void> {
+        try {
+          yield 1;
+        } catch {
+          captured = getClientLabels();
+          yield 2;
+        }
+      }
+
+      const generator = runWithClientLabel(label, () => withCatch());
+      await generator.next();
+      const resumed = await generator.throw(new Error('boom'));
+
+      expect(captured).toContain(label);
+      expect(resumed.value).toBe(2);
+    });
+
+    it('should pass through the return value of the generator', async () => {
+      async function* withReturnValue(): AsyncGenerator<number, string> {
+        yield 1;
+        return 'done';
+      }
+
+      const generator = runWithClientLabel(label, () => withReturnValue());
+      await generator.next();
+      const final = await generator.next();
+
+      expect(final).toEqual({done: true, value: 'done'});
+    });
+
+    it('should propagate an error thrown by the generator body', async () => {
+      async function* failing(): AsyncGenerator<number, void> {
+        yield 1;
+        throw new Error('generator failed');
+      }
+
+      const generator = runWithClientLabel(label, () => failing());
+      await generator.next();
+
+      await expect(generator.next()).rejects.toThrow('generator failed');
+    });
+
+    it('should not leak the label after the generator is drained', async () => {
+      for await (const _labels of runWithClientLabel(label, () =>
+        labelProbe(),
+      )) {
+        // drain
+      }
+
+      const labels = getClientLabels();
+      expect(labels).not.toContain(label);
+      expect(labels).toHaveLength(2);
+    });
+
+    it('should keep interleaved generators on their own labels', async () => {
+      const first = runWithClientLabel('label-a', () => labelProbe());
+      const second = runWithClientLabel('label-b', () => labelProbe());
+
+      const firstStart = await first.next();
+      const secondStart = await second.next();
+      const firstEnd = await first.next();
+      const secondEnd = await second.next();
+
+      expect(firstStart.value).toContain('label-a');
+      expect(secondStart.value).toContain('label-b');
+      expect(firstEnd.value).toContain('label-a');
+      expect(secondEnd.value).toContain('label-b');
+      expect(firstEnd.value).not.toContain('label-b');
+      expect(secondEnd.value).not.toContain('label-a');
+    });
+
+    it('should return a non-generator result unchanged', () => {
+      const promise = Promise.resolve('resolved');
+
+      expect(runWithClientLabel(label, () => 42)).toBe(42);
+      expect(runWithClientLabel(label, () => null)).toBeNull();
+      expect(runWithClientLabel(label, () => undefined)).toBeUndefined();
+      expect(runWithClientLabel(label, () => promise)).toBe(promise);
+    });
+
+    it('should not wrap a sync iterable', () => {
+      const items = [1, 2];
+
+      expect(runWithClientLabel(label, () => items)).toBe(items);
+    });
+
+    it('should not wrap an async iterable that is not a generator', async () => {
+      const asyncIterable = {
+        async *[Symbol.asyncIterator]() {
+          yield getClientLabels();
+        },
+      };
+
+      expect(runWithClientLabel(label, () => asyncIterable)).toBe(
+        asyncIterable,
+      );
+    });
+  });
 });

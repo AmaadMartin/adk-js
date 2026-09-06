@@ -33,7 +33,10 @@ export default defineConfig([
           "varsIgnorePattern": "^_",
           "caughtErrorsIgnorePattern": "^_"
         }
-      ]
+      ],
+      // The base rule reports a TypeScript function overload as a redeclaration.
+      "no-redeclare": "off",
+      "@typescript-eslint/no-redeclare": "error"
     },
   },
 ]);
