@@ -95,6 +95,7 @@ describe('ConversationScenario', () => {
 
     expect(parse).toThrow(InputValidationError);
     expect(parse).toThrow('userPersonaa');
+    expect(parse).toThrow('Unrecognized key');
   });
 });
 
@@ -161,5 +162,21 @@ describe('ConversationScenarios', () => {
     });
 
     expect(snakeCase).toEqual(camelCase);
+  });
+});
+
+describe('NotFoundError propagation', () => {
+  it('surfaces the registry error unwrapped from a nested scenario', () => {
+    expect(() =>
+      conversationScenariosModel.parse({
+        scenarios: [
+          {
+            startingPrompt: 'hi',
+            conversationPlan: 'chat',
+            userPersona: 'NOPE',
+          },
+        ],
+      }),
+    ).toThrowError(NotFoundError);
   });
 });

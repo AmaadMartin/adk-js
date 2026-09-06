@@ -9,12 +9,27 @@ import {
   UserPersonaRegistry,
   getBehaviorInstructionsStr,
   getViolationRubricsStr,
+  isInputValidationError,
+  userBehaviorModel,
+  userPersonaModel,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {resetLogger, setLogger} from '../../../src/utils/logger.js';
 
 function makePersona(id: string): UserPersona {
   return {id, description: `Persona ${id}`, behaviors: []};
+}
+
+function expectValidationMessage(run: () => unknown): string {
+  try {
+    run();
+  } catch (error: unknown) {
+    if (isInputValidationError(error)) {
+      return error.message;
+    }
+    expect.fail(`Expected an InputValidationError, got ${String(error)}.`);
+  }
+  expect.fail('Expected an InputValidationError, but nothing was thrown.');
 }
 
 describe('render helpers', () => {
@@ -154,5 +169,47 @@ describe('UserPersonaRegistry overwrite logging', () => {
     expect(debugCalls).toEqual([
       'Updating the user persona registered as same.',
     ]);
+  });
+});
+
+describe('userBehaviorModel', () => {
+  it('accepts the adk-python snake_case spelling', () => {
+    const behavior = userBehaviorModel.parse({
+      name: 'test_behavior',
+      description: 'Test behavior description.',
+      behavior_instructions: ['instruction1'],
+      violation_rubrics: ['violation1'],
+    });
+
+    expect(behavior.behaviorInstructions).toEqual(['instruction1']);
+    expect(behavior.violationRubrics).toEqual(['violation1']);
+  });
+
+  it('rejects an unrecognized key', () => {
+    expect(
+      expectValidationMessage(() =>
+        userBehaviorModel.parse({
+          name: 'test_behavior',
+          description: 'Test behavior description.',
+          behaviorInstructions: [],
+          violationRubrics: [],
+          behaviourInstructions: [],
+        }),
+      ),
+    ).toContain('behaviourInstructions');
+  });
+});
+
+describe('userPersonaModel', () => {
+  it('rejects a persona whose behaviors are not behaviors', () => {
+    expect(
+      expectValidationMessage(() =>
+        userPersonaModel.parse({
+          id: 'CUSTOM',
+          description: 'Inline persona.',
+          behaviors: ['Be terse'],
+        }),
+      ),
+    ).toContain('behaviors.0');
   });
 });

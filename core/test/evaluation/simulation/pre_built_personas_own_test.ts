@@ -44,6 +44,22 @@ describe('getDefaultPersonaRegistry', () => {
     );
   });
 
+  it('does not leak a shipped persona replaced in one registry into a later one', () => {
+    const replacement = {
+      id: 'EXPERT',
+      description: 'A replacement persona.',
+      behaviors: [],
+    };
+    const registry = getDefaultPersonaRegistry();
+
+    registry.registerPersona('EXPERT', replacement);
+
+    expect(registry.getPersona('EXPERT')).toEqual(replacement);
+    expect(getDefaultPersonaRegistry().getPersona('EXPERT')).not.toEqual(
+      replacement,
+    );
+  });
+
   it('holds exactly the three shipped personas, in order', () => {
     const personas = getDefaultPersonaRegistry().getRegisteredPersonas();
 

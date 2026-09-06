@@ -81,7 +81,9 @@ registry.getPersona('IMPATIENT').id; // 'IMPATIENT'
 
 A scenario's `userPersona` string is resolved against the default registry, not
 against a registry you built. Spell the persona out in the document to use one
-of your own.
+of your own. The [pre-built user personas](../pre_built_personas/index.md)
+guide describes the behaviors a persona is composed from, how to write one, and
+how `getBehaviorInstructionsStr` renders it into the simulator's prompt.
 
 ## Failure modes
 

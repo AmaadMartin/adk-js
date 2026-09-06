@@ -120,7 +120,7 @@ export const conversationScenariosModel: EvalModel<ConversationScenarios> =
 export const conversationGenerationConfigModel: EvalModel<ConversationGenerationConfig> =
   evalModel(
     {
-      count: z.number(),
+      count: z.number().int(),
       generationInstruction: optionalField(z.string()),
       environmentContext: optionalField(z.string()),
       modelName: z.string(),

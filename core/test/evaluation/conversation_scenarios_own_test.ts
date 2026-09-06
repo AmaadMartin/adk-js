@@ -70,6 +70,34 @@ describe('conversationScenarioModel', () => {
     ).toContain('userPersona');
   });
 
+  it('rejects a persona object whose behavior list is malformed', () => {
+    expect(
+      expectValidationError(() =>
+        conversationScenarioModel.parse({
+          startingPrompt: 'hi',
+          conversationPlan: 'chat',
+          userPersona: {
+            id: 'CUSTOM',
+            description: 'Inline persona.',
+            behaviors: [{name: 'Be terse'}],
+          },
+        }),
+      ).message,
+    ).toContain('userPersona');
+  });
+
+  it('accepts the adk-python snake_case spelling', () => {
+    const scenario = conversationScenarioModel.parse({
+      starting_prompt: 'I need to book a flight.',
+      conversation_plan: 'Book SFO to LAX.',
+      user_persona: 'EXPERT',
+    });
+
+    expect(scenario.startingPrompt).toBe('I need to book a flight.');
+    expect(scenario.conversationPlan).toBe('Book SFO to LAX.');
+    expect(scenario.userPersona?.id).toBe('EXPERT');
+  });
+
   it('reads an explicit null persona as absent', () => {
     const scenario = conversationScenarioModel.parse({
       startingPrompt: 'hi',
@@ -216,6 +244,17 @@ describe('conversationGenerationConfigModel', () => {
         conversationGenerationConfigModel.parse({count: 1}),
       ).message,
     ).toContain('modelName');
+  });
+
+  it('rejects a non-integer count', () => {
+    expect(
+      expectValidationError(() =>
+        conversationGenerationConfigModel.parse({
+          count: 2.5,
+          modelName: 'gemini-2.5-flash',
+        }),
+      ).message,
+    ).toContain('count');
   });
 
   it('rejects an unknown key', () => {
