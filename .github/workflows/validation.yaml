@@ -58,3 +58,27 @@ jobs:
 
       - name: Run documentation build check
         run: npm run docs:check
+
+  # A production install is the only place the published dependency set is
+  # exercised: `run-tests` installs devDependencies too, so a package that is
+  # only reachable through the dev tree still resolves there.
+  production-install:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+
+      # --ignore-scripts is required here: the root prepare script runs husky,
+      # which is a devDependency and so is absent from this install.
+      - name: Install production dependencies only
+        run: npm ci --omit=dev --ignore-scripts
+
+      # npm ls exits non-zero (ELSPROBLEMS) when a package a manifest declares
+      # is not present in the tree, which turns it into the assertion: every
+      # declared production dependency survived the install.
+      - name: Check declared production dependencies are installed
+        run: npm ls --omit=dev --workspaces --include-workspace-root
