@@ -6,15 +6,24 @@
 
 import {gcpDetector} from '@opentelemetry/resource-detector-gcp';
 import {detectResources, Resource} from '@opentelemetry/resources';
-import {PeriodicExportingMetricReader} from '@opentelemetry/sdk-metrics';
+import {
+  PeriodicExportingMetricReader,
+  PushMetricExporter,
+} from '@opentelemetry/sdk-metrics';
 import {BatchSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import {GoogleAuth} from 'google-auth-library';
 
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
 
-import {MIN_EXPORT_INTERVAL_MS} from './agent_engine_metric_exporter.js';
+import {
+  buildRequestDrivenMetrics,
+  MIN_EXPORT_INTERVAL_MS,
+} from './agent_engine_metric_exporter.js';
 import {OtelExportersConfig, OTelHooks} from './setup.js';
+
+/** Set by the Vertex AI Agent Runtime to the deployed agent's resource id. */
+const AGENT_ENGINE_ID_ENV = 'GOOGLE_CLOUD_AGENT_ENGINE_ID';
 
 const GCP_PROJECT_ERROR_MESSAGE =
   'Cannot determine GCP Project. OTel GCP Exporters cannot be set up. ' +
@@ -44,10 +53,10 @@ async function createCloudTraceProcessor(
   return new BatchSpanProcessor(new TraceExporter({projectId}));
 }
 
-/** Builds the Cloud Monitoring metric reader, loading its exporter on demand. */
-async function createCloudMetricReader(
+/** Builds the Cloud Monitoring metric exporter, loading it on demand. */
+async function createCloudMetricExporter(
   projectId: string,
-): Promise<PeriodicExportingMetricReader> {
+): Promise<PushMetricExporter> {
   const {MetricExporter} = await loadOptionalPeer(
     {
       packageName: '@google-cloud/opentelemetry-cloud-monitoring-exporter',
@@ -55,10 +64,31 @@ async function createCloudMetricReader(
     },
     () => import('@google-cloud/opentelemetry-cloud-monitoring-exporter'),
   );
-  return new PeriodicExportingMetricReader({
-    exporter: new MetricExporter({projectId}),
-    exportIntervalMillis: MIN_EXPORT_INTERVAL_MS,
-  });
+  return new MetricExporter({projectId});
+}
+
+/**
+ * Builds the metric hooks for Cloud Monitoring.
+ *
+ * On the Vertex AI Agent Runtime this is the request-driven reader, plus the
+ * span processor that drives it: the runtime throttles CPU between requests, so
+ * a periodic reader's timer is starved. Everywhere else it is a periodic reader
+ * at the shared minimum interval.
+ */
+async function createCloudMetricHooks(projectId: string): Promise<OTelHooks> {
+  const exporter = await createCloudMetricExporter(projectId);
+  if (!process.env[AGENT_ENGINE_ID_ENV]) {
+    return {
+      metricReaders: [
+        new PeriodicExportingMetricReader({
+          exporter,
+          exportIntervalMillis: MIN_EXPORT_INTERVAL_MS,
+        }),
+      ],
+    };
+  }
+  const {reader, spanProcessor} = buildRequestDrivenMetrics(exporter);
+  return {metricReaders: [reader], spanProcessors: [spanProcessor]};
 }
 
 export async function getGcpExporters(
@@ -76,13 +106,16 @@ export async function getGcpExporters(
     return {};
   }
 
+  const metricHooks = enableMetrics
+    ? await createCloudMetricHooks(projectId)
+    : {};
+
   return {
-    spanProcessors: enableTracing
-      ? [await createCloudTraceProcessor(projectId)]
-      : [],
-    metricReaders: enableMetrics
-      ? [await createCloudMetricReader(projectId)]
-      : [],
+    spanProcessors: [
+      ...(enableTracing ? [await createCloudTraceProcessor(projectId)] : []),
+      ...(metricHooks.spanProcessors ?? []),
+    ],
+    metricReaders: metricHooks.metricReaders ?? [],
     logRecordProcessors: [],
   };
 }

@@ -59,7 +59,6 @@ const FLOOR_MS = 3_000;
 const INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
 const FLOOR_ENV =
   'GOOGLE_CLOUD_AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS';
-const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
 
 /** Lets every queued microtask run, so a fire-and-forget collect reaches the exporter. */
 function flushPendingWork(): Promise<void> {
@@ -552,7 +551,7 @@ describe('buildRequestDrivenMetrics span processor', () => {
   }
 
   /** A reader already one and a half periods into a lone long request. */
-  function createOverdueReader(): {
+  function createOverdueReader(inferenceSpanName?: string): {
     clock: {t: number};
     exporter: FakeExporter;
     state: ReturnType<typeof buildRequestDrivenMetrics>;
@@ -564,6 +563,7 @@ describe('buildRequestDrivenMetrics span processor', () => {
       exportIntervalMillis: PERIOD_MS,
       floorMillis: FLOOR_MS,
       now: () => clock.t,
+      inferenceSpanName,
     });
     const meterProvider = new MeterProvider({readers: [state.reader]});
     meterProvider.getMeter('test').createCounter('c').add(1);
@@ -572,40 +572,58 @@ describe('buildRequestDrivenMetrics span processor', () => {
     return {clock, exporter, state, meterProvider};
   }
 
-  it('collects on a span named generate_content', async () => {
+  it('collects on the call_llm span that LlmAgent opens', async () => {
     const {exporter, state, meterProvider} = createOverdueReader();
     const tracer = createTracer(state.spanProcessor).getTracer('test');
 
-    tracer.startSpan('generate_content gemini-2.5-flash').end();
-    await state.reader.forceFlush();
+    // The exact call in core/src/agents/llm_agent.ts, which passes no
+    // attributes: the processor has only the span name to match on.
+    tracer.startSpan('call_llm').end();
+    await flushPendingWork();
 
-    expect(exporter.exports.length).toBeGreaterThanOrEqual(1);
+    expect(exporter.exports).toHaveLength(1);
     expect(errorSpy).not.toHaveBeenCalled();
     await meterProvider.shutdown();
   });
 
-  it('collects on a span attributed with the generate_content operation', async () => {
-    const {exporter, state, meterProvider} = createOverdueReader();
+  it('collects on a configured inference span name', async () => {
+    const {exporter, state, meterProvider} =
+      createOverdueReader('generate_content');
     const tracer = createTracer(state.spanProcessor).getTracer('test');
 
-    tracer
-      .startSpan('call_llm', {
-        attributes: {[GEN_AI_OPERATION_NAME]: 'generate_content'},
-      })
-      .end();
+    tracer.startSpan('generate_content gemini-2.5-flash').end();
     await flushPendingWork();
 
     expect(exporter.exports).toHaveLength(1);
     await meterProvider.shutdown();
   });
 
-  it('ignores a span that is neither named nor attributed for generation', async () => {
+  it('ignores an inference span the reader was not configured for', async () => {
+    const {exporter, state, meterProvider} =
+      createOverdueReader('generate_content');
+    const tracer = createTracer(state.spanProcessor).getTracer('test');
+
+    tracer.startSpan('call_llm').end();
+    await flushPendingWork();
+
+    expect(exporter.exports).toEqual([]);
+    await meterProvider.shutdown();
+  });
+
+  it('ignores the other spans adk-js opens', async () => {
     const {exporter, state, meterProvider} = createOverdueReader();
     const tracer = createTracer(state.spanProcessor).getTracer('test');
 
-    tracer
-      .startSpan('invocation', {attributes: {[GEN_AI_OPERATION_NAME]: 'chat'}})
-      .end();
+    // Every other span name in core/src, none of which is a model call.
+    for (const name of [
+      'invocation',
+      'invoke_agent my_agent',
+      'invoke_workflow my_flow',
+      'execute_node my_node',
+      'execute_tool my_tool',
+    ]) {
+      tracer.startSpan(name).end();
+    }
     await flushPendingWork();
 
     expect(exporter.exports).toEqual([]);
@@ -627,7 +645,7 @@ describe('buildRequestDrivenMetrics span processor', () => {
     clockFails = true;
     const tracer = createTracer(spanProcessor).getTracer('test');
 
-    const span = tracer.startSpan('generate_content');
+    const span = tracer.startSpan('call_llm');
     span.end();
 
     expect(errorSpy).toHaveBeenCalledWith(

@@ -62,7 +62,9 @@ tracerProvider.register();
 ```
 
 `buildRequestDrivenMetrics()` sets no global provider itself, so you decide
-where each half goes.
+where each half goes. You usually do not have to: `getGcpExporters({enableMetrics:
+true})` already returns this pair instead of a periodic reader when
+`GOOGLE_CLOUD_AGENT_ENGINE_ID` is set, and the periodic reader everywhere else.
 
 Then drive the reader from your request layer. Each hook is synchronous and
 cheap, and returns whether to collect:
@@ -87,9 +89,18 @@ async function serve(request: Request): Promise<Response> {
 Call `noteRequestEnd()` after the response body is fully sent. That is the last
 moment your process is guaranteed CPU.
 
+**You must drive the reader.** Installing it is not enough. Every collect except
+the one at shutdown starts from `noteRequestStart()` or `noteRequestEnd()`, and
+point 4 needs a request in flight before it will fire. A host that installs the
+reader and never calls the hooks exports nothing until it shuts down. ADK Python
+supplies that driver as request middleware; adk-js does not have one yet, so for
+now the host wires the two calls itself.
+
 The span processor needs no wiring beyond installing it. It watches for
-`generate_content` span starts, which ADK opens on every model call, and drives
-the reader from them.
+`call_llm` span starts, which `LlmAgent` opens on every model call, and drives
+the reader from them. Set `inferenceSpanName` if your inference span is named
+something else, for instance `generate_content` when the GenAI SDK's own
+instrumentation supplies it.
 
 ## When the reader collects
 
@@ -105,7 +116,7 @@ Four decisions produce a collect.
    on by one period. It does not retry the same guidepost as soon as the floor
    allows.
 4. **A long request collects off its own model calls.** Once 1.5 periods have
-   passed within the current busy period, the next `generate_content` span start
+   passed within the current busy period, the next `call_llm` span start
    collects. This is the only thing that stops a single very long request from
    accumulating points.
 
