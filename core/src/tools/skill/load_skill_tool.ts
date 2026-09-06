@@ -8,6 +8,7 @@ import {FunctionDeclaration, Type} from '@google/genai';
 import {requireAgent} from '../../agents/invocation_context.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {missingArgumentsError} from './skill_tool_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
@@ -40,13 +41,12 @@ export class LoadSkillTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
-    const skillName = args['name'] as string;
-    if (!skillName) {
-      return {
-        error: 'Skill name is required.',
-        error_code: 'MISSING_SKILL_NAME',
-      };
+    const invalidArguments = missingArgumentsError(args, ['name']);
+    if (invalidArguments) {
+      return invalidArguments;
     }
+
+    const skillName = args['name'] as string;
 
     let skill;
     try {

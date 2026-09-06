@@ -8,6 +8,7 @@ import {FunctionDeclaration, Type} from '@google/genai';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {missingArgumentsError} from './skill_tool_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 @experimental
@@ -42,13 +43,12 @@ export class SearchSkillsTool extends BaseTool {
   }
 
   override async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
-    const query = args['query'] as string;
-    if (!query) {
-      return {
-        error: "Argument 'query' is required.",
-        error_code: 'INVALID_ARGUMENTS',
-      };
+    const invalidArguments = missingArgumentsError(args, ['query']);
+    if (invalidArguments) {
+      return invalidArguments;
     }
+
+    const query = args['query'] as string;
 
     try {
       const results = await this.toolset.registry!.searchSkills(query);

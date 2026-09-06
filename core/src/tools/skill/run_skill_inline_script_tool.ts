@@ -11,6 +11,7 @@ import {CodeExecutionLanguage} from '../../code_executors/code_execution_utils.j
 import {experimental} from '../../utils/experimental.js';
 import {materializeFiles} from '../../utils/file_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
+import {missingArgumentsError} from './skill_tool_utils.js';
 import {SkillToolset} from './skill_toolset.js';
 
 /**
@@ -19,8 +20,7 @@ import {SkillToolset} from './skill_toolset.js';
  * must remain stable.
  */
 export enum RunSkillInlineScriptErrorCode {
-  MISSING_SCRIPT_CONTENT = 'MISSING_SCRIPT_CONTENT',
-  MISSING_LANGUAGE = 'MISSING_LANGUAGE',
+  INVALID_ARGUMENTS = 'INVALID_ARGUMENTS',
   NO_CODE_EXECUTOR = 'NO_CODE_EXECUTOR',
   EXECUTION_ERROR = 'EXECUTION_ERROR',
   CONFIRMATION_REJECTED = 'CONFIRMATION_REJECTED',
@@ -81,25 +81,20 @@ export class RunSkillInlineScriptTool extends BaseTool {
     args,
     toolContext,
   }: RunAsyncToolRequest): Promise<unknown> {
+    const invalidArguments = missingArgumentsError(args, [
+      'script_content',
+      'language',
+    ]);
+    if (invalidArguments) {
+      return invalidArguments;
+    }
+
     const inlineScriptContent = args['script_content'] as string;
     const language = args['language'] as string;
     const scriptArgs = args['args'] as
       | string[]
       | Record<string, string | number | boolean>
       | undefined;
-
-    if (!inlineScriptContent) {
-      return {
-        error: 'Script content is required.',
-        errorCode: RunSkillInlineScriptErrorCode.MISSING_SCRIPT_CONTENT,
-      };
-    }
-    if (!language) {
-      return {
-        error: 'Language is required.',
-        errorCode: RunSkillInlineScriptErrorCode.MISSING_LANGUAGE,
-      };
-    }
 
     let codeExecutor = this.toolset?.codeExecutor;
     if (!codeExecutor) {
@@ -112,7 +107,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
     if (!codeExecutor) {
       return {
         error: 'No code executor configured.',
-        errorCode: RunSkillInlineScriptErrorCode.NO_CODE_EXECUTOR,
+        error_code: RunSkillInlineScriptErrorCode.NO_CODE_EXECUTOR,
       };
     }
 
@@ -154,7 +149,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
     } catch (e: unknown) {
       return {
         error: `Failed to execute inline script: ${(e as Error).message}`,
-        errorCode: RunSkillInlineScriptErrorCode.EXECUTION_ERROR,
+        error_code: RunSkillInlineScriptErrorCode.EXECUTION_ERROR,
       };
     }
   }
@@ -177,7 +172,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
     language: string,
   ):
     | {partial: string}
-    | {error: string; errorCode: RunSkillInlineScriptErrorCode}
+    | {error: string; error_code: RunSkillInlineScriptErrorCode}
     | undefined {
     const confirmation = toolContext.toolConfirmation;
 
@@ -196,7 +191,7 @@ export class RunSkillInlineScriptTool extends BaseTool {
     if (!confirmation.confirmed) {
       return {
         error: 'Inline script execution was not confirmed and was rejected.',
-        errorCode: RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED,
+        error_code: RunSkillInlineScriptErrorCode.CONFIRMATION_REJECTED,
       };
     }
 

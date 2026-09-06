@@ -428,7 +428,8 @@ Instruction body`;
         args: {},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
-      expect(res.error_code).toBe('MISSING_SKILL_NAME');
+      expect(res.error_code).toBe('INVALID_ARGUMENTS');
+      expect(res.error).toBe("Argument 'name' is required.");
     });
 
     it('LoadSkillTool handles registry fetch errors', async () => {
@@ -470,13 +471,15 @@ Instruction body`;
         args: {path: 'foo'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
-      expect(res.error_code).toBe('MISSING_SKILL_NAME');
+      expect(res.error_code).toBe('INVALID_ARGUMENTS');
+      expect(res.error).toBe("Argument 'skill_name' is required.");
 
       res = (await tool.runAsync({
         args: {skill_name: 'foo'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
-      expect(res.error_code).toBe('MISSING_RESOURCE_PATH');
+      expect(res.error_code).toBe('INVALID_ARGUMENTS');
+      expect(res.error).toBe("Argument 'path' is required.");
     });
 
     it('LoadSkillResourceTool handles registry fetch error', async () => {
@@ -592,13 +595,15 @@ Instruction body`;
         args: {script_path: 'foo'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
-      expect(res.errorCode).toBe('MISSING_SKILL_NAME');
+      expect(res.error_code).toBe('INVALID_ARGUMENTS');
+      expect(res.error).toBe("Argument 'skill_name' is required.");
 
       res = (await tool.runAsync({
         args: {skill_name: 'foo'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
-      expect(res.errorCode).toBe('MISSING_SCRIPT_PATH');
+      expect(res.error_code).toBe('INVALID_ARGUMENTS');
+      expect(res.error).toBe("Argument 'script_path' is required.");
     });
 
     it('RunSkillScriptTool handles registry fetch error', async () => {
@@ -608,7 +613,7 @@ Instruction body`;
         args: {skill_name: 'error-skill', script_path: 'scripts/test.js'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
-      expect(res.errorCode).toBe('REGISTRY_ERROR');
+      expect(res.error_code).toBe('REGISTRY_ERROR');
     });
 
     it('RunSkillScriptTool handles skill not found', async () => {
@@ -618,7 +623,7 @@ Instruction body`;
         args: {skill_name: 'unknown-skill', script_path: 'scripts/test.js'},
         toolContext: createMockContext(),
       })) as Record<string, unknown>;
-      expect(res.errorCode).toBe('SKILL_NOT_FOUND');
+      expect(res.error_code).toBe('SKILL_NOT_FOUND');
     });
   });
 });
