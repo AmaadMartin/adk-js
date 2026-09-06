@@ -300,6 +300,23 @@ describe('RequestDrivenMetricReader lifecycle', () => {
     expect(reader.noteRequestEnd()).toBe(true);
   });
 
+  it('measures the floor from the collect, not from the decision', async () => {
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 1_000;
+    expect(reader.noteRequestEnd()).toBe(true);
+
+    // The queued collect runs later than the hook that armed it, so the floor
+    // must run from 5000, not from 1000.
+    clock.t = 5_000;
+    await reader.submitCollect();
+
+    clock.t = 7_000;
+    expect(reader.noteRequestStart()).toBe(false);
+    expect(reader.noteRequestEnd()).toBe(false);
+
+    await provider.shutdown();
+  });
+
   it('does not arm a second collect while one is already committed', async () => {
     expect(reader.noteRequestStart()).toBe(false);
     clock.t = FLOOR_MS;
@@ -322,6 +339,36 @@ describe('RequestDrivenMetricReader lifecycle', () => {
 
     clock.t = FLOOR_MS;
     expect(reader.noteRequestEnd()).toBe(true);
+    await provider.shutdown();
+  });
+});
+
+describe('RequestDrivenMetricReader guidepost grid', () => {
+  it('advances the grid past a muted guidepost', async () => {
+    const exporter = new FakeExporter();
+    const clock = new FakeClock();
+    const reader = new RequestDrivenMetricReader(exporter, {
+      exportIntervalMillis: PERIOD_MS,
+      floorMillis: FLOOR_MS,
+      now: clock.now,
+    });
+    const provider = meterProviderWith(reader);
+
+    expect(reader.noteRequestStart()).toBe(false);
+    clock.t = 9_000;
+    expect(reader.noteRequestEnd()).toBe(true);
+    await reader.submitCollect();
+    expect(reader.noteRequestStart()).toBe(false);
+
+    // The guidepost at 10000 is within the floor of the collect at 9000, so it
+    // is muted and the grid moves on to 20000.
+    clock.t = 10_000;
+    expect(reader.noteRequestStart()).toBe(false);
+
+    // Past the floor, but the muted guidepost must not fire a second time.
+    clock.t = 12_500;
+    expect(reader.noteRequestStart()).toBe(false);
+
     await provider.shutdown();
   });
 });
