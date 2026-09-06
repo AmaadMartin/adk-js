@@ -351,6 +351,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [OpenAPIToolset](tools/openapi_toolset/index.md) - Generating callable tools from an OpenAPI 3 specification, and configuring their authentication and TLS verification.
 - [OperationParser](tools/operation_parser/index.md) - How one OpenAPI operation becomes a tool signature: argument names, required arguments, and the generated documentation.
 - [preload_memory](tools/preload_memory_tool/index.md) - Recalling earlier conversations automatically, without a tool call.
+- [RemoteMcpServer](tools/remote_mcp_server/index.md) - Describing a remote MCP server the Managed Agents API runs server-side, and the headers ADK mints for it each turn.
 - [RestApiTool](tools/rest_api_tool/index.md) - Calling one REST endpoint from a model, and configuring it from JSON text.
 - [RestApiTool request timeouts](tools/rest_api_tool_timeouts/index.md) - Bounding one REST API call, and the error a timeout returns to the model.
 - [SetModelResponseTool](tools/set_model_response/index.md) - Returning structured output on a model that cannot take an output schema and tools in one request.

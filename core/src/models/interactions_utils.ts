@@ -14,6 +14,7 @@ import {
   Part,
   Tool,
 } from '@google/genai';
+import type {ReadonlyContext} from '../agents/readonly_context.js';
 import type {RemoteMcpServer} from '../tools/remote_mcp_server.js';
 import {logger} from '../utils/logger.js';
 import {LlmRequest} from './llm_request.js';
@@ -1082,6 +1083,8 @@ export function buildMcpServerParam(
     type: 'mcp_server',
     url: server.url,
   };
+  // Guarded on `undefined`, not on truthiness: an empty name and an empty
+  // allowed-tools list are meaningful and are forwarded.
   if (server.name !== undefined) {
     param.name = server.name;
   }
@@ -1092,6 +1095,31 @@ export function buildMcpServerParam(
     param.allowed_tools = [{tools: [...server.allowedTools]}];
   }
   return param;
+}
+
+/**
+ * Resolves the headers a {@link RemoteMcpServer} needs for one turn, then maps
+ * the server to its `mcp_server` tool param.
+ *
+ * The static headers are copied first, then the `headerProvider` output is
+ * assigned over the copy, so the provider wins on a key conflict. An error
+ * from the provider propagates: a failed token mint must be loud, not a
+ * silently missing header. A caller that already holds the resolved headers
+ * calls {@link buildMcpServerParam} instead.
+ *
+ * @param server The server description.
+ * @param context The context of the turn being built for.
+ * @return The tool param.
+ */
+export async function resolveMcpServerParam(
+  server: RemoteMcpServer,
+  context: ReadonlyContext,
+): Promise<Interactions.Tool.MCPServer> {
+  const headers: Record<string, string> = {...server.headers};
+  if (server.headerProvider !== undefined) {
+    Object.assign(headers, await server.headerProvider(context));
+  }
+  return buildMcpServerParam(server, headers);
 }
 
 /** Parameters for {@link buildInteractionsRequestLog}. */

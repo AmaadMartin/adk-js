@@ -7,23 +7,26 @@
 import type {ReadonlyContext} from '../agents/readonly_context.js';
 
 /**
- * Mints headers for a remote MCP server at request time, e.g. a fresh bearer
- * token. Called once per turn while the agent resolves its tools.
+ * Mints headers for one remote MCP turn, from the invocation that asked for
+ * it. Use it to carry a token that must be fresh on every turn.
+ *
+ * Named for the remote server because `tools/mcp/mcp_auth.ts` already exports
+ * `McpHeaderProvider` for the client-side session.
  */
-export type McpHeaderProvider = (
+export type RemoteMcpHeaderProvider = (
   context: ReadonlyContext,
 ) => Record<string, string> | Promise<Record<string, string>>;
 
 /**
- * A remote MCP server the Managed Agents backend runs, not this process.
+ * A remote MCP server that the Managed Agents API runs server-side.
  *
- * `ManagedAgent` forwards the URL and headers to `interactions.create`; the
- * backend opens the MCP session and executes the tools. Only remote
- * (HTTP/streamable) MCP servers are supported.
+ * The caller describes the endpoint; ADK forwards its URL and headers to the
+ * Interactions API, and the backend opens the Model Context Protocol session
+ * and runs the tools. Only remote (HTTP or streamable) MCP servers work here.
  *
- * This is server-side MCP. `LlmAgent`'s `McpToolset` is the client-side form:
- * it opens the session here and runs the tools here. The shared idea is the
- * `headerProvider` contract.
+ * This is server-side MCP. `McpToolset` is the client-side counterpart: it
+ * opens the session itself and runs the tools in this process. ADK never
+ * connects to the server described here.
  *
  * Mirrors `RemoteMcpServer` in google/adk-python `tools/_remote_mcp_server.py`,
  * which models it as a validated pydantic model. TypeScript rejects an unknown
@@ -32,7 +35,7 @@ export type McpHeaderProvider = (
  */
 export interface RemoteMcpServer {
   /**
-   * Full URL of the remote MCP server endpoint, e.g.
+   * Full URL of the remote MCP server endpoint, for example
    * `https://api.example.com/mcp`.
    */
   url: string;
@@ -41,16 +44,17 @@ export interface RemoteMcpServer {
   name?: string;
 
   /**
-   * Static headers sent on every turn, e.g. a fixed API key. Merged with
-   * {@link headerProvider} output, which wins on a key conflict.
+   * Static headers sent on every turn, for example a fixed API key. Merged
+   * with {@link RemoteMcpServer.headerProvider} output, which wins on a key
+   * conflict.
    */
   headers?: Record<string, string>;
 
   /** Restricts which of the server's tools the backend may call. */
   allowedTools?: string[];
 
-  /** Mints headers per turn. See {@link McpHeaderProvider}. */
-  headerProvider?: McpHeaderProvider;
+  /** Runtime callback that mints headers at request time, once per turn. */
+  headerProvider?: RemoteMcpHeaderProvider;
 }
 
 /**

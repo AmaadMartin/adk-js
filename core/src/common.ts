@@ -1264,12 +1264,13 @@ export {
 export {createPubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export type {PubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export {isRemoteMcpServer} from './tools/remote_mcp_server.js';
-// `McpHeaderProvider` is not re-exported here. `tools/mcp/mcp_auth.ts` declares
-// the same type and the MCP barrel already exports it, so naming it twice makes
-// the name ambiguous in `index.ts`. The two declarations are structurally
-// identical, so the one the MCP barrel exports also types this module's
-// `RemoteMcpServer.headerProvider`.
-export type {RemoteMcpServer} from './tools/remote_mcp_server.js';
+// The server-side header provider keeps its own name. `tools/mcp/mcp_auth.ts`
+// exports `McpHeaderProvider` for the client-side session through the MCP
+// barrel, and the same name twice would be ambiguous in `index.ts`.
+export type {
+  RemoteMcpHeaderProvider,
+  RemoteMcpServer,
+} from './tools/remote_mcp_server.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {GeminiEmbeddingModel} from './tools/retrieval/embedding_model.js';
