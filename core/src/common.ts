@@ -718,6 +718,15 @@ export type {
   CrewaiToolOptions,
 } from './integrations/crewai/crewai_tool.js';
 export {
+  EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+  createEventarcToolConfig,
+} from './integrations/eventarc/eventarc_tool_config.js';
+// A second port of `EventarcToolConfig`. It states the publish timeout in
+// seconds and requires it, where `integrations/eventarc/config.js` states the
+// same timeout in milliseconds and leaves it optional. That module already
+// holds the plain name through `index.ts`, so the barrel renames this one.
+export type {EventarcToolConfig as ValidatedEventarcToolConfig} from './integrations/eventarc/eventarc_tool_config.js';
+export {
   GCSCredentialsConfig,
   GCS_DEFAULT_SCOPE,
   GCS_TOKEN_CACHE_KEY,
