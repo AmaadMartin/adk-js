@@ -6,6 +6,7 @@
 
 import * as adk from '@google/adk';
 import {
+  BaseAuthenticatedTool,
   BaseLlm,
   BaseLlmConnection,
   BaseTool,
@@ -279,6 +280,12 @@ describe('the declaration-less tool surface', () => {
   // name for them, so no function call can come back naming one.
   const NOT_MODEL_ADDRESSABLE = new Set(['ExampleTool', 'PreloadMemoryTool']);
 
+  /** Exported bases a caller subclasses rather than registers. */
+  const ABSTRACT_TOOL_BASES = new Set<unknown>([
+    BuiltInTool,
+    BaseAuthenticatedTool,
+  ]);
+
   type ToolClass = (abstract new (...args: never[]) => BaseTool) & {
     name: string;
   };
@@ -315,9 +322,9 @@ describe('the declaration-less tool surface', () => {
           : value instanceof BaseTool
             ? (value.constructor as ToolClass)
             : undefined;
-      // `BuiltInTool` itself is abstract, so it holds neither side of the
-      // invariant.
-      if (ctor && (ctor as unknown) !== BuiltInTool) {
+      // An abstract base holds neither side of the invariant: a concrete
+      // subclass supplies the declaration, and the base is never registered.
+      if (ctor && !ABSTRACT_TOOL_BASES.has(ctor)) {
         classes.set(ctor.name, ctor);
       }
     }
