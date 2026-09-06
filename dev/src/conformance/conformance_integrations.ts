@@ -142,8 +142,7 @@ export const reimburse = new FunctionTool({
     purpose: z.string(),
     amount: z.number(),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  execute: ({purpose, amount}) => {
+  execute: () => {
     return {
       status: 'ok',
     };
@@ -157,8 +156,7 @@ export const askForApproval = new LongRunningFunctionTool({
     purpose: z.string(),
     amount: z.number(),
   }),
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  execute: ({purpose, amount}, context) => {
+  execute: ({amount}) => {
     return {
       status: 'pending',
       amount: amount,
