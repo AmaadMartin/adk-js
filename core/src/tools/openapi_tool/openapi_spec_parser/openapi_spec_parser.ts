@@ -30,7 +30,12 @@ export interface ParsedOperation {
   endpoint: OperationEndpoint;
   operation: OpenAPIV3.OperationObject;
   parameters: ApiParameter[];
-  returnValue?: ApiParameter;
+  /**
+   * The operation's response, from the lowest 2xx response code. Always
+   * present; `paramSchema` is empty when the operation declares no 2xx
+   * response with a schema.
+   */
+  returnValue: ApiParameter;
   authScheme?: OpenAPIV3.SecuritySchemeObject;
 }
 
@@ -299,6 +304,7 @@ function collectOperations(
         endpoint: {baseUrl, path, method},
         operation: operation,
         parameters: parser.getParameters(),
+        returnValue: parser.getReturnValue(),
         authScheme: authScheme,
       });
     }

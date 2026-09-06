@@ -259,6 +259,63 @@ describe('OpenApiSpecParser', () => {
     expect(postOp?.authScheme?.type).toBe('oauth2');
   });
 
+  it('should surface the return value on each parsed operation', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Pet API', version: '1.0.0'},
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {$ref: '#/components/schemas/Pet'},
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Pet: {type: 'object', properties: {name: {type: 'string'}}},
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].returnValue).toBeDefined();
+    expect(parsed[0].returnValue.paramSchema.type).toBe('object');
+    expect(
+      parsed[0].returnValue.paramSchema.properties?.['name'],
+    ).toBeDefined();
+    expect(parsed[0].returnValue.name).toBe('return');
+  });
+
+  it('should surface an empty return schema for an operation with no 2xx content', () => {
+    const spec: OpenAPIV3.Document = {
+      openapi: '3.0.0',
+      info: {title: 'Pet API', version: '1.0.0'},
+      paths: {
+        '/pets/{id}': {
+          delete: {
+            operationId: 'deletePet',
+            responses: {'204': {description: 'No Content'}},
+          },
+        },
+      },
+    };
+
+    const parsed = new OpenApiSpecParser().parse(spec);
+
+    expect(parsed[0].returnValue.paramSchema).toEqual({});
+  });
+
   describe('server URL resolution', () => {
     function parseBaseUrl(servers?: OpenAPIV3.ServerObject[]): string {
       const spec: OpenAPIV3.Document = {
