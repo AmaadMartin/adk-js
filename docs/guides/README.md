@@ -88,6 +88,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [ADK CLI options](cli/cli_options/index.md) - Where a run stores its data, how it reports events, and running one query instead of opening a prompt.
 - [adk eval](cli/eval/index.md) - Scoring an agent against recorded eval sets from the command line, and where the run reads and writes.
+- [Agent test runner](cli/agent_test_runner/index.md) - Replaying a recorded
+  conversation against an agent, and rebuilding the recording.
 - [CLI usage metrics](cli/telemetry_metrics/index.md) - The opt-in per-command record the `adk` CLI writes under `~/.adk`, and what it deliberately leaves out.
 - [Deploying with ADK Web](cli/deploy_web_ui/index.md) - What `adk deploy --with_ui` changes, and why ADK Web is a development tool.
 - [Pub/Sub and Eventarc triggers](cli/triggers/index.md) - Opt-in HTTP endpoints that let an event source invoke an agent, with bounded concurrency and retry on rate limits.

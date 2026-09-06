@@ -42,7 +42,8 @@ const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
 
 /**
  * Entry file names that make the containing *directory* the agent's name, in
- * the order {@link AgentLoader} prefers them.
+ * the order {@link AgentLoader} prefers them: an `app` file wins over an
+ * `agent` file.
  */
 const DIRECTORY_ENTRY_NAMES = ['app', 'agent'];
 
@@ -638,22 +639,19 @@ export class AgentLoader implements BaseAgentLoader {
   }
 
   private async loadAgentFromDirectory(dir: FileMetadata): Promise<void> {
-    const subFiles = await getDirFiles(dir.path);
-    const possibleEntryFile = DIRECTORY_ENTRY_NAMES.map((entryName) =>
-      subFiles.find((f) => f.isFile && f.name === entryName && isJsFile(f.ext)),
-    ).find((file) => file !== undefined);
+    const possibleEntryFile = findAgentEntryFile(dir.path);
 
     if (!possibleEntryFile) {
       return;
     }
 
     try {
-      const agentFile = new AgentFile(possibleEntryFile.path, this.options);
+      const agentFile = new AgentFile(possibleEntryFile, this.options);
       const loaded = await agentFile.load();
       stampRootAgentOrigin(loaded, dir.name, dir.path);
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
-      this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
+      this.recordLoadFailure(dir.name, possibleEntryFile, e);
     }
   }
 
@@ -691,6 +689,25 @@ function stampRootAgentOrigin(
   if (isBaseAgent(rootAgent)) {
     stampAgentOrigin(rootAgent, {appName, path: dirPath});
   }
+}
+
+/**
+ * Returns the agent entry file of a directory, or `undefined` when the
+ * directory holds none.
+ *
+ * Synchronous, so that a caller listing agent directories can do it while a
+ * test runner collects.
+ */
+export function findAgentEntryFile(dirPath: string): string | undefined {
+  for (const baseName of DIRECTORY_ENTRY_NAMES) {
+    for (const extension of JS_FILES_EXTENSIONS) {
+      const candidate = path.join(dirPath, `${baseName}${extension}`);
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
 }
 
 function isJsFile(fileExt?: string): boolean {
