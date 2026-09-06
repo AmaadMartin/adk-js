@@ -124,22 +124,42 @@ export abstract class BaseSessionService {
   /**
    * Gets a session or creates one if it doesn't exist.
    *
+   * Concurrent callers that ask for the same session id all get the same
+   * session. A caller that loses the create race gets the session the winner
+   * created, instead of the duplicate-id error the service reports. Only the
+   * call that creates the session applies the state in the request, as is
+   * already the case when the session exists beforehand.
+   *
    * @param request The request to get or create a session.
    * @return A promise that resolves to the session instance.
+   * @throws The original createSession error, when the create failed and no
+   *     session exists for the requested id afterwards.
    */
   async getOrCreateSession(request: CreateSessionRequest): Promise<Session> {
     if (!request.sessionId) {
       return this.createSession(request);
     }
-    const session = await this.getSession({
+    const key = {
       appName: request.appName,
       userId: request.userId,
       sessionId: request.sessionId,
-    });
+    };
+    const session = await this.getSession(key);
     if (session) {
       return session;
     }
-    return this.createSession(request);
+    try {
+      return await this.createSession(request);
+    } catch (e: unknown) {
+      // A concurrent caller can create the session between the read above and
+      // this create. Each service reports that with a different error shape,
+      // so re-read the key rather than match on the error.
+      const created = await this.getSession(key);
+      if (!created) {
+        throw e;
+      }
+      return created;
+    }
   }
 
   /**
