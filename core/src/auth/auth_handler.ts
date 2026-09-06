@@ -8,6 +8,7 @@ import {State} from '../sessions/state.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
 import {AuthCredential} from './auth_credential.js';
+import {isOAuth2Scheme} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
 
@@ -123,7 +124,7 @@ export class AuthHandler {
     if ('authorizationEndpoint' in authScheme) {
       authorizationEndpoint = authScheme.authorizationEndpoint;
       scopes = authScheme.scopes || [];
-    } else if (authScheme.type === 'oauth2' && authScheme.flows) {
+    } else if (isOAuth2Scheme(authScheme)) {
       const flows = authScheme.flows;
       const flow =
         flows.implicit ||

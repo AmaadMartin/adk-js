@@ -8,8 +8,16 @@ import {logger} from '../../utils/logger.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 import {OAuth2Auth} from '../auth_credential.js';
 
-import {AuthScheme, OpenIdConnectWithConfig} from '../auth_schemes.js';
-import {validateDiscoveryUrl} from './oauth2_discovery.js';
+import {
+  AuthScheme,
+  isExtendedOAuth2,
+  isOAuth2Scheme,
+  OpenIdConnectWithConfig,
+} from '../auth_schemes.js';
+import {
+  OAuth2DiscoveryManager,
+  validateDiscoveryUrl,
+} from './oauth2_discovery.js';
 
 /**
  * Returns the token endpoint for the given auth scheme.
@@ -22,7 +30,7 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
     return (authScheme as OpenIdConnectWithConfig).tokenEndpoint;
   }
 
-  if (authScheme.type === 'oauth2' && authScheme.flows) {
+  if (isOAuth2Scheme(authScheme)) {
     const flows = authScheme.flows;
     const flow =
       flows.authorizationCode ||
@@ -180,4 +188,55 @@ export function isTokenExpired(token: OAuth2Auth, leeway = 60): boolean {
   const expirationThreshold = token.expiresAt - leeway * 1000;
 
   return expirationThreshold < Date.now();
+}
+
+/**
+ * Fills the empty endpoints of an OAuth2 scheme from the metadata its issuer
+ * publishes, and leaves the endpoints that are already set alone.
+ *
+ * The scheme is modified in place, so a caller that already holds it sees the
+ * discovered endpoints. This never throws: a scheme with no issuer, and a
+ * discovery call that returns nothing, both resolve to false.
+ *
+ * @param authScheme The auth scheme to populate.
+ * @param discoveryManager The manager that fetches the server metadata. It
+ *     enforces the HTTPS-only and private-address rules, so discovery must go
+ *     through it rather than through a direct fetch.
+ * @returns True when discovery filled the scheme, false otherwise.
+ */
+export async function populateAuthSchemeFromDiscovery(
+  authScheme: AuthScheme,
+  discoveryManager: OAuth2DiscoveryManager,
+): Promise<boolean> {
+  if (!isExtendedOAuth2(authScheme)) {
+    logger.warn('No issuerUrl was provided for auto-discovery.');
+    return false;
+  }
+
+  const metadata = await discoveryManager.discoverAuthServerMetadata(
+    authScheme.issuerUrl,
+  );
+  if (!metadata) {
+    logger.warn('Auto-discovery has failed to populate OAuth scheme info.');
+    return false;
+  }
+
+  const {implicit, password, clientCredentials, authorizationCode} =
+    authScheme.flows;
+  // An empty string is the "not configured" sentinel here, so `||=` is right
+  // and `??=` would leave the empty endpoint in place.
+  if (implicit) {
+    implicit.authorizationUrl ||= metadata.authorization_endpoint;
+  }
+  if (password) {
+    password.tokenUrl ||= metadata.token_endpoint;
+  }
+  if (clientCredentials) {
+    clientCredentials.tokenUrl ||= metadata.token_endpoint;
+  }
+  if (authorizationCode) {
+    authorizationCode.authorizationUrl ||= metadata.authorization_endpoint;
+    authorizationCode.tokenUrl ||= metadata.token_endpoint;
+  }
+  return true;
 }
