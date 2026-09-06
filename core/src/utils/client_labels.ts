@@ -83,3 +83,17 @@ export function getClientLabels(): string[] {
   }
   return labels;
 }
+
+/**
+ * Returns the HTTP headers that identify ADK as the caller.
+ *
+ * Both headers carry the same joined {@link getClientLabels} value, so a
+ * backend reading either one sees the framework, its version and the runtime.
+ */
+export function getTrackingHeaders(): Record<string, string> {
+  const headerValue = getClientLabels().join(' ');
+  return {
+    'x-goog-api-client': headerValue,
+    'user-agent': headerValue,
+  };
+}

@@ -14,6 +14,7 @@ import {
   Part,
   Tool,
 } from '@google/genai';
+import type {RemoteMcpServer} from '../tools/remote_mcp_server.js';
 import {logger} from '../utils/logger.js';
 import {LlmRequest} from './llm_request.js';
 import {LlmResponse} from './llm_response.js';
@@ -489,6 +490,38 @@ export function convertToolsConfigToInteractionsFormat(
 }
 
 /**
+ * Maps a remote MCP server spec and its resolved headers to an interactions
+ * MCP server tool.
+ *
+ * Built directly rather than through genai's `McpServer`, which cannot carry
+ * `allowedTools` and which the Interactions API rejects on the enterprise
+ * backend. `resolvedHeaders` is the server's static headers already merged
+ * with any `headerProvider` output by the caller.
+ *
+ * Ports `_build_mcp_server_param` in google/adk-python
+ * `models/interactions_utils.py`.
+ */
+export function buildMcpServerParam(
+  server: RemoteMcpServer,
+  resolvedHeaders: Record<string, string>,
+): Interactions.Tool {
+  const param: Interactions.Tool.MCPServer = {
+    type: 'mcp_server',
+    url: server.url,
+  };
+  if (server.name !== undefined) {
+    param.name = server.name;
+  }
+  if (Object.keys(resolvedHeaders).length > 0) {
+    param.headers = resolvedHeaders;
+  }
+  if (server.allowedTools !== undefined) {
+    param.allowed_tools = [{tools: [...server.allowedTools]}];
+  }
+  return param;
+}
+
+/**
  * Helper to find the last element in an array matching a predicate.
  */
 function findLastPart(
@@ -860,6 +893,100 @@ function extractStreamInteractionId(
 }
 
 /**
+ * Extract the environment id carried by a stream event, if it has one.
+ *
+ * Only the created and completed events carry the interaction, and the
+ * Interactions API includes the id opportunistically, so an event without one
+ * yields `undefined`.
+ */
+function extractStreamEnvironmentId(
+  event: ExtendedInteractionSSEEvent,
+): string | undefined {
+  const interaction = event.interaction as
+    | {environment_id?: string}
+    | undefined;
+  return interaction?.environment_id;
+}
+
+/**
+ * The `interactions.create` parameters a caller assembles, without `stream`.
+ *
+ * A model interaction names a `model`; an agent interaction names an `agent`.
+ * Both otherwise share the request shape.
+ */
+export type InteractionsCreateParams =
+  | Omit<Interactions.CreateModelInteractionParamsStreaming, 'stream'>
+  | Omit<Interactions.CreateAgentInteractionParamsStreaming, 'stream'>;
+
+/**
+ * Issue `interactions.create` and convert the response(s) to LlmResponses.
+ *
+ * This is the shared transport and conversion loop. The caller assembles
+ * `createParams` (`model` or `agent`, `input`, `tools`, and the rest); this
+ * helper owns issuing the call and mapping what comes back.
+ *
+ * Ports `_create_interactions` in google/adk-python
+ * `models/interactions_utils.py`.
+ */
+export async function* createInteractions(
+  apiClient: GoogleGenAI,
+  options: {createParams: InteractionsCreateParams; stream: boolean},
+): AsyncGenerator<LlmResponse, void, void> {
+  const {createParams, stream} = options;
+  let currentInteractionId = createParams.previous_interaction_id;
+  let currentEnvironmentId: string | undefined;
+
+  if (stream) {
+    const responses = (await apiClient.interactions.create({
+      ...createParams,
+      stream: true,
+    })) as AsyncIterable<ExtendedInteractionSSEEvent>;
+
+    const aggregatedParts: Part[] = [];
+    for await (const event of responses) {
+      const interactionId = extractStreamInteractionId(event);
+      if (interactionId) {
+        currentInteractionId = interactionId;
+      }
+      const environmentId = extractStreamEnvironmentId(event);
+      if (environmentId) {
+        currentEnvironmentId = environmentId;
+      }
+      const llmResponse = convertInteractionEventToLlmResponse(
+        event,
+        aggregatedParts,
+        currentInteractionId,
+      );
+      if (llmResponse) {
+        llmResponse.environmentId = currentEnvironmentId;
+        yield llmResponse;
+      }
+    }
+
+    if (aggregatedParts.length > 0) {
+      yield {
+        content: {role: 'model', parts: aggregatedParts},
+        partial: false,
+        turnComplete: true,
+        finishReason: 'STOP' as FinishReason,
+        interactionId: currentInteractionId,
+        environmentId: currentEnvironmentId,
+      };
+    }
+  } else {
+    const interaction = (await apiClient.interactions.create({
+      ...createParams,
+      stream: false,
+    })) as ExtendedInteraction;
+
+    logger.info('Interaction response received from the model.');
+    const llmResponse = convertInteractionToLlmResponse(interaction);
+    llmResponse.environmentId = interaction.environment_id;
+    yield llmResponse;
+  }
+}
+
+/**
  * Generate content using the interactions API.
  */
 export async function* generateContentViaInteractions(
@@ -889,58 +1016,16 @@ export async function* generateContentViaInteractions(
     `Sending request via interactions API, model: ${llmRequest.model}, stream: ${stream}, previous_interaction_id: ${previousInteractionId}`,
   );
 
-  let currentInteractionId = previousInteractionId;
-
-  if (stream) {
-    const responses = (await apiClient.interactions.create({
+  yield* createInteractions(apiClient, {
+    createParams: {
       model: (llmRequest.model || 'gemini-2.5-flash') as 'gemini-2.5-flash',
       input: inputSteps,
-      stream: true,
       system_instruction: systemInstruction,
       tools: interactionTools.length > 0 ? interactionTools : undefined,
       generation_config:
         Object.keys(generationConfig).length > 0 ? generationConfig : undefined,
       previous_interaction_id: previousInteractionId,
-    })) as AsyncIterable<ExtendedInteractionSSEEvent>;
-
-    const aggregatedParts: Part[] = [];
-    for await (const event of responses) {
-      const interactionId = extractStreamInteractionId(event);
-      if (interactionId) {
-        currentInteractionId = interactionId;
-      }
-      const llmResponse = convertInteractionEventToLlmResponse(
-        event,
-        aggregatedParts,
-        currentInteractionId,
-      );
-      if (llmResponse) {
-        yield llmResponse;
-      }
-    }
-
-    if (aggregatedParts.length > 0) {
-      yield {
-        content: {role: 'model', parts: aggregatedParts},
-        partial: false,
-        turnComplete: true,
-        finishReason: 'STOP' as FinishReason,
-        interactionId: currentInteractionId,
-      };
-    }
-  } else {
-    const interaction = (await apiClient.interactions.create({
-      model: (llmRequest.model || 'gemini-2.5-flash') as 'gemini-2.5-flash',
-      input: inputSteps,
-      stream: false,
-      system_instruction: systemInstruction,
-      tools: interactionTools.length > 0 ? interactionTools : undefined,
-      generation_config:
-        Object.keys(generationConfig).length > 0 ? generationConfig : undefined,
-      previous_interaction_id: previousInteractionId,
-    })) as ExtendedInteraction;
-
-    logger.info('Interaction response received from the model.');
-    yield convertInteractionToLlmResponse(interaction);
-  }
+    },
+    stream,
+  });
 }
