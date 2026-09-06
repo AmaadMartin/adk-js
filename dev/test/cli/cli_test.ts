@@ -51,14 +51,19 @@ vi.mock('@google/adk', async (importOriginal) => {
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
+  // `process.exitCode` is global process state: a test that leaves it at 1
+  // makes the whole vitest run report failure even though every test passed.
+  let originalExitCode: typeof process.exitCode;
 
   beforeEach(() => {
+    originalExitCode = process.exitCode;
     vi.clearAllMocks();
     program = createProgram();
     program.exitOverride();
   });
 
   afterEach(() => {
+    process.exitCode = originalExitCode;
     vi.restoreAllMocks();
   });
 
@@ -380,6 +385,24 @@ describe('CLI Entrypoint', () => {
       // which gcloud would reject.
       expect(args.extraGcloudArgs).toEqual([]);
     });
+
+    it('should set a non-zero exit code when the deploy fails', async () => {
+      (deployToCloudRun as Mock).mockRejectedValueOnce(
+        new Error('gcloud blew up'),
+      );
+
+      // Reaching the assertion below also proves the handler does not let the
+      // rejection escape as an unhandled promise rejection.
+      await parse(['deploy', 'cloud_run']);
+
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('should leave the exit code untouched on a successful deploy', async () => {
+      await parse(['deploy', 'cloud_run']);
+
+      expect(process.exitCode).toBe(originalExitCode);
+    });
   });
 
   describe('command: deploy agent_engine', () => {
@@ -444,6 +467,16 @@ describe('CLI Entrypoint', () => {
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
       });
+    });
+
+    it('should set a non-zero exit code when the deploy fails', async () => {
+      (deployToAgentEngine as Mock).mockRejectedValueOnce(
+        new Error('reasoning engine blew up'),
+      );
+
+      await parse(['deploy', 'agent_engine']);
+
+      expect(process.exitCode).toBe(1);
     });
   });
 

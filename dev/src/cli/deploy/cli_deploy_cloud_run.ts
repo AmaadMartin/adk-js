@@ -219,6 +219,7 @@ export async function deployToCloudRun(options: DeployToCloudRunOptions) {
       (e as Error).message,
       '\x1b[0m',
     );
+    throw e;
   } finally {
     console.info('Cleaning up temporary files...');
     await fs.rm(tempFolder, {recursive: true, force: true});

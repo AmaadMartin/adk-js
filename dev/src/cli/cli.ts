@@ -486,6 +486,7 @@ export function createProgram(): Command {
         });
       } catch (error) {
         logger.error('Error deploying agent:', (error as Error).message);
+        process.exitCode = 1;
       }
     });
 
@@ -538,6 +539,7 @@ export function createProgram(): Command {
           });
         } catch (error) {
           logger.error('Error deploying agent:', (error as Error).message);
+          process.exitCode = 1;
         }
       });
   };

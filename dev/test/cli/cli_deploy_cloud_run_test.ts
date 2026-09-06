@@ -376,7 +376,9 @@ describe('deployToCloudRun', () => {
     const consoleErrorSpy = vi.spyOn(console, 'error');
     (loadFileData as Mock).mockResolvedValue({});
 
-    await deployToCloudRun(defaultOptions);
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /No dependencies found in package.json/,
+    );
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
@@ -393,7 +395,9 @@ describe('deployToCloudRun', () => {
       },
     });
 
-    await deployToCloudRun(defaultOptions);
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /Package "@google\/adk" is required but not found/,
+    );
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
@@ -478,7 +482,7 @@ describe('deployToCloudRun', () => {
     );
   });
 
-  it('should handle spawn failures', async () => {
+  it('should reject when the gcloud deploy spawn fails', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error');
     spawnMock.mockReturnValue({
       on: vi.fn((event: string, cb: (code: number) => void) => {
@@ -488,12 +492,42 @@ describe('deployToCloudRun', () => {
       }),
     });
 
-    await deployToCloudRun(defaultOptions);
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /Command failed with exit code 1/,
+    );
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
       expect.stringContaining('Command failed with exit code 1'),
       expect.stringContaining('\x1b[0m'),
     );
+  });
+
+  it('should still clean up temporary files when the deploy fails', async () => {
+    const disposeAll = vi.fn().mockResolvedValue(undefined);
+    (AgentLoader as Mock).mockImplementation(() => ({
+      listAgents: vi.fn().mockResolvedValue(['agent1']),
+      getAgentFile: vi.fn().mockResolvedValue({
+        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+      }),
+      disposeAll,
+    }));
+    spawnMock.mockReturnValue({
+      on: vi.fn((event: string, cb: (code: number) => void) => {
+        if (event === 'close') {
+          process.nextTick(() => cb(1));
+        }
+      }),
+    });
+
+    await expect(deployToCloudRun(defaultOptions)).rejects.toThrow(
+      /Command failed with exit code 1/,
+    );
+
+    expect(fs.rm).toHaveBeenCalledWith('/tmp/test-deploy', {
+      recursive: true,
+      force: true,
+    });
+    expect(disposeAll).toHaveBeenCalled();
   });
 });
