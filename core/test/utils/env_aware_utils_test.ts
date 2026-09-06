@@ -14,8 +14,12 @@ import {
   type MockInstance,
 } from 'vitest';
 import {randomUUID as shimRandomUUID} from '../../src/utils/crypto_shim.js';
-import {getBooleanEnvVar, randomUUID} from '../../src/utils/env_aware_utils.js';
-import type {Logger} from '../../src/utils/logger.js';
+import {
+  getBooleanEnvVar,
+  getNumberEnvVar,
+  randomUUID,
+} from '../../src/utils/env_aware_utils.js';
+import {logger, type Logger} from '../../src/utils/logger.js';
 
 describe('env_aware_utils', () => {
   describe('getBooleanEnvVar', () => {
@@ -58,6 +62,45 @@ describe('env_aware_utils', () => {
 
     it('should return false for undefined', () => {
       expect(getBooleanEnvVar('NON_EXISTENT_VAR')).toBe(false);
+    });
+  });
+
+  describe('getNumberEnvVar', () => {
+    const originalEnv = process.env;
+
+    afterEach(() => {
+      process.env = originalEnv;
+      vi.restoreAllMocks();
+    });
+
+    it('should return the default when the variable is unset', () => {
+      expect(getNumberEnvVar('NON_EXISTENT_VAR', 42)).toBe(42);
+    });
+
+    it('should parse a numeric value', () => {
+      process.env = {...originalEnv, 'TEST_VAR': '1500'};
+      expect(getNumberEnvVar('TEST_VAR', 42)).toBe(1500);
+    });
+
+    it('should parse a negative value', () => {
+      process.env = {...originalEnv, 'TEST_VAR': '-1'};
+      expect(getNumberEnvVar('TEST_VAR', 42)).toBe(-1);
+    });
+
+    it.each([
+      ['an empty value', ''],
+      ['a blank value', '  '],
+      ['a non-numeric value', 'abc'],
+      ['a non-finite value', 'Infinity'],
+    ])('should warn and fall back for %s', (_label, raw) => {
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      process.env = {...originalEnv, 'TEST_VAR': raw};
+
+      expect(getNumberEnvVar('TEST_VAR', 42)).toBe(42);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        `Found invalid value for TEST_VAR=${raw}, using default 42`,
+      );
     });
   });
 
