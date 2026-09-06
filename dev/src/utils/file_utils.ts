@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {rmSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -59,6 +60,34 @@ export async function removeFolder(folderPath: string): Promise<void> {
   } catch (e) {
     console.error(`Failed to remove folder ${folderPath}`, e);
   }
+}
+
+/**
+ * Arms a best-effort removal of `folderPath` for process exit, and returns the
+ * function that disarms it.
+ *
+ * Node drops any pending promise or I/O as soon as an `'exit'` listener
+ * returns, so an asynchronous removal registered for exit never completes. A
+ * caller that removes a directory in a `finally` also loses it on an interrupt,
+ * because the interrupted continuation never resumes. Hence the synchronous
+ * `rmSync` here.
+ */
+export function removeFolderOnExit(folderPath: string): () => void {
+  const remove = () => {
+    try {
+      rmSync(folderPath, {recursive: true, force: true});
+    } catch {
+      // At exit there is no caller left to handle a removal failure, and
+      // throwing from an 'exit' listener would replace the operator's own
+      // interrupt with a crash.
+    }
+  };
+
+  process.on('exit', remove);
+
+  return () => {
+    process.off('exit', remove);
+  };
 }
 
 /** List files within a directory */

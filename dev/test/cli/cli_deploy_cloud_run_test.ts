@@ -4,7 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {
   createDockerFileContent,
@@ -57,7 +66,8 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
   })),
 }));
 
-vi.mock('../../src/utils/file_utils.js', () => ({
+vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/file_utils.js')>()),
   createTempDir: vi.fn(),
   isFile: vi.fn(),
   isFolderExists: vi.fn(),
@@ -476,6 +486,50 @@ describe('deployToCloudRun', () => {
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining('WITHOUT authentication'),
     );
+  });
+
+  it('removes the staging folder from the exit listener when the deploy is interrupted', async () => {
+    const stagingFolder = mkdtempSync(
+      path.join(os.tmpdir(), 'adk-cloud-run-exit-'),
+    );
+    mkdirSync(path.join(stagingFolder, 'agents', 'agent1'), {recursive: true});
+    writeFileSync(
+      path.join(stagingFolder, 'agents', 'agent1', 'agent.js'),
+      'agent',
+    );
+
+    const baselineListeners = process.listeners('exit');
+    let interrupt: {before: boolean; after: boolean} | undefined;
+
+    spawnMock.mockImplementation(() => {
+      // Ctrl-C while gcloud runs: the SIGINT handler calls process.exit(),
+      // which runs the 'exit' listeners and never resumes the awaited deploy,
+      // so its finally block never executes.
+      const armed = process
+        .listeners('exit')
+        .filter((listener) => !baselineListeners.includes(listener));
+      expect(armed).toHaveLength(1);
+      const before = existsSync(stagingFolder);
+      armed[0](0);
+      interrupt = {before, after: existsSync(stagingFolder)};
+
+      return {
+        on: vi.fn((event: string, cb: (code: number) => void) => {
+          if (event === 'close') {
+            process.nextTick(() => cb(0));
+          }
+        }),
+      };
+    });
+
+    try {
+      await deployToCloudRun({...defaultOptions, tempFolder: stagingFolder});
+
+      expect(interrupt).toEqual({before: true, after: false});
+      expect(process.listeners('exit')).toEqual(baselineListeners);
+    } finally {
+      rmSync(stagingFolder, {recursive: true, force: true});
+    }
   });
 
   it('should handle spawn failures', async () => {

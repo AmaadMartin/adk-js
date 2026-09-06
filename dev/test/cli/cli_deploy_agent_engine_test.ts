@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -130,7 +131,8 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
   })),
 }));
 
-vi.mock('../../src/utils/file_utils.js', () => ({
+vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/utils/file_utils.js')>()),
   createTempDir: vi.fn(),
   isFile: vi.fn(),
   isFolderExists: vi.fn(),
@@ -724,6 +726,47 @@ describe('deployToAgentEngine', () => {
 
     vi.useRealTimers();
   }, 30000);
+
+  it('removes the staging folder from the exit listener when the deploy is interrupted', async () => {
+    const baselineListeners = process.listeners('exit');
+    let interrupt: {before: boolean; after: boolean} | undefined;
+
+    spawnMock.mockImplementation(() => {
+      // The deploy has already staged into tempFolder for real by now, but
+      // fs.cp is mocked, so seed the copied-sources marker here.
+      const agentFolder = path.join(tempFolder, 'agents', 'agent1');
+      mkdirSync(agentFolder, {recursive: true});
+      writeFileSync(path.join(agentFolder, 'agent.js'), 'agent');
+
+      // Ctrl-C while gcloud runs: the SIGINT handler calls process.exit(),
+      // which runs the 'exit' listeners and never resumes the awaited deploy,
+      // so its finally block never executes.
+      const armed = process
+        .listeners('exit')
+        .filter((listener) => !baselineListeners.includes(listener));
+      expect(armed).toHaveLength(1);
+      const before = existsSync(tempFolder);
+      armed[0](0);
+      interrupt = {before, after: existsSync(tempFolder)};
+
+      return {
+        on: vi.fn((event: string, cb: (code: number) => void) => {
+          if (event === 'close') {
+            process.nextTick(() => cb(0));
+          }
+        }),
+      };
+    });
+
+    try {
+      await deployToAgentEngine(defaultOptions);
+
+      expect(interrupt).toEqual({before: true, after: false});
+      expect(process.listeners('exit')).toEqual(baselineListeners);
+    } finally {
+      rmSync(tempFolder, {recursive: true, force: true});
+    }
+  });
 
   it('should throw descriptive error if update operation returns apiResponse.error', async () => {
     const options = {
