@@ -18,75 +18,49 @@ profile with no payload carries nothing for the model to read, so the tool drops
 it.
 
 Profile retrieval is not part of `BaseMemoryService`, so the tool does not take
-the invocation's memory service. You inject the service yourself, and the tool
-accepts anything that satisfies `ProfileRetrievingMemoryService`:
-
-```ts
-export interface ProfileRetrievingMemoryService {
-  retrieveProfiles(request: {
-    appName: string;
-    userId: string;
-  }): Promise<MemoryProfile[]>;
-}
-```
-
-`VertexAiMemoryBankService` does not expose `retrieveProfiles`, so pass a
-service of your own that does. The next section builds one on the Vertex AI SDK.
+the invocation's memory service. You inject the service yourself. The tool
+accepts anything that satisfies the exported `ProfileRetrievingMemoryService`
+interface, whose one method takes an `{appName, userId}` scope and resolves to
+the SDK's `MemoryProfile[]`.
 
 ## Get started
 
-You need an Agent Engine with structured memory schemas configured. The schema
-id you configure there becomes the key of each returned profile.
+Reading real profiles needs an Agent Engine with structured memory schemas
+configured. The schema id you configure there becomes the key of each returned
+profile.
+
+`samples/tools/vertex_ai_load_profiles/agent.ts` is a runnable agent that
+injects a fixed service, so it needs no Agent Engine:
 
 ```ts
-import {Client} from '@google-cloud/vertexai';
-import {MemoryProfile} from '@google-cloud/vertexai/build/src/genai/types.js';
 import {
   LlmAgent,
   ProfileRetrievingMemoryService,
   VertexAiLoadProfilesTool,
 } from '@google/adk';
 
-class MemoryBankProfiles implements ProfileRetrievingMemoryService {
-  private readonly memories;
-
-  constructor(
-    private readonly agentEngineId: string,
-    client: Client,
-  ) {
-    this.memories = client.agentEnginesInternal.memories;
-  }
-
-  async retrieveProfiles(request: {
-    appName: string;
-    userId: string;
-  }): Promise<MemoryProfile[]> {
-    const response = await this.memories.retrieveProfiles({
-      name: `reasoningEngines/${this.agentEngineId}`,
-      scope: {app_name: request.appName, user_id: request.userId},
-    });
-    return Object.values(response.profiles ?? {});
+class FixedProfiles implements ProfileRetrievingMemoryService {
+  async retrieveProfiles(request: {appName: string; userId: string}) {
+    return [
+      {
+        schemaId: 'user-profile',
+        profile: {name: 'Kim', tone: 'concise', userId: request.userId},
+      },
+      {schemaId: 'purchase-history', profile: {}},
+    ];
   }
 }
 
-const client = new Client({
-  project: process.env['GOOGLE_CLOUD_PROJECT'],
-  location: process.env['GOOGLE_CLOUD_LOCATION'],
-});
-
-export const agent = new LlmAgent({
+export const rootAgent = new LlmAgent({
   name: 'concierge',
   model: 'gemini-2.5-flash',
-  tools: [
-    new VertexAiLoadProfilesTool({
-      memoryService: new MemoryBankProfiles('456', client),
-    }),
-  ],
+  tools: [new VertexAiLoadProfilesTool({memoryService: new FixedProfiles()})],
 });
 ```
 
 The model sees a function named `load_profiles` that takes no arguments. A call
-returns `{profiles: [...]}`, where each entry is one profile payload.
+returns `{profiles: [...]}`, where each entry is one profile payload. The empty
+`purchase-history` profile above does not appear.
 
 ## What the tool returns
 

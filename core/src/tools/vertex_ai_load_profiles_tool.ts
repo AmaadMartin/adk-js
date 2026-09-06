@@ -14,9 +14,6 @@ import {FunctionTool} from './function_tool.js';
 
 const LOAD_PROFILES_TOOL_NAME = 'load_profiles';
 
-const LOAD_PROFILES_DESCRIPTION =
-  'Loads structured user profiles for the current user.';
-
 /**
  * The Vertex Memory Bank capability this tool needs: a scope-keyed lookup of
  * the structured profiles registered against an `(appName, userId)` pair.
@@ -60,12 +57,11 @@ async function loadProfiles(
   });
 
   return {
-    profiles: profiles
-      .map((entry) => entry.profile)
-      .filter(
-        (profile): profile is Record<string, unknown> =>
-          !!profile && Object.keys(profile).length > 0,
-      ),
+    profiles: profiles.flatMap((entry) =>
+      entry.profile && Object.keys(entry.profile).length > 0
+        ? [entry.profile]
+        : [],
+    ),
   };
 }
 
@@ -83,8 +79,7 @@ async function loadProfiles(
  * tool context, and returns one payload per non-empty profile.
  *
  * Pass any service that implements {@link ProfileRetrievingMemoryService}. See
- * `docs/guides/tools/vertex_ai_load_profiles/index.md` for one built on the
- * Vertex AI SDK.
+ * `docs/guides/tools/vertex_ai_load_profiles/index.md` for a runnable one.
  *
  * @example
  * ```ts
@@ -103,7 +98,7 @@ export class VertexAiLoadProfilesTool extends FunctionTool {
   constructor(options: VertexAiLoadProfilesToolOptions) {
     super({
       name: LOAD_PROFILES_TOOL_NAME,
-      description: LOAD_PROFILES_DESCRIPTION,
+      description: 'Loads structured user profiles for the current user.',
       execute: (_args, toolContext) =>
         loadProfiles(options.memoryService, toolContext),
     });

@@ -168,10 +168,13 @@ describe('VertexAiLoadProfilesTool adk-js specific', () => {
       memoryService: new FakeMemoryService([]),
     });
     // `RunAsyncToolRequest.toolContext` is required, so a typed caller cannot
-    // omit it. This cast reproduces the untyped caller the guard exists for.
-    const request = {args: {}} as unknown as RunAsyncToolRequest;
+    // omit it. This reproduces the untyped caller the guard exists for.
+    const request = {args: {}} satisfies Omit<
+      RunAsyncToolRequest,
+      'toolContext'
+    >;
 
-    await expect(tool.runAsync(request)).rejects.toThrow(
+    await expect(tool.runAsync(request as RunAsyncToolRequest)).rejects.toThrow(
       "Error in tool 'load_profiles': Tool 'load_profiles' requires a tool context.",
     );
   });
