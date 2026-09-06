@@ -67,6 +67,13 @@ export interface ArtifactVersion {
   customMetadata?: Record<string, unknown>;
   /** The MIME type of the artifact. */
   mimeType?: string;
+  /**
+   * When the service recorded the version, as a Unix timestamp in seconds.
+   *
+   * The unit is seconds, not milliseconds, so that the value matches
+   * adk-python's `ArtifactVersion.create_time`.
+   */
+  createTime?: number;
 }
 
 /**
