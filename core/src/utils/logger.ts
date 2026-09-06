@@ -28,6 +28,15 @@ export interface Logger {
   error(...args: unknown[]): void;
 
   setLogLevel(level: LogLevel): void;
+
+  /**
+   * Reports whether a message at `level` would be emitted.
+   *
+   * Callers use this to skip building an expensive log message. It is optional
+   * so that existing custom loggers keep compiling; a logger that omits it is
+   * treated as enabled for every level.
+   */
+  isEnabledFor?(level: LogLevel): boolean;
 }
 
 class SimpleLogger implements Logger {
@@ -61,6 +70,10 @@ class SimpleLogger implements Logger {
 
   setLogLevel(level: LogLevel): void {
     this.logLevel = level;
+  }
+
+  isEnabledFor(level: LogLevel): boolean {
+    return this.logLevel <= level;
   }
 
   log(level: LogLevel, ...messages: unknown[]): void {
@@ -109,6 +122,9 @@ class SimpleLogger implements Logger {
  */
 class NoOpLogger implements Logger {
   setLogLevel(_level: LogLevel): void {}
+  isEnabledFor(_level: LogLevel): boolean {
+    return false;
+  }
   log(_level: LogLevel, ..._args: unknown[]): void {}
   debug(..._args: unknown[]): void {}
   info(..._args: unknown[]): void {}
@@ -147,11 +163,24 @@ export function setLogLevel(level: LogLevel) {
 }
 
 /**
+ * Reports whether the current logger emits messages at `level`.
+ *
+ * A logger that does not implement `isEnabledFor` is treated as enabled, so a
+ * custom logger still receives every message.
+ */
+export function isLogLevelEnabled(level: LogLevel): boolean {
+  return currentLogger.isEnabledFor?.(level) ?? true;
+}
+
+/**
  * The logger instance for ADK.
  */
 export const logger: Logger = {
   setLogLevel(level: LogLevel): void {
     currentLogger.setLogLevel(level);
+  },
+  isEnabledFor(level: LogLevel): boolean {
+    return isLogLevelEnabled(level);
   },
   log(level: LogLevel, ...args: unknown[]): void {
     currentLogger.log(level, ...args);

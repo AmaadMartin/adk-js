@@ -6,7 +6,11 @@
 
 import {getLogger, Logger, LogLevel, setLogger, setLogLevel} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {resetLogger} from '../../src/utils/logger.js';
+import {
+  isLogLevelEnabled,
+  logger,
+  resetLogger,
+} from '../../src/utils/logger.js';
 
 describe('setLogger', () => {
   beforeEach(() => {
@@ -140,5 +144,47 @@ describe('setLogger', () => {
 
       expect(logger.constructor.name).toBe('SimpleLogger');
     });
+  });
+});
+
+describe('isLogLevelEnabled', () => {
+  beforeEach(resetLogger);
+  afterEach(resetLogger);
+
+  it('reports debug as disabled at the default level', () => {
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(false);
+    expect(isLogLevelEnabled(LogLevel.ERROR)).toBe(true);
+  });
+
+  it('reports debug as enabled once the level is lowered', () => {
+    setLogLevel(LogLevel.DEBUG);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('reports every level as disabled for the no-op logger', () => {
+    setLogger(null);
+
+    expect(isLogLevelEnabled(LogLevel.ERROR)).toBe(false);
+  });
+
+  it('reports every level as enabled for a logger without the probe', () => {
+    const customLogger: Logger = {
+      setLogLevel: () => {},
+      log: () => {},
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    };
+    setLogger(customLogger);
+
+    expect(isLogLevelEnabled(LogLevel.DEBUG)).toBe(true);
+  });
+
+  it('delegates the probe on the logger facade to the current logger', () => {
+    setLogger(null);
+
+    expect(logger.isEnabledFor?.(LogLevel.ERROR)).toBe(false);
   });
 });
