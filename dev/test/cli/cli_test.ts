@@ -337,11 +337,7 @@ describe('CLI Entrypoint', () => {
         '--extra-arg=foo',
       ];
 
-      try {
-        await parse(args);
-      } catch (e) {
-        console.log(e);
-      }
+      await parse(args);
 
       expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
         agentPath: expect.stringContaining('my-agent-path'),
