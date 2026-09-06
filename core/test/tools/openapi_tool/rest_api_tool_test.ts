@@ -14,7 +14,7 @@ import {
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
-import {FunctionDeclaration, Type} from '@google/genai';
+import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -348,9 +348,7 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const declaration = (
-      tool as unknown as {_getDeclaration: () => FunctionDeclaration}
-    )._getDeclaration();
+    const declaration = tool._getDeclaration();
 
     expect(declaration.parameters).toEqual({
       type: Type.OBJECT,

@@ -13,7 +13,7 @@ import {
   OpenAPIToolset,
   PluginManager,
 } from '@google/adk';
-import {FunctionDeclaration, Type} from '@google/genai';
+import {Type} from '@google/genai';
 import * as fs from 'fs';
 import {OpenAPIV3} from 'openapi-types';
 import * as path from 'path';
@@ -69,9 +69,10 @@ describe('OpenAPIToolset Integration', () => {
       expect.fail('get_thing tool was not created');
     }
 
-    const declaration = (
-      tool as unknown as {_getDeclaration: () => FunctionDeclaration}
-    )._getDeclaration();
+    const declaration = tool._getDeclaration();
+    if (!declaration) {
+      expect.fail('get_thing has no function declaration');
+    }
 
     expect(declaration.parameters).toEqual({
       type: Type.OBJECT,
