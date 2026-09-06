@@ -6,14 +6,18 @@
 
 import {AGENT_CARD_PATH, AgentCard} from '@a2a-js/sdk';
 import {
+  AuthConfig,
+  AuthCredentialTypes,
   BaseArtifactService,
   BaseMemoryService,
   BaseSessionService,
+  Context,
   createEvent,
   createSession,
   Event,
   FunctionTool,
   InMemoryArtifactService,
+  InMemoryCredentialService,
   InMemoryMemoryService,
   InMemorySessionService,
   InvocationContext,
@@ -31,6 +35,7 @@ import {z} from 'zod';
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
+  normalizeUrlPrefix,
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {version} from '../../src/version.js';
@@ -215,6 +220,81 @@ const TEST_AGENT = new TestAgent({
       execute: async () => 'bar',
     }),
   ],
+});
+
+const AUTH_CONFIG: AuthConfig = {
+  authScheme: {type: 'apiKey', in: 'header', name: 'X-Api-Key'},
+  credentialKey: 'test-credential',
+  exchangedAuthCredential: {
+    authType: AuthCredentialTypes.API_KEY,
+    apiKey: 'exchanged-api-key',
+  },
+};
+
+/**
+ * Stands in for a tool that completes an auth exchange. It loads the
+ * credential from whatever credential service the runner gave the invocation
+ * and saves one when there is none, then reports which of the two happened.
+ * A server whose runners have no credential service reports 'exchanged' on
+ * every request.
+ */
+class CredentialExchangingAgent extends LlmAgent {
+  async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const toolContext = new Context({invocationContext: context});
+    const existing = await context.credentialService?.loadCredential(
+      AUTH_CONFIG,
+      toolContext,
+    );
+    if (!existing) {
+      await context.credentialService?.saveCredential(AUTH_CONFIG, toolContext);
+    }
+
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      branch: context.branch,
+      content: {
+        parts: [{text: existing ? 'reused' : 'exchanged'}],
+        role: 'model',
+      },
+    });
+  }
+}
+
+const CREDENTIAL_AGENT = new CredentialExchangingAgent({
+  name: 'credentialAgent',
+  description: 'reports whether its credential survived the last request',
+});
+
+/** An agent loader that serves one fixed agent under the name `testApp`. */
+function loaderFor(agent: LlmAgent): AgentLoader {
+  return {
+    listAgents: () => Promise.resolve(['testApp']),
+    getAgentFile: () =>
+      Promise.resolve({
+        load: () => Promise.resolve(agent),
+        async [Symbol.asyncDispose](): Promise<void> {
+          return;
+        },
+      }),
+  } as unknown as AgentLoader;
+}
+
+describe('normalizeUrlPrefix', () => {
+  it.each([
+    {prefix: undefined, expected: ''},
+    {prefix: '', expected: ''},
+    {prefix: '/', expected: ''},
+    {prefix: '/adk', expected: '/adk'},
+    {prefix: 'adk', expected: '/adk'},
+    {prefix: '/adk/', expected: '/adk'},
+    {prefix: '//adk//', expected: '/adk'},
+    {prefix: '/api/v1', expected: '/api/v1'},
+  ])('turns $prefix into $expected', ({prefix, expected}) => {
+    expect(normalizeUrlPrefix(prefix)).toBe(expected);
+  });
 });
 
 describe('AdkWebServer', () => {
@@ -946,6 +1026,161 @@ describe('AdkWebServer', () => {
     });
   });
 
+  describe('autoCreateSession', () => {
+    const UNKNOWN_SESSION_ID = 'never-seen';
+    const RUN_BODY = {
+      appName: 'testApp',
+      userId: 'testUser',
+      sessionId: UNKNOWN_SESSION_ID,
+      newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+    };
+
+    let autoServer: AdkApiServer;
+    let autoClient: HttpClient;
+
+    beforeEach(async () => {
+      autoServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        autoCreateSession: true,
+      });
+      await autoServer.start();
+      autoClient = new HttpClient(autoServer.url);
+    });
+
+    afterEach(async () => {
+      await autoServer.stop();
+    });
+
+    it('creates the session /run names instead of answering 404', async () => {
+      const response = await autoClient.post<Event[]>('/run', RUN_BODY);
+
+      expect(response.status).toBe(200);
+      expect(response.data!.length).toBeGreaterThan(0);
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: UNKNOWN_SESSION_ID,
+      });
+      expect(session).toBeDefined();
+    });
+
+    it('creates the session /run_sse names instead of answering 404', async () => {
+      const response = await autoClient.post('/run_sse', RUN_BODY);
+
+      expect(response.status).toBe(200);
+      const frames = response
+        .text!.split('\n\n')
+        .filter((frame) => frame.length > 0);
+      expect(frames.length).toBeGreaterThan(0);
+      for (const frame of frames) {
+        const event = JSON.parse(frame.split('data: ')[1]) as Event & {
+          error?: string;
+        };
+        expect(event.error).toBeUndefined();
+      }
+      const session = await sessionService.getSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId: UNKNOWN_SESSION_ID,
+      });
+      expect(session).toBeDefined();
+    });
+
+    it('answers 404 naming the session on /run when left off', async () => {
+      await expect(client.post('/run', RUN_BODY)).rejects.toMatchObject({
+        response: {
+          status: 404,
+          data: {error: `Session not found: ${UNKNOWN_SESSION_ID}`},
+        },
+      });
+    });
+
+    it('answers 404 naming the session on /run_sse when left off', async () => {
+      await expect(client.post('/run_sse', RUN_BODY)).rejects.toMatchObject({
+        response: {
+          status: 404,
+          data: {error: `Session not found: ${UNKNOWN_SESSION_ID}`},
+        },
+      });
+    });
+  });
+
+  describe('credential service', () => {
+    /**
+     * Drives one `/run` against a server serving `CREDENTIAL_AGENT` and
+     * returns what the agent reported: 'exchanged' the first time it sees a
+     * credential service without its credential, 'reused' afterwards.
+     */
+    async function runCredentialAgent(
+      credentialServer: AdkApiServer,
+      sessionId: string,
+    ): Promise<string | undefined> {
+      await sessionService.createSession({
+        appName: 'testApp',
+        userId: 'testUser',
+        sessionId,
+      });
+      const response = await new HttpClient(credentialServer.url).post<Event[]>(
+        '/run',
+        {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId,
+          newMessage: {parts: [{text: 'Hello'}], role: 'user'},
+        },
+      );
+
+      return response.data![0].content?.parts?.[0].text;
+    }
+
+    function newCredentialServer(
+      credentialService?: InMemoryCredentialService,
+    ): AdkApiServer {
+      return new AdkApiServer({
+        agentLoader: loaderFor(CREDENTIAL_AGENT),
+        sessionService,
+        memoryService,
+        artifactService,
+        credentialService,
+      });
+    }
+
+    it('keeps a tool credential across requests by default', async () => {
+      const credentialServer = newCredentialServer();
+      await credentialServer.start();
+
+      try {
+        expect(await runCredentialAgent(credentialServer, 'first')).toBe(
+          'exchanged',
+        );
+        expect(await runCredentialAgent(credentialServer, 'second')).toBe(
+          'reused',
+        );
+      } finally {
+        await credentialServer.stop();
+      }
+    });
+
+    it('stores the credential in the supplied credential service', async () => {
+      const credentialService = new InMemoryCredentialService();
+      const writer = newCredentialServer(credentialService);
+      const reader = newCredentialServer(credentialService);
+      await writer.start();
+      await reader.start();
+
+      try {
+        expect(await runCredentialAgent(writer, 'writer')).toBe('exchanged');
+        expect(await runCredentialAgent(reader, 'reader')).toBe('reused');
+      } finally {
+        await writer.stop();
+        await reader.stop();
+      }
+    });
+  });
+
   describe('List Apps', () => {
     it('should return list of apps', async () => {
       const response = await client.get<string[]>('/list-apps');
@@ -982,6 +1217,49 @@ describe('AdkWebServer', () => {
       const response = await debugClient.get('/');
       expect(response.status).toBe(302);
       await debugServer.stop();
+    });
+
+    it('redirects to /dev-ui when no urlPrefix is configured', async () => {
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+      });
+      await debugServer.start();
+
+      try {
+        const response = await fetch(`${debugServer.url}/`, {
+          redirect: 'manual',
+        });
+        expect(response.status).toBe(302);
+        expect(response.headers.get('location')).toBe('/dev-ui');
+      } finally {
+        await debugServer.stop();
+      }
+    });
+
+    it('prefixes the dev-ui redirect with urlPrefix', async () => {
+      const debugServer = new AdkApiServer({
+        agentLoader,
+        sessionService,
+        memoryService,
+        artifactService,
+        serveDebugUI: true,
+        urlPrefix: '/adk',
+      });
+      await debugServer.start();
+
+      try {
+        const response = await fetch(`${debugServer.url}/`, {
+          redirect: 'manual',
+        });
+        expect(response.status).toBe(302);
+        expect(response.headers.get('location')).toBe('/adk/dev-ui');
+      } finally {
+        await debugServer.stop();
+      }
     });
   });
 

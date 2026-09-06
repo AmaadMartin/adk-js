@@ -166,6 +166,33 @@ describe('CLI Entrypoint', () => {
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
     });
+
+    it('should pass urlPrefix when --url_prefix is set', async () => {
+      await parse(['web', '--url_prefix', '/adk']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.urlPrefix).toBe('/adk');
+    });
+
+    it('should leave urlPrefix unset when --url_prefix is absent', async () => {
+      await parse(['web']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.urlPrefix).toBeUndefined();
+    });
+
+    it('should reject --auto_create_session, which api_server owns', async () => {
+      // adk-python declares --auto_create_session on api_server only, so web
+      // must not silently accept it.
+      const web = program.commands.find((command) => command.name() === 'web')!;
+      web.exitOverride();
+      web.configureOutput({writeErr: () => {}});
+
+      await expect(
+        parse(['web', '--auto_create_session']),
+      ).rejects.toMatchObject({code: 'commander.unknownOption'});
+      expect(AdkApiServer).not.toHaveBeenCalled();
+    });
   });
 
   describe('command: api_server', () => {
@@ -192,6 +219,27 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should pass urlPrefix when --url_prefix is set', async () => {
+      await parse(['api_server', '--url_prefix', '/adk']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.urlPrefix).toBe('/adk');
+    });
+
+    it('should pass autoCreateSession when --auto_create_session is set', async () => {
+      await parse(['api_server', '--auto_create_session']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.autoCreateSession).toBe(true);
+    });
+
+    it('should default autoCreateSession to false', async () => {
+      await parse(['api_server']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.autoCreateSession).toBe(false);
     });
   });
 
