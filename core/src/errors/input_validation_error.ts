@@ -10,9 +10,22 @@
 export class InputValidationError extends Error {
   /**
    * @param message A message describing why the input is invalid.
+   * @param options Standard error options. Set `cause` to the underlying
+   *   validation failure so a caller can reach its structured detail.
    */
-  constructor(message = 'Invalid input.') {
-    super(message);
+  constructor(message = 'Invalid input.', options?: ErrorOptions) {
+    super(message, options);
     this.name = 'InputValidationError';
   }
+}
+
+/**
+ * Type guard for {@link InputValidationError}.
+ *
+ * Matches on `name` rather than `instanceof` so it stays correct when the error
+ * crosses a package boundary: two copies of adk-js in one runtime would fail an
+ * `instanceof` check between them.
+ */
+export function isInputValidationError(e: unknown): e is InputValidationError {
+  return e instanceof Error && e.name === 'InputValidationError';
 }
