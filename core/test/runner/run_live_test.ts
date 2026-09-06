@@ -17,6 +17,7 @@ import {
   LlmRequest,
   LlmResponse,
   RunAsyncToolRequest,
+  RunConfig,
   Runner,
 } from '@google/adk';
 import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
@@ -1111,5 +1112,324 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('Simulated outbound connection error on empty receive');
 
     expect(llm.connection!.closed).toBe(true);
+  });
+
+  describe('live streaming run config fields', () => {
+    const AUDIO_CONTENT: Content = {
+      role: 'model',
+      parts: [{inlineData: {data: 'AAA=', mimeType: 'audio/pcm'}}],
+    };
+    const SESSION_KEY = {
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    };
+
+    function makeRunner(
+      llm: FakeLiveLlm,
+      artifacts?: InMemoryArtifactService,
+    ): Runner {
+      return new Runner({
+        appName: TEST_APP_ID,
+        agent: new LlmAgent({name: 'agent', model: llm}),
+        sessionService,
+        artifactService: artifacts,
+      });
+    }
+
+    async function drainLive(
+      runner: Runner,
+      runConfig?: RunConfig,
+    ): Promise<Event[]> {
+      const queue = new LiveRequestQueue();
+      queue.close();
+      const events: Event[] = [];
+      for await (const event of runner.runLive({
+        ...SESSION_KEY,
+        liveRequestQueue: queue,
+        runConfig,
+      })) {
+        events.push(event);
+      }
+      return events;
+    }
+
+    /** Makes `llmRequest.contents` non-empty so history replay is observable. */
+    async function seedUserTurn(): Promise<void> {
+      const session = (await sessionService.getSession(SESSION_KEY))!;
+      await sessionService.appendEvent({
+        session,
+        event: {
+          invocationId: 'seed',
+          author: 'user',
+          id: 'seed-evt',
+          actions: {
+            stateDelta: {},
+            artifactDelta: {},
+            requestedAuthConfigs: {},
+            requestedToolConfirmations: {},
+          },
+          longRunningToolIds: [],
+          timestamp: Date.now(),
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        } as Event,
+      });
+    }
+
+    async function persistedEvents(): Promise<Event[]> {
+      const session = await sessionService.getSession(SESSION_KEY);
+      return session!.events;
+    }
+
+    function hasAudioInlineData(events: Event[]): boolean {
+      return events.some((event) =>
+        event.content?.parts?.some((part) =>
+          part.inlineData?.mimeType?.startsWith('audio/'),
+        ),
+      );
+    }
+
+    it('forwards explicitVadSignal onto the live connect config', async () => {
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService), {
+        explicitVadSignal: true,
+      });
+
+      expect(llm.llmRequestSeen?.liveConnectConfig?.explicitVadSignal).toBe(
+        true,
+      );
+    });
+
+    it('leaves explicitVadSignal absent when the run config omits it', async () => {
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService));
+
+      expect(
+        llm.llmRequestSeen?.liveConnectConfig?.explicitVadSignal,
+      ).toBeUndefined();
+    });
+
+    it('forwards sessionResumption onto the live connect config', async () => {
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService), {
+        sessionResumption: {transparent: true},
+      });
+
+      expect(
+        llm.llmRequestSeen?.liveConnectConfig?.sessionResumption?.transparent,
+      ).toBe(true);
+    });
+
+    it('leaves sessionResumption absent when the run config omits it', async () => {
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService));
+
+      expect(
+        llm.llmRequestSeen?.liveConnectConfig?.sessionResumption,
+      ).toBeUndefined();
+    });
+
+    it('does not stamp the observed handle onto the caller run config', async () => {
+      const llm = new FakeLiveLlm([
+        [
+          {liveSessionResumptionUpdate: {newHandle: 'h-1'}},
+          {goAway: {timeLeft: '1s'}},
+        ],
+        [{turnComplete: true}],
+      ]);
+      const runConfig: RunConfig = {sessionResumption: {transparent: true}};
+
+      await drainLive(makeRunner(llm, artifactService), runConfig);
+
+      expect(llm.connections.length).toBe(2);
+      expect(
+        llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption?.handle,
+      ).toBe('h-1');
+      expect(runConfig.sessionResumption).toEqual({transparent: true});
+    });
+
+    it('keeps a caller-supplied transparent flag through a reconnect', async () => {
+      const llm = new FakeLiveLlm([
+        [
+          {liveSessionResumptionUpdate: {newHandle: 'h-1'}},
+          {goAway: {timeLeft: '1s'}},
+        ],
+        [{turnComplete: true}],
+      ]);
+
+      await drainLive(makeRunner(llm, artifactService), {
+        sessionResumption: {transparent: false},
+      });
+
+      expect(llm.connections.length).toBe(2);
+      const resumption =
+        llm.llmRequestsSeen[1].liveConnectConfig?.sessionResumption;
+      expect(resumption?.handle).toBe('h-1');
+      expect(resumption?.transparent).toBe(false);
+    });
+
+    it('skips history replay for a handle supplied through the run config', async () => {
+      await seedUserTurn();
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService), {
+        sessionResumption: {handle: 'h-0'},
+      });
+
+      expect(llm.connections[0].historyCalls.length).toBe(0);
+      expect(
+        llm.llmRequestsSeen[0].liveConnectConfig?.sessionResumption?.handle,
+      ).toBe('h-0');
+    });
+
+    it('withholds a configured resumption handle from a transferred sub-agent', async () => {
+      await seedUserTurn();
+      const childLlm = new FakeLiveLlm([
+        {content: {role: 'model', parts: [{text: 'child speaking'}]}},
+        {turnComplete: true},
+      ]);
+      const parentLlm = new FakeLiveLlm([
+        {
+          content: {
+            role: 'model',
+            parts: [
+              {
+                functionCall: {
+                  name: 'transfer_to_agent',
+                  args: {agentName: 'child'},
+                },
+              },
+            ],
+          },
+        },
+        {turnComplete: true},
+      ]);
+      const parent = new LlmAgent({
+        name: 'parent',
+        model: parentLlm,
+        subAgents: [new LlmAgent({name: 'child', model: childLlm})],
+      });
+      const runner = new Runner({
+        appName: TEST_APP_ID,
+        agent: parent,
+        sessionService,
+        artifactService,
+      });
+
+      await drainLive(runner, {sessionResumption: {handle: 'h-0'}});
+
+      expect(
+        parentLlm.llmRequestSeen?.liveConnectConfig?.sessionResumption?.handle,
+      ).toBe('h-0');
+      expect(childLlm.connections.length).toBe(1);
+      expect(
+        childLlm.llmRequestSeen?.liveConnectConfig?.sessionResumption?.handle,
+      ).toBeUndefined();
+      expect(childLlm.connections[0].historyCalls.length).toBe(1);
+    });
+
+    it('does not add transparent to a caller handle that omitted it', async () => {
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService), {
+        sessionResumption: {handle: 'h-0'},
+      });
+
+      const resumption =
+        llm.llmRequestSeen?.liveConnectConfig?.sessionResumption;
+      expect(resumption?.handle).toBe('h-0');
+      expect(resumption?.transparent).toBeUndefined();
+    });
+
+    it('replays history for the same session without a resumption handle', async () => {
+      await seedUserTurn();
+      const llm = new FakeLiveLlm([{turnComplete: true}]);
+
+      await drainLive(makeRunner(llm, artifactService));
+
+      expect(llm.connections[0].historyCalls.length).toBe(1);
+    });
+
+    it('saves a live audio blob as an artifact when saveLiveBlob is on', async () => {
+      const llm = new FakeLiveLlm([
+        {content: AUDIO_CONTENT},
+        {turnComplete: true},
+      ]);
+
+      const yielded = await drainLive(makeRunner(llm, artifactService), {
+        saveLiveBlob: true,
+      });
+
+      const keys = await artifactService.listArtifactKeys(SESSION_KEY);
+      expect(keys.length).toBe(1);
+      const artifact = await artifactService.loadArtifact({
+        ...SESSION_KEY,
+        filename: keys[0],
+      });
+      expect(artifact?.inlineData?.data).toBe('AAA=');
+
+      const persisted = await persistedEvents();
+      expect(hasAudioInlineData(persisted)).toBe(false);
+      const reference = persisted.find((event) =>
+        event.content?.parts?.some((part) =>
+          part.text?.startsWith('[Uploaded Artifact:'),
+        ),
+      );
+      expect(reference).toBeDefined();
+
+      expect(hasAudioInlineData(yielded)).toBe(true);
+      const yieldedAudio = yielded.find((event) =>
+        event.content?.parts?.some((part) => part.inlineData),
+      );
+      expect(yieldedAudio?.content?.parts?.[0]?.inlineData?.data).toBe('AAA=');
+    });
+
+    it('writes no artifact for a partial event the session never stores', async () => {
+      const llm = new FakeLiveLlm([
+        {
+          content: {
+            role: 'model',
+            parts: [
+              {text: 'partial text'},
+              {inlineData: {data: 'AAA=', mimeType: 'audio/pcm'}},
+            ],
+          },
+          partial: true,
+        },
+        {turnComplete: true},
+      ]);
+
+      await drainLive(makeRunner(llm, artifactService), {saveLiveBlob: true});
+
+      expect(await artifactService.listArtifactKeys(SESSION_KEY)).toEqual([]);
+    });
+
+    it('saves nothing when saveLiveBlob is off', async () => {
+      const llm = new FakeLiveLlm([
+        {content: AUDIO_CONTENT},
+        {turnComplete: true},
+      ]);
+
+      await drainLive(makeRunner(llm, artifactService));
+
+      expect(await artifactService.listArtifactKeys(SESSION_KEY)).toEqual([]);
+      expect(hasAudioInlineData(await persistedEvents())).toBe(false);
+    });
+
+    it('treats saveLiveBlob as a no-op when no artifact service is configured', async () => {
+      const llm = new FakeLiveLlm([
+        {content: AUDIO_CONTENT},
+        {turnComplete: true},
+      ]);
+
+      const yielded = await drainLive(makeRunner(llm), {saveLiveBlob: true});
+
+      expect(hasAudioInlineData(yielded)).toBe(true);
+      expect(hasAudioInlineData(await persistedEvents())).toBe(false);
+    });
   });
 });
