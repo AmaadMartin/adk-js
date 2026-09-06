@@ -75,7 +75,7 @@ function build({
 
   if (bundle) {
     buildOptions.entryPoints = [`./src/${entry}`];
-    buildOptions.outfile = `./dist/${targetDir}/index.js`;
+    buildOptions.outfile = `./dist/${targetDir}/${entry.replace(/\.ts$/, '.js')}`;
   } else {
     buildOptions.entryPoints = ['./src/**/*.ts'];
     buildOptions.outdir = `./dist/${targetDir}`;
@@ -119,12 +119,15 @@ async function main() {
     await Promise.all([
       build({targetDir: 'esm', platform: 'node', format: 'esm', bundle}),
       build({targetDir: 'cjs', platform: 'node', format: 'cjs', bundle}),
+      // esbuild rejects `alias` without `bundle`, so the browser shims only
+      // reach a bundled web output. `prepublishOnly` runs the non-bundled
+      // `npm run build`, so the web target ignores the flag and always bundles.
       build({
         targetDir: 'web',
         platform: 'browser',
         format: 'esm',
         entry: 'index_web.ts',
-        bundle,
+        bundle: true,
       }),
     ]);
 

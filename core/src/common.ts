@@ -317,8 +317,6 @@ export {
   LoadArtifactsTool,
 } from './tools/load_artifacts_tool.js';
 export {LOAD_MEMORY, LoadMemoryTool} from './tools/load_memory_tool.js';
-export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
-export type {LoadWebPageOptions} from './tools/load_web_page.js';
 export {LongRunningFunctionTool} from './tools/long_running_tool.js';
 export {
   PRELOAD_MEMORY,
@@ -354,21 +352,8 @@ export type {TaskExecutable} from './utils/task.js';
 export {GoogleLLMVariant} from './utils/variant_utils.js';
 export {version} from './version.js';
 
-export {GCPSkillRegistry} from './skills/gcp_skill_registry.js';
-export type {GCPSkillRegistryOptions} from './skills/gcp_skill_registry.js';
-export {
-  loadAllSkillsInDir,
-  loadSkillFromDir,
-  loadSkillFromZipBuffer,
-  validateSkillDir,
-} from './skills/loader.js';
 export type {Frontmatter, Resources, Script, Skill} from './skills/skill.js';
 export type {SkillRegistry} from './skills/skill_registry.js';
-export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
-export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
-export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
-export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
-export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';

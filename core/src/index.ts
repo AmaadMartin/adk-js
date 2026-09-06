@@ -31,16 +31,26 @@ export type {
   VertexAiCreateSessionRequest,
   VertexAiSessionServiceOptions,
 } from './sessions/vertex_ai_session_service.js';
+export {GCPSkillRegistry} from './skills/gcp_skill_registry.js';
+export type {GCPSkillRegistryOptions} from './skills/gcp_skill_registry.js';
 export {
   loadAllSkillsInDir,
   loadSkillFromDir,
+  loadSkillFromZipBuffer,
   validateSkillDir,
 } from './skills/loader.js';
+export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
+export type {LoadWebPageOptions} from './tools/load_web_page.js';
+export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
+export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
+export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
 } from './tools/skill/run_skill_inline_script_tool.js';
 export {RunSkillScriptTool} from './tools/skill/run_skill_script_tool.js';
+export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
+export {SkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './integrations/agent_registry/agent_registry.js';
 export * from './telemetry/google_cloud.js';
