@@ -298,14 +298,23 @@ function sentEndpoint(clientIndex = 0): string {
   return client.endpoint;
 }
 
-/** The n-th message of the request the provider sent. */
-function sentMessage(index: number, callIndex = 0): models.Message {
-  const messages = sentChatRequest(callIndex).messages;
-  const message = messages[index];
+/** The n-th message of a request the provider sent. */
+function messageOf(
+  request: models.GenericChatRequest,
+  index: number,
+): models.Message {
+  const message = request.messages?.[index];
   if (!message) {
-    expect.fail(`OCI request carried ${messages.length} messages`);
+    expect.fail(
+      `OCI request carried ${request.messages?.length ?? 0} messages`,
+    );
   }
   return message;
+}
+
+/** The n-th message of the request the provider sent. */
+function sentMessage(index: number, callIndex = 0): models.Message {
+  return messageOf(sentChatRequest(callIndex), index);
 }
 
 /** The n-th tool of the request the provider sent. */
@@ -318,8 +327,8 @@ function sentTool(index: number, callIndex = 0): models.FunctionDefinition {
 }
 
 /** The text of the first content block of a message. */
-function firstText(message?: models.Message): string {
-  const block = message?.content?.[0];
+function firstText(message: models.Message): string {
+  const block = message.content?.[0];
   if (!block || !isTextContent(block) || block.text === undefined) {
     expect.fail('message carries no leading TEXT block');
   }
@@ -991,7 +1000,7 @@ describe('OciGenAiLlm reference tests', () => {
     it('test_concurrent_async_calls', async () => {
       const llm = ociLlm();
       state.chatMock.mockImplementation(async ({chatDetails}) => {
-        const sent = genericChatRequest(chatDetails).messages[0];
+        const sent = messageOf(genericChatRequest(chatDetails), 0);
         return makeOciResponse({text: `Response ${firstText(sent)}`});
       });
 
@@ -1019,7 +1028,7 @@ describe('OciGenAiLlm reference tests', () => {
     it('test_concurrent_streaming_calls', async () => {
       const llm = ociLlm();
       state.chatMock.mockImplementation(async ({chatDetails}) => {
-        const sent = genericChatRequest(chatDetails).messages[0];
+        const sent = messageOf(genericChatRequest(chatDetails), 0);
         return sseStream(makeSseChunks([firstText(sent)]));
       });
 
