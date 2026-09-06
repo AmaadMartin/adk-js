@@ -10,6 +10,7 @@ import {AuthCredential} from '../auth/auth_credential.js';
 import {AuthHandler} from '../auth/auth_handler.js';
 import {AuthConfig} from '../auth/auth_tool.js';
 import {createEventActions, EventActions} from '../events/event_actions.js';
+import {UiWidget} from '../events/ui_widget.js';
 import {SearchMemoryResponse} from '../memory/base_memory_service.js';
 import {State} from '../sessions/state.js';
 import {ResumeInputs} from '../tools/resume_inputs.js';
@@ -81,6 +82,30 @@ export class Context extends ReadonlyContext {
 
   get actions(): EventActions {
     return this.eventActions;
+  }
+
+  /** The invocation's free-form metadata bag. */
+  get customMetadata(): Record<string, unknown> {
+    return this.invocationContext.customMetadata;
+  }
+
+  /**
+   * Attaches a UI widget to the current event's actions.
+   *
+   * Mirrors Python `Context.render_ui_widget`.
+   *
+   * @param uiWidget The widget the host UI should render.
+   * @throws If a widget with the same id is already attached.
+   */
+  renderUiWidget(uiWidget: UiWidget): void {
+    const widgets = (this.eventActions.renderUiWidgets ??= []);
+    if (widgets.some((widget) => widget.id === uiWidget.id)) {
+      throw new Error(
+        `UI widget with ID '${uiWidget.id}' already exists in the current ` +
+          'event actions.',
+      );
+    }
+    widgets.push(uiWidget);
   }
 
   /**

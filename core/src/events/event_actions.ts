@@ -10,6 +10,8 @@ import {AuthConfig} from '../auth/auth_tool.js';
 import {carryDeltaStamps} from '../sessions/state_write_order.js';
 import {ToolConfirmation} from '../tools/tool_confirmation.js';
 
+import {UiWidget} from './ui_widget.js';
+
 /**
  * Represents the actions attached to an event.
  */
@@ -71,6 +73,12 @@ export interface EventActions {
    * execution for this invocation. Mirrors Python `EventActions.end_of_agent`.
    */
   endOfAgent?: boolean;
+
+  /**
+   * UI widgets the host should render alongside this event. Mirrors Python
+   * `EventActions.render_ui_widgets`.
+   */
+  renderUiWidgets?: UiWidget[];
 }
 
 /**
@@ -102,8 +110,8 @@ export function createEventActions(
  * transfer, escalation or summarization signal.
  *
  * An actions object is considered non-default when any dictionary field has at
- * least one entry, or when any scalar field has been explicitly set (including
- * being set to `false`).
+ * least one entry, when any scalar field has been explicitly set (including
+ * being set to `false`), or when a UI widget is attached.
  *
  * @param actions - The actions to inspect.
  * @returns `true` when every field is at its default value.
@@ -116,7 +124,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
     isEmpty(actions.requestedToolConfirmations) &&
     actions.skipSummarization === undefined &&
     actions.transferToAgent === undefined &&
-    actions.escalate === undefined
+    actions.escalate === undefined &&
+    actions.renderUiWidgets === undefined
   );
 }
 
@@ -132,6 +141,8 @@ export function isDefaultEventActions(actions: EventActions): boolean {
  * 2. **Scalar fields** (`skipSummarization`, `transferToAgent`, `escalate`) —
  *    last-writer-wins: the value from the last source that sets the field is
  *    kept.
+ * 3. **List fields** (`renderUiWidgets`) — entries from every source are
+ *    concatenated in order, so a merged event keeps every widget.
  *
  * @param sources - Ordered list of partial {@link EventActions} to merge.
  *   Falsy entries are silently skipped.
@@ -179,6 +190,12 @@ export function mergeEventActions(
     }
     if (source.escalate !== undefined) {
       result.escalate = source.escalate;
+    }
+    if (source.renderUiWidgets) {
+      result.renderUiWidgets = [
+        ...(result.renderUiWidgets ?? []),
+        ...source.renderUiWidgets,
+      ];
     }
   }
   return result;

@@ -11,13 +11,13 @@
  */
 
 /**
- * Maximum number of characters of an HTTP response body surfaced by
- * {@link formatError} before it is truncated. Bounds both log volume and the
- * exposure of potentially sensitive response payloads.
+ * Maximum number of characters of a request or response body kept in a log or
+ * an error message before it is truncated. Bounds both log volume and the
+ * exposure of potentially sensitive payloads.
  */
-const MAX_RESPONSE_BODY_LENGTH = 1000;
+export const MAX_LOG_BODY_LENGTH = 1000;
 
-/** Marker appended to a response body that exceeds {@link MAX_RESPONSE_BODY_LENGTH}. */
+/** Marker appended to a body that exceeds {@link MAX_LOG_BODY_LENGTH}. */
 const TRUNCATION_MARKER = '... [truncated]';
 
 /** Returned by {@link formatError} when the input carries no usable message. */
@@ -32,7 +32,7 @@ const MAX_HTTP_STATUS = 599;
  * not a non-null object. Used to safely inspect duck-typed error shapes without
  * resorting to `any`.
  */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : undefined;
@@ -48,10 +48,17 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-/** Truncates a response body to {@link MAX_RESPONSE_BODY_LENGTH} characters. */
-function truncateBody(body: string): string {
-  return body.length > MAX_RESPONSE_BODY_LENGTH
-    ? body.slice(0, MAX_RESPONSE_BODY_LENGTH) + TRUNCATION_MARKER
+/**
+ * Truncates a body to {@link MAX_LOG_BODY_LENGTH} characters, appending a
+ * marker when it did.
+ *
+ * @param body The request or response body to bound.
+ * @return The body, at most {@link MAX_LOG_BODY_LENGTH} characters plus the
+ *   marker.
+ */
+export function truncateBody(body: string): string {
+  return body.length > MAX_LOG_BODY_LENGTH
+    ? body.slice(0, MAX_LOG_BODY_LENGTH) + TRUNCATION_MARKER
     : body;
 }
 

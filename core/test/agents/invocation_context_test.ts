@@ -172,3 +172,38 @@ describe('InvocationContext LLM-call cost tracking', () => {
     expect(events).toHaveLength(3);
   });
 });
+
+describe('InvocationContext customMetadata', () => {
+  it('starts as an empty bag', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    expect(context.customMetadata).toEqual({});
+  });
+
+  it('keeps the bag the caller supplied', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      customMetadata: {http_debug_info: []},
+    });
+
+    expect(context.customMetadata).toEqual({http_debug_info: []});
+  });
+
+  it('shares the bag with a cloned context', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    context.clone().customMetadata['key'] = 'value';
+
+    expect(context.customMetadata).toEqual({key: 'value'});
+  });
+});
