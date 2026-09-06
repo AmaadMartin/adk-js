@@ -50,6 +50,14 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **Coverage thresholds**: `npm run test:coverage` fails if coverage drops
+   below the thresholds in `vitest.config.ts`. Those numbers are a manually
+   maintained baseline, so CI also runs a `Check coverage threshold drift` step
+   that warns (without failing) once real coverage runs more than 1 percentage
+   point above them. When you see that warning, apply the suggested block from
+   the job summary in a standalone PR — a stale baseline cannot catch a
+   regression.
+
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 

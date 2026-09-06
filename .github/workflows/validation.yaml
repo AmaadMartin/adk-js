@@ -48,7 +48,15 @@ jobs:
         run: npm run ts:check:samples
 
       - name: Run tests and check code coverage
-        run: npm run test:coverage
+        run: npm run test:coverage ${{ matrix.os == 'ubuntu-latest' && '-- --coverage.thresholds.autoUpdate' || '' }}
+
+      # Reports only; never fails the build. This step also restores
+      # vitest.config.ts, which the flag above rewrites in place, so keep the
+      # two paired: the format check below runs on the restored file.
+      # See scripts/check_coverage_drift.sh.
+      - name: Check coverage threshold drift
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/check_coverage_drift.sh
 
       - name: Run lint check
         run: npm run lint

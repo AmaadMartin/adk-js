@@ -126,9 +126,12 @@ export default defineConfig({
         'dev/src/**/*.ts',
         'integrations/src/**/*.ts',
       ],
-      // Those values are from the npm run test:coverage command run on 2026-02-06
-      // and are used to ensure that the test coverage does not decrease.
-      // Once the test coverage increases, these values should be updated (manually).
+      // Baseline captured from `npm run test:coverage` on 2026-02-06; the gate
+      // fails if coverage drops below it. Raising it stays a manual PR, but CI
+      // no longer lets it go unnoticed: the "Check coverage threshold drift"
+      // step warns once real coverage runs more than 1pp above these numbers.
+      // Keep this a plain object literal — the drift check relies on Vitest's
+      // --coverage.thresholds.autoUpdate, which cannot rewrite computed values.
       thresholds: {
         statements: 86,
         branches: 87,
