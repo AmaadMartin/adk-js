@@ -229,14 +229,15 @@ describe('Responses request assembly', () => {
     expect(body['reasoning']).toEqual({effort: 'minimal', summary: 'concise'});
   });
 
-  it('keeps the computed stop sequences when no extra_body is supplied', () => {
+  it('sends the stop sequences as a top-level field', () => {
     const body = buildResponsesCreateParams(
       userRequest({config: {stopSequences: ['STOP']}}),
       requestOptions(),
       false,
     );
 
-    expect(body['extra_body']).toEqual({stop: ['STOP']});
+    expect(body['stop']).toEqual(['STOP']);
+    expect(body).not.toHaveProperty('extra_body');
   });
 
   it('ignores a non-object extra_body override', () => {
@@ -246,7 +247,8 @@ describe('Responses request assembly', () => {
       false,
     );
 
-    expect(body['extra_body']).toEqual({stop: ['STOP']});
+    expect(body['stop']).toEqual(['STOP']);
+    expect(body).not.toHaveProperty('extra_body');
   });
 
   it('sends tool_choice when the request sets a function-calling mode', () => {
