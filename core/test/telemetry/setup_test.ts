@@ -7,6 +7,8 @@
 import {OTelHooks, maybeSetOtelProviders} from '@google/adk';
 import {metrics, trace} from '@opentelemetry/api';
 import {logs} from '@opentelemetry/api-logs';
+import {OTLPLogExporter} from '@opentelemetry/exporter-logs-otlp-http';
+import {BatchLogRecordProcessor} from '@opentelemetry/sdk-logs';
 import {MetricReader} from '@opentelemetry/sdk-metrics';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -114,6 +116,20 @@ describe('maybeSetOtelProviders', () => {
       });
     },
   );
+
+  it('should construct the batch log record processor with an exporter options object', async () => {
+    // Arrange
+    vi.stubEnv('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', 'some-endpoint');
+
+    // Act
+    await maybeSetOtelProviders();
+
+    // Assert
+    expect(BatchLogRecordProcessor).toHaveBeenCalledTimes(1);
+    expect(BatchLogRecordProcessor).toHaveBeenCalledWith({
+      exporter: expect.any(OTLPLogExporter),
+    });
+  });
 
   it('should not set up any providers when no env vars are set', async () => {
     // Act
