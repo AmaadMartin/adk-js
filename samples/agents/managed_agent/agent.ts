@@ -12,7 +12,7 @@
  *   - a search agent built from an ADK built-in tool;
  *   - a code-execution agent built from a raw `Tool` config;
  *   - a remote-MCP agent whose bearer token is minted per turn;
- *   - a `single_turn` agent delegated to by a local `LlmAgent` coordinator.
+ *   - a summarizer a local `LlmAgent` coordinator delegates one turn to.
  *
  * Running it needs credentials and an agent id; see the README next to this
  * file.

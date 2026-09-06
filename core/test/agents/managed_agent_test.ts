@@ -8,9 +8,8 @@
  * adk-js-specific coverage for `ManagedAgent` and `RemoteMcpServer`. The ported
  * reference suite lives in `managed_agent_parity_test.ts`.
  *
- * Four reference tests answer at compile time in TypeScript and are kept here
- * under their reference names: `test_mode_chat_is_rejected`,
- * `test_remote_mcp_server_forbids_extra_fields`,
+ * Three reference tests answer at compile time in TypeScript and are kept here
+ * under their reference names: `test_remote_mcp_server_forbids_extra_fields`,
  * `test_resolve_rejects_plain_callable` and
  * `test_tools_import_first_has_no_cycle`. Each says at its own site how the
  * compile-time form stands in for the reference's runtime one. The type

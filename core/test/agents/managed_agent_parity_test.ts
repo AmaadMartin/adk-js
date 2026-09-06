@@ -10,12 +10,16 @@
  * keeps the reference test name so the two suites stay greppable against each
  * other.
  *
- * Three reference tests are not ported verbatim, and each says why at its own
- * site: `test_tools_import_first_has_no_cycle`,
+ * Of the 64 reference tests, 58 are here. Three answer at compile time in
+ * TypeScript and live in `managed_agent_test.ts` under their reference names:
+ * `test_tools_import_first_has_no_cycle`,
  * `test_remote_mcp_server_forbids_extra_fields` and
- * `test_resolve_rejects_plain_callable` live in `managed_agent_test.ts`,
- * because TypeScript answers all three at compile time. A fourth,
- * `test_run_async_non_streaming_final_event_carries_grounding_and_usage`, is
+ * `test_resolve_rejects_plain_callable`. Three have no subject, because the
+ * port does not carry the reference's `mode` field: adk-js's agent-transfer
+ * processor never reads it, so it would be a field nothing acts on.
+ * `test_mode_defaults_to_none`, `test_mode_single_turn_is_accepted` and
+ * `test_mode_chat_is_rejected` come back with the field.
+ * `test_run_async_non_streaming_final_event_carries_grounding_and_usage` is
  * ported here but asserts what adk-js actually produces; see its comment.
  *
  * The reference drives the run loop through a recording client. Here the loop

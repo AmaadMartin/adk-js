@@ -2,7 +2,7 @@
 
 Four `ManagedAgent` shapes behind one `LlmAgent` coordinator: a search agent, a
 code-execution agent built from a raw `Tool`, a remote-MCP agent, and a
-`single_turn` summarizer. See
+summarizer. See
 [the ManagedAgent guide](../../../docs/guides/agents/managed_agent/index.md).
 
 ## Setup
