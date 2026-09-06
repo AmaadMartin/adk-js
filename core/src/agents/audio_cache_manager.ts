@@ -52,6 +52,18 @@ function requireAudioData(blob: Blob): string {
 }
 
 /**
+ * Decodes one cached chunk to bytes, treating an entry with no data as empty.
+ *
+ * `cacheAudio` rejects a data-less blob, so such an entry only reaches here
+ * when a caller seeds a cache through `InvocationContextParams` directly.
+ * Every reader below counts it as zero bytes rather than raising, so one
+ * malformed entry cannot wedge a cache that no flush can ever drain.
+ */
+function decodedChunk(entry: RealtimeCacheEntry): Uint8Array {
+  return base64DecodeBytes(entry.data.data ?? '');
+}
+
+/**
  * Concatenates the chunks of `cache` into one audio payload.
  *
  * The chunks are decoded before they are joined, because a chunk whose decoded
@@ -60,7 +72,7 @@ function requireAudioData(blob: Blob): string {
  * after it.
  */
 function combineAudioChunks(cache: RealtimeCacheEntry[]): Uint8Array {
-  const chunks = cache.map((entry) => base64DecodeBytes(entry.data.data ?? ''));
+  const chunks = cache.map(decodedChunk);
   const combined = new Uint8Array(
     chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
   );
@@ -81,13 +93,12 @@ function buildArtifactFilename(
   // adk-python scales its epoch-seconds timestamp by 1000 here, so both SDKs
   // put epoch milliseconds in the filename.
   const extension = mimeType.split('/').pop();
-  return `adk_live_audio_storage_${cacheLabel}_${Math.trunc(timestampMs)}.${extension}`;
+  return `adk_live_audio_storage_${cacheLabel}_${timestampMs}.${extension}`;
 }
 
 function totalDecodedBytes(cache: RealtimeCacheEntry[]): number {
   return cache.reduce(
-    (total, entry) =>
-      total + base64DecodeBytes(requireAudioData(entry.data)).byteLength,
+    (total, entry) => total + decodedChunk(entry).byteLength,
     0,
   );
 }
@@ -269,7 +280,8 @@ export class AudioCacheManager {
   /**
    * Reports the chunk and decoded-byte totals of both caches.
    *
-   * @throws {InputValidationError} if a cached blob carries no data.
+   * An entry carrying no data counts as a chunk of zero bytes, matching what
+   * a flush writes for it.
    */
   getCacheStats(ctx: InvocationContext): AudioCacheStats {
     const inputCache = ctx.inputRealtimeCache ?? [];
