@@ -23,7 +23,7 @@ import {z} from 'zod/v4';
 import {
   fakeOciClient,
   firstText,
-  functionDefinitionName,
+  isFunctionDefinition,
   isJsonSchemaFormat,
   makeOciResponse,
   makeStreamChunks,
@@ -337,10 +337,12 @@ describe('tool declarations', () => {
         tools: [{functionDeclarations: [{name: 'ping'}]}],
       }),
     );
-    expect(functionDefinitionName(request.tools?.[0])).toBe('ping');
-    expect((request.tools?.[0] as models.FunctionDefinition).description).toBe(
-      '',
-    );
+    const tool = request.tools?.[0];
+    if (!isFunctionDefinition(tool)) {
+      expect.fail('Expected a function tool definition.');
+    }
+    expect(tool.name).toBe('ping');
+    expect(tool.description).toBe('');
   });
 
   it('sends no tools when the first tool declares no functions', async () => {
@@ -361,9 +363,11 @@ describe('tool declarations', () => {
         ],
       }),
     );
-    expect(
-      (request.tools?.[0] as models.FunctionDefinition).parameters,
-    ).toEqual({type: 'object', properties: {}});
+    const tool = request.tools?.[0];
+    if (!isFunctionDefinition(tool)) {
+      expect.fail('Expected a function tool definition.');
+    }
+    expect(tool.parameters).toEqual({type: 'object', properties: {}});
   });
 
   it('sends no tools when the declaration list is absent', async () => {
@@ -494,59 +498,33 @@ describe('malformed tool arguments', () => {
   });
 
   it('reads no parts from a response with no choices', () => {
-    const base = makeOciResponse();
-    const generic = base.chatResult.chatResponse as models.GenericChatResponse;
-    const response = {
-      ...base,
-      chatResult: {
-        ...base.chatResult,
-        chatResponse: {...generic, choices: []},
-      },
-    };
+    const response = makeOciResponse({choices: []});
     expect(ociResponseToLlmResponse(response).content?.parts).toEqual([]);
   });
 
   it('reads no tool calls from a message whose list is absent', () => {
-    const base = makeOciResponse();
-    const generic = base.chatResult.chatResponse as models.GenericChatResponse;
     const message: models.AssistantMessage = {
       role: 'ASSISTANT',
       content: [],
       toolCalls: undefined,
     };
-    const response = {
-      ...base,
-      chatResult: {
-        ...base.chatResult,
-        chatResponse: {
-          ...generic,
-          choices: [{index: 0, finishReason: 'stop', message}],
-        },
-      },
-    };
+    const response = makeOciResponse({
+      choices: [{index: 0, finishReason: 'stop', message}],
+    });
     expect(ociResponseToLlmResponse(response).content?.parts).toEqual([]);
   });
 
   it('reads no text from a content block that carries none', () => {
-    const base = makeOciResponse();
-    const generic = base.chatResult.chatResponse as models.GenericChatResponse;
     const imageBlock: models.ImageContent = {type: 'IMAGE'};
-    const response = {
-      ...base,
-      chatResult: {
-        ...base.chatResult,
-        chatResponse: {
-          ...generic,
-          choices: [
-            {
-              index: 0,
-              finishReason: 'stop',
-              message: {role: 'ASSISTANT', content: [imageBlock]},
-            },
-          ],
+    const response = makeOciResponse({
+      choices: [
+        {
+          index: 0,
+          finishReason: 'stop',
+          message: {role: 'ASSISTANT', content: [imageBlock]},
         },
-      },
-    };
+      ],
+    });
     expect(ociResponseToLlmResponse(response).content?.parts).toEqual([]);
   });
 

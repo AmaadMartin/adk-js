@@ -15,6 +15,8 @@ export interface OciResponseOptions {
   promptTokens?: number;
   completionTokens?: number;
   reasoningTokens?: number;
+  /** Replaces the single default choice, for shapes `text` cannot build. */
+  choices?: models.ChatChoice[];
 }
 
 /** Builds a non-streaming OCI chat response with one choice. */
@@ -24,6 +26,7 @@ export function makeOciResponse({
   promptTokens = 10,
   completionTokens = 5,
   reasoningTokens,
+  choices,
 }: OciResponseOptions = {}): responses.ChatResponse {
   const textBlock: models.TextContent = {type: 'TEXT', text};
   const message: models.AssistantMessage = {
@@ -34,7 +37,7 @@ export function makeOciResponse({
   const chatResponse: models.GenericChatResponse = {
     apiFormat: 'GENERIC',
     timeCreated: new Date(0),
-    choices: [{index: 0, message, finishReason: 'stop'}],
+    choices: choices ?? [{index: 0, message, finishReason: 'stop'}],
     usage: {
       promptTokens,
       completionTokens,
@@ -191,13 +194,11 @@ export function toolCallsOf(message: models.Message): models.FunctionCall[] {
   );
 }
 
-/** The name of a tool definition, which only the function variant carries. */
-export function functionDefinitionName(
+/** Narrows a tool definition to the function variant that carries a name. */
+export function isFunctionDefinition(
   tool?: models.ToolDefinition,
-): string | undefined {
-  return tool?.type === 'FUNCTION'
-    ? (tool as models.FunctionDefinition).name
-    : undefined;
+): tool is models.FunctionDefinition {
+  return tool?.type === 'FUNCTION';
 }
 
 /** Narrows a serving mode to the dedicated-endpoint variant. */
