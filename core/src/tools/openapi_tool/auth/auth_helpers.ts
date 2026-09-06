@@ -49,6 +49,11 @@ export function applyCredential(
     credential.http.credentials.token
   ) {
     headers['Authorization'] = `Bearer ${credential.http.credentials.token}`;
+  } else if (credential.oauth2?.accessToken) {
+    // An exchanged OAuth2/OIDC credential keeps authType 'oauth2' and carries
+    // its token at oauth2.accessToken. adk-python instead reshapes it into an
+    // HTTP bearer credential inside its OAuth2 exchanger, before this point.
+    headers['Authorization'] = `Bearer ${credential.oauth2.accessToken}`;
   }
 
   return url;
