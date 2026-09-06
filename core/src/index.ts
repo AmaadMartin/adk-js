@@ -17,10 +17,20 @@ export {
   type AgentEngineSandboxCodeExecutorOptions,
 } from './code_executors/agent_engine_sandbox_code_executor.js';
 export {CodeExecutionLanguage} from './code_executors/code_execution_utils.js';
+export type {
+  CodeInterpreterExecuteParams,
+  CodeInterpreterExecuteResponse,
+  CodeInterpreterExtensionClient,
+  CodeInterpreterFile,
+} from './code_executors/code_interpreter_extension_client.js';
 export {
   UnsafeLocalCodeExecutor,
   type UnsafeLocalCodeExecutorOptions,
 } from './code_executors/unsafe_local_code_executor.js';
+export {
+  VertexAiCodeExecutor,
+  type VertexAiCodeExecutorOptions,
+} from './code_executors/vertex_ai_code_executor.js';
 export * from './common.js';
 export {LocalEnvironment} from './environment/local_environment.js';
 export type {LocalEnvironmentOptions} from './environment/local_environment.js';
