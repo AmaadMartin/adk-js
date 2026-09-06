@@ -9,15 +9,20 @@ import {
   GeminiParams,
   LlmRequest,
   LlmResponse,
+  ResourceExhaustedError,
   geminiInitParams,
   version,
 } from '@google/adk';
 import {
+  ApiError,
+  Environment,
+  GenerateContentConfig,
   GenerateContentResponse,
   GoogleGenAI,
   HttpOptions,
   Modality,
   Part,
+  SpeechConfig,
 } from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -735,6 +740,678 @@ describe('GoogleLlm', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('apiClient configuration', () => {
+    /** The httpOptions the most recently built GoogleGenAI client received. */
+    function lastHttpOptions(): HttpOptions | undefined {
+      const call = vi.mocked(GoogleGenAI).mock.calls.at(-1);
+      if (!call) {
+        expect.fail('GoogleGenAI was never constructed');
+      }
+      return call[0].httpOptions;
+    }
+
+    /** Defines or removes the `window` global that `isBrowser()` reads. */
+    function setWindow(value: object | undefined): void {
+      Object.defineProperty(globalThis, 'window', {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    beforeEach(() => {
+      vi.mocked(GoogleGenAI).mockClear();
+      delete process.env['GOOGLE_GENAI_API_VERSION'];
+    });
+
+    afterEach(() => {
+      delete process.env['GOOGLE_GENAI_API_VERSION'];
+    });
+
+    it('reads the api version out of a Google base URL', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
+      });
+
+      expect(llm.apiClient).toBeDefined();
+      expect(lastHttpOptions()).toMatchObject({
+        baseUrl: 'https://generativelanguage.googleapis.com/',
+        apiVersion: 'v1alpha',
+      });
+    });
+
+    it('preserves the path of a custom base URL', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://proxy.example.com/gemini/v1alpha',
+      });
+
+      expect(llm.apiClient).toBeDefined();
+      const httpOptions = lastHttpOptions();
+      expect(httpOptions?.baseUrl).toBe(
+        'https://proxy.example.com/gemini/v1alpha',
+      );
+      expect(httpOptions?.apiVersion).toBeUndefined();
+    });
+
+    it('leaves the api version to the SDK when nothing is configured', () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      expect(llm.apiClient).toBeDefined();
+      const httpOptions = lastHttpOptions();
+      expect(httpOptions?.apiVersion).toBeUndefined();
+      expect(httpOptions?.baseUrl).toBeUndefined();
+    });
+
+    it('sends the configured api version', () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+
+      expect(llm.apiClient).toBeDefined();
+      expect(lastHttpOptions()?.apiVersion).toBe('v1');
+    });
+
+    it('sends the api version from the environment', () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1';
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      expect(llm.apiClient).toBeDefined();
+      expect(lastHttpOptions()?.apiVersion).toBe('v1');
+    });
+
+    it('prefers the configured api version over the environment', () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1beta1';
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+
+      expect(llm.apiClient).toBeDefined();
+      expect(lastHttpOptions()?.apiVersion).toBe('v1');
+    });
+
+    it('does not read the environment in a browser', () => {
+      // `isBrowser()` reads this global; a browser has no `process.env`.
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'v1';
+      setWindow({navigator: {userAgent: 'Mozilla/5.0'}});
+
+      try {
+        const llm = new TestGemini({apiKey: 'test-key'});
+
+        expect(llm.apiClient).toBeDefined();
+        expect(lastHttpOptions()?.apiVersion).toBeUndefined();
+      } finally {
+        setWindow(undefined);
+      }
+    });
+
+    it('prefers the base URL version over the configured one', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        apiVersion: 'v1',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
+      });
+
+      expect(llm.apiClient).toBeDefined();
+      expect(lastHttpOptions()).toMatchObject({
+        baseUrl: 'https://generativelanguage.googleapis.com/',
+        apiVersion: 'v1alpha',
+      });
+    });
+
+    it('sends the retry options', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        retryOptions: {attempts: 2},
+      });
+
+      expect(llm.apiClient).toBeDefined();
+      expect(lastHttpOptions()?.retryOptions).toEqual({attempts: 2});
+    });
+
+    it('does not retry a live connection', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        retryOptions: {attempts: 2},
+      });
+
+      expect(llm.liveApiClient).toBeDefined();
+      expect(lastHttpOptions()?.retryOptions).toBeUndefined();
+    });
+
+    it('lets clientKwargs override what ADK passes', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        clientKwargs: {apiKey: 'kwargs-key', vertexai: false},
+      });
+
+      expect(llm.apiClient).toBeDefined();
+      expect(vi.mocked(GoogleGenAI)).toHaveBeenCalledWith(
+        expect.objectContaining({apiKey: 'kwargs-key', vertexai: false}),
+      );
+    });
+
+    it('lets clientKwargs override what ADK passes to a live client', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        clientKwargs: {apiKey: 'kwargs-key'},
+      });
+
+      expect(llm.liveApiClient).toBeDefined();
+      expect(vi.mocked(GoogleGenAI)).toHaveBeenCalledWith(
+        expect.objectContaining({apiKey: 'kwargs-key'}),
+      );
+    });
+
+    it('uses an injected client and builds none', () => {
+      const injected = new GoogleGenAI({apiKey: 'injected-key'});
+      vi.mocked(GoogleGenAI).mockClear();
+      const llm = new TestGemini({apiKey: 'test-key', client: injected});
+
+      expect(llm.apiClient).toBe(injected);
+      expect(llm.liveApiClient).toBe(injected);
+      expect(vi.mocked(GoogleGenAI)).not.toHaveBeenCalled();
+    });
+
+    it('ignores the configured api version on the live path', () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+
+      expect(llm.liveApiVersion).toBe('v1alpha');
+      expect(llm.liveApiClient).toBeDefined();
+      expect(lastHttpOptions()?.apiVersion).toBe('v1alpha');
+    });
+
+    it('uses the base URL version on the live path', () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
+      });
+
+      expect(llm.liveApiVersion).toBe('v1alpha');
+      expect(llm.liveApiClient).toBeDefined();
+      expect(lastHttpOptions()).toMatchObject({
+        baseUrl: 'https://generativelanguage.googleapis.com/',
+        apiVersion: 'v1alpha',
+      });
+    });
+
+    it('uses the base URL version on the live Vertex path', () => {
+      const llm = new TestGemini({
+        model: 'gemini-2.5-flash',
+        vertexai: true,
+        project: 'p',
+        location: 'us-central1',
+        baseUrl: 'https://aiplatform.googleapis.com/v1',
+      });
+
+      expect(llm.liveApiVersion).toBe('v1');
+    });
+  });
+
+  describe('generateContentAsync request patching', () => {
+    /** Runs one non-streaming request and returns the config the SDK saw. */
+    async function runAndCaptureConfig(
+      llm: Gemini,
+      llmRequest: LlmRequest,
+    ): Promise<GenerateContentConfig | undefined> {
+      const generateContent = vi
+        .fn()
+        .mockResolvedValue(new GenerateContentResponse());
+      llm.apiClient.models.generateContent = generateContent;
+
+      for await (const _ of llm.generateContentAsync(llmRequest, false)) {
+        // Drain the generator so the request actually goes out.
+      }
+
+      const call = generateContent.mock.calls.at(-1);
+      if (!call) {
+        expect.fail('generateContent was never called');
+      }
+      return (call[0] as {config?: GenerateContentConfig}).config;
+    }
+
+    function textRequest(config?: GenerateContentConfig): LlmRequest {
+      return {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config,
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+    }
+
+    afterEach(() => {
+      delete process.env['GOOGLE_GENAI_API_VERSION'];
+    });
+
+    it('adds the tracking headers when the caller sent no http options', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      const config = await runAndCaptureConfig(llm, textRequest());
+
+      expect(config?.httpOptions?.headers?.['x-goog-api-client']).toBe(
+        llm.getTrackingHeaders()['x-goog-api-client'],
+      );
+    });
+
+    it('keeps a caller client alongside the ADK labels', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = textRequest({
+        httpOptions: {headers: {'x-goog-api-client': 'my-client/1.0'}},
+      });
+
+      const config = await runAndCaptureConfig(llm, request);
+
+      const header = config?.httpOptions?.headers?.['x-goog-api-client'];
+      expect(header).toContain('my-client/1.0');
+      expect(header).toContain('google-adk/');
+    });
+
+    it('patches the api version from the base URL', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1alpha',
+      });
+      const request = textRequest({
+        httpOptions: {headers: {'custom-header': 'custom-value'}},
+      });
+
+      const config = await runAndCaptureConfig(llm, request);
+
+      expect(config?.httpOptions?.apiVersion).toBe('v1alpha');
+      expect(config?.httpOptions?.headers?.['custom-header']).toBe(
+        'custom-value',
+      );
+    });
+
+    it('patches the configured api version', async () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+
+      const config = await runAndCaptureConfig(llm, textRequest({}));
+
+      expect(config?.httpOptions?.apiVersion).toBe('v1');
+    });
+
+    it('never overwrites the api version the request carries', async () => {
+      const llm = new TestGemini({apiKey: 'test-key', apiVersion: 'v1'});
+      const request = textRequest({httpOptions: {apiVersion: 'v2'}});
+
+      const config = await runAndCaptureConfig(llm, request);
+
+      expect(config?.httpOptions?.apiVersion).toBe('v2');
+    });
+
+    it('does not patch the api version from the environment', async () => {
+      process.env['GOOGLE_GENAI_API_VERSION'] = 'env-version';
+      const llm = new TestGemini({apiKey: 'test-key'});
+
+      const config = await runAndCaptureConfig(llm, textRequest({}));
+
+      expect(config?.httpOptions?.apiVersion).toBeUndefined();
+    });
+
+    it('appends a user turn before calling the interactions API', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        useInteractionsApi: true,
+      });
+      const create = vi
+        .fn()
+        .mockResolvedValue({id: 'i-1', status: 'completed', steps: []});
+      // `interactions` is readonly on the client, so the stub is installed
+      // with a property descriptor rather than an assignment.
+      Object.defineProperty(llm.apiClient, 'interactions', {
+        value: {create},
+        configurable: true,
+      });
+      const request: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      for await (const _ of llm.generateContentAsync(request, false)) {
+        // Drain the generator so the request actually goes out.
+      }
+
+      expect(request.contents).toHaveLength(1);
+      const call = create.mock.calls.at(-1);
+      if (!call) {
+        expect.fail('interactions.create was never called');
+      }
+      expect((call[0] as {input: unknown[]}).input).toHaveLength(1);
+    });
+  });
+
+  describe('generateContentAsync error handling', () => {
+    function apiError(status: number): ApiError {
+      return new ApiError({message: `boom ${status}`, status});
+    }
+
+    function textRequest(): LlmRequest {
+      return {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+    }
+
+    async function drain(llm: Gemini, stream: boolean): Promise<void> {
+      for await (const _ of llm.generateContentAsync(textRequest(), stream)) {
+        // Drain the generator so the error surfaces.
+      }
+    }
+
+    it('enriches a 429 from a non-streaming call', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContent = vi.fn().mockRejectedValue(apiError(429));
+      llm.apiClient.models.generateContent = generateContent;
+
+      await expect(drain(llm, false)).rejects.toThrow(ResourceExhaustedError);
+      await expect(drain(llm, false)).rejects.toThrow(
+        '#error-code-429-resource_exhausted',
+      );
+      expect(generateContent).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports the original status and message on a 429', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      llm.apiClient.models.generateContent = vi
+        .fn()
+        .mockRejectedValue(apiError(429));
+
+      const error = await drain(llm, false).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ResourceExhaustedError);
+      if (!(error instanceof ResourceExhaustedError)) {
+        expect.fail('expected a ResourceExhaustedError');
+      }
+      expect(error.status).toBe(429);
+      expect(error.message).toContain('boom 429');
+      expect(error.cause).toBeDefined();
+    });
+
+    it('enriches a 429 from a streaming call', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentStream = vi.fn().mockRejectedValue(apiError(429));
+      llm.apiClient.models.generateContentStream = generateContentStream;
+
+      await expect(drain(llm, true)).rejects.toThrow(ResourceExhaustedError);
+      expect(generateContentStream).toHaveBeenCalledTimes(1);
+    });
+
+    it('enriches a 429 raised while the stream is read', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      llm.apiClient.models.generateContentStream = vi.fn().mockResolvedValue(
+        (async function* () {
+          yield new GenerateContentResponse();
+          throw apiError(429);
+        })(),
+      );
+
+      await expect(drain(llm, true)).rejects.toThrow(ResourceExhaustedError);
+    });
+
+    it('rethrows a non-429 from a non-streaming call untouched', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContent = vi.fn().mockRejectedValue(apiError(500));
+      llm.apiClient.models.generateContent = generateContent;
+
+      const error = await drain(llm, false).catch((e: unknown) => e);
+
+      expect(error).not.toBeInstanceOf(ResourceExhaustedError);
+      if (!(error instanceof ApiError)) {
+        expect.fail('expected an ApiError');
+      }
+      expect(error.status).toBe(500);
+      expect(generateContent).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows a non-429 from a streaming call untouched', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentStream = vi.fn().mockRejectedValue(apiError(500));
+      llm.apiClient.models.generateContentStream = generateContentStream;
+
+      const error = await drain(llm, true).catch((e: unknown) => e);
+
+      expect(error).not.toBeInstanceOf(ResourceExhaustedError);
+      if (!(error instanceof ApiError)) {
+        expect.fail('expected an ApiError');
+      }
+      expect(error.status).toBe(500);
+      expect(generateContentStream).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows a thrown value that carries no status', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      llm.apiClient.models.generateContent = vi
+        .fn()
+        .mockRejectedValue(new Error('network down'));
+
+      const error = await drain(llm, false).catch((e: unknown) => e);
+
+      expect(error).not.toBeInstanceOf(ResourceExhaustedError);
+      if (!(error instanceof Error)) {
+        expect.fail('expected an Error');
+      }
+      expect(error.message).toBe('network down');
+    });
+  });
+
+  describe('preprocessRequest', () => {
+    /** Runs one non-streaming request so preprocessing runs on it. */
+    async function send(llm: Gemini, llmRequest: LlmRequest): Promise<void> {
+      llm.apiClient.models.generateContent = vi
+        .fn()
+        .mockResolvedValue(new GenerateContentResponse());
+
+      for await (const _ of llm.generateContentAsync(llmRequest, false)) {
+        // Drain the generator so preprocessing runs.
+      }
+    }
+
+    const SYSTEM_INSTRUCTION = 'You are a helpful assistant';
+
+    it('clears the system instruction for a computer-use tool', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request: LlmRequest = {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          tools: [
+            {computerUse: {environment: Environment.ENVIRONMENT_BROWSER}},
+          ],
+        },
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await send(llm, request);
+
+      expect(request.config?.systemInstruction).toBeUndefined();
+    });
+
+    it('keeps the system instruction for a function tool', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request: LlmRequest = {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          tools: [
+            {functionDeclarations: [{name: 'test', description: 'test'}]},
+          ],
+        },
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await send(llm, request);
+
+      expect(request.config?.systemInstruction).toBe(SYSTEM_INSTRUCTION);
+    });
+
+    it('keeps the system instruction when there are no tools', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request: LlmRequest = {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config: {systemInstruction: SYSTEM_INSTRUCTION},
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await send(llm, request);
+
+      expect(request.config?.systemInstruction).toBe(SYSTEM_INSTRUCTION);
+    });
+
+    it('runs without a config', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request: LlmRequest = {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await expect(send(llm, request)).resolves.toBeUndefined();
+    });
+
+    it('turns unsupported inline data into text', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request: LlmRequest = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType:
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  data: Buffer.from('doc bytes', 'utf8').toString('base64'),
+                },
+              },
+            ],
+          },
+        ],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await send(llm, request);
+
+      const part = request.contents[0].parts?.[0];
+      expect(part?.inlineData).toBeUndefined();
+      expect(part?.text).toContain('[Binary artifact: inline-file');
+    });
+
+    it('accepts a content that carries no parts', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request: LlmRequest = {
+        contents: [{role: 'user'}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await send(llm, request);
+
+      expect(request.contents[0].parts).toBeUndefined();
+    });
+
+    it('leaves supported inline data alone', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const inlineData = {
+        mimeType: 'image/png',
+        data: Buffer.from('pixels', 'utf8').toString('base64'),
+      };
+      const request: LlmRequest = {
+        contents: [{role: 'user', parts: [{inlineData}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await send(llm, request);
+
+      expect(request.contents[0].parts?.[0].inlineData).toEqual(inlineData);
+    });
+  });
+
+  describe('connect speech config', () => {
+    const MODEL_VOICE: SpeechConfig = {
+      voiceConfig: {prebuiltVoiceConfig: {voiceName: 'Puck'}},
+    };
+    const REQUEST_VOICE: SpeechConfig = {
+      voiceConfig: {prebuiltVoiceConfig: {voiceName: 'Zephyr'}},
+    };
+
+    function liveRequest(speechConfig?: SpeechConfig): LlmRequest {
+      return {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {speechConfig},
+        config: {},
+        toolsDict: {},
+      };
+    }
+
+    it('applies the model speech config', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        speechConfig: MODEL_VOICE,
+      });
+      const request = liveRequest();
+
+      await llm.connect(request);
+
+      expect(request.liveConnectConfig.speechConfig).toEqual(MODEL_VOICE);
+    });
+
+    it('keeps the request speech config when the model has none', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = liveRequest(REQUEST_VOICE);
+
+      await llm.connect(request);
+
+      expect(request.liveConnectConfig.speechConfig).toEqual(REQUEST_VOICE);
+    });
+
+    it('lets the model speech config win over the request one', async () => {
+      const llm = new TestGemini({
+        apiKey: 'test-key',
+        speechConfig: MODEL_VOICE,
+      });
+      const request = liveRequest(REQUEST_VOICE);
+
+      await llm.connect(request);
+
+      expect(request.liveConnectConfig.speechConfig).toEqual(MODEL_VOICE);
+    });
+
+    it('leaves the speech config unset when neither side has one', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request = liveRequest();
+
+      await llm.connect(request);
+
+      expect(request.liveConnectConfig.speechConfig).toBeUndefined();
+    });
+
+    it('merges the tracking headers into the live http options', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const request: LlmRequest = {
+        model: 'gemini-2.5-flash',
+        contents: [],
+        liveConnectConfig: {
+          httpOptions: {headers: {'x-goog-api-client': 'my-client/1.0'}},
+        },
+        config: {},
+        toolsDict: {},
+      };
+
+      await llm.connect(request);
+
+      const header =
+        request.liveConnectConfig.httpOptions?.headers?.['x-goog-api-client'];
+      expect(header).toContain('my-client/1.0');
+      expect(header).toContain('google-adk/');
     });
   });
 
