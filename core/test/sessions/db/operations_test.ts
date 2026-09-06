@@ -8,17 +8,24 @@ import {MikroORM} from '@mikro-orm/core';
 import {SqliteDriver} from '@mikro-orm/sqlite';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
   validateDatabaseSchemaVersion,
 } from '../../../src/sessions/db/operations.js';
 import {
   ENTITIES,
+  EVENTS_TABLE_NAME,
+  METADATA_TABLE_NAME,
+  SCHEMA_VERSION_0_PICKLE,
   SCHEMA_VERSION_1_JSON,
   SCHEMA_VERSION_KEY,
   STORAGE_KEY_COLUMN_LENGTH,
+  StorageAppState,
   StorageEvent,
   StorageMetadata,
+  StorageSession,
+  StorageUserState,
 } from '../../../src/sessions/db/schema.js';
 
 // Mock dynamic imports for drivers that might not be installed in dev
@@ -66,6 +73,36 @@ describe('operations', () => {
         return total + eventProperties[keyProperty].length! * 4;
       }, 0);
       expect(utf8mb4KeyBytes).toBeLessThanOrEqual(3072);
+    });
+
+    it('declares millisecond precision on every timestamp column', async () => {
+      orm = await MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+      });
+
+      // MySQL and MariaDB emit `datetime` with no fractional digits unless the
+      // property declares a length, and the whole-second value that column
+      // holds would round away the millisecond the revision marker and the
+      // event ordering both compare.
+      const timestampColumns: Array<[string, string]> = [
+        [StorageSession.name, 'createTime'],
+        [StorageSession.name, 'updateTime'],
+        [StorageAppState.name, 'updateTime'],
+        [StorageUserState.name, 'updateTime'],
+        [StorageEvent.name, 'timestamp'],
+      ];
+
+      for (const [entity, property] of timestampColumns) {
+        const properties = orm.getMetadata().get(entity).properties as Record<
+          string,
+          {length?: number}
+        >;
+        // Asserted against the literal, not the constant, so that lowering the
+        // constant fails here instead of moving both sides together.
+        expect(properties[property].length).toBe(3);
+      }
     });
   });
 
@@ -139,6 +176,102 @@ describe('operations', () => {
       await expect(
         getConnectionOptionsFromUri('invalid://user:pass@localhost/db'),
       ).rejects.toThrow('Unsupported database URI');
+    });
+
+    it('pins the sqlite in-memory pool to a single connection', async () => {
+      const options = await getConnectionOptionsFromUri('sqlite://:memory:');
+      expect(options.pool).toEqual({min: 1, max: 1});
+    });
+
+    it('leaves the pool alone for a sqlite file', async () => {
+      const options = await getConnectionOptionsFromUri('sqlite:///tmp/a.db');
+      expect(options.pool).toBeUndefined();
+    });
+
+    it('merges caller overrides over the derived options', async () => {
+      const options = await getConnectionOptionsFromUri('sqlite://:memory:', {
+        pool: {min: 2, max: 4},
+        debug: true,
+      });
+      expect(options.pool).toEqual({min: 2, max: 4});
+      expect(options.debug).toBe(true);
+      expect(options.dbName).toBe(':memory:');
+    });
+  });
+
+  describe('detectDatabaseSchemaVersion', () => {
+    let orm: MikroORM;
+
+    afterEach(async () => {
+      await orm.close();
+    });
+
+    async function initEmptyOrm(): Promise<MikroORM> {
+      return MikroORM.init({
+        dbName: ':memory:',
+        driver: SqliteDriver,
+        entities: ENTITIES,
+        pool: {min: 1, max: 1},
+      });
+    }
+
+    it('reports the latest version for an empty database', async () => {
+      orm = await initEmptyOrm();
+      await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe(
+        SCHEMA_VERSION_1_JSON,
+      );
+    });
+
+    it('reports the version stored in the metadata table', async () => {
+      orm = await initEmptyOrm();
+      await ensureDatabaseCreated(orm);
+      const em = orm.em.fork();
+      await em
+        .persist(
+          em.create(StorageMetadata, {key: SCHEMA_VERSION_KEY, value: '7'}),
+        )
+        .flush();
+
+      await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe('7');
+    });
+
+    it('rejects a metadata table that holds no schema version', async () => {
+      orm = await initEmptyOrm();
+      await orm.em
+        .getConnection()
+        .execute(
+          `create table ${METADATA_TABLE_NAME} ("key" text primary key, value text)`,
+        );
+
+      await expect(detectDatabaseSchemaVersion(orm)).rejects.toThrow(
+        'might be malformed',
+      );
+    });
+
+    it('reports the legacy version for a pickle events table', async () => {
+      orm = await initEmptyOrm();
+      await orm.em
+        .getConnection()
+        .execute(
+          `create table ${EVENTS_TABLE_NAME} (id text primary key, actions blob)`,
+        );
+
+      await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe(
+        SCHEMA_VERSION_0_PICKLE,
+      );
+    });
+
+    it('reports the latest version when the events table already holds event_data', async () => {
+      orm = await initEmptyOrm();
+      await orm.em
+        .getConnection()
+        .execute(
+          `create table ${EVENTS_TABLE_NAME} (id text primary key, actions blob, event_data text)`,
+        );
+
+      await expect(detectDatabaseSchemaVersion(orm)).resolves.toBe(
+        SCHEMA_VERSION_1_JSON,
+      );
     });
   });
 
