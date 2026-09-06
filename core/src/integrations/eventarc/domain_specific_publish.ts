@@ -84,10 +84,10 @@ export class AgentProvided {
  * Both arguments are always passed, in this order. To read only the context,
  * name the payload and ignore it: `(_payload, ctx) => ...`.
  */
-export type AttributeResolver<T> = (
+export type AttributeResolver = (
   payload?: unknown,
   toolContext?: Context,
-) => T;
+) => string | typeof OMIT;
 
 /**
  * What a CloudEvent attribute is bound to.
@@ -98,7 +98,7 @@ export type AttributeResolver<T> = (
  */
 export type AttributeBinding =
   | string
-  | AttributeResolver<string | typeof OMIT>
+  | AttributeResolver
   | AgentProvided
   | typeof OMIT;
 
@@ -139,9 +139,7 @@ export interface DomainSpecificToolOptions {
 }
 
 /** Whether a binding is a function to call rather than a value to use. */
-function isResolver(
-  binding: unknown,
-): binding is AttributeResolver<string | typeof OMIT> {
+function isResolver(binding: unknown): binding is AttributeResolver {
   return typeof binding === 'function';
 }
 
@@ -166,19 +164,15 @@ function validateReservedAttributes(
   binding: CloudEventAttributesBinding,
 ): void {
   for (const field of MANDATORY_ATTRIBUTES) {
-    const value = binding[field];
-    if (value == null) {
+    // `== null` catches both null and undefined, which a JavaScript caller can
+    // supply even though the type forbids them.
+    if (binding[field] == null) {
       throw new InputValidationError(
         `CloudEventAttributesBinding requires '${field}' to be provided.`,
       );
     }
-    if (value === OMIT) {
-      throw new InputValidationError(
-        `CloudEvent field '${field}' is mandatory and cannot be OMIT.`,
-      );
-    }
   }
-  for (const field of NON_OMITTABLE_ATTRIBUTES) {
+  for (const field of [...MANDATORY_ATTRIBUTES, ...NON_OMITTABLE_ATTRIBUTES]) {
     if (binding[field] === OMIT) {
       throw new InputValidationError(
         `CloudEvent field '${field}' is mandatory and cannot be OMIT.`,
@@ -269,11 +263,7 @@ function resolveBinding(
   if (binding === undefined) {
     return undefined;
   }
-  let value:
-    | string
-    | typeof OMIT
-    | AttributeResolver<string | typeof OMIT>
-    | undefined;
+  let value: string | typeof OMIT | AttributeResolver | undefined;
   if (binding instanceof AgentProvided) {
     const supplied = args[key];
     value = typeof supplied === 'string' ? supplied : binding.default;
@@ -381,17 +371,17 @@ function executeDomainSpecificPublish(
     type: reserved.get('type') ?? '',
     source: reserved.get('source') ?? '',
   };
-  for (const field of ['datacontenttype', 'subject', 'specversion'] as const) {
+  for (const field of [
+    'datacontenttype',
+    'subject',
+    'specversion',
+    'id',
+    'time',
+  ] as const) {
     const value = reserved.get(field);
     if (value !== undefined) {
       input[field] = value;
     }
-  }
-  if (reserved.has('id')) {
-    input.id = reserved.get('id');
-  }
-  if (reserved.has('time')) {
-    input.time = reserved.get('time');
   }
   if (Object.keys(custom).length > 0) {
     input.custom_attributes = custom;
