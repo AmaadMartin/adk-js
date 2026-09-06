@@ -108,6 +108,7 @@
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/storage": "^7.17.1",
+    "@google-cloud/text-to-speech": "^6.4.1",
     "@mikro-orm/sqlite": "^7.2.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@opentelemetry/context-async-hooks": "^2.1.0",
@@ -121,6 +122,7 @@
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
     "@google-cloud/storage": "^7.17.1",
+    "@google-cloud/text-to-speech": "^6.4.1",
     "@mikro-orm/mariadb": "^7.2.0",
     "@mikro-orm/mssql": "^7.2.0",
     "@mikro-orm/mysql": "^7.2.0",
@@ -137,6 +139,9 @@
       "optional": true
     },
     "@google-cloud/storage": {
+      "optional": true
+    },
+    "@google-cloud/text-to-speech": {
       "optional": true
     },
     "@mikro-orm/mariadb": {
