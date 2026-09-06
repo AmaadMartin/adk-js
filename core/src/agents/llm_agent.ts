@@ -7,7 +7,6 @@
 import {GenerateContentConfig, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
-import {FunctionTool} from '../tools/function_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
@@ -42,7 +41,6 @@ import {BaseTool, isBaseTool} from '../tools/base_tool.js';
 import {BaseToolset} from '../tools/base_toolset.js';
 
 import {logger} from '../utils/logger.js';
-import {canUseOutputSchemaWithTools} from '../utils/output_schema_utils.js';
 import {Context} from './context.js';
 
 import {
@@ -73,10 +71,12 @@ import {AGENT_TRANSFER_LLM_REQUEST_PROCESSOR} from './processors/agent_transfer_
 import {BASIC_LLM_REQUEST_PROCESSOR} from './processors/basic_llm_request_processor.js';
 import {CODE_EXECUTION_REQUEST_PROCESSOR} from './processors/code_execution_request_processor.js';
 import {CONTENT_REQUEST_PROCESSOR} from './processors/content_request_processor.js';
+import {CONTEXT_CACHE_REQUEST_PROCESSOR} from './processors/context_cache_request_processor.js';
 import {ContextCompactorRequestProcessor} from './processors/context_compactor_request_processor.js';
 import {IDENTITY_LLM_REQUEST_PROCESSOR} from './processors/identity_llm_request_processor.js';
 import {INSTRUCTIONS_LLM_REQUEST_PROCESSOR} from './processors/instructions_llm_request_processor.js';
 import {INTERACTIONS_REQUEST_PROCESSOR} from './processors/interactions_request_processor.js';
+import {OUTPUT_SCHEMA_REQUEST_PROCESSOR} from './processors/output_schema_request_processor.js';
 import {REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR} from './processors/request_confirmation_llm_request_processor.js';
 import {REQUEST_INPUT_LLM_REQUEST_PROCESSOR} from './processors/request_input_llm_request_processor.js';
 import {TOOL_FILTER_REQUEST_PROCESSOR} from './processors/tool_filter_request_processor.js';
@@ -542,13 +542,22 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     this.requestProcessors = config.requestProcessors ?? [
       BASIC_LLM_REQUEST_PROCESSOR,
       AUTH_PREPROCESSOR,
-      IDENTITY_LLM_REQUEST_PROCESSOR,
-      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
       REQUEST_CONFIRMATION_LLM_REQUEST_PROCESSOR,
       REQUEST_INPUT_LLM_REQUEST_PROCESSOR,
+      // The agent's own instruction comes before the identity preamble, so the
+      // two SDKs assemble the same system instruction from one agent.
+      INSTRUCTIONS_LLM_REQUEST_PROCESSOR,
+      IDENTITY_LLM_REQUEST_PROCESSOR,
       CONTENT_REQUEST_PROCESSOR,
+      // Context caching reads the contents the previous processor assembled.
+      CONTEXT_CACHE_REQUEST_PROCESSOR,
       INTERACTIONS_REQUEST_PROCESSOR,
+      // Code execution runs after contents because it rewrites the contents to
+      // optimize data files.
       CODE_EXECUTION_REQUEST_PROCESSOR,
+      // The output schema workaround declares a tool, so it runs after the
+      // processors that shape the contents.
+      OUTPUT_SCHEMA_REQUEST_PROCESSOR,
       TOOL_FILTER_REQUEST_PROCESSOR,
     ];
 
@@ -1481,24 +1490,6 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       // Task mode: the agent completes by calling `finish_task` (whose params
       // mirror the output schema) rather than emitting structured output.
       allTools.push(this.finishTaskTool);
-    } else if (
-      this.outputSchema &&
-      allTools.length > 0 &&
-      !canUseOutputSchemaWithTools(this.canonicalModel.model)
-    ) {
-      const setModelResponseTool = new FunctionTool({
-        name: 'set_model_response',
-        description:
-          'Call this tool to submit your final response conforming to the output schema. Use this tool only when you have collected all the information and are ready to return the final answer.',
-        parameters: this.outputSchema,
-        execute: async (args, toolContext) => {
-          if (toolContext) {
-            toolContext.actions.skipSummarization = true;
-          }
-          return JSON.stringify(args);
-        },
-      });
-      allTools.push(setModelResponseTool);
     }
     // Collect turn metadata and event actions
     // TODO - b/425992518: misleading, this is passing metadata.
@@ -1519,16 +1510,11 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           toolUnion,
           new ReadonlyContext(invocationContext),
         )
-      ).filter((tool) => {
-        // If allowedTools is not set, allow all tools. Otherwise, only allow
-        // tools that are in the allowedTools set.
-        // The allowedTools set is populated by request processors.
-        return (
+      ).filter(
+        (tool) =>
           !llmRequest.allowedTools ||
-          llmRequest.allowedTools.includes(tool.name) ||
-          tool.name === 'set_model_response'
-        );
-      });
+          llmRequest.allowedTools.includes(tool.name),
+      );
 
       for (const tool of tools) {
         await tool.processLlmRequest({toolContext, llmRequest});
