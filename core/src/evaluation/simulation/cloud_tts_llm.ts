@@ -294,7 +294,6 @@ export class CloudTtsLlm extends BaseLlm {
           `${Object.keys(TTS_ENCODING_TO_MIME_TYPE).join(', ')}`,
       );
     }
-    const encoding = this.audioEncoding;
     const text = extractText(llmRequest);
     const {voiceName, languageCode} = extractVoiceConfig(llmRequest);
     const client = await this.getClient();
@@ -304,7 +303,11 @@ export class CloudTtsLlm extends BaseLlm {
       [response] = await client.synthesizeSpeech({
         input: {text},
         voice: {languageCode, name: voiceName},
-        audioConfig: buildAudioConfig(encoding, this.speakingSpeed, this.pitch),
+        audioConfig: buildAudioConfig(
+          this.audioEncoding,
+          this.speakingSpeed,
+          this.pitch,
+        ),
       });
     } catch (err: unknown) {
       if (!isGoogleApiCallError(err)) {
@@ -329,7 +332,7 @@ export class CloudTtsLlm extends BaseLlm {
         ? Buffer.from(audioContent, 'base64')
         : Buffer.from(audioContent);
     logger.debug(
-      `Cloud TTS synthesis completed: ${audio.length} bytes of ${encoding} audio`,
+      `Cloud TTS synthesis completed: ${audio.length} bytes of ${this.audioEncoding} audio`,
     );
 
     yield {
@@ -338,7 +341,7 @@ export class CloudTtsLlm extends BaseLlm {
         parts: [
           createPartFromBase64(
             audio.toString('base64'),
-            TTS_ENCODING_TO_MIME_TYPE[encoding],
+            TTS_ENCODING_TO_MIME_TYPE[this.audioEncoding],
           ),
         ],
       },
