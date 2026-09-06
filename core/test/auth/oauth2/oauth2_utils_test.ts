@@ -4,8 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme, OAuth2Auth} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  AuthScheme,
+  CustomAuthScheme,
+  ExtendedOAuth2,
+  OAuth2Auth,
+  OAuth2DiscoveryManager,
+} from '@google/adk';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  MockInstance,
+  vi,
+} from 'vitest';
+import {AuthorizationServerMetadata} from '../../../src/auth/oauth2/oauth2_discovery.js';
 import {
   AuthorizationCodeParams,
   ClientCredentialsParams,
@@ -14,8 +29,10 @@ import {
   getTokenEndpoint,
   isTokenExpired,
   parseAuthorizationCode,
+  populateAuthSchemeFromDiscovery,
   RefreshTokenParams,
 } from '../../../src/auth/oauth2/oauth2_utils.js';
+import {logger} from '../../../src/utils/logger.js';
 
 describe('oauth2_utils', () => {
   describe('getTokenEndpoint', () => {
@@ -281,6 +298,162 @@ describe('oauth2_utils', () => {
       expect(isTokenExpired({expiresAt: nearFutureTimeMs} as OAuth2Auth)).toBe(
         true,
       );
+    });
+  });
+
+  describe('populateAuthSchemeFromDiscovery', () => {
+    const AUTHORIZATION_ENDPOINT = 'https://issuer.example.com/authorize';
+    const TOKEN_ENDPOINT = 'https://issuer.example.com/token';
+    const ISSUER_URL = 'https://issuer.example.com';
+
+    /** A discovery manager that answers from memory instead of the network. */
+    class StubDiscoveryManager extends OAuth2DiscoveryManager {
+      readonly requestedIssuers: string[] = [];
+
+      constructor(
+        private readonly metadata: AuthorizationServerMetadata | undefined,
+      ) {
+        super();
+      }
+
+      override async discoverAuthServerMetadata(
+        issuerUrl: string,
+      ): Promise<AuthorizationServerMetadata | undefined> {
+        this.requestedIssuers.push(issuerUrl);
+        return this.metadata;
+      }
+    }
+
+    function stubWithMetadata(): StubDiscoveryManager {
+      return new StubDiscoveryManager({
+        issuer: ISSUER_URL,
+        authorization_endpoint: AUTHORIZATION_ENDPOINT,
+        token_endpoint: TOKEN_ENDPOINT,
+      });
+    }
+
+    let warnSpy: MockInstance<typeof logger.warn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('rejects a plain OAuth2 scheme that names no issuer', async () => {
+      const scheme: AuthScheme = {
+        type: 'oauth2',
+        flows: {implicit: {authorizationUrl: '', scopes: {}}},
+      };
+
+      expect(
+        await populateAuthSchemeFromDiscovery(scheme, stubWithMetadata()),
+      ).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'No issuerUrl was provided for auto-discovery.',
+      );
+    });
+
+    it('rejects a custom scheme', async () => {
+      const scheme: CustomAuthScheme = {type: 'myProviderScheme'};
+
+      expect(
+        await populateAuthSchemeFromDiscovery(scheme, stubWithMetadata()),
+      ).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'No issuerUrl was provided for auto-discovery.',
+      );
+    });
+
+    it('reports failure when the issuer publishes no metadata', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: ISSUER_URL,
+        flows: {implicit: {authorizationUrl: '', scopes: {}}},
+      };
+      const discovery = new StubDiscoveryManager(undefined);
+
+      expect(await populateAuthSchemeFromDiscovery(scheme, discovery)).toBe(
+        false,
+      );
+      expect(discovery.requestedIssuers).toEqual([ISSUER_URL]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Auto-discovery has failed to populate OAuth scheme info.',
+      );
+      expect(scheme.flows.implicit?.authorizationUrl).toBe('');
+    });
+
+    it('fills every empty endpoint of every configured flow', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: ISSUER_URL,
+        flows: {
+          implicit: {authorizationUrl: '', scopes: {}},
+          password: {tokenUrl: '', scopes: {}},
+          clientCredentials: {tokenUrl: '', scopes: {}},
+          authorizationCode: {authorizationUrl: '', tokenUrl: '', scopes: {}},
+        },
+      };
+
+      expect(
+        await populateAuthSchemeFromDiscovery(scheme, stubWithMetadata()),
+      ).toBe(true);
+      expect(scheme.flows.implicit?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(scheme.flows.password?.tokenUrl).toBe(TOKEN_ENDPOINT);
+      expect(scheme.flows.clientCredentials?.tokenUrl).toBe(TOKEN_ENDPOINT);
+      expect(scheme.flows.authorizationCode?.authorizationUrl).toBe(
+        AUTHORIZATION_ENDPOINT,
+      );
+      expect(scheme.flows.authorizationCode?.tokenUrl).toBe(TOKEN_ENDPOINT);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('keeps an endpoint the caller already configured', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: ISSUER_URL,
+        flows: {
+          implicit: {
+            authorizationUrl: 'https://own.example.com/auth',
+            scopes: {},
+          },
+          authorizationCode: {
+            authorizationUrl: 'https://own.example.com/auth',
+            tokenUrl: 'https://own.example.com/token',
+            scopes: {},
+          },
+        },
+      };
+
+      expect(
+        await populateAuthSchemeFromDiscovery(scheme, stubWithMetadata()),
+      ).toBe(true);
+      expect(scheme.flows.implicit?.authorizationUrl).toBe(
+        'https://own.example.com/auth',
+      );
+      expect(scheme.flows.authorizationCode?.authorizationUrl).toBe(
+        'https://own.example.com/auth',
+      );
+      expect(scheme.flows.authorizationCode?.tokenUrl).toBe(
+        'https://own.example.com/token',
+      );
+    });
+
+    it('succeeds when the scheme declares no flow to fill', async () => {
+      const scheme: ExtendedOAuth2 = {
+        type: 'oauth2',
+        issuerUrl: ISSUER_URL,
+        flows: {},
+      };
+
+      expect(
+        await populateAuthSchemeFromDiscovery(scheme, stubWithMetadata()),
+      ).toBe(true);
+      expect(scheme.flows).toEqual({});
     });
   });
 });
