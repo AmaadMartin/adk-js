@@ -36,6 +36,16 @@ export {
   loadSkillFromDir,
   validateSkillDir,
 } from './skills/loader.js';
+export {DEFAULT_MAX_QUERY_RESULT_ROWS} from './tools/data_agent/config.js';
+export type {DataAgentToolConfig} from './tools/data_agent/config.js';
+export {
+  DATA_AGENT_DEFAULT_SCOPES,
+  DataAgentCredentialsConfig,
+} from './tools/data_agent/credentials.js';
+export type {DataAgentCredentialsConfigOptions} from './tools/data_agent/credentials.js';
+export type {DataAgentToolResult} from './tools/data_agent/data_agent_tool.js';
+export {DataAgentToolset} from './tools/data_agent/data_agent_toolset.js';
+export type {DataAgentToolsetOptions} from './tools/data_agent/data_agent_toolset.js';
 export {
   RunSkillInlineScriptErrorCode,
   RunSkillInlineScriptTool,
