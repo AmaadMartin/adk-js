@@ -103,8 +103,10 @@ export async function* readSseData(
         ? decoder.decode() + FRAME_TERMINATOR
         : decoder.decode(result.value, {stream: true});
       const lines = (buffer + chunk).split('\n');
-      buffer = lines.pop() ?? '';
-      yield* completedFrames(lines, pending);
+      // The last element is whatever follows the final newline, so it is the
+      // start of a line the next read completes.
+      buffer = lines[lines.length - 1];
+      yield* completedFrames(lines.slice(0, -1), pending);
       if (result.done) {
         return;
       }
