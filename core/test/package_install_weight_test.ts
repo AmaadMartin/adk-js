@@ -44,6 +44,7 @@ const pkg: CorePackageJson = JSON.parse(
 const OPTIONAL_SUBSYSTEM_PEERS = [
   '@google-cloud/bigquery',
   '@google-cloud/bigtable',
+  '@google-cloud/dataplex',
   '@google-cloud/opentelemetry-cloud-monitoring-exporter',
   '@google-cloud/opentelemetry-cloud-trace-exporter',
   '@google-cloud/spanner',
@@ -83,6 +84,7 @@ describe('core/package.json install weight', () => {
     '@google-cloud/bigquery',
     '@google-cloud/bigquery-storage',
     '@google-cloud/bigtable',
+    '@google-cloud/dataplex',
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',
     '@google-cloud/spanner',
@@ -129,6 +131,7 @@ describe('core/package.json subpath exports', () => {
     expect(subpaths.map(([subpath]) => subpath).sort()).toEqual([
       './a2a',
       './artifacts/gcs',
+      './integrations/bigquery',
       './integrations/e2b',
       './plugins/bigquery',
       './sessions/database',

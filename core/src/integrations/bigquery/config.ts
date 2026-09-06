@@ -4,20 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * Two ports of adk-python's `BigQueryToolConfig` live here, as the package
+ * barrel already carries several ports of the Google credentials module.
+ *
+ * {@link createBigQueryToolSettings} is the one the toolset calls: it parses
+ * with {@link bigQueryToolConfigSchema} and reports a `ZodError`.
+ * {@link createBigQueryToolConfig} is the standalone factory the package
+ * barrel exports: it applies stricter integer checks and reports an
+ * {@link InputValidationError}. They validate the same fields and neither
+ * calls the other, so each keeps the error contract its own callers expect.
+ */
+
 import {z} from 'zod';
 import {InputValidationError} from '../../errors/input_validation_error.js';
-
-/** Smallest `maximumBytesBilled` BigQuery on-demand pricing accepts. */
-const MINIMUM_BYTES_BILLED = 10_485_760;
-
-/** How many job labels a caller may provide. */
-const MAX_JOB_LABELS = 20;
-
-/** Job label key prefix reserved for labels the tools set themselves. */
-const RESERVED_JOB_LABEL_PREFIX = 'adk-bigquery-';
-
-/** Row cap a query result carries when the caller names none. */
-const DEFAULT_MAX_QUERY_RESULT_ROWS = 50;
 
 /**
  * Write mode indicating what levels of write operations are allowed in
@@ -48,88 +48,157 @@ export enum WriteMode {
   ALLOWED = 'allowed',
 }
 
-/** Configuration for BigQuery tools. */
-export interface BigQueryToolConfig {
-  /**
-   * Write mode for BigQuery tools.
-   *
-   * By default, the tool will allow only read operations. This behaviour may
-   * change in future versions.
-   */
-  writeMode: WriteMode;
+/**
+ * The smallest `maximumBytesBilled` BigQuery on-demand pricing accepts.
+ *
+ * Charges round up to the nearest MB, with a 10 MB floor per query and per
+ * table the query reads.
+ */
+export const MINIMUM_BYTES_BILLED = 10_485_760;
 
-  /**
-   * Maximum number of bytes to bill for a query.
-   *
-   * In BigQuery on-demand pricing, charges are rounded up to the nearest MB,
-   * with a minimum 10 MB data processed per table referenced by the query, and
-   * with a minimum 10 MB data processed per query. So this value must be set
-   * >=10485760.
-   */
-  maximumBytesBilled?: number;
+/** How many rows a query returns when the caller sets no cap. */
+export const DEFAULT_MAX_QUERY_RESULT_ROWS = 50;
 
-  /**
-   * Maximum number of rows to return from a query.
-   *
-   * By default, the query result will be limited to 50 rows.
-   */
-  maxQueryResultRows: number;
+/** How many job labels a caller may supply. */
+export const MAX_JOB_LABELS = 20;
 
-  /**
-   * Name of the application using the BigQuery tools.
-   *
-   * By default, no particular application name will be set in the BigQuery
-   * interaction. But if the tool user (agent builder) wants to differentiate
-   * their application/agent for tracking or support purpose, they can set this
-   * field. If set, this value will be added to the user_agent in BigQuery API
-   * calls, and also to the BigQuery job labels with the key
-   * "adk-bigquery-application-name".
-   *
-   * Note: This field is for usage discovery and tracking purposes only and
-   * should not be used for security-sensitive decisions.
-   */
-  applicationName?: string;
+/** The job-label key prefix the tools reserve for themselves. */
+export const RESERVED_JOB_LABEL_PREFIX = 'adk-bigquery-';
 
-  /**
-   * GCP project ID to use for the BigQuery compute operations.
-   *
-   * This can be set as a guardrail to ensure that the tools perform the
-   * compute operations (such as query execution) in a specific project.
-   */
-  computeProjectId?: string;
+/** The job label carrying {@link BigQueryToolConfig.applicationName}. */
+export const APPLICATION_NAME_JOB_LABEL = `${RESERVED_JOB_LABEL_PREFIX}application-name`;
 
-  /**
-   * BigQuery location to use for the data and compute.
-   *
-   * This can be set if the BigQuery tools are expected to process data in a
-   * particular BigQuery location. If not set, then location would be
-   * automatically determined based on the data location in the query. For all
-   * supported locations, see
-   * https://cloud.google.com/bigquery/docs/locations.
-   */
-  location?: string;
+/** The job label carrying the name of the tool that started the job. */
+export const TOOL_NAME_JOB_LABEL = `${RESERVED_JOB_LABEL_PREFIX}tool`;
 
-  /**
-   * Labels to apply to BigQuery jobs for tracking and monitoring.
-   *
-   * These labels will be added to all BigQuery jobs executed by the tools.
-   * Labels must be key-value pairs where both keys and values are strings.
-   * Labels can be used for billing, monitoring, and resource organization. For
-   * more information about labels, see
-   * https://cloud.google.com/bigquery/docs/labels-intro.
-   *
-   * Note: These labels are for usage discovery and tracking purposes only and
-   * should not be used for security-sensitive decisions. The number of
-   * user-provided labels is restricted to 20, and keys starting with
-   * "adk-bigquery-" are reserved for internal usage.
-   */
-  jobLabels?: Record<string, string>;
+/**
+ * Rejects a byte budget BigQuery would refuse anyway.
+ *
+ * `0` passes: adk-python guards with `if v and v < 10_485_760`, so a falsy
+ * value skips the check, and that behaviour crosses the language boundary.
+ */
+function isAllowedBytesBilled(value: number | undefined): boolean {
+  return !value || value >= MINIMUM_BYTES_BILLED;
 }
 
-// Unknown keys are rejected, which is what adk-python's `extra='forbid'`
-// does. The schema stays module-private: the type and the factory are the
-// public surface.
-const bigQueryToolConfigSchema = z.strictObject({
+const BYTES_BILLED_MESSAGE =
+  'In BigQuery on-demand pricing, charges are rounded up to the nearest MB,' +
+  ' with a minimum 10 MB data processed per table referenced by the query,' +
+  ' and with a minimum 10 MB data processed per query. So max_bytes_billed' +
+  ` must be set >=${MINIMUM_BYTES_BILLED}.`;
+
+/** Reports the first job-label rule a map breaks, or `undefined`. */
+function jobLabelsError(labels: Record<string, string>): string | undefined {
+  const keys = Object.keys(labels);
+  if (keys.length > MAX_JOB_LABELS) {
+    return `Only up to ${MAX_JOB_LABELS} job labels can be provided`;
+  }
+  for (const key of keys) {
+    if (!key) {
+      return 'Label keys cannot be empty.';
+    }
+    if (key.startsWith(RESERVED_JOB_LABEL_PREFIX)) {
+      return (
+        `Label key cannot start with "${RESERVED_JOB_LABEL_PREFIX}" as it is` +
+        ` reserved for internal usage, found "${key}".`
+      );
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The BigQuery tool settings, with every default applied.
+ *
+ * adk-python declares the same fields on a pydantic model that forbids extra
+ * keys; this schema is that model, and {@link BigQueryToolSettings} is what it
+ * produces.
+ */
+export const bigQueryToolConfigSchema = z.strictObject({
+  /** What kind of write `execute_sql` may run. */
+  writeMode: z.enum(WriteMode).default(WriteMode.BLOCKED),
+  /**
+   * The byte budget for a query, or unset to leave it to BigQuery.
+   */
+  maximumBytesBilled: z
+    .number()
+    .optional()
+    .refine(isAllowedBytesBilled, BYTES_BILLED_MESSAGE),
+  /** How many rows a query result may carry. */
+  maxQueryResultRows: z.number().default(DEFAULT_MAX_QUERY_RESULT_ROWS),
+  /**
+   * The name of the application using the tools.
+   *
+   * It is added to the BigQuery user agent and to a job label, so an operator
+   * can tell one agent's traffic from another's. Use it for tracking only,
+   * never for a security decision.
+   */
+  applicationName: z
+    .string()
+    .optional()
+    .refine(
+      (value) => !value?.includes(' '),
+      'Application name should not contain spaces.',
+    ),
+  /**
+   * The only project the tools may run compute in.
+   *
+   * Set it as a guardrail: `execute_sql` refuses a query aimed anywhere else.
+   */
+  computeProjectId: z.string().optional(),
+  /**
+   * The BigQuery location holding the data and running the compute. Unset
+   * lets BigQuery derive it from the query. See
+   * https://cloud.google.com/bigquery/docs/locations.
+   */
+  location: z.string().optional(),
+  /**
+   * Labels added to every BigQuery job the tools start, for billing and
+   * monitoring. See https://cloud.google.com/bigquery/docs/labels-intro.
+   *
+   * At most {@link MAX_JOB_LABELS} labels, no empty key, and no key starting
+   * with {@link RESERVED_JOB_LABEL_PREFIX}. Use them for tracking only, never
+   * for a security decision.
+   */
+  jobLabels: z
+    .record(z.string(), z.string())
+    .optional()
+    .superRefine((labels, ctx) => {
+      const error = labels && jobLabelsError(labels);
+      if (error) {
+        ctx.addIssue({code: 'custom', message: error});
+      }
+    }),
+});
+
+/**
+ * How a caller configures the BigQuery tools. Every field is optional.
+ *
+ * Unknown keys are rejected, matching adk-python's `extra='forbid'`.
+ */
+export type BigQueryToolConfig = z.input<typeof bigQueryToolConfigSchema>;
+
+/** The settings a BigQuery tool runs with, once defaults are applied. */
+export type BigQueryToolSettings = z.output<typeof bigQueryToolConfigSchema>;
+
+/**
+ * Validates a configuration and fills in its defaults.
+ *
+ * @param config The caller's configuration, or nothing for every default.
+ * @return The settings the tools run with.
+ * @throws {z.ZodError} If a field breaks a rule, or the object carries a key
+ *     the configuration does not declare.
+ */
+export function createBigQueryToolSettings(
+  config: BigQueryToolConfig = {},
+): BigQueryToolSettings {
+  return bigQueryToolConfigSchema.parse(config);
+}
+
+// The schema behind `createBigQueryToolConfig`. It rejects a fractional row
+// cap and a fractional byte budget, which the schema above accepts, and it
+// applies no default: the factory applies them after its own checks run.
+const strictConfigSchema = z.strictObject({
   writeMode: z.enum(WriteMode).optional(),
   maximumBytesBilled: z.int().optional(),
   maxQueryResultRows: z.int().optional(),
@@ -164,32 +233,19 @@ function validateJobLabels(labels: Record<string, string> | undefined): void {
   if (labels === undefined) {
     return;
   }
-  const keys = Object.keys(labels);
-  if (keys.length > MAX_JOB_LABELS) {
-    throw new InputValidationError(
-      `Only up to ${MAX_JOB_LABELS} job labels can be provided`,
-    );
-  }
-  for (const key of keys) {
-    if (!key) {
-      throw new InputValidationError('Label keys cannot be empty.');
-    }
-    if (key.startsWith(RESERVED_JOB_LABEL_PREFIX)) {
-      throw new InputValidationError(
-        `Label key cannot start with "${RESERVED_JOB_LABEL_PREFIX}" as it is` +
-          ` reserved for internal usage, found "${key}".`,
-      );
-    }
+  const error = jobLabelsError(labels);
+  if (error) {
+    throw new InputValidationError(error);
   }
 }
 
 /**
- * Creates a validated {@link BigQueryToolConfig}.
+ * Creates validated BigQuery tool settings.
  *
  * @param params Optional {@link BigQueryToolConfig} fields. Unset fields take
  *     their defaults: {@link WriteMode.BLOCKED} and 50 result rows.
- * @returns A validated {@link BigQueryToolConfig}, freshly built and sharing
- *     no reference with `params`.
+ * @returns Validated settings, freshly built and sharing no reference with
+ *     `params`.
  * @throws {InputValidationError} When `params` carries an unknown key or a
  *     field of the wrong type, when `maximumBytesBilled` is below the BigQuery
  *     on-demand minimum, when `applicationName` contains a space, or when
@@ -197,8 +253,8 @@ function validateJobLabels(labels: Record<string, string> | undefined): void {
  */
 export function createBigQueryToolConfig(
   params: Partial<BigQueryToolConfig> = {},
-): BigQueryToolConfig {
-  const result = bigQueryToolConfigSchema.safeParse(params);
+): BigQueryToolSettings {
+  const result = strictConfigSchema.safeParse(params);
   if (!result.success) {
     throw new InputValidationError(
       `Invalid BigQueryToolConfig: ${z.prettifyError(result.error)}`,
