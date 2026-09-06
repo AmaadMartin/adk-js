@@ -50,7 +50,6 @@ export {
   GCS_DEFAULT_SCOPES,
   GcsAdminToolset,
   Capabilities as GcsCapabilities,
-  createGcsToolSettings,
 } from './integrations/gcs/index.js';
 export type {
   GcsAdminToolsetOptions,

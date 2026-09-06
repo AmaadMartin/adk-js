@@ -72,7 +72,9 @@ export interface GcsAdminToolsetOptions {
  * A read-only toolset, with one identity for every end user:
  *
  * ```ts
- * const toolset = new GcsAdminToolset({credentialsConfig: {authClient}});
+ * const toolset = new GcsAdminToolset({
+ *   credentialsConfig: {applicationDefaultCredentials: true},
+ * });
  * ```
  *
  * A `toolFilter` given as a string array matches the prefixed name, as it does

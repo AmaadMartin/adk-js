@@ -11,7 +11,7 @@ import {AuthConfig} from '../../auth/auth_tool.js';
 import {GcsAuthorizedUser, GcsCredentials} from './client.js';
 
 /** Session-state key under which a resolved Cloud Storage token is cached. */
-export const GCS_TOKEN_CACHE_KEY = 'gcs_token_cache';
+const GCS_TOKEN_CACHE_KEY = 'gcs_token_cache';
 
 /** OAuth scopes the Cloud Storage tools request when the caller names none. */
 export const GCS_DEFAULT_SCOPES: readonly string[] = [
@@ -101,20 +101,6 @@ export function validateGcsCredentialsConfig(
   return {clientId, clientSecret, scopes: scopes ?? GCS_DEFAULT_SCOPES};
 }
 
-/** Whether a cached authorized user can still authenticate a call. */
-function isUsable(user: GcsAuthorizedUser): boolean {
-  // The refresh token lets storage mint a new access token itself, so an
-  // expired access token is not a reason to re-run the OAuth flow.
-  return Boolean(user.refreshToken);
-}
-
-/** Describes the scopes for the OpenAPI security scheme. */
-function scopeDescriptions(scopes: readonly string[]): Record<string, string> {
-  return Object.fromEntries(
-    scopes.map((scope) => [scope, `Access to ${scope}`]),
-  );
-}
-
 /**
  * Resolves the credentials the Cloud Storage tools call the API with.
  *
@@ -155,7 +141,9 @@ export class GcsCredentialsManager {
     context: Context,
   ): Promise<GcsCredentials | undefined> {
     const cached = context.state.get<GcsAuthorizedUser>(GCS_TOKEN_CACHE_KEY);
-    if (cached && isUsable(cached)) {
+    // The refresh token lets storage mint a new access token itself, so an
+    // expired access token is not a reason to re-run the OAuth flow.
+    if (cached?.refreshToken) {
       return {authorizedUser: cached};
     }
 
@@ -193,7 +181,9 @@ function authConfigFor(source: GcsOAuthClient): AuthConfig {
       authorizationCode: {
         authorizationUrl: GOOGLE_AUTHORIZATION_URL,
         tokenUrl: GOOGLE_TOKEN_URL,
-        scopes: scopeDescriptions(source.scopes),
+        scopes: Object.fromEntries(
+          source.scopes.map((scope) => [scope, `Access to ${scope}`]),
+        ),
       },
     },
   };

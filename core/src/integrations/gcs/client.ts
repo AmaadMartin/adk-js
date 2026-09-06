@@ -15,7 +15,7 @@ const FEATURE_NAME = 'GcsAdminToolset';
  * Attribution sent to Cloud Storage, matching adk-python's
  * `USER_AGENT = f"adk-gcs-tool google-adk/{version.__version__}"`.
  */
-export const GCS_USER_AGENT = `adk-gcs-tool google-adk/${version}`;
+const GCS_USER_AGENT = `adk-gcs-tool google-adk/${version}`;
 
 /** An OAuth authorized user, as the token cache holds one. */
 export interface GcsAuthorizedUser {
@@ -69,8 +69,8 @@ function authOptions(credentials: GcsCredentials): StorageOptions {
  * one end user, so a client kept across calls would serve the next user under
  * the previous user's identity.
  *
- * `@google-cloud/storage` is an optional peer dependency and is imported only
- * here, so that importing `@google/adk` never resolves it.
+ * `@google-cloud/storage` is an optional peer dependency, reached through a
+ * dynamic `import()` so that importing `@google/adk` never resolves it.
  *
  * @param credentials How this call authenticates.
  * @param projectId The project the call is billed to, when the tool names one.
