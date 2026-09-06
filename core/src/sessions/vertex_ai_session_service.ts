@@ -46,6 +46,7 @@ import {
 import {createSession, Session} from './session.js';
 
 const DEFAULT_MAX_ATTEMPTS = 30;
+const POLL_INTERVAL_MS = 1_000;
 const GRPC_NOT_FOUND = 5;
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_REQUEST = 400;
@@ -201,13 +202,14 @@ export class VertexAiSessionService extends BaseSessionService {
 
     let attempts = 0;
     while (!apiResponse.done && attempts < DEFAULT_MAX_ATTEMPTS) {
-      const [nextResponse] = await Promise.all([
-        this.sessions.getSessionOperationInternal({
-          operationName: operationName,
-        }),
-        new Promise((resolve) => setTimeout(resolve, 1000)),
-      ]);
-      apiResponse = nextResponse;
+      // Delay between polls only, so the poll that observes `done` returns
+      // immediately instead of waiting out an interval nothing depends on.
+      if (attempts > 0) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+      apiResponse = await this.sessions.getSessionOperationInternal({
+        operationName,
+      });
       attempts++;
     }
 

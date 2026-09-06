@@ -332,6 +332,88 @@ describe('VertexAiSessionService', () => {
       vi.useRealTimers();
     });
 
+    it('resolves as soon as the first poll reports done, without waiting an interval', async () => {
+      mockClient.createInternal.mockResolvedValue({
+        name: 'operations/op-1',
+        done: false,
+      });
+      mockClient.getSessionOperationInternal.mockResolvedValue({
+        done: true,
+        response: {
+          name: 'projects/p/locations/l/sessions/test-id',
+          sessionState: {},
+        },
+      });
+
+      vi.useFakeTimers();
+      try {
+        const start = Date.now();
+        let resolved = false;
+        const createPromise = service
+          .createSession({appName: '12345', userId: 'testUser'})
+          .then((session) => {
+            resolved = true;
+            return session;
+          });
+
+        // Crosses a macrotask boundary, draining the microtask chain while
+        // leaving the fake clock at its start value.
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(resolved).toBe(true);
+        expect(Date.now() - start).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+        expect(mockClient.getSessionOperationInternal).toHaveBeenCalledTimes(1);
+        await expect(createPromise).resolves.toMatchObject({id: 'test-id'});
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('spaces polls one interval apart and throws after the maximum attempts', async () => {
+      mockClient.createInternal.mockResolvedValue({
+        name: 'operation-456',
+        done: false,
+      });
+      mockClient.getSessionOperationInternal.mockResolvedValue({
+        name: 'operation-456',
+        done: false,
+      });
+
+      vi.useFakeTimers();
+      try {
+        const start = Date.now();
+        const createPromise = service.createSession({
+          appName: '12345',
+          userId: 'testUser',
+        });
+        const rejection = expect(createPromise).rejects.toThrow(
+          'Session creation operation operation-456 did not complete in time.',
+        );
+
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockClient.getSessionOperationInternal).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(999);
+        expect(mockClient.getSessionOperationInternal).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(mockClient.getSessionOperationInternal).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(28 * 1000);
+        expect(mockClient.getSessionOperationInternal).toHaveBeenCalledTimes(
+          30,
+        );
+        // 30 polls separated by 29 sleeps, and nothing pending afterwards.
+        expect(Date.now() - start).toBe(29 * 1000);
+        expect(vi.getTimerCount()).toBe(0);
+
+        await rejection;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('falls back to Date.now if update_time is missing in createSession', async () => {
       mockClient.createInternal.mockResolvedValue({
         name: 'projects/p/locations/l/operations/o',
