@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GenerateContentConfig, Schema} from '@google/genai';
+import {GenerateContentConfig, Part, Schema} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 import {FinishTaskTool} from '../tools/finish_task_tool.js';
 import {FunctionTool} from '../tools/function_tool.js';
@@ -414,6 +414,18 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   codeExecutor?: BaseCodeExecutor;
 }
 
+/**
+ * Joins the text the model addressed to the user, skipping thought parts.
+ *
+ * Returns `undefined` when no part carries user-facing text. That is distinct
+ * from `''`: a part with `text: ''` is a real empty answer, while an event
+ * holding only function responses carries no answer at all.
+ */
+function joinVisibleText(parts: Part[]): string | undefined {
+  const visible = parts.filter((p) => !p.thought && p.text !== undefined);
+  return visible.length ? visible.map((p) => p.text).join('') : undefined;
+}
+
 async function convertToolUnionToTools(
   toolUnion: ToolUnion,
   context?: ReadonlyContext,
@@ -426,7 +438,19 @@ async function convertToolUnionToTools(
     // model can call it (mirrors Python's Agent(tools=[node/workflow])).
     return [new NodeTool(toolUnion)];
   }
-  return await toolUnion.getTools(context);
+  try {
+    return await toolUnion.getTools(context);
+  } catch (e: unknown) {
+    // The agent still runs, just without this toolset's tools, and the model
+    // answers as though it never had them. That is a lost capability rather
+    // than a degraded one, so report it at error level and name the toolset.
+    logger.error(
+      `Agent ${context?.agentName ?? '<unknown>'} will run without the tools ` +
+        `from toolset ${toolUnion.constructor.name}, which failed to load:`,
+      e,
+    );
+    return [];
+  }
 }
 
 /**
@@ -793,6 +817,14 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       );
       return;
     }
+    if (this.mode === 'task') {
+      // A task agent delivers its result through `finish_task`, so the
+      // conversational text it emits on the way there is not the output.
+      logger.debug(
+        `Skipping output save for agent ${this.name}: agent is in task mode`,
+      );
+      return;
+    }
     if (!isFinalResponse(event)) {
       logger.debug(
         `Skipping output save for agent ${
@@ -808,9 +840,17 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       return;
     }
 
-    const resultStr: string = event.content.parts
-      .map((part) => (part.text ? part.text : ''))
-      .join('');
+    const resultStr = joinVisibleText(event.content.parts);
+    if (resultStr === undefined) {
+      // A function-response-only event carries no answer. Writing `''` here
+      // would clobber a value an `afterToolCallback` already put in the same
+      // event's state delta.
+      logger.debug(
+        `Skipping output save for agent ${this.name}: event has no text part`,
+      );
+      return;
+    }
+
     let result: unknown = resultStr;
     if (this.outputSchema) {
       // If the result from the final chunk is just whitespace or empty,
@@ -849,6 +889,48 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   }
 
   /**
+   * Accumulates {@link outputKey} text across one streaming model turn.
+   *
+   * Streaming with tool calls produces non-partial events that carry text
+   * alongside a function call. {@link isFinalResponse} rejects those, so
+   * {@link maybeSaveOutputToState} skips them and their text never reaches
+   * `outputKey`. This appends the text of every non-partial text-bearing event
+   * of this agent, so the segments around the tool calls survive.
+   *
+   * The running value overwrites whatever {@link maybeSaveOutputToState} wrote
+   * on the same event.
+   *
+   * @param event The event to accumulate.
+   * @param accumulator The text accumulated so far in this model turn.
+   * @returns The new accumulator value, unchanged when the event does not
+   *     contribute.
+   */
+  private maybeAccumulateStreamingOutput(
+    event: Event,
+    accumulator: string,
+  ): string {
+    if (
+      !this.outputKey ||
+      this.mode === 'task' ||
+      this.outputSchema ||
+      event.author !== this.name ||
+      event.partial ||
+      !event.content?.parts?.length
+    ) {
+      return accumulator;
+    }
+
+    const text = joinVisibleText(event.content.parts);
+    if (!text) {
+      return accumulator;
+    }
+
+    const accumulated = accumulator + text;
+    event.actions.stateDelta[this.outputKey] = accumulated;
+    return accumulated;
+  }
+
+  /**
    * Validates a value against this agent's output schema, in whichever dialect
    * it was declared, and returns the parsed value.
    *
@@ -879,9 +961,25 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
     yield* runLlmAgentAsNode(this, ctx, nodeInput);
   }
 
+  /**
+   * Saves the output of a short-circuiting `beforeAgentCallback` under
+   * {@link outputKey}, so a cached answer reaches session state exactly as a
+   * model answer would.
+   */
+  protected override async handleBeforeAgentCallback(
+    invocationContext: InvocationContext,
+  ): Promise<Event | undefined> {
+    const event = await super.handleBeforeAgentCallback(invocationContext);
+    if (event) {
+      this.maybeSaveOutputToState(event);
+    }
+    return event;
+  }
+
   protected async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    let outputAccumulator = '';
     while (true) {
       let lastEvent: Event | undefined = undefined;
       let stepHadToolCalls = false;
@@ -898,6 +996,10 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
           stepHadToolCalls = true;
         }
         this.maybeSaveOutputToState(event);
+        outputAccumulator = this.maybeAccumulateStreamingOutput(
+          event,
+          outputAccumulator,
+        );
         yield event;
       }
 
@@ -928,12 +1030,17 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
   protected async *runLiveImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    let outputAccumulator = '';
     for await (const event of this.runLiveFlow(context)) {
       if (context.abortSignal?.aborted) {
         return;
       }
 
       this.maybeSaveOutputToState(event);
+      outputAccumulator = this.maybeAccumulateStreamingOutput(
+        event,
+        outputAccumulator,
+      );
       yield event;
     }
     if (context.endInvocation) {
