@@ -206,6 +206,11 @@ export {InMemoryMemoryService} from './memory/in_memory_memory_service.js';
 export type {MemoryEntry} from './memory/memory_entry.js';
 export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.js';
 export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
+export {AnthropicLlm} from './models/anthropic_llm.js';
+export type {
+  AnthropicGenerateContentConfig,
+  AnthropicLlmParams,
+} from './models/anthropic_llm.js';
 export {ApigeeLlm} from './models/apigee_llm.js';
 export type {ApigeeLlmParams} from './models/apigee_llm.js';
 export {BaseLlm, isBaseLlm} from './models/base_llm.js';
