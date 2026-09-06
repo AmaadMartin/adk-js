@@ -6,6 +6,7 @@
 
 import {
   BaseCodeExecutor,
+  CodeExecutionInput,
   CodeExecutionLanguage,
   CodeExecutionResult,
   Context,
@@ -105,6 +106,50 @@ describe('RunSkillScriptTool', () => {
       },
     },
   };
+
+  const nestedScriptSkill: Skill = {
+    frontmatter: {name: 'nested-skill', description: 'A nested script skill'},
+    instructions: 'Test instructions',
+    resources: {scripts: {'sub/util.js': {src: 'console.log("util");'}}},
+  };
+
+  /** A skill whose resource key itself starts with `scripts/`. */
+  const prefixedKeySkill: Skill = {
+    frontmatter: {
+      name: 'prefixed-key-skill',
+      description: 'A skill with a nested scripts directory',
+    },
+    instructions: 'Test instructions',
+    resources: {scripts: {'scripts/nested.js': {src: 'console.log("n");'}}},
+  };
+
+  async function executeScript(
+    skill: Skill,
+    scriptPath: string,
+  ): Promise<CodeExecutionInput> {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([skill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    await tool.runAsync({
+      args: {skill_name: skill.frontmatter.name, script_path: scriptPath},
+      toolContext: createMockContext(),
+    });
+
+    const input = mockExecutor.executeCodeParams?.codeExecutionInput;
+    if (!input) {
+      expect.fail(`executeCode was not called for script_path '${scriptPath}'`);
+    }
+    return input;
+  }
+
+  function requiredPath(code: string): string {
+    const match = /^require\('\.\/(.*)'\);$/.exec(code);
+    if (!match) {
+      expect.fail(`wrapper is not a JS require wrapper: ${code}`);
+    }
+    return match[1];
+  }
 
   it('returns error if skill name is missing', async () => {
     const toolset = new SkillToolset([mockSkill]);
@@ -309,5 +354,82 @@ describe('RunSkillScriptTool', () => {
 
     expect(materializeFiles).toHaveBeenLastCalledWith([], outputDir);
     expect(result.outputDirectory).toBe(outputDir);
+  });
+
+  it('builds the canonical wrapper for a script path without the scripts/ prefix', async () => {
+    const input = await executeScript(mockSkill, 'setup.js');
+
+    expect(input.code).toBe("require('./scripts/setup.js');");
+  });
+
+  it('builds the same wrapper with and without the scripts/ prefix', async () => {
+    const bare = await executeScript(mockSkill, 'setup.js');
+    const prefixed = await executeScript(mockSkill, 'scripts/setup.js');
+
+    expect(bare.code).toBe(prefixed.code);
+  });
+
+  it('references an input file name from the wrapper of a prefix-less script path', async () => {
+    const input = await executeScript(mockSkill, 'setup.js');
+
+    const scriptPath = requiredPath(input.code);
+    expect(scriptPath).toBe('scripts/setup.js');
+    expect(input.inputFiles?.map((f) => f.name)).toContain(scriptPath);
+  });
+
+  it('builds the same shell wrapper with and without the scripts/ prefix', async () => {
+    const bare = await executeScript(mockSkill, 'run.sh');
+    const prefixed = await executeScript(mockSkill, 'scripts/run.sh');
+
+    expect(bare.code).toBe('source ./scripts/run.sh "$@"');
+    expect(prefixed.code).toBe(bare.code);
+    expect(bare.language).toBe(CodeExecutionLanguage.SHELL);
+  });
+
+  it('builds the canonical wrapper for a nested script path in either spelling', async () => {
+    const bare = await executeScript(nestedScriptSkill, 'sub/util.js');
+    const prefixed = await executeScript(
+      nestedScriptSkill,
+      'scripts/sub/util.js',
+    );
+
+    expect(bare.code).toBe("require('./scripts/sub/util.js');");
+    expect(prefixed.code).toBe(bare.code);
+    expect(bare.inputFiles?.map((f) => f.name)).toContain(
+      'scripts/sub/util.js',
+    );
+  });
+
+  it('builds the wrapper from the resource key matched by the fallback lookup', async () => {
+    const input = await executeScript(prefixedKeySkill, 'scripts/nested.js');
+
+    const scriptPath = requiredPath(input.code);
+    expect(scriptPath).toBe('scripts/scripts/nested.js');
+    expect(input.inputFiles?.map((f) => f.name)).toContain(scriptPath);
+  });
+
+  it('returns SCRIPT_NOT_FOUND echoing the requested path in either spelling', async () => {
+    const mockExecutor = new MockCodeExecutor();
+    const toolset = new SkillToolset([mockSkill], {codeExecutor: mockExecutor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const bare = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'nope.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+    const prefixed = (await tool.runAsync({
+      args: {skill_name: 'test-skill', script_path: 'scripts/nope.js'},
+      toolContext: createMockContext(),
+    })) as ToolErrorResponse;
+
+    expect(bare).toEqual({
+      error: "Script 'nope.js' not found in skill 'test-skill'.",
+      errorCode: 'SCRIPT_NOT_FOUND',
+    });
+    expect(prefixed).toEqual({
+      error: "Script 'scripts/nope.js' not found in skill 'test-skill'.",
+      errorCode: 'SCRIPT_NOT_FOUND',
+    });
+    expect(mockExecutor.executeCodeParams).toBeUndefined();
   });
 });

@@ -121,6 +121,24 @@ describe('RunSkillScriptTool Integration with UnsafeLocalCodeExecutor', () => {
     expect(result.stderr).toBe('');
   });
 
+  it('successfully executes a real JavaScript skill script requested without the scripts/ prefix', async () => {
+    const executor = new UnsafeLocalCodeExecutor();
+    const toolset = new SkillToolset([testSkill], {codeExecutor: executor});
+    const tool = new RunSkillScriptTool(toolset);
+
+    const result = (await tool.runAsync({
+      args: {
+        skill_name: 'test-skill',
+        script_path: 'hello.js',
+      },
+      toolContext: createMockContext(),
+    })) as CodeExecutionResult;
+
+    expect(result).toBeDefined();
+    expect(result.stdout).toContain('hello from skill js');
+    expect(result.stderr).toBe('');
+  });
+
   it.skipIf(!IS_UNIX)(
     'successfully executes a real Shell skill script',
     async () => {
