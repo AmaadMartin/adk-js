@@ -50,7 +50,11 @@ import {
   traceCallLlm,
   tracer,
 } from '../telemetry/tracing.js';
-import {parseWithSchema, SchemaLike} from '../utils/schema.js';
+import {
+  parseWithSchema,
+  SchemaLike,
+  stripJsonCodeFence,
+} from '../utils/schema.js';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 import {BaseAgent, BaseAgentConfig} from './base_agent.js';
 import {
@@ -821,7 +825,7 @@ export class LlmAgent extends BaseAgent<LlmAgentConfig> {
       }
       let parsed: unknown;
       try {
-        parsed = JSON.parse(resultStr);
+        parsed = JSON.parse(stripJsonCodeFence(resultStr));
       } catch (e) {
         // A model can return malformed JSON. Log and keep the raw text so the
         // failure is visible without dropping the response, exactly as this
