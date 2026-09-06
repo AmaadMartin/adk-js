@@ -256,3 +256,62 @@ describe('TokenBasedContextCompactor', () => {
     expect(await compactor.shouldCompact(context)).toBe(false);
   });
 });
+
+describe('TokenBasedContextCompactor once per invocation', () => {
+  function compactableEvents(): Event[] {
+    return [
+      createMockEvent('1', 5),
+      createMockEvent('2', 8),
+      createMockEvent('3', 12),
+      createMockEvent('4', 15),
+    ];
+  }
+
+  function makeCompactor(): TokenBasedContextCompactor {
+    return new TokenBasedContextCompactor({
+      tokenThreshold: 10,
+      eventRetentionSize: 2,
+      summarizer: new MockSummarizer(),
+    });
+  }
+
+  it('declines a second compaction in the same invocation', async () => {
+    const compactor = makeCompactor();
+    const context = createMockInvocationContext(compactableEvents());
+
+    expect(await compactor.shouldCompact(context)).toBe(true);
+    await compactor.compact(context);
+    expect(context.tokenCompactionChecked).toBe(true);
+
+    // Enough fresh traffic after the compaction to trigger a second one, so
+    // only the flag can hold it back.
+    const after = Date.now() + 1000;
+    for (const id of ['5', '6', '7', '8']) {
+      const event = createMockEvent(id, 40);
+      event.timestamp = after;
+      context.session.events.push(event);
+    }
+
+    expect(await compactor.shouldCompact(context)).toBe(false);
+  });
+
+  it('leaves the flag clear while nothing has compacted', async () => {
+    const context = createMockInvocationContext(compactableEvents());
+
+    expect(context.tokenCompactionChecked).toBe(false);
+    expect(await makeCompactor().shouldCompact(context)).toBe(true);
+    expect(context.tokenCompactionChecked).toBe(false);
+  });
+
+  it('compacts again in a fresh invocation', async () => {
+    const compactor = makeCompactor();
+
+    const first = createMockInvocationContext(compactableEvents());
+    await compactor.compact(first);
+    expect(await compactor.shouldCompact(first)).toBe(false);
+
+    // The flag belongs to the invocation, so the next one starts clear.
+    const second = createMockInvocationContext(compactableEvents());
+    expect(await compactor.shouldCompact(second)).toBe(true);
+  });
+});

@@ -6,13 +6,16 @@
 
 import {Content} from '@google/genai';
 
+import type {EventsCompactionConfig} from '../apps/events_compaction_config.js';
 import {SessionArtifactService} from '../artifacts/session_artifact_service.js';
+import type {AuthCredential} from '../auth/auth_credential.js';
 import {BaseCredentialService} from '../auth/credential_service/base_credential_service.js';
 import {Event} from '../events/event.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {PluginManager} from '../plugins/plugin_manager.js';
 import {BaseSessionService} from '../sessions/base_session_service.js';
 import {Session} from '../sessions/session.js';
+import type {BaseTool} from '../tools/base_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
@@ -36,6 +39,23 @@ export interface WorkflowInstructionScope {
 }
 
 /**
+ * One item on the invocation event queue: the event, and the callback that
+ * releases the producer that enqueued it.
+ *
+ * Mirrors the `(event, processed)` tuple `google/adk-python` puts on
+ * `InvocationContext._event_queue`.
+ */
+export interface QueuedInvocationEvent {
+  /** The event to interleave into the agent's output stream. */
+  event: Event;
+  /**
+   * Called by the consumer once it has taken the event, releasing the blocked
+   * producer. Absent for a partial event, which does not block its producer.
+   */
+  markProcessed?: () => void;
+}
+
+/**
  * The parameters for creating an invocation context.
  */
 export interface InvocationContextParams {
@@ -56,6 +76,12 @@ export interface InvocationContextParams {
   abortSignal?: AbortSignal;
   workflowInstructionScope?: WorkflowInstructionScope;
   isolationScope?: string;
+  /** The path of the workflow node this invocation runs, if any. */
+  nodePath?: string;
+  /** The app-level compaction policy that applies to this invocation. */
+  eventsCompactionConfig?: EventsCompactionConfig;
+  /** Whether token-threshold compaction already ran in this invocation. */
+  tokenCompactionChecked?: boolean;
   /** Nesting depth of node-as-tool executions; used to bound recursion. */
   nodeToolDepth?: number;
   liveRequestQueue?: LiveRequestQueue;
@@ -64,6 +90,10 @@ export interface InvocationContextParams {
    * Request-level metadata passed from an incoming A2A request or caller.
    */
   a2aMetadata?: Record<string, unknown>;
+  /**
+   * Credentials already resolved for this invocation, keyed by credential key.
+   */
+  credentialByKey?: Record<string, AuthCredential>;
 }
 
 /**
@@ -226,8 +256,11 @@ export class InvocationContext {
    * interleaved into the agent's output stream. Set by the LLM flow around tool
    * execution so a {@link NodeTool} (running a node/workflow) can surface the
    * node's intermediate and interrupt events. Cleared once tools finish.
+   *
+   * Write to it through {@link enqueueEvent} rather than pushing directly, so
+   * every producer honours the same handshake.
    */
-  eventQueue?: AsyncQueue<Event>;
+  eventQueue?: AsyncQueue<QueuedInvocationEvent>;
 
   /**
    * Workflow: field-resolution scope for `{Class.field}` /
@@ -241,6 +274,14 @@ export class InvocationContext {
    * carrying a different scope are withheld from this agent's LLM request.
    */
   isolationScope?: string;
+
+  /**
+   * The path of the workflow node this invocation runs, such as
+   * `outer.inner`, or `undefined` outside a workflow. Set by the node runner
+   * so an agent running as a node reports its position in the graph on its
+   * telemetry span. Mirrors `node_path` in `google/adk-python`.
+   */
+  readonly nodePath?: string;
 
   /**
    * Nesting depth of node-as-tool ({@link NodeTool}) executions in this
@@ -268,6 +309,41 @@ export class InvocationContext {
   readonly a2aMetadata?: Record<string, unknown>;
 
   /**
+   * Credentials resolved during this invocation, keyed by the credential key
+   * of the auth config that produced them. Held here rather than in session
+   * state so a credential resolved for one invocation cannot leak into
+   * another. Read through `ReadonlyContext.getCredential`.
+   *
+   * Created with `Object.create(null)`, as `InMemoryCredentialService` creates
+   * its buckets: the credential key is attacker-influenced, and on a `{}`
+   * literal a key of `__proto__` reparents the map instead of creating an own
+   * property.
+   */
+  readonly credentialByKey: Record<string, AuthCredential>;
+
+  /**
+   * The compaction policy the `App` declared, applying to every agent under
+   * it. An agent that declares its own compactors uses those instead. Mirrors
+   * `events_compaction_config` in `google/adk-python`.
+   */
+  readonly eventsCompactionConfig?: EventsCompactionConfig;
+
+  /**
+   * Whether token-threshold compaction already ran in this invocation. The
+   * token compactor sets it once it has compacted, so a later model step in
+   * the same invocation does not compact again. Mirrors
+   * `token_compaction_checked` in `google/adk-python`.
+   */
+  tokenCompactionChecked: boolean;
+
+  /**
+   * The agent's tools as resolved for the current model step, or `undefined`
+   * before anything resolved them. Read and written through
+   * `canonicalToolsFor`; the empty array is a resolved set, not a miss.
+   */
+  canonicalToolsCache?: BaseTool[];
+
+  /**
    * @param params The parameters for creating an invocation context.
    */
   constructor(params: InvocationContextParams) {
@@ -287,6 +363,10 @@ export class InvocationContext {
     this.abortSignal = params.abortSignal;
     this.workflowInstructionScope = params.workflowInstructionScope;
     this.isolationScope = params.isolationScope;
+    this.nodePath = params.nodePath;
+    this.credentialByKey = params.credentialByKey ?? Object.create(null);
+    this.eventsCompactionConfig = params.eventsCompactionConfig;
+    this.tokenCompactionChecked = params.tokenCompactionChecked ?? false;
     this.nodeToolDepth = params.nodeToolDepth ?? 0;
     this.a2aMetadata = params.a2aMetadata;
     // Inherit the parent invocation's cost manager when one is available.
@@ -318,6 +398,45 @@ export class InvocationContext {
   }
 
   /**
+   * Puts an event on {@link eventQueue} for the invocation's consumer to take.
+   *
+   * A non-partial event waits until the consumer has taken it, so the order the
+   * consumer sees — and appends to the session — is the order the producers
+   * emitted in. A partial (streaming) event does not wait.
+   *
+   * Ports `_enqueue_event` from `google/adk-python`, with one addition it has
+   * no counterpart for: `AsyncQueue.push` is a no-op once the queue is closed,
+   * so a non-partial event pushed onto a closed queue would wait forever. This
+   * rejects instead.
+   *
+   * @param event The event to enqueue.
+   * @throws If no queue is set, or if a non-partial event reaches a closed
+   *   queue.
+   */
+  async enqueueEvent(event: Event): Promise<void> {
+    const queue = this.eventQueue;
+    if (!queue) {
+      throw new Error(
+        'InvocationContext.eventQueue is not set: the Runner or the LLM flow ' +
+          'must set it before an event can be enqueued.',
+      );
+    }
+    if (event.partial) {
+      queue.push({event});
+      return;
+    }
+    if (queue.isClosed) {
+      throw new Error(
+        'InvocationContext.eventQueue is closed: no consumer is left to take ' +
+          `event '${event.id}'.`,
+      );
+    }
+    return new Promise<void>((resolve) => {
+      queue.push({event, markProcessed: resolve});
+    });
+  }
+
+  /**
    * Tracks number of llm calls made.
    *
    * @throws If number of llm calls made exceed the set threshold.
@@ -337,6 +456,33 @@ export class InvocationContext {
    */
   clone(overrides: Partial<InvocationContextParams> = {}): InvocationContext {
     return new InvocationContext({...this, ...overrides});
+  }
+}
+
+/**
+ * Yields the events on an invocation queue, releasing each producer once its
+ * event has gone downstream.
+ *
+ * A consumer that stops early — it breaks out of the agent's stream after an
+ * interrupt, say — still releases the producer it interrupted and closes the
+ * queue. Without that the producer would wait forever on a signal nobody is
+ * left to send.
+ *
+ * @param queue The invocation event queue to drain.
+ */
+export async function* drainInvocationEvents(
+  queue: AsyncQueue<QueuedInvocationEvent>,
+): AsyncGenerator<Event, void, void> {
+  try {
+    for await (const queued of queue) {
+      try {
+        yield queued.event;
+      } finally {
+        queued.markProcessed?.();
+      }
+    }
+  } finally {
+    queue.close();
   }
 }
 

@@ -7,10 +7,10 @@
 import {Event} from '../../events/event.js';
 import {LlmRequest} from '../../models/llm_request.js';
 import {BaseTool} from '../../tools/base_tool.js';
+import {canonicalToolsFor} from '../canonical_tools.js';
 import {Context} from '../context.js';
 import {InvocationContext} from '../invocation_context.js';
 import {isLlmAgent} from '../llm_agent.js';
-import {ReadonlyContext} from '../readonly_context.js';
 import {BaseLlmRequestProcessor} from './base_llm_processor.js';
 
 /**
@@ -36,10 +36,7 @@ export class ToolFilterRequestProcessor extends BaseLlmRequestProcessor {
       return;
     }
 
-    // Get all tools resolved to BaseTool
-    const toolsList = await agent.canonicalTools(
-      new ReadonlyContext(invocationContext),
-    );
+    const toolsList = await canonicalToolsFor(agent, invocationContext);
 
     if (toolsList.length === 0) {
       return;

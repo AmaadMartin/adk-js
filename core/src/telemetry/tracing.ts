@@ -95,6 +95,11 @@ export function traceAgentInvocation({
     [GEN_AI_AGENT_NAME]: agent.name,
     [GEN_AI_CONVERSATION_ID]: invocationContext.session.id,
   });
+
+  // Only an agent running as a workflow node has a path in the graph.
+  if (invocationContext.nodePath !== undefined) {
+    span.setAttribute(ADK_NODE_PATH, invocationContext.nodePath);
+  }
 }
 
 export interface TraceWorkflowInvocationParams {

@@ -9,6 +9,7 @@ import {
   asRunnableRoot,
   RunnableRoot,
 } from '../workflow/run_node_as_invocation.js';
+import {EventsCompactionConfig} from './events_compaction_config.js';
 import {ResumabilityConfig} from './resumability_config.js';
 
 const VALID_APP_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
@@ -60,6 +61,11 @@ export interface AppOptions {
   rootAgent: RunnableRoot;
   plugins?: BasePlugin[];
   resumabilityConfig?: ResumabilityConfig;
+  /**
+   * How this app compacts session events. Applies to every agent under the
+   * app that does not declare its own compactors.
+   */
+  eventsCompactionConfig?: EventsCompactionConfig;
 }
 
 /**
@@ -80,6 +86,7 @@ export class App {
   readonly rootAgent: RunnableRoot;
   readonly plugins: BasePlugin[];
   readonly resumabilityConfig?: ResumabilityConfig;
+  readonly eventsCompactionConfig?: EventsCompactionConfig;
 
   constructor(options: AppOptions) {
     validateAppName(options.name);
@@ -94,5 +101,34 @@ export class App {
     this.rootAgent = asRunnableRoot(options.rootAgent);
     this.plugins = options.plugins ?? [];
     this.resumabilityConfig = options.resumabilityConfig;
+    if (options.eventsCompactionConfig) {
+      requireSupportedCompactionTrigger(options.eventsCompactionConfig);
+    }
+    this.eventsCompactionConfig = options.eventsCompactionConfig;
+  }
+}
+
+/**
+ * Rejects a compaction policy this SDK cannot act on.
+ *
+ * `adk-python` supports two triggers; `adk-js` has a compactor for the token
+ * one only. A policy that configures the sliding window alone would therefore
+ * never compact, so it fails here rather than at request time.
+ *
+ * @param config The policy to check.
+ * @throws {Error} When the policy carries no token trigger.
+ */
+function requireSupportedCompactionTrigger(
+  config: EventsCompactionConfig,
+): void {
+  if (
+    config.tokenThreshold === undefined ||
+    config.eventRetentionSize === undefined
+  ) {
+    throw new Error(
+      'eventsCompactionConfig carries no token trigger, and adk-js has no ' +
+        'compactor for the sliding-window one. Set both tokenThreshold and ' +
+        'eventRetentionSize.',
+    );
   }
 }

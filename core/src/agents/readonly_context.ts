@@ -6,6 +6,7 @@
 
 import {Content} from '@google/genai';
 
+import {AuthCredential} from '../auth/auth_credential.js';
 import {State} from '../sessions/state.js';
 
 import {InvocationContext, requireAgent} from './invocation_context.js';
@@ -66,5 +67,21 @@ export class ReadonlyContext {
    */
   get a2aMetadata(): Record<string, unknown> | undefined {
     return this.invocationContext.a2aMetadata;
+  }
+
+  /**
+   * The credential resolved for `key` during this invocation, or `undefined`
+   * when none was.
+   *
+   * @param key The credential key of the auth config that produced it.
+   * @returns The credential, or `undefined`.
+   */
+  getCredential(key: string): AuthCredential | undefined {
+    const credentials = this.invocationContext.credentialByKey;
+
+    // `key` is attacker-influenced, and a caller may supply the map as a `{}`
+    // literal, so an inherited key such as `toString` would otherwise resolve
+    // to a function rather than to `undefined`.
+    return Object.hasOwn(credentials, key) ? credentials[key] : undefined;
   }
 }

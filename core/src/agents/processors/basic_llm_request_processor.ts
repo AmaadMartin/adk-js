@@ -38,6 +38,7 @@ export class BasicLlmRequestProcessor extends BaseLlmRequestProcessor {
     llmRequest.model = agent.canonicalModel.model;
 
     llmRequest.config = {...(agent.generateContentConfig ?? {})};
+
     // Models that cannot take an output schema alongside tools get the
     // prompt-based `set_model_response` workaround instead, injected by
     // `LlmAgent.runOneStepAsync` and the instructions processor.

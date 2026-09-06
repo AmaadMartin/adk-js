@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {canonicalToolsFor} from '../agents/canonical_tools.js';
 import {
   REQUEST_CREDENTIAL_FUNCTION_CALL_NAME,
   handleFunctionCallsAsync,
@@ -11,7 +12,6 @@ import {
 import {InvocationContext} from '../agents/invocation_context.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {BaseLlmRequestProcessor} from '../agents/processors/base_llm_processor.js';
-import {ReadonlyContext} from '../agents/readonly_context.js';
 import {
   Event,
   getFunctionCalls,
@@ -21,6 +21,7 @@ import {State} from '../sessions/state.js';
 import {BaseTool} from '../tools/base_tool.js';
 import {camelCaseKeys} from '../utils/case_utils.js';
 import {logger} from '../utils/logger.js';
+import {AuthCredential} from './auth_credential.js';
 import {AuthHandler} from './auth_handler.js';
 import {AuthConfig} from './auth_tool.js';
 import {bindCredentialResponse} from './credential_response_binding.js';
@@ -77,6 +78,7 @@ async function storeAuthAndCollectResumeTargets(
   authResponses: Record<string, unknown>,
   state: State,
   agentName: string,
+  credentialByKey: Record<string, AuthCredential>,
 ): Promise<Set<string>> {
   const requests = requestedAuthConfigs(events, authFcIds, agentName);
 
@@ -113,6 +115,15 @@ async function storeAuthAndCollectResumeTargets(
       !functionCallId.startsWith(TOOLSET_AUTH_CREDENTIAL_ID_PREFIX)
     ) {
       toolsToResume.add(functionCallId);
+      continue;
+    }
+
+    // A toolset resumes no tool call, so its credential has to be reachable
+    // some other way: the invocation carries it under the key the request
+    // named, for `ReadonlyContext.getCredential` to read back.
+    const credential = authConfig.exchangedAuthCredential;
+    if (credential) {
+      credentialByKey[authConfig.credentialKey] = credential;
     }
   }
 
@@ -175,6 +186,7 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
       authResponses,
       state,
       agent.name,
+      invocationContext.credentialByKey,
     );
 
     if (toolsToResume.size === 0) {
@@ -193,8 +205,9 @@ export class AuthPreprocessor extends BaseLlmRequestProcessor {
       );
 
       if (hasMatchingCall) {
-        const canonicalTools = await agent.canonicalTools(
-          new ReadonlyContext(invocationContext),
+        const canonicalTools = await canonicalToolsFor(
+          agent,
+          invocationContext,
         );
         const toolsDict: Record<string, BaseTool> = {};
         for (const tool of canonicalTools) {

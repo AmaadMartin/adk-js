@@ -9,9 +9,11 @@ import {
   BaseAgent,
   BasePlugin,
   createEvent,
+  createEventsCompactionConfig,
   createResumabilityConfig,
   determineAgentForResumption,
   Event,
+  EventsCompactionConfig,
   InMemoryArtifactService,
   InMemorySessionService,
   InvocationContext,
@@ -353,6 +355,72 @@ describe('Runner.determineAgentForResumption', () => {
     });
 
     expect(appRunner.resumabilityConfig?.isResumable).toBe(true);
+  });
+
+  it('should carry the app eventsCompactionConfig onto each invocation', async () => {
+    const eventsCompactionConfig = createEventsCompactionConfig({
+      tokenThreshold: 1000,
+      eventRetentionSize: 5,
+    });
+    const app = new App({
+      name: TEST_APP_ID,
+      rootAgent,
+      eventsCompactionConfig,
+    });
+    const appRunner = new Runner({app, sessionService, artifactService});
+    expect(appRunner.eventsCompactionConfig).toBe(eventsCompactionConfig);
+
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+    const seen: Array<EventsCompactionConfig | undefined> = [];
+    vi.spyOn(rootAgent, 'runAsync').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.eventsCompactionConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
+
+    for await (const _ of appRunner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the run.
+    }
+
+    expect(seen).toEqual([eventsCompactionConfig]);
+  });
+
+  it('should leave the invocation compaction policy unset without an App policy', async () => {
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+    });
+    const seen: Array<EventsCompactionConfig | undefined> = [];
+    vi.spyOn(rootAgent, 'runAsync').mockImplementation(async function* (
+      context: InvocationContext,
+    ) {
+      seen.push(context.eventsCompactionConfig);
+      yield createEvent({
+        author: rootAgent.name,
+        invocationId: context.invocationId,
+      });
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: TEST_USER_ID,
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
+    })) {
+      // Drain the run.
+    }
+
+    expect(seen).toEqual([undefined]);
   });
 
   it('should skip function response resumption routing when resumabilityConfig.isResumable is false or undefined', async () => {

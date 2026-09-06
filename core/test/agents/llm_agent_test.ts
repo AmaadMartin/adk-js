@@ -598,20 +598,20 @@ describe('LlmAgent Output Processing', () => {
 });
 
 describe('LlmAgent Configuration with contextCompactors', () => {
-  it('does not add ContextCompactorRequestProcessor if contextCompactors is not provided', () => {
+  it('adds one ContextCompactorRequestProcessor if contextCompactors is not provided', () => {
     const agent = new LlmAgent({name: 'test_agent'});
     const compactorProcessors = agent.requestProcessors.filter(
       (p) => p instanceof ContextCompactorRequestProcessor,
     );
-    expect(compactorProcessors.length).toBe(0);
+    expect(compactorProcessors.length).toBe(1);
   });
 
-  it('does not add ContextCompactorRequestProcessor if contextCompactors is empty array', () => {
+  it('adds one ContextCompactorRequestProcessor if contextCompactors is empty array', () => {
     const agent = new LlmAgent({name: 'test_agent', contextCompactors: []});
     const compactorProcessors = agent.requestProcessors.filter(
       (p) => p instanceof ContextCompactorRequestProcessor,
     );
-    expect(compactorProcessors.length).toBe(0);
+    expect(compactorProcessors.length).toBe(1);
   });
 
   it('does not add ContextCompactorRequestProcessor if custom requestProcessors are provided', () => {

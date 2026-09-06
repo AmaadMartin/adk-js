@@ -8,6 +8,7 @@ import {describe, expect, it} from 'vitest';
 import {BaseAgent} from '../../src/agents/base_agent.js';
 import {InvocationContext} from '../../src/agents/invocation_context.js';
 import {App, isApp, validateAppName} from '../../src/apps/app.js';
+import {createEventsCompactionConfig} from '../../src/apps/events_compaction_config.js';
 import {createResumabilityConfig} from '../../src/apps/resumability_config.js';
 import {BasePlugin} from '../../src/plugins/base_plugin.js';
 import {node} from '../../src/workflow/node.js';
@@ -124,5 +125,56 @@ describe('App', () => {
 
     expect(app.resumabilityConfig).toBe(resumabilityConfig);
     expect(app.resumabilityConfig?.isResumable).toBe(true);
+  });
+});
+
+describe('App eventsCompactionConfig', () => {
+  it('accepts a token-threshold policy', () => {
+    const eventsCompactionConfig = createEventsCompactionConfig({
+      tokenThreshold: 1000,
+      eventRetentionSize: 5,
+    });
+
+    const app = new App({
+      name: 'compacting_app',
+      rootAgent: new DummyAgent('root'),
+      eventsCompactionConfig,
+    });
+
+    expect(app.eventsCompactionConfig).toBe(eventsCompactionConfig);
+  });
+
+  it('rejects a sliding-window policy this SDK cannot act on', () => {
+    expect(
+      () =>
+        new App({
+          name: 'window_app',
+          rootAgent: new DummyAgent('root'),
+          eventsCompactionConfig: createEventsCompactionConfig({
+            compactionInterval: 2,
+            overlapSize: 1,
+          }),
+        }),
+    ).toThrowError(/carries no token trigger/);
+  });
+
+  it('leaves the policy unset when none is given', () => {
+    const app = new App({
+      name: 'plain_app',
+      rootAgent: new DummyAgent('root'),
+    });
+
+    expect(app.eventsCompactionConfig).toBeUndefined();
+  });
+
+  it('rejects a token threshold without a retention size', () => {
+    expect(
+      () =>
+        new App({
+          name: 'half_pair_app',
+          rootAgent: new DummyAgent('root'),
+          eventsCompactionConfig: {tokenThreshold: 5},
+        }),
+    ).toThrowError(/carries no token trigger/);
   });
 });
