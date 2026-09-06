@@ -28,7 +28,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
-import {createEvent, Event} from '../events/event.js';
+import {createEvent, Event, mergeEventOverride} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
 import {BasePlugin} from '../plugins/base_plugin.js';
@@ -445,14 +445,7 @@ export class Runner {
                     event,
                   });
                 const outputEvent = modifiedEvent
-                  ? {
-                      ...modifiedEvent,
-                      id: event.id,
-                      invocationId: event.invocationId,
-                      timestamp: event.timestamp,
-                      author: modifiedEvent.author || event.author,
-                      branch: modifiedEvent.branch ?? event.branch,
-                    }
+                  ? mergeEventOverride(event, modifiedEvent)
                   : event;
                 if (!event.partial) {
                   await this.sessionService.appendEvent({

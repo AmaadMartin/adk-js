@@ -10,7 +10,12 @@ import {LlmResponse} from '../models/llm_response.js';
 
 import {randomUUID} from '../utils/env_aware_utils.js';
 import {toCamelCase, toSnakeCase} from '../utils/object_notation_utils.js';
-import {createEventActions, EventActions} from './event_actions.js';
+import {definedFields} from '../utils/partial_copy.js';
+import {
+  createEventActions,
+  EventActions,
+  mergeEventActions,
+} from './event_actions.js';
 
 /**
  * A unique symbol identifying ADK Event objects.
@@ -179,6 +184,47 @@ export function createEvent(params: CreateEventParams = {}): Event {
     longRunningToolIds: params.longRunningToolIds || [],
     branch: params.branch,
     timestamp: params.timestamp || Date.now(),
+  };
+}
+
+/**
+ * Applies a plugin's replacement event onto the event it replaces.
+ *
+ * Plugins may return a replacement event that only overrides a subset of
+ * fields. Those changes are merged onto the original event, without losing the
+ * original event identity. Mirrors `google/adk-python`
+ * `Runner._get_output_event`.
+ *
+ * adk-python reads the overridden fields from `model_fields_set`, which has no
+ * TypeScript equivalent, and {@link createEvent} always populates `actions` and
+ * `longRunningToolIds`. A field therefore counts as overridden when its value
+ * is not `undefined`, `actions` is merged rather than replaced, and an empty
+ * `longRunningToolIds` counts as absent.
+ *
+ * @param original The event the agent emitted.
+ * @param override The event the plugin returned.
+ * @returns A new event. Neither input is mutated.
+ */
+export function mergeEventOverride(original: Event, override: Event): Event {
+  return {
+    ...original,
+    ...definedFields(override),
+    id: original.id,
+    invocationId: original.invocationId,
+    timestamp: original.timestamp,
+    author: override.author || original.author,
+    actions: {
+      // mergeEventActions owns the dictionary fields: it allocates fresh maps
+      // and carries their state write-order stamps. The spreads underneath it
+      // carry the fields it does not enumerate, such as `agentState` and
+      // `endOfAgent`.
+      ...original.actions,
+      ...definedFields(override.actions),
+      ...mergeEventActions([original.actions, override.actions]),
+    },
+    longRunningToolIds: override.longRunningToolIds?.length
+      ? override.longRunningToolIds
+      : original.longRunningToolIds,
   };
 }
 
