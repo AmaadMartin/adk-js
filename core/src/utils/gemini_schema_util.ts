@@ -6,82 +6,51 @@
 
 import {Schema, Type} from '@google/genai';
 
-type MCPToolSchema = {
-  type: 'object';
-  properties?: Record<string, unknown>;
-  required?: string[];
-};
+/** A JSON Schema object, as produced by an MCP server or an OpenAPI spec. */
+type JsonSchemaObject = {[key: string]: unknown};
 type MCPTypeArrayItem = string | {type: string};
 
-/** Formats the Gemini API accepts on an `integer` or `number` schema node. */
-const GEMINI_NUMERIC_FORMATS = new Set(['int32', 'int64']);
-
-/** Formats the Gemini API accepts on a `string` schema node. */
-const GEMINI_STRING_FORMATS = new Set(['date-time', 'enum']);
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isSupportedFormat(type: unknown, format: unknown): boolean {
-  if (typeof format !== 'string' || !format) {
-    return false;
-  }
-  if (type === 'integer' || type === 'number') {
-    return GEMINI_NUMERIC_FORMATS.has(format);
-  }
-  if (type === 'string') {
-    return GEMINI_STRING_FORMATS.has(format);
-  }
-  return false;
-}
-
-function sanitizeNode(node: unknown): unknown {
-  if (Array.isArray(node)) {
-    return node.map(sanitizeNode);
-  }
-  if (!isPlainObject(node)) {
-    return node;
-  }
-  return sanitizeSchemaFormatsForGemini(node);
-}
-
-function sanitizeProperties(
-  properties: Record<string, unknown>,
-): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(properties).map(([name, schema]) => [
-      name,
-      sanitizeNode(schema),
-    ]),
-  );
-}
+/**
+ * `format` values the Gemini API accepts, keyed by the JSON Schema type that
+ * carries them.
+ *
+ * This is narrower than the set the genai `Schema.format` doc comment lists,
+ * because the backend rejects the rest. It mirrors
+ * `_sanitize_schema_formats_for_gemini` in adk-python's
+ * `tools/_gemini_schema_util.py`, including the two rows that read oddly: a
+ * `number` keeps `int32`/`int64` and loses `float`/`double`, and a node with no
+ * type keeps no format at all.
+ */
+const SUPPORTED_FORMATS: Readonly<Record<string, readonly string[]>> = {
+  integer: ['int32', 'int64'],
+  number: ['int32', 'int64'],
+  string: ['date-time', 'enum'],
+};
 
 /**
- * Removes every `format` the Gemini API rejects, at every depth.
- *
- * Gemini keeps `int32` and `int64` on an `integer` or `number` node, and
- * `date-time` and `enum` on a `string` node. A node with any other `format`,
- * or with a `format` but no `type`, loses the key. Property names pass through
- * untouched and the input is never mutated.
+ * Bounds that JSON Schema carries as numbers and genai carries as strings.
+ * The inverse list lives in `genai_schema_to_json.ts`.
  */
-export function sanitizeSchemaFormatsForGemini(
-  schema: Record<string, unknown>,
-): Record<string, unknown> {
-  const type = schema['type'];
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(schema)) {
-    if (key === 'format') {
-      if (isSupportedFormat(type, value)) {
-        sanitized[key] = value;
-      }
-    } else if (key === 'properties' && isPlainObject(value)) {
-      sanitized[key] = sanitizeProperties(value);
-    } else {
-      sanitized[key] = sanitizeNode(value);
-    }
+const NUMERIC_STRING_KEYS = [
+  'minLength',
+  'maxLength',
+  'minItems',
+  'maxItems',
+  'minProperties',
+  'maxProperties',
+] as const;
+
+function isSupportedFormat(type: unknown, format: unknown): format is string {
+  if (typeof type !== 'string' || typeof format !== 'string') {
+    return false;
   }
-  return sanitized;
+  return SUPPORTED_FORMATS[type]?.includes(format) ?? false;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
 }
 
 function toGeminiType(mcpType: string | undefined): Type {
@@ -117,7 +86,9 @@ const getTypeFromArrayItem = (
   return mcpType?.type?.toLowerCase?.();
 };
 
-export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
+export function toGeminiSchema(
+  mcpSchema?: JsonSchemaObject,
+): Schema | undefined {
   if (!mcpSchema) {
     return undefined;
   }
@@ -198,8 +169,37 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
       geminiSchema.description = mcp.description;
     }
 
-    if (mcp.format) {
+    // Evaluated after the nullable unwrap above, so `{type: ['string',
+    // 'null'], format: 'date-time'}` keeps its format. adk-python tests the
+    // raw type and drops it.
+    if (isSupportedFormat(mcp.type, mcp.format)) {
       geminiSchema.format = mcp.format;
+    }
+
+    if (typeof mcp.pattern === 'string') {
+      geminiSchema.pattern = mcp.pattern;
+    }
+
+    if (typeof mcp.minimum === 'number') {
+      geminiSchema.minimum = mcp.minimum;
+    }
+
+    if (typeof mcp.maximum === 'number') {
+      geminiSchema.maximum = mcp.maximum;
+    }
+
+    for (const key of NUMERIC_STRING_KEYS) {
+      if (typeof mcp[key] === 'number') {
+        geminiSchema[key] = String(mcp[key]);
+      }
+    }
+
+    if (isStringArray(mcp.propertyOrdering)) {
+      geminiSchema.propertyOrdering = mcp.propertyOrdering;
+    }
+
+    if (mcp.default !== undefined) {
+      geminiSchema.default = mcp.default;
     }
 
     if (mcp.enum) {
@@ -229,5 +229,5 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     }
     return geminiSchema;
   }
-  return recursiveConvert(sanitizeSchemaFormatsForGemini(mcpSchema));
+  return recursiveConvert(mcpSchema);
 }

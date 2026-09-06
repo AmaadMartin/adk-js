@@ -14,6 +14,7 @@ import {
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -341,10 +342,15 @@ describe('RestApiTool', () => {
       operation,
     );
 
-    const properties = tool._getDeclaration()?.parameters?.properties;
+    const parameters = tool._getDeclaration()?.parameters;
 
-    expect(properties?.['pet_id'].format).toBe('int64');
-    expect(properties?.['body'].format).toBeUndefined();
+    expect(parameters?.type).toBe(Type.OBJECT);
+    expect(parameters?.title).toBeUndefined();
+    expect(parameters?.properties?.['pet_id']).toEqual({
+      type: Type.INTEGER,
+      format: 'int64',
+    });
+    expect(parameters?.properties?.['body']).toEqual({type: Type.STRING});
   });
 
   it('should extract query parameters from path', async () => {

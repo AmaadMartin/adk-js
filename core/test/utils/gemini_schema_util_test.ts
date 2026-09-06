@@ -6,10 +6,7 @@
 
 import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {
-  sanitizeSchemaFormatsForGemini,
-  toGeminiSchema,
-} from '../../src/utils/gemini_schema_util.js';
+import {toGeminiSchema} from '../../src/utils/gemini_schema_util.js';
 
 interface MCPToolSchema {
   type: 'object';
@@ -533,260 +530,114 @@ describe('toGeminiSchema', () => {
 
     expect(input).toEqual(pristine);
   });
-});
 
-describe('sanitizeSchemaFormatsForGemini', () => {
-  it('test_sanitize_integer_formats', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
+  it('carries pattern, minimum, maximum and default through', () => {
+    const schema = toGeminiSchema({
       type: 'object',
       properties: {
-        int32_field: {type: 'integer', format: 'int32'},
-        int64_field: {type: 'integer', format: 'int64'},
-        invalid_int_format: {type: 'integer', format: 'unsigned'},
+        slug: {type: 'string', pattern: '^[a-z]+$', default: 'abc'},
+        score: {type: 'integer', minimum: 1, maximum: 10, default: 5},
       },
     });
 
-    expect(sanitized).toEqual({
-      type: 'object',
+    expect(schema).toEqual({
+      type: Type.OBJECT,
       properties: {
-        int32_field: {type: 'integer', format: 'int32'},
-        int64_field: {type: 'integer', format: 'int64'},
-        invalid_int_format: {type: 'integer'},
+        slug: {type: Type.STRING, pattern: '^[a-z]+$', default: 'abc'},
+        score: {type: Type.INTEGER, minimum: 1, maximum: 10, default: 5},
       },
     });
   });
 
-  it('test_sanitize_string_formats', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
+  it('stringifies every count and length bound', () => {
+    const schema = toGeminiSchema({
       type: 'object',
+      minProperties: 1,
+      maxProperties: 4,
       properties: {
-        datetime_field: {type: 'string', format: 'date-time'},
-        enum_field: {type: 'string', format: 'enum', enum: ['a', 'b']},
-        date_field: {type: 'string', format: 'date'},
-        email_field: {type: 'string', format: 'email'},
-        byte_field: {type: 'string', format: 'byte'},
-      },
-    });
-
-    expect(sanitized).toEqual({
-      type: 'object',
-      properties: {
-        datetime_field: {type: 'string', format: 'date-time'},
-        enum_field: {type: 'string', format: 'enum', enum: ['a', 'b']},
-        date_field: {type: 'string'},
-        email_field: {type: 'string'},
-        byte_field: {type: 'string'},
-      },
-    });
-  });
-
-  it('test_sanitize_number_formats', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: 'object',
-      properties: {
-        float_field: {type: 'number', format: 'float'},
-        double_field: {type: 'number', format: 'double'},
-        int32_number: {type: 'number', format: 'int32'},
-      },
-    });
-
-    expect(sanitized).toEqual({
-      type: 'object',
-      properties: {
-        float_field: {type: 'number'},
-        double_field: {type: 'number'},
-        int32_number: {type: 'number', format: 'int32'},
-      },
-    });
-  });
-
-  it('test_sanitize_nested_formats', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: 'object',
-      properties: {
-        nested: {
-          type: 'object',
-          properties: {
-            date_str: {type: 'string', format: 'date'},
-            int_field: {type: 'integer', format: 'int64'},
-          },
-        },
-        array_field: {
+        name: {type: 'string', minLength: 3, maxLength: 40},
+        tags: {
           type: 'array',
-          items: {type: 'string', format: 'uri'},
+          minItems: 1,
+          maxItems: 9,
+          items: {type: 'string'},
         },
       },
     });
 
-    expect(sanitized).toEqual({
-      type: 'object',
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      minProperties: '1',
+      maxProperties: '4',
       properties: {
-        nested: {
-          type: 'object',
-          properties: {
-            date_str: {type: 'string'},
-            int_field: {type: 'integer', format: 'int64'},
-          },
+        name: {type: Type.STRING, minLength: '3', maxLength: '40'},
+        tags: {
+          type: Type.ARRAY,
+          minItems: '1',
+          maxItems: '9',
+          items: {type: Type.STRING},
         },
-        array_field: {type: 'array', items: {type: 'string'}},
       },
     });
   });
 
-  it('test_sanitize_anyof_formats', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      anyOf: [
-        {type: 'string', format: 'email'},
-        {type: 'integer', format: 'int32'},
-        {type: 'string', format: 'date-time'},
-      ],
+  it('carries a false default rather than treating it as absent', () => {
+    const schema = toGeminiSchema({type: 'boolean', default: false});
+
+    expect(schema).toEqual({type: Type.BOOLEAN, default: false});
+  });
+
+  it('drops a bound, a pattern and a propertyOrdering of the wrong type', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      minProperties: '2',
+      pattern: 7,
+      minimum: 'low',
+      maximum: 'high',
+      propertyOrdering: ['a', 3],
+      properties: {},
     });
 
-    expect(sanitized).toEqual({
-      anyOf: [
-        {type: 'string'},
-        {type: 'integer', format: 'int32'},
-        {type: 'string', format: 'date-time'},
-      ],
+    expect(schema).toEqual({type: Type.OBJECT, properties: {}});
+  });
+
+  it('drops a format that is not a string', () => {
+    expect(toGeminiSchema({type: 'integer', format: 64})).toEqual({
+      type: Type.INTEGER,
     });
   });
 
-  it('test_preserve_valid_formats_without_type', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      format: 'date-time',
-      properties: {field1: {format: 'int32'}},
+  it('drops the synthetic title an OpenAPI operation carries', () => {
+    const schema = toGeminiSchema({
+      type: 'object',
+      title: 'upload_file_Arguments',
+      properties: {},
     });
 
-    expect(sanitized).toEqual({properties: {field1: {}}});
-  });
-
-  it('test_to_gemini_schema_remove_unrecognized_fields', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: 'string',
-      description: 'A single date string.',
-      format: 'date',
-    });
-
-    expect(sanitized).toEqual({
-      type: 'string',
-      description: 'A single date string.',
-    });
+    expect(schema).toEqual({type: Type.OBJECT, properties: {}});
   });
 
   it('keeps a property named format and drops that property own format', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
+    const schema = toGeminiSchema({
       type: 'object',
       properties: {format: {type: 'string', format: 'email'}},
     });
 
-    expect(sanitized).toEqual({
-      type: 'object',
-      properties: {format: {type: 'string'}},
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {format: {type: Type.STRING}},
     });
   });
 
   it('keeps a property named properties', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
+    const schema = toGeminiSchema({
       type: 'object',
       properties: {properties: {type: 'string', format: 'date-time'}},
     });
 
-    expect(sanitized).toEqual({
-      type: 'object',
-      properties: {properties: {type: 'string', format: 'date-time'}},
-    });
-  });
-
-  it('passes string arrays such as required and enum through untouched', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: 'object',
-      required: ['a', 'b'],
-      properties: {a: {type: 'string', enum: ['x', 'y']}},
-    });
-
-    expect(sanitized).toEqual({
-      type: 'object',
-      required: ['a', 'b'],
-      properties: {a: {type: 'string', enum: ['x', 'y']}},
-    });
-  });
-
-  it('does not mutate the node it was given', () => {
-    const input = {
-      type: 'object',
-      properties: {
-        a: {type: 'string', format: 'email'},
-        b: {type: 'array', items: {type: 'integer', format: 'unsigned'}},
-      },
-    };
-    const pristine = structuredClone(input);
-
-    sanitizeSchemaFormatsForGemini(input);
-
-    expect(input).toEqual(pristine);
-  });
-
-  it('is idempotent', () => {
-    const input = {
-      type: 'object',
-      properties: {
-        a: {type: 'string', format: 'email'},
-        b: {type: 'integer', format: 'int64'},
-      },
-    };
-
-    const once = sanitizeSchemaFormatsForGemini(input);
-
-    expect(sanitizeSchemaFormatsForGemini(once)).toEqual(once);
-  });
-
-  it('drops the format when type is an array', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: ['string', 'null'],
-      format: 'date-time',
-    });
-
-    expect(sanitized).toEqual({type: ['string', 'null']});
-  });
-
-  it('returns a primitive value unchanged', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: 'string',
-      title: 'A title',
-      minLength: 1,
-      nullable: true,
-      default: null,
-      required: undefined,
-    });
-
-    expect(sanitized).toEqual({
-      type: 'string',
-      title: 'A title',
-      minLength: 1,
-      nullable: true,
-      default: null,
-      required: undefined,
-    });
-  });
-
-  it('drops a format that is not a string', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: 'integer',
-      format: 64,
-    });
-
-    expect(sanitized).toEqual({type: 'integer'});
-  });
-
-  it('recurses into a properties value that is not an object', () => {
-    const sanitized = sanitizeSchemaFormatsForGemini({
-      type: 'object',
-      properties: [{type: 'string', format: 'email'}],
-    });
-
-    expect(sanitized).toEqual({
-      type: 'object',
-      properties: [{type: 'string'}],
+    expect(schema).toEqual({
+      type: Type.OBJECT,
+      properties: {properties: {type: Type.STRING, format: 'date-time'}},
     });
   });
 });
