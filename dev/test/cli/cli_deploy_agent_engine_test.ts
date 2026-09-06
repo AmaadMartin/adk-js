@@ -133,6 +133,7 @@ vi.mock('../../src/utils/agent_loader.js', () => ({
 vi.mock('../../src/utils/file_utils.js', () => ({
   createTempDir: vi.fn(),
   isFile: vi.fn(),
+  isFileExists: vi.fn(),
   isFolderExists: vi.fn(),
   loadFileData: vi.fn(),
   saveToFile: vi.fn(),
@@ -545,7 +546,7 @@ describe('deployToAgentEngine', () => {
     });
 
     await expect(deployToAgentEngine(defaultOptions)).rejects.toThrow(
-      'Package "@google/adk" is required but not found',
+      'Required npm package(s) not found for deployment: "@google/adk"',
     );
   });
 
