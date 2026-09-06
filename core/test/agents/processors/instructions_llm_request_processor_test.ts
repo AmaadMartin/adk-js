@@ -259,7 +259,20 @@ describe('InstructionsLlmRequestProcessor', () => {
       );
     });
 
-    it('should append set_model_response instruction on Vertex AI with a pre-2.0 model', async () => {
+    it('should append set_model_response instruction on Vertex AI with a non-Gemini model', async () => {
+      vi.stubEnv(VERTEX_ENV_VAR, 'true');
+
+      const llmRequest = await runWithOutputSchema({
+        model: 'claude-3-7-sonnet',
+        withTools: true,
+      });
+
+      expect(llmRequest.config?.systemInstruction).toContain(
+        SET_MODEL_RESPONSE_INSTRUCTION,
+      );
+    });
+
+    it('should not append set_model_response instruction on Vertex AI with a Gemini 1.x model', async () => {
       vi.stubEnv(VERTEX_ENV_VAR, 'true');
 
       const llmRequest = await runWithOutputSchema({
@@ -267,8 +280,11 @@ describe('InstructionsLlmRequestProcessor', () => {
         withTools: true,
       });
 
+      expect(llmRequest.config?.systemInstruction).not.toContain(
+        'set_model_response',
+      );
       expect(llmRequest.config?.systemInstruction).toContain(
-        SET_MODEL_RESPONSE_INSTRUCTION,
+        'Base instruction',
       );
     });
 
