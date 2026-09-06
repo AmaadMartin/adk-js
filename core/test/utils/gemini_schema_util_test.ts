@@ -8,11 +8,11 @@ import {Type} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {toGeminiSchema} from '../../src/utils/gemini_schema_util.js';
 
-interface MCPToolSchema {
+type MCPToolSchema = {
   type: 'object';
   properties?: Record<string, unknown>;
   required?: string[];
-}
+};
 
 describe('toGeminiSchema', () => {
   it('converts a simple object schema with explicit type', () => {
@@ -443,6 +443,347 @@ describe('toGeminiSchema', () => {
         {type: Type.OBJECT, properties: {a: {type: Type.STRING}}},
         {type: Type.STRING},
       ],
+    });
+  });
+
+  function domainPayloadDefinitions() {
+    return {
+      DeviceEnum: {
+        enum: ['GLOBAL', 'desktop', 'mobile'],
+        title: 'DeviceEnum',
+        type: 'string',
+      },
+      DomainPayload: {
+        properties: {
+          adDomain: {
+            description: 'List of one or many domains.',
+            items: {type: 'string'},
+            title: 'Addomain',
+            type: 'array',
+          },
+          device: {
+            $ref: '#/$defs/DeviceEnum',
+            default: 'GLOBAL',
+            description: 'Filter by device.',
+          },
+        },
+        required: ['adDomain'],
+        title: 'DomainPayload',
+        type: 'object',
+      },
+    };
+  }
+
+  const expectedDomainPayload = {
+    type: Type.OBJECT,
+    properties: {
+      adDomain: {
+        type: Type.ARRAY,
+        description: 'List of one or many domains.',
+        items: {type: Type.STRING},
+      },
+      device: {
+        type: Type.STRING,
+        description: 'Filter by device.',
+        enum: ['GLOBAL', 'desktop', 'mobile'],
+      },
+    },
+    required: ['adDomain'],
+  };
+
+  function domainPayloadSchema() {
+    return {
+      $defs: domainPayloadDefinitions(),
+      properties: {payload: {$ref: '#/$defs/DomainPayload'}},
+      required: ['payload'],
+      title: 'query_domainsArguments',
+      type: 'object',
+    };
+  }
+
+  it('resolves a $defs $ref to the referenced definition', () => {
+    const schema = toGeminiSchema(domainPayloadSchema());
+
+    expect(schema?.properties?.['payload']).toEqual(expectedDomainPayload);
+  });
+
+  it('resolves a draft-07 definitions $ref', () => {
+    const input = {
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      definitions: {
+        DeviceEnum: {
+          enum: ['GLOBAL', 'desktop', 'mobile'],
+          title: 'DeviceEnum',
+          type: 'string',
+        },
+        DomainPayload: {
+          properties: {
+            adDomain: {
+              description: 'List of one or many domains.',
+              items: {type: 'string'},
+              title: 'Addomain',
+              type: 'array',
+            },
+            device: {
+              $ref: '#/definitions/DeviceEnum',
+              default: 'GLOBAL',
+              description: 'Filter by device.',
+            },
+          },
+          required: ['adDomain'],
+          title: 'DomainPayload',
+          type: 'object',
+        },
+      },
+      properties: {payload: {$ref: '#/definitions/DomainPayload'}},
+      required: ['payload'],
+      type: 'object',
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['payload']).toEqual(expectedDomainPayload);
+  });
+
+  it('resolves a $ref used as array items', () => {
+    const input = {
+      $defs: {Item: {type: 'string'}},
+      type: 'array',
+      items: {$ref: '#/$defs/Item'},
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema).toEqual({type: Type.ARRAY, items: {type: Type.STRING}});
+  });
+
+  it('lets sibling keys override the resolved definition', () => {
+    const input = {
+      $defs: {Thing: {type: 'string', description: 'from def'}},
+      type: 'object',
+      properties: {a: {$ref: '#/$defs/Thing', description: 'from sibling'}},
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({
+      type: Type.STRING,
+      description: 'from sibling',
+    });
+  });
+
+  it('leaves an unresolvable $ref alone when a $defs block exists', () => {
+    const input = {
+      $defs: {Known: {type: 'string'}},
+      type: 'object',
+      properties: {a: {$ref: '#/$defs/Missing'}},
+    };
+
+    expect(() => toGeminiSchema(input)).not.toThrow();
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({
+      type: Type.OBJECT,
+      properties: {},
+    });
+  });
+
+  it('degrades a self-referencing $ref to a placeholder object', () => {
+    const input = {
+      $defs: {
+        Node: {
+          type: 'object',
+          properties: {
+            name: {type: 'string'},
+            parent: {$ref: '#/$defs/Node'},
+          },
+        },
+      },
+      properties: {tree: {$ref: '#/$defs/Node'}},
+      type: 'object',
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['tree']).toEqual({
+      type: Type.OBJECT,
+      properties: {
+        name: {type: Type.STRING},
+        parent: {
+          type: Type.OBJECT,
+          description: 'Circular ref to Node',
+          properties: {},
+        },
+      },
+    });
+  });
+
+  it('degrades a multi-step cycle to a placeholder object', () => {
+    const input = {
+      $defs: {
+        Value: {
+          anyOf: [{type: 'string'}, {$ref: '#/$defs/Struct'}],
+        },
+        Struct: {
+          type: 'object',
+          properties: {
+            fields: {
+              type: 'object',
+              properties: {
+                my_val: {
+                  type: 'array',
+                  items: {$ref: '#/$defs/Value'},
+                },
+              },
+            },
+          },
+        },
+      },
+      properties: {root: {$ref: '#/$defs/Value'}},
+      type: 'object',
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['root']).toEqual({
+      anyOf: [
+        {type: Type.STRING},
+        {
+          type: Type.OBJECT,
+          properties: {
+            fields: {
+              type: Type.OBJECT,
+              properties: {
+                my_val: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    description: 'Circular ref to Value',
+                    properties: {},
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it('resolves a shared definition in both sibling positions', () => {
+    const input = {
+      $defs: {
+        CommonType: {type: 'string'},
+        ObjectA: {
+          type: 'object',
+          properties: {prop_a: {$ref: '#/$defs/CommonType'}},
+        },
+        ObjectB: {
+          type: 'object',
+          properties: {prop_b: {$ref: '#/$defs/CommonType'}},
+        },
+      },
+      properties: {
+        a: {$ref: '#/$defs/ObjectA'},
+        b: {$ref: '#/$defs/ObjectB'},
+      },
+      type: 'object',
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({
+      type: Type.OBJECT,
+      properties: {prop_a: {type: Type.STRING}},
+    });
+    expect(schema?.properties?.['b']).toEqual({
+      type: Type.OBJECT,
+      properties: {prop_b: {type: Type.STRING}},
+    });
+  });
+
+  it('resolves each dialect block through its own pointer', () => {
+    const input = {
+      $defs: {Shared: {type: 'integer'}},
+      definitions: {Shared: {type: 'string'}},
+      type: 'object',
+      properties: {
+        a: {$ref: '#/$defs/Shared'},
+        b: {$ref: '#/definitions/Shared'},
+      },
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({type: Type.INTEGER});
+    expect(schema?.properties?.['b']).toEqual({type: Type.STRING});
+  });
+
+  it('leaves an external $ref untouched', () => {
+    const input = {
+      type: 'object',
+      properties: {a: {$ref: 'https://example.com/schema.json#/Thing'}},
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({
+      type: Type.OBJECT,
+      properties: {},
+    });
+  });
+
+  it('leaves a $ref that points at a non-schema value untouched', () => {
+    const input = {
+      type: 'object',
+      title: 'not a schema',
+      properties: {a: {$ref: '#/title'}},
+    };
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['a']).toEqual({
+      type: Type.OBJECT,
+      properties: {},
+    });
+  });
+
+  it('drops the definition blocks from the returned schema', () => {
+    const schema = toGeminiSchema(domainPayloadSchema());
+
+    if (!schema) {
+      expect.fail('toGeminiSchema returned undefined');
+    }
+    expect('$defs' in schema).toBe(false);
+    expect('definitions' in schema).toBe(false);
+  });
+
+  it('does not mutate the input schema', () => {
+    const input = domainPayloadSchema();
+    const snapshot = structuredClone(input);
+
+    toGeminiSchema(input);
+
+    expect(input).toEqual(snapshot);
+  });
+
+  it('traverses a property named $ref instead of resolving it', () => {
+    const input = {
+      $defs: {Thing: {type: 'string'}},
+      type: 'object',
+      properties: {
+        $ref: {type: 'object', properties: {inner: {$ref: '#/$defs/Thing'}}},
+      },
+    };
+
+    expect(() => toGeminiSchema(input)).not.toThrow();
+
+    const schema = toGeminiSchema(input);
+
+    expect(schema?.properties?.['$ref']).toEqual({
+      type: Type.OBJECT,
+      properties: {inner: {type: Type.STRING}},
     });
   });
 });

@@ -7,13 +7,14 @@
 import {Schema, Type} from '@google/genai';
 import {z} from 'zod';
 
+import {resolvePointer} from './schema.js';
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const MCPToolSchemaObject = z.object({
   type: z.literal('object'),
   properties: z.record(z.string(), z.unknown()).optional(),
   required: z.string().array().optional(),
 });
-type MCPToolSchema = z.infer<typeof MCPToolSchemaObject>;
 type MCPTypeArrayItem = string | {type: string};
 
 function toGeminiType(mcpType: string | undefined): Type {
@@ -49,7 +50,93 @@ const getTypeFromArrayItem = (
   return mcpType?.type?.toLowerCase?.();
 };
 
-export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
+/** A JSON Schema node as received; any key may be present. */
+type JsonSchemaNode = Record<string, unknown>;
+
+function isJsonSchemaNode(value: unknown): value is JsonSchemaNode {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Resolves a local pointer against the schema that declared it. Returns
+ * undefined when the pointer is external, dangling, or aimed at something that
+ * is not a schema node.
+ */
+function resolveDefinition(
+  document: JsonSchemaNode,
+  ref: string,
+): JsonSchemaNode | undefined {
+  let target: unknown;
+  try {
+    target = resolvePointer(document, ref);
+  } catch {
+    // A schema off the wire is untrusted, so a pointer that does not resolve
+    // degrades instead of failing the whole conversion.
+    return undefined;
+  }
+  return isJsonSchemaNode(target) ? target : undefined;
+}
+
+function resolveRefs(
+  value: unknown,
+  document: JsonSchemaNode,
+  pathRefs: ReadonlySet<string>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveRefs(item, document, pathRefs));
+  }
+  if (!isJsonSchemaNode(value)) {
+    return value;
+  }
+
+  const ref = value['$ref'];
+  // A property can legitimately be named `$ref`, in which case its value is a
+  // schema and not a pointer.
+  if (typeof ref !== 'string') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        resolveRefs(item, document, pathRefs),
+      ]),
+    );
+  }
+
+  // The set carries the refs on the current path only. A global set would
+  // report a definition reused in two sibling positions as a cycle.
+  if (pathRefs.has(ref)) {
+    const refKey = ref.slice(ref.lastIndexOf('/') + 1);
+    return {type: 'object', description: `Circular ref to ${refKey}`};
+  }
+
+  const definition = resolveDefinition(document, ref);
+  if (!definition) {
+    // Gemini has no `$ref`, but an unresolvable pointer stays in place so the
+    // inference below still reports the node as an object. The copy keeps the
+    // conversion from writing to the caller's schema.
+    return {...value};
+  }
+
+  const {$ref: _ref, ...siblings} = value;
+  return resolveRefs(
+    {...definition, ...siblings},
+    document,
+    new Set([...pathRefs, ref]),
+  );
+}
+
+/**
+ * Inlines every resolvable local `$ref`.
+ *
+ * The definition blocks are dropped from the schema that is converted, and
+ * pointers resolve against the original document, so a definition stays
+ * reachable after its block is gone.
+ */
+function dereferenceSchema(schema: JsonSchemaNode): unknown {
+  const {$defs: _defs, definitions: _definitions, ...body} = schema;
+  return resolveRefs(body, schema, new Set<string>());
+}
+
+export function toGeminiSchema(mcpSchema?: JsonSchemaNode): Schema | undefined {
   if (!mcpSchema) {
     return undefined;
   }
@@ -157,5 +244,5 @@ export function toGeminiSchema(mcpSchema?: MCPToolSchema): Schema | undefined {
     }
     return geminiSchema;
   }
-  return recursiveConvert(mcpSchema);
+  return recursiveConvert(dereferenceSchema(mcpSchema));
 }

@@ -10,6 +10,7 @@ import {
   MCPSessionManager,
   MCPTool,
 } from '@google/adk';
+import {Type} from '@google/genai';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
 import {describe, expect, it, vi} from 'vitest';
@@ -161,5 +162,39 @@ describe('MCPTool', () => {
 
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+  });
+
+  it('declares the properties behind a $defs $ref in the input schema', () => {
+    const mockTool: Tool = {
+      name: 'query_domains',
+      description: 'Query domains',
+      inputSchema: {
+        type: 'object',
+        $defs: {
+          DomainPayload: {
+            type: 'object',
+            properties: {adDomain: {type: 'array', items: {type: 'string'}}},
+            required: ['adDomain'],
+          },
+        },
+        properties: {payload: {$ref: '#/$defs/DomainPayload'}},
+        required: ['payload'],
+      },
+    };
+
+    // A real session manager: building a declaration never opens a session.
+    const sessionManager = new MCPSessionManager({
+      type: 'StreamableHTTPConnectionParams',
+      url: 'http://localhost/mcp',
+    });
+
+    const declaration = new MCPTool(mockTool, sessionManager)._getDeclaration();
+
+    expect(declaration.parameters?.properties?.['payload']).toEqual({
+      type: Type.OBJECT,
+      properties: {adDomain: {type: Type.ARRAY, items: {type: Type.STRING}}},
+      required: ['adDomain'],
+    });
+    expect(declaration.parameters?.required).toEqual(['payload']);
   });
 });
