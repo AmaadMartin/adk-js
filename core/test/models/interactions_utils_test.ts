@@ -2478,10 +2478,10 @@ describe('agent interactions', () => {
         stream: true,
       });
 
-      expect(log).toContain('Tools: mcp_server');
       expect(log).not.toContain('SUPER-SECRET-TOKEN');
       expect(log).not.toContain('Authorization');
       expect(log).not.toContain('api.example.com');
+      expect(log).toContain('Tools: mcp_server');
     });
 
     it('names a function tool and drops its parameter schema', () => {
@@ -2493,7 +2493,10 @@ describe('agent interactions', () => {
             type: 'function',
             name: 'lookup',
             description: 'Looks a record up.',
-            parameters: {type: 'object', properties: {apiKey: {type: 'string'}}},
+            parameters: {
+              type: 'object',
+              properties: {apiKey: {type: 'string'}},
+            },
           },
           {type: 'function'},
         ],
