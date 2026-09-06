@@ -21,12 +21,14 @@ import {
 import {logger} from '../../src/utils/logger.js';
 import {
   chooseApiEndpoint,
+  chooseApiEndpointForDefaultCerts,
   clientCertDispatcher,
   clientCertsToPresent,
   defaultClientCertSource,
   effectiveGoogleapisEndpoint,
   getApiEndpoint,
   getWithClientCert,
+  hasDefaultClientCertSource,
   loadDefaultClientCerts,
   shouldUseMtlsEndpoint,
   useClientCertEffective,
@@ -996,5 +998,176 @@ describe('clientCertDispatcher', () => {
 
     await dispatcher.close();
     await expect(dispatcher.close()).rejects.toThrow('The client is destroyed');
+  });
+});
+
+const AGENT_REGISTRY_ENDPOINT = 'https://agentregistry.googleapis.com/v1alpha';
+const AGENT_REGISTRY_MTLS_ENDPOINT =
+  'https://agentregistry.mtls.googleapis.com/v1alpha';
+
+function agentRegistryEndpoint(): string {
+  return chooseApiEndpointForDefaultCerts(
+    AGENT_REGISTRY_ENDPOINT,
+    AGENT_REGISTRY_MTLS_ENDPOINT,
+  );
+}
+
+describe('chooseApiEndpointForDefaultCerts', () => {
+  let homeDir: string;
+
+  beforeEach(async () => {
+    homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-mtls-home-'));
+    homedirMock.mockReturnValue(homeDir);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(homeDir, {recursive: true, force: true});
+  });
+
+  /** Gives the machine a certificate source the loader can read. */
+  async function writeDefaultMetadata(): Promise<void> {
+    const dir = path.join(homeDir, '.secureConnect');
+    await fs.mkdir(dir, {recursive: true});
+    await fs.writeFile(
+      path.join(dir, 'context_aware_metadata.json'),
+      JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
+      'utf-8',
+    );
+  }
+
+  it('returns the default host when neither variable is set', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', undefined);
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_ENDPOINT);
+  });
+
+  it('returns the mTLS host when the setting is always', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_MTLS_ENDPOINT);
+  });
+
+  it('reads the setting case insensitively', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'ALWAYS');
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_MTLS_ENDPOINT);
+  });
+
+  it('returns the default host when the setting is never', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'never');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_ENDPOINT);
+  });
+
+  it('returns the mTLS host for auto with a client certificate', async () => {
+    await writeDefaultMetadata();
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'TRUE');
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_MTLS_ENDPOINT);
+  });
+
+  it('returns the default host for auto without a client certificate', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'false');
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_ENDPOINT);
+  });
+
+  it('returns the default host for auto when the machine has no certificate to present', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'auto');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_ENDPOINT);
+  });
+
+  it('returns the mTLS host for always even with no certificate to present', () => {
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'always');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'false');
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_MTLS_ENDPOINT);
+  });
+
+  it('warns and treats an unrecognised setting as auto', async () => {
+    await writeDefaultMetadata();
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    vi.stubEnv('GOOGLE_API_USE_MTLS_ENDPOINT', 'sometimes');
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', 'true');
+
+    expect(agentRegistryEndpoint()).toBe(AGENT_REGISTRY_MTLS_ENDPOINT);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('GOOGLE_API_USE_MTLS_ENDPOINT'),
+    );
+    warn.mockRestore();
+  });
+});
+
+describe('hasDefaultClientCertSource', () => {
+  let homeDir: string;
+
+  beforeEach(async () => {
+    homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-mtls-home-'));
+    homedirMock.mockReturnValue(homeDir);
+  });
+
+  afterEach(async () => {
+    await fs.rm(homeDir, {recursive: true, force: true});
+  });
+
+  it('is false when the machine has no context-aware metadata', () => {
+    expect(hasDefaultClientCertSource()).toBe(false);
+  });
+
+  it('is true once the context-aware metadata exists', async () => {
+    const dir = path.join(homeDir, '.secureConnect');
+    await fs.mkdir(dir, {recursive: true});
+    await fs.writeFile(
+      path.join(dir, 'context_aware_metadata.json'),
+      JSON.stringify({cert_provider_command: PROVIDER_COMMAND}),
+      'utf-8',
+    );
+
+    expect(hasDefaultClientCertSource()).toBe(true);
+  });
+});
+
+describe('useClientCertEffective', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('is false when the variable is unset', () => {
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', undefined);
+
+    expect(useClientCertEffective()).toBe(false);
+  });
+
+  it.each(['true', 'TRUE', 'True'])('is true for %s', (value) => {
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', value);
+
+    expect(useClientCertEffective()).toBe(true);
+  });
+
+  it.each(['false', 'FALSE'])('is false for %s without warning', (value) => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', value);
+
+    expect(useClientCertEffective()).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(['yes', '1', ''])('warns and is false for "%s"', (value) => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    vi.stubEnv('GOOGLE_API_USE_CLIENT_CERTIFICATE', value);
+
+    expect(useClientCertEffective()).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('GOOGLE_API_USE_CLIENT_CERTIFICATE'),
+    );
   });
 });

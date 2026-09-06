@@ -5,6 +5,7 @@
  */
 
 import * as childProcess from 'node:child_process';
+import {existsSync} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {IncomingMessage} from 'node:http';
 import * as https from 'node:https';
@@ -45,6 +46,35 @@ export function getApiEndpoint(
     '{location}',
     () => location,
   );
+}
+
+/**
+ * Chooses between two endpoints, using the certificate this machine holds.
+ *
+ * This is the counterpart of {@link chooseApiEndpoint} for a caller that
+ * cannot await a certificate, because it picks its endpoint in a constructor.
+ * Here `auto` picks the mutual-TLS endpoint only when
+ * `GOOGLE_API_USE_CLIENT_CERTIFICATE` is `true` and
+ * {@link hasDefaultClientCertSource} finds a certificate to present. Asking
+ * for a client certificate is not enough on its own: the transport would
+ * present nothing, and the mutual-TLS host rejects such a connection.
+ *
+ * The two endpoints are complete URLs, so nothing is substituted into them.
+ *
+ * @param defaultEndpoint The endpoint to call without mutual TLS.
+ * @param mtlsEndpoint The endpoint to call with mutual TLS.
+ */
+export function chooseApiEndpointForDefaultCerts(
+  defaultEndpoint: string,
+  mtlsEndpoint: string,
+): string {
+  const setting = readMtlsEndpointSetting();
+  const useMtls =
+    setting === MtlsEndpointSetting.ALWAYS ||
+    (setting !== MtlsEndpointSetting.NEVER &&
+      useClientCertEffective() &&
+      hasDefaultClientCertSource());
+  return useMtls ? mtlsEndpoint : defaultEndpoint;
 }
 
 /**
@@ -247,6 +277,18 @@ export function useClientCertEffective(): boolean {
     );
   }
   return value === 'true';
+}
+
+/**
+ * Reports whether this machine has a client certificate to present.
+ *
+ * The answer is the existence of the context-aware metadata file that
+ * {@link loadDefaultClientCerts} reads, so the two agree: a mutual-TLS host
+ * chosen on the strength of this answer is one the loader can serve a
+ * certificate for.
+ */
+export function hasDefaultClientCertSource(): boolean {
+  return existsSync(defaultMetadataPath());
 }
 
 /** Returns the default SecureConnect context-aware metadata path. */

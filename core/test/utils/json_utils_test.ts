@@ -10,6 +10,8 @@ import {
   isJsonObject,
   isRecord,
   parseFencedJson,
+  readOwn,
+  readOwnString,
   readString,
   safeJsonLoads,
   stableJsonStringify,
@@ -537,5 +539,46 @@ describe('parseFencedJson', () => {
   it('returns the parsed scalar for a JSON scalar', () => {
     expect(parseFencedJson('42')).toBe(42);
     expect(parseFencedJson('null')).toBeNull();
+  });
+});
+
+describe('readOwn', () => {
+  it('returns the value of an own property', () => {
+    expect(readOwn({skills: [1, 2]}, 'skills')).toEqual([1, 2]);
+    expect(readOwn({count: 0}, 'count')).toBe(0);
+  });
+
+  it('returns undefined for a property the value does not carry', () => {
+    expect(readOwn({}, 'skills')).toBeUndefined();
+  });
+
+  it('returns undefined for an inherited property', () => {
+    expect(readOwn({}, 'toString')).toBeUndefined();
+    expect(readOwn(Object.create({skills: [1]}), 'skills')).toBeUndefined();
+  });
+
+  it.each([[null], [undefined], ['text'], [7], [true]])(
+    'returns undefined for %s, which carries no own properties',
+    (value) => {
+      expect(readOwn(value, 'skills')).toBeUndefined();
+    },
+  );
+});
+
+describe('readOwnString', () => {
+  it('returns a string property, including the empty string', () => {
+    expect(readOwnString({name: 'my-skill'}, 'name')).toBe('my-skill');
+    expect(readOwnString({name: ''}, 'name')).toBe('');
+  });
+
+  it.each([[7], [null], [['a']], [{}], [undefined], [false]])(
+    'returns undefined when the property is %s rather than a string',
+    (value) => {
+      expect(readOwnString({name: value}, 'name')).toBeUndefined();
+    },
+  );
+
+  it('returns undefined when the value is not an object', () => {
+    expect(readOwnString('text', 'name')).toBeUndefined();
   });
 });

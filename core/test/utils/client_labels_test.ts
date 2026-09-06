@@ -273,3 +273,14 @@ describe('client_labels', () => {
     });
   });
 });
+
+describe('getTrackingHeaders', () => {
+  it('puts the joined client labels on both tracking headers', () => {
+    const expected = getClientLabels().join(' ');
+
+    expect(getTrackingHeaders()).toEqual({
+      'x-goog-api-client': expected,
+      'user-agent': expected,
+    });
+  });
+});
