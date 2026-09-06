@@ -19,7 +19,7 @@
  * to this file lists the environment variables and the grants it needs.
  *
  * Run:
- *   npm install @google-cloud/bigquery
+ *   npm install @google-cloud/bigquery @google-cloud/bigquery-storage
  *   export GOOGLE_CLOUD_PROJECT=<your-project>
  *   npm run sample -- samples/plugins/bigquery_agent_analytics/agent.ts
  */

@@ -243,6 +243,69 @@ class UndeclarableTool extends BaseTool {
   }
 }
 
+/** A tool whose declaration carries a raw JSON Schema rather than a `Schema`. */
+class JsonSchemaTool extends BaseTool {
+  constructor() {
+    super({name: 'json_schema_tool', description: 'Takes raw JSON Schema.'});
+  }
+
+  override _getDeclaration(): FunctionDeclaration {
+    return {
+      name: 'json_schema_tool',
+      parametersJsonSchema: {type: 'object', properties: {q: {type: 'string'}}},
+    };
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return 'done';
+  }
+}
+
+/** A tool that describes itself only through its declaration. */
+class DeclarationOnlyTool extends BaseTool {
+  constructor() {
+    super({name: 'declared', description: ''});
+  }
+
+  override _getDeclaration(): FunctionDeclaration {
+    return {
+      name: 'declared',
+      description: 'Described by the declaration alone.',
+      parameters: {type: Type.OBJECT, properties: {city: {type: Type.STRING}}},
+    };
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return 'done';
+  }
+}
+
+/** A tool whose declaration throws, which must not lose the other tools. */
+class ThrowingDeclarationTool extends BaseTool {
+  constructor() {
+    super({name: 'broken', description: 'Cannot describe itself.'});
+  }
+
+  override _getDeclaration(): FunctionDeclaration {
+    throw new Error('declaration unavailable');
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return 'done';
+  }
+}
+
+/** A tool reporting an empty name, so the dict key has to stand in. */
+class NamelessTool extends BaseTool {
+  constructor() {
+    super({name: '', description: 'Reports no name.'});
+  }
+
+  override async runAsync(): Promise<unknown> {
+    return 'done';
+  }
+}
+
 /**
  * Ported from adk-python
  * tests/unittests/plugins/test_bigquery_agent_analytics_plugin.py @ main
@@ -366,6 +429,92 @@ describe('extractToolDeclarations', () => {
   });
 
   it('emits nothing for a request offering no tools', () => {
+    expect(extractToolDeclarations({})).toEqual([]);
+  });
+
+  it('writes the name, description and parameters of every tool', () => {
+    expect(extractToolDeclarations({lookup: localTool()})).toEqual([
+      {
+        name: 'lookup',
+        description: 'Looks something up.',
+        parameters: {type: Type.OBJECT, properties: {}},
+      },
+    ]);
+  });
+
+  it('writes an entry per tool, in the order the request holds them', () => {
+    const declarations = extractToolDeclarations({
+      lookup: localTool(),
+      plain: new PlainTool(),
+    });
+    expect(declarations.map((entry) => entry.name)).toEqual([
+      'lookup',
+      'plain',
+    ]);
+  });
+
+  it('prefers the raw JSON Schema a declaration carries', () => {
+    expect(
+      extractToolDeclarations({json_schema_tool: new JsonSchemaTool()})[0],
+    ).toMatchObject({
+      name: 'json_schema_tool',
+      parameters: {type: 'object', properties: {q: {type: 'string'}}},
+    });
+  });
+
+  it('falls back to the declaration Schema when there is no JSON Schema', () => {
+    expect(
+      extractToolDeclarations({declared: new DeclarationOnlyTool()})[0],
+    ).toEqual({
+      name: 'declared',
+      description: 'Described by the declaration alone.',
+      parameters: {type: Type.OBJECT, properties: {city: {type: Type.STRING}}},
+    });
+  });
+
+  it('keeps the tool description over the declaration description', () => {
+    expect(
+      extractToolDeclarations({json_schema_tool: new JsonSchemaTool()})[0]
+        .description,
+    ).toBe('Takes raw JSON Schema.');
+  });
+
+  it('still writes the name of a tool whose declaration throws', () => {
+    expect(
+      extractToolDeclarations({
+        broken: new ThrowingDeclarationTool(),
+        lookup: localTool(),
+      }),
+    ).toEqual([
+      {name: 'broken', description: 'Cannot describe itself.'},
+      {
+        name: 'lookup',
+        description: 'Looks something up.',
+        parameters: {type: Type.OBJECT, properties: {}},
+      },
+    ]);
+  });
+
+  it('names a tool by its dict key when the tool reports no name', () => {
+    expect(extractToolDeclarations({search: new NamelessTool()})[0]).toEqual({
+      name: 'search',
+      description: 'Reports no name.',
+    });
+  });
+
+  it('omits the description of a tool that has none', () => {
+    const tool = new FunctionTool({
+      name: 'bare',
+      description: '',
+      execute: () => 'done',
+    });
+    expect(extractToolDeclarations({bare: tool})[0]).toEqual({
+      name: 'bare',
+      parameters: {type: Type.OBJECT, properties: {}},
+    });
+  });
+
+  it('returns no entries for a request that offered no tools', () => {
     expect(extractToolDeclarations({})).toEqual([]);
   });
 });

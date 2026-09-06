@@ -48,9 +48,10 @@ interface CreatedTable {
   metadata: TableMetadata;
 }
 
-const {BigQueryMock, fake} = vi.hoisted(() => {
+const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
   interface FakeBigQuery {
     clientOptions: unknown[];
+    streamOptions: unknown[];
     inserted: AnalyticsRow[];
     insertIds: string[];
     insertCalls: number;
@@ -68,6 +69,11 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     createError?: Error;
     datasetCreateError?: Error;
     insertError?: unknown;
+    insertStatus?: {code: number; message: string; rowErrors: unknown[]};
+    /** The event ids each append attempt carried, failed attempts included. */
+    appendAttempts: string[][];
+    /** How many leading attempts fail with a retryable gRPC status. */
+    transientAppendFailures: number;
     insertGate?: Promise<void>;
     queries: string[];
     queryError?: Error;
@@ -75,6 +81,9 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
 
   const fake: FakeBigQuery = {
     clientOptions: [],
+    streamOptions: [],
+    appendAttempts: [],
+    transientAppendFailures: 0,
     inserted: [],
     insertIds: [],
     insertCalls: 0,
@@ -117,22 +126,6 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
         throw fake.metadataError;
       }
       return [metadata];
-    }
-
-    async insert(
-      rows: Array<{insertId: string; json: AnalyticsRow}>,
-    ): Promise<void> {
-      fake.insertCalls += 1;
-      if (fake.insertGate !== undefined) {
-        await fake.insertGate;
-      }
-      if (fake.insertError !== undefined) {
-        throw fake.insertError;
-      }
-      for (const row of rows) {
-        fake.insertIds.push(row.insertId);
-        fake.inserted.push(row.json);
-      }
     }
   }
 
@@ -186,10 +179,86 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     }
   }
 
-  return {BigQueryMock, fake};
+  class FakeStreamConnection {
+    close(): void {}
+  }
+
+  class FakeJSONWriter {
+    appendRows(rows: AnalyticsRow[]): {
+      getResult: () => Promise<{error?: unknown}>;
+    } {
+      fake.insertCalls += 1;
+      fake.appendAttempts.push(rows.map((row) => row.event_id));
+      const gate = fake.insertGate;
+      const transient = fake.transientAppendFailures > 0;
+      if (transient) {
+        fake.transientAppendFailures -= 1;
+      }
+      return {
+        getResult: async () => {
+          if (gate !== undefined) {
+            await gate;
+          }
+          if (transient) {
+            // gRPC UNAVAILABLE, which the writer retries.
+            throw Object.assign(new Error('unavailable'), {code: 14});
+          }
+          if (fake.insertError !== undefined) {
+            throw fake.insertError;
+          }
+          if (fake.insertStatus !== undefined) {
+            const {code, message, rowErrors} = fake.insertStatus;
+            return {error: {code, message}, rowErrors};
+          }
+          for (const row of rows) {
+            fake.insertIds.push(row.event_id);
+            fake.inserted.push(row);
+          }
+          return {};
+        },
+      };
+    }
+
+    close(): void {}
+  }
+
+  class FakeWriterClient {
+    constructor(clientOptions: unknown) {
+      fake.streamOptions.push(clientOptions);
+    }
+
+    async getWriteStream(): Promise<{tableSchema: unknown}> {
+      return {tableSchema: {fields: []}};
+    }
+
+    async createStreamConnection(): Promise<FakeStreamConnection> {
+      return new FakeStreamConnection();
+    }
+
+    close(): void {}
+  }
+
+  const storageMock = {
+    managedwriter: {
+      WriterClient: FakeWriterClient,
+      JSONWriter: FakeJSONWriter,
+      DefaultStream: 'DEFAULT',
+    },
+    adapt: {
+      convertStorageSchemaToProto2Descriptor: () => ({name: 'root'}),
+    },
+    protos: {
+      google: {
+        cloud: {bigquery: {storage: {v1: {WriteStreamView: {FULL: 2}}}}},
+      },
+    },
+  };
+
+  return {BigQueryMock, storageMock, fake};
 });
 
 vi.mock('@google-cloud/bigquery', () => ({BigQuery: BigQueryMock}));
+vi.mock('@google-cloud/bigquery-storage', () => storageMock);
 
 const PROJECT_ID = 'test-project';
 const DATASET_ID = 'agent_analytics';
@@ -394,6 +463,9 @@ beforeEach(() => {
   fake.createError = undefined;
   fake.datasetCreateError = undefined;
   fake.insertError = undefined;
+  fake.insertStatus = undefined;
+  fake.appendAttempts = [];
+  fake.transientAppendFailures = 0;
   fake.insertGate = undefined;
   fake.queries = [];
   fake.queryError = undefined;
@@ -539,7 +611,7 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
     ]);
   });
 
-  it('describes event_id by the de-duplication this transport gives', async () => {
+  it("describes event_id in adk-python's words, not its own", async () => {
     const plugin = makePlugin();
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
@@ -550,11 +622,13 @@ describe('BigQueryAgentAnalyticsPlugin lifecycle', () => {
       expect.fail('the created table carries no field list');
     }
     const eventId = schema.find((field) => field.name === 'event_id');
-    // A table holds rows from both SDKs, and whichever one creates it writes
-    // this description. It must not promise the Storage Write API guarantees
-    // that `tabledata.insertAll` does not give.
-    expect(eventId?.description).toContain('insert id');
-    expect(eventId?.description).not.toContain('Storage Write API');
+    // A table holds rows from both SDKs and whichever one creates it writes
+    // this description, so the two must not disagree.
+    expect(eventId?.description).toBe(
+      'A unique identifier assigned before enqueue. Storage Write API ' +
+        'retries preserve this value so duplicate rows can be identified ' +
+        'reliably.',
+    );
   });
 
   it('reuses an existing table without creating one', async () => {
@@ -782,17 +856,27 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       error_message: null,
       is_truncated: false,
     });
-    expect(row.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // A Date, not a string: the Storage Write API encoder converts only a Date
+    // into the microseconds a TIMESTAMP column takes.
+    expect(row.timestamp).toBeInstanceOf(Date);
+    expect(row.timestamp.getTime()).not.toBeNaN();
     expect(row.event_id).toMatch(/^[0-9a-f]{32}$/);
   });
 
-  it('uses the row event id as the BigQuery insert id', async () => {
-    const plugin = makePlugin();
+  it('re-sends the same event id when a retried append repeats a row', async () => {
+    // The default stream delivers at least once, so a reader de-duplicates on
+    // event_id. That only works if a retry carries the id the first attempt did.
+    fake.transientAppendFailures = 1;
+    const plugin = makePlugin({
+      retryConfig: {maxRetries: 1, initialDelayMs: 1, maxDelayMs: 1},
+    });
     await plugin.beforeRunCallback({
       invocationContext: makeInvocationContext(),
     });
     await plugin.flush();
-    expect(fake.insertIds).toEqual([onlyRow().event_id]);
+    expect(fake.appendAttempts).toHaveLength(2);
+    expect(fake.appendAttempts[0]).toEqual(fake.appendAttempts[1]);
+    expect(fake.appendAttempts[1]).toEqual([onlyRow().event_id]);
   });
 
   it('gives every row a distinct event id', async () => {
@@ -921,6 +1005,26 @@ describe('BigQueryAgentAnalyticsPlugin row contents', () => {
       model: 'gemini-2.0-flash',
       llm_config: {temperature: 0.5, top_p: 0.9, max_output_tokens: 128},
       tools: [{name: 'lookup_weather', description: 'Looks up the weather.'}],
+    });
+  });
+
+  it('writes a tool declaration, not a bare name, on an LLM_REQUEST row', async () => {
+    const plugin = makePlugin();
+    await plugin.beforeModelCallback({
+      callbackContext: makeContext(makeInvocationContext()),
+      llmRequest: makeLlmRequest({
+        toolsDict: {lookup_weather: makeTool()},
+      }),
+    });
+    await plugin.flush();
+    expect(parseColumn(onlyRow().attributes)).toMatchObject({
+      tools: [
+        {
+          name: 'lookup_weather',
+          description: 'Looks up the weather.',
+          parameters: {type: 'OBJECT', properties: {}},
+        },
+      ],
     });
   });
 
@@ -3018,11 +3122,12 @@ describe('BigQueryAgentAnalyticsPlugin insert failures', () => {
     expect(plugin.getDropStats()['unexpected_error']).toBe(1);
   });
 
-  it('counts only the rejected rows of a partial failure', async () => {
-    fake.insertError = Object.assign(new Error('some rows failed'), {
-      name: 'PartialFailureError',
-      errors: [{row: {}, errors: [{reason: 'invalid'}]}],
-    });
+  it('counts only the rows the service singled out of a batch', async () => {
+    fake.insertStatus = {
+      code: 3,
+      message: 'some rows failed',
+      rowErrors: [{index: 0, code: 'FIELDS_ERROR'}],
+    };
     const plugin = makePlugin({batchSize: 5, flushOnRunEnd: false});
     const invocationContext = makeInvocationContext();
     await plugin.beforeRunCallback({invocationContext});

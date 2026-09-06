@@ -24,10 +24,10 @@ Writes one BigQuery row per lifecycle event of a weather agent. The plugin
 creates the dataset and the table on first use, so the first run needs
 permission to create both.
 
-Install the optional peer dependency:
+Install the optional peer dependencies:
 
 ```bash
-npm install @google-cloud/bigquery
+npm install @google-cloud/bigquery @google-cloud/bigquery-storage
 ```
 
 Environment variables:

@@ -21,7 +21,7 @@ import {
 /** A row carrying every column, so a projection has something to remove. */
 function makeRow(): AnalyticsRow {
   return {
-    timestamp: '2026-01-01T00:00:00.000Z',
+    timestamp: new Date('2026-01-01T00:00:00.000Z'),
     event_id: 'e1',
     event_type: AnalyticsEventType.LLM_REQUEST,
     agent: 'agent',

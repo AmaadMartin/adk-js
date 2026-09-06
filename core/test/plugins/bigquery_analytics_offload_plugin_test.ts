@@ -15,67 +15,118 @@ import type {AnalyticsRow} from '../../src/plugins/bigquery_analytics_schema.js'
 import {PluginManager} from '../../src/plugins/plugin_manager.js';
 import {createSession} from '../../src/sessions/session.js';
 
-const {BigQueryMock, StorageMock, inserted, saved} = vi.hoisted(() => {
-  const inserted: AnalyticsRow[] = [];
-  const saved: string[] = [];
+const {BigQueryMock, StorageMock, storageWriteMock, inserted, saved} =
+  vi.hoisted(() => {
+    const inserted: AnalyticsRow[] = [];
+    const saved: string[] = [];
 
-  class FakeTable {
-    async exists(): Promise<[boolean]> {
-      return [true];
-    }
+    class FakeTable {
+      async exists(): Promise<[boolean]> {
+        return [true];
+      }
 
-    async getMetadata(): Promise<[unknown]> {
-      return [{schema: {fields: []}, labels: {adk_schema_version: '2'}}];
-    }
+      async getMetadata(): Promise<[unknown]> {
+        return [{schema: {fields: []}, labels: {adk_schema_version: '2'}}];
+      }
 
-    async setMetadata(metadata: unknown): Promise<[unknown]> {
-      return [metadata];
-    }
+      async setMetadata(metadata: unknown): Promise<[unknown]> {
+        return [metadata];
+      }
 
-    async insert(rows: Array<{json: AnalyticsRow}>): Promise<void> {
-      for (const row of rows) {
-        inserted.push(row.json);
+      async insert(rows: Array<{json: AnalyticsRow}>): Promise<void> {
+        for (const row of rows) {
+          inserted.push(row.json);
+        }
       }
     }
-  }
 
-  class FakeDataset {
-    async exists(): Promise<[boolean]> {
-      return [true];
+    class FakeDataset {
+      async exists(): Promise<[boolean]> {
+        return [true];
+      }
+
+      table(): FakeTable {
+        return new FakeTable();
+      }
     }
 
-    table(): FakeTable {
-      return new FakeTable();
-    }
-  }
+    class BigQueryMock {
+      dataset(): FakeDataset {
+        return new FakeDataset();
+      }
 
-  class BigQueryMock {
-    dataset(): FakeDataset {
-      return new FakeDataset();
+      async query(): Promise<[unknown[]]> {
+        return [[]];
+      }
     }
 
-    async query(): Promise<[unknown[]]> {
-      return [[]];
+    class StorageMock {
+      bucket() {
+        return {
+          file: (path: string) => ({
+            save: async () => {
+              saved.push(path);
+            },
+          }),
+        };
+      }
     }
-  }
 
-  class StorageMock {
-    bucket() {
-      return {
-        file: (path: string) => ({
-          save: async () => {
-            saved.push(path);
-          },
-        }),
-      };
+    /**
+     * The Storage Write API path the writer now appends through. The rows land
+     * in `inserted`, where the `table.insert` fake used to put them.
+     */
+    class FakeStreamConnection {
+      close(): void {}
     }
-  }
 
-  return {BigQueryMock, StorageMock, inserted, saved};
-});
+    class FakeJSONWriter {
+      appendRows(rows: AnalyticsRow[]): {
+        getResult: () => Promise<Record<string, never>>;
+      } {
+        for (const row of rows) {
+          inserted.push(row);
+        }
+        return {getResult: async () => ({})};
+      }
+
+      close(): void {}
+    }
+
+    class FakeWriterClient {
+      async getWriteStream(): Promise<{tableSchema: unknown}> {
+        return {tableSchema: {fields: []}};
+      }
+
+      async createStreamConnection(): Promise<FakeStreamConnection> {
+        return new FakeStreamConnection();
+      }
+
+      close(): void {}
+    }
+
+    const storageWriteMock = {
+      managedwriter: {
+        WriterClient: FakeWriterClient,
+        JSONWriter: FakeJSONWriter,
+        DefaultStream: 'DEFAULT',
+      },
+      adapt: {
+        convertStorageSchemaToProto2Descriptor: () => ({name: 'root'}),
+      },
+      protos: {
+        google: {
+          cloud: {bigquery: {storage: {v1: {WriteStreamView: {FULL: 2}}}}},
+        },
+      },
+    };
+
+    return {BigQueryMock, StorageMock, storageWriteMock, inserted, saved};
+  });
 
 vi.mock('@google-cloud/bigquery', () => ({BigQuery: BigQueryMock}));
 vi.mock('@google-cloud/storage', () => ({Storage: StorageMock}));
+vi.mock('@google-cloud/bigquery-storage', () => storageWriteMock);
 
 /** Text that exceeds the 32 KiB inline byte limit by one character. */
 const OVERSIZED_TEXT = 'A'.repeat(32 * 1024 + 1);

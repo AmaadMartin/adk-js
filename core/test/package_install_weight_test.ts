@@ -79,6 +79,7 @@ describe('core/package.json install weight', () => {
 
   it.each([
     '@google-cloud/bigquery',
+    '@google-cloud/bigquery-storage',
     '@google-cloud/bigtable',
     '@google-cloud/opentelemetry-cloud-monitoring-exporter',
     '@google-cloud/opentelemetry-cloud-trace-exporter',

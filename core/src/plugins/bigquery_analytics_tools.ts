@@ -199,7 +199,11 @@ function describeTool(key: string, tool: BaseTool): ToolDeclaration {
  *
  * The row records what the model was allowed to call, which is what makes a
  * later `TOOL_ERROR` readable: a name alone does not say whether the model was
- * given the wrong schema.
+ * given the wrong schema. adk-python's `_extract_tool_declarations` writes the
+ * same shape, so one query reads a dataset both SDKs write.
+ *
+ * Extraction is per tool and best-effort: a tool whose declaration cannot be
+ * read still contributes its name, so one tool never empties the list.
  *
  * @param toolsDict The request's tools, keyed by the name they are called by.
  * @return One entry per tool, in registration order.

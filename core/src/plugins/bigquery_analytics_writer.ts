@@ -15,9 +15,11 @@ import type {
 import {formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
 import {loadOptionalPeer} from '../utils/optional_peer.js';
-import type {ResolvedAnalyticsRetryConfig} from './bigquery_analytics_config.js';
+import type {
+  BigQueryRowWriterOptions,
+  ResolvedAnalyticsRetryConfig,
+} from './bigquery_analytics_config.js';
 import {
-  AnalyticsPayloadColumn,
   AnalyticsRow,
   EVENTS_TABLE_SCHEMA,
   mergeSchemaFields,
@@ -26,16 +28,24 @@ import {
   SCHEMA_VERSION,
   SCHEMA_VERSION_LABEL_KEY,
 } from './bigquery_analytics_schema.js';
+import type {AnalyticsJsonRows} from './bigquery_analytics_stream.js';
+import {
+  AnalyticsAppendError,
+  AnalyticsRowStream,
+} from './bigquery_analytics_stream.js';
 import {analyticsViewStatements} from './bigquery_analytics_views.js';
 
 /** HTTP status BigQuery returns when a table already exists. */
 const ALREADY_EXISTS_STATUS = 409;
 
 /**
- * The error name the BigQuery client uses when an insert accepted some rows
- * and rejected others.
+ * How long a table this process created can still answer an append with
+ * `NOT_FOUND` while it propagates.
+ *
+ * `@google-cloud/bigquery` waits the same 60 seconds for a table it created
+ * (`Table._insertAndCreateTable`), which is where this number comes from.
  */
-const PARTIAL_FAILURE_ERROR_NAME = 'PartialFailureError';
+const TABLE_PROPAGATION_WINDOW_MS = 60_000;
 
 /** Delay before the first retry of a failed setup. */
 const SETUP_RETRY_BASE_MS = 1000;
@@ -76,40 +86,14 @@ enum InsertFailure {
 }
 
 /**
- * Status codes worth another attempt: HTTP 429, 500, 502 and 503, and the
- * gRPC codes the client surfaces for the same conditions — 4
- * (DEADLINE_EXCEEDED), 13 (INTERNAL) and 14 (UNAVAILABLE).
+ * The gRPC statuses an append is worth re-sending on: 4 (DEADLINE_EXCEEDED),
+ * 8 (RESOURCE_EXHAUSTED), 13 (INTERNAL) and 14 (UNAVAILABLE). Each names a
+ * transport or capacity condition rather than a problem with the rows.
  */
-const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([
-  4, 13, 14, 429, 500, 502, 503,
-]);
+const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([4, 8, 13, 14]);
 
-/**
- * Credentials for the BigQuery client, in the SDK's own option shape.
- *
- * Taken from the SDK's options rather than declared here, so the two can never
- * disagree, and so this stays a pass-through with no cast in between.
- */
-export type BigQueryCredentials = BigQueryOptions['credentials'];
-
-/** Everything {@link BigQueryRowWriter} needs to open and feed the table. */
-export interface BigQueryRowWriterOptions {
-  projectId: string;
-  datasetId: string;
-  tableId: string;
-  location: string;
-  credentials?: BigQueryCredentials;
-  clusteringFields: string[];
-  batchSize: number;
-  flushIntervalMs: number;
-  shutdownTimeoutMs: number;
-  queueMaxSize: number;
-  retry: ResolvedAnalyticsRetryConfig;
-  autoSchemaUpgrade: boolean;
-  createViews: boolean;
-  viewPrefix: string;
-  deniedColumns: ReadonlySet<AnalyticsPayloadColumn>;
-}
+/** gRPC `NOT_FOUND`, which a table still propagating answers an append with. */
+const NOT_FOUND_STATUS = 5;
 
 /**
  * Finds or creates `dataset`. A create that loses the race to a concurrent
@@ -162,46 +146,48 @@ async function awaitWithTimeout(
 }
 
 /**
- * How many rows of a batch of `batchSize` an insert failure lost.
+ * How many rows of a batch of `batchSize` an append failure lost.
  *
- * `tabledata.insertAll` can accept part of a batch and reject the rest, which
- * the client reports as a `PartialFailureError` carrying one entry per rejected
- * row. Charging the whole batch there would report rows that landed as lost.
+ * The service can single out individual rows of an append, which it reports as
+ * `rowErrors`. Charging the whole batch there would report rows that landed as
+ * lost.
  *
- * @param err The error the insert threw.
- * @param batchSize How many rows the insert carried.
+ * @param err The error the append threw.
+ * @param batchSize How many rows the append carried.
  * @return The number of rows that did not land.
  */
 function rejectedRowCount(err: unknown, batchSize: number): number {
-  const errors = partialFailureEntries(err);
+  const errors = rowErrorEntries(err);
   return errors === undefined ? batchSize : Math.min(errors.length, batchSize);
 }
 
-/** The per-row entries of a `PartialFailureError`, or undefined for any other error. */
-function partialFailureEntries(err: unknown): unknown[] | undefined {
-  if (typeof err !== 'object' || err === null) {
+/** The rows an append error singled out, or undefined when it named none. */
+function rowErrorEntries(err: unknown): readonly unknown[] | undefined {
+  if (!(err instanceof AnalyticsAppendError) || err.rowErrors.length === 0) {
     return undefined;
   }
-  const {name, errors} = err as {name?: unknown; errors?: unknown};
-  return name === PARTIAL_FAILURE_ERROR_NAME && Array.isArray(errors)
-    ? errors
-    : undefined;
+  return err.rowErrors;
 }
 
 /**
- * Classifies an insert failure.
+ * Classifies an append failure.
  *
- * A partial failure is definitive: BigQuery accepted the rest of the batch and
- * named the rows it rejected, so re-sending them changes nothing. A numeric
- * status is retryable only when it names a rate limit or a server-side
- * condition. Anything without a status is unexpected, which keeps a bug in
- * this file out of the retry loop.
+ * A row-level refusal is definitive: the service named the rows it would not
+ * take, so re-sending them changes nothing. A gRPC status is retryable when it
+ * names a transport or capacity condition. `NOT_FOUND` is retryable only while
+ * a table this process created is still propagating, because the same status
+ * means a genuinely missing table at any other time. Anything without a status
+ * is unexpected, which keeps a bug in this file out of the retry loop.
  *
- * @param err The error the insert threw.
+ * @param err The error the append threw.
+ * @param tablePropagating Whether this process created the table just now.
  * @return Which failure class the error falls into.
  */
-function classifyInsertFailure(err: unknown): InsertFailure {
-  if (partialFailureEntries(err) !== undefined) {
+function classifyAppendFailure(
+  err: unknown,
+  tablePropagating: boolean,
+): InsertFailure {
+  if (rowErrorEntries(err) !== undefined) {
     return InsertFailure.NON_RETRYABLE;
   }
   if (typeof err !== 'object' || err === null) {
@@ -210,6 +196,11 @@ function classifyInsertFailure(err: unknown): InsertFailure {
   const {code} = err as {code?: unknown};
   if (typeof code !== 'number') {
     return InsertFailure.UNEXPECTED;
+  }
+  if (code === NOT_FOUND_STATUS) {
+    return tablePropagating
+      ? InsertFailure.RETRYABLE
+      : InsertFailure.NON_RETRYABLE;
   }
   return RETRYABLE_STATUS_CODES.has(code)
     ? InsertFailure.RETRYABLE
@@ -291,20 +282,23 @@ async function upgradeSchema(
  *
  * The writer creates the dataset and the table if they are absent.
  *
- * Transport: adk-python appends rows through the BigQuery Storage Write API.
- * This writer calls `table.insert()`, which is `tabledata.insertAll`. That is a
- * deliberate departure, not an oversight. Both paths write the same columns and
- * the same values, so one dataset answers queries from either SDK.
+ * The two planes use two clients, as adk-python's does. `@google-cloud/bigquery`
+ * creates the dataset, the table and the views and upgrades the schema, and
+ * `@google-cloud/bigquery-storage` appends the rows through the Storage Write
+ * API. Both are optional peer dependencies, loaded on the first row.
  *
- * The delivery semantics differ, and a host that reads {@link getDropStats}
- * should know how. `insertAll` de-duplicates on the insert id of a row on a
- * best-effort basis, where adk-python's committed streams and offsets can
- * de-duplicate exactly. BigQuery also rejects an insert into a table it created
- * moments earlier, until that new table propagates; that rejection is
- * retryable, so the configured backoff covers it.
+ * Rows go to the table's default stream, which delivers at least once. A
+ * retried append the service had in fact accepted can therefore duplicate a
+ * row, and `event_id` is the key to de-duplicate on when reading. adk-python
+ * offers a committed-stream mode with explicit offsets for exactly-once
+ * delivery; that mode is not ported, and it is off by default there too.
  *
- * The client's own retry is turned off, so the caller's `retryConfig` is the
- * only thing deciding how often a failed insert is attempted.
+ * A table this writer just created answers an append with `NOT_FOUND` until it
+ * propagates, so that status is retried inside a bounded window after the
+ * create and treated as a genuinely missing table outside it.
+ *
+ * The control-plane client's own retry is turned off, so the caller's
+ * `retryConfig` is the only thing deciding how often an append is attempted.
  */
 export class BigQueryRowWriter {
   /** The columns this writer creates, upgrades to and writes. */
@@ -322,12 +316,15 @@ export class BigQueryRowWriter {
     [AnalyticsDropReason.FORMATTER_FAILED]: 0,
     [AnalyticsDropReason.CONTENT_PARSE_FAILED]: 0,
   };
-  private tablePromise?: Promise<Table>;
+  private streamPromise?: Promise<AnalyticsRowStream>;
+  private stream?: AnalyticsRowStream;
   private timer?: ReturnType<typeof setTimeout>;
   private pendingRows = 0;
   private setupFailures = 0;
   private nextSetupAttemptMs = 0;
   private abandoned = false;
+  /** When this writer created the table, so a `NOT_FOUND` append can wait. */
+  private tableCreatedAtMs?: number;
 
   constructor(private readonly options: BigQueryRowWriterOptions) {
     this.schema = projectSchema(EVENTS_TABLE_SCHEMA, options.deniedColumns);
@@ -412,37 +409,43 @@ export class BigQueryRowWriter {
    */
   async shutdown(): Promise<void> {
     this.clearTimer();
-    await this.flushWithinTimeout();
-    const lost = this.queue.length + this.pendingRows;
-    if (lost > 0) {
-      this.queue.length = 0;
-      this.countDrop(AnalyticsDropReason.SHUTDOWN_TIMEOUT, lost);
-      this.abandoned = true;
-      logger.warn(
-        `BigQuery analytics shutdown timed out after ` +
-          `${this.options.shutdownTimeoutMs}ms; ${lost} row(s) for ` +
-          `${this.tableName} were not written.`,
-      );
+    try {
+      await this.flushWithinTimeout();
+      const lost = this.queue.length + this.pendingRows;
+      if (lost > 0) {
+        this.queue.length = 0;
+        this.countDrop(AnalyticsDropReason.SHUTDOWN_TIMEOUT, lost);
+        this.abandoned = true;
+        logger.warn(
+          `BigQuery analytics shutdown timed out after ` +
+            `${this.options.shutdownTimeoutMs}ms; ${lost} row(s) for ` +
+            `${this.tableName} were not written.`,
+        );
+      }
+    } finally {
+      this.stream?.close();
+      this.stream = undefined;
+      this.streamPromise = undefined;
     }
   }
 
   /**
-   * Resolves the table handle, opening the client and creating the table on
-   * first use. The promise is kept, so later writes reuse the same handle.
+   * Resolves the append stream, creating the table and opening the clients on
+   * first use. The promise is kept, so later writes reuse the same stream.
    * Returns `undefined` when setup failed, having logged the cause; the next
    * call retries, so a transient control-plane failure does not disable the
    * plugin for the rest of the process.
    */
-  private async openTableOnce(): Promise<Table | undefined> {
+  private async openStreamOnce(): Promise<AnalyticsRowStream | undefined> {
     if (Date.now() < this.nextSetupAttemptMs) {
       return undefined;
     }
-    const pending = (this.tablePromise ??= this.openTable());
+    const pending = (this.streamPromise ??= this.openStream());
     try {
       return await pending;
     } catch (err: unknown) {
-      if (this.tablePromise === pending) {
-        this.tablePromise = undefined;
+      if (this.streamPromise === pending) {
+        this.streamPromise = undefined;
         this.setupFailures += 1;
         this.nextSetupAttemptMs = Date.now() + this.setupRetryDelayMs();
         logger.error(
@@ -463,6 +466,26 @@ export class BigQueryRowWriter {
       SETUP_RETRY_BASE_MS * 2 ** (this.setupFailures - 1),
       SETUP_RETRY_MAX_MS,
     );
+  }
+
+  /**
+   * Readies the table, then opens the append stream onto it.
+   *
+   * The stream is opened last because its proto descriptor is built from the
+   * schema the service reports, which is only final once the table exists and
+   * any schema upgrade has landed.
+   */
+  private async openStream(): Promise<AnalyticsRowStream> {
+    await this.openTable();
+    const {projectId, datasetId, tableId, credentials} = this.options;
+    const stream = await AnalyticsRowStream.open({
+      projectId,
+      datasetId,
+      tableId,
+      credentials,
+    });
+    this.stream = stream;
+    return stream;
   }
 
   /**
@@ -512,6 +535,9 @@ export class BigQueryRowWriter {
     };
     try {
       const [created] = await dataset.createTable(tableId, metadata);
+      // A new table is not immediately appendable, so the first appends after
+      // this get to retry a NOT_FOUND rather than being dropped.
+      this.tableCreatedAtMs = Date.now();
       logger.debug(`BigQuery analytics created table ${this.tableName}.`);
       await this.maybeCreateViews(client);
       return created;
@@ -585,42 +611,53 @@ export class BigQueryRowWriter {
     this.inFlight.add(write);
   }
 
-  /** Opens the table if needed, then hands every queued row to it as one insert. */
+  /** Opens the stream if needed, then appends every queued row as one batch. */
   private async writeBatch(): Promise<void> {
     const rows = this.queue.splice(0, this.queue.length);
     this.clearTimer();
     this.pendingRows += rows.length;
     try {
-      const table = await this.openTableOnce();
-      if (table === undefined) {
+      const stream = await this.openStreamOnce();
+      if (stream === undefined) {
         this.countDrop(AnalyticsDropReason.SETUP_UNAVAILABLE, rows.length);
         return;
       }
-      await this.insert(table, rows);
+      await this.append(stream, rows);
     } finally {
       this.pendingRows -= rows.length;
     }
   }
 
+  /** Whether the table this writer created is still propagating. */
+  private tablePropagating(): boolean {
+    return (
+      this.tableCreatedAtMs !== undefined &&
+      Date.now() - this.tableCreatedAtMs < TABLE_PROPAGATION_WINDOW_MS
+    );
+  }
+
   /**
-   * Inserts one batch, retrying a failure that another attempt could fix.
+   * Appends one batch, retrying a failure that another attempt could fix.
    *
-   * `insertId` is the row's `event_id`, so a retry of a batch BigQuery already
-   * accepted is de-duplicated on the same key adk-python uses. The attempt
-   * counter lives outside the loop, which is what bounds the retries.
+   * The attempt counter lives outside the loop, which is what bounds the
+   * retries. The default stream delivers at least once, so a retry of an
+   * append the service had accepted can duplicate rows; readers de-duplicate
+   * on `event_id`.
    */
-  private async insert(table: Table, rows: AnalyticsRow[]): Promise<void> {
-    const payload = rows.map((row) => ({
-      insertId: row.event_id,
-      json: projectRow(row, this.options.deniedColumns),
+  private async append(
+    stream: AnalyticsRowStream,
+    rows: AnalyticsRow[],
+  ): Promise<void> {
+    const payload: AnalyticsJsonRows = rows.map((row) => ({
+      ...projectRow(row, this.options.deniedColumns),
     }));
     let attempt = 0;
     for (;;) {
       try {
-        await table.insert(payload, {raw: true});
+        await stream.append(payload);
         return;
       } catch (err: unknown) {
-        const failure = classifyInsertFailure(err);
+        const failure = classifyAppendFailure(err, this.tablePropagating());
         if (failure !== InsertFailure.RETRYABLE) {
           this.dropBatch(err, rows.length, failureReason(failure));
           return;

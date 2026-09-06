@@ -233,8 +233,12 @@ export enum AnalyticsStorageMode {
 /**
  * The `content_parts.object_ref` column: a BigQuery `ObjectRef` naming the
  * Cloud Storage object that holds one part's content.
+ *
+ * A type alias rather than an interface: the row reaches the Storage Write API
+ * as `JSONList`, whose members are index-signature types, and an interface is
+ * not assignable to one.
  */
-export interface AnalyticsObjectRef {
+export type AnalyticsObjectRef = {
   /** The `gs://` URI of the object. */
   uri: string;
   /** Always null: the plugin never pins a reference to one generation. */
@@ -243,10 +247,10 @@ export interface AnalyticsObjectRef {
   authorizer: string | null;
   /** JSON-encoded, because BigQuery `JSON` columns are supplied as strings. */
   details: string;
-}
+};
 
 /** One entry of the repeated `content_parts` column. */
-export interface AnalyticsContentPart {
+export type AnalyticsContentPart = {
   mime_type: string;
   uri: string | null;
   /**
@@ -258,11 +262,19 @@ export interface AnalyticsContentPart {
   part_index: number;
   part_attributes: string;
   storage_mode: AnalyticsStorageMode;
-}
+};
 
 /** One row of the events table, in the column order the schema declares. */
-export interface AnalyticsRow {
-  timestamp: string;
+export type AnalyticsRow = {
+  /**
+   * When the event happened.
+   *
+   * A `Date`, not an ISO-8601 string: the Storage Write API encodes a
+   * TIMESTAMP column as proto2 `int64` microseconds, and its JSON encoder
+   * converts only a `Date` into that. A string reaches protobuf's int64 writer
+   * unconverted and the append throws.
+   */
+  timestamp: Date;
   event_id: string;
   event_type: AnalyticsEventType;
   agent: string | null;
@@ -282,7 +294,7 @@ export interface AnalyticsRow {
   status: AnalyticsStatus;
   error_message: string | null;
   is_truncated: boolean;
-}
+};
 
 /** Sub-fields of the repeated `content_parts` column. */
 const CONTENT_PART_FIELDS: TableField[] = [
@@ -374,7 +386,7 @@ export const EVENTS_TABLE_SCHEMA: TableField[] = [
     type: 'STRING',
     mode: 'NULLABLE',
     description:
-      'A unique identifier assigned before enqueue. This SDK sends it as the insert id of the row, so a retried insert of the same row is de-duplicated on a best-effort basis.',
+      'A unique identifier assigned before enqueue. Storage Write API retries preserve this value so duplicate rows can be identified reliably.',
   },
   {
     name: 'event_type',

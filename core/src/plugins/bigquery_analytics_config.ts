@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {BigQueryOptions} from '@google-cloud/bigquery';
 import {InputValidationError} from '../errors/input_validation_error.js';
 import {NO_LENGTH_LIMIT} from '../utils/sanitize_utils.js';
 import {
@@ -11,10 +12,33 @@ import {
   AnalyticsPayloadColumn,
   validatePayloadColumnDenylist,
 } from './bigquery_analytics_schema.js';
-import type {
-  BigQueryCredentials,
-  BigQueryRowWriterOptions,
-} from './bigquery_analytics_writer.js';
+
+/**
+ * Credentials for the BigQuery clients, in the SDK's own option shape.
+ *
+ * Taken from the SDK's options rather than declared here, so the two can never
+ * disagree, and so this stays a pass-through with no cast in between.
+ */
+export type BigQueryCredentials = BigQueryOptions['credentials'];
+
+/** Everything the row writer needs to open and feed the table. */
+export interface BigQueryRowWriterOptions {
+  projectId: string;
+  datasetId: string;
+  tableId: string;
+  location: string;
+  credentials?: BigQueryCredentials;
+  clusteringFields: string[];
+  batchSize: number;
+  flushIntervalMs: number;
+  shutdownTimeoutMs: number;
+  queueMaxSize: number;
+  retry: ResolvedAnalyticsRetryConfig;
+  autoSchemaUpgrade: boolean;
+  createViews: boolean;
+  viewPrefix: string;
+  deniedColumns: ReadonlySet<AnalyticsPayloadColumn>;
+}
 
 /** Default configuration values, matching adk-python's `BigQueryLoggerConfig`. */
 const DEFAULT_TABLE_ID = 'agent_events';
@@ -297,7 +321,7 @@ function requireRetryConfig(retry: AnalyticsRetryConfig): void {
   }
 }
 
-/** Rejects a blank string. */
+/** Rejects a name the caller left blank. */
 function requireNonEmpty(name: string, value: string): void {
   if (value.trim() === '') {
     throw configError(`${name} must not be empty.`);
@@ -322,7 +346,7 @@ function requireNonEmptyIfSet(name: string, value: string | undefined): void {
  * event type alone, which can collide with an ordinary table in the dataset.
  *
  * @param config The configuration to check.
- * @throws Error when an option is out of range or names a protected column.
+ * @throws InputValidationError when an option is out of range or blank.
  */
 function validateConfig(config: BigQueryLoggerConfig): void {
   requireCount('batchSize', config.batchSize, 1);

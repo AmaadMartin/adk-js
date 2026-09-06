@@ -25,26 +25,50 @@ import {
   BigQueryRowWriter,
   retryDelayMs,
 } from '../../src/plugins/bigquery_analytics_writer.js';
+import type {Logger} from '../../src/utils/logger.js';
+import {setLogger} from '../../src/utils/logger.js';
 
-const {BigQueryMock, fake} = vi.hoisted(() => {
+const {BigQueryMock, storageMock, fake} = vi.hoisted(() => {
+  /** A status the service reports on an append it resolved rather than threw. */
+  interface AppendStatus {
+    code: number;
+    message: string;
+    rowErrors: unknown[];
+  }
+
   interface FakeBigQuery {
     clientOptions: unknown[];
-    insertCalls: Array<Array<{insertId: string; json: Partial<AnalyticsRow>}>>;
-    insertErrors: unknown[];
+    streamOptions: unknown[];
+    appendCalls: Array<Array<Partial<AnalyticsRow>>>;
+    appendErrors: unknown[];
+    appendStatuses: Array<AppendStatus | undefined>;
+    streamsClosed: number;
+    descriptorScopes: string[];
+    streamViews: unknown[];
+    streamIds: string[];
     created: Array<{tableId: string; metadata: TableMetadata}>;
     metadataReads: number;
     metadataUpdates: TableMetadata[];
     liveSchema: TableField[];
     liveLabels: Record<string, string>;
     tableExists: boolean;
+    createError?: Error;
+    appendHold?: Promise<void>;
+    streamSchema: unknown;
     queries: string[];
     queryError?: Error;
   }
 
   const fake: FakeBigQuery = {
     clientOptions: [],
-    insertCalls: [],
-    insertErrors: [],
+    streamOptions: [],
+    appendCalls: [],
+    appendErrors: [],
+    appendStatuses: [],
+    streamsClosed: 0,
+    descriptorScopes: [],
+    streamViews: [],
+    streamIds: [],
     created: [],
     metadataReads: 0,
     metadataUpdates: [],
@@ -52,6 +76,7 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     liveLabels: {},
     tableExists: true,
     queries: [],
+    streamSchema: {fields: []},
   };
 
   class FakeTable {
@@ -76,17 +101,6 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
       fake.metadataUpdates.push(metadata);
       return [metadata];
     }
-
-    async insert(
-      rows: Array<{insertId: string; json: Partial<AnalyticsRow>}>,
-    ): Promise<void> {
-      fake.insertCalls.push(rows);
-      // One entry per attempt, so a test can fail the first N and then succeed.
-      const failure = fake.insertErrors.shift();
-      if (failure !== undefined) {
-        throw failure;
-      }
-    }
   }
 
   class FakeDataset {
@@ -103,6 +117,9 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
       metadata: TableMetadata,
     ): Promise<[FakeTable]> {
       fake.created.push({tableId, metadata});
+      if (fake.createError !== undefined) {
+        throw fake.createError;
+      }
       return [new FakeTable(tableId)];
     }
   }
@@ -125,34 +142,140 @@ const {BigQueryMock, fake} = vi.hoisted(() => {
     }
   }
 
-  return {BigQueryMock, fake};
+  class FakeStreamConnection {
+    close(): void {
+      fake.streamsClosed += 1;
+    }
+  }
+
+  class FakeJSONWriter {
+    appendRows(rows: Array<Partial<AnalyticsRow>>): {
+      getResult: () => Promise<{error?: unknown; rowErrors?: unknown[]}>;
+    } {
+      fake.appendCalls.push(rows);
+      // One entry per attempt, so a test can fail the first N and succeed after.
+      const thrown = fake.appendErrors.shift();
+      const status = fake.appendStatuses.shift();
+      const hold = fake.appendHold;
+      return {
+        getResult: async () => {
+          if (hold !== undefined) {
+            await hold;
+          }
+          if (thrown !== undefined) {
+            throw thrown;
+          }
+          if (status !== undefined) {
+            return {
+              error: {code: status.code, message: status.message},
+              rowErrors: status.rowErrors,
+            };
+          }
+          return {};
+        },
+      };
+    }
+
+    close(): void {
+      fake.streamsClosed += 1;
+    }
+  }
+
+  class FakeWriterClient {
+    constructor(clientOptions: unknown) {
+      fake.streamOptions.push(clientOptions);
+    }
+
+    async getWriteStream(request: {
+      streamId: string;
+      view?: unknown;
+    }): Promise<{tableSchema: unknown}> {
+      fake.streamIds.push(request.streamId);
+      fake.streamViews.push(request.view);
+      return {tableSchema: fake.streamSchema};
+    }
+
+    async createStreamConnection(): Promise<FakeStreamConnection> {
+      return new FakeStreamConnection();
+    }
+
+    close(): void {
+      fake.streamsClosed += 1;
+    }
+  }
+
+  const storageMock = {
+    managedwriter: {
+      WriterClient: FakeWriterClient,
+      JSONWriter: FakeJSONWriter,
+      DefaultStream: 'DEFAULT',
+    },
+    adapt: {
+      convertStorageSchemaToProto2Descriptor: (
+        _schema: unknown,
+        scope: string,
+      ) => {
+        fake.descriptorScopes.push(scope);
+        return {name: scope};
+      },
+    },
+    protos: {
+      google: {
+        cloud: {bigquery: {storage: {v1: {WriteStreamView: {FULL: 2}}}}},
+      },
+    },
+  };
+
+  return {BigQueryMock, storageMock, fake};
 });
 
 vi.mock('@google-cloud/bigquery', () => ({BigQuery: BigQueryMock}));
+vi.mock('@google-cloud/bigquery-storage', () => storageMock);
 
 /** The backoff one retry test waits out, kept short so the suite stays fast. */
 const BACKOFF_MS = 50;
 
-/** An error carrying an HTTP or gRPC status, as the client reports one. */
+/** An error carrying a gRPC status, as the append client reports one. */
 function statusError(code: number, message = 'bigquery said no'): Error {
   return Object.assign(new Error(message), {code});
 }
 
-/** A `PartialFailureError` naming `rejected` rows of a larger batch. */
-function partialFailure(rejected: number): Error {
-  return Object.assign(new Error('some rows failed'), {
-    name: 'PartialFailureError',
-    errors: Array.from({length: rejected}, () => ({
-      row: {},
-      errors: [{reason: 'invalid'}],
+/** A resolved append status naming `rejected` rows of a larger batch. */
+function rowErrorStatus(rejected: number): {
+  code: number;
+  message: string;
+  rowErrors: unknown[];
+} {
+  return {
+    code: 3,
+    message: 'some rows failed',
+    rowErrors: Array.from({length: rejected}, (_unused, index) => ({
+      index,
+      code: 'FIELDS_ERROR',
     })),
-  });
+  };
+}
+
+/** Redirects `logger.error` into `sink` until the returned function is called. */
+function captureErrors(sink: string[]): () => void {
+  const capturing: Logger = {
+    setLogLevel: () => {},
+    log: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: (...args: unknown[]) => {
+      sink.push(args.map((arg) => String(arg)).join(' '));
+    },
+  };
+  setLogger(capturing);
+  return () => setLogger(null);
 }
 
 /** One well-formed row, distinguished by `id`. */
 function makeRow(id: string): AnalyticsRow {
   return {
-    timestamp: '2026-01-01T00:00:00.000Z',
+    timestamp: new Date('2026-01-01T00:00:00.000Z'),
     event_id: id,
     event_type: AnalyticsEventType.LLM_REQUEST,
     agent: 'agent',
@@ -210,14 +333,23 @@ async function writeOneRow(writer: BigQueryRowWriter): Promise<void> {
 
 beforeEach(() => {
   fake.clientOptions = [];
-  fake.insertCalls = [];
-  fake.insertErrors = [];
+  fake.streamOptions = [];
+  fake.appendCalls = [];
+  fake.appendErrors = [];
+  fake.appendStatuses = [];
+  fake.streamsClosed = 0;
+  fake.descriptorScopes = [];
+  fake.streamViews = [];
+  fake.streamIds = [];
   fake.created = [];
   fake.metadataReads = 0;
   fake.metadataUpdates = [];
   fake.liveSchema = EVENTS_TABLE_SCHEMA;
   fake.liveLabels = {[SCHEMA_VERSION_LABEL_KEY]: SCHEMA_VERSION};
   fake.tableExists = true;
+  fake.createError = undefined;
+  fake.appendHold = undefined;
+  fake.streamSchema = {fields: []};
   fake.queries = [];
   fake.queryError = undefined;
 });
@@ -256,18 +388,18 @@ describe('BigQueryRowWriter insert retry', () => {
   it('writes the batch once when the insert succeeds', async () => {
     const writer = makeWriter();
     await writeOneRow(writer);
-    expect(fake.insertCalls).toHaveLength(1);
+    expect(fake.appendCalls).toHaveLength(1);
     expect(writer.getDropStats()[AnalyticsDropReason.RETRY_EXHAUSTED]).toBe(0);
   });
 
-  it.each([4, 13, 14, 429, 500, 502, 503])(
-    'retries status %i and keeps the row',
+  it.each([4, 8, 13, 14])(
+    'retries gRPC status %i and keeps the row',
     async (code) => {
-      fake.insertErrors = [statusError(code)];
+      fake.appendErrors = [statusError(code)];
       const writer = makeWriter();
       await writeOneRow(writer);
-      expect(fake.insertCalls).toHaveLength(2);
-      expect(fake.insertCalls[1][0].insertId).toBe('e1');
+      expect(fake.appendCalls).toHaveLength(2);
+      expect(fake.appendCalls[1][0].event_id).toBe('e1');
       expect(writer.getDropStats()[AnalyticsDropReason.RETRY_EXHAUSTED]).toBe(
         0,
       );
@@ -275,26 +407,26 @@ describe('BigQueryRowWriter insert retry', () => {
   );
 
   it('gives up after maxRetries and counts retry_exhausted', async () => {
-    fake.insertErrors = [503, 503, 503, 503].map((code) => statusError(code));
+    fake.appendErrors = [14, 14, 14, 14].map((code) => statusError(code));
     const writer = makeWriter();
     await writeOneRow(writer);
     // One first attempt plus the two retries the config allows.
-    expect(fake.insertCalls).toHaveLength(3);
+    expect(fake.appendCalls).toHaveLength(3);
     expect(writer.getDropStats()[AnalyticsDropReason.RETRY_EXHAUSTED]).toBe(1);
   });
 
   it('attempts once and gives up when maxRetries is zero', async () => {
-    fake.insertErrors = [statusError(503), statusError(503)];
+    fake.appendErrors = [statusError(14), statusError(14)];
     const writer = makeWriter({
       retryConfig: {maxRetries: 0, initialDelayMs: 0, maxDelayMs: 0},
     });
     await writeOneRow(writer);
-    expect(fake.insertCalls).toHaveLength(1);
+    expect(fake.appendCalls).toHaveLength(1);
     expect(writer.getDropStats()[AnalyticsDropReason.RETRY_EXHAUSTED]).toBe(1);
   });
 
   it('charges every row of the batch when the retries run out', async () => {
-    fake.insertErrors = [503, 503, 503].map((code) => statusError(code));
+    fake.appendErrors = [14, 14, 14].map((code) => statusError(code));
     const writer = makeWriter({batchSize: 3});
     writer.enqueue(makeRow('e1'));
     writer.enqueue(makeRow('e2'));
@@ -304,7 +436,7 @@ describe('BigQueryRowWriter insert retry', () => {
   });
 
   it('waits out the configured backoff before it retries', async () => {
-    fake.insertErrors = [statusError(503)];
+    fake.appendErrors = [statusError(14)];
     const writer = makeWriter({
       retryConfig: {
         maxRetries: 1,
@@ -315,40 +447,40 @@ describe('BigQueryRowWriter insert retry', () => {
     });
     const startedAt = Date.now();
     await writeOneRow(writer);
-    expect(fake.insertCalls).toHaveLength(2);
+    expect(fake.appendCalls).toHaveLength(2);
     // A timer never fires early, so the elapsed time is a sound lower bound.
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(BACKOFF_MS - 1);
   });
 });
 
-describe('BigQueryRowWriter insert failure classification', () => {
-  it.each([400, 403, 404, 409])(
-    'counts status %i as non_retryable and does not retry',
+describe('BigQueryRowWriter append failure classification', () => {
+  it.each([3, 7, 5, 6])(
+    'counts gRPC status %i as non_retryable and does not retry',
     async (code) => {
-      fake.insertErrors = [statusError(code)];
+      fake.appendErrors = [statusError(code)];
       const writer = makeWriter();
       await writeOneRow(writer);
-      expect(fake.insertCalls).toHaveLength(1);
+      expect(fake.appendCalls).toHaveLength(1);
       expect(writer.getDropStats()[AnalyticsDropReason.NON_RETRYABLE]).toBe(1);
     },
   );
 
   it('counts a schema mismatch as non_retryable', async () => {
-    fake.insertErrors = [statusError(400, 'Schema mismatch for field content')];
+    fake.appendErrors = [statusError(3, 'Schema mismatch for field content')];
     const writer = makeWriter();
     await writeOneRow(writer);
-    expect(fake.insertCalls).toHaveLength(1);
+    expect(fake.appendCalls).toHaveLength(1);
     expect(writer.getDropStats()[AnalyticsDropReason.NON_RETRYABLE]).toBe(1);
   });
 
   it('counts only the rejected rows of a partial failure', async () => {
-    fake.insertErrors = [partialFailure(2)];
+    fake.appendStatuses = [rowErrorStatus(2)];
     const writer = makeWriter({batchSize: 5});
     for (const id of ['e1', 'e2', 'e3', 'e4', 'e5']) {
       writer.enqueue(makeRow(id));
     }
     await writer.flush();
-    expect(fake.insertCalls).toHaveLength(1);
+    expect(fake.appendCalls).toHaveLength(1);
     expect(writer.getDropStats()[AnalyticsDropReason.NON_RETRYABLE]).toBe(2);
   });
 
@@ -360,15 +492,15 @@ describe('BigQueryRowWriter insert failure classification', () => {
       Object.assign(new Error('x'), {code: 'ECONNRESET'}),
     ],
   ])('counts %s as unexpected_error', async (_label, failure) => {
-    fake.insertErrors = [failure];
+    fake.appendErrors = [failure];
     const writer = makeWriter();
     await writeOneRow(writer);
-    expect(fake.insertCalls).toHaveLength(1);
+    expect(fake.appendCalls).toHaveLength(1);
     expect(writer.getDropStats()[AnalyticsDropReason.UNEXPECTED_ERROR]).toBe(1);
   });
 
   it('never throws at the caller, whatever the insert does', async () => {
-    fake.insertErrors = [statusError(400)];
+    fake.appendErrors = [statusError(400)];
     const writer = makeWriter();
     await expect(writeOneRow(writer)).resolves.toBeUndefined();
   });
@@ -453,7 +585,7 @@ describe('BigQueryRowWriter schema upgrade', () => {
     fake.liveSchema = [{name: 'content', type: 'STRING', mode: 'NULLABLE'}];
     const writer = makeWriter();
     await writeOneRow(writer);
-    expect(fake.insertCalls).toEqual([]);
+    expect(fake.appendCalls).toEqual([]);
     expect(writer.getDropStats()[AnalyticsDropReason.SETUP_UNAVAILABLE]).toBe(
       1,
     );
@@ -464,7 +596,7 @@ describe('BigQueryRowWriter schema upgrade', () => {
     const writer = makeWriter();
     await writeOneRow(writer);
     await writeOneRow(writer);
-    expect(fake.insertCalls).toHaveLength(2);
+    expect(fake.appendCalls).toHaveLength(2);
     expect(fake.metadataReads).toBe(1);
   });
 });
@@ -489,15 +621,15 @@ describe('BigQueryRowWriter payload column projection', () => {
     await writeOneRow(
       makeWriter({payloadColumnDenylist: ['content', 'content_parts']}),
     );
-    const [row] = fake.insertCalls[0];
-    expect(row.json).not.toHaveProperty('content');
-    expect(row.json).not.toHaveProperty('content_parts');
-    expect(row.json.event_id).toBe('e1');
+    const [row] = fake.appendCalls[0];
+    expect(row).not.toHaveProperty('content');
+    expect(row).not.toHaveProperty('content_parts');
+    expect(row.event_id).toBe('e1');
   });
 
-  it('still keys de-duplication on the event id', async () => {
+  it('appends the event id, which is the key a reader de-duplicates on', async () => {
     await writeOneRow(makeWriter({payloadColumnDenylist: ['attributes']}));
-    expect(fake.insertCalls[0][0].insertId).toBe('e1');
+    expect(fake.appendCalls[0][0].event_id).toBe('e1');
   });
 
   it('does not ask an existing table for the columns it projected out', async () => {
@@ -520,7 +652,7 @@ describe('BigQueryRowWriter queue bounds', () => {
     writer.enqueue(makeRow('e2'));
     expect(writer.getDropStats()[AnalyticsDropReason.QUEUE_FULL]).toBe(1);
     await writer.flush();
-    expect(fake.insertCalls[0]).toHaveLength(1);
+    expect(fake.appendCalls[0]).toHaveLength(1);
   });
 });
 
@@ -557,7 +689,7 @@ describe('BigQueryRowWriter analytics views', () => {
     const writer = makeWriter();
     await writeOneRow(writer);
     expect(fake.queries.length).toBeGreaterThan(0);
-    expect(fake.insertCalls).toHaveLength(1);
+    expect(fake.appendCalls).toHaveLength(1);
     expect(writer.getDropStats()[AnalyticsDropReason.SETUP_UNAVAILABLE]).toBe(
       0,
     );
@@ -567,7 +699,7 @@ describe('BigQueryRowWriter analytics views', () => {
     const writer = makeWriter();
     await writeOneRow(writer);
     await writeOneRow(writer);
-    expect(fake.insertCalls).toHaveLength(2);
+    expect(fake.appendCalls).toHaveLength(2);
     expect(fake.queries).toHaveLength(EVENT_VIEW_DEFS.size);
   });
 
@@ -579,5 +711,149 @@ describe('BigQueryRowWriter analytics views', () => {
     expect(llmResponse).toBeDefined();
     expect(llmResponse).not.toContain('ttft_ms');
     expect(llmResponse).toContain('usage_prompt_tokens');
+  });
+});
+
+describe('BigQueryRowWriter fresh table propagation', () => {
+  it('retries NOT_FOUND while a table it just created propagates', async () => {
+    fake.tableExists = false;
+    fake.appendErrors = [statusError(5, 'Not found: Table agent_events')];
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    expect(fake.appendCalls).toHaveLength(2);
+    expect(writer.getDropStats()[AnalyticsDropReason.NON_RETRYABLE]).toBe(0);
+  });
+
+  it('drops NOT_FOUND on a table it found already there', async () => {
+    fake.tableExists = true;
+    fake.createError = undefined;
+    fake.appendHold = undefined;
+    fake.streamSchema = {fields: []};
+    fake.appendErrors = [statusError(5, 'Not found: Table agent_events')];
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    expect(fake.appendCalls).toHaveLength(1);
+    expect(writer.getDropStats()[AnalyticsDropReason.NON_RETRYABLE]).toBe(1);
+  });
+
+  it('stops retrying NOT_FOUND once the propagation window has passed', async () => {
+    vi.useFakeTimers();
+    try {
+      fake.tableExists = false;
+      const writer = makeWriter();
+      await writeOneRow(writer);
+      // 60s is the window; step past it before the next append fails.
+      vi.setSystemTime(Date.now() + 60_001);
+      fake.appendErrors = [statusError(5, 'Not found: Table agent_events')];
+      fake.appendCalls = [];
+      await writeOneRow(writer);
+      expect(fake.appendCalls).toHaveLength(1);
+      expect(writer.getDropStats()[AnalyticsDropReason.NON_RETRYABLE]).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('BigQueryRowWriter storage write stream', () => {
+  it('opens the default stream of the destination table', async () => {
+    await writeOneRow(makeWriter());
+    expect(fake.streamIds).toEqual([
+      'projects/test-project/datasets/agent_analytics/tables/agent_events/streams/_default',
+    ]);
+  });
+
+  it('asks for the full stream view, which is the one carrying the schema', async () => {
+    await writeOneRow(makeWriter());
+    expect(fake.streamViews).toEqual([2]);
+  });
+
+  it('builds the proto descriptor under the root scope', async () => {
+    await writeOneRow(makeWriter());
+    expect(fake.descriptorScopes).toEqual(['root']);
+  });
+
+  it('opens one stream however many batches it writes', async () => {
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    writer.enqueue(makeRow('e2'));
+    await writer.flush();
+    expect(fake.appendCalls).toHaveLength(2);
+    expect(fake.streamIds).toHaveLength(1);
+  });
+
+  it('passes the caller credentials to the append client too', async () => {
+    const credentials = {client_email: 'a@b.test', private_key: 'k'};
+    const resolved = resolvePluginOptions({
+      projectId: 'test-project',
+      datasetId: 'agent_analytics',
+      credentials,
+    });
+    await writeOneRow(new BigQueryRowWriter(resolved.writer));
+    expect(fake.streamOptions[0]).toMatchObject({credentials});
+  });
+
+  it('releases the writer, the connection and the client on shutdown', async () => {
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    await writer.shutdown();
+    expect(fake.streamsClosed).toBe(3);
+  });
+
+  it('releases the stream even when the drain times out', async () => {
+    const resolved = resolvePluginOptions({
+      projectId: 'test-project',
+      datasetId: 'agent_analytics',
+      config: {shutdownTimeoutMs: 10},
+    });
+    const writer = new BigQueryRowWriter(resolved.writer);
+    await writeOneRow(writer);
+    // An append that never settles makes the drain hit its timeout.
+    let release = () => {};
+    fake.appendHold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    writer.enqueue(makeRow('e2'));
+    await writer.shutdown();
+    expect(fake.streamsClosed).toBe(3);
+    expect(writer.getDropStats()[AnalyticsDropReason.SHUTDOWN_TIMEOUT]).toBe(1);
+    release();
+  });
+
+  it('opens no stream when the table cannot be readied', async () => {
+    fake.tableExists = false;
+    fake.createError = new Error('permission denied');
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    expect(fake.streamIds).toEqual([]);
+    expect(writer.getDropStats()[AnalyticsDropReason.SETUP_UNAVAILABLE]).toBe(
+      1,
+    );
+  });
+});
+
+describe('BigQueryRowWriter stream setup failure', () => {
+  it('counts a drop when the service returns a stream with no schema', async () => {
+    fake.streamSchema = null;
+    const writer = makeWriter();
+    await writeOneRow(writer);
+    expect(fake.appendCalls).toEqual([]);
+    expect(writer.getDropStats()[AnalyticsDropReason.SETUP_UNAVAILABLE]).toBe(
+      1,
+    );
+  });
+
+  it('names the table in the schemaless-stream error it logs', async () => {
+    fake.streamSchema = undefined;
+    const logged: string[] = [];
+    const restore = captureErrors(logged);
+    try {
+      await writeOneRow(makeWriter());
+    } finally {
+      restore();
+    }
+    expect(logged.join('\n')).toContain(
+      'returned no schema for projects/test-project/datasets/agent_analytics/tables/agent_events',
+    );
   });
 });

@@ -78,11 +78,11 @@ export type {
   AnalyticsContentFormatter,
   AnalyticsRetryConfig,
   BigQueryAgentAnalyticsPluginOptions,
+  BigQueryCredentials,
   BigQueryLoggerConfig,
 } from './plugins/bigquery_analytics_config.js';
 export {AnalyticsEventType} from './plugins/bigquery_analytics_schema.js';
 export {AnalyticsDropReason} from './plugins/bigquery_analytics_writer.js';
-export type {BigQueryCredentials} from './plugins/bigquery_analytics_writer.js';
 export {
   DEFAULT_DEBUG_OUTPUT_PATH,
   DebugEntryType,

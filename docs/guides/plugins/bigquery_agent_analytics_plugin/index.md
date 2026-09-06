@@ -19,10 +19,10 @@ Three properties are worth knowing before you enable it:
 
 ## Get started
 
-`@google-cloud/bigquery` is an optional peer dependency. Install it. The plugin creates the dataset and the table on first use, so your credentials need permission to create both.
+`@google-cloud/bigquery` and `@google-cloud/bigquery-storage` are optional peer dependencies. Install both: the first creates the dataset, the table and the views, and the second appends the rows. The plugin creates the dataset and the table on first use, so your credentials need permission to create both.
 
 ```bash
-npm install @google-cloud/bigquery
+npm install @google-cloud/bigquery @google-cloud/bigquery-storage
 ```
 
 Then register the plugin on the runner and shut it down when the process ends.
@@ -41,8 +41,15 @@ const agent = new LlmAgent({
   instruction: 'Answer weather questions.',
 });
 
+const projectId = process.env['GOOGLE_CLOUD_PROJECT'];
+if (projectId === undefined) {
+  throw new Error(
+    'Set GOOGLE_CLOUD_PROJECT to the project holding the dataset.',
+  );
+}
+
 const analytics = new BigQueryAgentAnalyticsPlugin({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT!,
+  projectId,
   datasetId: 'agent_analytics',
 });
 
@@ -188,13 +195,16 @@ The column expressions match adk-python's, so a query written against a Python-c
 The client uses Application Default Credentials. Pass `credentials` to authenticate as a particular service account instead.
 
 ```typescript
+const clientEmail = process.env['ANALYTICS_CLIENT_EMAIL'];
+const privateKey = process.env['ANALYTICS_PRIVATE_KEY'];
+if (clientEmail === undefined || privateKey === undefined) {
+  throw new Error('Set ANALYTICS_CLIENT_EMAIL and ANALYTICS_PRIVATE_KEY.');
+}
+
 const analytics = new BigQueryAgentAnalyticsPlugin({
   projectId: 'my-project',
   datasetId: 'agent_analytics',
-  credentials: {
-    client_email: process.env.ANALYTICS_CLIENT_EMAIL!,
-    private_key: process.env.ANALYTICS_PRIVATE_KEY!,
-  },
+  credentials: {client_email: clientEmail, private_key: privateKey},
 });
 ```
 
@@ -291,21 +301,23 @@ const dropped = analytics.getDropStats();
 
 The reasons split in two. `formatter_failed` and `content_parse_failed` mean the row **did** land, with its payload replaced by `[FORMATTER_FAILED]` or `[CONTENT_PARSE_FAILED]`. Those two log a fixed message that never includes the payload, the exception text or a type name, because all three can be attacker-supplied. Every other reason means the row never landed:
 
-| Reason              | What happened                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------------- |
-| `queue_full`        | The row arrived at a queue already holding `queueMaxSize` rows.                                |
-| `setup_unavailable` | The client or the table could not be opened. The next event retries the setup.                 |
-| `retry_exhausted`   | Every attempt the retry budget allowed failed.                                                 |
-| `non_retryable`     | BigQuery rejected the rows for a reason another attempt cannot fix, such as a schema mismatch. |
-| `unexpected_error`  | The insert threw something carrying no status at all.                                          |
-| `shutdown_timeout`  | The row was still pending when the shutdown timeout expired.                                   |
-| `shutdown_race`     | A callback produced the row after `shutdown()` began.                                          |
+| Reason              | What happened                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `queue_full`        | The row arrived at a queue already holding `queueMaxSize` rows.                               |
+| `setup_unavailable` | The client or the table could not be opened. The next event retries the setup.                |
+| `retry_exhausted`   | Every attempt the retry budget allowed failed.                                                |
+| `non_retryable`     | BigQuery refused the rows for a reason another attempt cannot fix, such as a schema mismatch. |
+| `unexpected_error`  | The append threw something carrying no status at all.                                         |
+| `shutdown_timeout`  | The row was still pending when the shutdown timeout expired.                                  |
+| `shutdown_race`     | A callback produced the row after `shutdown()` began.                                         |
 
-Writes use `table.insert()`, which is `tabledata.insertAll`, with the insert id set to the row's `event_id`. That gives best-effort de-duplication, not the exactly-once delivery that adk-python gets from Storage Write API streams. BigQuery can also reject the first rows written to a table it created moments earlier, until that new table propagates; that rejection is retryable, so the configured backoff covers it.
+Rows are appended through the BigQuery Storage Write API, to the table's default stream. That stream delivers at least once: an append the service accepted but did not acknowledge is retried, so a row can appear twice. De-duplicate on `event_id`, which is stable across retries of the same event. adk-python offers a committed-stream mode with explicit offsets for exactly-once delivery; that mode is not ported here, and it is off by default there too.
+
+A table the plugin has just created answers an append with `NOT_FOUND` until it propagates. That status is retried for 60 seconds after the create and treated as a missing table after that, so the first rows of a new table are not lost and a genuinely wrong table id still fails fast.
 
 ### Retrying a failed write
 
-`retryConfig` decides how often a failed insert is attempted. The plugin turns the client's own request-level automatic retry off, so a rate limit or a server error is retried on this schedule and no other. One client retry remains outside it: `insertAll` re-sends the rows a partial failure rejected, up to three times, before the plugin's classifier sees the error at all.
+`retryConfig` decides how often a failed append is attempted. The plugin turns the control-plane client's own automatic retry off, so a rate limit or a server error is retried on this schedule and no other. An append is retried on gRPC `DEADLINE_EXCEEDED`, `RESOURCE_EXHAUSTED`, `INTERNAL` and `UNAVAILABLE`. Rows the service singles out are never retried: it named them, so re-sending them changes nothing.
 
 ```typescript
 const analytics = new BigQueryAgentAnalyticsPlugin({
