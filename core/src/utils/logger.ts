@@ -55,7 +55,13 @@ class SimpleLogger implements Logger {
           return `${info.level}: [${info.label}] ${info.timestamp} ${info.message}`;
         }),
       ),
-      transports: [new winston.transports.Console()],
+      transports: [
+        // Winston's Console transport puts every level on stdout unless told
+        // otherwise; diagnostics belong on stderr. Winston matches these names
+        // against the raw level name on `info[LEVEL]`, so they stay lowercase
+        // despite the upper-casing format above.
+        new winston.transports.Console({stderrLevels: ['warn', 'error']}),
+      ],
     });
   }
 
