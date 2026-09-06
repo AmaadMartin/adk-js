@@ -15,6 +15,7 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -33,12 +34,47 @@ class MockAgent extends BaseAgent {
       content: {role: 'model', parts: [{text: `Response from ${this.name}`}]},
     });
   }
+}
+
+/** A text-only agent, declaring no live implementation of its own. */
+class LiveLessAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: `Response from ${this.name}`}]},
+    });
+  }
+}
+
+/** An agent that overrides the default live implementation. */
+class LiveCapableAgent extends BaseAgent {
+  protected async *runAsyncImpl(): AsyncGenerator<Event, void, void> {}
 
   protected async *runLiveImpl(
-    _context: InvocationContext,
+    context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
-    // Not needed for this test
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {
+        role: 'model',
+        parts: [{text: `Live response from ${this.name}`}],
+      },
+    });
   }
+}
+
+async function drainTexts(
+  events: AsyncGenerator<Event, void, void>,
+): Promise<Array<string | undefined>> {
+  const texts: Array<string | undefined> = [];
+  for await (const event of events) {
+    texts.push(event.content?.parts?.[0]?.text);
+  }
+  return texts;
 }
 
 describe('BaseAgent', () => {
@@ -159,6 +195,58 @@ describe('BaseAgent', () => {
       }
 
       expect(callback2Called).toBe(false);
+    });
+  });
+
+  describe('runLiveImpl', () => {
+    const makeContext = (agent: BaseAgent) =>
+      new InvocationContext({
+        invocationId: 'live-invocation',
+        agent,
+        session: createSession({id: 'live-session', appName: 'test-app'}),
+        pluginManager: new PluginManager(),
+      });
+
+    it('throws by default, naming the concrete class', async () => {
+      const agent = new MockAgent({name: 'text_only'});
+
+      await expect(
+        drainTexts(agent.runLive(makeContext(agent))),
+      ).rejects.toThrow('runLiveImpl for MockAgent is not implemented.');
+    });
+
+    it('names whichever subclass is running, rather than a fixed class', async () => {
+      const agent = new LiveLessAgent({name: 'live_less'});
+
+      await expect(
+        drainTexts(agent.runLive(makeContext(agent))),
+      ).rejects.toThrow('runLiveImpl for LiveLessAgent is not implemented.');
+    });
+
+    it('does not shadow a subclass override', async () => {
+      const agent = new LiveCapableAgent({name: 'live_capable'});
+
+      await expect(
+        drainTexts(agent.runLive(makeContext(agent))),
+      ).resolves.toEqual(['Live response from live_capable']);
+    });
+
+    it('surfaces the failure on the first iteration, not when runLive is called', async () => {
+      const agent = new MockAgent({name: 'text_only'});
+
+      const events = agent.runLive(makeContext(agent));
+
+      await expect(events.next()).rejects.toThrow(
+        'runLiveImpl for MockAgent is not implemented.',
+      );
+    });
+
+    it('leaves the runAsync path of a text-only subclass untouched', async () => {
+      const agent = new LiveLessAgent({name: 'live_less'});
+
+      await expect(
+        drainTexts(agent.runAsync(makeContext(agent))),
+      ).resolves.toEqual(['Response from live_less']);
     });
   });
 

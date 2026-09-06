@@ -165,10 +165,6 @@ describe('RoutedAgent', () => {
       ): AsyncGenerator<Event, void, void> {
         throw new Error('Agent failed');
       }
-
-      protected async *runLiveImpl(
-        _context: InvocationContext,
-      ): AsyncGenerator<Event, void, void> {}
     }
 
     const failingAgent = new FailingAgent('agent-failing');
@@ -218,10 +214,6 @@ describe('RoutedAgent', () => {
         });
         throw new Error('Mid-stream failure');
       }
-
-      protected async *runLiveImpl(
-        _context: InvocationContext,
-      ): AsyncGenerator<Event, void, void> {}
     }
 
     const partialAgent = new PartialAgent('agent-partial');
@@ -269,10 +261,6 @@ describe('RoutedAgent', () => {
       ): AsyncGenerator<Event, void, void> {
         throw new Error('Initial fail');
       }
-
-      protected async *runLiveImpl(
-        _context: InvocationContext,
-      ): AsyncGenerator<Event, void, void> {}
     }
 
     const failingAgent = new FailingAgent('agent-failing');
@@ -332,8 +320,6 @@ describe('RoutedAgent', () => {
           },
         });
       }
-
-      protected async *runLiveImpl(_context: InvocationContext) {}
     }
 
     const localAgentA = new MockAgent('agent-a');

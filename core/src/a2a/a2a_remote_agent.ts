@@ -287,10 +287,4 @@ export class RemoteA2AAgent extends BaseAgent<RemoteA2AAgentConfig> {
       });
     }
   }
-
-  protected runLiveImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<AdkEvent, void, void> {
-    throw new Error('Live mode is not supported in A2ARemoteAgent yet.');
-  }
 }

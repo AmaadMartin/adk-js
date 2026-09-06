@@ -69,7 +69,6 @@ describe('ToolFilterRequestProcessor', () => {
   it('should do nothing if agent is not LlmAgent', async () => {
     class NonLlmAgent extends BaseAgent {
       protected async *runAsyncImpl() {}
-      protected async *runLiveImpl() {}
     }
     const agent = new NonLlmAgent({name: 'non_llm'});
     const invocationContext = createMockInvocationContext(agent);

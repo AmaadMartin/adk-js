@@ -36,10 +36,6 @@ class MockSubAgent extends BaseAgent {
       };
     }
   }
-
-  protected async *runLiveImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {}
 }
 
 function makeContext(agent: BaseAgent): InvocationContext {

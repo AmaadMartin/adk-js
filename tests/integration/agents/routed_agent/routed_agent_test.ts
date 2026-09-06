@@ -197,7 +197,6 @@ describe('RoutedAgent Integration', () => {
       protected async *runAsyncImpl() {
         throw new Error('Agent failed');
       }
-      protected async *runLiveImpl() {}
     }
     const errorAgent = new ErrorAgent();
     const router = async () => 'error-agent';
@@ -220,7 +219,6 @@ describe('RoutedAgent Integration', () => {
       protected async *runAsyncImpl() {
         throw new Error('Network error');
       }
-      protected async *runLiveImpl() {}
     }
     const flaky = new FlakyAgent();
     const router = async () => 'flaky';

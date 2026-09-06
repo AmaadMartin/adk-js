@@ -49,11 +49,6 @@ class MockAgent extends BaseAgent {
   ): AsyncGenerator<AdkEvent, void, void> {
     throw new Error('Method not implemented.');
   }
-  protected runLiveImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<AdkEvent, void, void> {
-    throw new Error('Method not implemented.');
-  }
 }
 
 class MockRunner extends Runner {

@@ -30,9 +30,6 @@ class TestAgent extends BaseAgent {
   protected async *runAsyncImpl(
     _context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {}
-  protected async *runLiveImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {}
 }
 
 const mockApp = {

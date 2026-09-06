@@ -19,10 +19,6 @@ class StreamingErrorAgent extends BaseAgent {
     });
     throw new Error('Mid-stream connection failure!');
   }
-
-  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
-    throw new Error('Not supported');
-  }
 }
 
 export const rootAgent = new StreamingErrorAgent();

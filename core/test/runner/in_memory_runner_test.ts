@@ -34,10 +34,6 @@ class MockAgent extends BaseAgent {
       content: {role: 'model', parts: [{text: 'Mock response'}]},
     });
   }
-
-  protected async *runLiveImpl(
-    _context: InvocationContext,
-  ): AsyncGenerator<Event, void, void> {}
 }
 
 describe('InMemoryRunner', () => {

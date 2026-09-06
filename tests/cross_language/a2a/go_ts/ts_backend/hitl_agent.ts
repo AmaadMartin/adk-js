@@ -36,10 +36,6 @@ class HitlAgent extends BaseAgent {
       partial: false,
     });
   }
-
-  protected runLiveImpl(): AsyncGenerator<Event, void, void> {
-    throw new Error('Not supported');
-  }
 }
 
 export const rootAgent = new HitlAgent();

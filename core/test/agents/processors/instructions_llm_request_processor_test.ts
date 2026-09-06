@@ -37,7 +37,6 @@ class MockRootAgent extends BaseAgent {
   }
 
   protected async *runAsyncImpl(_context: InvocationContext) {}
-  protected async *runLiveImpl(_context: InvocationContext) {}
 }
 
 /**
