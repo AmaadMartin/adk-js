@@ -75,4 +75,14 @@ describe('publishMessage without the publishing SDK', () => {
       'npm install @google-cloud/eventarc-publishing',
     );
   });
+
+  it('reports an invalid argument before it reaches the missing package', async () => {
+    const res = await publishMessage({bus: 'bus', type: '   ', source: 'src'});
+
+    if (res.status !== EventarcPublishStatus.ERROR) {
+      expect.fail('expected the blank type to fail the publish');
+    }
+    expect(res.error_details).toContain('type must be a non-empty string');
+    expect(res.error_details).not.toContain('is not installed');
+  });
 });
