@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
+import {Content, ContentUnion, Part} from '@google/genai';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {Context} from '../agents/context.js';
@@ -21,6 +21,41 @@ import {BaseTool} from '../tools/base_tool.js';
 import {logger} from '../utils/logger.js';
 
 import {BasePlugin} from './base_plugin.js';
+
+/** Returns whether a system-instruction entry is a `Content` and not a `Part`. */
+function isContent(value: Content | Part): value is Content {
+  return 'parts' in value && Array.isArray(value.parts);
+}
+
+/**
+ * Serializes a value for a log line. Never throws.
+ *
+ * A tool may return a value `JSON.stringify` rejects, such as a `BigInt` or a
+ * circular structure. Logging must not abort the invocation it observes.
+ */
+function stringifyForLog(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    return (
+      JSON.stringify(value, (_key, entry: unknown) => {
+        if (typeof entry === 'bigint') {
+          return entry.toString();
+        }
+        if (typeof entry === 'object' && entry !== null) {
+          // A value referenced twice without a cycle also reads as
+          // `[Circular]`; the log line is truncated anyway.
+          if (seen.has(entry)) {
+            return '[Circular]';
+          }
+          seen.add(entry);
+        }
+        return entry;
+      }) ?? String(value)
+    );
+  } catch {
+    return String(value);
+  }
+}
 
 /**
  * A plugin that logs important information at each callback point.
@@ -172,7 +207,9 @@ export class LoggingPlugin extends BasePlugin {
     this.log(`   Agent: ${callbackContext.agentName}`);
 
     if (llmRequest.config && llmRequest.config.systemInstruction) {
-      let sysInstruction = llmRequest.config.systemInstruction as string;
+      let sysInstruction = this.renderSystemInstruction(
+        llmRequest.config.systemInstruction,
+      );
       if (sysInstruction.length > 200) {
         sysInstruction = sysInstruction.substring(0, 200) + '...';
       }
@@ -294,8 +331,27 @@ export class LoggingPlugin extends BasePlugin {
     logger.info(formattedMessage);
   }
 
+  /**
+   * Renders a system instruction for logging.
+   *
+   * The field accepts a string, a `Content`, a `Part`, or a list of those.
+   */
+  private renderSystemInstruction(instruction: ContentUnion): string {
+    if (typeof instruction === 'string') {
+      return instruction;
+    }
+    if (Array.isArray(instruction)) {
+      return instruction
+        .map((entry) => this.renderSystemInstruction(entry))
+        .join(' | ');
+    }
+    return this.formatContent(
+      isContent(instruction) ? instruction : {parts: [instruction]},
+    );
+  }
+
   private formatContent(content?: Content, maxLength = 200): string {
-    if (!content || !content.parts) {
+    if (!content?.parts?.length) {
       return 'None';
     }
 
@@ -326,7 +382,7 @@ export class LoggingPlugin extends BasePlugin {
       return '{}';
     }
 
-    let formatted = JSON.stringify(args);
+    let formatted = stringifyForLog(args);
     if (formatted.length > maxLength) {
       formatted = formatted.substring(0, maxLength) + '...}';
     }
