@@ -13,6 +13,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   DynamicNodeFailError,
+  isNodeInterruptedError,
   NodeInterruptedError,
 } from '../../src/workflow/errors.js';
 import {FunctionNode} from '../../src/workflow/nodes/function_node.js';
@@ -80,15 +81,22 @@ describe('workflow errors — ported reference tests', () => {
     // `BaseException` sits outside `except Exception`. TypeScript has one
     // exception hierarchy, so a bare `catch` does catch it. The behavioural
     // test below pins the property that base class protects.
+    let caught: unknown;
     function nodeBodyThatSwallowsErrors(): string {
       try {
         throw new NodeInterruptedError();
-      } catch {
+      } catch (e: unknown) {
+        caught = e;
         return 'swallowed';
       }
     }
 
     expect(nodeBodyThatSwallowsErrors()).toBe('swallowed');
+    // The swallowed value is still what the framework's guards match on.
+    if (!isNodeInterruptedError(caught)) {
+      expect.fail('the swallowed value is not a NodeInterruptedError');
+    }
+    expect(caught.name).toBe('NodeInterruptedError');
   });
 });
 

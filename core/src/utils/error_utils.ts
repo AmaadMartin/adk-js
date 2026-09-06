@@ -188,8 +188,8 @@ export function errorStatusCode(err: unknown): string | number | undefined {
  *
  * The body is only read when it is already a string, so no async
  * `Response.text()` is ever invoked. The result is not truncated: it is a data
- * field for a caller that already holds the error, not a log line. Render it
- * through {@link formatError} before writing it to a log or an event.
+ * field for a caller that already holds the error, not a log line. A caller
+ * that logs it must bound it itself.
  *
  * @param err The thrown or rejected value to inspect.
  * @return The detail text it carries, or `undefined`.
