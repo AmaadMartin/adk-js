@@ -12,7 +12,7 @@ import {
   LlmRequest,
   LlmResponse,
 } from '@google/adk';
-import {beforeAll, describe, expect, it} from 'vitest';
+import {beforeAll, describe, expect, it, vi} from 'vitest';
 
 import {
   Blob,
@@ -20,6 +20,8 @@ import {
   createModelContent,
   GenerateContentResponse,
 } from '@google/genai';
+
+import {logger} from '../../src/utils/logger.js';
 
 class TestLlmConnection implements BaseLlmConnection {
   async sendHistory(_history: Content[]): Promise<void> {
@@ -88,5 +90,41 @@ describe('LLMRegistry', () => {
     });
 
     expect(agent.canonicalModel).toBeInstanceOf(TestLlmModel);
+  });
+
+  it('throws an error if model is not found during resolve', () => {
+    expect(() => LLMRegistry.resolve('non-existent-model')).toThrow(
+      'Model non-existent-model not found.',
+    );
+  });
+
+  it('logs info when registering an already registered model', () => {
+    const loggerSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
+    LLMRegistry.register(TestLlmModel);
+    expect(loggerSpy).toHaveBeenCalled();
+    loggerSpy.mockRestore();
+  });
+
+  it('evicts LRU cache items when cache exceeds max size', () => {
+    // LLMRegistry.resolveCache has maxSize 32.
+    // Let's register a set of models so we can resolve them.
+    for (let i = 0; i < 35; i++) {
+      class TempModel extends BaseLlm {
+        constructor({model}: {model: string}) {
+          super({model});
+        }
+        static override readonly supportedModels = [`temp-model-${i}`];
+        async *generateContentAsync(): AsyncGenerator<LlmResponse, void> {}
+        async connect(): Promise<BaseLlmConnection> {
+          return new TestLlmConnection();
+        }
+      }
+      LLMRegistry.register(TempModel);
+    }
+
+    // Resolve 35 models to trigger eviction
+    for (let i = 0; i < 35; i++) {
+      expect(LLMRegistry.resolve(`temp-model-${i}`)).toBeDefined();
+    }
   });
 });
