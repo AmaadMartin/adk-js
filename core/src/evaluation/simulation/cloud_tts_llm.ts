@@ -30,16 +30,16 @@ type ISynthesizeSpeechResponse =
 type IAudioConfig = protos.google.cloud.texttospeech.v1.IAudioConfig;
 
 /** The registry key this model answers to. */
-export const CLOUD_TTS_MODEL_NAME = 'cloud_tts';
+const CLOUD_TTS_MODEL_NAME = 'cloud_tts';
 
 /** The Cloud TTS voice used when a request selects none. */
-export const DEFAULT_TTS_VOICE_NAME = 'en-US-Studio-O';
+const DEFAULT_TTS_VOICE_NAME = 'en-US-Studio-O';
 
 /** The BCP-47 language code used when a request selects none. */
-export const DEFAULT_TTS_LANGUAGE_CODE = 'en-US';
+const DEFAULT_TTS_LANGUAGE_CODE = 'en-US';
 
 /** The audio encoding used when a caller selects none. */
-export const DEFAULT_TTS_AUDIO_ENCODING = 'LINEAR16';
+const DEFAULT_TTS_AUDIO_ENCODING = 'LINEAR16';
 
 /** The Cloud TTS audio encodings this model can label with a MIME type. */
 type SupportedAudioEncoding =
@@ -65,12 +65,6 @@ const CLOUD_TTS_PEER: OptionalPeer = {
   packageName: '@google-cloud/text-to-speech',
   feature: 'CloudTtsLlm (Google Cloud Text-to-Speech)',
 };
-
-/** Error codes {@link CloudTtsLlm} reports on an {@link LlmResponse}. */
-export enum CloudTtsErrorCode {
-  /** The Cloud TTS API rejected or failed the synthesis request. */
-  SYNTHESIS_FAILED = 'TTS_SYNTHESIS_FAILED',
-}
 
 /** A resolved Cloud TTS voice selection. */
 export interface CloudTtsVoiceSelection {
@@ -141,7 +135,7 @@ export function extractText(llmRequest: LlmRequest): string {
 
 /**
  * Reads the voice selection from `LlmRequest.config.speechConfig`, falling
- * back to {@link DEFAULT_TTS_VOICE_NAME} / {@link DEFAULT_TTS_LANGUAGE_CODE}.
+ * back to `en-US-Studio-O` / `en-US`.
  *
  * `speechConfig` is `SpeechConfig | string` in `@google/genai`; the string
  * shorthand carries no language code, so it yields the defaults.
@@ -189,15 +183,26 @@ function isGoogleApiCallError(err: unknown): err is Error {
 }
 
 /**
- * Loads the `@google-cloud/text-to-speech` optional peer and builds a client
- * from Application Default Credentials.
+ * Builds the Cloud TTS client options for the ambient GCP project.
  *
  * `GOOGLE_CLOUD_PROJECT`, when set, selects the project, matching what the
- * other Google Cloud clients in ADK do with it. Credentials are resolved by
- * the SDK on the first call, not here. Cloud Text-to-Speech also needs a quota
- * project under user credentials; google-auth-library reads that only from
- * `GOOGLE_CLOUD_QUOTA_PROJECT` or from the credentials file, so no client
- * option can set it here.
+ * other Google Cloud clients in ADK do with it. Cloud Text-to-Speech also
+ * needs a quota project under user credentials; google-auth-library reads that
+ * only from `GOOGLE_CLOUD_QUOTA_PROJECT` or from the credentials file, so no
+ * client option can set it here.
+ *
+ * @return The options to construct the client with, empty when the project is
+ *   unset.
+ */
+export function cloudTtsClientOptions(): {projectId?: string} {
+  const projectId = process.env['GOOGLE_CLOUD_PROJECT'];
+  return projectId ? {projectId} : {};
+}
+
+/**
+ * Loads the `@google-cloud/text-to-speech` optional peer and builds a client.
+ *
+ * Credentials are resolved by the SDK on the first call, not here.
  *
  * @return A client for {@link CloudTtsLlm} to synthesize through.
  * @throws {Error} If `@google-cloud/text-to-speech` is not installed.
@@ -207,10 +212,7 @@ export async function createCloudTtsClient(): Promise<CloudTtsClient> {
     CLOUD_TTS_PEER,
     () => import('@google-cloud/text-to-speech'),
   );
-  const projectId = process.env['GOOGLE_CLOUD_PROJECT'];
-  return projectId
-    ? new TextToSpeechClient({projectId})
-    : new TextToSpeechClient();
+  return new TextToSpeechClient(cloudTtsClientOptions());
 }
 
 /** Builds the Cloud TTS `audioConfig`, omitting the fields set to `null`. */
@@ -277,8 +279,8 @@ export class CloudTtsLlm extends BaseLlm {
    * @param _stream Ignored. Cloud TTS always returns one response.
    * @param _abortSignal Ignored. The SDK call is not cancellable here.
    * @return One {@link LlmResponse}: an `inlineData` audio part on success, or
-   *   an error response carrying
-   *   {@link CloudTtsErrorCode.SYNTHESIS_FAILED} when the API call fails.
+   *   an error response carrying `TTS_SYNTHESIS_FAILED` when the API call
+   *   fails.
    * @throws {Error} If `audioEncoding` is unsupported, if the request carries
    *   no text, if the optional peer is not installed, or if Cloud TTS returns
    *   a successful response with no audio.
@@ -314,10 +316,7 @@ export class CloudTtsLlm extends BaseLlm {
         throw err;
       }
       logger.error(`Cloud TTS synthesis failed: ${err.message}`);
-      yield {
-        errorCode: CloudTtsErrorCode.SYNTHESIS_FAILED,
-        errorMessage: err.message,
-      };
+      yield {errorCode: 'TTS_SYNTHESIS_FAILED', errorMessage: err.message};
       return;
     }
 
