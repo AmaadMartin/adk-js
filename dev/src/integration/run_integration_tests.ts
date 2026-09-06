@@ -43,7 +43,7 @@ export async function runIntegrationTests({
   console.log('Running tests.');
   const successfulTests = [];
   const skippedTests = [];
-  const failedTests = [];
+  const failedTests: Array<{name: string; message: string}> = [];
   const testRunner = new TestRunner(agentRegistry);
 
   for (const [name, testInfo] of testSpecs) {
@@ -59,9 +59,10 @@ export async function runIntegrationTests({
 
       successfulTests.push(name);
       console.log('\n\x1b[32mTest passed.\x1b[0m\n');
-    } catch (_: unknown) {
-      failedTests.push(name);
-      console.error('\n\x1b[31mTest failed.\x1b[0m\n');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      failedTests.push({name, message});
+      console.error(`\n\x1b[31mTest failed: ${name}\x1b[0m\n`);
     }
   }
 
@@ -71,8 +72,15 @@ export async function runIntegrationTests({
       `${failedTests.length} tests failed.`,
   );
 
-  console.log('Successfull tests:', successfulTests.join(', '));
+  console.log('Successful tests:', successfulTests.join(', '));
   console.log('Skipped tests:', skippedTests.join(', '));
-  console.log('Failed tests:', failedTests.join(', '));
+  console.log('Failed tests:', failedTests.map((test) => test.name).join(', '));
+
+  for (const test of failedTests) {
+    console.error(
+      `\n\x1b[31mFAILED ${test.name}\x1b[0m\n  ${test.message.replaceAll('\n', '\n  ')}`,
+    );
+  }
+
   console.log('\n');
 }
