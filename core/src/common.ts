@@ -317,6 +317,7 @@ export {
   LoadArtifactsTool,
 } from './tools/load_artifacts_tool.js';
 export {LOAD_MEMORY, LoadMemoryTool} from './tools/load_memory_tool.js';
+export type {LoadMemoryResponse} from './tools/load_memory_tool.js';
 export {LOAD_WEB_PAGE, loadWebPage} from './tools/load_web_page.js';
 export type {LoadWebPageOptions} from './tools/load_web_page.js';
 export {LongRunningFunctionTool} from './tools/long_running_tool.js';
