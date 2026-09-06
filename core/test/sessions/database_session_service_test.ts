@@ -17,6 +17,17 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isDatabaseConnectionString} from '../../src/sessions/database_session_service.js';
 import {validateDatabaseSchemaVersion} from '../../src/sessions/db/operations.js';
 
+/**
+ * Reaches the service's private MikroORM handle.
+ *
+ * DatabaseSessionService exposes no accessor for it, so tests that need the
+ * live connection state that single unavoidable cast here instead of at every
+ * call site.
+ */
+function ormOf(service: DatabaseSessionService): MikroORM | undefined {
+  return (service as unknown as {orm?: MikroORM}).orm;
+}
+
 describe('DatabaseSessionService', () => {
   let service: DatabaseSessionService;
 
@@ -31,7 +42,7 @@ describe('DatabaseSessionService', () => {
 
   afterEach(async () => {
     // MikroORM closing
-    const orm = (service as unknown as {orm: MikroORM}).orm;
+    const orm = ormOf(service);
     if (orm) {
       await orm.close();
     }
@@ -128,6 +139,98 @@ describe('DatabaseSessionService', () => {
     });
 
     expect(session).toBeUndefined();
+  });
+
+  it('should delete a session and its events in one transaction', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: Date.now()}),
+    });
+
+    await service.deleteSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+
+    expect(
+      await service.getSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-atomic-ok',
+      }),
+    ).toBeUndefined();
+
+    // Re-creating the same key resurrects any orphaned events, so an empty
+    // event list proves the event rows were deleted with the session.
+    await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+    const recreated = await service.getSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-ok',
+    });
+    expect(recreated?.events).toEqual([]);
+  });
+
+  it('should not delete the session when deleting its events fails', async () => {
+    const session = await service.createSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-fail',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({timestamp: Date.now()}),
+    });
+
+    const orm = ormOf(service)!;
+    await orm.em.getConnection().execute(
+      `CREATE TRIGGER block_event_delete
+       BEFORE DELETE ON events
+       BEGIN
+         SELECT RAISE(ABORT, 'event delete blocked');
+       END;`,
+    );
+
+    await expect(
+      service.deleteSession({
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-atomic-fail',
+      }),
+    ).rejects.toThrow(/event delete blocked/);
+
+    const em = orm.em.fork();
+    expect(
+      await em.count('StorageSession', {
+        appName: 'test-app',
+        userId: 'test-user',
+        id: 's-atomic-fail',
+      }),
+    ).toBe(1);
+    expect(
+      await em.count('StorageEvent', {
+        appName: 'test-app',
+        userId: 'test-user',
+        sessionId: 's-atomic-fail',
+      }),
+    ).toBe(1);
+
+    const survivingSession = await service.getSession({
+      appName: 'test-app',
+      userId: 'test-user',
+      sessionId: 's-atomic-fail',
+    });
+    expect(survivingSession?.events.length).toBe(1);
   });
 
   it('should append event and update state', async () => {
@@ -371,7 +474,7 @@ describe('DatabaseSessionService', () => {
       allowGlobalContext: true,
     });
     await internalService.init();
-    const orm = (internalService as unknown as {orm: MikroORM}).orm as MikroORM;
+    const orm = ormOf(internalService)!;
 
     // Manually insert bad version
     const em = orm.em.fork();
@@ -668,7 +771,7 @@ describe('DatabaseSessionService', () => {
 
       await service.appendEvent({session, event});
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
+      const em = ormOf(service)!.em.fork();
       const storedEvents = (await em.find('StorageEvent', {
         sessionId: 's-temp',
       })) as {sessionId: string; eventData: Event}[];
@@ -694,7 +797,7 @@ describe('DatabaseSessionService', () => {
 
       expect(session.lastUpdateTime).toBe(timestamp);
 
-      const em = (service as unknown as {orm: MikroORM}).orm.em.fork();
+      const em = ormOf(service)!.em.fork();
       const storedSession = (await em.findOne('StorageSession', {
         id: 's-time',
       })) as {id: string; updateTime: Date};

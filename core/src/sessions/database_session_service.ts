@@ -354,6 +354,12 @@ export class DatabaseSessionService extends BaseSessionService {
     return {sessions, ...paginationMeta};
   }
 
+  /**
+   * Deletes a session and its events atomically.
+   *
+   * The events table has no foreign key to sessions, so both deletes must share
+   * one transaction; otherwise a failure between them orphans the event rows.
+   */
   async deleteSession({
     appName,
     userId,
@@ -362,8 +368,10 @@ export class DatabaseSessionService extends BaseSessionService {
     await this.init();
     const em = this.orm!.em.fork();
 
-    await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
-    await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
+    return em.transactional(async (txEm) => {
+      await txEm.nativeDelete(StorageSession, {appName, userId, id: sessionId});
+      await txEm.nativeDelete(StorageEvent, {appName, userId, sessionId});
+    });
   }
 
   override async appendEvent({
