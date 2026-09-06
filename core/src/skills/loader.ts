@@ -187,7 +187,11 @@ export function parseSkillMdContent(content: string): {
 
 /**
  * Checks whether a zip member name attempts to escape the extraction root (zip
- * slip), mirroring adk-python's `_load_skill_from_zip_bytes`. This is a
+ * slip). adk-python's `_load_skill_from_zip_bytes` tests `startswith("/")`,
+ * `startswith("../")` and `"/../" in filename`, which miss a `..` component
+ * that no `/` follows (`scripts/..`) and miss backslash separators. adk-js is
+ * deliberately stricter: it splits on both separators and rejects any component
+ * that is exactly `..`, a strict superset of what Python rejects. This is a
  * name-shape check on archive metadata, not a sandbox: it says nothing about
  * symlinks.
  */

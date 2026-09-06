@@ -662,10 +662,42 @@ Instruction body`;
       'references/../../esc.txt',
       'scripts/..',
       'scripts\\..\\..\\pwned.txt',
+      '..',
+      '..\\evil.txt',
     ])('rejects the whole archive for the dangerous entry %s', (entryName) => {
       expect(() =>
         loadSkillFromZipBuffer(createZipWithRawEntryName(entryName)),
       ).toThrow(`Dangerous zip entry ignored: ${entryName}`);
+    });
+
+    it('accepts a reference whose name only contains ".." as a substring', () => {
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+      zip.addFile('references/..hidden.txt', Buffer.from('ref body', 'utf-8'));
+
+      const skill = loadSkillFromZipBuffer(zip.toBuffer());
+
+      expect(skill.resources?.references?.['..hidden.txt']).toBe('ref body');
+    });
+
+    it('accepts an asset whose name only contains ".." as a substring', () => {
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+      zip.addFile('assets/v1..2.bin', Buffer.from('asset body', 'utf-8'));
+
+      const skill = loadSkillFromZipBuffer(zip.toBuffer());
+
+      expect(skill.resources?.assets?.['v1..2.bin']).toBe('asset body');
+    });
+
+    it('accepts a script whose name only contains ".." as a substring', () => {
+      const zip = new AdmZip();
+      zip.addFile('SKILL.md', Buffer.from(validSkillMd, 'utf-8'));
+      zip.addFile('scripts/a..b.sh', Buffer.from('echo hello', 'utf-8'));
+
+      const skill = loadSkillFromZipBuffer(zip.toBuffer());
+
+      expect(skill.resources?.scripts?.['a..b.sh']?.src).toBe('echo hello');
     });
 
     it('reports the dangerous entry even when SKILL.md is absent', () => {
