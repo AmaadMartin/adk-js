@@ -40,6 +40,11 @@
     "dev",
     "integrations"
   ],
+  "overrides": {
+    "@google-cloud/vertexai": {
+      "@google/genai": "$@google/genai"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.37.0",
     "@google/genai": "^2.9.0",
