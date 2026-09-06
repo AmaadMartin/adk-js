@@ -19,6 +19,22 @@ vi.mock('../../src/auth/oauth2/oauth2_credential_exchanger.js', () => ({
   },
 }));
 
+function oauth2Config(credentialKey: string): AuthConfig {
+  return {
+    credentialKey,
+    authScheme: {
+      type: 'oauth2',
+      flows: {
+        authorizationCode: {
+          authorizationUrl: 'https://auth.com',
+          tokenUrl: 'https://token.com',
+          scopes: {},
+        },
+      },
+    },
+  };
+}
+
 describe('AuthHandler', () => {
   describe('getAuthResponse', () => {
     it('returns credential from state when temp:key is present', () => {
@@ -50,6 +66,196 @@ describe('AuthHandler', () => {
       const response = handler.getAuthResponse(state);
 
       expect(response).toBeUndefined();
+    });
+
+    it('wraps a raw token in the temp: slot as an OAuth2 credential', () => {
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': 'mock_access_token'});
+
+      const response = handler.getAuthResponse(state);
+
+      expect(response).toEqual({
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'mock_access_token'},
+      });
+    });
+
+    it('returns a credential stored under the prefixless key', () => {
+      const credential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {authUri: 'https://auth.com', state: 'abc'},
+      };
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({testKey: credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
+    it('wraps a raw token in the prefixless slot as an OAuth2 credential', () => {
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({testKey: 'mock_access_token_no_prefix'});
+
+      const response = handler.getAuthResponse(state);
+
+      expect(response).toEqual({
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'mock_access_token_no_prefix'},
+      });
+    });
+
+    it('returns a plain credential object in the temp: slot unchanged', () => {
+      const credential = {
+        authType: 'oauth2',
+        oauth2: {accessToken: 'mock_token_from_dict'},
+      };
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
+    it('returns a plain credential object in the prefixless slot unchanged', () => {
+      const credential = {
+        authType: 'oauth2',
+        oauth2: {accessToken: 'mock_token_from_dict_no_prefix'},
+      };
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({testKey: credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
+    it('wraps a raw token as an API key when the scheme is apiKey', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {type: 'apiKey', name: 'X-API-Key', in: 'header'},
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State({'temp:testKey': 'my_api_key_value'});
+
+      const response = handler.getAuthResponse(state);
+
+      expect(response).toEqual({
+        authType: AuthCredentialTypes.API_KEY,
+        apiKey: 'my_api_key_value',
+      });
+    });
+
+    it('wraps a raw token as an HTTP credential when the scheme is http', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {type: 'http', scheme: 'bearer'},
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State({'temp:testKey': 'my_http_bearer_token'});
+
+      const response = handler.getAuthResponse(state);
+
+      expect(response).toEqual({
+        authType: AuthCredentialTypes.HTTP,
+        http: {
+          scheme: 'bearer',
+          credentials: {token: 'my_http_bearer_token'},
+        },
+      });
+    });
+
+    it('uses the http scheme declared by the auth scheme', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {type: 'http', scheme: 'basic'},
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State({'temp:testKey': 'dXNlcjpwYXNz'});
+
+      const response = handler.getAuthResponse(state);
+
+      expect(response?.http?.scheme).toBe('basic');
+    });
+
+    it('falls back to bearer when the http scheme is empty', () => {
+      const authConfig: AuthConfig = {
+        credentialKey: 'testKey',
+        authScheme: {type: 'http', scheme: ''},
+      };
+      const handler = new AuthHandler(authConfig);
+      const state = new State({'temp:testKey': 'my_http_token'});
+
+      const response = handler.getAuthResponse(state);
+
+      expect(response?.http?.scheme).toBe('bearer');
+    });
+
+    it('prefers the temp: slot when both slots hold a credential', () => {
+      const tempCredential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'temp_token'},
+      };
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({
+        'temp:testKey': tempCredential,
+        testKey: {
+          authType: AuthCredentialTypes.OAUTH2,
+          oauth2: {accessToken: 'prefixless_token'},
+        },
+      });
+
+      expect(handler.getAuthResponse(state)).toBe(tempCredential);
+    });
+
+    it('falls back to the prefixless slot when the temp: slot is an empty string', () => {
+      const credential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'prefixless_token'},
+      };
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': '', testKey: credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
+    it('falls back to the prefixless slot when the temp: slot is null', () => {
+      const credential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'prefixless_token'},
+      };
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': null, testKey: credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
+    it('falls back to the prefixless slot when the temp: slot is a number', () => {
+      const credential = {
+        authType: AuthCredentialTypes.OAUTH2,
+        oauth2: {accessToken: 'prefixless_token'},
+      };
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': 42, testKey: credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
+    it('returns a stored credential that carries only a payload key', () => {
+      const credential = {apiKey: 'client_supplied_key'};
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': credential});
+
+      expect(handler.getAuthResponse(state)).toBe(credential);
+    });
+
+    it('returns undefined when a slot holds an object that is not a credential', () => {
+      const handler = new AuthHandler(oauth2Config('testKey'));
+      const state = new State({'temp:testKey': {foo: 'bar'}});
+
+      expect(handler.getAuthResponse(state)).toBeUndefined();
+    });
+
+    it('returns undefined when the credential key is empty', () => {
+      const handler = new AuthHandler(oauth2Config(''));
+      const state = new State({'temp:': 'token'});
+
+      expect(handler.getAuthResponse(state)).toBeUndefined();
     });
   });
 

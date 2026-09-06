@@ -7,9 +7,65 @@
 import {State} from '../sessions/state.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
 
-import {AuthCredential} from './auth_credential.js';
+import {AuthCredential, AuthCredentialTypes} from './auth_credential.js';
+import {AuthScheme} from './auth_schemes.js';
 import {AuthConfig} from './auth_tool.js';
 import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js';
+
+/**
+ * The keys that mark a stored object as a credential.
+ *
+ * `authType` alone is too strict: a client answering an
+ * `adk_request_credential` call may send only the payload, so
+ * `parseAndStoreAuthResponse` stores a credential such as `{apiKey: '...'}`.
+ */
+const CREDENTIAL_KEYS: ReadonlyArray<keyof AuthCredential> = [
+  'authType',
+  'apiKey',
+  'http',
+  'oauth2',
+  'serviceAccount',
+];
+
+/** Whether a state value is shaped like a stored credential. */
+function isAuthCredential(value: unknown): value is AuthCredential {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    CREDENTIAL_KEYS.some((key) => key in value)
+  );
+}
+
+/** Wraps a bare token string in the credential shape the auth scheme implies. */
+function buildCredentialFromString(
+  token: string,
+  authScheme: AuthScheme,
+): AuthCredential {
+  if (authScheme.type === 'apiKey') {
+    return {authType: AuthCredentialTypes.API_KEY, apiKey: token};
+  }
+  if (authScheme.type === 'http') {
+    return {
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: authScheme.scheme || 'bearer',
+        credentials: {token},
+      },
+    };
+  }
+  return {authType: AuthCredentialTypes.OAUTH2, oauth2: {accessToken: token}};
+}
+
+/** Normalizes the value of one state slot into a credential. */
+function toAuthCredential(
+  value: unknown,
+  authScheme: AuthScheme,
+): AuthCredential | undefined {
+  if (typeof value === 'string') {
+    return value ? buildCredentialFromString(value, authScheme) : undefined;
+  }
+  return isAuthCredential(value) ? value : undefined;
+}
 
 /**
  * A handler that handles the auth flow in Agent Development Kit to help
@@ -19,10 +75,27 @@ import {OAuth2CredentialExchanger} from './oauth2/oauth2_credential_exchanger.js
 export class AuthHandler {
   constructor(private readonly authConfig: AuthConfig) {}
 
+  /**
+   * Reads the credential for this auth config out of the session state.
+   *
+   * The `temp:` slot that the interactive flow writes wins. When that slot
+   * holds nothing usable, the prefixless slot that
+   * `SessionStateCredentialService` and application code write is read
+   * instead. A bare token string in either slot is wrapped according to the
+   * auth scheme.
+   */
   getAuthResponse(state: State): AuthCredential | undefined {
-    const credentialKey = 'temp:' + this.authConfig.credentialKey;
+    const credentialKey = this.authConfig.credentialKey;
+    if (!credentialKey) {
+      return undefined;
+    }
 
-    return state.get<AuthCredential>(credentialKey);
+    const authScheme = this.authConfig.authScheme;
+
+    return (
+      toAuthCredential(state.get('temp:' + credentialKey), authScheme) ??
+      toAuthCredential(state.get(credentialKey), authScheme)
+    );
   }
 
   /**
