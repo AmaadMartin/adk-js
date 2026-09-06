@@ -271,6 +271,12 @@ describe('ToolNode argument coercion', () => {
     });
   });
 
+  it('joins the text of a multi-part genai Content', async () => {
+    expect(
+      await drive({role: 'user', parts: [{text: '{"a":'}, {text: '4}'}]}),
+    ).toEqual({a: 4});
+  });
+
   it('treats null / empty string as no arguments', async () => {
     expect(await drive(null)).toEqual({});
     expect(await drive('')).toEqual({});

@@ -127,7 +127,7 @@ describe('Phase 5b-cont — FunctionNode auth gate', () => {
         runs++;
         return 'ok';
       },
-      {authConfig: apiKeyAuthConfig()},
+      {authConfig: apiKeyAuthConfig(), rerunOnResume: true},
     );
     const wf = new Workflow({name: 'auth_wf2', edges: [['START', secured]]});
 

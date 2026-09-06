@@ -43,6 +43,7 @@ export type {ParallelWorkerConfig} from './nodes/parallel_worker.js';
 export {ToolNode} from './nodes/tool_node.js';
 export type {ToolNodeConfig} from './nodes/tool_node.js';
 export {findStaticNodePath} from './utils/node_path_utils.js';
+export type {ParameterBinding} from './utils/parameter_binding.js';
 export type {BuildNodeOptions} from './utils/workflow_graph_utils.js';
 
 // --- Graph model ---

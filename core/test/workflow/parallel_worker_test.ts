@@ -223,9 +223,9 @@ describe('ParallelWorker takes what edges take', () => {
     expect(output).toEqual(['ok', 'ok']);
   });
 
-  it('reports an unnameable value with the builder’s message', () => {
+  it('reports an unnameable value with the FunctionNode name error', () => {
     expect(() => new ParallelWorker((_c: unknown, n: number) => n)).toThrow(
-      /has no name; pass \{name\} explicitly/,
+      /FunctionNode must have a name/,
     );
   });
 

@@ -11,6 +11,7 @@ import {NodeLike} from '../graph.js';
 import {isWorkflowNode} from '../node.js';
 import {NODE_BUILDERS, PARALLEL_WORKER_FACTORY} from '../node_builders.js';
 import {prepareRetryConfig, RetryConfig} from '../retry_config.js';
+import {ParameterBinding} from './parameter_binding.js';
 
 /**
  * Property overrides applied when building a node from a {@link NodeLike}.
@@ -25,6 +26,15 @@ export interface BuildNodeOptions {
   outputSchema?: SchemaLike;
   stateSchema?: SchemaLike;
   authConfig?: AuthConfig;
+  /**
+   * The parameters a wrapped function declares, bound for it on every run. Only
+   * a `FunctionNode` reads it, and only when the node is built from a function:
+   * the descriptors are compiled in the constructor, so it cannot be grafted
+   * onto an already-built node.
+   */
+  parameters?: SchemaLike;
+  /** Where a `FunctionNode` reads its declared parameters from. */
+  parameterBinding?: ParameterBinding;
   /** Runs the node's subtree in an isolated conversation scope. */
   isolationScope?: string | true;
   /** If true, wrap the built node in a parallel worker. */
@@ -201,6 +211,13 @@ const OVERRIDABLE_KEYS = [
  * credentials, while the tool and agent builders ignore it. Guarding on the
  * property keeps this path consistent with a fresh build — the option reaches
  * the node that consumes it and no other.
+ *
+ * `parameters` and `parameterBinding` are deliberately absent, because neither
+ * survives a shallow copy on its own. `FunctionNode` compiles `parameters` into
+ * parameter descriptors and derives its `inputSchema` from both keys in its
+ * constructor, so overriding either here would leave the clone binding one way
+ * and validating the other. Declare them where the node is built from its
+ * function.
  */
 const NODE_DECLARED_KEYS = ['authConfig'] as const satisfies ReadonlyArray<
   Exclude<keyof BuildNodeOptions, keyof BaseNode>

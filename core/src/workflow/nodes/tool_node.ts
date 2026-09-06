@@ -10,7 +10,7 @@ import {Event} from '../../events/event.js';
 import {isDefaultEventActions} from '../../events/event_actions.js';
 import {getFunctionResponses} from '../../models/llm_response.js';
 import {BaseTool} from '../../tools/base_tool.js';
-import {isContent} from '../../utils/content_utils.js';
+import {contentToText, isContent} from '../../utils/content_utils.js';
 import {BaseNode, BaseNodeConfig} from '../base_node.js';
 import {NodeContext} from '../node_context.js';
 
@@ -139,7 +139,7 @@ function coerceToolArgs(input: unknown): Record<string, unknown> {
   let args: unknown = input;
 
   if (isContent(args)) {
-    args = extractText(args);
+    args = contentToText(args);
   }
 
   if (typeof args === 'string') {
@@ -165,10 +165,6 @@ function coerceToolArgs(input: unknown): Record<string, unknown> {
     );
   }
   return args as Record<string, unknown>;
-}
-
-function extractText(content: {parts?: Array<{text?: string}>}): string {
-  return (content.parts ?? []).map((p) => p.text ?? '').join('');
 }
 
 // The builder that turns a BaseTool into a ToolNode is wired into the static
