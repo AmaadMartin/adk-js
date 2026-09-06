@@ -477,11 +477,24 @@ export class Runner {
       );
     } finally {
       span.end();
-      const toolsets = isBaseAgent(this.agent)
-        ? getAllToolsets(this.agent)
-        : [];
-      await Promise.allSettled(toolsets.map((t) => t.close()));
+      await this.close();
     }
+  }
+
+  /**
+   * Releases what this runner holds open: every toolset reachable from its
+   * agent tree, so a tool server and its subprocess do not outlive the runner
+   * that started them. A root that is not an agent — a bare workflow node —
+   * owns no toolsets.
+   *
+   * Best-effort and safe to call more than once. It never rejects, so it is
+   * safe in a `finally` beside a run that failed. adk-python's `Runner.close`
+   * also closes the plugins and flushes the session service; adk-js has
+   * neither hook, so the toolsets are the whole of it.
+   */
+  async close(): Promise<void> {
+    const toolsets = isBaseAgent(this.agent) ? getAllToolsets(this.agent) : [];
+    await Promise.allSettled(toolsets.map((t) => t.close()));
   }
 
   /**
