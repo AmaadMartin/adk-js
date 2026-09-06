@@ -114,6 +114,11 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [DevServer](dev/dev_server/index.md) - The HTTP server behind `adk web`, and the dev-only endpoints it adds to `AdkApiServer`.
 
+### Environments
+
+- [DaytonaEnvironment](environments/daytona_environment/index.md) - Running an
+  agent's shell commands and file operations inside a remote Daytona sandbox.
+
 ### Evaluation
 
 - [AgentEvaluator](evaluation/agent_evaluator/index.md) - Running an agent over recorded eval data from your own test suite, and reading the verdict it produces.

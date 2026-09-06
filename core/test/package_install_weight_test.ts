@@ -42,6 +42,7 @@ const pkg: CorePackageJson = JSON.parse(
  * that subsystem.
  */
 const OPTIONAL_SUBSYSTEM_PEERS = [
+  '@daytona/sdk',
   '@google-cloud/bigquery',
   '@google-cloud/bigtable',
   '@google-cloud/dataplex',
@@ -81,6 +82,7 @@ describe('core/package.json install weight', () => {
   );
 
   it.each([
+    '@daytona/sdk',
     '@google-cloud/bigquery',
     '@google-cloud/bigquery-storage',
     '@google-cloud/bigtable',
