@@ -1134,11 +1134,28 @@ describe('LlmAgent outputSchema with tools', () => {
     expect(request.config?.systemInstruction).toContain('set_model_response');
   });
 
-  it('uses the set_model_response workaround on Vertex AI with a pre-2.0 model', async () => {
+  it('uses the native response schema on Vertex AI with an unversioned Gemini id', async () => {
     vi.stubEnv(VERTEX_ENV_VAR, 'true');
 
     const request = await captureRequest({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-early-exp',
+      withTools: true,
+    });
+
+    expect(request.config?.responseSchema).toBeDefined();
+    expect(request.config?.responseMimeType).toBe('application/json');
+    expect(request.toolsDict).not.toHaveProperty('set_model_response');
+    expect(request.toolsDict).toHaveProperty('some_tool');
+    expect(request.config?.systemInstruction).not.toContain(
+      'set_model_response',
+    );
+  });
+
+  it('uses the set_model_response workaround on Vertex AI with a non-Gemini model', async () => {
+    vi.stubEnv(VERTEX_ENV_VAR, 'true');
+
+    const request = await captureRequest({
+      model: 'claude-3-7-sonnet',
       withTools: true,
     });
 

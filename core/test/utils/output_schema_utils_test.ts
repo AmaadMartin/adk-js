@@ -52,8 +52,8 @@ const TEST_CASES: TestCase[] = [
   {
     model: 'gemini-1.5-pro',
     vertexEnv: 'true',
-    expected: false,
-    why: 'Gemini 1.x is below the 2.0 floor',
+    expected: true,
+    why: 'there is no version floor: every Gemini id qualifies on Vertex AI',
   },
   {
     model: 'gemini-1.5-pro',
@@ -77,13 +77,49 @@ const TEST_CASES: TestCase[] = [
     model: 'projects/p/locations/l/publishers/google/models/gemini-2.5-flash',
     vertexEnv: 'true',
     expected: true,
-    why: 'the version is read out of the path-based model name',
+    why: 'the model id is read out of the path-based model name',
   },
   {
     model: 'gemini-flash-early-exp',
     vertexEnv: 'true',
+    expected: true,
+    why: 'an Early Access Program name is a Gemini id, even without a version',
+  },
+  {
+    model: 'gemini-early-exp',
+    vertexEnv: 'true',
+    expected: true,
+    why: 'an Early Access Program name is a Gemini id, even without a version',
+  },
+  {
+    model: 'gemini-early-exp',
+    vertexEnv: undefined,
     expected: false,
-    why: 'Early Access Program names encode no numeric version, unlike the Python implementation',
+    why: 'the variant gates every model id',
+  },
+  {
+    model: 'gemini-flash-early-exp3',
+    vertexEnv: 'true',
+    expected: true,
+    why: 'a numeric Early Access Program suffix is not a version either',
+  },
+  {
+    model: 'gemini-live-2.5-flash-native-audio',
+    vertexEnv: 'true',
+    expected: true,
+    why: 'a word before the version does not stop it being a Gemini id',
+  },
+  {
+    model: 'projects/p/locations/l/publishers/google/models/gemini-early-exp',
+    vertexEnv: 'true',
+    expected: true,
+    why: 'an unversioned id is also read out of a path-based model name',
+  },
+  {
+    model: 'gemma-3-27b-it',
+    vertexEnv: 'true',
+    expected: false,
+    why: 'the "gemini-" prefix is required, and "gemma-" is a different family',
   },
 ];
 
