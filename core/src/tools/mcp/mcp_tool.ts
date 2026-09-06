@@ -70,6 +70,7 @@ export class MCPTool extends BaseTool {
       callRequest.params = {name: this.originalName, arguments: request.args};
       const result = await session.callTool(callRequest.params, undefined, {
         signal: request.toolContext.abortSignal,
+        timeout: this.mcpSessionManager.requestTimeoutMs,
       });
       return result as CallToolResult;
     } finally {

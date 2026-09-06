@@ -110,7 +110,9 @@ export class AgentRegistrySingleMCPToolset extends BaseToolset {
     // Retrieve tools from the remote server and close the discovery session
     let listResult: ListToolsResult;
     try {
-      listResult = (await session.listTools()) as ListToolsResult;
+      listResult = (await session.listTools(undefined, {
+        timeout: sessionManager.requestTimeoutMs,
+      })) as ListToolsResult;
     } finally {
       await sessionManager.closeSession(session).catch((e) => {
         logger.warn('Failed to close MCP discovery session', e);
