@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {LlmRequest, LlmResponse, Session} from '@google/adk';
+import {Session} from '@google/adk';
 import {
   Blob,
   CodeExecutionResult,
@@ -12,13 +12,12 @@ import {
   ExecutableCode,
   FileData,
   FinishReason,
-  FunctionCall,
-  FunctionResponse,
   GenerateContentResponseUsageMetadata,
   GroundingMetadata,
   PartMediaResolution,
   VideoMetadata,
 } from '@google/genai';
+import {Recordings} from './recordings_schema.js';
 
 // The User message to replay. Either text or content will be filled in
 export interface UserMessage {
@@ -40,29 +39,6 @@ export interface TestSpec {
   initialState?: Record<string, unknown>;
   // Sequence of user messages to send to the agent during test execution.
   userMessages?: UserMessage[];
-}
-
-export interface LlmRecording {
-  llmRequest?: LlmRequest;
-  llmResponse?: LlmResponse;
-}
-
-export interface ToolRecording {
-  toolCall?: FunctionCall;
-  toolResponse?: FunctionResponse;
-}
-
-export interface Recording {
-  userMessageIndex: number;
-  agentName: string;
-
-  // only one of these will be filled in
-  llmRecording?: LlmRecording;
-  toolRecording?: ToolRecording;
-}
-
-export interface Recordings {
-  recordings: Recording[];
 }
 
 export interface TestInfo {
