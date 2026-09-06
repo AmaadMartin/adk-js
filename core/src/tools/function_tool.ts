@@ -11,6 +11,7 @@ import {z as z4} from 'zod/v4';
 import {isZodObject, zodObjectToSchema} from '../utils/simple_zod_to_json.js';
 
 import {Context} from '../agents/context.js';
+import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {BaseTool, RunAsyncToolRequest} from './base_tool.js';
 
 /**
@@ -37,10 +38,15 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
 
 /**
  * The signature of the user-provided function executed by a {@link FunctionTool}.
+ *
+ * `inputStream` is the queue registered for this tool at
+ * `invocationContext.activeStreamingTools[name].stream`, set only in a live
+ * session. The tool reads it; whoever created it closes it.
  */
 export type ToolExecuteFunction<TParameters extends ToolInputParameters> = (
   input: ToolExecuteArgument<TParameters>,
   toolContext?: Context,
+  inputStream?: LiveRequestQueue,
 ) => Promise<unknown> | unknown;
 
 /**
@@ -196,7 +202,12 @@ export class FunctionTool<
         return pending;
       }
 
-      return await this.execute(validatedArgs, req.toolContext);
+      return await this.execute(
+        validatedArgs,
+        req.toolContext,
+        req.toolContext.invocationContext?.activeStreamingTools?.[this.name]
+          ?.stream,
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
