@@ -87,6 +87,8 @@ export class OperationParser {
     const mediaTypeObject = content[firstMimeType];
     const schema = mediaTypeObject.schema;
     const description = requestBody.description || '';
+    // OpenAPI defaults requestBody.required to false when it is omitted.
+    const bodyRequired = requestBody.required ?? false;
 
     if (schema && !('$ref' in schema)) {
       if (schema.type === 'object') {
@@ -110,7 +112,7 @@ export class OperationParser {
             paramLocation: 'body',
             paramSchema: schema,
             description,
-            required: true,
+            required: bodyRequired,
             name: 'body',
           });
         }
@@ -120,7 +122,7 @@ export class OperationParser {
           paramLocation: 'body',
           paramSchema: schema,
           description,
-          required: true,
+          required: bodyRequired,
           name: 'body',
         });
       } else {
@@ -129,7 +131,7 @@ export class OperationParser {
           paramLocation: 'body',
           paramSchema: schema,
           description,
-          required: true,
+          required: bodyRequired,
           name: 'body',
         });
       }
