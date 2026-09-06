@@ -5,14 +5,24 @@
  */
 
 import {
+  FeatureName,
   InMemorySessionService,
   Session,
+  SessionNotFoundError,
   State,
   createEvent,
   createEventActions,
+  overrideFeatureEnabled,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {isInMemoryConnectionString} from '../../src/sessions/in_memory_session_service.js';
+
+// A `'__proto__': value` pair in an object literal invokes the prototype
+// setter instead of creating an own key, so it cannot express what an attacker
+// actually sends. `JSON.parse` is what the dev server does with a request
+// body, and it does produce an own `__proto__` key.
+const parseBody = (json: string): Record<string, unknown> =>
+  JSON.parse(json) as Record<string, unknown>;
 
 describe('isInMemoryConnectionString', () => {
   it('returns true for memory://', () => {
@@ -657,7 +667,8 @@ describe('InMemorySessionService', () => {
       expect(session2.state).toHaveProperty(`${State.USER_PREFIX}key`, 'value');
     });
 
-    it('handles non-existent app/user/session gracefully', async () => {
+    // adk-python: tests/unittests/sessions/test_session_service.py::test_append_event_to_unknown_session_raises_session_not_found
+    it('throws SessionNotFoundError for a session the service never created', async () => {
       const session: Session = {
         id: 'fake-session',
         appName: 'fake-app',
@@ -668,9 +679,112 @@ describe('InMemorySessionService', () => {
       };
       const event = createEvent({timestamp: Date.now()});
 
-      // Should just log warnings and return event
-      const returnedEvent = await service.appendEvent({session, event});
-      expect(returnedEvent).toBe(event);
+      await expect(service.appendEvent({session, event})).rejects.toThrow(
+        SessionNotFoundError,
+      );
+      await expect(service.appendEvent({session, event})).rejects.toThrow(
+        'Session fake-session not found.',
+      );
+    });
+
+    // adk-python: tests/unittests/sessions/test_session_service.py::test_append_event_to_deleted_session_raises_session_not_found
+    it('throws SessionNotFoundError after the session is deleted', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      await service.deleteSession({appName, userId, sessionId: session.id});
+
+      await expect(
+        service.appendEvent({session, event: createEvent({timestamp: 1000})}),
+      ).rejects.toThrow(SessionNotFoundError);
+    });
+
+    it('throws for a known app whose user is unknown', async () => {
+      const appName = 'app';
+      await service.createSession({appName, userId: 'known-user'});
+      const session: Session = {
+        id: 'other-session',
+        appName,
+        userId: 'unknown-user',
+        state: {},
+        events: [],
+        lastUpdateTime: 0,
+      };
+
+      await expect(
+        service.appendEvent({session, event: createEvent({timestamp: 1000})}),
+      ).rejects.toThrow(SessionNotFoundError);
+    });
+
+    it('leaves the app and user stores untouched when the session is unknown', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const known = await service.createSession({appName, userId});
+      const stale: Session = {
+        id: 'stale-session',
+        appName,
+        userId,
+        state: {},
+        events: [],
+        lastUpdateTime: 0,
+      };
+
+      await expect(
+        service.appendEvent({
+          session: stale,
+          event: createEvent({
+            timestamp: 1000,
+            actions: createEventActions({
+              stateDelta: {[`${State.APP_PREFIX}key`]: 'value'},
+            }),
+          }),
+        }),
+      ).rejects.toThrow(SessionNotFoundError);
+
+      const sibling = await service.getSession({
+        appName,
+        userId,
+        sessionId: known.id,
+      });
+      expect(sibling?.state).toEqual({});
+      expect(stale.events).toEqual([]);
+    });
+
+    // adk-python: in_memory_session_service.py::append_event returns before the
+    // store lookup when `event.partial` is set.
+    it('returns a partial event for an unknown session without throwing', async () => {
+      const session: Session = {
+        id: 'fake-session',
+        appName: 'fake-app',
+        userId: 'fake-user',
+        state: {},
+        events: [],
+        lastUpdateTime: 0,
+      };
+      const event = createEvent({timestamp: Date.now(), partial: true});
+
+      await expect(service.appendEvent({session, event})).resolves.toBe(event);
+    });
+
+    it('does not stamp lastUpdateTime for a partial event', async () => {
+      const appName = 'app';
+      const userId = 'user';
+      const session = await service.createSession({appName, userId});
+      const before = session.lastUpdateTime;
+
+      await service.appendEvent({
+        session,
+        event: createEvent({timestamp: before + 5000, partial: true}),
+      });
+
+      expect(session.lastUpdateTime).toBe(before);
+      const stored = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(stored?.lastUpdateTime).toBe(before);
+      expect(stored?.events).toEqual([]);
     });
   });
 
@@ -699,13 +813,6 @@ describe('InMemorySessionService', () => {
 
     beforeEach(clearPollution);
     afterEach(clearPollution);
-
-    // A `'__proto__': value` pair in an object literal invokes the prototype
-    // setter instead of creating an own key, so it cannot express what an
-    // attacker actually sends. `JSON.parse` is what the dev server does with a
-    // request body, and it does produce an own `__proto__` key.
-    const parseBody = (json: string): Record<string, unknown> =>
-      JSON.parse(json) as Record<string, unknown>;
 
     it('does not pollute Object.prototype via appName', async () => {
       await service.createSession({
@@ -880,6 +987,224 @@ describe('InMemorySessionService', () => {
         sessionId: 'poc_sid',
       });
       expect(session?.id).toBe('poc_sid');
+    });
+  });
+
+  describe('light copy (IN_MEMORY_SESSION_SERVICE_LIGHT_COPY)', () => {
+    const appName = 'app';
+    const userId = 'user';
+
+    beforeEach(() => {
+      overrideFeatureEnabled(
+        FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY,
+        true,
+      );
+    });
+
+    afterEach(() => {
+      overrideFeatureEnabled(
+        FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY,
+        undefined,
+      );
+      delete (Object.prototype as Record<string, unknown>)['isAdmin'];
+    });
+
+    it('shares the stored event objects but not the events array', async () => {
+      const session = await service.createSession({appName, userId});
+      const event = createEvent({timestamp: 1000});
+      await service.appendEvent({session, event});
+
+      const first = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      const second = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+
+      expect(first?.events[0]).toBe(event);
+      expect(first?.events).not.toBe(second?.events);
+    });
+
+    it('deep-clones the stored event objects with the flag off', async () => {
+      overrideFeatureEnabled(
+        FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY,
+        false,
+      );
+      const session = await service.createSession({appName, userId});
+      const event = createEvent({timestamp: 1000});
+      await service.appendEvent({session, event});
+
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+
+      expect(retrieved?.events[0]).not.toBe(event);
+      expect(retrieved?.events[0]).toEqual(event);
+    });
+
+    it('shares a nested state value between two reads', async () => {
+      const nested = {inner: 'value'};
+      const session = await service.createSession({
+        appName,
+        userId,
+        state: {nested},
+      });
+
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+
+      expect(retrieved?.state['nested']).toBe(nested);
+    });
+
+    it('deep-clones a nested state value with the flag off', async () => {
+      overrideFeatureEnabled(
+        FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY,
+        false,
+      );
+      const nested = {inner: 'value'};
+      const session = await service.createSession({
+        appName,
+        userId,
+        state: {nested},
+      });
+
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+
+      expect(retrieved?.state['nested']).not.toBe(nested);
+      expect(retrieved?.state['nested']).toEqual(nested);
+    });
+
+    it('keeps the stored session unchanged when the caller edits its copy', async () => {
+      const session = await service.createSession({appName, userId});
+      await service.appendEvent({session, event: createEvent({timestamp: 1})});
+
+      const copy = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      copy!.events.push(createEvent({timestamp: 2}));
+      copy!.state['addedByCaller'] = true;
+
+      const reread = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+      expect(reread?.events).toHaveLength(1);
+      expect(reread?.state).not.toHaveProperty('addedByCaller');
+    });
+
+    it('returns a null-prototype state map', async () => {
+      const session = await service.createSession({appName, userId});
+
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+      });
+
+      expect(Object.getPrototypeOf(retrieved!.state)).toBeNull();
+      expect('toString' in retrieved!.state).toBe(false);
+    });
+
+    it('merges existing app and user state into a new session', async () => {
+      const session1 = await service.createSession({appName, userId});
+      await service.appendEvent({
+        session: session1,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: {
+              [`${State.APP_PREFIX}appKey`]: 'appValue',
+              [`${State.USER_PREFIX}userKey`]: 'userValue',
+            },
+          }),
+        }),
+      });
+
+      const session2 = await service.createSession({appName, userId});
+
+      expect(session2.state).toEqual({
+        [`${State.APP_PREFIX}appKey`]: 'appValue',
+        [`${State.USER_PREFIX}userKey`]: 'userValue',
+      });
+    });
+
+    it('respects numRecentEvents config', async () => {
+      const session = await service.createSession({appName, userId});
+      for (let i = 0; i < 5; i++) {
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: i}),
+        });
+      }
+
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+        config: {numRecentEvents: 2},
+      });
+
+      expect(retrieved?.events.map((e) => e.timestamp)).toEqual([3, 4]);
+    });
+
+    it('respects afterTimestamp config', async () => {
+      const session = await service.createSession({appName, userId});
+      for (let i = 0; i < 5; i++) {
+        await service.appendEvent({
+          session,
+          event: createEvent({timestamp: i * 1000}),
+        });
+      }
+
+      const retrieved = await service.getSession({
+        appName,
+        userId,
+        sessionId: session.id,
+        config: {afterTimestamp: 2500},
+      });
+
+      expect(retrieved?.events.map((e) => e.timestamp)).toEqual([3000, 4000]);
+    });
+
+    it('does not re-parent session state via __proto__ in a state delta', async () => {
+      const session = await service.createSession({
+        appName,
+        userId,
+        sessionId: 's1',
+      });
+      await service.appendEvent({
+        session,
+        event: createEvent({
+          timestamp: Date.now(),
+          actions: createEventActions({
+            stateDelta: parseBody('{"__proto__": {"isAdmin": true}}'),
+          }),
+        }),
+      });
+
+      const stored = await service.getSession({
+        appName,
+        userId,
+        sessionId: 's1',
+      });
+      expect(new State(stored!.state).get('isAdmin')).toBeUndefined();
+      expect(stored?.state['__proto__']).toEqual({isAdmin: true});
     });
   });
 });

@@ -12,6 +12,13 @@ import {logger} from '../utils/logger.js';
  */
 export enum FeatureName {
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
+  /**
+   * Makes `InMemorySessionService` hand back a light copy of a session —
+   * containers copied, contents shared — instead of a deep clone. It trades
+   * isolation of the returned session's event objects and state values for the
+   * cost of cloning them.
+   */
+  IN_MEMORY_SESSION_SERVICE_LIGHT_COPY = 'IN_MEMORY_SESSION_SERVICE_LIGHT_COPY',
 }
 
 /**
@@ -35,6 +42,10 @@ export interface FeatureConfig {
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: false,
+  },
+  [FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY]: {
+    stage: FeatureStage.WIP,
     defaultOn: false,
   },
 };

@@ -39,6 +39,22 @@ describe('FeatureRegistry', () => {
     expect(config?.defaultOn).toBe(false);
   });
 
+  it('should get correct config for IN_MEMORY_SESSION_SERVICE_LIGHT_COPY', () => {
+    const config = getFeatureConfig(
+      FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY,
+    );
+    expect(config).toEqual({stage: FeatureStage.WIP, defaultOn: false});
+  });
+
+  it('should leave IN_MEMORY_SESSION_SERVICE_LIGHT_COPY off by default', () => {
+    delete process.env.ADK_ENABLE_IN_MEMORY_SESSION_SERVICE_LIGHT_COPY;
+    delete process.env.ADK_DISABLE_IN_MEMORY_SESSION_SERVICE_LIGHT_COPY;
+
+    expect(
+      isFeatureEnabled(FeatureName.IN_MEMORY_SESSION_SERVICE_LIGHT_COPY),
+    ).toBe(false);
+  });
+
   it('should return defaultOn value when no overrides or env vars', () => {
     delete process.env.ADK_ENABLE_PROGRESSIVE_SSE_STREAMING;
     delete process.env.ADK_DISABLE_PROGRESSIVE_SSE_STREAMING;
