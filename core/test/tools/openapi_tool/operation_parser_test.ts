@@ -92,4 +92,86 @@ describe('OperationParser', () => {
     expect(schema).toBeTruthy();
     expect(schema.title).toBe('testOp_Arguments');
   });
+
+  it('should number colliding parameter names from 0', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'getPet',
+      parameters: [
+        {name: 'x_api_key', in: 'query'},
+        {name: 'xApiKey', in: 'header'},
+        {name: 'XApiKey', in: 'cookie'},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params.map((p) => p.name)).toEqual([
+      'x_api_key',
+      'x_api_key_0',
+      'x_api_key_1',
+    ]);
+    expect(params.map((p) => p.originalName)).toEqual([
+      'x_api_key',
+      'xApiKey',
+      'XApiKey',
+    ]);
+  });
+
+  it('should expose the deduped names in the generated schema', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'getPet',
+      parameters: [
+        {name: 'x_api_key', in: 'query'},
+        {name: 'xApiKey', in: 'header'},
+        {name: 'XApiKey', in: 'cookie'},
+      ],
+      responses: {},
+    };
+
+    const schema = new OperationParser(op).getJsonSchema();
+
+    expect(schema.properties).toEqual({
+      x_api_key: {},
+      x_api_key_0: {},
+      x_api_key_1: {},
+    });
+  });
+
+  it('should number each colliding name independently', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'getPet',
+      parameters: [
+        {name: 'pet_id', in: 'path'},
+        {name: 'petId', in: 'query'},
+        {name: 'x_api_key', in: 'query'},
+        {name: 'xApiKey', in: 'header'},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params.map((p) => p.name)).toEqual([
+      'pet_id',
+      'pet_id_0',
+      'x_api_key',
+      'x_api_key_0',
+    ]);
+  });
+
+  it('should leave distinct parameter names unsuffixed', () => {
+    const op: OpenAPIV3.OperationObject = {
+      operationId: 'getPet',
+      parameters: [
+        {name: 'pet_id', in: 'path'},
+        {name: 'x_api_key', in: 'header'},
+      ],
+      responses: {},
+    };
+
+    const params = new OperationParser(op).getParameters();
+
+    expect(params.map((p) => p.name)).toEqual(['pet_id', 'x_api_key']);
+  });
 });
