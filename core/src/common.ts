@@ -288,6 +288,18 @@ export type {ToolPredicate} from './tools/base_toolset.js';
 export {BuiltInTool} from './tools/built_in_tool.js';
 export {ConsolidateContextTool} from './tools/consolidate_context_tool.js';
 export {
+  DiscoveryEngineSearchTool,
+  SearchResultMode,
+} from './tools/discovery_engine_search_tool.js';
+export type {
+  BaseDiscoveryEngineSearchToolParams,
+  DiscoveryEngineDataStoreParams,
+  DiscoveryEngineSearchEngineParams,
+  DiscoveryEngineSearchResponse,
+  DiscoveryEngineSearchResult,
+  DiscoveryEngineSearchToolParams,
+} from './tools/discovery_engine_search_tool.js';
+export {
   ENTERPRISE_WEB_SEARCH,
   EnterpriseWebSearchTool,
 } from './tools/enterprise_web_search_tool.js';
