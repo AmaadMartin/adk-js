@@ -182,15 +182,15 @@ AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 
 // Reusable deployment CLI option constants
 export const PROJECT_DEPLOY_OPTION = new Option(
-  '--project [string]',
+  '--project <string>',
   'Optional. Google Cloud project to deploy the agent. If not set, default project from gcloud config is used',
 );
 export const REGION_DEPLOY_OPTION = new Option(
-  '--region [string]',
+  '--region <string>',
   'Optional. Google Cloud region to deploy the agent. If not set, default run/region from gcloud config is used',
 );
 export const ADK_VERSION_OPTION = new Option(
-  '--adk_version [string]',
+  '--adk_version <string>',
   'Optional. ADK version to use. If not set, default to the latest version available on npm',
 ).default('latest');
 export const WITH_UI_OPTION = new Option(
@@ -198,19 +198,19 @@ export const WITH_UI_OPTION = new Option(
   'Optional. Deploy ADK Web UI if set. (default: deploy ADK API server only)',
 ).default(false);
 export const DISPLAY_NAME_OPTION = new Option(
-  '--display_name [string]',
+  '--display_name <string>',
   'Optional. The display name for the Reasoning Engine. Defaults to agent directory name.',
 );
 export const DESCRIPTION_OPTION = new Option(
-  '--description [string]',
+  '--description <string>',
   'Optional. The description for the Reasoning Engine.',
 );
 export const REPOSITORY_DEPLOY_OPTION = new Option(
-  '--repository [string]',
+  '--repository <string>',
   'Optional. Artifact Registry repository name to push docker images. Required for agent_engine deploy.',
 );
 export const AGENT_ENGINE_ID_OPTION = new Option(
-  '--agent_engine_id [id]',
+  '--agent_engine_id <id>',
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
 );
 
@@ -431,12 +431,12 @@ export function createProgram(): Command {
     .addOption(PROJECT_DEPLOY_OPTION)
     .addOption(REGION_DEPLOY_OPTION)
     .option(
-      '--service_name [string]',
+      '--service_name <string>',
       'Optional. The service name to use in Cloud Run. Default: "adk-default-service-name"',
       'adk-default-service-name',
     )
     .option(
-      '--temp_folder [string]',
+      '--temp_folder <string>',
       'Optional. Temp folder for the generated Cloud Run source files (default: a private directory created in the system temp directory).',
     )
     .addOption(ADK_VERSION_OPTION)
@@ -500,7 +500,7 @@ export function createProgram(): Command {
       .addOption(DESCRIPTION_OPTION)
       .addOption(REPOSITORY_DEPLOY_OPTION)
       .option(
-        '--temp_folder [string]',
+        '--temp_folder <string>',
         'Optional. Temp folder for the generated source files (default: a private directory created in the system temp directory).',
       )
       .addOption(ADK_VERSION_OPTION)
@@ -554,12 +554,12 @@ export function createProgram(): Command {
     .addOption(VERBOSE_OPTION)
     .addOption(LOG_LEVEL_OPTION)
     .option(
-      '--agents_dir [dir]',
+      '--agents_dir <dir>',
       'Directory of conformance test agent definitions. Recursively searched for .yaml files with agent definitions.',
       process.cwd(),
     )
     .option(
-      '--tests_dir [dir]',
+      '--tests_dir <dir>',
       'Directory of conformance test definitions. Recursively searched for .yaml files with test definitions.',
       process.cwd(),
     )

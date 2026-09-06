@@ -5,12 +5,14 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {Command} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
 import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
+import {runIntegrationTests} from '../../src/integration/run_integration_tests.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
 vi.mock('../../src/server/adk_api_server', () => {
@@ -37,6 +39,10 @@ vi.mock('../../src/cli/cli_run', () => ({
   runAgent: vi.fn(),
 }));
 
+vi.mock('../../src/integration/run_integration_tests', () => ({
+  runIntegrationTests: vi.fn(),
+}));
+
 vi.mock('../../src/version', () => ({
   version: '1.0.0-test',
 }));
@@ -48,6 +54,18 @@ vi.mock('@google/adk', async (importOriginal) => {
     setLogLevel: vi.fn(),
   };
 });
+
+/**
+ * Commander copies the parent's exit callback into a subcommand when
+ * `.command()` creates it, so calling `exitOverride()` on an already-built
+ * program does not reach the subcommands. A parse error on a subcommand would
+ * then call `process.exit` and kill the worker instead of throwing.
+ */
+function applyExitOverrideRecursively(cmd: Command): void {
+  cmd.exitOverride();
+  cmd.configureOutput({writeErr: () => {}});
+  cmd.commands.forEach(applyExitOverrideRecursively);
+}
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
@@ -465,6 +483,106 @@ describe('CLI Entrypoint', () => {
 
       expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
         agentEngineId: '12345',
+      });
+    });
+  });
+
+  describe('option value arity', () => {
+    beforeEach(() => {
+      applyExitOverrideRecursively(program);
+    });
+
+    const expectNoCommandRan = () => {
+      expect(deployToCloudRun).not.toHaveBeenCalled();
+      expect(deployToAgentEngine).not.toHaveBeenCalled();
+      expect(runIntegrationTests).not.toHaveBeenCalled();
+    };
+
+    it.each([
+      [['deploy', 'cloud_run', '--project'], "'--project <string>'"],
+      [['deploy', 'cloud_run', '--region'], "'--region <string>'"],
+      [['deploy', 'cloud_run', '--adk_version'], "'--adk_version <string>'"],
+      [['deploy', 'cloud_run', '--service_name'], "'--service_name <string>'"],
+      [['deploy', 'cloud_run', '--temp_folder'], "'--temp_folder <string>'"],
+      [
+        ['deploy', 'agent_engine', '--display_name'],
+        "'--display_name <string>'",
+      ],
+      [['deploy', 'agent_engine', '--description'], "'--description <string>'"],
+      [['deploy', 'agent_engine', '--repository'], "'--repository <string>'"],
+      [
+        ['deploy', 'agent_engine', '--agent_engine_id'],
+        "'--agent_engine_id <id>'",
+      ],
+      [['deploy', 'agent_engine', '--temp_folder'], "'--temp_folder <string>'"],
+      [['integration', 'conformance', '--agents_dir'], "'--agents_dir <dir>'"],
+      [['integration', 'conformance', '--tests_dir'], "'--tests_dir <dir>'"],
+    ])('should reject %j with a missing argument error', async (argv, flag) => {
+      await expect(parse(argv)).rejects.toThrow(
+        `error: option ${flag} argument missing`,
+      );
+      expectNoCommandRan();
+    });
+
+    it('should reject a value option typed after the agent directory', async () => {
+      await expect(
+        parse(['deploy', 'cloud_run', './my-agent-path', '--project']),
+      ).rejects.toThrow("error: option '--project <string>' argument missing");
+      expectNoCommandRan();
+    });
+
+    it('should keep the agent directory as the positional when --project has a value', async () => {
+      await parse(['deploy', 'cloud_run', '--project', 'p', './agents']);
+
+      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+        project: 'p',
+        agentPath: expect.stringContaining('agents'),
+      });
+    });
+
+    it('should keep the agent directory as the positional when --agent_engine_id has a value', async () => {
+      await parse([
+        'deploy',
+        'agent_engine',
+        '--agent_engine_id',
+        '12345',
+        './agents',
+      ]);
+
+      expect((deployToAgentEngine as Mock).mock.calls[0][0]).toMatchObject({
+        agentEngineId: '12345',
+        agentPath: expect.stringContaining('agents'),
+      });
+    });
+
+    it('should accept an explicitly empty value', async () => {
+      await parse(['deploy', 'cloud_run', '--project=']);
+
+      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+        project: '',
+      });
+    });
+
+    it('should pass both conformance directories to runIntegrationTests', async () => {
+      await parse([
+        'integration',
+        'conformance',
+        '--agents_dir',
+        './a',
+        '--tests_dir',
+        './t',
+      ]);
+
+      expect(runIntegrationTests).toHaveBeenCalledWith(
+        expect.objectContaining({agentsDir: './a', testsDir: './t'}),
+      );
+    });
+
+    it('should still accept --with_ui as the last token', async () => {
+      await parse(['deploy', 'cloud_run', '--with_ui']);
+
+      expect((deployToCloudRun as Mock).mock.calls[0][0]).toMatchObject({
+        withUi: true,
       });
     });
   });
