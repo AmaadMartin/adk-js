@@ -161,6 +161,22 @@ describe('OpenAPIToolset', () => {
     expect(tools[0].name).toBe('get_users');
   });
 
+  it('should apply a predicate toolFilter when no context is provided', async () => {
+    const seenContexts: Array<ReadonlyContext | undefined> = [];
+    const toolset = new OpenAPIToolset({
+      specDict: mockSpec,
+      toolFilter: (tool, context) => {
+        seenContexts.push(context);
+        return tool.name === 'get_users';
+      },
+    });
+
+    const tools = await toolset.getTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['get_users']);
+    expect(seenContexts).toEqual([undefined, undefined]);
+  });
+
   it('should handle context in getTools', async () => {
     const toolset = new OpenAPIToolset({specDict: mockSpec});
     const mockContext = {};

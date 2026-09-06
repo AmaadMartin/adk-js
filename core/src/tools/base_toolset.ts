@@ -14,10 +14,14 @@ import {BaseTool} from './base_tool.js';
  * Function to decide whether a tool should be exposed to LLM. Toolset
  * implementer could consider whether to accept such instance in the toolset's
  * constructor and apply the predicate in getTools method.
+ *
+ * `readonlyContext` is undefined when the toolset is enumerated outside an
+ * invocation (for example while building an A2A agent card), so a predicate
+ * must not assume it is present.
  */
 export type ToolPredicate = (
   tool: BaseTool,
-  readonlyContext: ReadonlyContext,
+  readonlyContext?: ReadonlyContext,
 ) => boolean;
 
 /**
@@ -51,8 +55,9 @@ export abstract class BaseToolset {
   /**
    * Returns the tools that should be exposed to LLM.
    *
-   * @param context Context used to filter tools available to the agent. If
-   *     not defined, all tools in the toolset are returned.
+   * @param context Context used to filter tools available to the agent. May be
+   *     undefined when the toolset is enumerated outside an invocation;
+   *     implementations should still apply their `toolFilter`.
    * @return A Promise that resolves to the list of tools.
    */
   abstract getTools(context?: ReadonlyContext): Promise<BaseTool[]>;
@@ -73,10 +78,12 @@ export abstract class BaseToolset {
    * Returns whether the tool should be exposed to LLM.
    *
    * @param tool The tool to check.
-   * @param context Context used to filter tools available to the agent.
+   * @param context Context used to filter tools available to the agent. May be
+   *     undefined; a `ToolPredicate` filter is still applied and receives
+   *     `undefined` for the context.
    * @return Whether the tool should be exposed to LLM.
    */
-  protected isToolSelected(tool: BaseTool, context: ReadonlyContext): boolean {
+  protected isToolSelected(tool: BaseTool, context?: ReadonlyContext): boolean {
     // An empty tool filter means no filtering: all tools are selected.
     if (
       !this.toolFilter ||
