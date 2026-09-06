@@ -1429,3 +1429,57 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
   });
 });
+
+describe('LlmAgent run config httpOptions', () => {
+  /** Records the request the agent builds on the unary path. */
+  class RequestCapturingLlm extends BaseLlm {
+    capturedRequest?: LlmRequest;
+
+    async *generateContentAsync(
+      request: LlmRequest,
+    ): AsyncGenerator<LlmResponse, void, void> {
+      this.capturedRequest = request;
+      yield {content: {role: 'model', parts: [{text: 'done'}]}};
+    }
+
+    async connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+      return new MockLlmConnection();
+    }
+  }
+
+  it('reach the model request and win over the agent options', async () => {
+    const llm = new RequestCapturingLlm({model: 'capture-http-options'});
+    const agent = new LlmAgent({
+      name: 'test_agent',
+      model: llm,
+      generateContentConfig: {
+        httpOptions: {timeout: 1000, headers: {'Agent-Header': 'agent'}},
+      },
+    });
+    const invocationContext = new InvocationContext({
+      invocationId: 'inv_http_options',
+      session: createSession({
+        id: 'sess_http_options',
+        events: [],
+        appName: 'test-app',
+        userId: 'test-user',
+      }),
+      agent,
+      pluginManager: new PluginManager(),
+      runConfig: {
+        httpOptions: {timeout: 5000, headers: {'RunConfig-Header': 'run'}},
+        labels: {owner: 'run'},
+      },
+    });
+
+    for await (const _ of agent.runAsync(invocationContext)) {
+      // Drain the run so that the request is fully built.
+    }
+
+    expect(llm.capturedRequest?.config?.httpOptions).toEqual({
+      timeout: 5000,
+      headers: {'Agent-Header': 'agent', 'RunConfig-Header': 'run'},
+    });
+    expect(llm.capturedRequest?.config?.labels).toMatchObject({owner: 'run'});
+  });
+});

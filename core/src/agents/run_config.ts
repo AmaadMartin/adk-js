@@ -6,11 +6,15 @@
 
 import {
   AudioTranscriptionConfig,
+  AvatarConfig,
   ContextWindowCompressionConfig,
+  HttpOptions,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
+  TranslationConfig,
 } from '@google/genai';
 
 import {logger} from '../utils/logger.js';
@@ -97,6 +101,42 @@ export interface RunConfig {
    * `triggerTokens`, the server compresses older history to `targetTokens`.
    */
   contextWindowCompression?: ContextWindowCompressionConfig;
+
+  /**
+   * Per-run HTTP options merged into the request config, this run winning.
+   *
+   * `baseUrl` and `apiVersion` are configuration-time settings, so they only
+   * apply when the agent set no HTTP options of its own.
+   */
+  httpOptions?: HttpOptions;
+
+  /**
+   * Per-run labels merged into the request config, this run winning per key.
+   * Used for billing, telemetry and revenue attribution across services.
+   */
+  labels?: Record<string, string>;
+
+  /**
+   * Whether the client signals the start and end of speech itself, instead of
+   * letting the server detect it.
+   */
+  explicitVadSignal?: boolean;
+
+  /**
+   * Translation config for a live agent that translates speech.
+   */
+  translationConfig?: TranslationConfig;
+
+  /**
+   * Session resumption config for a live agent. The server issues a handle
+   * that the connection uses to resume after a drop.
+   */
+  sessionResumption?: SessionResumptionConfig;
+
+  /**
+   * Avatar config for a live agent that renders one.
+   */
+  avatarConfig?: AvatarConfig;
 
   /**
    * A limit on the total number of llm calls for a given run.
