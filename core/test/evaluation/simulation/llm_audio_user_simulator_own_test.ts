@@ -78,9 +78,10 @@ describe('LlmAudioUserSimulator (adk-js specific)', () => {
       const {simulator, audioLlm} = buildSimulator();
       // Four bytes then two: neither decoded length is a multiple of three, so
       // each chunk's base64 carries padding. Joining the encoded strings would
-      // leave that padding mid-payload.
-      const first = new Uint8Array([1, 2, 3, 4]);
-      const second = new Uint8Array([5, 6]);
+      // leave that padding mid-payload. The bytes are also not valid UTF-8, so
+      // a decode that returns a string corrupts them.
+      const first = new Uint8Array([0xff, 0xfe, 0x01, 0x04]);
+      const second = new Uint8Array([0x80, 0x90]);
       expect(encode(first)).toContain('=');
       expect(encode(second)).toContain('=');
       audioLlm.responses.push(
@@ -115,7 +116,7 @@ describe('LlmAudioUserSimulator (adk-js specific)', () => {
       const content = await simulator.toAudioContent('hello');
 
       expect(decode(content.parts?.[1].inlineData?.data)).toEqual(
-        new Uint8Array([1, 2, 3, 4, 5, 6]),
+        new Uint8Array([0xff, 0xfe, 0x01, 0x04, 0x80, 0x90]),
       );
     });
 
@@ -262,6 +263,36 @@ describe('LlmAudioUserSimulator (adk-js specific)', () => {
         status: UserSimulatorStatus.SUCCESS,
       };
       const {simulator, audioLlm} = buildSimulator(textResult);
+
+      const result = await simulator.getNextUserMessage(NO_EVENTS);
+
+      expect(result).toBe(textResult);
+      expect(audioLlm.requests).toHaveLength(0);
+    });
+
+    it('does not speak a non-SUCCESS result that carries text', async () => {
+      // The status guard alone must stop this. The empty-text guard cannot:
+      // this result has text, so it would otherwise reach the audio model.
+      const textResult: NextUserMessage = {
+        status: UserSimulatorStatus.STOP_SIGNAL_DETECTED,
+        userMessage: {parts: [{text: 'goodbye'}], role: 'user'},
+      };
+      const {simulator, audioLlm} = buildSimulator(textResult);
+      // Queued so that a missing guard produces audio rather than an
+      // incidental error.
+      audioLlm.responses.push({
+        content: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: LIVE_INPUT_MIME_TYPE,
+                data: encode(new Uint8Array([1, 2])),
+              },
+            },
+          ],
+          role: 'user',
+        },
+      });
 
       const result = await simulator.getNextUserMessage(NO_EVENTS);
 
