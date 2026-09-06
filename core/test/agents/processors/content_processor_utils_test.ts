@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {CompactedEvent, createEvent} from '@google/adk';
+import {CompactedEvent, createEvent, Event} from '@google/adk';
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
@@ -1203,5 +1203,469 @@ describe('removeClientFunctionCallId', () => {
     expect(() => removeClientFunctionCallId(emptyContent)).not.toThrow();
     const noParts: Content = {role: 'user', parts: []};
     expect(() => removeClientFunctionCallId(noParts)).not.toThrow();
+  });
+});
+
+describe('function responses answering another agent', () => {
+  const callByOtherAgent = createEvent({
+    author: 'other_agent',
+    content: {
+      role: 'model',
+      parts: [{functionCall: {name: 'search', id: 'call_1', args: {q: 'x'}}}],
+    },
+  });
+
+  it('relays a user-authored response to another agent call as context', () => {
+    const response = createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'search',
+              id: 'call_1',
+              response: {result: 'found'},
+            },
+          },
+        ],
+      },
+    });
+
+    const contents = getContents([callByOtherAgent, response], 'my_agent');
+
+    expect(contents).toHaveLength(2);
+    expect(contents[1].role).toBe('user');
+    expect(contents[1].parts?.[0]?.text).toBe('For context:');
+    expect(contents[1].parts?.[1]?.text).toContain(
+      '[user] tool `search` returned result:',
+    );
+    expect(contents[1].parts?.[1]?.text).toContain('{"result":"found"}');
+  });
+
+  it('leaves a response to the current agent own call alone', () => {
+    const call = createEvent({
+      author: 'my_agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'search', id: 'call_1', args: {}}}],
+      },
+    });
+    const response = createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'search',
+              id: 'call_1',
+              response: {result: 'found'},
+            },
+          },
+        ],
+      },
+    });
+
+    const contents = getContents([call, response], 'my_agent');
+
+    expect(contents).toHaveLength(2);
+    expect(contents[1].parts?.[0]?.functionResponse?.id).toBe('call_1');
+  });
+
+  it('leaves a response to a user call alone', () => {
+    const call = createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [{functionCall: {name: 'search', id: 'call_1', args: {}}}],
+      },
+    });
+    const response = createEvent({
+      author: 'my_agent',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'search',
+              id: 'call_1',
+              response: {result: 'found'},
+            },
+          },
+        ],
+      },
+    });
+
+    const contents = getContents([call, response], 'my_agent');
+
+    expect(contents).toHaveLength(2);
+    expect(contents[1].parts?.[0]?.functionResponse?.id).toBe('call_1');
+  });
+
+  it('leaves a response alone when no call in the window carries its id', () => {
+    const response = createEvent({
+      author: 'my_agent',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'search',
+              id: 'unknown_call',
+              response: {result: 'found'},
+            },
+          },
+        ],
+      },
+    });
+
+    const later = createEvent({
+      author: 'user',
+      content: {role: 'user', parts: [{text: 'anything else?'}]},
+    });
+
+    const contents = getContents(
+      [callByOtherAgent, response, later],
+      'my_agent',
+    );
+
+    const texts = contents.flatMap((content) =>
+      (content.parts ?? []).map((part) => part.text ?? ''),
+    );
+    expect(texts.some((text) => text.includes('[my_agent]'))).toBe(false);
+    expect(texts).toContain('anything else?');
+  });
+});
+
+describe('adk_framework events', () => {
+  const userEvent = createEvent({
+    author: 'user',
+    content: {role: 'user', parts: [{text: 'hello'}]},
+  });
+
+  it('drops an event carrying an adk_framework function call', () => {
+    const frameworkCall = createEvent({
+      author: 'my_agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'adk_framework', id: 'fw_1', args: {}}}],
+      },
+    });
+
+    const contents = getContents([userEvent, frameworkCall], 'my_agent');
+
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts?.[0]?.text).toBe('hello');
+  });
+
+  it('drops an event carrying an adk_framework function response', () => {
+    const frameworkResponse = createEvent({
+      author: 'user',
+      content: {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'adk_framework',
+              id: 'fw_1',
+              response: {done: true},
+            },
+          },
+        ],
+      },
+    });
+
+    const contents = getContents([userEvent, frameworkResponse], 'my_agent');
+
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts?.[0]?.text).toBe('hello');
+  });
+
+  it('keeps an event whose call is merely named like a tool', () => {
+    const toolCall = createEvent({
+      author: 'my_agent',
+      content: {
+        role: 'model',
+        parts: [
+          {functionCall: {name: 'adk_framework_tool', id: 'call_1', args: {}}},
+        ],
+      },
+    });
+
+    const contents = getContents([userEvent, toolCall], 'my_agent');
+
+    expect(contents).toHaveLength(2);
+    expect(contents[1].parts?.[0]?.functionCall?.name).toBe(
+      'adk_framework_tool',
+    );
+  });
+});
+
+describe('getCurrentTurnContents anchor exclusions', () => {
+  it('keeps the turn across a long-running tool resume', () => {
+    const events = [
+      createEvent({
+        invocationId: 'inv1',
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'approve the request'}]},
+      }),
+      createEvent({
+        invocationId: 'inv1',
+        author: 'test_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                name: 'ask_for_approval',
+                id: 'call_1',
+                args: {ticket: 't1'},
+              },
+            },
+          ],
+        },
+      }),
+      createEvent({
+        invocationId: 'inv1',
+        author: 'test_agent',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'ask_for_approval',
+                id: 'call_1',
+                response: {status: 'pending'},
+              },
+            },
+          ],
+        },
+      }),
+      createEvent({
+        invocationId: 'inv2',
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'ask_for_approval',
+                id: 'call_1',
+                response: {status: 'approved'},
+              },
+            },
+          ],
+        },
+      }),
+    ];
+
+    const contents = getCurrentTurnContents(events, 'test_agent');
+
+    expect(contents).toEqual([
+      {role: 'user', parts: [{text: 'approve the request'}]},
+      {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'ask_for_approval',
+              id: 'call_1',
+              args: {ticket: 't1'},
+            },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'ask_for_approval',
+              id: 'call_1',
+              response: {status: 'approved'},
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('resumes past an interleaved user turn', () => {
+    const events = [
+      createEvent({
+        invocationId: 'inv1',
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'approve the request'}]},
+      }),
+      createEvent({
+        invocationId: 'inv1',
+        author: 'test_agent',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                name: 'ask_for_approval',
+                id: 'call_1',
+                args: {ticket: 't1'},
+              },
+            },
+          ],
+        },
+      }),
+      createEvent({
+        invocationId: 'inv2',
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [{text: 'meanwhile, what is the weather?'}],
+        },
+      }),
+      createEvent({
+        invocationId: 'inv2',
+        author: 'test_agent',
+        content: {role: 'model', parts: [{text: 'sunny'}]},
+      }),
+      createEvent({
+        invocationId: 'inv3',
+        author: 'user',
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'ask_for_approval',
+                id: 'call_1',
+                response: {status: 'approved'},
+              },
+            },
+          ],
+        },
+      }),
+    ];
+
+    const contents = getCurrentTurnContents(events, 'test_agent');
+
+    const functionCalls = contents.flatMap((content) =>
+      (content.parts ?? [])
+        .map((part) => part.functionCall)
+        .filter((call) => !!call),
+    );
+    const functionResponses = contents.flatMap((content) =>
+      (content.parts ?? [])
+        .map((part) => part.functionResponse)
+        .filter((response) => !!response),
+    );
+    expect(functionCalls.map((call) => call.id)).toEqual(['call_1']);
+    expect(functionResponses.map((response) => response.response)).toEqual([
+      {status: 'approved'},
+    ]);
+    // The turn still anchors on the user input that started it, not on the
+    // interleaved turn and not on the posted-back result.
+    expect(contents[0]).toEqual({
+      role: 'user',
+      parts: [{text: 'approve the request'}],
+    });
+  });
+
+  it('keeps the user input across a transfer_to_agent handoff', () => {
+    const events = [
+      createEvent({
+        invocationId: 'inv1',
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'First user message'}]},
+      }),
+      createEvent({
+        invocationId: 'inv1',
+        author: 'parent',
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                name: 'transfer_to_agent',
+                id: 'call_inv1',
+                args: {agent_name: 'test_agent'},
+              },
+            },
+          ],
+        },
+      }),
+      createEvent({
+        invocationId: 'inv1',
+        author: 'parent',
+        actions: {transferToAgent: 'test_agent'},
+        content: {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                name: 'transfer_to_agent',
+                id: 'call_inv1',
+                response: {result: null},
+              },
+            },
+          ],
+        },
+      }),
+    ];
+
+    const contents = getCurrentTurnContents(events, 'test_agent');
+
+    expect(contents).toHaveLength(3);
+    expect(contents[0].parts?.[0]?.text).toBe('First user message');
+    expect(contents[1].parts?.[1]?.text).toContain(
+      '[parent] called tool `transfer_to_agent`',
+    );
+    expect(contents[2].parts?.[1]?.text).toContain(
+      '[parent] tool `transfer_to_agent` returned result:',
+    );
+  });
+
+  it('does not anchor on a transfer marked only by the event actions', () => {
+    const events = [
+      createEvent({
+        author: 'user',
+        content: {role: 'user', parts: [{text: 'First user message'}]},
+      }),
+      createEvent({
+        author: 'parent',
+        actions: {transferToAgent: 'test_agent'},
+        content: {role: 'model', parts: [{text: 'handing over'}]},
+      }),
+    ];
+
+    const contents = getCurrentTurnContents(events, 'test_agent');
+
+    expect(contents).toHaveLength(2);
+    expect(contents[0].parts?.[0]?.text).toBe('First user message');
+  });
+
+  it('anchors on an event whose content has no parts', () => {
+    const events = [createEvent({author: 'user', content: {role: 'user'}})];
+
+    const contents = getCurrentTurnContents(events, 'my_agent');
+
+    expect(contents).toEqual([{role: 'user'}]);
+  });
+
+  it('anchors on an event that has no actions', () => {
+    // A store that round-trips events through JSON drops an undefined field,
+    // so a rehydrated event can reach the anchor scan without `actions`.
+    const rehydrated: Event = JSON.parse(
+      JSON.stringify({
+        ...createEvent({
+          author: 'user',
+          content: {role: 'user', parts: [{text: 'hello'}]},
+        }),
+        actions: undefined,
+      }),
+    );
+
+    const contents = getCurrentTurnContents([rehydrated], 'my_agent');
+
+    expect(contents).toHaveLength(1);
+    expect(contents[0].parts?.[0]?.text).toBe('hello');
   });
 });
