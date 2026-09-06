@@ -39,16 +39,20 @@ export class MCPTool extends BaseTool {
   private readonly mcpTool: Tool;
   private readonly mcpSessionManager: MCPSessionManager;
   private readonly originalName: string;
+  /** Headers resolved by the owning toolset. Never log or echo these. */
+  private readonly headers?: Headers;
 
   constructor(
     mcpTool: Tool,
     mcpSessionManager: MCPSessionManager,
     originalName?: string,
+    headers?: Headers,
   ) {
     super({name: mcpTool.name, description: mcpTool.description || ''});
     this.mcpTool = mcpTool;
     this.mcpSessionManager = mcpSessionManager;
     this.originalName = originalName || mcpTool.name;
+    this.headers = headers;
   }
 
   override _getDeclaration(): FunctionDeclaration {
@@ -63,7 +67,7 @@ export class MCPTool extends BaseTool {
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    const session = await this.mcpSessionManager.createSession();
+    const session = await this.mcpSessionManager.createSession(this.headers);
 
     try {
       const callRequest: CallToolRequest = {} as CallToolRequest;
