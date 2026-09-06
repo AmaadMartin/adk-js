@@ -9,9 +9,17 @@
  * The reference test names are kept verbatim as `it()` titles.
  */
 
-import {createLlmCapabilities} from '@google/adk';
+import {createLlmCapabilities, LlmCapabilities} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 import {ZodError} from 'zod';
+
+/**
+ * Produces capability values the compiler never checked, the way a parsed
+ * configuration file does. This is the input the runtime validation exists for.
+ */
+function fromConfigFile(json: string): Partial<LlmCapabilities> {
+  return JSON.parse(json);
+}
 
 describe('LlmCapabilities', () => {
   it('test_capabilities_are_immutable', () => {
@@ -27,9 +35,9 @@ describe('LlmCapabilities', () => {
   });
 
   it('test_unknown_capability_is_rejected', () => {
-    expect(() => createLlmCapabilities({noSuchCapability: true})).toThrow(
-      ZodError,
-    );
+    expect(() =>
+      createLlmCapabilities(fromConfigFile('{"noSuchCapability": true}')),
+    ).toThrow(ZodError);
   });
 
   it('test_model_copy_silently_ignores_an_unknown_capability', () => {
@@ -40,7 +48,7 @@ describe('LlmCapabilities', () => {
     expect(() =>
       createLlmCapabilities({
         ...createLlmCapabilities(),
-        outputSchemaWithTools: true,
+        ...fromConfigFile('{"outputSchemaWithTools": true}'),
       }),
     ).toThrow(ZodError);
   });
@@ -57,8 +65,8 @@ describe('LlmCapabilities', () => {
   });
 
   it('rejects a wrong-typed capability value', () => {
-    expect(() => createLlmCapabilities({outputSchemaAndTools: 'yes'})).toThrow(
-      ZodError,
-    );
+    expect(() =>
+      createLlmCapabilities(fromConfigFile('{"outputSchemaAndTools": "yes"}')),
+    ).toThrow(ZodError);
   });
 });

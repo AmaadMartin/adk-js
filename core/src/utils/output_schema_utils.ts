@@ -15,8 +15,9 @@ import {getGoogleLlmVariant, GoogleLLMVariant} from './variant_utils.js';
  * The test is membership in the Gemini family, with no version floor, so an
  * Early Access Program name such as `gemini-flash-early-exp` qualifies.
  *
- * Prefer {@link LlmCapabilities} when a model instance is in hand, because a
- * model can report a capability that its name does not reveal.
+ * This resolves a model name. Read `model.capabilities.outputSchemaAndTools`
+ * when a model instance is in hand, because a model can override the getter to
+ * report a capability that its name does not reveal.
  *
  * @param modelString A simple or path-based model name.
  * @return True if the model supports an output schema alongside tools.
