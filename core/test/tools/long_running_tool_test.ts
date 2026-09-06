@@ -44,6 +44,20 @@ describe('LongRunningFunctionTool', () => {
     expect(declaration.description).toBe(LONG_RUNNING_INSTRUCTION.trimStart());
   });
 
+  it('appends the long-running instruction once per declaration', () => {
+    const tool = new LongRunningFunctionTool({
+      name: 'my_tool',
+      description: 'Does something.',
+      execute: async () => 'done',
+    });
+
+    tool._getDeclaration();
+
+    expect(tool._getDeclaration().description).toBe(
+      'Does something.' + LONG_RUNNING_INSTRUCTION,
+    );
+  });
+
   it('preserves the tool name in declaration', () => {
     const tool = new LongRunningFunctionTool({
       name: 'background_task',
