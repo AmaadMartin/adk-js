@@ -684,6 +684,12 @@ export {
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
 export {
+  BIGQUERY_DEFAULT_SCOPE,
+  BIGQUERY_SCOPES,
+  BIGQUERY_TOKEN_CACHE_KEY,
+  BigQueryCredentialsConfig,
+} from './integrations/bigquery/bigquery_credentials.js';
+export {
   CrewaiTool,
   isCrewaiToolLike,
 } from './integrations/crewai/crewai_tool.js';
