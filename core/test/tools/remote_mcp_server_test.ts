@@ -46,8 +46,6 @@ describe('createRemoteMcpServer', () => {
   });
 
   it('test_remote_mcp_server_forbids_extra_fields', () => {
-    // Assigned to a variable first: TypeScript rejects an unknown key on a
-    // fresh object literal, which is the check this test reaches past.
     const spec = {url: 'https://x/mcp', bogus: 'nope'};
 
     expect(() => createRemoteMcpServer(spec)).toThrow(InputValidationError);

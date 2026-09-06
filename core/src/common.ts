@@ -331,7 +331,6 @@ export {
 export type {
   RemoteMcpHeaderProvider,
   RemoteMcpServer,
-  RemoteMcpServerInput,
 } from './tools/remote_mcp_server.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
