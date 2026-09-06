@@ -16,7 +16,15 @@ import {
   resamplePcm16,
   toLiveInput,
 } from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import {logger} from '../../src/utils/logger.js';
 
 /** Builds little-endian signed 16-bit PCM bytes from integer samples. */
@@ -113,7 +121,7 @@ describe('audio_utils', () => {
   });
 
   describe('toLiveInput', () => {
-    let warn: ReturnType<typeof vi.spyOn>;
+    let warn: MockInstance<(...args: unknown[]) => void>;
 
     beforeEach(() => {
       warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
@@ -135,9 +143,7 @@ describe('audio_utils', () => {
       // The 24 kHz default downsamples 600 samples to 400 at 16 kHz...
       expect(samplesOf(result)).toHaveLength(400);
       // ...and the missing rate warns rather than guessing in silence.
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('no `rate=`') as unknown as string,
-      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no `rate=`'));
     });
 
     it('test_to_live_input_does_not_warn_when_rate_is_declared', () => {

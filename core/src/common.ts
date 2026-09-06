@@ -25,6 +25,13 @@ export {
 } from './agents/functions.js';
 export {InvocationContext, requireAgent} from './agents/invocation_context.js';
 export type {
+  InvocationContextParams,
+  WorkflowInstructionScope,
+} from './agents/invocation_context.js';
+export {LiveRequestQueue} from './agents/live_request_queue.js';
+export type {LiveRequest} from './agents/live_request_queue.js';
+export {LlmAgent as Agent, LlmAgent, isLlmAgent} from './agents/llm_agent.js';
+export type {
   AfterModelCallback,
   AfterToolCallback,
   BeforeModelCallback,
@@ -151,15 +158,26 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
 export type {
   ConversationScenario,
+  EvalCase,
   IntermediateData,
   IntermediateDataType,
   Invocation,
   InvocationEvent,
   InvocationEvents,
+  SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
 } from './evaluation/eval_case.js';
-export type {Rubric, RubricContent} from './evaluation/eval_rubrics.js';
+export {EvalStatus} from './evaluation/eval_metrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
 export type {
   EvaluationResult,
   Evaluator,
@@ -174,6 +192,7 @@ export {
   parseLlmAudioUserSimulatorConfig,
 } from './evaluation/simulation/llm_audio_user_simulator.js';
 export type {LlmAudioUserSimulatorConfig} from './evaluation/simulation/llm_audio_user_simulator.js';
+export {getDefaultPersonaRegistry} from './evaluation/simulation/pre_built_personas.js';
 export {StaticUserSimulator} from './evaluation/simulation/static_user_simulator.js';
 export {
   DEFAULT_MAX_ALLOWED_INVOCATIONS,
@@ -185,6 +204,11 @@ export type {
   NextUserMessage,
   UserSimulator,
 } from './evaluation/simulation/user_simulator.js';
+export {UserPersonaRegistry} from './evaluation/simulation/user_simulator_personas.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
