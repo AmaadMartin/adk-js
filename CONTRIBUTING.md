@@ -50,6 +50,23 @@ To maintain high code quality and consistency:
    npm run format
    ```
 
+1. **Dependency declarations**: Check that every imported package is declared.
+
+   ```bash
+   npm run deps:check
+   ```
+
+   A failure means a file imports a package that no `package.json` between it
+   and the repository root declares. It resolves here only because npm
+   workspaces hoist a sibling workspace's copy into the root `node_modules`,
+   and it will fail for anyone installing the published package. Fix it by
+   adding the package to the `package.json` the report names.
+
+   `scripts/phantom_deps_allowlist.json` records the violations that already
+   existed when this check was introduced. They are being paid down, and the
+   check also fails on an allowlist entry that no longer matches a real
+   violation, so the list can only shrink. Do not add entries to it.
+
 The project uses `husky` and `lint-staged` to automatically lint and format
 your changes before each commit.
 
