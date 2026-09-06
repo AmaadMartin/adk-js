@@ -10,7 +10,11 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  InvocationContext,
+  LlmAgent,
   OpenApiSpecParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
 } from '@google/adk';
@@ -24,6 +28,17 @@ import {
   prepareRequestBody,
   prepareRequestParams,
 } from '../../../src/tools/openapi_tool/rest_api_tool.js';
+
+function createToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'invocation-1',
+      agent: new LlmAgent({name: 'test_agent'}),
+      session: createSession({id: 'session-1', appName: 'test_app'}),
+      pluginManager: new PluginManager(),
+    }),
+  });
+}
 
 describe('RestApiTool', () => {
   afterEach(() => {
@@ -601,6 +616,142 @@ describe('RestApiTool', () => {
     });
 
     expect(result).toEqual(jsonResponse);
+  });
+
+  it('should return a parity error payload for a 500 response', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'GET',
+    };
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: {get: () => 'text/plain'},
+      text: async () => 'Internal Server Error',
+    });
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createToolContext(),
+    });
+
+    expect(result).toEqual({
+      error:
+        'Tool test_tool execution failed. Analyze this execution error and ' +
+        'your inputs. Retry with adjustments if applicable. But make sure ' +
+        "don't retry more than 3 times. Execution Error: Status Code: 500, " +
+        'Internal Server Error',
+    });
+  });
+
+  it('should return an error payload for a 404 with a JSON error body', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'GET',
+    };
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: {
+        get: (name: string) =>
+          name === 'content-type' ? 'application/json' : null,
+      },
+      json: async () => ({message: 'not found'}),
+      text: async () => '{"message": "not found"}',
+    });
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createToolContext(),
+    });
+
+    expect(result).not.toEqual({message: 'not found'});
+    expect(result).toEqual({
+      error: expect.stringContaining(
+        'Status Code: 404, {"message": "not found"}',
+      ),
+    });
+  });
+
+  it('should return an error payload for a non-2xx response with an empty body', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'GET',
+    };
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      headers: {get: () => 'text/plain'},
+      text: async () => '',
+    });
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createToolContext(),
+    });
+
+    expect(result).toEqual({
+      error: expect.stringMatching(/Status Code: 503, $/),
+    });
+  });
+
+  it('should not treat a 201 response as an error', async () => {
+    const endpoint = {
+      baseUrl: 'http://api.example.com',
+      path: '/test',
+      method: 'POST',
+    };
+    const operation: OpenAPIV3.OperationObject = {responses: {}};
+    const tool = new RestApiTool(
+      'test_tool',
+      'description',
+      endpoint,
+      operation,
+    );
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: {
+        get: (name: string) =>
+          name === 'content-type' ? 'application/json' : null,
+      },
+      json: async () => ({created: true}),
+    });
+
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: createToolContext(),
+    });
+
+    expect(result).toEqual({created: true});
   });
 
   it('should configure auth scheme and credential via setters', async () => {
