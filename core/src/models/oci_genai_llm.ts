@@ -10,6 +10,8 @@ import {
   GenerateContentConfig,
   GenerateContentResponseUsageMetadata,
   Part,
+  Schema,
+  Type,
 } from '@google/genai';
 import type {AuthenticationDetailsProvider} from 'oci-common';
 import type {
@@ -19,7 +21,8 @@ import type {
 } from 'oci-generativeaiinference';
 
 import {logger} from '../utils/logger.js';
-import {SchemaLike, toJsonSchema} from '../utils/schema.js';
+import {toJsonSchema} from '../utils/schema.js';
+import {isZodSchema} from '../utils/simple_zod_to_json.js';
 import {readSseData} from '../utils/sse_utils.js';
 
 import {BaseLlm} from './base_llm.js';
@@ -36,6 +39,9 @@ const DEFAULT_SERVICE_ENDPOINT =
   'https://inference.generativeai.us-chicago-1.oci.oraclecloud.com';
 const DEFAULT_MEDIA_MIME_TYPE = 'application/octet-stream';
 const DEFAULT_RESPONSE_SCHEMA_NAME = 'response';
+
+/** The type names of the genai schema dialect, which JSON Schema lower-cases. */
+const GENAI_SCHEMA_TYPES: ReadonlySet<string> = new Set(Object.values(Type));
 
 const COMPARTMENT_ID_ENV_VAR = 'OCI_COMPARTMENT_ID';
 const SERVICE_ENDPOINT_ENV_VAR = 'OCI_SERVICE_ENDPOINT';
@@ -609,8 +615,8 @@ function toolParameters(fn: FunctionDeclaration): unknown {
 export function buildResponseFormat(
   config: GenerateContentConfig,
 ): OciResponseFormat | undefined {
-  if (isSchemaLike(config.responseSchema)) {
-    const schema = toJsonSchema(config.responseSchema);
+  if (isSchemaObject(config.responseSchema)) {
+    const schema = toOciJsonSchema(config.responseSchema);
     const jsonSchema: models.JsonSchemaResponseFormat = {
       type: OciResponseFormatType.JsonSchema,
       jsonSchema: {
@@ -866,7 +872,9 @@ function functionCallPart(call: {
 }): Part {
   return {
     functionCall: {
-      id: call.id,
+      // An absent id becomes empty, as `interactions_utils` and adk-python
+      // both normalise it.
+      id: call.id ?? '',
       name: call.name,
       args: parseJsonObject(call.arguments),
     },
@@ -907,11 +915,37 @@ function isFunctionCall(call: models.ToolCall): call is models.FunctionCall {
 
 /**
  * Narrows `GenerateContentConfig.responseSchema`, which genai types as
- * `unknown`, to the schema forms ADK renders as JSON Schema. Every one of them
- * is an object, and {@link toJsonSchema} degrades gracefully for the rest.
+ * `unknown`. Every schema form ADK accepts is an object.
  */
-function isSchemaLike(schema: unknown): schema is SchemaLike {
+function isSchemaObject(schema: unknown): schema is Record<string, unknown> {
   return typeof schema === 'object' && schema !== null;
+}
+
+/**
+ * True when a schema is written in the genai dialect, which names its types in
+ * upper case, rather than as JSON Schema.
+ */
+function isGenaiSchema(
+  schema: Record<string, unknown>,
+): schema is Record<string, unknown> & Schema {
+  const type = schema['type'];
+  return typeof type === 'string' && GENAI_SCHEMA_TYPES.has(type);
+}
+
+/**
+ * Renders a response schema as the JSON Schema that OCI reads.
+ *
+ * A Zod type or a genai `Schema` is converted. A schema already written as
+ * JSON Schema passes through unchanged, as adk-python's `dict` branch does:
+ * converting it would strip every `type`, because the converter only knows the
+ * genai dialect's upper-case type names.
+ */
+function toOciJsonSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  return isZodSchema(schema) || isGenaiSchema(schema)
+    ? toJsonSchema(schema)
+    : schema;
 }
 
 function requireChatResponse(result: OciChatResult): responses.ChatResponse {
