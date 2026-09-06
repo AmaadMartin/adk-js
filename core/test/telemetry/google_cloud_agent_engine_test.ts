@@ -15,10 +15,15 @@
 
 import {OTelHooks, getGcpExporters} from '@google/adk';
 import {MeterProvider} from '@opentelemetry/sdk-metrics';
-import {GoogleAuth} from 'google-auth-library';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
-vi.mock('google-auth-library');
+vi.mock('google-auth-library', () => ({
+  GoogleAuth: class {
+    getProjectId(): Promise<string> {
+      return Promise.resolve('test-project');
+    }
+  },
+}));
 vi.mock('@google-cloud/opentelemetry-cloud-monitoring-exporter', async () => {
   const {ExportResultCode} = await import('@opentelemetry/core');
   return {
@@ -52,18 +57,8 @@ function dispose(hooks: OTelHooks): Promise<void> {
 }
 
 describe('getGcpExporters metric reader selection', () => {
-  beforeEach(() => {
-    vi.mocked(GoogleAuth).mockImplementation(
-      () =>
-        ({
-          getProjectId: vi.fn().mockResolvedValue('test-project'),
-        }) as unknown as GoogleAuth,
-    );
-  });
-
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.restoreAllMocks();
   });
 
   it('installs a periodic reader and no span processor off Agent Engine', async () => {
