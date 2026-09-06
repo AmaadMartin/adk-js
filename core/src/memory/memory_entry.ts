@@ -19,6 +19,16 @@ export interface MemoryEntry {
   content: Content;
 
   /**
+   * Metadata carried alongside the memory. Services that support it store
+   * these keys with the memory and return them on retrieval; the keys a
+   * service recognises are defined by that service.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /** The unique identifier of the memory. */
+  id?: string;
+
+  /**
    * The author of the memory. Common values are `'user'` and `'model'`, but
    * this can also be the name of an agent when the content was produced by a
    * named sub-agent.
@@ -31,4 +41,14 @@ export interface MemoryEntry {
    * Preferred format is ISO 8601 (e.g. `'2024-01-15T10:30:00.000Z'`).
    */
   timestamp?: string;
+}
+
+/**
+ * Creates a {@link MemoryEntry} with its declared defaults applied:
+ * `customMetadata` becomes `{}` when the caller does not supply it.
+ */
+export function createMemoryEntry(
+  params: Partial<MemoryEntry> & {content: Content},
+): MemoryEntry {
+  return {customMetadata: {}, ...params};
 }
