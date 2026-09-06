@@ -1151,5 +1151,112 @@ describe('RestApiTool Utilities', () => {
         'Content-Type': 'application/json',
       });
     });
+
+    it('should handle application/octet-stream body correctly', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/octet-stream': {
+            schema: {type: 'string', format: 'binary'},
+          },
+        },
+      };
+      const body = 'binary-payload';
+      const bodyData = {};
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, body, bodyData, headers);
+
+      expect(result).toBe('binary-payload');
+      expect(headers).toEqual({
+        'Content-Type': 'application/octet-stream',
+      });
+    });
+
+    it('should pass a binary octet-stream payload through without coercion', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/octet-stream': {
+            schema: {type: 'string', format: 'binary'},
+          },
+        },
+      };
+      const bytes = new Uint8Array([1, 2, 3]);
+      const bodyData = {};
+      const headers = {};
+
+      const result = prepareRequestBody(requestBody, bytes, bodyData, headers);
+
+      expect(result).toBe(bytes);
+      expect(headers).toEqual({
+        'Content-Type': 'application/octet-stream',
+      });
+    });
+
+    it('should not set Content-Type for an octet-stream operation with no body data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/octet-stream': {
+            schema: {type: 'string', format: 'binary'},
+          },
+        },
+      };
+      const bodyData = {};
+      const headers = {};
+
+      const result = prepareRequestBody(
+        requestBody,
+        undefined,
+        bodyData,
+        headers,
+      );
+
+      expect(result).toBeUndefined();
+      expect(headers).toEqual({});
+    });
+
+    it('should leave Content-Type to fetch for application/x-www-form-urlencoded', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'application/x-www-form-urlencoded': {
+            schema: {type: 'object'},
+          },
+        },
+      };
+      const bodyData = {foo: 'bar', baz: 'qux'};
+      const headers = {};
+
+      const result = prepareRequestBody(
+        requestBody,
+        undefined,
+        bodyData,
+        headers,
+      );
+
+      expect(result).toBeInstanceOf(URLSearchParams);
+      expect(String(result)).toBe('foo=bar&baz=qux');
+      expect(headers).toEqual({});
+    });
+
+    it('should not set Content-Type for multipart/form-data', () => {
+      const requestBody: OpenAPIV3.RequestBodyObject = {
+        content: {
+          'multipart/form-data': {
+            schema: {type: 'object'},
+          },
+        },
+      };
+      const bodyData = {foo: 'bar'};
+      const headers = {};
+
+      const result = prepareRequestBody(
+        requestBody,
+        undefined,
+        bodyData,
+        headers,
+      );
+
+      expect(result).toBeInstanceOf(FormData);
+      expect(headers).toEqual({});
+    });
   });
 });
