@@ -23,6 +23,10 @@ import {
 
 const USER_NAMESPACE_PREFIX = 'user:';
 
+// Per-version metadata document; see the class doc for why callers may not
+// use this name.
+const METADATA_FILENAME = 'metadata.json';
+
 /**
  * Metadata for a file artifact version.
  */
@@ -54,7 +58,9 @@ interface FileArtifactVersion extends ArtifactVersion {
  * Artifact paths are derived from the provided filenames: separators create
  * nested directories, and path traversal is rejected to keep the layout
  * portable across filesystems. `{artifactPath}` therefore mirrors the
- * sanitized, scope-relative path derived from each filename.
+ * sanitized, scope-relative path derived from each filename. A filename whose
+ * final segment is `metadata.json` is rejected, in any casing, because the
+ * payload and the metadata document would share one path.
  */
 export class FileArtifactService implements BaseArtifactService {
   private readonly rootDir: string;
@@ -87,6 +93,15 @@ export class FileArtifactService implements BaseArtifactService {
       sessionId,
       filename,
     );
+    // Enforced here rather than in `getArtifactDir`, which the read and delete
+    // paths share: an artifact stored under this name before the name was
+    // rejected must stay readable and, above all, deletable. The comparison is
+    // caseless because APFS and NTFS resolve both spellings to one file.
+    if (path.basename(artifactDir).toLowerCase() === METADATA_FILENAME) {
+      throw new Error(
+        `Artifact filename ${filename} is reserved: an artifact may not be named ${METADATA_FILENAME}, in any casing.`,
+      );
+    }
     await fs.mkdir(artifactDir, {recursive: true});
 
     const versions = await getArtifactVersionsFromDir(artifactDir);
@@ -133,7 +148,7 @@ export class FileArtifactService implements BaseArtifactService {
       customMetadata,
     };
 
-    await writeMetadata(path.join(versionDir, 'metadata.json'), metadata);
+    await writeMetadata(path.join(versionDir, METADATA_FILENAME), metadata);
 
     return nextVersion;
   }
@@ -184,7 +199,7 @@ export class FileArtifactService implements BaseArtifactService {
         getVersionsDir(artifactDir),
         versionToLoad.toString(),
       );
-      const metadataPath = path.join(versionDir, 'metadata.json');
+      const metadataPath = path.join(versionDir, METADATA_FILENAME);
       const metadata = await readMetadata(metadataPath);
 
       if (metadata.fileUri) {
@@ -341,7 +356,7 @@ export class FileArtifactService implements BaseArtifactService {
         const metadataPath = path.join(
           getVersionsDir(artifactDir),
           version.toString(),
-          'metadata.json',
+          METADATA_FILENAME,
         );
         try {
           const metadata = await readMetadata(metadataPath);
@@ -395,7 +410,7 @@ export class FileArtifactService implements BaseArtifactService {
       const metadataPath = path.join(
         getVersionsDir(artifactDir),
         versionToRead.toString(),
-        'metadata.json',
+        METADATA_FILENAME,
       );
       return await readMetadata(metadataPath);
     } catch (e) {
@@ -617,7 +632,7 @@ async function getLatestMetadata(
   const metadataPath = path.join(
     getVersionsDir(artifactDir),
     latestVersion.toString(),
-    'metadata.json',
+    METADATA_FILENAME,
   );
   try {
     return await readMetadata(metadataPath);
