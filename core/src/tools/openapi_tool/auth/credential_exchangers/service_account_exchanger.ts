@@ -20,9 +20,30 @@ import {experimental} from '../../../../utils/experimental.js';
 
 const DEFAULT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
 
+const AUDIENCE_REQUIRED_MESSAGE =
+  'audience is required when useIdToken is true. Set it to the URL of the ' +
+  'target service (e.g. https://my-service.run.app).';
+
+function toBearerResult(token: string): ExchangeResult {
+  return {
+    credential: {
+      authType: AuthCredentialTypes.HTTP,
+      http: {
+        scheme: 'bearer',
+        credentials: {token},
+      },
+    },
+    wasExchanged: true,
+  };
+}
+
 /**
  * Fetches credentials for Google Service Account.
  * Ported from Python implementation.
+ *
+ * When `useIdToken` is set, the exchange returns an ID token minted for
+ * `audience` instead of an access token. Backends that verify caller identity,
+ * such as Cloud Run and Cloud Functions, require an ID token.
  */
 @experimental
 export class ServiceAccountCredentialExchanger implements BaseCredentialExchanger {
@@ -43,6 +64,16 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
     }
 
     const saConfig = authCredential.serviceAccount;
+
+    if (saConfig.useIdToken) {
+      const {audience} = saConfig;
+      if (!audience) {
+        throw new CredentialExchangeError(AUDIENCE_REQUIRED_MESSAGE);
+      }
+      return saConfig.useDefaultCredential
+        ? this.exchangeForDefaultIdToken(audience)
+        : this.exchangeForExplicitIdToken(saConfig, audience);
+    }
 
     if (saConfig.useDefaultCredential) {
       return this.exchangeForDefaultCredential(saConfig);
@@ -66,16 +97,7 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
         throw new Error('Failed to get access token from default credentials');
       }
 
-      return {
-        credential: {
-          authType: AuthCredentialTypes.HTTP,
-          http: {
-            scheme: 'bearer',
-            credentials: {token},
-          },
-        },
-        wasExchanged: true,
-      };
+      return toBearerResult(token);
     } catch (error) {
       throw new CredentialExchangeError(
         `Failed to exchange default service account token: ${(error as Error).message}`,
@@ -107,19 +129,53 @@ export class ServiceAccountCredentialExchanger implements BaseCredentialExchange
         throw new Error('Failed to get access token from explicit credentials');
       }
 
-      return {
-        credential: {
-          authType: AuthCredentialTypes.HTTP,
-          http: {
-            scheme: 'bearer',
-            credentials: {token},
-          },
-        },
-        wasExchanged: true,
-      };
+      return toBearerResult(token);
     } catch (error) {
       throw new CredentialExchangeError(
         `Failed to exchange explicit service account token: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async exchangeForDefaultIdToken(
+    audience: string,
+  ): Promise<ExchangeResult> {
+    try {
+      const auth = new GoogleAuth();
+      const client = await auth.getIdTokenClient(audience);
+      const token = await client.idTokenProvider.fetchIdToken(audience);
+
+      return toBearerResult(token);
+    } catch (error) {
+      throw new CredentialExchangeError(
+        `Failed to exchange service account for ID token: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async exchangeForExplicitIdToken(
+    saConfig: ServiceAccount,
+    audience: string,
+  ): Promise<ExchangeResult> {
+    const creds = saConfig.serviceAccountCredential;
+    if (!creds) {
+      throw new CredentialExchangeError(
+        'Service account credentials are missing.',
+      );
+    }
+
+    try {
+      const client = new JWT({
+        email: creds.clientEmail,
+        key: creds.privateKey,
+      });
+
+      const token = await client.fetchIdToken(audience);
+
+      return toBearerResult(token);
+    } catch (error) {
+      throw new CredentialExchangeError(
+        `Failed to exchange service account for ID token: ${(error as Error).message}`,
       );
     }
   }
