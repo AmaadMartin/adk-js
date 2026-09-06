@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content} from '@google/genai';
 import {
   InvocationContext,
   WorkflowInstructionScope,
@@ -20,8 +19,8 @@ import {
   FINISH_TASK_SUCCESS_RESULT,
   FINISH_TASK_TOOL_NAME,
 } from '../tools/finish_task_tool.js';
+import {extractTextFromContent, toUserContent} from '../utils/content_utils.js';
 import {logger} from '../utils/logger.js';
-import {isContent} from './base_node.js';
 import {NodeContext} from './node_context.js';
 
 /**
@@ -162,10 +161,7 @@ function maybeSetOutput(agent: LlmAgent, event: Event): void {
   if (!content || content.role !== 'model' || !content.parts) {
     return;
   }
-  const text = content.parts
-    .filter((p) => p.text && !p.thought)
-    .map((p) => p.text)
-    .join('');
+  const text = extractTextFromContent(content);
 
   let output: unknown = text;
   if (agent.outputSchema && text.trim()) {
@@ -243,15 +239,4 @@ function isFinishTaskSuccessResponse(event: Event): boolean {
     const response = (fr.response ?? {}) as {result?: unknown};
     return response.result === FINISH_TASK_SUCCESS_RESULT;
   });
-}
-
-/** Converts an arbitrary node input into a user-role `Content`. */
-function toUserContent(input: unknown): Content {
-  if (isContent(input)) {
-    return {...input, role: 'user'};
-  }
-  if (typeof input === 'string') {
-    return {role: 'user', parts: [{text: input}]};
-  }
-  return {role: 'user', parts: [{text: JSON.stringify(input)}]};
 }

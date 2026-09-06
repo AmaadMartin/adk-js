@@ -12,6 +12,7 @@ import {
   Session,
 } from '@google/genai';
 
+import {filterAudioParts} from '../utils/content_utils.js';
 import {LiveResponseAggregator} from '../utils/live_connection_utils.js';
 import {logger} from '../utils/logger.js';
 import {isGemini3xFlashLive} from '../utils/model_name.js';
@@ -38,8 +39,8 @@ export class GeminiLlmConnection implements BaseLlmConnection {
    */
   async sendHistory(history: Content[]): Promise<void> {
     // We ignore any audio from user during the agent transfer phase.
-    const contents = history.filter(
-      (content) => content.parts && content.parts[0]?.text,
+    const contents = history.flatMap(
+      (content) => filterAudioParts(content) ?? [],
     );
 
     if (contents.length > 0) {
