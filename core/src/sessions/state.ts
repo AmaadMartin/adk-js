@@ -139,6 +139,13 @@ export class State {
   }
 
   /**
+   * Returns a copy of the pending delta.
+   */
+  getDelta(): Record<string, unknown> {
+    return {...this.delta};
+  }
+
+  /**
    * Updates the state dict with the given delta.
    *
    * @param delta The delta to update the state with.
