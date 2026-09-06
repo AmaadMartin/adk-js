@@ -1093,6 +1093,13 @@ describe('AgentLoader', () => {
       });
 
       it('ignores index inside node_modules and dot directories', async () => {
+        // `afterEach` preserves `node_modules`, so this test removes the only
+        // file it writes there itself.
+        const nodeModulesIndex = path.join(
+          tempAgentsDir,
+          'node_modules',
+          'index.js',
+        );
         await writeDirFile(
           'node_modules',
           'index.js',
@@ -1105,10 +1112,14 @@ describe('AgentLoader', () => {
         );
         const loader = new AgentLoader(tempAgentsDir);
 
-        const agents = await loader.listAgents();
+        try {
+          const agents = await loader.listAgents();
 
-        expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
-        await loader.disposeAll();
+          expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
+        } finally {
+          await loader.disposeAll();
+          await fs.rm(nodeModulesIndex, {force: true});
+        }
       });
     });
   });
