@@ -36,7 +36,15 @@ import {
 export class ToolResultBuffer {
   private readonly results = new Map<string, AntigravityToolResult>();
 
-  /** How many outcomes are buffered. */
+  /**
+   * How many outcomes are buffered.
+   *
+   * The port of Python's `ToolResultBuffer.__len__` and, like it, read by the
+   * tests rather than by a turn. It does not duplicate {@link take}: `take`
+   * answers by call id, so it cannot observe an outcome that was dropped for
+   * having no id, which is the one thing {@link record} and
+   * {@link recordError} promise to do.
+   */
   get size(): number {
     return this.results.size;
   }

@@ -76,11 +76,14 @@ export interface AntigravityToolResult {
 /**
  * One action in the Antigravity agent's trajectory.
  *
- * Only the fields this package reads are declared; an adapter carrying more of
- * the SDK's step (the trajectory ids, the depth, the target, the structured
- * output) extends this interface with them. Every field is optional where the
- * SDK gives it a default, and the converter reads a missing field as that
- * default (`''`, `0`, `[]`, `'UNKNOWN'`).
+ * Only the fields this package reads are declared, the same rule
+ * {@link AntigravityAgentConfig} follows. A step carries more — a trajectory
+ * id, a nesting depth, a target, the cumulative `thinking` — and an adapter
+ * that wants them extends this interface; structural typing carries them
+ * through either way.
+ *
+ * Every field is optional where the SDK gives it a default, and the converter
+ * reads a missing field as that default (`''`, `0`, `[]`, `'UNKNOWN'`).
  */
 export interface AntigravityStep {
   /** The step's position in the trajectory. */
@@ -187,7 +190,16 @@ export function isAntigravityToolExecutionError(
  * capabilities or workspaces.
  */
 export interface AntigravityAgentConfig {
-  /** Which backend runs the harness. `'local'` runs it as a subprocess. */
+  /**
+   * Which backend runs the harness. `'local'` runs it as a subprocess.
+   *
+   * This field belongs to the port, not to the SDK: Python names the local
+   * backend by config class (`BaseLocalAgentConfig`) and there is no class to
+   * test against here. An adapter for a local harness must set it to
+   * `'local'`, or {@link isLocalAntigravityConfig} reads the connection as
+   * remote and the agent skips both the `saveDir` warning and the
+   * silent-drop check.
+   */
   connection?: string;
   /** The tools the harness may call, by object or by builtin name. */
   tools?: Array<AntigravityTool | string>;

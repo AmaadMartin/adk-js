@@ -713,7 +713,10 @@ export {
   GCS_DEFAULT_SCOPE,
   GCS_TOKEN_CACHE_KEY,
 } from './integrations/gcs/gcs_credentials.js';
-export {AntigravityAgent} from './labs/antigravity/antigravity_agent.js';
+export {
+  AntigravityAgent,
+  PARENT_REQUIRES_SINGLE_TURN_MESSAGE,
+} from './labs/antigravity/antigravity_agent.js';
 export type {
   AntigravityAgentMode,
   AntigravityAgentOptions,

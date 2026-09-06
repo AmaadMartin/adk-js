@@ -22,7 +22,6 @@ import {BaseAgent, BaseAgentConfig} from '../../agents/base_agent.js';
 import {InvocationContext} from '../../agents/invocation_context.js';
 import {StreamingMode} from '../../agents/run_config.js';
 import {createEvent, Event} from '../../events/event.js';
-import {coerceToUserContent} from '../../utils/content_utils.js';
 import {logger} from '../../utils/logger.js';
 import {NodeContext} from '../../workflow/node_context.js';
 import {
@@ -30,6 +29,7 @@ import {
   drainToolResults,
   finalModelText,
 } from './event_converter.js';
+import {toNodeInputContent} from './node_input_utils.js';
 import {
   AntigravityAgentConfig,
   isLocalAntigravityConfig,
@@ -44,12 +44,24 @@ import {
 
 const CONVERSATION_ID_STATE_KEY_PREFIX = '_antigravity_conversation_id_';
 
+/** The error an {@link AntigravityAgent} throws when an ADK parent adopts it. */
+export const PARENT_REQUIRES_SINGLE_TURN_MESSAGE =
+  'AntigravityAgent may only be an ADK sub-agent when it sets ' +
+  "mode: 'single_turn', where the ADK parent composes a self-contained " +
+  'request. Otherwise it must run as an ADK root agent.';
+
 /**
  * The composition mode an {@link AntigravityAgent} runs in under an ADK parent.
  *
- * `'single_turn'` is what allows this agent to have a parent at all: the parent
- * composes the task, session history is not forwarded, and each call is an
- * independent conversation.
+ * `'single_turn'` is what allows this agent to have a parent at all. Each call
+ * is an independent conversation: no conversation id is stored, and the id an
+ * earlier turn stored is not read back.
+ *
+ * What supplies the request differs from adk-python. As a workflow node the
+ * parent composes it, and the node input becomes the prompt. In an agent tree
+ * it is still `ctx.userContent`, because adk-js has no `_SingleTurnAgentTool`
+ * equivalent: an `LlmAgent` parent neither exposes a single-turn child as an
+ * inline `request` tool nor excludes it from its transfer targets.
  */
 export type AntigravityAgentMode = 'single_turn';
 
@@ -114,6 +126,7 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
     super(options);
     this.antigravityConfig = options.antigravityConfig;
     this.agentFactory = options.agentFactory;
+    validateMode(options.mode);
     guardParentAdoption(this);
     this.validateSubAgents();
     this.warnIfLocalWithoutSaveDir();
@@ -179,7 +192,7 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
     // An absent node input means a classic agent-tree run.
     if (nodeInput !== undefined && nodeInput !== null) {
       parentContext = parentContext.clone({
-        userContent: coerceToUserContent(nodeInput),
+        userContent: toNodeInputContent(nodeInput),
       });
     }
 
@@ -238,25 +251,26 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
           }
         }
       }
-      yield* this.recordIdIfPending(ctx, active, storedId, recorded);
+      yield* this.flushIdIfPending(ctx, active, storedId, recorded);
     } catch (error: unknown) {
       // A harness error mid-turn leaves a resumable conversation behind, so the
-      // line after the loop never runs on that path; the id is persisted here
+      // block after the loop never runs on that path; the id is persisted here
       // before re-raising, or the next turn orphans it. A consumer that
       // abandons the generator lands on `finally`, never here, so no yield can
-      // answer it.
-      yield* this.recordIdIfPending(ctx, active, storedId, recorded);
+      // answer it — which is why this is not a `finally`.
+      yield* this.flushIdIfPending(ctx, active, storedId, recorded);
       throw error;
     }
   }
 
   /**
-   * Persists the conversation id of a turn that ended without recording one.
+   * Records the conversation id if the turn ended without recording it.
    *
-   * Yields nothing when an event already carried the id, when the conversation
-   * has no history, or when the id has not changed.
+   * Only when the conversation has history: "did we yield an event" is not the
+   * same question as "does this conversation exist", and recording an id for a
+   * genuinely empty turn makes the next resume look silently dropped.
    */
-  private async *recordIdIfPending(
+  private async *flushIdIfPending(
     ctx: InvocationContext,
     active: ActiveConversation,
     storedId: string | undefined,
@@ -469,7 +483,10 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
       author: this.name,
       branch: ctx.branch,
       actions: {
-        stateDelta: {[this.conversationIdStateKey()]: conversationId},
+        // `null`, not `undefined`, so the clearing entry survives being
+        // serialized with the event and replayed. Both read back as "no stored
+        // id", but `JSON.stringify` drops an `undefined` value.
+        stateDelta: {[this.conversationIdStateKey()]: conversationId ?? null},
       },
     });
   }
@@ -490,6 +507,22 @@ export class AntigravityAgent extends BaseAgent<AntigravityAgentOptions> {
   }
 }
 
+/**
+ * Rejects a composition mode this agent does not have.
+ *
+ * `AntigravityAgent` is not an `LlmAgent`, so `LlmAgent`'s other modes have no
+ * meaning here. The check runs at construction as well as in the type, because
+ * a plain JavaScript caller and a config loaded from YAML both reach the
+ * constructor without the compiler having seen the value.
+ */
+function validateMode(mode: AntigravityAgentMode | undefined): void {
+  if (mode !== undefined && mode !== 'single_turn') {
+    throw new Error(
+      `AntigravityAgent mode must be 'single_turn' or unset, got '${mode}'.`,
+    );
+  }
+}
+
 /** The first text part of the user's message, or `''` when there is none. */
 function extractUserPrompt(ctx: InvocationContext): string {
   for (const part of ctx.userContent?.parts ?? []) {
@@ -500,29 +533,39 @@ function extractUserPrompt(ctx: InvocationContext): string {
   return '';
 }
 
+/** Throws unless `agent` may be adopted by `parent`. */
+function assertAdoptable(
+  agent: AntigravityAgent,
+  parent: BaseAgent | undefined,
+): void {
+  if (parent !== undefined && agent.mode !== 'single_turn') {
+    throw new Error(PARENT_REQUIRES_SINGLE_TURN_MESSAGE);
+  }
+}
+
 /**
  * Rejects adoption of `agent` by an ADK parent unless it runs single-turn.
  *
- * `BaseAgent` declares `parentAgent` as a plain field, which a subclass may not
- * override with an accessor pair (TS2611), so the guard is installed on the
- * instance. `setParentAgentForSubAgents` assigns the field directly, and this
- * is what it reaches.
+ * The check has to intercept the assignment, because that is the only moment
+ * it happens: a parent's constructor adopts its children through
+ * `setParentAgentForSubAgents`, which writes the field directly. Checking at
+ * run time instead would let a mis-built agent tree construct cleanly and fail
+ * a turn later, and it is `BaseAgent(...)` that the stack trace should name.
+ *
+ * `BaseAgent` declares `parentAgent` as a plain field, and a subclass may not
+ * override a field with an accessor pair (TS2611), so the descriptor is
+ * installed on the instance instead. The value the constructor already applied
+ * is checked too, not only later assignments.
  */
 function guardParentAdoption(agent: AntigravityAgent): void {
   let parent = agent.parentAgent;
+  assertAdoptable(agent, parent);
   Object.defineProperty(agent, 'parentAgent', {
     configurable: true,
     enumerable: true,
     get: () => parent,
     set: (value: BaseAgent | undefined) => {
-      if (value !== undefined && agent.mode !== 'single_turn') {
-        throw new Error(
-          'AntigravityAgent may only be an ADK sub-agent when it sets ' +
-            "mode: 'single_turn', where the ADK parent composes a " +
-            'self-contained request. Otherwise it must run as an ADK root ' +
-            'agent.',
-        );
-      }
+      assertAdoptable(agent, value);
       parent = value;
     },
   });

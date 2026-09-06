@@ -189,6 +189,12 @@ documentation, visit [adk.dev](https://adk.dev/).
   appends, and the optional peer it loads on first use.
 - [SlackRunner](integrations/slack_runner/index.md) - Putting an ADK agent behind a Slack bot over Socket Mode, and how a Slack thread maps onto a session.
 
+### Labs
+
+- [AntigravityAgent](labs/antigravity/index.md) - Running a Google Antigravity
+  agent as an ADK agent: how a turn runs, conversation continuity across turns,
+  and ADK sub-agents bridged as client tools.
+
 ### Memory
 
 - [BaseMemoryService write paths](memory/base_memory_service/index.md) - The

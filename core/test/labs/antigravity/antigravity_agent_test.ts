@@ -16,6 +16,7 @@
 import {
   AntigravityAgent,
   AntigravityAgentConfig,
+  AntigravityAgentOptions,
   AntigravityHook,
   AntigravityStep,
   AntigravityTool,
@@ -24,9 +25,12 @@ import {
   createEvent,
   createSession,
   Event,
+  InMemorySessionService,
   InvocationContext,
   LocalAntigravityAgentConfig,
+  PARENT_REQUIRES_SINGLE_TURN_MESSAGE,
   PluginManager,
+  Runner,
   SdkAgent,
   SdkConversation,
   StreamingMode,
@@ -400,6 +404,52 @@ describe('AntigravityAgent construction', () => {
     expect(agy.parentAgent).toBe(parent);
   });
 
+  it('test_chat_mode_is_rejected', () => {
+    // AntigravityAgent is not an LlmAgent, so LlmAgent's other modes ('chat',
+    // 'task') have no meaning here. Python rejects this through the pydantic
+    // `Literal`. The mode is written after the fact rather than declared,
+    // because the TypeScript type already rejects it: the runtime check is
+    // there for the untyped caller, and this is the object one hands over.
+    const options: AntigravityAgentOptions = {
+      name: 'agy',
+      antigravityConfig: makeConfig(),
+      agentFactory: () => new FakeSdkAgent(),
+    };
+    Object.assign(options, {mode: 'chat'});
+
+    expect(() => new AntigravityAgent(options)).toThrow(/single_turn/);
+  });
+
+  it('rejects a parent passed straight to the constructor', () => {
+    // `BaseAgent` accepts `parentAgent` as a config field, so adoption can
+    // happen without the parent's own constructor assigning it.
+    const parent = new StubParent({name: 'parent'});
+
+    expect(
+      () =>
+        new AntigravityAgent({
+          name: 'agy',
+          antigravityConfig: makeConfig(),
+          agentFactory: () => new FakeSdkAgent(),
+          parentAgent: parent,
+        }),
+    ).toThrow(PARENT_REQUIRES_SINGLE_TURN_MESSAGE);
+  });
+
+  it('accepts a parent passed to the constructor under single turn', () => {
+    const parent = new StubParent({name: 'parent'});
+
+    const agy = new AntigravityAgent({
+      name: 'agy',
+      antigravityConfig: makeConfig(),
+      agentFactory: () => new FakeSdkAgent(),
+      mode: 'single_turn',
+      parentAgent: parent,
+    });
+
+    expect(agy.parentAgent).toBe(parent);
+  });
+
   it('leaves the guard in place after a single-turn agent is adopted', () => {
     const agy = new AntigravityAgent({
       name: 'agy',
@@ -473,13 +523,19 @@ describe('AntigravityAgent save_dir warning', () => {
     expect(warnings()).not.toContain('saveDir');
   });
 
-  it("warns for an adapter's own local config, not just a bare one", () => {
-    // The warning follows the discriminator, so every local configuration gets
-    // it — not only one shaped exactly like the bare interface.
+  it('test_another_local_config_subclass_also_warns', () => {
+    // Divergence: adk-python asks `isinstance(config, BaseLocalAgentConfig)`,
+    // so every subclass of that base warns. There is no config class here, so
+    // the equivalent claim is that a specialized local config warns too — the
+    // discriminator is what is read, and an adapter's extra fields are carried
+    // through without changing the answer.
     interface OpenAiLocalConfig extends LocalAntigravityAgentConfig {
-      model: string;
+      openAiModel: string;
     }
-    const config: OpenAiLocalConfig = {connection: 'local', model: 'llama3'};
+    const config: OpenAiLocalConfig = {
+      connection: 'local',
+      openAiModel: 'llama3',
+    };
 
     new AntigravityAgent({
       name: 'agy',
@@ -959,7 +1015,9 @@ describe('AntigravityAgent failure paths', () => {
 
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/Could not resume conversation/);
-    expect(deltas(events)).toEqual([{[STATE_KEY]: undefined}]);
+    // `null`, matching Python's `None`, so the clearing entry survives being
+    // serialized with the event rather than being dropped by JSON.stringify.
+    expect(deltas(events)).toEqual([{[STATE_KEY]: null}]);
     // The turn is abandoned, not half-run.
     expect(sdkAgent.conversation.sendCount).toBe(0);
     expect(sdkAgent.closeCount).toBe(1);
@@ -1480,5 +1538,92 @@ describe('AntigravityAgent as a workflow node', () => {
 
     // `undefined` would put `{"result": null}` in front of the parent's model.
     expect(output).toBe('');
+  });
+});
+
+describe('AntigravityAgent under a real Runner', () => {
+  /** Runs one turn through a real `Runner`, which is what applies a delta. */
+  async function runTurn(
+    agent: AntigravityAgent,
+    sessionService: InMemorySessionService,
+    sessionId: string,
+  ): Promise<void> {
+    const runner = new Runner({
+      appName: 'test_app',
+      agent,
+      sessionService,
+    });
+    for await (const _event of runner.runAsync({
+      userId: 'test_user',
+      sessionId,
+      newMessage: {role: 'user', parts: [{text: 'hello'}]},
+    })) {
+      // The events are asserted through session state below, not here.
+    }
+  }
+
+  it('persists the conversation id across two turns of one session', async () => {
+    // The delta is only applied by the Runner, so asserting on the yielded
+    // event alone would not show that the next turn can read it back.
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+    });
+    const seenConversationIds: Array<string | undefined> = [];
+    const agent = new AntigravityAgent({
+      name: 'agy',
+      antigravityConfig: makeConfig({saveDir: '/var/lib/app/antigravity'}),
+      agentFactory: (config) => {
+        seenConversationIds.push(config.conversationId);
+        return new FakeSdkAgent(stepsOnce, CID, [textStep(0, 'earlier')]);
+      },
+    });
+
+    await runTurn(agent, sessionService, session.id);
+    const afterFirst = await sessionService.getSession({
+      appName: 'test_app',
+      userId: 'test_user',
+      sessionId: session.id,
+    });
+    await runTurn(agent, sessionService, session.id);
+
+    expect(afterFirst?.state[STATE_KEY]).toBe(CID);
+    // Turn one has no id to resume; turn two reads back what turn one stored.
+    expect(seenConversationIds).toEqual([undefined, CID]);
+  });
+
+  it('clears the stored id when a local resume finds no history', async () => {
+    const sessionService = new InMemorySessionService();
+    const session = await sessionService.createSession({
+      appName: 'test_app',
+      userId: 'test_user',
+      state: {[STATE_KEY]: CID},
+    });
+    const seenConversationIds: Array<string | undefined> = [];
+    const agent = new AntigravityAgent({
+      name: 'agy',
+      antigravityConfig: makeConfig({saveDir: '/var/lib/app/antigravity'}),
+      // No history, so the resume was silently dropped.
+      agentFactory: (config) => {
+        seenConversationIds.push(config.conversationId);
+        return new FakeSdkAgent(stepsOnce, CID);
+      },
+    });
+
+    await expect(runTurn(agent, sessionService, session.id)).rejects.toThrow(
+      /no longer available/,
+    );
+    // The next turn starts a new conversation instead of failing the same way
+    // forever, which is the point of clearing the id.
+    await runTurn(agent, sessionService, session.id);
+
+    const after = await sessionService.getSession({
+      appName: 'test_app',
+      userId: 'test_user',
+      sessionId: session.id,
+    });
+    expect(seenConversationIds).toEqual([CID, undefined]);
+    expect(after?.state[STATE_KEY]).toBe(CID);
   });
 });
