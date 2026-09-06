@@ -68,6 +68,76 @@ describe('oauth2_utils', () => {
       } as AuthScheme;
       expect(getTokenEndpoint(scheme)).toBeUndefined();
     });
+
+    it('falls back to clientCredentials when authorizationCode has a blank tokenUrl', () => {
+      const scheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: '',
+            scopes: {},
+          },
+          clientCredentials: {
+            tokenUrl: 'https://example.com/token-cc',
+            scopes: {},
+          },
+        },
+      } as AuthScheme;
+      expect(getTokenEndpoint(scheme)).toBe('https://example.com/token-cc');
+    });
+
+    it('falls through to password when earlier flows have blank tokenUrls', () => {
+      const scheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: '',
+            scopes: {},
+          },
+          clientCredentials: {tokenUrl: '', scopes: {}},
+          password: {tokenUrl: 'https://example.com/token-pw', scopes: {}},
+        },
+      } as AuthScheme;
+      expect(getTokenEndpoint(scheme)).toBe('https://example.com/token-pw');
+    });
+
+    it('prefers authorizationCode when several flows have usable tokenUrls', () => {
+      const scheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: 'https://example.com/token-auth',
+            scopes: {},
+          },
+          clientCredentials: {
+            tokenUrl: 'https://example.com/token-cc',
+            scopes: {},
+          },
+        },
+      } as AuthScheme;
+      expect(getTokenEndpoint(scheme)).toBe('https://example.com/token-auth');
+    });
+
+    it('returns undefined when every declared flow has a blank tokenUrl', () => {
+      const scheme = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: '',
+            scopes: {},
+          },
+          implicit: {
+            authorizationUrl: 'https://example.com/auth',
+            scopes: {},
+          },
+        },
+      } as AuthScheme;
+      expect(getTokenEndpoint(scheme)).toBeUndefined();
+    });
   });
 
   describe('fetchOAuth2Tokens', () => {
