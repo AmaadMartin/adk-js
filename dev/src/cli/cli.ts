@@ -177,7 +177,10 @@ const RELOAD_AGENTS_OPTION = new Option(
   '--reload_agents [boolean]',
   'Optional. Watch agent files for changes and automatically reload them. Default: false. To see any changes to your agent file, you need to initiate a new agent run.',
 ).default(false);
-const AGENT_FILE_MODULE_TYPE = new Option('--file_type <string>', 'Optional. ');
+const AGENT_FILE_MODULE_TYPE = new Option(
+  '--file_type <string>',
+  'Optional. The module format of the compiled agent file: cjs emits CommonJS to a .cjs file, esm emits an ES module to a .mjs file. If not set, the format is detected from the agent file extension and the nearest package.json "type" field.',
+);
 AGENT_FILE_MODULE_TYPE.argChoices = [FileModuleType.CJS, FileModuleType.ESM];
 
 // Reusable deployment CLI option constants

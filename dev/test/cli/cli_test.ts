@@ -5,6 +5,7 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
+import {Command} from 'commander';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
@@ -49,6 +50,44 @@ vi.mock('@google/adk', async (importOriginal) => {
   };
 });
 
+/** Command surfaces that register the shared agent-file compilation options. */
+const AGENT_FILE_COMMANDS = [
+  'web',
+  'api_server',
+  'run',
+  'deploy cloud_run',
+  'deploy agent_engine',
+  'deploy reasoning_engine',
+];
+
+/** Resolves a space-separated command path, e.g. `deploy cloud_run`. */
+function findCommand(program: Command, commandPath: string): Command {
+  let command = program;
+  for (const name of commandPath.split(' ')) {
+    const child = command.commands.find((c) => c.name() === name);
+    if (!child) {
+      expect.fail(`Command "${commandPath}" is not registered`);
+    }
+    command = child;
+  }
+  return command;
+}
+
+/**
+ * Returns the `--file_type` entry of a command's help, whitespace-normalized so
+ * assertions are independent of commander's column wrapping.
+ */
+function fileTypeHelp(program: Command, commandPath: string): string {
+  const help = findCommand(program, commandPath)
+    .helpInformation()
+    .replace(/\s+/g, ' ');
+  const entry = help.match(/--file_type <string>.*?(?= --?[a-z])/);
+  if (!entry) {
+    expect.fail(`"${commandPath}" help does not list --file_type`);
+  }
+  return entry[0];
+}
+
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
 
@@ -82,6 +121,20 @@ describe('CLI Entrypoint', () => {
       await parse(['-v']);
       expect(logSpy).toHaveBeenCalledWith('1.0.0-test');
     });
+  });
+
+  describe('option help text', () => {
+    it.each(AGENT_FILE_COMMANDS)(
+      'describes what --file_type selects in `%s` help',
+      (commandPath) => {
+        const entry = fileTypeHelp(program, commandPath);
+
+        expect(entry).not.toMatch(/^--file_type <string> Optional\. \(choices/);
+        expect(entry).toContain('.cjs');
+        expect(entry).toContain('.mjs');
+        expect(entry).toContain('(choices: "cjs", "esm")');
+      },
+    );
   });
 
   describe('command: web', () => {
