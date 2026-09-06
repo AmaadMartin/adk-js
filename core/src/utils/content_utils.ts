@@ -43,6 +43,11 @@ export function toUserContent(value: ContentUnion): Content {
  * Use this for a value whose shape the caller does not control, such as a
  * workflow node input. {@link toUserContent} is the strict version: it takes a
  * `ContentUnion` and never re-roles a `Content` it is given.
+ *
+ * Mirrors `to_user_content` in google/adk-python `utils/content_utils.py`.
+ *
+ * @param input The value to convert.
+ * @return A `Content` with `role: 'user'`.
  */
 export function coerceToUserContent(input: unknown): Content {
   if (isContent(input)) {

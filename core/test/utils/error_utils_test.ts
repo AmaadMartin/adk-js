@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {ApiError} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   formatError,
+  getApiErrorDetails,
   isAbortError,
   isFileNotFoundError,
   isNotFoundError,
@@ -418,5 +420,71 @@ describe('isFileNotFoundError', () => {
     expect(isFileNotFoundError('ENOENT')).toBe(false);
     expect(isFileNotFoundError(null)).toBe(false);
     expect(isFileNotFoundError(undefined)).toBe(false);
+  });
+});
+
+describe('getApiErrorDetails', () => {
+  it('reads the canonical status and message out of the JSON body', () => {
+    const error = new ApiError({
+      status: 429,
+      message: JSON.stringify({
+        error: {code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota.'},
+      }),
+    });
+
+    expect(getApiErrorDetails(error)).toEqual({
+      status: 'RESOURCE_EXHAUSTED',
+      message: 'Quota.',
+    });
+  });
+
+  it('parses the body the streaming path prefixes with "got status:"', () => {
+    const body = JSON.stringify({
+      error: {code: 500, status: 'INTERNAL', message: 'Backend failure.'},
+    });
+    const error = new ApiError({
+      status: 500,
+      message: `got status: INTERNAL. ${body}`,
+    });
+
+    expect(getApiErrorDetails(error)).toEqual({
+      status: 'INTERNAL',
+      message: 'Backend failure.',
+    });
+  });
+
+  it('falls back to the numeric status when the body carries no JSON', () => {
+    const error = new ApiError({status: 503, message: 'service unavailable'});
+
+    expect(getApiErrorDetails(error)).toEqual({
+      status: '503',
+      message: 'service unavailable',
+    });
+  });
+
+  it('falls back when the body is a brace that does not parse', () => {
+    const error = new ApiError({status: 400, message: 'bad {not json'});
+
+    expect(getApiErrorDetails(error)).toEqual({
+      status: '400',
+      message: 'bad {not json',
+    });
+  });
+
+  it('falls back when the parsed body carries no error object', () => {
+    const error = new ApiError({status: 400, message: '{"other": 1}'});
+
+    expect(getApiErrorDetails(error)).toEqual({
+      status: '400',
+      message: '{"other": 1}',
+    });
+  });
+
+  it('returns undefined for a value that is not an API error', () => {
+    expect(getApiErrorDetails(new Error('plain'))).toBeUndefined();
+    expect(getApiErrorDetails(undefined)).toBeUndefined();
+    expect(getApiErrorDetails('boom')).toBeUndefined();
+    expect(getApiErrorDetails({status: 500})).toBeUndefined();
+    expect(getApiErrorDetails({message: 'no status'})).toBeUndefined();
   });
 });

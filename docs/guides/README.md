@@ -28,6 +28,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   LangGraph state graph as an ADK agent.
 - [LlmAgent single-turn and task modes](agents/llm_agent/single_turn.md) - Exposing a sub-agent to its parent as a callable tool that runs inline.
 - [LoopAgent config documents](agents/loop_agent_config/index.md) - Validating a LoopAgent configuration document, with the same verdict ADK Python gives.
+- [ManagedAgent](agents/managed_agent/index.md) - Driving a server-hosted managed agent, its server-side tools, and how a conversation chains across turns.
 - [mcpInstructionProvider](agents/mcp_instruction_provider/index.md) - Reading an
   agent's instruction from a prompt hosted on an MCP server.
 - [Model input context](agents/model_input_context/index.md) - Adding per-turn contents to one LLM request without writing them to the session.

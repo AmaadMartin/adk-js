@@ -239,4 +239,18 @@ describe('coerceToUserContent', () => {
       parts: [{text: '{"bug":42}'}],
     });
   });
+
+  it('JSON-encodes anything else into one text part', () => {
+    expect(coerceToUserContent({task: 'primes', limit: 10})).toEqual({
+      role: 'user',
+      parts: [{text: '{"task":"primes","limit":10}'}],
+    });
+  });
+
+  it('encodes a number rather than dropping it', () => {
+    expect(coerceToUserContent(42)).toEqual({
+      role: 'user',
+      parts: [{text: '42'}],
+    });
+  });
 });

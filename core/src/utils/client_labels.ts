@@ -43,11 +43,15 @@ export function parseUserAgent(userAgent: string): string {
   return 'Browser';
 }
 
-function _getDefaultLabels(): string[] {
-  let frameworkLabel = `${ADK_LABEL}/${version}`;
+function _getDefaultLabels(frameworkLabel?: string): string[] {
+  let frameworkToken = `${ADK_LABEL}/${version}`;
 
   if (!isBrowser() && process.env[AGENT_ENGINE_TELEMETRY_ENV_VARIABLE_NAME]) {
-    frameworkLabel = `${frameworkLabel}+${AGENT_ENGINE_TELEMETRY_TAG}`;
+    frameworkToken = `${frameworkToken}+${AGENT_ENGINE_TELEMETRY_TAG}`;
+  }
+
+  if (frameworkLabel) {
+    frameworkToken = `${frameworkToken}+${frameworkLabel}`;
   }
 
   const languageLabelDetail = isBrowser()
@@ -56,7 +60,7 @@ function _getDefaultLabels(): string[] {
     : process.version;
 
   const languageLabel = `${LANGUAGE_LABEL}/${languageLabelDetail}`;
-  return [frameworkLabel, languageLabel];
+  return [frameworkToken, languageLabel];
 }
 
 /**
@@ -80,9 +84,13 @@ export function runWithClientLabel<R>(
 
 /**
  * Returns the current list of client labels that can be added to HTTP Headers.
+ *
+ * @param frameworkLabel Optional SemVer build-metadata suffix appended to the
+ *     `google-adk/<version>` token (e.g. `managed_agent`), which tells Google's
+ *     server-side usage pipeline which ADK surface issued the call.
  */
-export function getClientLabels(): string[] {
-  const labels = _getDefaultLabels();
+export function getClientLabels(frameworkLabel?: string): string[] {
+  const labels = _getDefaultLabels(frameworkLabel);
   const contextLabel = clientLabelLocalStorage.getStore();
   if (contextLabel) {
     labels.push(contextLabel);
@@ -96,9 +104,14 @@ export function getClientLabels(): string[] {
  *
  * Mirrors adk-python `utils/_google_client_headers.py`, so server-side usage
  * data can separate ADK calls from any other caller of the same API.
+ *
+ * @param frameworkLabel Optional ADK surface suffix, as on
+ *     {@link getClientLabels}.
  */
-export function getTrackingHeaders(): Record<string, string> {
-  const headerValue = getClientLabels().join(' ');
+export function getTrackingHeaders(
+  frameworkLabel?: string,
+): Record<string, string> {
+  const headerValue = getClientLabels(frameworkLabel).join(' ');
   return {
     'x-goog-api-client': headerValue,
     'user-agent': headerValue,
@@ -111,12 +124,20 @@ export function getTrackingHeaders(): Record<string, string> {
  * A caller's own value for a tracking header is kept: its labels are appended
  * after the ADK ones, and a label the caller already carries is not repeated.
  * The argument is never modified.
+ *
+ * @param headers The caller's headers, or undefined when there are none.
+ * @param frameworkLabel Optional ADK surface suffix, as on
+ *     {@link getClientLabels}.
+ * @return A new headers map carrying both sets of tokens.
  */
 export function mergeTrackingHeaders(
   headers?: Record<string, string>,
+  frameworkLabel?: string,
 ): Record<string, string> {
   const merged: Record<string, string> = {...headers};
-  for (const [key, trackingValue] of Object.entries(getTrackingHeaders())) {
+  for (const [key, trackingValue] of Object.entries(
+    getTrackingHeaders(frameworkLabel),
+  )) {
     const customValue = merged[key];
     if (!customValue) {
       merged[key] = trackingValue;

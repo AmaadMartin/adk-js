@@ -99,6 +99,11 @@ export interface RunConfig {
    *
    * `baseUrl` and `apiVersion` are configuration-time settings, so they only
    * apply when the agent set no HTTP options of its own.
+   *
+   * `ManagedAgent` reads only the `headers`: it merges them with the ADK
+   * tracking headers, so a caller header never displaces attribution. Mirrors
+   * `RunConfig.http_options` in google/adk-python `agents/run_config.py`, where
+   * `base_llm_flow` merges it into every request.
    */
   httpOptions?: HttpOptions;
 

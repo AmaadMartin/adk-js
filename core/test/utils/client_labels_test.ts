@@ -185,6 +185,15 @@ describe('client_labels', () => {
       expect(headers['user-agent']).toBe(getClientLabels().join(' '));
       expect(headers['x-goog-api-client']).toBe(headers['user-agent']);
     });
+
+    it('appends a framework label to the google-adk token', () => {
+      const [framework] = getClientLabels('managed_agent');
+
+      expect(framework).toMatch(/^google-adk\/[^ ]+\+managed_agent$/);
+      expect(getTrackingHeaders('managed_agent')['user-agent']).toContain(
+        '+managed_agent',
+      );
+    });
   });
 
   describe('mergeTrackingHeaders', () => {
@@ -270,6 +279,38 @@ describe('client_labels', () => {
       expect(mergeTrackingHeaders({'user-agent': ''})).toEqual(
         getTrackingHeaders(),
       );
+    });
+
+    it('returns the tracking headers when there are none to merge', () => {
+      expect(mergeTrackingHeaders(undefined)).toEqual(getTrackingHeaders());
+    });
+
+    it('keeps a caller header the tracking headers do not name', () => {
+      expect(mergeTrackingHeaders({'x-custom': 'v'})['x-custom']).toBe('v');
+    });
+
+    it('appends the caller tokens to a tracking header it also sets', () => {
+      const merged = mergeTrackingHeaders({'user-agent': 'my-app/1.0'});
+
+      expect(merged['user-agent']).toBe(
+        `${getClientLabels().join(' ')} my-app/1.0`,
+      );
+    });
+
+    it('does not repeat a token the caller already carries', () => {
+      const tracking = getClientLabels().join(' ');
+
+      expect(mergeTrackingHeaders({'user-agent': tracking})['user-agent']).toBe(
+        tracking,
+      );
+    });
+
+    it('does not mutate the headers it was given', () => {
+      const headers = {'x-custom': 'v'};
+
+      mergeTrackingHeaders(headers);
+
+      expect(headers).toEqual({'x-custom': 'v'});
     });
   });
 });

@@ -117,6 +117,14 @@ export {
   parseLoopAgentYamlConfig,
 } from './agents/loop_agent_config.js';
 export type {LoopAgentYamlConfig as DeclarativeLoopAgentConfig} from './agents/loop_agent_config.js';
+export {ManagedAgent, isManagedAgent} from './agents/managed_agent.js';
+export type {
+  ManagedAgentClient,
+  ManagedAgentConfig,
+  ManagedAgentEnvironment,
+  ManagedAgentRuntimeConfig,
+  ManagedAgentTool,
+} from './agents/managed_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
 // As with the LlmAgent loader above: the deprecated `agents/agent_config.ts`
 // already exports `parallelAgentYamlConfigSchema` and `ParallelAgentYamlConfig`
@@ -801,6 +809,7 @@ export type {
 export {Gemma} from './models/gemma_llm.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
+export type {InteractionsClient} from './models/interactions_utils.js';
 export {LiteLlm} from './models/lite_llm.js';
 export type {LiteLlmParams} from './models/lite_llm.js';
 export {FetchLiteLlmClient} from './models/lite_llm_client.js';
@@ -1249,6 +1258,13 @@ export {
 } from './tools/pubsub/pubsub_credentials.js';
 export {createPubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export type {PubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
+export {isRemoteMcpServer} from './tools/remote_mcp_server.js';
+// `McpHeaderProvider` is not re-exported here. `tools/mcp/mcp_auth.ts` declares
+// the same type and the MCP barrel already exports it, so naming it twice makes
+// the name ambiguous in `index.ts`. The two declarations are structurally
+// identical, so the one the MCP barrel exports also types this module's
+// `RemoteMcpServer.headerProvider`.
+export type {RemoteMcpServer} from './tools/remote_mcp_server.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {GeminiEmbeddingModel} from './tools/retrieval/embedding_model.js';
@@ -1340,6 +1356,8 @@ export {snakeToLowerCamel} from './utils/case_utils.js';
 export {
   EVAL_CLIENT_LABEL,
   getClientLabels,
+  getTrackingHeaders,
+  mergeTrackingHeaders,
   runWithClientLabel,
 } from './utils/client_labels.js';
 export {deprecated} from './utils/deprecated.js';

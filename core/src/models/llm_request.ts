@@ -61,6 +61,9 @@ export interface LlmRequest {
    * Whether a managed agent built the request. A managed agent resolves its
    * tools server-side, so the request carries no model. Built-in tools read
    * this flag to enable themselves on such a request. Internal request state.
+   *
+   * Mirrors `LlmRequest._is_managed_agent` in google/adk-python
+   * `models/llm_request.py`.
    */
   isManagedAgent?: boolean;
 

@@ -81,6 +81,15 @@ export class GoogleSearchTool extends BuiltInTool {
       llmRequest.model = this.model;
     }
 
+    // A Managed Agent names a backend agent instead of a model, so the model
+    // gates below cannot decide anything. The backend runs the search itself.
+    if (llmRequest.isManagedAgent) {
+      llmRequest.config = llmRequest.config || ({} as GenerateContentConfig);
+      llmRequest.config.tools = llmRequest.config.tools || [];
+      llmRequest.config.tools.push({googleSearch: {}});
+      return;
+    }
+
     const modelCheckDisabled = isGeminiModelIdCheckDisabled();
     const model = llmRequest.model ?? '';
 

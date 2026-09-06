@@ -45,6 +45,20 @@ function makeToolContext(): Context {
   });
 }
 
+/**
+ * A real {@link Context}, so the managed-agent tests do not have to cast one.
+ * The tool reads nothing off it, but the signature requires it.
+ */
+function managedToolContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv1',
+      session: createSession({id: 's1', appName: 'test', userId: 'user'}),
+      pluginManager: new PluginManager([]),
+    }),
+  });
+}
+
 describe('UrlContextTool', () => {
   describe('Gemini models', () => {
     it('adds urlContext for Gemini 2+ model', async () => {
@@ -288,6 +302,36 @@ describe('UrlContextTool', () => {
 
     expect(tool.name).toBe('url_context');
     expect(tool.description).toBe('url_context');
+  });
+
+  describe('managed agent mode', () => {
+    it('configures the tool when the request names an agent, not a model', async () => {
+      const req = makeRequest(undefined);
+      req.isManagedAgent = true;
+
+      await new UrlContextTool().processLlmRequest({
+        llmRequest: req,
+        toolContext: managedToolContext(),
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+
+    it('creates the tools array when the request has no config', async () => {
+      const req: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        isManagedAgent: true,
+      };
+
+      await new UrlContextTool().processLlmRequest({
+        llmRequest: req,
+        toolContext: managedToolContext(),
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
   });
 
   it('has a global instance URL_CONTEXT', () => {

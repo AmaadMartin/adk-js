@@ -32,6 +32,13 @@ export class UrlContextTool extends BuiltInTool {
     llmRequest.config = llmRequest.config || {};
     llmRequest.config.tools = llmRequest.config.tools || [];
 
+    // A Managed Agent names a backend agent instead of a model, so the model
+    // gate below cannot decide anything. The backend fetches the URLs itself.
+    if (llmRequest.isManagedAgent) {
+      llmRequest.config.tools.push({urlContext: {}});
+      return;
+    }
+
     if (
       !isGeminiModel(llmRequest.model ?? '') &&
       !isGeminiModelIdCheckDisabled()
