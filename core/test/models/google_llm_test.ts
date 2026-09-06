@@ -21,6 +21,9 @@ import {
 } from '@google/genai';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
+const TEST_PROJECT = 'test-project';
+const TEST_LOCATION = 'us-central1';
+
 vi.mock('@google/genai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@google/genai')>();
   return {
@@ -131,6 +134,7 @@ describe('GoogleLlm', () => {
   });
 
   it('should respect configured location for Vertex AI liveApiClient', () => {
+    // Kept literal: the resource path, location, and assertion must agree.
     const llm = new TestGemini({
       model: 'projects/p/locations/us-central1/models/gemini-2.5-flash',
       vertexai: true,
@@ -333,13 +337,13 @@ describe('GoogleLlm', () => {
       const input = {
         model: 'gemini-1.5-flash',
         vertexai: true,
-        project: 'test-project',
-        location: 'us-central1',
+        project: TEST_PROJECT,
+        location: TEST_LOCATION,
       };
       const params = geminiInitParams(input);
       expect(params.vertexai).toBe(true);
-      expect(params.project).toBe('test-project');
-      expect(params.location).toBe('us-central1');
+      expect(params.project).toBe(TEST_PROJECT);
+      expect(params.location).toBe(TEST_LOCATION);
     });
 
     it('should use env vars for Vertex AI', () => {
@@ -391,7 +395,7 @@ describe('GoogleLlm', () => {
       const input = {
         model: 'gemini-1.5-flash',
         vertexai: true,
-        location: 'us-central1',
+        location: TEST_LOCATION,
       };
       expect(() => geminiInitParams(input)).toThrow(/VertexAI project/);
     });

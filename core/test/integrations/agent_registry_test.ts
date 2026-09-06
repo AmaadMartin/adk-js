@@ -20,6 +20,8 @@ import {
   StreamableHTTPConnectionParams,
 } from '../../src/index.js';
 
+const TEST_PROJECT = 'test-project';
+
 // Mock google-auth-library
 let shouldAuthThrow = false;
 let mockQuotaProjectId: string | undefined = 'quota-project-123';
@@ -96,14 +98,14 @@ describe('AgentRegistry', () => {
     vi.clearAllMocks();
     global.fetch = vi.fn();
     registry = new AgentRegistry({
-      projectId: 'test-project',
+      projectId: TEST_PROJECT,
       location: 'global',
     });
   });
 
   describe('Initialization', () => {
     it('should initialize correctly and build base path', () => {
-      expect(registry.projectId).toBe('test-project');
+      expect(registry.projectId).toBe(TEST_PROJECT);
       expect(registry.location).toBe('global');
     });
 
@@ -738,7 +740,7 @@ describe('AgentRegistry', () => {
 
     it('should support custom header providers and merge headers', async () => {
       const customHeaderRegistry = new AgentRegistry({
-        projectId: 'test-project',
+        projectId: TEST_PROJECT,
         location: 'global',
         headerProvider: () => ({'Custom-Header': 'value'}),
       });
@@ -763,7 +765,7 @@ describe('AgentRegistry', () => {
 
     it('should support getMcpToolset with empty options and verify auth headers added for Google API', async () => {
       const customHeaderRegistry = new AgentRegistry({
-        projectId: 'test-project',
+        projectId: TEST_PROJECT,
         location: 'global',
       });
 
@@ -864,7 +866,7 @@ describe('AgentRegistry', () => {
       shouldAuthThrow = true;
 
       const badRegistry = new AgentRegistry({
-        projectId: 'test-project',
+        projectId: TEST_PROJECT,
         location: 'global',
       });
 
