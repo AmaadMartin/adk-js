@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {spawnSync} from 'node:child_process';
-import {existsSync, mkdtempSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, realpathSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -74,7 +74,11 @@ describe.each(ENTRY_POINTS)(
         `${entry} is not built; run "npm run build" before this suite`,
       ).toBe(true);
 
-      projectDir = mkdtempSync(path.join(tmpdir(), 'adk-metric-project-'));
+      // Realpath, because macOS reports the system temp directory through a
+      // symlink and the child process resolves its own working directory.
+      projectDir = realpathSync(
+        mkdtempSync(path.join(tmpdir(), 'adk-metric-project-')),
+      );
       writeFileSync(
         path.join(projectDir, 'metrics.mjs'),
         METRIC_MODULE,

@@ -32,6 +32,7 @@ import {EvalConfig} from './eval_config.js';
 import {EvalSetResultsManager} from './eval_set_results_manager.js';
 import {EvalSetsManager} from './eval_sets_manager.js';
 import {MetricEvaluatorRegistry} from './metric_evaluator_registry.js';
+import {UserSimulatorProvider} from './simulation/user_simulator_provider.js';
 
 /** Everything the eval runtime needs to build a service for one run. */
 export interface EvalServiceParams {
@@ -58,6 +59,9 @@ export interface EvalServiceParams {
    * registry untouched.
    */
   metricEvaluatorRegistry?: MetricEvaluatorRegistry;
+
+  /** Supplies the simulator that plays the user for each eval case. */
+  userSimulatorProvider?: UserSimulatorProvider;
 
   /** Loads the artifacts the eval cases reach for. */
   artifactService?: BaseArtifactService;

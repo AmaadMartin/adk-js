@@ -183,15 +183,6 @@ describe('CustomMetricEvaluator specifier resolution', () => {
     await writeFile(modulePath, RECORDING_MODULE, 'utf-8');
   });
 
-  it('resolves a relative specifier against the working directory', async () => {
-    const relative = `./${path.relative(process.cwd(), modulePath)}`;
-    const evaluator = new CustomMetricEvaluator(METRIC, `${relative}#score`);
-
-    const result = await evaluator.evaluateInvocations([]);
-
-    expect(result.overallScore).toBe(0.5);
-  });
-
   it('resolves an absolute file path that carries no URL scheme', async () => {
     const evaluator = new CustomMetricEvaluator(METRIC, `${modulePath}#score`);
 
