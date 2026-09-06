@@ -178,7 +178,7 @@ describe('MCPTool', () => {
     const mockSessionManager = {
       createSession: vi.fn().mockResolvedValue(mockClient),
       closeSession: vi.fn().mockResolvedValue(undefined),
-      requestTimeoutMs: 5000,
+      requestOptions: {timeout: 5000},
     } as Partial<MCPSessionManager> as MCPSessionManager;
 
     const tool = new MCPTool(mockTool, mockSessionManager);

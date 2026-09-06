@@ -151,16 +151,16 @@ export class MCPSessionManager {
     SessionTerminator | undefined
   >();
   /**
-   * Milliseconds callers must allow each request they issue on a session from
-   * this manager. `undefined` leaves the MCP SDK's own request timeout in
-   * place, which is what a streamable HTTP connection gets when it configures
-   * no timeout.
+   * Options callers must pass with every request they issue on a session from
+   * this manager. A `timeout` of `undefined` leaves the MCP SDK's own request
+   * timeout in place, which is what a streamable HTTP connection gets when it
+   * configures no timeout.
    */
-  readonly requestTimeoutMs: number | undefined;
+  readonly requestOptions: {timeout: number | undefined};
 
   constructor(connectionParams: MCPConnectionParams) {
     this.connectionParams = connectionParams;
-    this.requestTimeoutMs = resolveRequestTimeoutMs(connectionParams);
+    this.requestOptions = {timeout: resolveRequestTimeoutMs(connectionParams)};
   }
 
   async createSession(): Promise<Client> {
@@ -170,10 +170,6 @@ export class MCPSessionManager {
     );
     const client = new Client({name: 'MCPClient', version: '1.0.0'});
     let terminate: SessionTerminator | undefined;
-    const requestOptions =
-      this.requestTimeoutMs === undefined
-        ? undefined
-        : {timeout: this.requestTimeoutMs};
 
     try {
       switch (this.connectionParams.type) {
@@ -186,7 +182,7 @@ export class MCPSessionManager {
             this.connectionParams.serverParams,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport, requestOptions);
+          await client.connect(transport, this.requestOptions);
           break;
         }
         case 'StreamableHTTPConnectionParams': {
@@ -210,7 +206,7 @@ export class MCPSessionManager {
             options,
           );
           transport.onerror = logTransportError;
-          await client.connect(transport, requestOptions);
+          await client.connect(transport, this.requestOptions);
           if (this.connectionParams.terminateOnClose ?? true) {
             terminate = async () => {
               // `terminateSession()` reports through `onerror` as well as

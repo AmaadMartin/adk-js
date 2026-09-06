@@ -373,7 +373,9 @@ describe('MCPSessionManager', () => {
 
       const client = await manager.createSession();
 
-      expect(client.connect).toHaveBeenCalledWith(expect.anything(), undefined);
+      expect(client.connect).toHaveBeenCalledWith(expect.anything(), {
+        timeout: undefined,
+      });
     });
 
     it('applies the default stdio timeout to the initialize handshake', async () => {
@@ -391,21 +393,21 @@ describe('MCPSessionManager', () => {
   });
 
   /**
-   * `requestTimeoutMs` is what `MCPToolset` and `MCPTool` read to bound the
+   * `requestOptions` is what `MCPToolset` and `MCPTool` pass to bound the
    * requests they issue after the handshake. adk-python bounds the
    * whole session once, through `ClientSession(read_timeout_seconds=...)` in
    * `src/google/adk/tools/mcp_tool/session_context.py`; the MCP TypeScript SDK
    * has no session-level knob, so the value is published for each call site to
    * pass instead.
    */
-  describe('requestTimeoutMs', () => {
+  describe('requestOptions', () => {
     it('defaults a stdio session to five seconds', () => {
       const manager = new MCPSessionManager({
         type: 'StdioConnectionParams',
         serverParams: {command: 'test-command'},
       });
 
-      expect(manager.requestTimeoutMs).toBe(5000);
+      expect(manager.requestOptions.timeout).toBe(5000);
     });
 
     it('converts a configured stdio timeout to milliseconds', () => {
@@ -415,7 +417,7 @@ describe('MCPSessionManager', () => {
         timeout: 30,
       });
 
-      expect(manager.requestTimeoutMs).toBe(30000);
+      expect(manager.requestOptions.timeout).toBe(30000);
     });
 
     it('treats a zero stdio timeout as a zero-length budget', () => {
@@ -425,7 +427,7 @@ describe('MCPSessionManager', () => {
         timeout: 0,
       });
 
-      expect(manager.requestTimeoutMs).toBe(0);
+      expect(manager.requestOptions.timeout).toBe(0);
     });
 
     it('leaves streamable HTTP on the SDK default when unset', () => {
@@ -434,7 +436,7 @@ describe('MCPSessionManager', () => {
         url: 'http://test-url',
       });
 
-      expect(manager.requestTimeoutMs).toBeUndefined();
+      expect(manager.requestOptions.timeout).toBeUndefined();
     });
 
     it('converts a configured streamable HTTP timeout to milliseconds', () => {
@@ -444,7 +446,7 @@ describe('MCPSessionManager', () => {
         timeout: 15,
       });
 
-      expect(manager.requestTimeoutMs).toBe(15000);
+      expect(manager.requestOptions.timeout).toBe(15000);
     });
   });
 

@@ -63,11 +63,6 @@ export class MCPToolset extends BaseToolset {
     this.mcpSessionManager = new MCPSessionManager(connectionParams);
   }
 
-  /** Bounds every request this toolset issues on a session. */
-  private get requestOptions() {
-    return {timeout: this.mcpSessionManager.requestTimeoutMs};
-  }
-
   async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
     const session = await this.mcpSessionManager.createSession();
 
@@ -75,7 +70,7 @@ export class MCPToolset extends BaseToolset {
     try {
       listResult = (await session.listTools(
         undefined,
-        this.requestOptions,
+        this.mcpSessionManager.requestOptions,
       )) as ListToolsResult;
     } finally {
       await this.mcpSessionManager.closeSession(session);
@@ -130,7 +125,7 @@ export class MCPToolset extends BaseToolset {
     try {
       const result = (await session.listResources(
         undefined,
-        this.requestOptions,
+        this.mcpSessionManager.requestOptions,
       )) as ListResourcesResult;
       return result.resources.map((resource) => resource.name);
     } finally {
@@ -151,7 +146,7 @@ export class MCPToolset extends BaseToolset {
     try {
       result = (await session.listResources(
         undefined,
-        this.requestOptions,
+        this.mcpSessionManager.requestOptions,
       )) as ListResourcesResult;
     } finally {
       await this.mcpSessionManager.closeSession(session);
@@ -189,7 +184,7 @@ export class MCPToolset extends BaseToolset {
     try {
       const result = (await session.readResource(
         {uri: resourceInfo.uri},
-        this.requestOptions,
+        this.mcpSessionManager.requestOptions,
       )) as ReadResourceResult;
       return result.contents;
     } finally {
