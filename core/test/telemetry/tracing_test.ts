@@ -4,23 +4,33 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {trace} from '@opentelemetry/api';
+import {
+  AttributeValue,
+  Attributes,
+  Span,
+  SpanContext,
+  trace,
+} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
   BaseAgent,
   BaseTool,
+  ContentCapturingMode,
   Event,
   InvocationContext,
   LlmRequest,
   LlmResponse,
   Session,
+  TelemetryConfig,
   createEventActions,
+  createTelemetryConfig,
 } from '@google/adk';
 import {
   traceAgentInvocation,
   traceCallLlm,
   traceMergedToolCalls,
+  traceSendData,
   traceToolCall,
 } from '../../src/telemetry/tracing.js';
 
@@ -288,5 +298,201 @@ describe('Telemetry Tracing Functions', () => {
         expect.anything(),
       );
     });
+  });
+});
+
+/** A {@link Span} that keeps the attributes set on it, for assertions. */
+class RecordingSpan implements Span {
+  readonly attributes: Attributes = {};
+
+  setAttribute(key: string, value: AttributeValue): this {
+    this.attributes[key] = value;
+    return this;
+  }
+
+  setAttributes(attributes: Attributes): this {
+    Object.assign(this.attributes, attributes);
+    return this;
+  }
+
+  spanContext(): SpanContext {
+    return {traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: 0};
+  }
+
+  addEvent(): this {
+    return this;
+  }
+
+  addLink(): this {
+    return this;
+  }
+
+  addLinks(): this {
+    return this;
+  }
+
+  setStatus(): this {
+    return this;
+  }
+
+  updateName(): this {
+    return this;
+  }
+
+  end(): void {}
+
+  isRecording(): boolean {
+    return true;
+  }
+
+  recordException(): void {}
+}
+
+describe('Tracing with a per-request TelemetryConfig', () => {
+  let span: RecordingSpan;
+
+  function createContext(telemetry?: TelemetryConfig): InvocationContext {
+    return {
+      invocationId: 'test-invocation-id',
+      session: {id: 'test-session-id'} as Session,
+      agent: {name: 'test-agent'} as BaseAgent,
+      runConfig: telemetry ? {telemetry} : undefined,
+    } as InvocationContext;
+  }
+
+  const noContent = () =>
+    createContext(
+      createTelemetryConfig({
+        captureMessageContent: ContentCapturingMode.NO_CONTENT,
+      }),
+    );
+
+  const tool = {
+    name: 'test-tool',
+    description: 'A test tool',
+    constructor: {name: 'FunctionTool'},
+  } as BaseTool;
+
+  const event = {
+    id: 'test-event-id',
+    invocationId: 'test-invocation-id',
+    actions: createEventActions({skipSummarization: false}),
+    timestamp: 0,
+    content: {parts: [{text: 'response'}]},
+  } as Event;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS', undefined);
+    span = new RecordingSpan();
+    vi.mocked(trace.getActiveSpan).mockReturnValue(span);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('redacts the tool call args when the run opts out', () => {
+    traceToolCall({
+      tool,
+      args: {secret: 'value'},
+      functionResponseEvent: event,
+      invocationContext: noContent(),
+    });
+
+    expect(span.attributes['gcp.vertex.agent.tool_call_args']).toBe('{}');
+    expect(span.attributes['gcp.vertex.agent.tool_response']).toBe('{}');
+  });
+
+  it('records the tool call args when the run opts in', () => {
+    traceToolCall({
+      tool,
+      args: {topic: 'weather'},
+      functionResponseEvent: event,
+      invocationContext: createContext(
+        createTelemetryConfig({
+          captureMessageContent: ContentCapturingMode.SPAN_ONLY,
+        }),
+      ),
+    });
+
+    expect(span.attributes['gcp.vertex.agent.tool_call_args']).toBe(
+      JSON.stringify({topic: 'weather'}),
+    );
+  });
+
+  it('records content by default when the run sets no telemetry config', () => {
+    traceToolCall({
+      tool,
+      args: {topic: 'weather'},
+      functionResponseEvent: event,
+      invocationContext: createContext(),
+    });
+
+    expect(span.attributes['gcp.vertex.agent.tool_call_args']).toBe(
+      JSON.stringify({topic: 'weather'}),
+    );
+  });
+
+  it('still honours the env var when the run sets no telemetry config', () => {
+    vi.stubEnv('ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS', 'false');
+
+    traceToolCall({
+      tool,
+      args: {topic: 'weather'},
+      functionResponseEvent: event,
+      invocationContext: createContext(),
+    });
+
+    expect(span.attributes['gcp.vertex.agent.tool_call_args']).toBe('{}');
+  });
+
+  it('redacts the merged tool response when the run opts out', () => {
+    traceMergedToolCalls({
+      responseEventId: 'merged-id',
+      functionResponseEvent: event,
+      invocationContext: noContent(),
+    });
+
+    expect(span.attributes['gcp.vertex.agent.tool_response']).toBe('{}');
+  });
+
+  it('redacts the llm request and response when the run opts out', () => {
+    traceCallLlm({
+      invocationContext: noContent(),
+      eventId: 'test-event-id',
+      llmRequest: {
+        model: 'test-model',
+        contents: [],
+        liveConnectConfig: {},
+        toolsDict: {},
+      } as LlmRequest,
+      llmResponse: {content: {parts: [{text: 'secret'}]}} as LlmResponse,
+    });
+
+    expect(span.attributes['gcp.vertex.agent.llm_request']).toBe('{}');
+    expect(span.attributes['gcp.vertex.agent.llm_response']).toBe('{}');
+  });
+
+  it('redacts the streamed data when the run opts out', () => {
+    traceSendData({
+      invocationContext: noContent(),
+      eventId: 'test-event-id',
+      data: [{role: 'user', parts: [{text: 'secret'}]}],
+    });
+
+    expect(span.attributes['gcp.vertex.agent.data']).toBe('{}');
+  });
+
+  it('records the streamed data when the run sets no telemetry config', () => {
+    const data = [{role: 'user', parts: [{text: 'hello'}]}];
+
+    traceSendData({
+      invocationContext: createContext(),
+      eventId: 'test-event-id',
+      data,
+    });
+
+    expect(span.attributes['gcp.vertex.agent.data']).toBe(JSON.stringify(data));
   });
 });

@@ -8,6 +8,7 @@ import {
   AsyncQueue,
   BaseLlm,
   BaseLlmConnection,
+  BasePlugin,
   BaseTool,
   Event,
   InMemoryArtifactService,
@@ -20,7 +21,7 @@ import {
   Runner,
 } from '@google/adk';
 import {Blob, Content, FunctionDeclaration, Modality} from '@google/genai';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 
 const TEST_APP_ID = 'test_app_id';
 const TEST_USER_ID = 'test_user_id';
@@ -1111,5 +1112,121 @@ describe('Runner.runLive', () => {
     }).rejects.toThrow('Simulated outbound connection error on empty receive');
 
     expect(llm.connection!.closed).toBe(true);
+  });
+});
+
+/** Ends the run before the agent starts, so the early-exit path is exercised. */
+class EarlyExitPlugin extends BasePlugin {
+  static readonly EARLY_EXIT_MSG = 'Early exit from EarlyExitPlugin';
+
+  constructor() {
+    super('early_exit_plugin');
+  }
+
+  override async beforeRunCallback(): Promise<Content> {
+    return {role: 'model', parts: [{text: EarlyExitPlugin.EARLY_EXIT_MSG}]};
+  }
+}
+
+describe('Runner.runLive with run-level RunConfig fields', () => {
+  let sessionService: InMemorySessionService;
+  let artifactService: InMemoryArtifactService;
+
+  beforeEach(async () => {
+    sessionService = new InMemorySessionService();
+    artifactService = new InMemoryArtifactService();
+    await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+    });
+  });
+
+  it('stamps customMetadata on every event the live run yields', async () => {
+    const llm = new FakeLiveLlm([
+      {content: {role: 'model', parts: [{text: 'hello'}]}},
+      {turnComplete: true},
+    ]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    const events: Event[] = [];
+    for await (const event of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {customMetadata: {tenant: 'acme'}},
+    })) {
+      events.push(event);
+    }
+
+    expect(events).not.toHaveLength(0);
+    for (const event of events) {
+      expect(event.customMetadata).toEqual({tenant: 'acme'});
+    }
+  });
+
+  it('stamps customMetadata on a before-run plugin early exit', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+      plugins: [new EarlyExitPlugin()],
+    });
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    const events: Event[] = [];
+    for await (const event of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {customMetadata: {tenant: 'acme'}},
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content?.parts?.[0]?.text).toBe(
+      EarlyExitPlugin.EARLY_EXIT_MSG,
+    );
+    expect(events[0].customMetadata).toEqual({tenant: 'acme'});
+  });
+
+  it('forwards getSessionConfig to the session lookup', async () => {
+    const llm = new FakeLiveLlm([{turnComplete: true}]);
+    const agent = new LlmAgent({name: 'agent', model: llm});
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      artifactService,
+    });
+    const getSessionSpy = vi.spyOn(sessionService, 'getSession');
+
+    const queue = new LiveRequestQueue();
+    queue.close();
+    for await (const _ of runner.runLive({
+      userId: TEST_USER_ID,
+      sessionId: TEST_SESSION_ID,
+      liveRequestQueue: queue,
+      runConfig: {getSessionConfig: {numRecentEvents: 5}},
+    })) {
+      // drain
+    }
+
+    expect(getSessionSpy.mock.calls[0][0].config).toEqual({
+      numRecentEvents: 5,
+    });
   });
 });
