@@ -8,7 +8,20 @@ import {LocalEnvironment} from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+
+// Only `spawn` is mocked; it defaults to the real implementation (see
+// `beforeEach`) so the pre-existing tests still run real commands.
+const spawnMock = vi.hoisted(() => vi.fn());
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:child_process')>()),
+  spawn: spawnMock,
+}));
+
+const {spawn: realSpawn} =
+  await vi.importActual<typeof import('node:child_process')>(
+    'node:child_process',
+  );
 
 /**
  * Commands are built from the Node binary running the tests so that they work
@@ -33,6 +46,11 @@ const decoder = new TextDecoder();
 
 describe('LocalEnvironment', () => {
   let tmpRoot: string;
+
+  beforeEach(() => {
+    spawnMock.mockReset();
+    spawnMock.mockImplementation(realSpawn);
+  });
 
   beforeEach(async () => {
     tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-local-env-test-'));
@@ -400,6 +418,21 @@ describe('LocalEnvironment', () => {
         await expect(removed.execute(`${NODE} -e ""`)).rejects.toThrow();
 
         await removed.close();
+      },
+      SPAWN_TIMEOUT_MS,
+    );
+
+    it(
+      'hides the child console window and keeps the other spawn options',
+      async () => {
+        await env.execute(`${NODE} -e ""`);
+
+        expect(spawnMock).toHaveBeenCalledWith(`${NODE} -e ""`, {
+          shell: true,
+          cwd: env.workingDir,
+          env: {...process.env},
+          windowsHide: true,
+        });
       },
       SPAWN_TIMEOUT_MS,
     );

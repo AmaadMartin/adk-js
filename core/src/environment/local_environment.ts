@@ -126,6 +126,10 @@ export class LocalEnvironment extends BaseEnvironment {
       shell: true,
       cwd: this.workingDir,
       env: {...process.env, ...this.envVars},
+      // Windows gives the shell its own console window whenever the host
+      // process owns none. stdout and stderr are piped and stdin is never
+      // written, so the child needs no console of its own.
+      windowsHide: true,
     });
 
     const stdoutChunks: Buffer[] = [];
