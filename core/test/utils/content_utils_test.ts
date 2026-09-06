@@ -5,7 +5,11 @@
  */
 
 import {describe, expect, it} from 'vitest';
-import {isContent, toUserContent} from '../../src/utils/content_utils.js';
+import {
+  isContent,
+  nodeInputToUserContent,
+  toUserContent,
+} from '../../src/utils/content_utils.js';
 
 describe('isContent', () => {
   it('accepts an object carrying a parts array', () => {
@@ -41,6 +45,39 @@ describe('toUserContent', () => {
     expect(toUserContent([{text: 'a'}, {text: 'b'}])).toEqual({
       role: 'user',
       parts: [{text: 'a'}, {text: 'b'}],
+    });
+  });
+});
+
+describe('nodeInputToUserContent', () => {
+  it('re-roles a Content to user, keeping its parts', () => {
+    const content = {role: 'model', parts: [{text: 'hi'}]};
+
+    expect(nodeInputToUserContent(content)).toEqual({
+      role: 'user',
+      parts: [{text: 'hi'}],
+    });
+  });
+
+  it('does not mutate the Content it was given', () => {
+    const content = {role: 'model', parts: [{text: 'hi'}]};
+
+    nodeInputToUserContent(content);
+
+    expect(content.role).toBe('model');
+  });
+
+  it('wraps a string as one user text part', () => {
+    expect(nodeInputToUserContent('hi')).toEqual({
+      role: 'user',
+      parts: [{text: 'hi'}],
+    });
+  });
+
+  it('serializes any other value', () => {
+    expect(nodeInputToUserContent({a: 1})).toEqual({
+      role: 'user',
+      parts: [{text: '{"a":1}'}],
     });
   });
 });

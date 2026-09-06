@@ -32,3 +32,19 @@ export function isContent(value: unknown): value is Content {
 export function toUserContent(value: ContentUnion): Content {
   return isContent(value) ? value : createUserContent(value);
 }
+
+/**
+ * Converts an arbitrary workflow node input into a user `Content`.
+ *
+ * A `Content` keeps its parts but is re-roled to `user`: a node input is the
+ * turn being handed to the agent, whatever role its producer stamped. A string
+ * becomes one text part, and any other value is serialized.
+ */
+export function nodeInputToUserContent(input: unknown): Content {
+  if (isContent(input)) {
+    return {...input, role: 'user'};
+  }
+  return toUserContent(
+    typeof input === 'string' ? input : JSON.stringify(input),
+  );
+}

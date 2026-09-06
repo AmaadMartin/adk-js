@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, GoogleGenAI, Interactions, Tool} from '@google/genai';
+import {GoogleGenAI, Interactions, Tool} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {createEvent, Event} from '../events/event.js';
@@ -25,7 +25,7 @@ import {
   isRemoteMcpServer,
   RemoteMcpServer,
 } from '../tools/remote_mcp_server.js';
-import {isContent, toUserContent} from '../utils/content_utils.js';
+import {nodeInputToUserContent} from '../utils/content_utils.js';
 import {isEnterpriseModeEnabled} from '../utils/env_aware_utils.js';
 import {asApiFailure, formatError} from '../utils/error_utils.js';
 import {logger} from '../utils/logger.js';
@@ -138,20 +138,6 @@ async function resolveMcpHeaders(
   return resolved;
 }
 
-/**
- * Converts a node's input into the agent's user content.
- *
- * A `Content` passes through and a string becomes one text part; any other
- * value is serialized, matching what an `LlmAgent` node does with its input.
- */
-function nodeInputToUserContent(nodeInput: unknown): Content {
-  return toUserContent(
-    isContent(nodeInput) || typeof nodeInput === 'string'
-      ? nodeInput
-      : JSON.stringify(nodeInput),
-  );
-}
-
 /** The configuration options for creating a managed agent. */
 export interface ManagedAgentConfig extends BaseAgentConfig {
   /** The Managed Agent id, for example `agents/my-agent`. */
@@ -213,7 +199,7 @@ const MANAGED_AGENT_SIGNATURE_SYMBOL = Symbol.for('google.adk.managedAgent');
  * @param obj The object to check.
  * @returns True if the object is a ManagedAgent, false otherwise.
  */
-export function isManagedAgentInstance(obj: unknown): obj is ManagedAgent {
+export function isManagedAgent(obj: unknown): obj is ManagedAgent {
   return (
     typeof obj === 'object' &&
     obj !== null &&

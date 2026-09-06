@@ -16,7 +16,7 @@ import {
   FunctionTool,
   getLogger,
   InvocationContext,
-  isManagedAgentInstance,
+  isManagedAgent,
   isRemoteMcpServer,
   ManagedAgent,
   ManagedAgentConfig,
@@ -438,10 +438,10 @@ describe('type guards survive a second copy of the package', () => {
   it('rejects a plain object shaped like a ManagedAgent', () => {
     const lookalike = {name: 'mgr', agentId: 'agents/a', tools: []};
 
-    expect(isManagedAgentInstance(lookalike)).toBe(false);
-    expect(isManagedAgentInstance(null)).toBe(false);
+    expect(isManagedAgent(lookalike)).toBe(false);
+    expect(isManagedAgent(null)).toBe(false);
     expect(
-      isManagedAgentInstance(
+      isManagedAgent(
         new ManagedAgent({
           name: 'mgr',
           agentId: 'agents/a',
