@@ -270,6 +270,14 @@ export class InMemorySessionService extends BaseSessionService {
     session,
     event,
   }: AppendEventRequest): Promise<Event> {
+    // The base class already declines to record a partial event, but it cannot
+    // stop this override's own writes to the timestamps and the app/user state
+    // stores, so the subclass has to opt out too. `DatabaseSessionService` and
+    // adk-python return here as well.
+    if (event.partial) {
+      return event;
+    }
+
     await super.appendEvent({session, event});
     session.lastUpdateTime = event.timestamp;
 
