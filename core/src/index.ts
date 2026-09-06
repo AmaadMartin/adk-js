@@ -42,6 +42,8 @@ export {VertexAiMemoryBankService} from './memory/vertex_ai_memory_bank_service.
 export type {VertexAiMemoryBankServiceOptions} from './memory/vertex_ai_memory_bank_service.js';
 export {VertexAiRagMemoryService} from './memory/vertex_ai_rag_memory_service.js';
 export type {VertexAiRagMemoryServiceOptions} from './memory/vertex_ai_rag_memory_service.js';
+export {OCIGenAILlm} from './models/oci_genai_llm.js';
+export type {OCIAuthType, OCIGenAILlmParams} from './models/oci_genai_llm.js';
 export {DatabaseSessionService} from './sessions/database_session_service.js';
 export {getSessionServiceFromUri} from './sessions/registry.js';
 export {VertexAiSessionService} from './sessions/vertex_ai_session_service.js';
