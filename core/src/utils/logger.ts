@@ -28,6 +28,15 @@ export interface Logger {
   error(...args: unknown[]): void;
 
   setLogLevel(level: LogLevel): void;
+
+  /**
+   * Returns the minimum level this logger emits, or `undefined` if it has no
+   * single level to report.
+   *
+   * Optional so that existing `Logger` implementations keep compiling. Prefer
+   * the module-level `getLogLevel()` over calling this directly.
+   */
+  getLogLevel?(): LogLevel | undefined;
 }
 
 class SimpleLogger implements Logger {
@@ -61,6 +70,10 @@ class SimpleLogger implements Logger {
 
   setLogLevel(level: LogLevel): void {
     this.logLevel = level;
+  }
+
+  getLogLevel(): LogLevel {
+    return this.logLevel;
   }
 
   log(level: LogLevel, ...messages: unknown[]): void {
@@ -147,11 +160,27 @@ export function setLogLevel(level: LogLevel) {
 }
 
 /**
+ * Gets the current log level, or `undefined` if the active logger does not
+ * report one (for example a custom logger that predates `getLogLevel`, or the
+ * no-op logger installed by `setLogger(null)`).
+ *
+ * Callers using this as an "is this level enabled?" guard should treat
+ * `undefined` as enabled, so that a custom logger still receives messages it
+ * may want to emit.
+ */
+export function getLogLevel(): LogLevel | undefined {
+  return logger.getLogLevel?.();
+}
+
+/**
  * The logger instance for ADK.
  */
 export const logger: Logger = {
   setLogLevel(level: LogLevel): void {
     currentLogger.setLogLevel(level);
+  },
+  getLogLevel(): LogLevel | undefined {
+    return currentLogger.getLogLevel?.();
   },
   log(level: LogLevel, ...args: unknown[]): void {
     currentLogger.log(level, ...args);
