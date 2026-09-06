@@ -10,6 +10,7 @@ import {
   BaseMemoryService,
   BaseSessionService,
   createEvent,
+  CreateEventParams,
   createSession,
   Event,
   FunctionTool,
@@ -32,7 +33,7 @@ import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
 } from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
+import {AgentFile, AgentLoader} from '../../src/utils/agent_loader.js';
 import {version} from '../../src/version.js';
 
 interface JsonRpcResponse {
@@ -201,6 +202,35 @@ class TestAgent extends LlmAgent {
         role: 'model',
       },
     });
+  }
+}
+
+/** Yields exactly one event, built from `eventParams`. */
+class SingleEventAgent extends LlmAgent {
+  constructor(private readonly eventParams: CreateEventParams) {
+    super({name: 'singleEventAgent', description: 'yields one event'});
+  }
+
+  async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      ...this.eventParams,
+      invocationId: context.invocationId,
+      author: this.name,
+      branch: context.branch,
+    });
+  }
+}
+
+/** An {@link AgentFile} serving an in-memory agent instead of a file on disk. */
+class PreloadedAgentFile extends AgentFile {
+  constructor(private readonly preloaded: LlmAgent) {
+    super('preloaded_agent.ts');
+  }
+
+  override load(): Promise<LlmAgent> {
+    return Promise.resolve(this.preloaded);
   }
 }
 
@@ -943,6 +973,110 @@ describe('AdkWebServer', () => {
       expect(runAsyncParams.abortSignal).toBeInstanceOf(AbortSignal);
 
       spy.mockRestore();
+    });
+
+    describe('artifact delta split', () => {
+      /**
+       * Runs an agent that yields one event built from `eventParams` and
+       * returns the SSE frames the server wrote for it.
+       */
+      async function streamOneEvent(
+        eventParams: CreateEventParams,
+      ): Promise<Event[]> {
+        const agentFile = new PreloadedAgentFile(
+          new SingleEventAgent(eventParams),
+        );
+        agentLoader.getAgentFile = () => Promise.resolve(agentFile);
+
+        await sessionService.createSession({
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+        });
+
+        const response = await client.post('/run_sse', {
+          appName: 'testApp',
+          userId: 'testUser',
+          sessionId: 'sessionId',
+          newMessage: {parts: [{text: 'Hello test agent!'}], role: 'user'},
+        });
+
+        expect(response.status).toBe(200);
+
+        const rawFrames = response.text!.split('\n\n');
+        // Last element is always empty.
+        rawFrames.pop();
+
+        return rawFrames.map(
+          (frame) => JSON.parse(frame.split('data: ')[1]) as Event,
+        );
+      }
+
+      it('splits an event carrying both content and an artifact delta', async () => {
+        const frames = await streamOneEvent({
+          content: {parts: [{text: 'LLM reply'}], role: 'model'},
+          actions: {
+            artifactDelta: {'artifact.txt': 0},
+            stateDelta: {counter: 1},
+          },
+        });
+
+        expect(frames.length).toBe(2);
+        expect(frames[0]!.content?.parts?.[0].text).toBe('LLM reply');
+        expect(frames[0]!.actions.artifactDelta).toEqual({});
+        expect('content' in frames[1]!).toBe(false);
+        expect(frames[1]!.actions.artifactDelta).toEqual({'artifact.txt': 0});
+        expect(frames[0]!.actions.stateDelta).toEqual({counter: 1});
+        expect(frames[1]!.actions.stateDelta).toEqual({counter: 1});
+      });
+
+      it('does not split an event that has an artifact delta but no content', async () => {
+        const frames = await streamOneEvent({
+          actions: {artifactDelta: {'artifact.txt': 0}},
+        });
+
+        expect(frames.length).toBe(1);
+        expect(frames[0]!.actions.artifactDelta).toEqual({'artifact.txt': 0});
+      });
+
+      it('does not split an event whose content has no parts', async () => {
+        const frames = await streamOneEvent({
+          content: {parts: [], role: 'model'},
+          actions: {artifactDelta: {'artifact.txt': 0}},
+        });
+
+        expect(frames.length).toBe(1);
+        expect(frames[0]!.content?.parts).toEqual([]);
+        expect(frames[0]!.actions.artifactDelta).toEqual({'artifact.txt': 0});
+      });
+
+      it('does not split an ordinary content event', async () => {
+        const frames = await streamOneEvent({
+          content: {parts: [{text: 'LLM reply'}], role: 'model'},
+        });
+
+        expect(frames.length).toBe(1);
+        expect(frames[0]!.content?.parts?.[0].text).toBe('LLM reply');
+        expect(frames[0]!.actions.artifactDelta).toEqual({});
+      });
+
+      it('leaves the event stored in the session intact', async () => {
+        await streamOneEvent({
+          content: {parts: [{text: 'LLM reply'}], role: 'model'},
+          actions: {artifactDelta: {'artifact.txt': 0}},
+        });
+
+        const response = await client.get<Session>(
+          '/apps/testApp/users/testUser/sessions/sessionId',
+        );
+
+        expect(response.status).toBe(200);
+        const stored = response.data!.events.find(
+          (event) => event.author === 'singleEventAgent',
+        );
+        expect(stored?.content?.parts?.[0].text).toBe('LLM reply');
+        expect(stored?.actions.artifactDelta).toEqual({'artifact.txt': 0});
+      });
     });
   });
 

@@ -97,6 +97,29 @@ interface ServerOptions {
   registerProcessors?: (tracerProvider: TracerProvider) => void;
 }
 
+/**
+ * Splits an event that carries both content and artifact updates into the two
+ * frames the dev UI expects: the content first, then the artifact delta alone.
+ *
+ * The dev UI reads `actions.artifactDelta` while it processes the content parts
+ * and again while it processes the actions, so a combined event renders its
+ * artifacts twice. Mirrors the same split in adk-python's `/run_sse`.
+ *
+ * The returned frames are copies. The event itself is the object the runner
+ * appended to the session, so a mutation here would corrupt session history.
+ */
+function splitArtifactDeltaEvent(event: Event): Event[] {
+  const {artifactDelta} = event.actions;
+  if (!Object.keys(artifactDelta).length || !event.content?.parts?.length) {
+    return [event];
+  }
+
+  return [
+    {...event, actions: {...event.actions, artifactDelta: {}}},
+    {...event, content: undefined},
+  ];
+}
+
 export class AdkApiServer {
   private readonly host: string;
   private readonly port: number;
@@ -1095,7 +1118,9 @@ export class AdkApiServer {
           },
           abortSignal: abortController.signal,
         })) {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
+          for (const frame of splitArtifactDeltaEvent(event)) {
+            res.write(`data: ${JSON.stringify(frame)}\n\n`);
+          }
         }
 
         responseCompleted = true;
