@@ -7,30 +7,20 @@
 /**
  * Ported from adk-python
  * `tests/unittests/integrations/eventarc/test_config.py`, read at `a3bd1115`
- * on `main`. Each ported `it` keeps its Python name.
+ * on `main`.
  *
- * `test_invalid_config` is not ported: it asserts that pydantic rejects
- * `project_id=123`. `EventarcToolConfig` is a TypeScript interface, so the
- * compiler makes that assertion and there is no runtime validator to raise.
+ * Neither of its two tests is ported, because `EventarcToolConfig` is a
+ * TypeScript interface: it has no runtime validator, no defaults and no
+ * constructor. `test_invalid_config` asserts that pydantic rejects
+ * `project_id=123`, and `test_valid_config` asserts that a valid config keeps
+ * the fields it was given; the compiler makes both assertions. What is left to
+ * test is the behaviour around the interface, which is below.
  */
 
-import {
-  DEFAULT_PUBLISH_TIMEOUT_MS,
-  EventarcToolset,
-  type EventarcToolConfig,
-} from '@google/adk';
+import {DEFAULT_PUBLISH_TIMEOUT_MS, EventarcToolset} from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
 describe('EventarcToolConfig', () => {
-  it('test_valid_config', () => {
-    const config: EventarcToolConfig = {projectId: 'my-project'};
-    expect(config.projectId).toBe('my-project');
-
-    const config2: EventarcToolConfig = {};
-    expect(config2.projectId).toBeUndefined();
-    expect(config2.publishTimeoutMs).toBeUndefined();
-  });
-
   it('spells the default timeout as the 15 seconds adk-python uses', () => {
     expect(DEFAULT_PUBLISH_TIMEOUT_MS).toBe(15_000);
   });
