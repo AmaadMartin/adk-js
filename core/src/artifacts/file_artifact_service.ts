@@ -499,9 +499,14 @@ function getArtifactDir(
   }
   cleanFilename = cleanFilename.trim();
 
-  if (path.isAbsolute(cleanFilename)) {
+  if (isRootedFilename(cleanFilename)) {
     throw new Error(`Absolute artifact filename ${filename} is not permitted.`);
   }
+
+  // Interpret Windows separators on every host, as _to_posix_path does in
+  // adk-python. asPosixPath is not usable here: it splits on path.sep, so it
+  // is a no-op for backslashes on POSIX.
+  cleanFilename = cleanFilename.replaceAll('\\', '/');
 
   const artifactDir = path.resolve(scopeRoot, cleanFilename);
   const relative = path.relative(scopeRoot, artifactDir);
@@ -690,4 +695,21 @@ function fileUriToPath(uri: string): string | undefined {
  */
 function asPosixPath(p: string): string {
   return p.split(path.sep).join('/');
+}
+
+/**
+ * Reports whether a filename carries a path root under POSIX or Windows rules.
+ *
+ * `path.isAbsolute` follows the host platform, so on POSIX it reads
+ * `C:\evil.txt` and `\evil.txt` as ordinary relative names. Parsing with
+ * `path.win32` is host independent: the root is non-empty for a drive
+ * (including the drive-relative `C:`), a leading backslash, a UNC share and a
+ * leading `/`, so it also covers the POSIX form. Mirrors
+ * `PureWindowsPath(...).drive or .root` in adk-python.
+ *
+ * @param filename The filename, after the user namespace prefix is stripped.
+ * @returns True when the filename names a rooted location.
+ */
+function isRootedFilename(filename: string): boolean {
+  return path.win32.parse(filename).root !== '';
 }
