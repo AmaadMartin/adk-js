@@ -102,6 +102,89 @@ describe('FileArtifactService', () => {
       }
     });
 
+    it('accepts a filename that starts with two dots', async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const appName = 'test-app';
+      const userId = 'test-user';
+      const sessionId = 'test-session';
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: '..foo.txt',
+          artifact: {text: 'hello'},
+        });
+
+        const versionDir = path.join(
+          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          '..foo.txt',
+          'versions',
+          '0',
+        );
+        await expect(fs.access(versionDir)).resolves.toBeUndefined();
+
+        const loaded = await service.loadArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: '..foo.txt',
+        });
+        expect(loaded?.text).toBe('hello');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it("still rejects a bare '..' filename", async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+
+      try {
+        await expect(
+          service.saveArtifact({
+            appName: 'test-app',
+            userId: 'test-user',
+            sessionId: 'test-session',
+            filename: '..',
+            artifact: {text: 'dangerous'},
+          }),
+        ).rejects.toThrow('escapes storage directory');
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
+    it("stores a '.' filename under the artifact sentinel directory", async () => {
+      rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-artifacts-test-'));
+      const service = new FileArtifactService(rootDir);
+      const appName = 'test-app';
+      const userId = 'test-user';
+      const sessionId = 'test-session';
+
+      try {
+        await service.saveArtifact({
+          appName,
+          userId,
+          sessionId,
+          filename: '.',
+          artifact: {text: 'sentinel'},
+        });
+
+        const versionDir = path.join(
+          getSessionArtifactsDir(getUserRoot(rootDir, userId), sessionId),
+          'artifact',
+          'versions',
+          '0',
+        );
+        await expect(fs.access(versionDir)).resolves.toBeUndefined();
+      } finally {
+        await fs.rm(rootDir, {recursive: true, force: true});
+      }
+    });
+
     const ROOT = '/tmp/adk-test-root';
 
     describe('assertSafeSegment - valid inputs', () => {
@@ -182,6 +265,11 @@ describe('FileArtifactService', () => {
         expect(() =>
           assertInsideRoot('/tmp/root/users/alice', '/tmp/root', 'test'),
         ).not.toThrow();
+      });
+      it('rejects a sibling sharing a name prefix with root', () => {
+        expect(() =>
+          assertInsideRoot('/tmp/root-evil/x', '/tmp/root', 'test'),
+        ).toThrow('escapes storage root');
       });
     });
   });

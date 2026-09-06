@@ -9,7 +9,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {materializeFiles} from '../../src/utils/file_utils.js';
+import {isInsideDir, materializeFiles} from '../../src/utils/file_utils.js';
 
 describe('file_utils', () => {
   let tempDir: string;
@@ -211,6 +211,39 @@ describe('file_utils', () => {
         'utf8',
       );
       expect(content3).toBe('third');
+    });
+  });
+
+  describe('isInsideDir', () => {
+    const baseDir = path.resolve(path.sep, 'tmp', 'agent');
+
+    it('accepts the base directory itself', () => {
+      expect(isInsideDir(baseDir, baseDir)).toBe(true);
+    });
+
+    it('accepts a path nested inside the base directory', () => {
+      expect(isInsideDir(path.join(baseDir, 'sub', 'file.txt'), baseDir)).toBe(
+        true,
+      );
+    });
+
+    it('rejects a sibling whose name shares the base directory prefix', () => {
+      expect(isInsideDir(`${baseDir}-evil${path.sep}x`, baseDir)).toBe(false);
+    });
+
+    it('rejects the parent of the base directory', () => {
+      expect(isInsideDir(path.dirname(baseDir), baseDir)).toBe(false);
+    });
+
+    it('accepts a filename starting with two dots and no separator', () => {
+      expect(isInsideDir(path.join(baseDir, '..foo.txt'), baseDir)).toBe(true);
+    });
+
+    it('resolves unnormalized arguments before comparing', () => {
+      const unnormalizedTarget = `${baseDir}${path.sep}sub${path.sep}..${path.sep}in.txt`;
+      expect(isInsideDir(unnormalizedTarget, `${baseDir}${path.sep}`)).toBe(
+        true,
+      );
     });
   });
 });

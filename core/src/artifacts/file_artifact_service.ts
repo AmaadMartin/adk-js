@@ -9,6 +9,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 
+import {isInsideDir} from '../utils/file_utils.js';
 import {logger} from '../utils/logger.js';
 
 import {
@@ -423,9 +424,9 @@ export function assertInsideRoot(
   rootDir: string,
   label: string,
 ): void {
-  const root = path.resolve(rootDir);
-  const resolved = path.resolve(resolvedPath);
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+  if (!isInsideDir(resolvedPath, rootDir)) {
+    const resolved = path.resolve(resolvedPath);
+    const root = path.resolve(rootDir);
     throw new Error(
       `[FileArtifactService] ${label} escapes storage root. Resolved: ${resolved}, Root: ${root}`,
     );
@@ -503,12 +504,12 @@ function getArtifactDir(
     throw new Error(`Absolute artifact filename ${filename} is not permitted.`);
   }
 
+  const resolvedScopeRoot = path.resolve(scopeRoot);
   const artifactDir = path.resolve(scopeRoot, cleanFilename);
-  const relative = path.relative(scopeRoot, artifactDir);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+  if (!isInsideDir(artifactDir, resolvedScopeRoot)) {
     throw new Error(`Artifact filename ${filename} escapes storage directory.`);
   }
-  if (relative === '' || relative === '.') {
+  if (artifactDir === resolvedScopeRoot) {
     return path.join(scopeRoot, 'artifact');
   }
 
