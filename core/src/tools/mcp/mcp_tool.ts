@@ -12,6 +12,7 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
+import {retryOnce} from '../../utils/retry_utils.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
 import {MCPSessionManager} from './mcp_session_manager.js';
@@ -63,11 +64,22 @@ export class MCPTool extends BaseTool {
   }
 
   override async runAsync(request: RunAsyncToolRequest): Promise<unknown> {
-    const session = await this.mcpSessionManager.createSession();
+    // Session setup happens before the tool call exists, so a failure here
+    // provably did not run anything on the server and can be retried without
+    // risking a duplicate side effect.
+    const session = await retryOnce(
+      () => this.mcpSessionManager.createSession(),
+      {
+        signal: request.toolContext.abortSignal,
+        description: 'MCP session creation',
+      },
+    );
 
     try {
       const callRequest: CallToolRequest = {} as CallToolRequest;
       callRequest.params = {name: this.originalName, arguments: request.args};
+      // The call is issued at most once: replaying it after an ambiguous
+      // transport failure could duplicate a remote side effect.
       const result = await session.callTool(callRequest.params, undefined, {
         signal: request.toolContext.abortSignal,
       });
