@@ -4,6 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
+import {
+  ApiClient,
+  NodeAuth,
+  NodeDownloader,
+  NodeUploader,
+} from '@google/genai/vertex_internal';
 import {isEnterpriseModeEnabled} from './env_aware_utils.js';
 
 export const EXPRESS_MODE_UNSUPPORTED_MESSAGE =
@@ -41,4 +48,44 @@ export function getExpressModeApiKey(
   }
 
   return undefined;
+}
+
+/**
+ * Builds a Vertex AI API client that authenticates with an Express Mode API
+ * key instead of Application Default Credentials.
+ *
+ * `NodeAuth` returns early when an API key is set and never constructs
+ * `GoogleAuth`, so the client needs no credentials on the machine.
+ *
+ * @param apiKey The Express Mode API key.
+ * @returns A client that signs requests with `apiKey`.
+ */
+export function createExpressModeApiClient(apiKey: string): ApiClient {
+  return new ApiClient({
+    auth: new NodeAuth({apiKey}),
+    uploader: new NodeUploader(),
+    downloader: new NodeDownloader(),
+    vertexai: true,
+    apiKey,
+  });
+}
+
+/**
+ * Builds the Agent Engine `Sessions` client from an `ApiClient`.
+ *
+ * `@google-cloud/vertexai` bundles its own nested copy of `@google/genai`
+ * (1.52.0) while the repo root resolves `@google/genai` to 2.9.0, so the
+ * `ApiClient` here is a structurally distinct class (its private fields make
+ * the two nominally incompatible) from the one `Sessions` declares. The
+ * instances are interchangeable at runtime -- the mismatch is a
+ * duplicate-dependency artifact, not a real API difference -- so every caller
+ * goes through this function rather than repeating the cast.
+ *
+ * @param apiClient The client to send Agent Engine requests with.
+ * @returns A `Sessions` client backed by `apiClient`.
+ */
+export function createAgentEngineSessions(apiClient: ApiClient): Sessions {
+  return new Sessions(
+    apiClient as unknown as ConstructorParameters<typeof Sessions>[0],
+  );
 }
