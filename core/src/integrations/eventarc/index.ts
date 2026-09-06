@@ -13,11 +13,21 @@
  */
 
 export {cleanupClients} from './client.js';
+export {DEFAULT_PUBLISH_TIMEOUT_MS, type EventarcToolConfig} from './config.js';
 export {
-  DEFAULT_PUBLISH_TIMEOUT_MS,
+  AgentProvided,
+  OMIT,
+  buildDomainSpecificTool,
+  type AttributeBinding,
+  type AttributeResolver,
+  type CloudEventAttributesBinding,
+  type CreatePublishToolOptions,
+  type DomainSpecificToolOptions,
+} from './domain_specific_publish.js';
+export {
+  validateEventarcCredentialsConfig,
   type EventarcCredentialsConfig,
-  type EventarcToolConfig,
-} from './config.js';
+} from './eventarc_credentials.js';
 export {
   EventarcToolset,
   PUBLISH_MESSAGE_TOOL_NAME,

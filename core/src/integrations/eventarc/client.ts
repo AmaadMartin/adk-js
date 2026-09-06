@@ -18,7 +18,7 @@ import {createHash} from 'node:crypto';
 import {formatError} from '../../utils/error_utils.js';
 import {logger} from '../../utils/logger.js';
 import {version} from '../../version.js';
-import type {EventarcCredentialsConfig} from './config.js';
+import type {EventarcCredentialsConfig} from './eventarc_credentials.js';
 import {loadEventarcSdk, type PublisherClient} from './sdk.js';
 
 /** How long a cached client stays usable. */
@@ -141,6 +141,9 @@ export async function getPublisherClient(
     client: createPublisherClient(request),
     expiresAt: now + CACHE_TTL_MS,
   };
+  // The caller only receives this promise after the awaits below. A rejection
+  // in that window would otherwise have no handler, and Node ends the process.
+  entry.client.catch(() => {});
   publisherClientCache.set(key, entry);
 
   if (cached !== undefined) {
