@@ -324,6 +324,8 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
+export {createPubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
+export type {PubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
