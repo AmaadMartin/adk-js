@@ -288,6 +288,8 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 ### Telemetry
 
+- [Agent Engine telemetry](telemetry/agent_engine/index.md) - Joining a run onto
+  the caller's trace on Vertex AI Agent Engine.
 - [Experimental GenAI semantic conventions](telemetry/experimental_semconv/index.md) - Emitting the experimental OpenTelemetry GenAI attributes and the completion-details log record.
 - [Google Cloud telemetry export](telemetry/google_cloud/index.md) - Sending an
   agent's traces, metrics and log records to Google Cloud over OTLP.

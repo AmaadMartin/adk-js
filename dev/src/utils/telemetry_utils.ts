@@ -7,9 +7,11 @@
 import {
   getGcpExporters,
   getGcpResource,
+  isAgentEngine,
   maybeSetOtelProviders,
   OTelHooks,
   resolveGoogleAuth,
+  TopSpanProcessor,
 } from '@google/adk';
 import {HrTime} from '@opentelemetry/api';
 import {
@@ -140,13 +142,18 @@ export async function setupTelemetry(
   otelToCloud: boolean = false,
   internalExporters: SpanProcessor[] = [],
 ): Promise<void> {
+  // On Agent Engine the top span carries the caller's support identifier.
+  const processors = isAgentEngine()
+    ? [new TopSpanProcessor(), ...internalExporters]
+    : internalExporters;
+
   if (otelToCloud) {
-    await setupGcpTelemetryExperimental(internalExporters);
+    await setupGcpTelemetryExperimental(processors);
   } else if (otelEnvVarsEnabled()) {
-    await setupTelemetryFromEnvExperimental(internalExporters);
+    await setupTelemetryFromEnvExperimental(processors);
   } else {
     const otelHooks: OTelHooks = {
-      spanProcessors: internalExporters,
+      spanProcessors: processors,
     };
     maybeSetOtelProviders([otelHooks]);
   }

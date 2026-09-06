@@ -216,6 +216,7 @@ export * from './integrations/firestore/firestore_session_service.js';
 export * from './integrations/langchain/langchain_tool.js';
 export * from './integrations/parameter_manager/parameter_client.js';
 export * from './integrations/secret_manager/secret_client.js';
+export * from './telemetry/agent_engine.js';
 // Exported here rather than from `common.ts`, which also feeds the web build:
 // these tools reach the network through `google-auth-library`.
 export * from './telemetry/google_cloud.js';

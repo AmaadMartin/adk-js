@@ -16,10 +16,12 @@ import {
   Event,
   getFunctionCalls,
   getFunctionResponses,
+  getPropagatedContext,
   InMemoryArtifactService,
   InMemoryCredentialService,
   InMemoryMemoryService,
   InMemorySessionService,
+  isAgentEngine,
   isApp,
   LlmAgent,
   Logger,
@@ -32,7 +34,7 @@ import {
   toA2a,
 } from '@google/adk';
 import {Content} from '@google/genai';
-import {trace, TracerProvider} from '@opentelemetry/api';
+import {context, trace, TracerProvider} from '@opentelemetry/api';
 import {SimpleSpanProcessor} from '@opentelemetry/sdk-trace-base';
 import cors from 'cors';
 import express, {Request, Response} from 'express';
@@ -368,6 +370,14 @@ export class AdkApiServer {
       LlmAgent.setDefaultModel(this.defaultLlmModel);
     }
     await this.setupTelemetry();
+
+    // Registered before every route so an Agent Engine caller's trace context
+    // covers the whole request.
+    if (isAgentEngine()) {
+      app.use((req: Request, _res: Response, next: express.NextFunction) => {
+        context.with(getPropagatedContext(req.headers), next);
+      });
+    }
 
     // Registered before any route (including /health, /, /version) so the
     // DNS-rebinding guard applies to every endpoint, not just the ones
