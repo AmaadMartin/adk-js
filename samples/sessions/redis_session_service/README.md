@@ -5,30 +5,14 @@ instance: it creates a session carrying all four state scopes, appends two
 events, reads the session back, lists the application's sessions, deletes it,
 and shows the read coming back `undefined`.
 
-The guide for the service is in
-[docs/guides/sessions/redis_session_service](../../../docs/guides/sessions/redis_session_service/index.md).
-
-## Running
-
-`redis` is an optional peer dependency, so install it first. Then build the
-package, because `samples/` resolves `@google/adk` through `node_modules`
-against the built types, the way a user's project does.
+Setup — installing `redis`, and what the options mean — is in the
+[guide](../../../docs/guides/sessions/redis_session_service/index.md). This
+sample exports no `rootAgent`, so `npm run sample` cannot launch it; compile it
+and run the output. `REDIS_URL` is its only input, and it prints the setup
+instructions and exits when that is unset.
 
 ```bash
-npm install redis
 npm run build
-```
-
-Start a throwaway Redis instance:
-
-```bash
-docker run --rm -p 6379:6379 redis:7
-```
-
-Compile the sample and run it. `REDIS_URL` is the only input; the sample prints
-these instructions and exits when it is unset.
-
-```bash
 npx tsc samples/sessions/redis_session_service/round_trip.ts \
   --outDir /tmp/adk-redis-sample --module nodenext --moduleResolution nodenext \
   --target es2022
@@ -49,16 +33,6 @@ After delete, getSession returns undefined
 `temp:scratch` is missing from the second line: temporary state lives only on
 the object `createSession` returns and is never written to Redis.
 
-## Against a managed instance
-
-Point `REDIS_URL` at it. Use `rediss://` for TLS, and keep the password in the
-environment rather than in a file:
-
-```bash
-REDIS_URL="rediss://:$REDIS_PASSWORD@my-instance.example.com:6380/0" \
-  node /tmp/adk-redis-sample/round_trip.js
-```
-
 The sample writes under the `adk:sample:` key prefix and deletes the session it
-created, but the shared `app:` and `user:` state keys it writes remain until
-their TTL expires.
+created. The shared `app:` and `user:` state keys it writes remain until their
+expiry.

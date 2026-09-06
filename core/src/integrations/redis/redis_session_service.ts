@@ -36,6 +36,7 @@ import {
   ListSessionsRequest,
   ListSessionsResponse,
   mergeStates,
+  paginateSessions,
 } from '../../sessions/base_session_service.js';
 import {createSession, Session} from '../../sessions/session.js';
 import {State} from '../../sessions/state.js';
@@ -44,7 +45,7 @@ import {logger} from '../../utils/logger.js';
 import {loadOptionalPeer} from '../../utils/optional_peer.js';
 import {redactUriPassword} from '../../utils/redact_uri.js';
 
-/** Default Redis hostname, matching adk-python's `RedisSessionServiceConfig`. */
+/** Default Redis hostname, matching adk-python's `_config.py`. */
 const DEFAULT_HOST = 'localhost';
 /** Default Redis port. */
 const DEFAULT_PORT = 6379;
@@ -57,37 +58,6 @@ const DEFAULT_KEY_PREFIX = 'adk:session:';
 
 /** Characters Redis reads as glob metacharacters in a `SCAN` pattern. */
 const GLOB_METACHARACTERS = /[*?[\]^\\]/g;
-
-/**
- * Connection and storage settings for {@link RedisSessionService}.
- *
- * Every default matches adk-python, because the defaults are what make an
- * adk-js runner and an adk-python runner address the same keys.
- */
-export interface RedisSessionServiceConfig {
-  /**
-   * Connection URI, `redis://[:password@]host:port/db` or `rediss://...` for
-   * TLS. Takes precedence over the discrete fields below.
-   */
-  uri?: string;
-  /** Redis hostname. Defaults to `localhost`. */
-  host?: string;
-  /** Redis port. Defaults to `6379`. */
-  port?: number;
-  /** Password for Redis authentication. */
-  password?: string;
-  /** Whether to connect over TLS. Defaults to `false`. */
-  ssl?: boolean;
-  /** Redis database index. Defaults to `0`. */
-  db?: number;
-  /**
-   * Expiry applied to every key this service writes, in seconds. Defaults to
-   * `604800` (seven days). Zero or negative disables expiry.
-   */
-  ttlSeconds?: number;
-  /** Prefix for every key this service writes. Defaults to `adk:session:`. */
-  keyPrefix?: string;
-}
 
 /**
  * The slice of a node-redis client {@link RedisSessionService} uses.
@@ -124,12 +94,36 @@ export interface RedisClientLike {
 }
 
 /**
- * Constructor options for {@link RedisSessionService}: the configuration, plus
- * an optional client the caller has already connected.
+ * Constructor options for {@link RedisSessionService}.
+ *
+ * Every default matches adk-python, because the defaults are what make an
+ * adk-js runner and an adk-python runner address the same keys.
  */
-export interface RedisSessionServiceOptions extends RedisSessionServiceConfig {
+export interface RedisSessionServiceOptions {
   /**
-   * A connected client to use instead of one built from the configuration.
+   * Connection URI, `redis://[:password@]host:port/db` or `rediss://...` for
+   * TLS. Takes precedence over the discrete fields below.
+   */
+  uri?: string;
+  /** Redis hostname. Defaults to `localhost`. */
+  host?: string;
+  /** Redis port. Defaults to `6379`. */
+  port?: number;
+  /** Password for Redis authentication. */
+  password?: string;
+  /** Whether to connect over TLS. Defaults to `false`. */
+  ssl?: boolean;
+  /** Redis database index. Defaults to `0`. */
+  db?: number;
+  /**
+   * Expiry applied to every key this service writes, in seconds. Defaults to
+   * `604800` (seven days). Zero or negative disables expiry.
+   */
+  ttlSeconds?: number;
+  /** Prefix for every key this service writes. Defaults to `adk:session:`. */
+  keyPrefix?: string;
+  /**
+   * A connected client to use instead of one built from the fields above.
    * It belongs to its caller: the service never connects or closes it.
    */
   client?: RedisClientLike;
@@ -165,6 +159,10 @@ interface ScopedState {
 
 /**
  * Builds the key holding one session.
+ *
+ * The key builders and {@link escapeRedisGlob} below are exported for this
+ * module's tests, not re-exported from `@google/adk`: the key layout is a
+ * documented wire format, not a public API surface.
  *
  * @param keyPrefix The configured key prefix.
  * @param appName The name of the application.
@@ -413,43 +411,6 @@ function filterEvents(events: Event[], config?: GetSessionConfig): Event[] {
   return filtered;
 }
 
-/**
- * Slices `sessions` into one page, matching `InMemorySessionService`.
- *
- * `page` takes precedence over `offset`. With no `limit` the whole list is one
- * page and `limit` reports the total.
- */
-function paginateSessions(
-  sessions: Session[],
-  {limit, offset, page}: ListSessionsRequest,
-): ListSessionsResponse {
-  const totalItems = sessions.length;
-  if (limit === undefined) {
-    return {
-      sessions: offset ? sessions.slice(offset) : sessions,
-      page: 1,
-      limit: totalItems,
-      totalItems,
-      totalPages: totalItems === 0 ? 0 : 1,
-    };
-  }
-  const effectiveOffset =
-    page !== undefined ? (page - 1) * limit : (offset ?? 0);
-  const effectivePage =
-    page !== undefined
-      ? page
-      : limit === 0
-        ? 1
-        : Math.floor(effectiveOffset / limit) + 1;
-  return {
-    sessions: sessions.slice(effectiveOffset, effectiveOffset + limit),
-    page: effectivePage,
-    limit,
-    totalItems,
-    totalPages: limit === 0 ? 0 : Math.ceil(totalItems / limit),
-  };
-}
-
 /** Collects every key matching `pattern`, flattening the scan batches. */
 async function scanKeys(
   client: RedisClientLike,
@@ -480,11 +441,10 @@ async function scanKeys(
  * ```
  */
 export class RedisSessionService extends BaseSessionService {
-  private readonly config: RedisSessionServiceConfig;
+  private readonly config: RedisSessionServiceOptions;
   private readonly keyPrefix: string;
   /** The `EX` argument for every write, or undefined when expiry is off. */
   private readonly expiry: number | undefined;
-  private readonly injectedClient?: RedisClientLike;
   private clientPromise?: Promise<RedisClientLike>;
 
   constructor(options: RedisSessionServiceOptions = {}) {
@@ -493,35 +453,32 @@ export class RedisSessionService extends BaseSessionService {
     this.keyPrefix = options.keyPrefix ?? DEFAULT_KEY_PREFIX;
     const ttlSeconds = options.ttlSeconds ?? DEFAULT_TTL_SECONDS;
     this.expiry = ttlSeconds > 0 ? ttlSeconds : undefined;
-    this.injectedClient = options.client;
   }
 
   /**
    * Resolves the client, connecting on first use.
    *
    * The promise is cached rather than the client, so two concurrent first
-   * calls share one connection instead of opening two.
+   * calls share one connection instead of opening two. An injected client
+   * never enters that cache, which is what leaves it for its owner to close.
    */
   private getClient(): Promise<RedisClientLike> {
-    this.clientPromise ??= this.openClient();
-    return this.clientPromise;
-  }
-
-  /** Resolves an injected client, or starts one connection attempt. */
-  private openClient(): Promise<RedisClientLike> {
-    if (this.injectedClient) {
-      return Promise.resolve(this.injectedClient);
+    if (this.config.client) {
+      return Promise.resolve(this.config.client);
     }
-    const pending = this.connect();
-    // A caching service must not be poisoned by one failed attempt: drop the
-    // rejected promise so the next call reconnects instead of replaying the
-    // old error for the life of the process.
-    pending.catch(() => {
-      if (this.clientPromise === pending) {
-        this.clientPromise = undefined;
-      }
-    });
-    return pending;
+    if (this.clientPromise === undefined) {
+      const pending = this.connect();
+      // One failed attempt must not poison the service: drop the rejected
+      // promise so the next call reconnects instead of replaying the old
+      // error for the life of the process.
+      pending.catch(() => {
+        if (this.clientPromise === pending) {
+          this.clientPromise = undefined;
+        }
+      });
+      this.clientPromise = pending;
+    }
+    return this.clientPromise;
   }
 
   /** Loads the `redis` peer, builds a client from the config and connects it. */
@@ -562,12 +519,13 @@ export class RedisSessionService extends BaseSessionService {
   /**
    * Closes the connection this service opened.
    *
-   * A client passed in through {@link RedisSessionServiceOptions.client}
-   * belongs to its caller and is left open.
+   * A client passed in through {@link RedisSessionServiceOptions.client} never
+   * enters the connection cache, so it belongs to its caller and is left
+   * open.
    */
   async close(): Promise<void> {
     const pending = this.clientPromise;
-    if (this.injectedClient !== undefined || pending === undefined) {
+    if (pending === undefined) {
       return;
     }
     this.clientPromise = undefined;
