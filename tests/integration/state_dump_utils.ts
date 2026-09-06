@@ -62,6 +62,21 @@ function toGenAIResponse(response: LlmResponse): GenerateContentResponse {
 }
 
 /**
+ * Writes `data` as pretty-printed JSON to `dir/fileName`, creating `dir` if it
+ * does not exist. `dir` is always supplied by the caller: dumps are debugging
+ * output and must never land in the process working directory, which under
+ * vitest is the repository root.
+ */
+async function writeJsonDump(
+  dir: string,
+  fileName: string,
+  data: unknown,
+): Promise<void> {
+  await fs.mkdir(dir, {recursive: true});
+  return fs.writeFile(path.join(dir, fileName), JSON.stringify(data, null, 2));
+}
+
+/**
  * A plugin that captures all model responses.
  */
 export class ModelEventCapturePlugin extends BasePlugin {
@@ -75,14 +90,11 @@ export class ModelEventCapturePlugin extends BasePlugin {
     return params.llmResponse;
   }
 
-  dump(fileName: string): Promise<void> {
+  dump(dir: string, fileName: string): Promise<void> {
     const modelResponses = this.modelResponses;
     this.modelResponses = [];
 
-    return fs.writeFile(
-      path.join(process.cwd(), fileName),
-      JSON.stringify(modelResponses, null, 2),
-    );
+    return writeJsonDump(dir, fileName, modelResponses);
   }
 }
 
@@ -97,40 +109,41 @@ export class AgentEventCapturePlugin extends BasePlugin {
     return params.event;
   }
 
-  dump(fileName: string): Promise<void> {
+  dump(dir: string, fileName: string): Promise<void> {
     const events = this.events;
     this.events = [];
 
-    return fs.writeFile(
-      path.join(process.cwd(), fileName),
-      JSON.stringify(events, null, 2),
-    );
+    return writeJsonDump(dir, fileName, events);
   }
 }
 
 /**
- * Runs the agent with the given prompt and plugins.
+ * Runs the agent with the given prompts and dumps what the plugins captured
+ * into `outDir`. Resolves once the last dump is flushed to disk. `events` and
+ * `modelResponses` take `true` for the default per-turn name, or a file name.
  */
 export async function runAndCapture(
   agent: LlmAgent,
   prompts: string | string[],
   {
+    outDir,
     runConfig,
     events,
     modelResponses,
   }: {
+    outDir: string;
     runConfig?: RunConfig;
     events?: string | boolean;
     modelResponses?: string | boolean;
   },
 ) {
-  const plugins: BasePlugin[] = [];
-  if (events) {
-    plugins.push(new AgentEventCapturePlugin('agent_events'));
-  }
-  if (modelResponses) {
-    plugins.push(new ModelEventCapturePlugin('model_responses'));
-  }
+  const eventPlugin = events
+    ? new AgentEventCapturePlugin('agent_events')
+    : undefined;
+  const modelPlugin = modelResponses
+    ? new ModelEventCapturePlugin('model_responses')
+    : undefined;
+  const plugins = [eventPlugin, modelPlugin].filter((p) => p !== undefined);
   const runner = await createRunner(agent, plugins, runConfig);
 
   prompts = Array.isArray(prompts) ? prompts : [prompts];
@@ -141,21 +154,19 @@ export async function runAndCapture(
       // Do nothing. The plugins will capture events and model responses.
     }
 
-    for (const plugin of plugins) {
-      if (plugin instanceof AgentEventCapturePlugin) {
-        plugin.dump(
-          typeof events === 'boolean'
-            ? `events_turn_${i}.json`
-            : (events as string),
-        );
-      }
-      if (plugin instanceof ModelEventCapturePlugin) {
-        plugin.dump(
-          typeof modelResponses === 'boolean'
-            ? `model_responses_turn_${i}.json`
-            : (modelResponses as string),
-        );
-      }
+    if (eventPlugin) {
+      await eventPlugin.dump(
+        outDir,
+        typeof events === 'string' ? events : `events_turn_${i}.json`,
+      );
+    }
+    if (modelPlugin) {
+      await modelPlugin.dump(
+        outDir,
+        typeof modelResponses === 'string'
+          ? modelResponses
+          : `model_responses_turn_${i}.json`,
+      );
     }
 
     i++;
