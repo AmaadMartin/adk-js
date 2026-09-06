@@ -67,7 +67,7 @@ function build({
     buildOptions.banner = {
       js:
         (buildOptions.banner?.js || '') +
-        `import {createRequire as topLevelCreateRequire} from 'module';\nconst require = topLevelCreateRequire(import.meta.url);`,
+        `import {createRequire as topLevelCreateRequire} from 'node:module';\nconst require = topLevelCreateRequire(import.meta.url);`,
     };
   }
 
