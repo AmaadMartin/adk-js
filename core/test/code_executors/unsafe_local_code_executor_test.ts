@@ -14,7 +14,9 @@ import {
   UnsafeLocalCodeExecutor,
   createSession,
 } from '@google/adk';
+import type {SpawnOptions} from 'node:child_process';
 import {EventEmitter} from 'node:events';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -160,6 +162,80 @@ describe('UnsafeLocalCodeExecutor', () => {
     if (os.platform() !== 'win32') {
       expect(first.mode).toBe('700');
     }
+  });
+
+  // The 60s budget covers a cold `node` start on the windows-latest CI runner
+  // and exceeds the executor's own 30s kill deadline, so a hung child reports
+  // the executor's timeout message rather than an opaque runner timeout.
+  it('removes the scratch directory after a successful execution', async () => {
+    let scratchDir: string | undefined;
+    // The directory is read off the `spawn` call, not off the script's own
+    // `process.cwd()`: `process.cwd()` resolves symlinks, so on macOS the
+    // script reports `/private/var/...` while `os.tmpdir()` returns `/var/...`.
+    spawnMock.mockImplementation(
+      (command: string, args: readonly string[], options: SpawnOptions) => {
+        if (typeof options.cwd === 'string') {
+          scratchDir = options.cwd;
+        }
+        return realSpawn(command, args, options);
+      },
+    );
+
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'console.log("done");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    const result = await executor.executeCode(params);
+
+    // Proves the child really ran, so the removal asserted below is the
+    // post-execution cleanup and not a cleanup after a script that never
+    // started.
+    expect(result.stdout).toContain('done');
+    expect(result.stderr).toBe('');
+    if (scratchDir === undefined) {
+      expect.fail('the executor spawned the script without a string cwd');
+    }
+    expect(path.dirname(scratchDir)).toBe(os.tmpdir());
+    // ENOENT specifically: a bare rejection is also satisfied by EACCES against
+    // a directory that is still there.
+    await expect(fs.access(scratchDir)).rejects.toMatchObject({code: 'ENOENT'});
+  }, 60000);
+
+  it('removes the scratch directory when the child process cannot be spawned', async () => {
+    let scratchDir: string | undefined;
+    // Same reason as above, and here the failed `spawn` call is the only place
+    // the scratch directory's path is observable at all, because no script
+    // ever runs.
+    spawnMock.mockImplementation(
+      (_command: string, _args: readonly string[], options: SpawnOptions) => {
+        if (typeof options.cwd === 'string') {
+          scratchDir = options.cwd;
+        }
+        throw new Error('spawn EACCES');
+      },
+    );
+
+    const params: ExecuteCodeParams = {
+      invocationContext,
+      codeExecutionInput: {
+        code: 'console.log("never runs");',
+        language: CodeExecutionLanguage.JAVASCRIPT,
+        inputFiles: [],
+      },
+    };
+
+    await expect(executor.executeCode(params)).rejects.toThrow('spawn EACCES');
+
+    if (scratchDir === undefined) {
+      expect.fail('the executor spawned the script without a string cwd');
+    }
+    expect(path.dirname(scratchDir)).toBe(os.tmpdir());
+    await expect(fs.access(scratchDir)).rejects.toMatchObject({code: 'ENOENT'});
   });
 
   it('should capture stderr', async () => {
