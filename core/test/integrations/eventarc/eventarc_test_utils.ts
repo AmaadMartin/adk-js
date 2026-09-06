@@ -20,8 +20,13 @@
  */
 
 import {
+  Context,
+  createSession,
   EventarcPublishStatus,
+  InvocationContext,
+  PluginManager,
   publishMessage,
+  ReadonlyContext,
   type EventarcToolConfig,
   type PublishMessageInput,
   type PublishMessageResult,
@@ -167,4 +172,23 @@ export function errorDetails(result: PublishMessageResult): string {
     expect.fail(`expected an error result, got ${JSON.stringify(result)}`);
   }
   return result.error_details;
+}
+
+/** An invocation with just enough of a session for a tool call to run. */
+function testInvocationContext(): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    session: createSession({id: 'test-session', appName: 'test-app'}),
+    pluginManager: new PluginManager(),
+  });
+}
+
+/** A tool context a test can pass to `BaseTool.runAsync`. */
+export function toolContext(): Context {
+  return new Context({invocationContext: testInvocationContext()});
+}
+
+/** A readonly context a test can pass to `BaseToolset.getTools`. */
+export function readonlyContext(): ReadonlyContext {
+  return new ReadonlyContext(testInvocationContext());
 }

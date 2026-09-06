@@ -10,7 +10,11 @@
  * `a3bd1115` on `main`. Each `it` keeps its Python name.
  */
 
-import {cleanupClients, EventarcPublishStatus, publishMessage} from '@google/adk';
+import {
+  cleanupClients,
+  EventarcPublishStatus,
+  publishMessage,
+} from '@google/adk';
 import {propagation} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -18,13 +22,13 @@ import {
   BUS,
   errorDetails,
   eventAttributes,
-  StubPropagator,
   onlyEvent,
   onlyPublish,
   publish,
   publishBehavior,
   resetEventarcFake,
   SETTINGS,
+  StubPropagator,
 } from './eventarc_test_utils.js';
 
 vi.mock('@google-cloud/eventarc-publishing', async () => {

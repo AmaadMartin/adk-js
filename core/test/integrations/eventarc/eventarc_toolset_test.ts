@@ -22,7 +22,11 @@ import {
   type EventarcToolConfig,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {builtClients, resetEventarcFake} from './eventarc_test_utils.js';
+import {
+  builtClients,
+  resetEventarcFake,
+  toolContext,
+} from './eventarc_test_utils.js';
 
 vi.mock('@google-cloud/eventarc-publishing', async () => {
   const {FakePublisherClient} = await import('./eventarc_test_utils.js');
@@ -99,6 +103,7 @@ describe('EventarcToolset', () => {
     const [tool] = await toolset.getTools();
     await tool.runAsync({
       args: {bus: 'bus', type: 'type', source: 'source'},
+      toolContext: toolContext(),
     });
     expect(builtClients).toHaveLength(1);
 
