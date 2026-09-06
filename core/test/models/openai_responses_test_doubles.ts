@@ -15,14 +15,14 @@
 import type {
   OpenAIResponses,
   OpenAIResponsesClient,
-  ResponsesRequestBody,
+  ResponsesRequestBodyWithExtras,
 } from '@google/adk';
 import type {OpenAI} from 'openai';
 import {expect} from 'vitest';
 
 /** One recorded call to `responses.create`. */
 export interface RecordedCall {
-  body: ResponsesRequestBody;
+  body: ResponsesRequestBodyWithExtras;
   options?: {signal?: AbortSignal};
 }
 
@@ -48,15 +48,15 @@ class FakeResponses implements OpenAIResponses {
   ) {}
 
   create(
-    body: ResponsesRequestBody & {stream?: false | null},
+    body: ResponsesRequestBodyWithExtras & {stream?: false | null},
     options?: {signal?: AbortSignal},
   ): Promise<OpenAI.Responses.Response>;
   create(
-    body: ResponsesRequestBody & {stream: true},
+    body: ResponsesRequestBodyWithExtras & {stream: true},
     options?: {signal?: AbortSignal},
   ): Promise<AsyncIterable<OpenAI.Responses.ResponseStreamEvent>>;
   async create(
-    body: ResponsesRequestBody,
+    body: ResponsesRequestBodyWithExtras,
     options?: {signal?: AbortSignal},
   ): Promise<
     | OpenAI.Responses.Response
@@ -88,7 +88,7 @@ export class FakeResponsesClient implements OpenAIResponsesClient {
   }
 
   /** The body of the single call the client received. */
-  get body(): ResponsesRequestBody {
+  get body(): ResponsesRequestBodyWithExtras {
     return this.onlyCall.body;
   }
 }

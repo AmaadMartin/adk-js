@@ -23,20 +23,19 @@ import {
   GenerateContentConfig,
   GenerateContentResponseUsageMetadata,
   Part,
-  Schema,
   ThinkingLevel,
-  Type,
 } from '@google/genai';
 import type {OpenAI} from 'openai';
 
-import {genaiSchemaToJsonSchema} from '../utils/genai_schema_to_json.js';
 import {logger} from '../utils/logger.js';
 
 import {LlmResponse} from './llm_response.js';
 import {
   enforceStrictOpenAiSchema,
+  isJsonSchemaObject,
   JsonSchemaObject,
   lowercaseSchemaTypes,
+  schemaToJsonObject,
 } from './openai_schema.js';
 
 /** Prefix given to a model refusal so it survives as ordinary text. */
@@ -61,9 +60,6 @@ const VALID_CALL_ID = /^[a-zA-Z0-9_-]+$/;
 /** Prefix of the id minted for a missing or unusable function call id. */
 const FALLBACK_CALL_ID_PREFIX = 'call_adk_fallback_';
 
-/** The genai `type` values, used to tell a genai `Schema` from JSON Schema. */
-const GENAI_SCHEMA_TYPES = new Set<string>(Object.values(Type));
-
 /**
  * `incomplete_details.reason` values that mean the output hit a length limit.
  *
@@ -83,20 +79,6 @@ export const REASONING_NOT_GIVEN = Symbol('reasoningNotGiven');
 
 /** The reasoning efforts a genai thinking level maps onto. */
 type MappedReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
-
-/** Narrows an arbitrary value to a plain JSON object. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Narrows an arbitrary schema value to the genai `Schema` dialect. */
-function isGenaiSchema(value: unknown): value is Schema {
-  return (
-    isRecord(value) &&
-    typeof value['type'] === 'string' &&
-    GENAI_SCHEMA_TYPES.has(value['type'])
-  );
-}
 
 /**
  * Maps function call ids onto ids the Responses API accepts.
@@ -153,7 +135,7 @@ export function serializeToolOutput(value: unknown): string {
   if (typeof value === 'string') {
     return value;
   }
-  if (isRecord(value)) {
+  if (isJsonSchemaObject(value)) {
     const content = value['content'];
     if (Array.isArray(content) && content.length > 0) {
       return content.map(contentItemToText).join('\n');
@@ -171,7 +153,7 @@ export function serializeToolOutput(value: unknown): string {
 
 /** Renders one entry of an MCP-style `content` list as text. */
 function contentItemToText(item: unknown): string {
-  if (isRecord(item)) {
+  if (isJsonSchemaObject(item)) {
     const text = item['text'];
     return item['type'] === 'text' && text !== undefined
       ? String(text)
@@ -198,7 +180,7 @@ export function loadsJsonObject(value?: string): Record<string, unknown> {
     logger.warn('Failed to parse Responses API function arguments as JSON.');
     return {};
   }
-  return isRecord(parsed) ? parsed : {};
+  return isJsonSchemaObject(parsed) ? parsed : {};
 }
 
 /** Returns the text of a part, or a plain string, as a string. */
@@ -233,29 +215,6 @@ export function serializeSystemInstruction(
     return (instruction.parts ?? []).map(partUnionText).join('');
   }
   return partUnionText(instruction);
-}
-
-/**
- * Renders a response schema as a JSON Schema object.
- *
- * A genai `Schema` and a plain JSON Schema need different treatment:
- * `genaiSchemaToJsonSchema` drops a `type` it does not recognise, so a
- * document that is already JSON Schema is copied and only its `type` keywords
- * are lowercased.
- *
- * @param schema The schema in either dialect.
- * @return The JSON Schema object, or `{}` when there is nothing to convert.
- */
-export function schemaToJsonObject(schema: unknown): JsonSchemaObject {
-  if (isGenaiSchema(schema)) {
-    return genaiSchemaToJsonSchema(schema);
-  }
-  if (!isRecord(schema)) {
-    return {};
-  }
-  const copy = structuredClone(schema);
-  lowercaseSchemaTypes(copy);
-  return copy;
 }
 
 /** Sanitizes a schema title into the `^[a-zA-Z0-9_-]+$` name OpenAI requires. */
@@ -578,7 +537,7 @@ export function functionDeclarationToResponseTool(
   }
   const jsonSchema = functionDeclaration.parametersJsonSchema;
   let parameters: JsonSchemaObject;
-  if (isRecord(jsonSchema)) {
+  if (isJsonSchemaObject(jsonSchema)) {
     parameters = structuredClone(jsonSchema);
     lowercaseSchemaTypes(parameters);
   } else if (functionDeclaration.parameters) {

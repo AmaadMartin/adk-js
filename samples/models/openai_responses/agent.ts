@@ -20,10 +20,6 @@ import {FunctionTool, LlmAgent, OpenAIResponsesLlm} from '@google/adk';
 import {ThinkingLevel} from '@google/genai';
 import {z} from 'zod';
 
-if (!process.env['OPENAI_API_KEY']) {
-  throw new Error('Set OPENAI_API_KEY before running this sample.');
-}
-
 const getWeather = new FunctionTool({
   name: 'get_weather',
   description: 'Returns the current weather for a city.',

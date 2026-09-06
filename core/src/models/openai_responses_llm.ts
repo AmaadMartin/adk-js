@@ -47,16 +47,25 @@ const AZURE_OPENAI_V1_PATH = '/openai/v1/';
 const AZURE_API_KEY_ENV = 'AZURE_OPENAI_API_KEY';
 
 /**
- * The body sent to `POST /v1/responses`.
+ * The body the model computes for `POST /v1/responses`.
  *
- * The SDK's own params type, widened to also carry fields it does not declare.
- * Two of those are needed: `stop`, which the API accepts and the SDK omits,
- * and whatever a caller puts in
- * {@link OpenAIResponsesLlmParams.extraRequestArgs}. The SDK serializes the
- * body object as it is given, so an undeclared key reaches the wire unchanged.
- * Every declared field stays type-checked.
+ * The SDK's own params type plus `stop`, which the API accepts and the SDK
+ * does not declare. Everything the model builds is typed against this, so a
+ * misspelled field is a compile error.
  */
-export type ResponsesRequestBody = OpenAI.Responses.ResponseCreateParams &
+export type ResponsesRequestBody = OpenAI.Responses.ResponseCreateParams & {
+  stop?: string[];
+};
+
+/**
+ * A computed body with the caller's extra request fields merged in.
+ *
+ * Only this type is open, and only because
+ * {@link OpenAIResponsesLlmParams.extraRequestArgs} exists to send an API
+ * field this SDK version does not declare. The SDK serializes the body object
+ * as it is given, so an undeclared key reaches the wire unchanged.
+ */
+export type ResponsesRequestBodyWithExtras = ResponsesRequestBody &
   Record<string, unknown>;
 
 /**
@@ -67,11 +76,11 @@ export type ResponsesRequestBody = OpenAI.Responses.ResponseCreateParams &
  */
 export interface OpenAIResponses {
   create(
-    body: ResponsesRequestBody & {stream?: false | null},
+    body: ResponsesRequestBodyWithExtras & {stream?: false | null},
     options?: {signal?: AbortSignal},
   ): Promise<OpenAI.Responses.Response>;
   create(
-    body: ResponsesRequestBody & {stream: true},
+    body: ResponsesRequestBodyWithExtras & {stream: true},
     options?: {signal?: AbortSignal},
   ): Promise<AsyncIterable<OpenAI.Responses.ResponseStreamEvent>>;
 }
@@ -243,8 +252,6 @@ function applyConfig(
  * ```
  */
 export class OpenAIResponsesLlm extends BaseLlm {
-  static override readonly supportedModels: Array<string | RegExp> = [];
-
   protected readonly apiKey?: string | (() => string);
   private readonly store?: boolean;
   private readonly include?: OpenAI.Responses.ResponseIncludable[];
@@ -310,7 +317,9 @@ export class OpenAIResponsesLlm extends BaseLlm {
   }
 
   /** Builds the request body for one ADK request. */
-  private buildRequestBody(llmRequest: LlmRequest): ResponsesRequestBody {
+  private buildRequestBody(
+    llmRequest: LlmRequest,
+  ): ResponsesRequestBodyWithExtras {
     const config = llmRequest.config ?? {};
     const body: ResponsesRequestBody = {
       model: llmRequest.model ?? this.model,

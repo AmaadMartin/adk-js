@@ -230,6 +230,7 @@ export type {
   OpenAIResponsesClient,
   OpenAIResponsesLlmParams,
   ResponsesRequestBody,
+  ResponsesRequestBodyWithExtras,
 } from './models/openai_responses_llm.js';
 export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';

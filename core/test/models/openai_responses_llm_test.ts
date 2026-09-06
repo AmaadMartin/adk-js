@@ -24,7 +24,7 @@ import {
   OpenAIResponsesClient,
   OpenAIResponsesLlm,
   OpenAIResponsesLlmParams,
-  ResponsesRequestBody,
+  ResponsesRequestBodyWithExtras,
 } from '@google/adk';
 import {
   Content,
@@ -145,7 +145,7 @@ function userRequest(
 async function sentBody(
   params: OpenAIResponsesLlmParams,
   llmRequest: LlmRequest,
-): Promise<ResponsesRequestBody> {
+): Promise<ResponsesRequestBodyWithExtras> {
   const client = new FakeResponsesClient({
     response: makeResponse({status: 'completed'}),
   });

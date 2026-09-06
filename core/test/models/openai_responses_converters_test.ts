@@ -34,7 +34,6 @@ import {
   reasoningParts,
   responseTextConfig,
   responseToLlmResponse,
-  schemaToJsonObject,
   serializeSystemInstruction,
   serializeToolOutput,
   toolChoice,
@@ -126,42 +125,6 @@ describe('serializeSystemInstruction', () => {
     expect(serializeSystemInstruction(['Be ', {text: 'brief.'}])).toBe(
       'Be brief.',
     );
-  });
-});
-
-describe('schemaToJsonObject', () => {
-  it('converts a genai schema out of its dialect', () => {
-    expect(
-      schemaToJsonObject({
-        type: Type.OBJECT,
-        properties: {n: {type: Type.INTEGER, maxItems: '5'}},
-      }),
-    ).toEqual({
-      type: 'object',
-      properties: {n: {type: 'integer', maxItems: 5}},
-    });
-  });
-
-  it('lowercases the types of a plain JSON schema without dropping them', () => {
-    expect(
-      schemaToJsonObject({
-        type: 'object',
-        properties: {n: {type: 'INTEGER'}},
-      }),
-    ).toEqual({type: 'object', properties: {n: {type: 'integer'}}});
-  });
-
-  it('does not mutate the schema it was given', () => {
-    const schema = {type: 'OBJECT', properties: {n: {type: 'STRING'}}};
-
-    schemaToJsonObject(schema);
-
-    expect(schema).toEqual({type: 'OBJECT', properties: {n: {type: 'STRING'}}});
-  });
-
-  it('returns an empty object for a value that is not a schema', () => {
-    expect(schemaToJsonObject('object')).toEqual({});
-    expect(schemaToJsonObject(undefined)).toEqual({});
   });
 });
 
