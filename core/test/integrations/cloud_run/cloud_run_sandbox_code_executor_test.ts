@@ -121,6 +121,26 @@ describe('CloudRunSandboxCodeExecutor', () => {
     expect(result.stderr).toBe('slow start');
   });
 
+  it('reports the timeout status when the child died from another signal', async () => {
+    vi.useFakeTimers();
+    const child = createFakeChild();
+    spawnMock.mockReturnValue(child);
+
+    const pending = new CloudRunSandboxCodeExecutor({
+      timeoutSeconds: 2,
+    }).executeCode({
+      invocationContext,
+      codeExecutionInput: executionInput('while True: pass'),
+    });
+    vi.advanceTimersByTime(2000);
+    // The wall-clock bound elapsed, so the run is a timeout whatever killed
+    // the child. Reporting the signal would give -15 here.
+    child.emit('close', null, 'SIGTERM');
+    const result = await pending;
+
+    expect(result.exitCode).toBe(TIMEOUT_EXIT_CODE);
+  });
+
   it('reports the negated signal number for a child killed by a signal', async () => {
     const child = createFakeChild();
     spawnMock.mockReturnValue(child);
