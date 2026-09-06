@@ -54,11 +54,11 @@ const ociSdk = vi.hoisted(() => {
   class FakeInferenceClient {
     endpoint = '';
     chat = chat;
-    constructor(authParams: unknown) {
-      clients.push(this as unknown as {endpoint: string; authParams: unknown});
-      this.authParams = authParams;
-    }
     authParams: unknown;
+    constructor(authParams: unknown) {
+      this.authParams = authParams;
+      clients.push(this);
+    }
   }
   const configFileProvider = vi.fn();
   const instancePrincipalBuild = vi.fn(async () => ({kind: 'instance'}));
