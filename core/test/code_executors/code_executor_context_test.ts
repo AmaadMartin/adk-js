@@ -4,10 +4,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {describe, expect, it} from 'vitest';
-import {File} from '../../src/code_executors/code_execution_utils.js';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {
+  File,
+  FileContentEncoding,
+} from '../../src/code_executors/code_execution_utils.js';
 import {CodeExecutorContext} from '../../src/code_executors/code_executor_context.js';
 import {State} from '../../src/sessions/state.js';
+
+const CONTEXT_KEY = '_code_execution_context';
+const INPUT_FILE_KEY = '_code_executor_input_files';
+const ERROR_COUNT_KEY = '_code_executor_error_counts';
+const RESULTS_KEY = '_code_execution_results';
+
+const inputFile1: File = {
+  name: 'f1.txt',
+  content: 'aGVsbG8=',
+  mimeType: 'text/plain',
+};
+const inputFile2: File = {
+  name: 'f2.txt',
+  content: 'd29ybGQ=',
+  mimeType: 'text/plain',
+};
 
 function makeContext(initial: Record<string, unknown> = {}): {
   state: State;
@@ -15,6 +34,26 @@ function makeContext(initial: Record<string, unknown> = {}): {
 } {
   const state = new State(initial);
   return {state, ctx: new CodeExecutorContext(state)};
+}
+
+function storedFiles(state: State): File[] {
+  const files = state.get<File[]>(INPUT_FILE_KEY);
+  if (!files) {
+    return expect.fail(`session state holds no ${INPUT_FILE_KEY}`);
+  }
+  return files;
+}
+
+function firstResult(
+  state: State,
+  invocationId: string,
+): Record<string, unknown> {
+  const results =
+    state.get<Record<string, Array<Record<string, unknown>>>>(RESULTS_KEY);
+  if (!results) {
+    return expect.fail(`session state holds no ${RESULTS_KEY}`);
+  }
+  return results[invocationId][0];
 }
 
 describe('CodeExecutorContext', () => {
@@ -239,6 +278,234 @@ describe('CodeExecutorContext', () => {
       ctx.setExecutionId('s-42');
       const result = ctx.getCodeExecutionContext() as Record<string, unknown>;
       expect(result['execution_session_id']).toBe('s-42');
+    });
+  });
+
+  describe('constructor write-back', () => {
+    it('stores an empty context when the key is absent', () => {
+      const {state} = makeContext();
+      expect(state.get(CONTEXT_KEY)).toEqual({});
+    });
+
+    it('records the context key in the delta', () => {
+      const delta: Record<string, unknown> = {};
+      const state = new State({}, delta);
+      new CodeExecutorContext(state);
+      expect(CONTEXT_KEY in delta).toBe(true);
+    });
+
+    it('holds the stored object, so setExecutionId is visible through state', () => {
+      const {ctx, state} = makeContext();
+      ctx.setExecutionId('s-1');
+      expect(state.get(CONTEXT_KEY)).toEqual({execution_session_id: 's-1'});
+    });
+
+    it('adopts a pre-existing context instead of replacing it', () => {
+      const {ctx} = makeContext({
+        [CONTEXT_KEY]: {execution_session_id: 'session123'},
+      });
+      expect(ctx.getExecutionId()).toBe('session123');
+      expect(ctx.getStateDelta()).toEqual({
+        [CONTEXT_KEY]: {execution_session_id: 'session123'},
+      });
+    });
+  });
+
+  describe('delta recording for pre-existing keys', () => {
+    function seededState(): {state: State; delta: Record<string, unknown>} {
+      const delta: Record<string, unknown> = {};
+      const state = new State(
+        {
+          [CONTEXT_KEY]: {},
+          [INPUT_FILE_KEY]: [
+            {name: 'a.txt', content: 'YQ==', mimeType: 'text/plain'},
+          ],
+          [ERROR_COUNT_KEY]: {inv: 2},
+          [RESULTS_KEY]: {inv: []},
+        },
+        delta,
+      );
+      return {state, delta};
+    }
+
+    it('records every mutating write on keys that already exist', () => {
+      const {state, delta} = seededState();
+      const ctx = new CodeExecutorContext(state);
+
+      ctx.addInputFiles([inputFile2]);
+      ctx.incrementErrorCount('inv');
+      ctx.updateCodeExecutionResult({
+        invocationId: 'inv',
+        code: 'x = 1',
+        resultStdout: '',
+        resultStderr: '',
+      });
+
+      expect(delta[INPUT_FILE_KEY]).toHaveLength(2);
+      expect(delta[ERROR_COUNT_KEY]).toEqual({inv: 3});
+      expect(
+        (delta[RESULTS_KEY] as Record<string, unknown[]>)['inv'],
+      ).toHaveLength(1);
+    });
+
+    it('records the error counts when an invocation is reset', () => {
+      const {state, delta} = seededState();
+      const ctx = new CodeExecutorContext(state);
+
+      ctx.resetErrorCount('inv');
+
+      expect(delta[ERROR_COUNT_KEY]).toEqual({});
+      expect(ctx.getErrorCount('inv')).toBe(0);
+    });
+
+    it('records the error counts when the invocation is unknown', () => {
+      const {state, delta} = seededState();
+      const ctx = new CodeExecutorContext(state);
+
+      expect(() => ctx.resetErrorCount('unknown')).not.toThrow();
+      expect(delta[ERROR_COUNT_KEY]).toEqual({inv: 2});
+    });
+
+    it('leaves the error counts key absent when it was never set', () => {
+      const {ctx, state} = makeContext();
+
+      ctx.resetErrorCount('inv');
+
+      expect(state.has(ERROR_COUNT_KEY)).toBe(false);
+    });
+
+    it('records the emptied input files on a seeded state', () => {
+      const {state, delta} = seededState();
+      const ctx = new CodeExecutorContext(state);
+
+      ctx.clearInputFiles();
+
+      expect(delta[INPUT_FILE_KEY]).toEqual([]);
+    });
+
+    it('leaves the input files key absent when it was never set', () => {
+      const {ctx, state} = makeContext();
+
+      ctx.clearInputFiles();
+
+      expect(state.has(INPUT_FILE_KEY)).toBe(false);
+    });
+  });
+
+  describe('code execution result timestamp', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('is the current time in whole seconds', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2025-01-01T00:00:00Z'));
+      const {ctx, state} = makeContext();
+
+      ctx.updateCodeExecutionResult({
+        invocationId: 'inv-1',
+        code: 'x = 1',
+        resultStdout: '',
+        resultStderr: '',
+      });
+
+      expect(firstResult(state, 'inv-1')['timestamp']).toBe(1735689600);
+    });
+
+    it('is an integer far below the millisecond magnitude', () => {
+      const {ctx, state} = makeContext();
+
+      ctx.updateCodeExecutionResult({
+        invocationId: 'inv-1',
+        code: 'x = 1',
+        resultStdout: '',
+        resultStderr: '',
+      });
+
+      const timestamp = firstResult(state, 'inv-1')['timestamp'] as number;
+      expect(Number.isInteger(timestamp)).toBe(true);
+      expect(timestamp).toBeLessThan(Date.now() / 100);
+    });
+  });
+
+  describe('input file reconstruction', () => {
+    it('rebuilds the stored records as File objects', () => {
+      const {ctx} = makeContext({
+        [INPUT_FILE_KEY]: [
+          {name: 'input1.txt', content: 'YQ==', mimeType: 'text/plain'},
+        ],
+      });
+
+      expect(ctx.getInputFiles()).toEqual([
+        {name: 'input1.txt', content: 'YQ==', mimeType: 'text/plain'},
+      ]);
+    });
+
+    it('defaults a record without a mime type to text/plain', () => {
+      const {ctx} = makeContext({
+        [INPUT_FILE_KEY]: [{name: 'input1.txt', content: 'YQ=='}],
+      });
+
+      expect(ctx.getInputFiles()[0].mimeType).toBe('text/plain');
+    });
+
+    it('round-trips the content encoding', () => {
+      const {ctx} = makeContext();
+      const encoded: File = {
+        name: 'raw.txt',
+        content: 'hello',
+        contentEncoding: FileContentEncoding.UTF8,
+        mimeType: 'text/plain',
+      };
+
+      ctx.addInputFiles([encoded]);
+
+      expect(ctx.getInputFiles()[0].contentEncoding).toBe(
+        FileContentEncoding.UTF8,
+      );
+    });
+
+    it('returns a copy of the array, not the stored one', () => {
+      const {ctx} = makeContext();
+      ctx.addInputFiles([inputFile1]);
+
+      ctx.getInputFiles().push(inputFile2);
+
+      expect(ctx.getInputFiles()).toHaveLength(1);
+    });
+
+    it('returns copies of the records, not the stored ones', () => {
+      const {ctx} = makeContext();
+      ctx.addInputFiles([inputFile1]);
+
+      ctx.getInputFiles()[0].name = 'mutated.txt';
+
+      expect(ctx.getInputFiles()[0].name).toBe('f1.txt');
+    });
+
+    it('stores a copy of the file it was given', () => {
+      const {ctx, state} = makeContext();
+      const mutable: File = {...inputFile1};
+
+      ctx.addInputFiles([mutable]);
+      mutable.name = 'mutated.txt';
+
+      expect(storedFiles(state)[0].name).toBe('f1.txt');
+    });
+
+    it('does not duplicate a file when the caller also accumulates it', () => {
+      const {ctx, state} = makeContext({
+        [INPUT_FILE_KEY]: [
+          {name: 'f1.txt', content: 'aGVsbG8=', mimeType: 'text/plain'},
+        ],
+      });
+
+      const all = ctx.getInputFiles();
+      ctx.addInputFiles([inputFile2]);
+      all.push(inputFile2);
+
+      expect(storedFiles(state)).toHaveLength(2);
+      expect(all).toHaveLength(2);
     });
   });
 });
