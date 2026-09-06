@@ -6,6 +6,7 @@
 import {
   BaseLlm,
   BaseLlmConnection,
+  CODE_EXECUTION_RESPONSE_PROCESSOR,
   LlmAgent,
   LLMRegistry,
   LlmResponse,
@@ -51,4 +52,5 @@ export const rootAgent = new LlmAgent({
   name: 'root_agent',
   model: 'test-llm-model',
   description: 'Root agent',
+  responseProcessors: [CODE_EXECUTION_RESPONSE_PROCESSOR],
 });
