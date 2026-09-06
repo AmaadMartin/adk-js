@@ -17,7 +17,6 @@ import {LlmAgent, LlmRequest, LlmResponse, OciGenAiLlm} from '@google/adk';
 import {generateKeyPairSync} from 'node:crypto';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {createServer, Server} from 'node:http';
-import {AddressInfo} from 'node:net';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
@@ -158,7 +157,10 @@ describe('OciGenAiLlm against a local OCI service', () => {
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', resolve);
     });
-    const address = server.address() as AddressInfo;
+    const address = server.address();
+    if (typeof address !== 'object' || address === null) {
+      expect.fail('the local OCI service did not report a port');
+    }
     serviceEndpoint = `http://127.0.0.1:${address.port}`;
   });
 
