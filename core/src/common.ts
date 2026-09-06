@@ -197,6 +197,11 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {
+  EVENTARC_DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+  createEventarcToolConfig,
+} from './integrations/eventarc/eventarc_tool_config.js';
+export type {EventarcToolConfig} from './integrations/eventarc/eventarc_tool_config.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,

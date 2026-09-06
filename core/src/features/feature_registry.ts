@@ -11,6 +11,8 @@ import {logger} from '../utils/logger.js';
  * Feature names.
  */
 export enum FeatureName {
+  /** Configuration surface for the Eventarc tools. */
+  EVENTARC_TOOL_CONFIG = 'EVENTARC_TOOL_CONFIG',
   PROGRESSIVE_SSE_STREAMING = 'PROGRESSIVE_SSE_STREAMING',
 }
 
@@ -33,6 +35,10 @@ export interface FeatureConfig {
 
 // Central registry: FeatureName -> FeatureConfig
 const FEATURE_REGISTRY: Record<FeatureName, FeatureConfig> = {
+  [FeatureName.EVENTARC_TOOL_CONFIG]: {
+    stage: FeatureStage.EXPERIMENTAL,
+    defaultOn: true,
+  },
   [FeatureName.PROGRESSIVE_SSE_STREAMING]: {
     stage: FeatureStage.EXPERIMENTAL,
     defaultOn: false,
