@@ -414,7 +414,13 @@ export interface LlmAgentConfig extends BaseAgentConfig {
   codeExecutor?: BaseCodeExecutor;
 }
 
-async function convertToolUnionToTools(
+/**
+ * Resolves one member of {@link ToolUnion} to the tools it stands for.
+ *
+ * Exported for reuse inside the package (see `agent_info.ts`) so every caller
+ * shares one resolution path. This is not part of the public API.
+ */
+export async function convertToolUnionToTools(
   toolUnion: ToolUnion,
   context?: ReadonlyContext,
 ): Promise<BaseTool[]> {
