@@ -352,7 +352,7 @@ export class Gemini extends BaseLlm {
       if (llmRequest.config) {
         // Using API key from Google AI Studio to call model doesn't support
         // labels.
-        (llmRequest.config as {labels?: unknown}).labels = undefined;
+        llmRequest.config.labels = undefined;
       }
       if (llmRequest.contents) {
         for (const content of llmRequest.contents) {

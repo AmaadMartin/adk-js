@@ -460,6 +460,52 @@ describe('GoogleLlm', () => {
 
       await expect(generator.next()).rejects.toThrow('Aborted');
     });
+
+    it('should clear labels on the request config for the Gemini API backend', async () => {
+      const llm = new TestGemini({apiKey: 'test-key'});
+      const generateContentMock =
+        vi.fn<typeof llm.apiClient.models.generateContent>();
+      generateContentMock.mockResolvedValue(new GenerateContentResponse());
+      llm.apiClient.models.generateContent = generateContentMock;
+
+      const llmRequest: LlmRequest = {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config: {labels: {'adk-agent-name': 'agent'}},
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      const [callArg] = generateContentMock.mock.calls[0];
+      expect(callArg.config?.labels).toBeUndefined();
+      expect(llmRequest.config?.labels).toBeUndefined();
+    });
+
+    it('should preserve labels on the request config for the Vertex AI backend', async () => {
+      const llm = new TestGemini({
+        vertexai: true,
+        project: 'test-project',
+        location: 'us-central1',
+      });
+      const generateContentMock =
+        vi.fn<typeof llm.apiClient.models.generateContent>();
+      generateContentMock.mockResolvedValue(new GenerateContentResponse());
+      llm.apiClient.models.generateContent = generateContentMock;
+
+      const llmRequest: LlmRequest = {
+        contents: [{role: 'user', parts: [{text: 'hello'}]}],
+        config: {labels: {'adk-agent-name': 'agent'}},
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+
+      await llm.generateContentAsync(llmRequest).next();
+
+      const [callArg] = generateContentMock.mock.calls[0];
+      expect(callArg.config?.labels).toEqual({'adk-agent-name': 'agent'});
+      expect(llmRequest.config?.labels).toEqual({'adk-agent-name': 'agent'});
+    });
   });
 
   describe('generateContentAsync streaming', () => {
