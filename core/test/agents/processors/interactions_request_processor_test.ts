@@ -4,20 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import {
   BaseAgent,
   BaseLlm,
+  BaseLlmConnection,
+  createEvent,
+  createSession,
   Event,
-  EventActions,
   Gemini,
   INTERACTIONS_REQUEST_PROCESSOR,
   InvocationContext,
   LlmAgent,
   LlmRequest,
+  LlmResponse,
   PluginManager,
-  Session,
+  SequentialAgent,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -27,12 +28,11 @@ class MockLlm extends BaseLlm {
   }
 
   override async *generateContentAsync(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    llmRequest: LlmRequest,
-  ): AsyncGenerator<any, void, void> {}
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  override async connect(llmRequest: LlmRequest): Promise<any> {
-    return {} as any;
+    _llmRequest: LlmRequest,
+  ): AsyncGenerator<LlmResponse, void> {}
+
+  override connect(_llmRequest: LlmRequest): Promise<BaseLlmConnection> {
+    throw new Error('Not implemented');
   }
 }
 
@@ -42,28 +42,26 @@ function createMockEvent(
   branch: string,
   interactionId?: string,
 ): Event {
-  return {
+  return createEvent({
     id,
     invocationId: 'test-invoc',
     author,
     branch,
     interactionId,
-    actions: {} as EventActions,
-    timestamp: Date.now(),
-  };
+  });
 }
 
 function createMockInvocationContext(
   events: Event[],
-  model: any,
+  model: BaseLlm,
   agentName = 'test_agent',
 ): InvocationContext {
-  const session = {
+  const session = createSession({
     id: 'test-session',
     events,
     appName: 'test-app',
     userId: 'test-user',
-  } as unknown as Session;
+  });
 
   const agent = new LlmAgent({
     name: agentName,
@@ -233,7 +231,7 @@ describe('InteractionsRequestProcessor', () => {
       rawEvents,
       new MockLlm(),
     );
-    (invocationContext as any).agent = {name: 'not-an-llm-agent'};
+    invocationContext.agent = new SequentialAgent({name: 'not-an-llm-agent'});
     const llmRequest: LlmRequest = {
       contents: [],
       toolsDict: {},
