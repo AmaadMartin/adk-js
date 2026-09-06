@@ -14,6 +14,10 @@ Versioned binary and text storage (`Part` payloads) scoped to an individual sess
 
 - [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
 
+### Evaluation
+
+- [LlmAudioUserSimulator](evaluation/llm_audio_user_simulator/index.md) - Speaking a simulated user's turns, so an eval case can drive an agent that takes audio input.
+
 ### Tools
 
 #### Retrieval
