@@ -58,10 +58,13 @@ function isFileNotFoundError(err: Error): boolean {
   return 'code' in err && err.code === 'ENOENT';
 }
 
+/** A signal name Node can report a child as killed by. */
+type SignalName = keyof typeof os.constants.signals;
+
 /** The status a finished child exited with, as a POSIX shell reports it. */
 function exitStatus(
   code: number | null,
-  signal: NodeJS.Signals | null,
+  signal: SignalName | null,
 ): number | null {
   return signal === null ? code : -os.constants.signals[signal];
 }
