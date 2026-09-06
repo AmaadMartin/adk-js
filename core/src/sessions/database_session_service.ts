@@ -5,6 +5,7 @@
  */
 
 import {
+  EntityManager,
   FilterQuery,
   LockMode,
   Options as MikroDBOptions,
@@ -13,11 +14,13 @@ import {
 
 import {Event} from '../events/event.js';
 import {randomUUID} from '../utils/env_aware_utils.js';
+import {logger} from '../utils/logger.js';
 import {
   AppendEventRequest,
   BaseSessionService,
   CreateSessionRequest,
   DeleteSessionRequest,
+  GetSessionConfig,
   GetSessionRequest,
   ListSessionsRequest,
   ListSessionsResponse,
@@ -25,19 +28,64 @@ import {
   trimTempDeltaState,
 } from './base_session_service.js';
 import {
+  assertSupportedDatabaseUri,
+  detectDatabaseSchemaVersion,
   ensureDatabaseCreated,
   getConnectionOptionsFromUri,
+  getOrCreateRow,
+  namesSupportedDatabaseBackend,
   validateDatabaseSchemaVersion,
 } from './db/operations.js';
 import {
   ENTITIES,
+  SCHEMA_VERSION_0_PICKLE,
   StorageAppState,
   StorageEvent,
   StorageSession,
   StorageUserState,
 } from './db/schema.js';
+import {
+  ENTITIES_V0,
+  StorageEventV0,
+  storageEventV0ToEvent,
+} from './db/schema_v0.js';
 import {createSession, Session} from './session.js';
 import {State} from './state.js';
+
+/**
+ * adk-python's unconditional `update_time asc, user_id asc, id asc`. The tie
+ * breaks keep a paginated sweep from repeating or skipping a row.
+ */
+const OLDEST_SESSION_FIRST = {
+  updateTime: 'ASC',
+  userId: 'ASC',
+  id: 'ASC',
+} as const;
+
+const NEWEST_SESSION_FIRST = {
+  updateTime: 'DESC',
+  userId: 'ASC',
+  id: 'ASC',
+} as const;
+
+/**
+ * Newest event first, ties broken on id. Without the tie break the database
+ * may return tied events in a different order on every read, so a replayed
+ * conversation shuffles and `numRecentEvents` truncates inside the tie.
+ */
+const NEWEST_EVENT_FIRST = {timestamp: 'DESC', id: 'DESC'} as const;
+
+/**
+ * Reports whether `source` is a MikroORM instance rather than its options.
+ *
+ * Structural, because `instanceof` returns false across two copies of
+ * `@mikro-orm/core` in one runtime.
+ */
+function isMikroOrmInstance(
+  source: MikroDBOptions | MikroORM,
+): source is MikroORM {
+  return 'em' in source && 'schema' in source && 'close' in source;
+}
 
 /**
  * Checks if a URI is a database connection URI.
@@ -46,18 +94,7 @@ import {State} from './state.js';
  * @returns True if the URI is a database connection URI, false otherwise.
  */
 export function isDatabaseConnectionString(uri?: string): boolean {
-  if (!uri) {
-    return false;
-  }
-
-  return (
-    uri.startsWith('postgres://') ||
-    uri.startsWith('postgresql://') ||
-    uri.startsWith('mysql://') ||
-    uri.startsWith('mariadb://') ||
-    uri.startsWith('mssql://') ||
-    uri.startsWith('sqlite://')
-  );
+  return !!uri && namesSupportedDatabaseBackend(uri);
 }
 
 /**
@@ -68,21 +105,57 @@ export class DatabaseSessionService extends BaseSessionService {
   private initialized = false;
   private options?: MikroDBOptions;
   private connectionString?: string;
+  private optionOverrides?: Partial<MikroDBOptions>;
+  private ownsOrm = true;
+  private legacySchema = false;
+  private warnedAboutLegacyActions = false;
 
-  constructor(connectionStringOrOptions: MikroDBOptions | string) {
+  /**
+   * @param source A connection URL, MikroORM options, or a MikroORM instance
+   *   the caller already built and continues to own.
+   * @param overrides Options applied on top of the ones the URL implies. They
+   *   cannot be combined with a MikroORM instance.
+   */
+  constructor(
+    source: MikroDBOptions | MikroORM | string,
+    overrides?: Partial<MikroDBOptions>,
+  ) {
     super();
-    if (typeof connectionStringOrOptions === 'string') {
-      this.connectionString = connectionStringOrOptions;
-    } else {
-      if (!connectionStringOrOptions.driver) {
-        throw new Error('Driver is required when passing options object.');
-      }
 
-      this.options = {
-        ...connectionStringOrOptions,
-        entities: ENTITIES,
-      };
+    if (!source) {
+      throw new Error(
+        'Exactly one of a database URL, MikroORM options, or a MikroORM' +
+          ' instance must be provided.',
+      );
     }
+
+    if (typeof source === 'string') {
+      // Reject a bad URL here rather than on the first query, matching
+      // adk-python's engine construction.
+      assertSupportedDatabaseUri(source);
+      this.connectionString = source;
+      this.optionOverrides = overrides;
+      return;
+    }
+
+    if (isMikroOrmInstance(source)) {
+      if (overrides) {
+        throw new Error(
+          'Options cannot be applied to a MikroORM instance the caller' +
+            ' already built. Pass a connection string or an options object' +
+            ' instead.',
+        );
+      }
+      this.orm = source;
+      this.ownsOrm = false;
+      return;
+    }
+
+    if (!source.driver) {
+      throw new Error('Driver is required when passing options object.');
+    }
+
+    this.options = {...source, ...overrides, entities: ENTITIES};
   }
 
   async init() {
@@ -90,14 +163,137 @@ export class DatabaseSessionService extends BaseSessionService {
       return;
     }
 
-    if (this.connectionString && (!this.options || !this.options.driver)) {
-      this.options = await getConnectionOptionsFromUri(this.connectionString);
+    if (this.connectionString) {
+      this.options = await getConnectionOptionsFromUri(
+        this.connectionString,
+        this.optionOverrides,
+      );
     }
 
-    this.orm = await MikroORM.init(this.options!);
+    if (!this.orm) {
+      this.orm = await MikroORM.init(this.options!);
+    }
+
+    // Detection has to run first: creating the current tables adds an
+    // `event_data` column to a legacy `events` table, which destroys the
+    // evidence it reads.
+    const version = await detectDatabaseSchemaVersion(this.orm);
+    if (version === SCHEMA_VERSION_0_PICKLE) {
+      await this.reopenWithLegacyEntities();
+      this.initialized = true;
+      return;
+    }
+
     await ensureDatabaseCreated(this.orm!);
     await validateDatabaseSchemaVersion(this.orm!);
     this.initialized = true;
+  }
+
+  /**
+   * Releases the database connection.
+   *
+   * A MikroORM instance the caller supplied stays open, because the caller
+   * owns it. Calling this twice, or before {@link init}, does nothing.
+   */
+  async close(): Promise<void> {
+    this.initialized = false;
+
+    if (!this.ownsOrm || !this.orm) {
+      return;
+    }
+
+    const orm = this.orm;
+    this.orm = undefined;
+    await orm.close();
+  }
+
+  /**
+   * Swaps the current entity set for the legacy one.
+   *
+   * Neither the tables nor the metadata row is written: doing so would turn a
+   * readable legacy database into one that reports itself as current while its
+   * events read back empty.
+   */
+  private async reopenWithLegacyEntities(): Promise<void> {
+    if (!this.ownsOrm) {
+      throw new Error(
+        'This database uses the legacy v0 session schema. Reading it needs' +
+          ' the legacy entity set, which this service can only install on a' +
+          ' connection it opened itself. Construct it with a connection' +
+          ' string or an options object rather than a MikroORM instance.',
+      );
+    }
+
+    const previous = this.orm!;
+    // Clear first, so a failed retry does not leave a closed instance
+    // installed.
+    this.orm = undefined;
+    await previous.close();
+
+    this.orm = await MikroORM.init({...this.options!, entities: ENTITIES_V0});
+    this.legacySchema = true;
+  }
+
+  /** Throws when the open database is one adk-js can only read. */
+  private assertWritable(): void {
+    if (this.legacySchema) {
+      throw new Error(
+        'This database uses the legacy v0 session schema, which stores event' +
+          ' actions as a Python pickle. adk-js can read such a database but' +
+          ' cannot write to it. Migrate it with the adk-python' +
+          ' `adk migrate session` command first.',
+      );
+    }
+  }
+
+  private warnAboutLegacyActionsOnce(): void {
+    if (this.warnedAboutLegacyActions) {
+      return;
+    }
+    this.warnedAboutLegacyActions = true;
+    logger.warn(
+      'Event actions read from a legacy v0 database come back empty, because' +
+        ' they are stored as a Python pickle that adk-js cannot decode.' +
+        ' Migrate the database with the adk-python `adk migrate session`' +
+        ' command.',
+    );
+  }
+
+  /** Reads a session's events, newest first, then restores their order. */
+  private async findSessionEvents(
+    em: EntityManager,
+    appName: string,
+    userId: string,
+    sessionId: string,
+    config?: GetSessionConfig,
+  ): Promise<Event[]> {
+    if (config?.numRecentEvents === 0) {
+      // Existence/metadata-only read; skip the events query entirely.
+      return [];
+    }
+
+    const afterTimestamp = config?.afterTimestamp;
+    const where = {
+      appName,
+      userId,
+      sessionId,
+      ...(afterTimestamp === undefined
+        ? {}
+        : {timestamp: {$gte: new Date(afterTimestamp)}}),
+    };
+    const options = {
+      orderBy: NEWEST_EVENT_FIRST,
+      limit: config?.numRecentEvents,
+    };
+
+    if (this.legacySchema) {
+      this.warnAboutLegacyActionsOnce();
+      const rows = await em.find(StorageEventV0, where, options);
+      return rows.reverse().map(storageEventV0ToEvent);
+    }
+
+    const rows = await em.find(StorageEvent, where, options);
+    return rows.reverse().map((row) => row.eventData);
   }
 
   async createSession({
@@ -107,6 +303,7 @@ export class DatabaseSessionService extends BaseSessionService {
     sessionId,
   }: CreateSessionRequest): Promise<Session> {
     await this.init();
+    this.assertWritable();
     const em = this.orm!.em.fork();
 
     const id = sessionId || randomUUID();
@@ -120,25 +317,19 @@ export class DatabaseSessionService extends BaseSessionService {
       throw new Error(`Session with id ${id} already exists.`);
     }
 
-    let appStateModel = await em.findOne(StorageAppState, {appName});
-    if (!appStateModel) {
-      appStateModel = em.create(StorageAppState, {
-        appName,
-        state: {},
-        updateTime: now,
-      });
-      em.persist(appStateModel);
-    }
+    const appStateModel = await getOrCreateRow(
+      em,
+      StorageAppState,
+      {appName},
+      {appName, state: {}, updateTime: now},
+    );
 
-    let userStateModel = await em.findOne(StorageUserState, {appName, userId});
-    if (!userStateModel) {
-      userStateModel = em.create(StorageUserState, {
-        appName,
-        userId,
-        state: {},
-      });
-      em.persist(userStateModel);
-    }
+    const userStateModel = await getOrCreateRow(
+      em,
+      StorageUserState,
+      {appName, userId},
+      {appName, userId, state: {}, updateTime: now},
+    );
 
     const appStateDelta: Record<string, unknown> = {};
     const userStateDelta: Record<string, unknown> = {};
@@ -210,24 +401,13 @@ export class DatabaseSessionService extends BaseSessionService {
       return undefined;
     }
 
-    const eventWhere: FilterQuery<StorageEvent> = {
+    const events = await this.findSessionEvents(
+      em,
       appName,
       userId,
       sessionId,
-    };
-
-    if (config?.afterTimestamp) {
-      eventWhere.timestamp = {$gt: new Date(config.afterTimestamp)};
-    }
-
-    // Get latest numRecentEvents events or all events in DESC order
-    const storageEvents = await em.find(StorageEvent, eventWhere, {
-      orderBy: {timestamp: 'DESC'},
-      limit: config?.numRecentEvents,
-    });
-    // Reverse the events to maintain the original order as we get events in DESC order
-    // to get the latest events first.
-    storageEvents.reverse();
+      config,
+    );
 
     const appStateModel = await em.findOne(StorageAppState, {appName});
     const userStateModel = await em.findOne(StorageUserState, {
@@ -246,7 +426,7 @@ export class DatabaseSessionService extends BaseSessionService {
       appName,
       userId,
       state: mergedState,
-      events: storageEvents.map((se) => se.eventData),
+      events,
       lastUpdateTime: storageSession.updateTime.getTime(),
     });
   }
@@ -263,16 +443,14 @@ export class DatabaseSessionService extends BaseSessionService {
     const em = this.orm!.em.fork();
 
     const where: FilterQuery<StorageSession> = {appName};
-    if (userId) {
+    // An empty user id is a user id. Falsiness here returned every user's
+    // sessions for the app; adk-python filters on `if user_id is not None`.
+    if (userId !== undefined) {
       where.userId = userId;
     }
 
     const orderBy =
-      order === 'asc'
-        ? {updateTime: 'ASC' as const, id: 'ASC' as const}
-        : order === 'desc'
-          ? {updateTime: 'DESC' as const, id: 'ASC' as const}
-          : undefined;
+      order === 'desc' ? NEWEST_SESSION_FIRST : OLDEST_SESSION_FIRST;
 
     let storageSessions;
     let paginationMeta: Pick<
@@ -328,7 +506,7 @@ export class DatabaseSessionService extends BaseSessionService {
     const appState = appStateModel?.state || {};
     const userStateMap: Record<string, Record<string, unknown>> = {};
 
-    if (userId) {
+    if (userId !== undefined) {
       const u = await em.findOne(StorageUserState, {appName, userId});
       if (u) userStateMap[userId] = u.state;
     } else {
@@ -363,6 +541,10 @@ export class DatabaseSessionService extends BaseSessionService {
     const em = this.orm!.em.fork();
 
     await em.nativeDelete(StorageSession, {appName, userId, id: sessionId});
+    if (this.legacySchema) {
+      await em.nativeDelete(StorageEventV0, {appName, userId, sessionId});
+      return;
+    }
     await em.nativeDelete(StorageEvent, {appName, userId, sessionId});
   }
 
@@ -371,6 +553,7 @@ export class DatabaseSessionService extends BaseSessionService {
     event,
   }: AppendEventRequest): Promise<Event> {
     await this.init();
+    this.assertWritable();
     const em = this.orm!.em.fork();
 
     if (event.partial) {

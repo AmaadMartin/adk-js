@@ -21,5 +21,11 @@ describe('Registry', () => {
         'Unsupported session service URI: unsupported://localhost:5432/mydb',
       );
     });
+
+    it('explains a driver suffix rather than disclaiming the uri', () => {
+      expect(() =>
+        getSessionServiceFromUri('postgresql+asyncpg://user:pw@host:5432/db'),
+      ).to.throw("names the 'asyncpg' driver in its scheme");
+    });
   });
 });
