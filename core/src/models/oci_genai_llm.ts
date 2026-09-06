@@ -145,9 +145,13 @@ interface OciToolCallDelta {
  * `Message` requires a role, and a chunk carries only the fields that changed.
  */
 interface OciStreamChunk {
+  /**
+   * Present only when the frame carried a message object. Its two lists are
+   * always arrays, because `parseStreamChunk` builds them.
+   */
   message?: {
-    content?: Array<{type?: string; text?: string}>;
-    toolCalls?: OciToolCallDelta[];
+    content: Array<{type?: string; text?: string}>;
+    toolCalls: OciToolCallDelta[];
   };
   usage?: {
     promptTokens?: number;
@@ -171,12 +175,6 @@ interface ContentPieces {
   toolResults: models.ToolMessage[];
 }
 
-/** The URL and mime type a part contributes to a chat message. */
-interface PartMedia {
-  url: string;
-  mimeType: string;
-}
-
 /**
  * The OCI content blocks that carry media.
  *
@@ -190,9 +188,33 @@ export type OciMediaContent =
   | models.VideoContent
   | models.DocumentContent;
 
-/** Narrows an unknown value to a plain object. */
+/**
+ * Narrows an unknown value to a plain object.
+ *
+ * An array is an object to `typeof`, so it is excluded explicitly: every
+ * caller here wants a keyed record, and a JSON array reaching one of them as
+ * a tool-argument set or a schema would be silently wrong.
+ */
 function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Reads a string field of a wire object, or undefined when it is absent. */
+function stringField(
+  source: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = source[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/** Reads a numeric field of a wire object, or undefined when it is absent. */
+function numberField(
+  source: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = source[key];
+  return typeof value === 'number' ? value : undefined;
 }
 
 /** Narrows a value to a web stream, without depending on its constructor. */
@@ -217,35 +239,27 @@ export function toOciRole(role?: string): OciRole.Assistant | OciRole.User {
 }
 
 /**
- * The URL and mime type of a part's media payload, or undefined when it has
- * none. Inline bytes become a data URL; file data passes its URI through.
- */
-function partMedia(part: Part): PartMedia | undefined {
-  if (part.inlineData?.data !== undefined) {
-    const mimeType = part.inlineData.mimeType || DEFAULT_MEDIA_MIME_TYPE;
-    return {url: `data:${mimeType};base64,${part.inlineData.data}`, mimeType};
-  }
-  if (part.fileData?.fileUri) {
-    return {url: part.fileData.fileUri, mimeType: part.fileData.mimeType ?? ''};
-  }
-  return undefined;
-}
-
-/**
  * Maps a multimodal part onto OCI content blocks, keyed on the primary type of
- * its mime type. Anything that is not image, audio or video — a PDF, plain
- * text, an unknown mime type — is sent as a document.
+ * its mime type. Inline bytes become a data URL and file data passes its URI
+ * through. Anything that is not image, audio or video — a PDF, plain text, an
+ * unknown mime type — is sent as a document.
  *
  * @param part The part to convert.
  * @return One content block, or none when the part carries no media.
  */
 export function mediaBlocksForPart(part: Part): OciMediaContent[] {
-  const media = partMedia(part);
-  if (!media) {
+  let url: string;
+  let mimeType: string;
+  if (part.inlineData?.data !== undefined) {
+    mimeType = part.inlineData.mimeType || DEFAULT_MEDIA_MIME_TYPE;
+    url = `data:${mimeType};base64,${part.inlineData.data}`;
+  } else if (part.fileData?.fileUri) {
+    url = part.fileData.fileUri;
+    mimeType = part.fileData.mimeType ?? '';
+  } else {
     return [];
   }
-  const url = media.url;
-  switch (media.mimeType.split('/')[0].toLowerCase()) {
+  switch (mimeType.split('/')[0].toLowerCase()) {
     case 'image':
       return [{type: 'IMAGE', imageUrl: {url}}];
     case 'audio':
@@ -388,15 +402,6 @@ function responseJsonSchema(
   return isGenaiDialect(schema) ? genaiSchemaToJsonSchema(schema) : schema;
 }
 
-/** Reads a string field of a JSON Schema, or undefined when it is absent. */
-function schemaString(
-  schema: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const value = schema[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
 /**
  * Maps the response settings of a request onto an OCI response format.
  *
@@ -417,8 +422,8 @@ export function buildResponseFormat(
     return {
       type: 'JSON_SCHEMA',
       jsonSchema: {
-        name: schemaString(schema, 'title') ?? 'response',
-        description: schemaString(schema, 'description'),
+        name: stringField(schema, 'title') ?? 'response',
+        description: stringField(schema, 'description'),
         schema,
         isStrict: true,
       },
@@ -517,6 +522,11 @@ function blockText(block: models.ChatContent): string | undefined {
   return typeof text === 'string' ? text : undefined;
 }
 
+/** Narrows a chat body to the non-streaming response the SDK may return. */
+function isChatResponse(body: unknown): body is responses.ChatResponse {
+  return isJsonObject(body) && 'chatResult' in body;
+}
+
 /** Narrows an OCI chat response to the GenericChat shape this provider asks for. */
 function isGenericChatResponse(
   response: models.ChatResult['chatResponse'],
@@ -588,15 +598,76 @@ export function ociResponseToLlmResponse(
   };
 }
 
-/** Parses one SSE frame of a chat stream, skipping a frame that is not JSON. */
+/** Reads the text blocks of a streamed message, dropping anything malformed. */
+function streamTextBlocks(
+  value: unknown,
+): Array<{type?: string; text?: string}> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isJsonObject).map((block) => ({
+    type: stringField(block, 'type'),
+    text: stringField(block, 'text'),
+  }));
+}
+
+/** Reads the tool-call deltas of a streamed message. */
+function streamToolCalls(value: unknown): OciToolCallDelta[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isJsonObject).map((delta) => ({
+    index: numberField(delta, 'index'),
+    id: stringField(delta, 'id'),
+    name: stringField(delta, 'name'),
+    arguments: stringField(delta, 'arguments'),
+  }));
+}
+
+/** Reads the usage counts of a stream chunk. */
+function streamUsage(value: unknown): OciStreamChunk['usage'] {
+  if (!isJsonObject(value)) {
+    return undefined;
+  }
+  const details = value['completionTokensDetails'];
+  return {
+    promptTokens: numberField(value, 'promptTokens'),
+    completionTokens: numberField(value, 'completionTokens'),
+    completionTokensDetails: isJsonObject(details)
+      ? {reasoningTokens: numberField(details, 'reasoningTokens')}
+      : undefined,
+  };
+}
+
+/**
+ * Reads one SSE frame of a chat stream, skipping a frame that is not a JSON
+ * object.
+ *
+ * The frame is parsed field by field rather than cast, because it arrives as
+ * untyped text: a chunk whose `text` is a number, or whose `toolCalls` is not
+ * an array, must not reach the accumulators as if it had the declared shape.
+ */
 function parseStreamChunk(data: string): OciStreamChunk | undefined {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(data);
-    return isJsonObject(parsed) ? (parsed as OciStreamChunk) : undefined;
+    parsed = JSON.parse(data);
   } catch {
     logger.debug(`Could not parse an OCI SSE frame: ${data}`);
     return undefined;
   }
+  if (!isJsonObject(parsed)) {
+    return undefined;
+  }
+  const message = parsed['message'];
+  return {
+    message: isJsonObject(message)
+      ? {
+          content: streamTextBlocks(message['content']),
+          toolCalls: streamToolCalls(message['toolCalls']),
+        }
+      : undefined,
+    usage: streamUsage(parsed['usage']),
+  };
 }
 
 /**
@@ -759,8 +830,13 @@ export class OCIGenAILlm extends BaseLlm {
     const client = await this.getClient();
     const chatDetails = this.buildChatDetails(llmRequest, false);
     logger.debug(`Sending a request to OCI Generative AI: ${this.model}`);
-    const response = await client.chat({chatDetails});
-    yield ociResponseToLlmResponse(response as responses.ChatResponse);
+    const body = await client.chat({chatDetails});
+    if (!isChatResponse(body)) {
+      throw new Error(
+        'OCI Generative AI answered a chat request without a chat result.',
+      );
+    }
+    yield ociResponseToLlmResponse(body);
   }
 
   /**
@@ -815,7 +891,7 @@ export class OCIGenAILlm extends BaseLlm {
       if (!chunk?.message) {
         continue;
       }
-      for (const block of chunk.message.content ?? []) {
+      for (const block of chunk.message.content) {
         if (block.type === TEXT_CONTENT_TYPE && block.text) {
           text += block.text;
           yield {
@@ -824,10 +900,15 @@ export class OCIGenAILlm extends BaseLlm {
           };
         }
       }
-      accumulateToolCalls(toolCalls, chunk.message.toolCalls ?? []);
+      accumulateToolCalls(toolCalls, chunk.message.toolCalls);
     }
 
     const parts: Part[] = text ? [{text}] : [];
+    // adk-python emits the accumulated calls sorted by name, and the order of
+    // the parts decides the order the caller runs the tools in, so it is
+    // observable behaviour that has to match. The non-streaming path emits in
+    // wire order instead; that difference is inherited from the reference
+    // implementation, not introduced here.
     const ordered = [...toolCalls.values()].sort((a, b) =>
       a.name.localeCompare(b.name),
     );

@@ -125,7 +125,7 @@ describe('defaults', () => {
     const client = fakeOciClient(makeOciResponse());
     const llm = new OCIGenAILlm({
       compartmentId: COMPARTMENT_ID,
-      reasoningEffort: 'LOW' as models.GenericChatRequest.ReasoningEffort,
+      reasoningEffort: ociModels.GenericChatRequest.ReasoningEffort.Low,
       client,
     });
     await collect(llm.generateContentAsync(requestWith()));
@@ -349,6 +349,23 @@ describe('tool declarations', () => {
     ).toBeUndefined();
   });
 
+  it('ignores a parameters schema that is a JSON array', async () => {
+    const request = await chatRequestFor(
+      requestWith('Hi', {
+        tools: [
+          {
+            functionDeclarations: [
+              {name: 'ping', parametersJsonSchema: [1, 2]},
+            ],
+          },
+        ],
+      }),
+    );
+    expect(
+      (request.tools?.[0] as models.FunctionDefinition).parameters,
+    ).toEqual({type: 'object', properties: {}});
+  });
+
   it('sends no tools when the declaration list is absent', async () => {
     expect(
       (
@@ -421,6 +438,18 @@ describe('malformed tool arguments', () => {
       makeOciResponse({
         text: '',
         toolCalls: [{id: 'c1', type: 'FUNCTION', name: 'get', arguments: '7'}],
+      }),
+    );
+    expect(response.content?.parts?.[0].functionCall?.args).toEqual({});
+  });
+
+  it('reads a JSON array of arguments as an empty object', () => {
+    const response = ociResponseToLlmResponse(
+      makeOciResponse({
+        text: '',
+        toolCalls: [
+          {id: 'c1', type: 'FUNCTION', name: 'get', arguments: '[1,2]'},
+        ],
       }),
     );
     expect(response.content?.parts?.[0].functionCall?.args).toEqual({});
@@ -644,7 +673,7 @@ describe('streaming', () => {
     expect(parts.map((p) => p.functionCall?.id)).toEqual(['c1', 'c2']);
   });
 
-  it('orders the accumulated tool calls by name', async () => {
+  it('emits the accumulated tool calls in adk-python name order', async () => {
     const {llm} = providerWith(
       sseStreamFrom([
         {
@@ -662,6 +691,8 @@ describe('streaming', () => {
     const responses = await collect(
       llm.generateContentAsync(requestWith(), true),
     );
+    // OCI sent index 0 = zulu, index 1 = alpha. adk-python sorts the
+    // accumulated calls by name before emitting them, so alpha comes first.
     const parts = responses[0].content?.parts ?? [];
     expect(parts.map((p) => p.functionCall?.name)).toEqual(['alpha', 'zulu']);
   });
@@ -686,11 +717,88 @@ describe('streaming', () => {
     expect(responses[1].content?.parts?.[0].text).toBe('one');
   });
 
+  it('skips a text block whose text is not a string', async () => {
+    const {llm} = providerWith(
+      sseStreamFrom([
+        {message: {content: [{type: 'TEXT', text: 42}]}},
+        {message: {content: [{type: 'TEXT', text: 'real'}]}},
+      ]),
+    );
+    const responses = await collect(
+      llm.generateContentAsync(requestWith(), true),
+    );
+    expect(responses[0].content?.parts?.[0].text).toBe('real');
+    expect(responses[1].content?.parts?.[0].text).toBe('real');
+  });
+
+  it('skips a content list that is not an array', async () => {
+    const {llm} = providerWith(
+      sseStreamFrom([{message: {content: 'not a list'}}]),
+    );
+    const responses = await collect(
+      llm.generateContentAsync(requestWith(), true),
+    );
+    expect(responses).toHaveLength(1);
+    expect(responses[0].content?.parts).toEqual([]);
+  });
+
+  it('skips a tool-call list that is not an array', async () => {
+    const {llm} = providerWith(
+      sseStreamFrom([{message: {toolCalls: {id: 'c1', name: 'get'}}}]),
+    );
+    const responses = await collect(
+      llm.generateContentAsync(requestWith(), true),
+    );
+    expect(responses[0].content?.parts).toEqual([]);
+  });
+
+  it('skips a tool-call delta that is not an object', async () => {
+    const {llm} = providerWith(
+      sseStreamFrom([
+        {message: {toolCalls: ['nope', {id: 'c1', name: 'get'}]}},
+      ]),
+    );
+    const responses = await collect(
+      llm.generateContentAsync(requestWith(), true),
+    );
+    const parts = responses[0].content?.parts ?? [];
+    expect(parts.map((p) => p.functionCall?.id)).toEqual(['c1']);
+  });
+
+  it('reads a token count that is not a number as zero', async () => {
+    const {llm} = providerWith(
+      sseStreamFrom([
+        {
+          usage: {
+            promptTokens: '8',
+            completionTokens: 3,
+            completionTokensDetails: 'nope',
+          },
+        },
+      ]),
+    );
+    const responses = await collect(
+      llm.generateContentAsync(requestWith(), true),
+    );
+    expect(responses[0].usageMetadata?.promptTokenCount).toBe(0);
+    expect(responses[0].usageMetadata?.candidatesTokenCount).toBe(3);
+    expect(responses[0].usageMetadata?.thoughtsTokenCount).toBeUndefined();
+  });
+
   it('refuses a streaming answer that is not a stream', async () => {
     const {llm} = providerWith(makeOciResponse());
     await expect(
       collect(llm.generateContentAsync(requestWith(), true)),
     ).rejects.toThrow(/without a stream/);
+  });
+});
+
+describe('a malformed non-streaming answer', () => {
+  it('refuses an answer that carries no chat result', async () => {
+    const {llm} = providerWith(null);
+    await expect(
+      collect(llm.generateContentAsync(requestWith())),
+    ).rejects.toThrow(/without a chat result/);
   });
 });
 

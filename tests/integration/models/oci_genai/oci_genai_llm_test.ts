@@ -22,18 +22,28 @@ import {createServer, Server} from 'node:http';
 import {AddressInfo} from 'node:net';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import type {models} from 'oci-generativeaiinference';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {z} from 'zod/v4';
 
+import {
+  functionDefinitionName,
+  isGenericChatRequest,
+} from '../../../../core/test/models/oci_genai_test_utils.js';
 import {createRunner} from '../../test_case_utils.js';
 
 const COMPARTMENT_ID = 'ocid1.compartment.oc1..integration';
 const MODEL = 'google.gemini-2.0-flash-001';
 
-/** One request the stub server received. */
+/**
+ * One request the stub server received.
+ *
+ * The body is typed as the SDK's own `ChatDetails`, so every assertion below
+ * reads a declared field rather than re-casting an untyped record.
+ */
 interface RecordedRequest {
   path: string;
-  body: Record<string, unknown>;
+  body: models.ChatDetails;
 }
 
 /** What the stub server answers with next. */
@@ -124,7 +134,11 @@ describe('OCIGenAILlm against a local inference endpoint', () => {
       request.on('end', () => {
         received.push({
           path: request.url ?? '',
-          body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+          // The one place untyped JSON becomes a typed value. The provider
+          // serialised it from a ChatDetails, so this is what came back.
+          body: JSON.parse(
+            Buffer.concat(chunks).toString('utf8'),
+          ) as models.ChatDetails,
         });
         response.writeHead(200, {'content-type': nextReply.contentType});
         response.end(nextReply.body);
@@ -154,11 +168,22 @@ describe('OCIGenAILlm against a local inference endpoint', () => {
     });
   }
 
-  /** The body of the most recent request the stub server received. */
-  function lastRequest(): Record<string, unknown> {
+  /** The chat details of the most recent request the stub server received. */
+  function lastRequest(): models.ChatDetails {
     const request = received[received.length - 1];
     expect(request).toBeDefined();
     return request.body;
+  }
+
+  /** The GenericChat request of the most recent call. */
+  function lastChatRequest(): models.GenericChatRequest {
+    const chatRequest = lastRequest().chatRequest;
+    if (!isGenericChatRequest(chatRequest)) {
+      expect.fail(
+        `Expected a GenericChatRequest, got ${chatRequest.apiFormat}.`,
+      );
+    }
+    return chatRequest;
   }
 
   it('runs an agent turn over HTTP', async () => {
@@ -178,18 +203,17 @@ describe('OCIGenAILlm against a local inference endpoint', () => {
 
     expect(text).toBe('Chicago is sunny.');
     expect(received[received.length - 1].path).toBe('/20231130/actions/chat');
-    const body = lastRequest();
-    expect(body['compartmentId']).toBe(COMPARTMENT_ID);
-    expect(body['servingMode']).toEqual({
+    expect(lastRequest().compartmentId).toBe(COMPARTMENT_ID);
+    expect(lastRequest().servingMode).toEqual({
       servingType: 'ON_DEMAND',
       modelId: MODEL,
     });
-    const chatRequest = body['chatRequest'] as Record<string, unknown>;
-    expect(chatRequest['apiFormat']).toBe('GENERIC');
-    expect(chatRequest['isStream']).toBeUndefined();
-    const messages = chatRequest['messages'] as Array<Record<string, unknown>>;
-    expect(messages[0]['role']).toBe('SYSTEM');
-    expect(messages[messages.length - 1]['role']).toBe('USER');
+    const chatRequest = lastChatRequest();
+    expect(chatRequest.apiFormat).toBe('GENERIC');
+    expect(chatRequest.isStream).toBeUndefined();
+    const messages = chatRequest.messages ?? [];
+    expect(messages[0].role).toBe('SYSTEM');
+    expect(messages[messages.length - 1].role).toBe('USER');
   });
 
   it('streams an agent turn over server-sent events', async () => {
@@ -231,9 +255,9 @@ describe('OCIGenAILlm against a local inference endpoint', () => {
 
     expect(partials).toEqual(['Chicago ', 'is sunny.']);
     expect(final).toBe('Chicago is sunny.');
-    const chatRequest = lastRequest()['chatRequest'] as Record<string, unknown>;
-    expect(chatRequest['isStream']).toBe(true);
-    expect(chatRequest['streamOptions']).toEqual({isIncludeUsage: true});
+    const chatRequest = lastChatRequest();
+    expect(chatRequest.isStream).toBe(true);
+    expect(chatRequest.streamOptions).toEqual({isIncludeUsage: true});
   });
 
   it('calls a tool and sends its result back to the model', async () => {
@@ -277,11 +301,12 @@ describe('OCIGenAILlm against a local inference endpoint', () => {
 
     expect(calls).toContain('get_temperature');
     expect(results[0]).toMatchObject({city: 'Chicago', celsius: 22});
-    const chatRequest = lastRequest()['chatRequest'] as Record<string, unknown>;
-    const tools = chatRequest['tools'] as Array<Record<string, unknown>>;
-    expect(tools[0]['name']).toBe('get_temperature');
-    const messages = chatRequest['messages'] as Array<Record<string, unknown>>;
-    expect(messages.some((m) => m['role'] === 'TOOL')).toBe(true);
+    const chatRequest = lastChatRequest();
+    expect(functionDefinitionName(chatRequest.tools?.[0])).toBe(
+      'get_temperature',
+    );
+    const messages = chatRequest.messages ?? [];
+    expect(messages.some((m) => m.role === 'TOOL')).toBe(true);
   });
 
   it('reports a service error rather than swallowing it', async () => {
