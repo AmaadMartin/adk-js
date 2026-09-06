@@ -15,6 +15,7 @@ import {
 } from '@google/adk';
 import {Argument, Command, Option} from 'commander';
 import dotenv from 'dotenv';
+import * as path from 'node:path';
 import {runIntegrationTests} from '../integration/run_integration_tests.js';
 import {AdkApiServer} from '../server/adk_api_server.js';
 import {FileModuleType} from '../utils/agent_loader.js';
@@ -25,6 +26,7 @@ import {createAgent} from './cli_create.js';
 import {runAgent} from './cli_run.js';
 import {deployToAgentEngine} from './deploy/cli_deploy_agent_engine.js';
 import {deployToCloudRun} from './deploy/cli_deploy_cloud_run.js';
+import {getServiceRegistry, loadServicesModule} from './service_registry.js';
 
 dotenv.config({quiet: true});
 
@@ -52,19 +54,27 @@ function getLogLevelFromOptions(options: {
   return LogLevel.INFO;
 }
 
-function getSessionServiceFromOptions(options: {
+// The registry is consulted first, so a scheme a user registered overrides the
+// built-in of the same name. An unclaimed scheme falls through to the core
+// resolver, which owns memory://, database URLs, gs:// and file://.
+async function getSessionServiceFromOptions(options: {
   session_service_uri?: string;
-}): BaseSessionService {
-  return getSessionServiceFromUri(
-    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://',
+}): Promise<BaseSessionService> {
+  const uri =
+    options['session_service_uri'] || process.env.DATABASE_URL || 'memory://';
+  return (
+    (await getServiceRegistry().createSessionService(uri)) ??
+    getSessionServiceFromUri(uri)
   );
 }
 
-function getArtifactServiceFromOptions(options: {
+async function getArtifactServiceFromOptions(options: {
   artifact_service_uri?: string;
-}): BaseArtifactService | undefined {
-  return getArtifactServiceFromUri(
-    options['artifact_service_uri'] || 'memory://',
+}): Promise<BaseArtifactService | undefined> {
+  const uri = options['artifact_service_uri'] || 'memory://';
+  return (
+    (await getServiceRegistry().createArtifactService(uri)) ??
+    getArtifactServiceFromUri(uri)
   );
 }
 
@@ -256,16 +266,18 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
+        const resolvedAgentsDir = getAbsolutePath(agentsDir);
+        await loadServicesModule(resolvedAgentsDir);
         const server = new AdkApiServer({
           logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
+          agentsDir: resolvedAgentsDir,
           host: options['host'],
           port: parseInt(options['port'], 10),
           serveDebugUI: true,
           allowOrigins: options['allow_origins'],
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: await getSessionServiceFromOptions(options),
+          artifactService: await getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -304,16 +316,18 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(logLevel);
 
       try {
+        const resolvedAgentsDir = getAbsolutePath(agentsDir);
+        await loadServicesModule(resolvedAgentsDir);
         const server = new AdkApiServer({
           logLevel,
-          agentsDir: getAbsolutePath(agentsDir),
+          agentsDir: resolvedAgentsDir,
           host: options['host'],
           port: parseInt(options['port'], 10),
           serveDebugUI: false,
           allowOrigins: options['allow_origins'],
           allowedHosts: getAllowedHosts(options['allowed_hosts']),
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: await getSessionServiceFromOptions(options),
+          artifactService: await getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           a2a: getBoolean(options['a2a']),
@@ -399,14 +413,16 @@ export function createProgram(): Command {
       setAdkCoreLogLevel(getLogLevelFromOptions(options));
 
       try {
+        // The agent's own directory, matching where adk-python looks.
+        await loadServicesModule(path.dirname(getAbsolutePath(agentPath)));
         await runAgent({
           agentPath,
           inputFile: options['replay'],
           savedSessionFile: options['resume'],
           saveSession: getBoolean(options['save_session']),
           sessionId: options['session_id'],
-          sessionService: getSessionServiceFromOptions(options),
-          artifactService: getArtifactServiceFromOptions(options),
+          sessionService: await getSessionServiceFromOptions(options),
+          artifactService: await getArtifactServiceFromOptions(options),
           otelToCloud: options['otel_to_cloud'] ? true : false,
           agentFileLoadOptions: getAgentFileOptions(options),
           reloadAgents: getBoolean(options['reload_agents']),
