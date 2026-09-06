@@ -172,6 +172,7 @@
     "@google-cloud/bigquery-storage": "^6.0.1",
     "@google-cloud/bigtable": "^7.2.0",
     "@google-cloud/dataplex": "^6.0.0",
+    "@google-cloud/eventarc-publishing": "^5.0.0",
     "@google-cloud/firestore": "^9.0.1",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
@@ -207,6 +208,7 @@
     "@google-cloud/bigquery-storage": "^6.0.1",
     "@google-cloud/bigtable": "^7.2.0",
     "@google-cloud/dataplex": "^6.0.0",
+    "@google-cloud/eventarc-publishing": "^5.0.0",
     "@google-cloud/firestore": "^9.0.1",
     "@google-cloud/opentelemetry-cloud-monitoring-exporter": "^0.21.0",
     "@google-cloud/opentelemetry-cloud-trace-exporter": "^3.0.0",
@@ -250,6 +252,9 @@
       "optional": true
     },
     "@google-cloud/dataplex": {
+      "optional": true
+    },
+    "@google-cloud/eventarc-publishing": {
       "optional": true
     },
     "@google-cloud/firestore": {
