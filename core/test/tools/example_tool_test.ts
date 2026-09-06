@@ -13,7 +13,9 @@ import {
   createSession,
   Example,
   ExampleTool,
+  FunctionTool,
   InvocationContext,
+  isExampleTool,
   LlmRequest,
   PluginManager,
 } from '@google/adk';
@@ -151,6 +153,28 @@ describe('ExampleTool', () => {
 
   it('is importable from @google/adk (public export)', () => {
     expect(new ExampleTool([])).toBeInstanceOf(ExampleTool);
+  });
+});
+
+describe('isExampleTool', () => {
+  it('accepts an ExampleTool holding either a list or a provider', () => {
+    expect(isExampleTool(new ExampleTool([]))).toBe(true);
+    expect(isExampleTool(new ExampleTool(new FixedExampleProvider([])))).toBe(
+      true,
+    );
+  });
+
+  it('rejects another tool, a plain object and nullish values', () => {
+    const functionTool = new FunctionTool({
+      name: 'add',
+      description: 'Adds two numbers',
+      execute: async () => 0,
+    });
+
+    expect(isExampleTool(functionTool)).toBe(false);
+    expect(isExampleTool({})).toBe(false);
+    expect(isExampleTool(undefined)).toBe(false);
+    expect(isExampleTool(null)).toBe(false);
   });
 });
 

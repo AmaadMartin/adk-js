@@ -16,6 +16,26 @@ import {
 } from './base_tool.js';
 
 /**
+ * A unique symbol to identify ADK example tool classes.
+ * Defined once and shared by all ExampleTool instances.
+ */
+const EXAMPLE_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.exampleTool');
+
+/**
+ * Type guard to check if an object is an instance of ExampleTool.
+ * @param obj The object to check.
+ * @returns True if the object is an instance of ExampleTool, false otherwise.
+ */
+export function isExampleTool(obj: unknown): obj is ExampleTool {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    EXAMPLE_TOOL_SIGNATURE_SYMBOL in obj &&
+    obj[EXAMPLE_TOOL_SIGNATURE_SYMBOL] === true
+  );
+}
+
+/**
  * A tool that adds (few-shot) examples to the LLM request.
  *
  * This tool is executed for each LLM request and is never called by the model;
@@ -23,6 +43,9 @@ import {
  * from the latest user query.
  */
 export class ExampleTool extends BaseTool {
+  /** A unique symbol to identify ADK example tool class. */
+  readonly [EXAMPLE_TOOL_SIGNATURE_SYMBOL] = true;
+
   constructor(readonly examples: Example[] | BaseExampleProvider) {
     super({
       // Name and description are not used because this tool only changes

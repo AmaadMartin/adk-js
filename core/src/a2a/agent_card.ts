@@ -17,8 +17,8 @@ import {isLoopAgent, LoopAgent} from '../agents/loop_agent.js';
 import {isParallelAgent} from '../agents/parallel_agent.js';
 import {ReadonlyContext} from '../agents/readonly_context.js';
 import {isSequentialAgent} from '../agents/sequential_agent.js';
-import {BaseTool, isBaseTool} from '../tools/base_tool.js';
-import {isBaseToolset} from '../tools/base_toolset.js';
+import {BaseTool} from '../tools/base_tool.js';
+import {isExampleTool} from '../tools/example_tool.js';
 import {logger} from '../utils/logger.js';
 import {RunnableRoot} from '../workflow/run_node_as_invocation.js';
 import {isWorkflow} from '../workflow/workflow.js';
@@ -128,6 +128,8 @@ async function buildSubAgentSkills(agent: RunnableRoot): Promise<AgentSkill[]> {
         name: `${sub.name}: ${subSkill.name}`,
         description: subSkill.description,
         tags: [`sub_agent:${sub.name}`, ...subSkill.tags],
+        ...(subSkill.examples ? {examples: subSkill.examples} : {}),
+        ...(subSkill.outputModes ? {outputModes: subSkill.outputModes} : {}),
       };
       result.push(skill);
     }
@@ -137,30 +139,67 @@ async function buildSubAgentSkills(agent: RunnableRoot): Promise<AgentSkill[]> {
 }
 
 async function buildLLMAgentSkills(agent: LlmAgent): Promise<AgentSkill[]> {
+  const tools = await agent.canonicalTools();
+  const examples = extractExampleInputs(tools);
+  const outputModes = agent.generateContentConfig?.responseModalities;
+
   const skills: AgentSkill[] = [
     {
       id: agent.name,
       name: 'model',
       description: await buildDescriptionFromInstructions(agent),
       tags: ['llm'],
+      ...(examples.length > 0 ? {examples} : {}),
+      ...(outputModes?.length ? {outputModes} : {}),
     },
   ];
 
-  if (agent.tools && agent.tools.length > 0) {
-    for (const toolUnion of agent.tools) {
-      if (isBaseTool(toolUnion)) {
-        skills.push(toolToSkill(agent.name, toolUnion));
-      } else if (isBaseToolset(toolUnion)) {
-        const tools = await toolUnion.getTools();
+  for (const tool of tools) {
+    // The ExampleTool's content is published as the model skill's examples.
+    if (isExampleTool(tool)) continue;
+    skills.push(toolToSkill(agent.name, tool));
+  }
 
-        for (const tool of tools) {
-          skills.push(toolToSkill(agent.name, tool));
-        }
-      }
-    }
+  if (agent.codeExecutor) {
+    skills.push(codeExecutorToSkill(agent));
   }
 
   return skills;
+}
+
+/**
+ * Extracts the input text of each few-shot example declared on an ExampleTool
+ * so it can be published as AgentSkill.examples.
+ *
+ * Examples come only from a declared ExampleTool. The card is served without
+ * authentication, so instruction text is not publishable content and is never
+ * mined for examples.
+ */
+function extractExampleInputs(tools: BaseTool[]): string[] {
+  for (const tool of tools) {
+    if (!isExampleTool(tool)) continue;
+    // A BaseExampleProvider resolves examples per query, so there is nothing
+    // static to publish; fall through to any later ExampleTool.
+    if (!Array.isArray(tool.examples)) continue;
+    return tool.examples
+      .map((example) =>
+        (example.input.parts ?? [])
+          .map((part) => part.text)
+          .filter((text): text is string => !!text)
+          .join('\n'),
+      )
+      .filter((text) => text.length > 0);
+  }
+  return [];
+}
+
+function codeExecutorToSkill(agent: LlmAgent): AgentSkill {
+  return {
+    id: `${agent.name}-code-executor`,
+    name: 'code-execution',
+    description: 'Can execute code',
+    tags: ['llm', 'code_execution'],
+  };
 }
 
 function toolToSkill(prefix: string, tool: BaseTool): AgentSkill {
