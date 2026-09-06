@@ -155,6 +155,31 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export {getAllToolCalls} from './evaluation/eval_case.js';
+export type {
+  ConversationScenario,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+} from './evaluation/eval_case.js';
+export {ToolTrajectoryMatchType} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  ParsedToolTrajectoryCriterion,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export {EvalStatus} from './evaluation/evaluator.js';
+export type {
+  CriterionType,
+  EvaluationResult,
+  Evaluator,
+  PerInvocationResult,
+} from './evaluation/evaluator.js';
+export {TrajectoryEvaluator} from './evaluation/trajectory_evaluator.js';
+export type {TrajectoryEvaluatorOptions} from './evaluation/trajectory_evaluator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
