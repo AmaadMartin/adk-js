@@ -5,6 +5,12 @@
  */
 
 /**
+ * `createGcsClient` only. `getGcsClient`, the factory the admin toolset calls,
+ * is covered by `admin_client_test.ts`: the two suites script a different
+ * stand-in for `@google-cloud/storage`, and one file installs one `vi.mock`.
+ */
+
+/**
  * Ported from adk-python
  * `tests/unittests/integrations/gcs/test_client.py`, at upstream `main`.
  */

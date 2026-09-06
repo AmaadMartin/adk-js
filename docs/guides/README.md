@@ -320,6 +320,9 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [ExampleTool.fromConfig](tools/example_tool/index.md) - Building an ExampleTool from a configuration record, and naming an example provider that user code exports.
 - [FunctionTool parameters and the sync-callable runner](tools/function_tool/index.md) - How a tool's parameter declaration is built, and how a host keeps a blocking tool body off the event loop.
 - [GCSCredentialsConfig](tools/gcs_credentials/index.md) - How a Cloud Storage tool authenticates: the three credential modes, the default scope and the token cache key.
+- [GcsAdminToolset](tools/gcs_admin_toolset/index.md) - Cloud Storage bucket
+  administration tools, behind a read/read-write capability gate and the end
+  user's Google credential.
 - [GoogleApiToolset](tools/google_api_toolset/index.md) - Turning a Google API Discovery document into callable tools, and the credentials they run under.
 - [GoogleSearchAgentTool](tools/google_search_agent/index.md) - Running Google
   Search in a sub-agent so it can sit beside your agent's other tools.

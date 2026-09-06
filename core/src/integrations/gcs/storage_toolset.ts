@@ -12,7 +12,7 @@ import {BaseToolset, ToolPredicate} from '../../tools/base_toolset.js';
 import {FunctionTool} from '../../tools/function_tool.js';
 import {experimental} from '../../utils/experimental.js';
 import {createGcsClient} from './client.js';
-import {GcsCredentialsConfig} from './gcs_credentials.js';
+import {GcsClientCredentialsConfig} from './gcs_credentials.js';
 import {GcsCapability} from './settings.js';
 import {
   createObject,
@@ -45,7 +45,7 @@ export interface GcsToolsetOptions {
    */
   toolFilter?: ToolPredicate | string[];
   /** How to authenticate. Defaults to Application Default Credentials. */
-  credentialsConfig?: GcsCredentialsConfig;
+  credentialsConfig?: GcsClientCredentialsConfig;
   /**
    * Which operations to expose. Defaults to {@link GcsCapability.READ_ONLY},
    * so a toolset built with no options never exposes a write tool. This
@@ -84,7 +84,7 @@ export interface GcsToolsetOptions {
 @experimental
 export class GcsToolset extends BaseToolset {
   private readonly capability: GcsCapability;
-  private readonly credentialsConfig?: GcsCredentialsConfig;
+  private readonly credentialsConfig?: GcsClientCredentialsConfig;
   private readonly project?: string;
   private clientPromise?: Promise<Storage>;
 

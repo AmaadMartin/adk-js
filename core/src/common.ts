@@ -1155,8 +1155,9 @@ export type {GoogleApiToolOptions} from './tools/google_api_tool/google_api_tool
 // `_google_credentials.js`. Both modules declare a class of that name.
 export {GoogleCredentialsManager} from './tools/google_credentials.js';
 export type {BaseGoogleCredentialsConfigOptions} from './tools/google_credentials.js';
-// A third port of that module, the one `GoogleTool` is built on. The two
-// modules above already hold its class names, so the barrel prefixes them.
+// The config class of that same module, the one `GoogleTool` is built on.
+// `_google_credentials.js` above already holds the plain name.
+export {BaseGoogleCredentialsConfig as GoogleCredentialsConfig} from './tools/google_credentials.js';
 export {
   GOOGLE_MAPS_GROUNDING,
   GoogleMapsGroundingTool,

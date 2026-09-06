@@ -18,10 +18,15 @@ import {
   ToolInputParameters,
   ToolOptions,
 } from './function_tool.js';
+// This module and `google_tool_credentials.js` are two ports of one adk-python
+// module. The config declared here is the weaker of the two: it has no
+// `credentialKey`, so a config built on either module satisfies it. That is
+// what lets the BigQuery, Bigtable and Cloud Storage toolsets, which ported
+// their credentials against different copies, all build a `GoogleTool`.
 import {
   BaseGoogleCredentialsConfig,
   GoogleCredentialsManager,
-} from './google_tool_credentials.js';
+} from './google_credentials.js';
 
 /**
  * The `status` field a {@link GoogleTool} result carries.

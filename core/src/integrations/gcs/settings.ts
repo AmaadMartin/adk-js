@@ -10,7 +10,8 @@ import {
 } from '../../features/feature_registry.js';
 
 /**
- * What kind of Cloud Storage operations a {@link GcsToolset} may expose.
+ * What kind of Cloud Storage operations a {@link GcsToolset} or a
+ * {@link GcsAdminToolset} may expose.
  *
  * The string values cross the language boundary and match adk-python's
  * `Capabilities` enum exactly.
@@ -66,3 +67,17 @@ export function createGcsToolSettings(
   // only an absent field takes the default.
   return {capabilities: params.capabilities ?? [...DEFAULT_GCS_CAPABILITIES]};
 }
+
+/**
+ * The settings a toolset built without any uses.
+ *
+ * Read-only, so an agent cannot create, change or delete a bucket unless its
+ * author asked for that. This default may change in a future version.
+ *
+ * {@link createGcsToolSettings} builds the same value, but only once the
+ * `GCS_TOOL_SETTINGS` feature is enabled. {@link GcsAdminToolset} needs a
+ * default that is always available, so it reads this constant instead.
+ */
+export const DEFAULT_GCS_TOOL_SETTINGS: GcsToolSettings = {
+  capabilities: [...DEFAULT_GCS_CAPABILITIES],
+};

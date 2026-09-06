@@ -19,13 +19,13 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {z} from 'zod/v3';
 // Not part of the package barrel: `GoogleTool` is the public surface.
 import {
+  BaseGoogleCredentialsConfig,
+  GoogleCredentialsManager,
+} from '../../src/tools/google_credentials.js';
+import {
   authorizationRequiredMessage,
   withGoogleCredentials,
 } from '../../src/tools/google_tool.js';
-import {
-  BaseGoogleCredentialsConfig,
-  GoogleCredentialsManager,
-} from '../../src/tools/google_tool_credentials.js';
 
 const CLIENT_ID = 'test_client_id';
 const CLIENT_SECRET = 'test_client_secret';
