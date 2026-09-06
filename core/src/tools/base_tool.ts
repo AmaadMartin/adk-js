@@ -34,6 +34,7 @@ export interface BaseToolParams {
   name: string;
   description: string;
   isLongRunning?: boolean;
+  customMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -87,6 +88,21 @@ export abstract class BaseTool {
   readonly isLongRunning: boolean;
 
   /**
+   * Optional key-value metadata for this tool, e.g. tool manifests or
+   * telemetry identifiers attached by the toolset that produced the tool.
+   *
+   * Unlike the other `BaseTool` members this is intentionally mutable: a
+   * toolset frequently has to stamp metadata onto tool instances it does not
+   * construct itself (see `AgentRegistrySingleMCPToolset`). The reference
+   * Python SDK exposes the same field with the same mutability.
+   *
+   * The entire value must be JSON-serializable. It is intended to reach
+   * telemetry spans, so it must never carry credentials, tokens or user
+   * content.
+   */
+  customMetadata?: Record<string, unknown>;
+
+  /**
    * Base constructor for a tool.
    *
    * @param params The parameters for `BaseTool`.
@@ -95,6 +111,7 @@ export abstract class BaseTool {
     this.name = params.name;
     this.description = params.description;
     this.isLongRunning = params.isLongRunning ?? false;
+    this.customMetadata = params.customMetadata;
   }
 
   /**

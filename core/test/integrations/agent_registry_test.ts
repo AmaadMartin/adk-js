@@ -310,9 +310,9 @@ describe('AgentRegistry', () => {
 
       const tools = await toolset.getTools({} as ReadonlyContext);
       expect(tools.length).toBe(2);
-      expect(
-        (tools[0] as any).customMetadata[GCP_MCP_SERVER_DESTINATION_ID],
-      ).toBe('urn:mcp:1234:bigquery');
+      expect(tools[0].customMetadata?.[GCP_MCP_SERVER_DESTINATION_ID]).toBe(
+        'urn:mcp:1234:bigquery',
+      );
     });
 
     it('should throw if connection URI not found', async () => {
