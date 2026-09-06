@@ -7,6 +7,7 @@
 import {
   AudioTranscriptionConfig,
   ContextWindowCompressionConfig,
+  HttpOptions,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
@@ -64,6 +65,17 @@ export interface RunConfig {
    * supported and is rejected by `createRunConfig`.
    */
   streamingMode?: StreamingMode;
+
+  /**
+   * Per-request HTTP options for the calls this run makes.
+   *
+   * `ManagedAgent` is the only agent that reads this today, and only its
+   * `headers`: it merges them with the ADK tracking headers, so a caller header
+   * never displaces attribution. An `LlmAgent` run ignores the field. Mirrors
+   * `RunConfig.http_options` in google/adk-python `agents/run_config.py`, where
+   * `base_llm_flow` merges it into every request.
+   */
+  httpOptions?: HttpOptions;
 
   /**
    * Output audio transcription config.

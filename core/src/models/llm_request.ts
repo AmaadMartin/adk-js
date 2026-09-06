@@ -51,6 +51,17 @@ export interface LlmRequest {
    * The interaction ID from the previous turn, if any.
    */
   previousInteractionId?: string;
+
+  /**
+   * Whether this request is being assembled for a Managed Agent.
+   *
+   * A Managed Agent names its backend agent instead of a model, so `model` is
+   * absent and the request never reaches a model API. Built-in tools that gate
+   * their configuration on a Gemini model read this flag so they still resolve.
+   * Mirrors `LlmRequest._is_managed_agent` in google/adk-python
+   * `models/llm_request.py`.
+   */
+  isManagedAgent?: boolean;
 }
 
 /**

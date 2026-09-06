@@ -47,6 +47,14 @@ export type {
 } from './agents/llm_agent.js';
 export {LoopAgent, isLoopAgent} from './agents/loop_agent.js';
 export type {LoopAgentConfig} from './agents/loop_agent.js';
+export {ManagedAgent, isManagedAgent} from './agents/managed_agent.js';
+export type {
+  ManagedAgentClient,
+  ManagedAgentConfig,
+  ManagedAgentEnvironment,
+  ManagedAgentRuntimeConfig,
+  ManagedAgentTool,
+} from './agents/managed_agent.js';
 export {ParallelAgent, isParallelAgent} from './agents/parallel_agent.js';
 export {AgentTransferLlmRequestProcessor} from './agents/processors/agent_transfer_llm_request_processor.js';
 export {
@@ -212,6 +220,7 @@ export {BaseLlm, isBaseLlm} from './models/base_llm.js';
 export type {BaseLlmConnection} from './models/base_llm_connection.js';
 export {Gemini, geminiInitParams} from './models/google_llm.js';
 export type {GeminiParams} from './models/google_llm.js';
+export type {InteractionsClient} from './models/interactions_utils.js';
 export type {LlmRequest} from './models/llm_request.js';
 export type {LlmResponse} from './models/llm_response.js';
 export {LLMRegistry} from './models/registry.js';
@@ -324,6 +333,11 @@ export {
   PRELOAD_MEMORY,
   PreloadMemoryTool,
 } from './tools/preload_memory_tool.js';
+export {isRemoteMcpServer} from './tools/remote_mcp_server.js';
+export type {
+  McpHeaderProvider,
+  RemoteMcpServer,
+} from './tools/remote_mcp_server.js';
 export {requestInputTool} from './tools/request_input_tool.js';
 export type {ResumeInputs} from './tools/resume_inputs.js';
 export {
@@ -343,7 +357,12 @@ export type {
 } from './tools/vertex_ai_search_tool.js';
 export {VertexRagRetrievalTool} from './tools/vertex_rag_retrieval_tool.js';
 export {AsyncQueue} from './utils/async_queue.js';
-export {getClientLabels, runWithClientLabel} from './utils/client_labels.js';
+export {
+  getClientLabels,
+  getTrackingHeaders,
+  mergeTrackingHeaders,
+  runWithClientLabel,
+} from './utils/client_labels.js';
 export {LogLevel, getLogger, setLogLevel, setLogger} from './utils/logger.js';
 export type {Logger} from './utils/logger.js';
 export {isGemini2OrAbove, isGemini3xFlashLive} from './utils/model_name.js';

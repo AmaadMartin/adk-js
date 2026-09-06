@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {getClientLabels, runWithClientLabel} from '@google/adk';
+import {
+  getClientLabels,
+  getTrackingHeaders,
+  mergeTrackingHeaders,
+  runWithClientLabel,
+} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {parseUserAgent} from '../../src/utils/client_labels.js';
 
@@ -143,6 +148,59 @@ describe('client_labels', () => {
       expect(() => {
         runWithClientLabel('   ', () => {});
       }).toThrow('Client label must be a non-empty string.');
+    });
+  });
+
+  describe('getTrackingHeaders', () => {
+    it('sets both tracking headers to the joined labels', () => {
+      const headers = getTrackingHeaders();
+      const expected = getClientLabels().join(' ');
+
+      expect(headers['x-goog-api-client']).toBe(expected);
+      expect(headers['user-agent']).toBe(expected);
+    });
+
+    it('appends a framework label to the google-adk token', () => {
+      const [framework] = getClientLabels('managed_agent');
+
+      expect(framework).toMatch(/^google-adk\/[^ ]+\+managed_agent$/);
+      expect(getTrackingHeaders('managed_agent')['user-agent']).toContain(
+        '+managed_agent',
+      );
+    });
+  });
+
+  describe('mergeTrackingHeaders', () => {
+    it('returns the tracking headers when there are none to merge', () => {
+      expect(mergeTrackingHeaders(undefined)).toEqual(getTrackingHeaders());
+    });
+
+    it('keeps a caller header the tracking headers do not name', () => {
+      expect(mergeTrackingHeaders({'x-custom': 'v'})['x-custom']).toBe('v');
+    });
+
+    it('appends the caller tokens to a tracking header it also sets', () => {
+      const merged = mergeTrackingHeaders({'user-agent': 'my-app/1.0'});
+
+      expect(merged['user-agent']).toBe(
+        `${getClientLabels().join(' ')} my-app/1.0`,
+      );
+    });
+
+    it('does not repeat a token the caller already carries', () => {
+      const tracking = getClientLabels().join(' ');
+
+      expect(mergeTrackingHeaders({'user-agent': tracking})['user-agent']).toBe(
+        tracking,
+      );
+    });
+
+    it('does not mutate the headers it was given', () => {
+      const headers = {'x-custom': 'v'};
+
+      mergeTrackingHeaders(headers);
+
+      expect(headers).toEqual({'x-custom': 'v'});
     });
   });
 });
