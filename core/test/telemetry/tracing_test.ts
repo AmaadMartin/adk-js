@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {trace} from '@opentelemetry/api';
+import {SpanStatusCode, trace} from '@opentelemetry/api';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {
@@ -45,6 +45,8 @@ describe('Telemetry Tracing Functions', () => {
     mockSpan = {
       setAttributes: vi.fn(),
       setAttribute: vi.fn(),
+      recordException: vi.fn(),
+      setStatus: vi.fn(),
     };
 
     mockAgent = {
@@ -183,6 +185,95 @@ describe('Telemetry Tracing Functions', () => {
         'gcp.vertex.agent.tool_response':
           expect.stringContaining('not specified'),
       });
+    });
+
+    it('should record the exception a tool threw on the span', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const error = new TypeError('bad');
+
+      // Act
+      traceToolCall({tool: mockTool, args: {}, error});
+
+      // Assert
+      expect(mockSpan.recordException).toHaveBeenCalledTimes(1);
+      expect(mockSpan.recordException).toHaveBeenCalledWith(error);
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith(
+        'error.type',
+        'TypeError',
+      );
+      expect(mockSpan.setStatus).toHaveBeenCalledWith({
+        code: SpanStatusCode.ERROR,
+        message: 'TypeError',
+      });
+    });
+
+    it('should still set the baseline tool attributes when the tool threw', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+      const args = {param1: 'value1'};
+
+      // Act
+      traceToolCall({tool: mockTool, args, error: new TypeError('bad')});
+
+      // Assert
+      expect(mockSpan.setAttributes).toHaveBeenCalledWith({
+        'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.tool.description': 'A test tool',
+        'gen_ai.tool.name': 'test-tool',
+        'gen_ai.tool.type': 'FunctionTool',
+        'gcp.vertex.agent.llm_request': '{}',
+        'gcp.vertex.agent.llm_response': '{}',
+        'gcp.vertex.agent.tool_call_args': expect.stringContaining('param1'),
+      });
+    });
+
+    it('should leave the call id unspecified and the event id unset without a response event', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      // Act
+      traceToolCall({tool: mockTool, args: {}, error: new TypeError('bad')});
+
+      // Assert
+      expect(mockSpan.setAttributes).toHaveBeenCalledWith({
+        'gen_ai.tool.call.id': '<not specified>',
+        'gcp.vertex.agent.event_id': undefined,
+        'gcp.vertex.agent.tool_response':
+          expect.stringContaining('not specified'),
+      });
+    });
+
+    it('should leave the span status unset when the tool did not throw', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      // Act
+      traceToolCall({
+        tool: mockTool,
+        args: {},
+        functionResponseEvent: mockEvent,
+      });
+
+      // Assert
+      expect(mockSpan.recordException).not.toHaveBeenCalled();
+      expect(mockSpan.setStatus).not.toHaveBeenCalled();
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        'error.type',
+        expect.anything(),
+      );
+    });
+
+    it('should record a thrown value that is not an error', () => {
+      // Arrange
+      vi.mocked(trace.getActiveSpan).mockReturnValue(mockSpan);
+
+      // Act
+      traceToolCall({tool: mockTool, args: {}, error: 'boom'});
+
+      // Assert
+      expect(mockSpan.recordException).toHaveBeenCalledWith('boom');
+      expect(mockSpan.setAttribute).toHaveBeenCalledWith('error.type', 'boom');
     });
   });
 

@@ -215,6 +215,9 @@ async function callToolAsync(
         ),
       });
       return result;
+    } catch (e: unknown) {
+      traceToolCall({tool, args, error: e});
+      throw e;
     } finally {
       span.end();
     }

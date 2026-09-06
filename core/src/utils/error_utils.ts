@@ -159,3 +159,41 @@ function formatErrorRecursive(err: unknown, seen: Set<unknown>): string {
 export function formatError(err: unknown): string {
   return formatErrorRecursive(err, new Set<unknown>());
 }
+
+/**
+ * Derives the `error.type` telemetry label for a failure.
+ *
+ * Prefers, in order: an `errorType` the error classified itself with; an HTTP
+ * status the error carries (the `@google/genai` `ApiError` reports one, and the
+ * SDK collapses every 4xx into a single class and every 5xx into another, so
+ * the status is the only signal that tells them apart); finally the class name.
+ *
+ * The status is duck-typed rather than matched with `instanceof`, because two
+ * copies of `@google/genai` can share one runtime and an error raised by one is
+ * not an `instanceof` the class of the other. It is bounded to a plausible HTTP
+ * range so that an unrelated numeric `status` field is not reported as a status
+ * code.
+ *
+ * @param error The thrown value to classify. JavaScript allows any value to be
+ *     thrown, so this accepts `unknown` rather than `Error`.
+ * @return The value to report as `error.type`.
+ */
+export function resolveErrorType(error: unknown): string {
+  const record = asRecord(error);
+  const errorType = record?.['errorType'];
+  if (typeof errorType === 'string') {
+    return errorType;
+  }
+  const status = record?.['status'];
+  if (
+    typeof status === 'number' &&
+    status >= MIN_HTTP_STATUS &&
+    status <= MAX_HTTP_STATUS
+  ) {
+    return String(status);
+  }
+  // `constructor.name` rather than `name`, mirroring Python's
+  // `type(error).__name__`: a subclass that never assigns `this.name` still
+  // reports its own class.
+  return error instanceof Error ? error.constructor.name : String(error);
+}

@@ -16,7 +16,7 @@
  */
 
 import {Content} from '@google/genai';
-import {context, Context, trace} from '@opentelemetry/api';
+import {context, Context, SpanStatusCode, trace} from '@opentelemetry/api';
 
 import {BaseAgent} from '../agents/base_agent.js';
 import {InvocationContext} from '../agents/invocation_context.js';
@@ -24,8 +24,10 @@ import {Event} from '../events/event.js';
 import {LlmRequest} from '../models/llm_request.js';
 import {LlmResponse} from '../models/llm_response.js';
 import {BaseTool} from '../tools/base_tool.js';
+import {resolveErrorType} from '../utils/error_utils.js';
 import {version} from '../version.js';
 
+const ERROR_TYPE = 'error.type';
 const GEN_AI_AGENT_DESCRIPTION = 'gen_ai.agent.description';
 const GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
 const GEN_AI_CONVERSATION_ID = 'gen_ai.conversation.id';
@@ -152,18 +154,26 @@ export function traceNodeExecution({
 export interface TraceToolCallParams {
   tool: BaseTool;
   args: Record<string, unknown>;
-  functionResponseEvent: Event;
+  /** Absent when the tool threw: there is no response to describe. */
+  functionResponseEvent?: Event;
+  /**
+   * The error the tool threw, if any. A thrown error is the authoritative
+   * classification for the span.
+   */
+  error?: unknown;
 }
 
 /**
  * Traces tool call.
  *
- * @param params The parameters object containing tool, args, and function response event.
+ * @param params The parameters object containing tool, args, the function
+ *     response event, and the error the tool threw.
  */
 export function traceToolCall({
   tool,
   args,
   functionResponseEvent,
+  error,
 }: TraceToolCallParams): void {
   const span = trace.getActiveSpan();
   if (!span) return;
@@ -183,11 +193,20 @@ export function traceToolCall({
       : '{}',
   });
 
+  if (error !== undefined) {
+    const failureType = resolveErrorType(error);
+    span.recordException(error instanceof Error ? error : String(error));
+    span.setAttribute(ERROR_TYPE, failureType);
+    // The type rather than the message, so that no tool content lands in a
+    // field the content toggle cannot gate.
+    span.setStatus({code: SpanStatusCode.ERROR, message: failureType});
+  }
+
   // Tracing tool response
   let toolCallId = '<not specified>';
   let toolResponse: unknown = '<not specified>';
 
-  if (functionResponseEvent.content?.parts) {
+  if (functionResponseEvent?.content?.parts) {
     const responseParts = functionResponseEvent.content.parts;
     const functionResponse = responseParts[0]?.functionResponse;
     if (functionResponse?.id) {
@@ -203,7 +222,7 @@ export function traceToolCall({
 
   span.setAttributes({
     [GEN_AI_TOOL_CALL_ID]: toolCallId,
-    'gcp.vertex.agent.event_id': functionResponseEvent.id,
+    'gcp.vertex.agent.event_id': functionResponseEvent?.id,
     'gcp.vertex.agent.tool_response': shouldAddRequestResponseToSpans()
       ? safeJsonSerialize(toolResponse)
       : '{}',
