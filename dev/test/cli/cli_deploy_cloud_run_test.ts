@@ -212,6 +212,22 @@ describe('createDockerFileContent', () => {
   });
 });
 
+const LABELS_FLAG = '--labels';
+const LABELS_PREFIX = `${LABELS_FLAG}=`;
+
+/**
+ * Every label value gcloud would read from the argv, in argv order. gcloud
+ * accepts both the separate `--labels <value>` form and the inline
+ * `--labels=<value>` form, so this collects both.
+ */
+function labelValues(argv: string[]): string[] {
+  return argv.flatMap((arg, i) => {
+    if (arg === LABELS_FLAG) return [argv[i + 1]];
+    if (arg.startsWith(LABELS_PREFIX)) return [arg.slice(LABELS_PREFIX.length)];
+    return [];
+  });
+}
+
 describe('deployToCloudRun', () => {
   const defaultOptions = {
     agentPath: 'path/to/agent',
@@ -495,5 +511,132 @@ describe('deployToCloudRun', () => {
       expect.stringContaining('Command failed with exit code 1'),
       expect.stringContaining('\x1b[0m'),
     );
+  });
+
+  it('should merge a user --labels=k=v into the single ADK label flag', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: ['--labels=team=abc'],
+    });
+
+    expect(labelValues(spawnMock.mock.calls[0][1])).toEqual([
+      'created-by=adk,team=abc',
+    ]);
+  });
+
+  it('should not forward a second --labels flag to gcloud', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: ['--labels=team=abc'],
+    });
+
+    const argv = spawnMock.mock.calls[0][1];
+    expect(
+      argv.filter(
+        (arg) => arg === LABELS_FLAG || arg.startsWith(LABELS_PREFIX),
+      ),
+    ).toEqual([LABELS_FLAG]);
+  });
+
+  it.each([
+    {name: 'omitted', extraGcloudArgs: undefined},
+    {name: 'empty', extraGcloudArgs: []},
+  ])(
+    'should emit only the ADK label when extra args are $name',
+    async ({extraGcloudArgs}) => {
+      await deployToCloudRun({...defaultOptions, extraGcloudArgs});
+
+      expect(labelValues(spawnMock.mock.calls[0][1])).toEqual([
+        'created-by=adk',
+      ]);
+    },
+  );
+
+  it('should merge multiple --labels arguments in order', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: ['--labels=env=test', '--labels=team=myteam'],
+    });
+
+    expect(labelValues(spawnMock.mock.calls[0][1])).toEqual([
+      'created-by=adk,env=test,team=myteam',
+    ]);
+  });
+
+  it('should keep a comma-separated label value intact', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: ['--labels=env=test,team=myteam'],
+    });
+
+    expect(labelValues(spawnMock.mock.calls[0][1])).toEqual([
+      'created-by=adk,env=test,team=myteam',
+    ]);
+  });
+
+  it('should merge labels while forwarding other gcloud args in order', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: ['--memory=1Gi', '--labels=env=test', '--cpu=1'],
+    });
+
+    const argv = spawnMock.mock.calls[0][1];
+    expect(labelValues(argv)).toEqual(['created-by=adk,env=test']);
+    expect(argv.indexOf('--memory=1Gi')).toBeGreaterThan(-1);
+    expect(argv.indexOf('--cpu=1')).toBeGreaterThan(
+      argv.indexOf('--memory=1Gi'),
+    );
+  });
+
+  it('should merge the space-separated --labels form', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: [LABELS_FLAG, 'team=abc'],
+    });
+
+    const argv = spawnMock.mock.calls[0][1];
+    expect(labelValues(argv)).toEqual(['created-by=adk,team=abc']);
+    expect(argv.filter((arg) => arg === 'team=abc')).toEqual([]);
+  });
+
+  it('should drop a --labels token that has no value after it', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: [LABELS_FLAG],
+    });
+
+    const argv = spawnMock.mock.calls[0][1];
+    expect(labelValues(argv)).toEqual(['created-by=adk']);
+    expect(argv).not.toContain('');
+  });
+
+  it('should not swallow the flag that follows a bare --labels token', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: [LABELS_FLAG, '--no-traffic'],
+    });
+
+    const argv = spawnMock.mock.calls[0][1];
+    expect(labelValues(argv)).toEqual(['created-by=adk']);
+    expect(argv).toContain('--no-traffic');
+  });
+
+  it('should drop an empty --labels= value', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: [LABELS_PREFIX],
+    });
+
+    expect(labelValues(spawnMock.mock.calls[0][1])).toEqual(['created-by=adk']);
+  });
+
+  it('should drop empty segments inside a label value', async () => {
+    await deployToCloudRun({
+      ...defaultOptions,
+      extraGcloudArgs: ['--labels=env=test,', LABELS_FLAG, ',team=myteam'],
+    });
+
+    const [value] = labelValues(spawnMock.mock.calls[0][1]);
+    expect(value).toBe('created-by=adk,env=test,team=myteam');
   });
 });

@@ -33,6 +33,42 @@ export interface DeployToCloudRunOptions extends BaseDeployOptions {
   a2aAuthToken?: string;
 }
 
+/**
+ * Splits pass-through gcloud args into user label values and everything else,
+ * so the caller can merge those values with ADK's own provenance label into
+ * the single `--labels` flag gcloud accepts.
+ *
+ * gcloud takes both `--labels=k=v` and `--labels k=v`, and the CLI forwards
+ * whichever form the user typed, so both are recognised. Each value is itself
+ * a comma-separated list. A `--labels` with no value, and any empty segment,
+ * are dropped rather than merged as an empty label that gcloud rejects.
+ */
+function splitLabelArgs(extraGcloudArgs: string[]): {
+  userLabels: string[];
+  passthroughArgs: string[];
+} {
+  const userLabels: string[] = [];
+  const passthroughArgs: string[] = [];
+  for (let i = 0; i < extraGcloudArgs.length; i++) {
+    const arg = extraGcloudArgs[i];
+    if (arg.startsWith('--labels=')) {
+      userLabels.push(arg.slice('--labels='.length));
+    } else if (arg === '--labels') {
+      const value = extraGcloudArgs[i + 1];
+      if (value !== undefined && !value.startsWith('-')) {
+        userLabels.push(value);
+        i++;
+      }
+    } else {
+      passthroughArgs.push(arg);
+    }
+  }
+  return {
+    userLabels: userLabels.flatMap((value) => value.split(',')).filter(Boolean),
+    passthroughArgs,
+  };
+}
+
 function validateGcloudExtraArgs(
   extraGcloudArgs: string[],
   adkManagedArgs: string[],
@@ -100,21 +136,11 @@ function prepareGCloudArguments(options: DeployToCloudRunOptions): string[] {
     );
   }
 
-  const userLabels = [];
-  const extraArgsWithoutLabels = [];
-  if (options.extraGcloudArgs?.length) {
-    for (const arg of options.extraGcloudArgs) {
-      if (arg === '--labels') {
-        userLabels.push(arg.slice(9));
-      } else {
-        extraArgsWithoutLabels.push(arg);
-      }
-    }
-  }
-
-  const allLabels = ['created-by=adk', ...userLabels];
-  gcloudCommands.push('--labels', allLabels.join(','));
-  gcloudCommands.push(...extraArgsWithoutLabels);
+  const {userLabels, passthroughArgs} = splitLabelArgs(
+    options.extraGcloudArgs ?? [],
+  );
+  gcloudCommands.push('--labels', ['created-by=adk', ...userLabels].join(','));
+  gcloudCommands.push(...passthroughArgs);
 
   return gcloudCommands;
 }
