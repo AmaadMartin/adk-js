@@ -12,7 +12,38 @@ import {
 } from '@google/adk';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {Tool} from '@modelcontextprotocol/sdk/types.js';
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it, Mock, vi} from 'vitest';
+import {logger} from '../../../src/utils/logger.js';
+
+/**
+ * Builds a tool whose session close always rejects, with the context to run it.
+ * Used by the cases that pin what happens when the close fails.
+ */
+function toolWithFailingClose(callTool: Mock): {
+  tool: MCPTool;
+  toolContext: Context;
+} {
+  const client = {callTool} as unknown as Client;
+  const sessionManager = {
+    createSession: vi.fn().mockResolvedValue(client),
+    closeSession: vi.fn().mockRejectedValue(new Error('close boom')),
+  } as unknown as MCPSessionManager;
+  const invocationContext = {
+    abortSignal: new AbortController().signal,
+    session: {state: {}},
+  } as unknown as InvocationContext;
+  return {
+    tool: new MCPTool(
+      {
+        name: 'test-tool',
+        description: 'A test tool',
+        inputSchema: {type: 'object', properties: {}},
+      },
+      sessionManager,
+    ),
+    toolContext: new Context({invocationContext}),
+  };
+}
 
 describe('MCPTool', () => {
   it('passes abort signal to callTool', async () => {
@@ -161,5 +192,37 @@ describe('MCPTool', () => {
 
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
+  });
+
+  it('propagates the callTool error when closing the session also fails', async () => {
+    const {tool, toolContext} = toolWithFailingClose(
+      vi.fn().mockRejectedValue(new Error('Call failed')),
+    );
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    await expect(tool.runAsync({args: {}, toolContext})).rejects.toThrow(
+      'Call failed',
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to close MCP discovery session',
+      expect.objectContaining({message: 'close boom'}),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('returns the tool result when only the session close fails', async () => {
+    const {tool, toolContext} = toolWithFailingClose(
+      vi.fn().mockResolvedValue({content: [{type: 'text'}]}),
+    );
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const result = await tool.runAsync({args: {}, toolContext});
+
+    expect(result).toEqual({content: [{type: 'text'}]});
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to close MCP discovery session',
+      expect.objectContaining({message: 'close boom'}),
+    );
+    warnSpy.mockRestore();
   });
 });

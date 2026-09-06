@@ -18,7 +18,11 @@ import {logger} from '../../utils/logger.js';
 import {BaseTool} from '../base_tool.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 
-import {MCPConnectionParams, MCPSessionManager} from './mcp_session_manager.js';
+import {
+  closeSessionQuietly,
+  MCPConnectionParams,
+  MCPSessionManager,
+} from './mcp_session_manager.js';
 import {MCPTool} from './mcp_tool.js';
 
 /**
@@ -69,7 +73,7 @@ export class MCPToolset extends BaseToolset {
     try {
       listResult = (await session.listTools()) as ListToolsResult;
     } finally {
-      await this.mcpSessionManager.closeSession(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
     logger.debug(`number of tools: ${listResult.tools.length}`);
     for (const tool of listResult.tools) {
@@ -122,7 +126,7 @@ export class MCPToolset extends BaseToolset {
       const result = (await session.listResources()) as ListResourcesResult;
       return result.resources.map((resource) => resource.name);
     } finally {
-      await this.mcpSessionManager.closeSession(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
   }
 
@@ -139,7 +143,7 @@ export class MCPToolset extends BaseToolset {
     try {
       result = (await session.listResources()) as ListResourcesResult;
     } finally {
-      await this.mcpSessionManager.closeSession(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
 
     const resource = result.resources.find(
@@ -177,7 +181,7 @@ export class MCPToolset extends BaseToolset {
       })) as ReadResourceResult;
       return result.contents;
     } finally {
-      await this.mcpSessionManager.closeSession(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
   }
 

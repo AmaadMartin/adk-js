@@ -9,6 +9,7 @@ import {describe, expect, it, vi} from 'vitest';
 import {ReadonlyContext} from '../../../src/agents/readonly_context.js';
 import {MCPConnectionParams} from '../../../src/tools/mcp/mcp_session_manager.js';
 import {MCPToolset} from '../../../src/tools/mcp/mcp_toolset.js';
+import {logger} from '../../../src/utils/logger.js';
 
 vi.hoisted(() => {
   vi.resetModules();
@@ -42,6 +43,14 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
 
 /** A client method stub that resolves to nothing (connect/close). */
 const noop = () => vi.fn().mockResolvedValue(undefined);
+
+/**
+ * Builds a stub MCP client. `connect` and `close` default to resolving no-ops;
+ * supply only the methods the test exercises.
+ */
+function mockClient(overrides: Partial<Client>): Client {
+  return {connect: noop(), close: noop(), ...overrides} as unknown as Client;
+}
 
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   return {
@@ -161,6 +170,62 @@ describe('MCPToolset', () => {
       await expect(toolset.getTools()).rejects.toThrow('List tools failed');
       expect(spy).toHaveBeenCalledOnce();
       expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
+    });
+
+    it('propagates the listTools error when closing the session also fails', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(() =>
+        mockClient({
+          close: vi.fn().mockRejectedValue(new Error('close boom')),
+          listTools: vi.fn().mockRejectedValue(new Error('List tools failed')),
+        }),
+      );
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const toolset = new MCPToolset(stdioParams);
+
+      await expect(toolset.getTools()).rejects.toThrow('List tools failed');
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Failed to close MCP discovery session',
+        expect.objectContaining({message: 'close boom'}),
+      );
+      expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
+      warnSpy.mockRestore();
+    });
+
+    it('returns the discovered tools when only the session close fails', async () => {
+      const {Client} =
+        await import('@modelcontextprotocol/sdk/client/index.js');
+      vi.mocked(Client).mockImplementationOnce(() =>
+        mockClient({
+          close: vi.fn().mockRejectedValue(new Error('close boom')),
+          listTools: vi.fn().mockResolvedValue({
+            tools: [
+              {name: 'test-tool', description: 'A test tool', inputSchema: {}},
+              {
+                name: 'other-tool',
+                description: 'Another tool',
+                inputSchema: {},
+              },
+            ],
+          }),
+        }),
+      );
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      const toolset = new MCPToolset(stdioParams);
+      const tools = await toolset.getTools();
+
+      expect(tools).toHaveLength(2);
+      expect(tools[0].name).toBe('test-tool');
+      expect(tools[1].name).toBe('other-tool');
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Failed to close MCP discovery session',
+        expect.objectContaining({message: 'close boom'}),
+      );
+      expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(0);
+      warnSpy.mockRestore();
     });
   });
 
@@ -330,6 +395,89 @@ describe('MCPToolset', () => {
         expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(
           0,
         );
+      });
+
+      it('listResources propagates the list error when closing also fails', async () => {
+        const {Client} =
+          await import('@modelcontextprotocol/sdk/client/index.js');
+        vi.mocked(Client).mockImplementationOnce(() =>
+          mockClient({
+            close: vi.fn().mockRejectedValue(new Error('close boom')),
+            listResources: vi.fn().mockRejectedValue(new Error('list boom')),
+          }),
+        );
+        const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+        const toolset = new MCPToolset(stdioParams);
+
+        await expect(toolset.listResources()).rejects.toThrow('list boom');
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Failed to close MCP discovery session',
+          expect.objectContaining({message: 'close boom'}),
+        );
+        expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(
+          0,
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('getResourceInfo propagates the list error when closing also fails', async () => {
+        const {Client} =
+          await import('@modelcontextprotocol/sdk/client/index.js');
+        vi.mocked(Client).mockImplementationOnce(() =>
+          mockClient({
+            close: vi.fn().mockRejectedValue(new Error('close boom')),
+            listResources: vi.fn().mockRejectedValue(new Error('list boom')),
+          }),
+        );
+        const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+        const toolset = new MCPToolset(stdioParams);
+
+        await expect(toolset.getResourceInfo('res1')).rejects.toThrow(
+          'list boom',
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Failed to close MCP discovery session',
+          expect.objectContaining({message: 'close boom'}),
+        );
+        expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(
+          0,
+        );
+        warnSpy.mockRestore();
+      });
+
+      it('readResource propagates the read error when closing the second session also fails', async () => {
+        const {Client} =
+          await import('@modelcontextprotocol/sdk/client/index.js');
+        vi.mocked(Client)
+          .mockImplementationOnce(() =>
+            mockClient({
+              listResources: vi.fn().mockResolvedValue({
+                resources: [{uri: 'file:///res1', name: 'res1'}],
+              }),
+            }),
+          )
+          .mockImplementationOnce(() =>
+            mockClient({
+              close: vi.fn().mockRejectedValue(new Error('close boom')),
+              readResource: vi.fn().mockRejectedValue(new Error('read boom')),
+            }),
+          );
+        const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+        const toolset = new MCPToolset(stdioParams);
+
+        await expect(toolset.readResource('res1')).rejects.toThrow('read boom');
+        expect(warnSpy).toHaveBeenCalledOnce();
+        expect(warnSpy).toHaveBeenCalledWith(
+          'Failed to close MCP discovery session',
+          expect.objectContaining({message: 'close boom'}),
+        );
+        expect(toolset['mcpSessionManager'].getActiveSessions()).toHaveLength(
+          0,
+        );
+        warnSpy.mockRestore();
       });
     });
   });

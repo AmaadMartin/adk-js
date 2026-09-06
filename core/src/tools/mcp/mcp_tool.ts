@@ -14,7 +14,7 @@ import type {
 import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 
-import {MCPSessionManager} from './mcp_session_manager.js';
+import {closeSessionQuietly, MCPSessionManager} from './mcp_session_manager.js';
 
 /**
  * Represents a tool exposed via the Model Context Protocol (MCP).
@@ -73,7 +73,7 @@ export class MCPTool extends BaseTool {
       });
       return result as CallToolResult;
     } finally {
-      await this.mcpSessionManager.closeSession(session);
+      await closeSessionQuietly(this.mcpSessionManager, session);
     }
   }
 }

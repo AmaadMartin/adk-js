@@ -30,6 +30,22 @@ function logTransportError(err: unknown): void {
 }
 
 /**
+ * Closes a session, reporting rather than throwing when the close fails.
+ *
+ * Callers close from a `finally` block, where a rejection replaces the
+ * completion being unwound. A close failure is secondary, so it is logged and
+ * dropped and the original outcome — value or error — survives.
+ */
+export async function closeSessionQuietly(
+  manager: MCPSessionManager,
+  client: Client,
+): Promise<void> {
+  await manager.closeSession(client).catch((e: unknown) => {
+    logger.warn('Failed to close MCP discovery session', e);
+  });
+}
+
+/**
  * Defines the parameters for establishing a connection to an MCP server using
  * standard input/output (stdio). This is typically used for running MCP servers
  * as local child processes.
