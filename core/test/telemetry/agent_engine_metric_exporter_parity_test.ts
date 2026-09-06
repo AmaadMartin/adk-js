@@ -22,12 +22,12 @@
  * `0/5000/9000/12000`.
  */
 
+import {afterEach, describe, expect, it} from 'vitest';
 import {
   AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS_ENV,
   collectFloorMillis,
   MIN_EXPORT_INTERVAL_MS,
-} from '@google/adk';
-import {afterEach, describe, expect, it} from 'vitest';
+} from '../../src/telemetry/agent_engine_metric_exporter.js';
 import {FLOOR_MS, Harness} from './agent_engine_metric_exporter_test_utils.js';
 
 /** Asserts I1 and I2 over a driven harness. */

@@ -56,15 +56,11 @@
  * ```
  */
 
-import {context} from '@opentelemetry/api';
-import {ExportResultCode, suppressTracing} from '@opentelemetry/core';
-import {
-  MetricReader,
-  PushMetricExporter,
-  ResourceMetrics,
-} from '@opentelemetry/sdk-metrics';
+import {ExportResultCode, internal} from '@opentelemetry/core';
+import {MetricReader, PushMetricExporter} from '@opentelemetry/sdk-metrics';
 import {Span, SpanProcessor} from '@opentelemetry/sdk-trace-base';
 
+import {getNumberEnvVar} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
 /**
@@ -102,54 +98,25 @@ const OVERDUE_PERIOD_FACTOR = 1.5;
  * `generate_content`, the span the GenAI Python SDK's own instrumentation
  * opens; adk-js emits no such span.
  */
-const DEFAULT_INFERENCE_SPAN_NAME = 'call_llm';
+const INFERENCE_SPAN_NAME = 'call_llm';
 
 /** Semantic-convention attribute carrying the GenAI operation name. */
 const GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
 
-/**
- * Reads a millisecond env var, falling back to `defaultMillis` when unusable.
- *
- * `Number('')` and `Number('  ')` are both `0`, so a blank value is rejected
- * rather than read as "no spacing at all".
- */
-function envMillis(name: string, defaultMillis: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) {
-    return defaultMillis;
-  }
-  const parsed = raw.trim() === '' ? Number.NaN : Number(raw);
-  if (!Number.isFinite(parsed)) {
-    logger.warn(
-      `Found invalid value for ${name}=${raw}, using default ${defaultMillis}`,
-    );
-    return defaultMillis;
-  }
-  return parsed;
-}
-
 /** Returns the minimum spacing between two collects (I2), in milliseconds. */
 export function collectFloorMillis(): number {
-  return envMillis(
+  return getNumberEnvVar(
     AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS_ENV,
     MIN_EXPORT_INTERVAL_MS,
   );
 }
 
-/** Promisifies the callback-style {@link PushMetricExporter.export}. */
-function exportMetrics(
-  exporter: PushMetricExporter,
-  metrics: ResourceMetrics,
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    exporter.export(metrics, (result) => {
-      if (result.code === ExportResultCode.SUCCESS) {
-        resolve();
-        return;
-      }
-      reject(result.error ?? new Error('Metric export failed'));
-    });
-  });
+/** True when a span start should drive point 4. */
+function isInferenceSpan(span: Span): boolean {
+  return (
+    span.attributes[GEN_AI_OPERATION_NAME] === INFERENCE_SPAN_NAME ||
+    span.name.startsWith(INFERENCE_SPAN_NAME)
+  );
 }
 
 /** Timing overrides for a {@link RequestDrivenMetricReader}. */
@@ -162,18 +129,6 @@ export interface RequestDrivenMetricReaderOptions {
   floorMillis?: number;
   /** Monotonic clock in milliseconds. */
   now?: () => number;
-}
-
-/** Options for {@link buildRequestDrivenMetrics}. */
-export interface RequestDrivenMetricsOptions extends RequestDrivenMetricReaderOptions {
-  /**
-   * Name prefix of the inference span whose starts drive point 4.
-   *
-   * Defaults to `call_llm`, the span adk-js opens for a model call. Set it to
-   * `generate_content` when the GenAI SDK's own instrumentation supplies the
-   * span instead.
-   */
-  inferenceSpanName?: string;
 }
 
 /** The metric-export handles an application wires up. */
@@ -240,10 +195,16 @@ export class RequestDrivenMetricReader extends MetricReader {
     this.now = options.now ?? (() => performance.now());
     this.periodMs =
       options.exportIntervalMillis ??
-      envMillis(OTEL_METRIC_EXPORT_INTERVAL_ENV, DEFAULT_EXPORT_INTERVAL_MS);
+      getNumberEnvVar(
+        OTEL_METRIC_EXPORT_INTERVAL_ENV,
+        DEFAULT_EXPORT_INTERVAL_MS,
+      );
     this.timeoutMs =
       options.exportTimeoutMillis ??
-      envMillis(OTEL_METRIC_EXPORT_TIMEOUT_ENV, DEFAULT_EXPORT_TIMEOUT_MS);
+      getNumberEnvVar(
+        OTEL_METRIC_EXPORT_TIMEOUT_ENV,
+        DEFAULT_EXPORT_TIMEOUT_MS,
+      );
     this.floorMs = options.floorMillis ?? collectFloorMillis();
 
     const startedAt = this.now();
@@ -348,11 +309,13 @@ export class RequestDrivenMetricReader extends MetricReader {
       if (resourceMetrics.scopeMetrics.length === 0) {
         return;
       }
-      // Suppressed, so the exporter's own request does not open spans that
-      // record metrics that trigger the next export.
-      await context.with(suppressTracing(context.active()), () =>
-        exportMetrics(this.exporter, resourceMetrics),
-      );
+      // `_export` suppresses tracing around the call, so the exporter's own
+      // request cannot open spans that record metrics that trigger the next
+      // export. PeriodicExportingMetricReader exports through it too.
+      const result = await internal._export(this.exporter, resourceMetrics);
+      if (result.code !== ExportResultCode.SUCCESS) {
+        throw result.error ?? new Error('Metric export failed');
+      }
     } catch (e: unknown) {
       // A fire-and-forget collect has nobody to observe its rejection.
       logger.error('Exception during request-driven metric collect', e);
@@ -410,18 +373,15 @@ export class RequestDrivenMetricReader extends MetricReader {
   }
 }
 
-/** Collects on each matching span start (point 4). */
+/** Collects on each inference span start (point 4). */
 class MetricsFlushingSpanProcessor implements SpanProcessor {
-  constructor(
-    private readonly reader: RequestDrivenMetricReader,
-    private readonly inferenceSpanName: string,
-  ) {}
+  constructor(private readonly reader: RequestDrivenMetricReader) {}
 
   onStart(span: Span): void {
     // This runs inside span creation on the inference path, so a metrics
     // failure must not break the span it observes.
     try {
-      if (this.matches(span) && this.reader.noteGenerateContentStart()) {
+      if (isInferenceSpan(span) && this.reader.noteGenerateContentStart()) {
         void this.reader.submitCollect();
       }
     } catch (e: unknown) {
@@ -438,13 +398,6 @@ class MetricsFlushingSpanProcessor implements SpanProcessor {
   forceFlush(): Promise<void> {
     return Promise.resolve();
   }
-
-  private matches(span: Span): boolean {
-    return (
-      span.attributes[GEN_AI_OPERATION_NAME] === this.inferenceSpanName ||
-      span.name.startsWith(this.inferenceSpanName)
-    );
-  }
 }
 
 /**
@@ -455,19 +408,13 @@ class MetricsFlushingSpanProcessor implements SpanProcessor {
  * request path.
  *
  * @param exporter The exporter each collect drains into.
- * @param options Timing overrides and the inference span name.
+ * @param options Timing overrides for the reader.
  * @returns The reader and the span processor.
  */
 export function buildRequestDrivenMetrics(
   exporter: PushMetricExporter,
-  options: RequestDrivenMetricsOptions = {},
+  options: RequestDrivenMetricReaderOptions = {},
 ): MetricsState {
   const reader = new RequestDrivenMetricReader(exporter, options);
-  return {
-    reader,
-    spanProcessor: new MetricsFlushingSpanProcessor(
-      reader,
-      options.inferenceSpanName ?? DEFAULT_INFERENCE_SPAN_NAME,
-    ),
-  };
+  return {reader, spanProcessor: new MetricsFlushingSpanProcessor(reader)};
 }
