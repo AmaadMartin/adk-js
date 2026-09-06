@@ -17,7 +17,7 @@ import {
 import {EventEmitter} from 'node:events';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 // Only `spawn` is mocked; it defaults to the real implementation (see
 // `beforeEach`) so the pre-existing tests still execute real scripts.
@@ -32,7 +32,77 @@ const {spawn: realSpawn} =
     'node:child_process',
   );
 
-const POWERSHELL_COMMAND = os.platform() === 'win32' ? 'powershell' : 'pwsh';
+const IS_WINDOWS = os.platform() === 'win32';
+
+const POWERSHELL_COMMAND = IS_WINDOWS ? 'powershell' : 'pwsh';
+
+const PYTHON_COMMAND = IS_WINDOWS ? 'python' : 'python3';
+
+/** A stand-in stdio stream that records whether the executor released it. */
+type FakeStream = EventEmitter & {
+  setEncoding: () => void;
+  destroy: () => void;
+  destroyed: boolean;
+};
+
+/** A stand-in child that records the signals it is sent. */
+type FakeChild = EventEmitter & {
+  pid: number;
+  kill: (signal: string) => boolean;
+  stdin: EventEmitter & {write: (chunk: string) => void; end: () => void};
+  stdout: FakeStream;
+  stderr: FakeStream;
+};
+
+function createFakeStream(): FakeStream {
+  const stream: FakeStream = Object.assign(new EventEmitter(), {
+    setEncoding: () => {},
+    destroy: () => {
+      stream.destroyed = true;
+    },
+    destroyed: false,
+  });
+  return stream;
+}
+
+/**
+ * A child that never exits on its own. `stdinFails` makes the write report
+ * EPIPE, as a child that died before reading the program does.
+ */
+function createFakeChild(
+  pid: number,
+  signalled: string[],
+  stdinFails = false,
+): FakeChild {
+  const stdin = Object.assign(new EventEmitter(), {
+    write: (chunk: string) => {
+      if (stdinFails) {
+        stdin.emit('error', new Error(`EPIPE writing ${chunk.length} bytes`));
+      }
+    },
+    end: () => {},
+  });
+  return Object.assign(new EventEmitter(), {
+    pid,
+    kill: (signal: string) => {
+      signalled.push(`child.kill(${signal})`);
+      return true;
+    },
+    stdin,
+    stdout: createFakeStream(),
+    stderr: createFakeStream(),
+  });
+}
+
+/** Whether `pid` names a process that still exists. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const POWERSHELL_FLAGS = [
   '-NoLogo',
@@ -75,6 +145,17 @@ describe('UnsafeLocalCodeExecutor', () => {
     spawnMock.mockImplementation(realSpawn);
     executor = new UnsafeLocalCodeExecutor();
   });
+
+  function pythonParams(code: string): ExecuteCodeParams {
+    return {
+      invocationContext,
+      codeExecutionInput: {
+        code,
+        language: CodeExecutionLanguage.PYTHON,
+        inputFiles: [],
+      },
+    };
+  }
 
   it('should execute code and return stdout', async () => {
     const params: ExecuteCodeParams = {
@@ -166,7 +247,9 @@ describe('UnsafeLocalCodeExecutor', () => {
     const params: ExecuteCodeParams = {
       invocationContext,
       codeExecutionInput: {
-        code: 'console.error("An error occurred");',
+        // The exit status is what marks a run failed, so a program whose
+        // stderr must survive has to exit non-zero.
+        code: 'console.error("An error occurred");\nprocess.exit(1);',
         language: CodeExecutionLanguage.JAVASCRIPT,
         inputFiles: [],
       },
@@ -561,5 +644,490 @@ describe('UnsafeLocalCodeExecutor', () => {
         );
       });
     });
+
+    it('runs python through the runner on stdin rather than a script file', async () => {
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: "if __name__ == '__main__':\n  print('hi')",
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        PYTHON_COMMAND,
+        ['-c', expect.stringContaining('sys.stdin.buffer.read()'), '__main__'],
+        expect.anything(),
+      );
+    });
+
+    it('gives the python child its own environment and leaves other languages inheriting', async () => {
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'print("hi")',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+        },
+      });
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("hi");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(spawnMock.mock.calls[0][2]).toEqual(
+        expect.objectContaining({
+          env: expect.objectContaining({PYTHONIOENCODING: 'utf-8'}),
+        }),
+      );
+      expect(spawnMock.mock.calls[1][2]).toEqual(
+        expect.objectContaining({env: undefined}),
+      );
+    });
+
+    it('leads its own process group everywhere but Windows', async () => {
+      await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("hi");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({detached: !IS_WINDOWS}),
+      );
+    });
+  });
+
+  it('reports itself stateless and unable to optimize data files', () => {
+    expect(executor.stateful).toBe(false);
+    expect(executor.optimizeDataFile).toBe(false);
+  });
+
+  describe('exit status classification', () => {
+    it('clears stderr when python writes to it and exits 0', async () => {
+      const result = await executor.executeCode(
+        pythonParams(
+          [
+            'import sys',
+            "sys.stdout.write('to out')",
+            "sys.stderr.write('to err')",
+            'sys.exit(0)',
+          ].join('\n'),
+        ),
+      );
+
+      expect(result.stdout).toBe('to out');
+      expect(result.stderr).toBe('');
+    });
+
+    it('clears stderr when javascript writes to it and exits 0', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.error("a deprecation warning");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stderr).toBe('');
+    });
+
+    it('reports a silent non-zero exit', async () => {
+      const result = await executor.executeCode(
+        pythonParams('import sys\nsys.exit(3)'),
+      );
+
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('Code execution exited with status 3.');
+    });
+
+    it('reports an exit no in-process hook can see, keeping the output', async () => {
+      const result = await executor.executeCode(
+        pythonParams("import os\nprint('before', flush=True)\nos._exit(5)"),
+      );
+
+      expect(result.stdout).toBe(`before${os.EOL === '\r\n' ? '\r\n' : '\n'}`);
+      expect(result.stderr).toBe('Code execution exited with status 5.');
+    });
+
+    it.skipIf(IS_WINDOWS)(
+      'reports death by signal rather than a timeout',
+      async () => {
+        const result = await executor.executeCode(
+          pythonParams(
+            'import os, signal\nos.kill(os.getpid(), signal.SIGKILL)',
+          ),
+        );
+
+        expect(result.stdout).toBe('');
+        expect(result.stderr).toBe('Code execution exited with status -9.');
+      },
+    );
+
+    it('keeps a failed spawn reported rather than clearing it', async () => {
+      const customExecutor = new UnsafeLocalCodeExecutor({
+        pythonCommandPath: 'non-existent-python-executable-789',
+      });
+
+      const result = await customExecutor.executeCode(
+        pythonParams('print("test")'),
+      );
+
+      // A failed spawn closes with a null code, which must not be read as the
+      // clean exit that clears stderr.
+      expect(result.stderr).not.toBe('');
+      expect(result.stderr).toContain('Process error:');
+    });
+
+    it('writes the timeout note alone when the program said nothing', async () => {
+      const timeoutSeconds = 0.5;
+      const result = await new UnsafeLocalCodeExecutor({
+        timeoutSeconds,
+      }).executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'setTimeout(() => {}, 60000);',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stderr).toBe(
+        `Code execution timed out after ${timeoutSeconds} seconds.`,
+      );
+    });
+
+    it('separates the timeout note from output the program wrote', async () => {
+      const timeoutSeconds = 0.5;
+      const result = await new UnsafeLocalCodeExecutor({
+        timeoutSeconds,
+      }).executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.error("before the hang");\nsetTimeout(() => {}, 60000);',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stderr).toBe(
+        `before the hang\n\nCode execution timed out after ${timeoutSeconds} seconds.`,
+      );
+    });
+  });
+
+  describe('python runner semantics', () => {
+    it('runs code guarded on __main__', async () => {
+      const result = await executor.executeCode(
+        pythonParams("if __name__ == '__main__':\n  print('guarded')"),
+      );
+
+      expect(result.stdout.trim()).toBe('guarded');
+      expect(result.stderr).toBe('');
+    });
+
+    it('does not name unguarded code __main__', async () => {
+      const result = await executor.executeCode(
+        pythonParams("print(globals().get('__name__'))"),
+      );
+
+      expect(result.stdout.trim()).toBe('None');
+    });
+
+    it('shows the model its own traceback frames and none of ours', async () => {
+      const result = await executor.executeCode(
+        pythonParams('def divide():\n  return 1 / 0\n\ndivide()'),
+      );
+
+      expect(result.stderr).toContain('ZeroDivisionError');
+      expect(result.stderr).not.toContain('unsafe_local_code_executor');
+      expect(result.stderr.split('File "<code>"').length - 1).toBe(2);
+    });
+
+    it('runs a program too large for a single argument', async () => {
+      const payload = 'a'.repeat(300000);
+
+      const result = await executor.executeCode(
+        pythonParams(`data = '${payload}'\nprint(len(data))`),
+      );
+
+      expect(result.stdout.trim()).toBe('300000');
+      expect(result.stderr).toBe('');
+    });
+
+    it('leaves python stdin at end-of-file', async () => {
+      const result = await executor.executeCode(
+        pythonParams("try:\n  input()\nexcept EOFError:\n  print('eof')\n"),
+      );
+
+      expect(result.stdout.trim()).toBe('eof');
+      expect(result.stderr).toBe('');
+    });
+
+    it('leaves stdin at end-of-file for other languages too', async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: [
+            'let read = 0;',
+            'process.stdin.on("data", (c) => { read += c.length; });',
+            'process.stdin.on("end", () => console.log("eof:" + read));',
+          ].join('\n'),
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      expect(result.stdout.trim()).toBe('eof:0');
+    });
+
+    it('survives a python child that dies before reading the program', async () => {
+      // Without a listener on the write end, the EPIPE this child reports is
+      // an unhandled stream error and takes the agent down with it.
+      spawnMock.mockImplementation(() => {
+        const child = createFakeChild(1234, [], true);
+        setImmediate(() => child.emit('close', 1, null));
+        return child;
+      });
+
+      const result = await executor.executeCode(pythonParams('print("hi")'));
+
+      expect(result.stderr).toBe('Code execution exited with status 1.');
+    });
+
+    it("keeps the caller's arguments in a python program's argv", async () => {
+      const result = await executor.executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'import sys\nprint(sys.argv[1:])',
+          language: CodeExecutionLanguage.PYTHON,
+          inputFiles: [],
+          args: ['alpha', 'beta'],
+        },
+      });
+
+      expect(result.stdout.trim()).toBe("['alpha', 'beta']");
+      expect(result.stderr).toBe('');
+    });
+  });
+
+  describe('python child environment', () => {
+    it('pins the output encoding rather than following the host locale', async () => {
+      const result = await executor.executeCode(
+        pythonParams('import sys\nprint(sys.stdout.encoding)'),
+      );
+
+      expect(result.stdout.trim().toLowerCase()).toBe('utf-8');
+    });
+
+    it('round-trips non-ASCII output', async () => {
+      const result = await executor.executeCode(
+        pythonParams("print('你好, café')"),
+      );
+
+      expect(result.stdout.trim()).toBe('你好, café');
+      expect(result.stderr).toBe('');
+    });
+
+    it('reads out output far larger than a pipe buffer', async () => {
+      const result = await executor.executeCode(
+        pythonParams("print('x' * 1000000)"),
+      );
+
+      expect(result.stdout.trim()).toBe('x'.repeat(1000000));
+      expect(result.stderr).toBe('');
+    }, 30000);
+
+    it('keeps a multi-byte character split across a chunk boundary intact', async () => {
+      const count = 400000;
+
+      const result = await executor.executeCode(
+        pythonParams(`print('你' * ${count})`),
+      );
+
+      expect(result.stdout).not.toContain('\uFFFD');
+      expect(result.stdout.trim()).toBe('你'.repeat(count));
+    }, 30000);
+
+    it("puts the agent's import path on the child's sys.path", async () => {
+      const result = await executor.executeCode(
+        pythonParams(
+          `import sys\nprint(${JSON.stringify(process.cwd())} in sys.path)`,
+        ),
+      );
+
+      expect(result.stdout.trim()).toBe('True');
+      expect(result.stderr).toBe('');
+    });
+  });
+
+  describe('process group teardown', () => {
+    // Mirrors TERMINATE_GRACE_MS in the executor.
+    const TERMINATE_GRACE_MS = 5000;
+    const FAKE_PID = 4242;
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /**
+     * Drives one timed-out execution against a child that never closes on its
+     * own, recording every signal in the order it was sent.
+     */
+    async function runFakeTimeout(
+      timeoutSeconds: number,
+      groupSignalFails = false,
+    ) {
+      vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+      const signalled: string[] = [];
+      const killSpy = vi
+        .spyOn(process, 'kill')
+        .mockImplementation((pid: number, signal?: string | number) => {
+          signalled.push(`process.kill(${pid}, ${String(signal)})`);
+          if (groupSignalFails) {
+            throw Object.assign(new Error('no such process'), {code: 'ESRCH'});
+          }
+          return true;
+        });
+
+      let announceSpawn: (child: FakeChild) => void = () => {};
+      const spawned = new Promise<FakeChild>((resolve) => {
+        announceSpawn = resolve;
+      });
+      spawnMock.mockImplementation(() => {
+        const child = createFakeChild(FAKE_PID, signalled);
+        announceSpawn(child);
+        return child;
+      });
+
+      const run = new UnsafeLocalCodeExecutor({timeoutSeconds}).executeCode({
+        invocationContext,
+        codeExecutionInput: {
+          code: 'console.log("never finishes");',
+          language: CodeExecutionLanguage.JAVASCRIPT,
+          inputFiles: [],
+        },
+      });
+
+      return {child: await spawned, killSpy, run, signalled};
+    }
+
+    it('signals the group before killing it, after the grace period', async () => {
+      const {child, killSpy, run, signalled} = await runFakeTimeout(1);
+
+      vi.advanceTimersByTime(1000);
+      expect(signalled).toEqual([
+        ...(IS_WINDOWS ? [] : [`process.kill(${-FAKE_PID}, SIGTERM)`]),
+        'child.kill(SIGTERM)',
+      ]);
+
+      vi.advanceTimersByTime(TERMINATE_GRACE_MS - 1);
+      expect(signalled).toHaveLength(IS_WINDOWS ? 1 : 2);
+
+      vi.advanceTimersByTime(1);
+      expect(signalled).toEqual([
+        ...(IS_WINDOWS ? [] : [`process.kill(${-FAKE_PID}, SIGTERM)`]),
+        'child.kill(SIGTERM)',
+        ...(IS_WINDOWS ? [] : [`process.kill(${-FAKE_PID}, SIGKILL)`]),
+        'child.kill(SIGKILL)',
+      ]);
+      // A survivor holding the read ends would otherwise hold 'close' back.
+      expect(child.stdout.destroyed).toBe(true);
+      expect(child.stderr.destroyed).toBe(true);
+
+      killSpy.mockRestore();
+      child.emit('close', null, 'SIGKILL');
+      await run;
+    });
+
+    it('disarms the escalation when the child closes within the grace period', async () => {
+      const {child, killSpy, run, signalled} = await runFakeTimeout(1);
+
+      vi.advanceTimersByTime(1000);
+      child.emit('close', null, 'SIGTERM');
+      await run;
+      const afterClose = [...signalled];
+
+      vi.advanceTimersByTime(TERMINATE_GRACE_MS * 2);
+
+      // A recycled pid would otherwise take an unrelated group with it.
+      expect(signalled).toEqual(afterClose);
+      expect(signalled.join(' ')).not.toContain('SIGKILL');
+      killSpy.mockRestore();
+    });
+
+    it.skipIf(IS_WINDOWS)(
+      'still kills the child when the group is already empty',
+      async () => {
+        const {child, killSpy, run, signalled} = await runFakeTimeout(1, true);
+
+        vi.advanceTimersByTime(1000);
+
+        expect(signalled).toEqual([
+          `process.kill(${-FAKE_PID}, SIGTERM)`,
+          'child.kill(SIGTERM)',
+        ]);
+
+        killSpy.mockRestore();
+        child.emit('close', null, 'SIGTERM');
+        await run;
+      },
+    );
+
+    it.skipIf(IS_WINDOWS)(
+      'takes down what the timed-out code spawned',
+      async () => {
+        const timeoutSeconds = 2;
+        const result = await new UnsafeLocalCodeExecutor({
+          timeoutSeconds,
+        }).executeCode({
+          invocationContext,
+          codeExecutionInput: {
+            code: [
+              'const {spawn} = require("node:child_process");',
+              'const fs = require("node:fs");',
+              'const grandchild = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], {stdio: "ignore"});',
+              // A `.txt` name so the harvested content is text, not base64.
+              'fs.writeFileSync("grandchild_pid.txt", String(grandchild.pid));',
+              'setTimeout(() => {}, 60000);',
+            ].join('\n'),
+            language: CodeExecutionLanguage.JAVASCRIPT,
+            inputFiles: [],
+          },
+        });
+
+        expect(result.stderr).toContain(
+          `Code execution timed out after ${timeoutSeconds} seconds.`,
+        );
+
+        const recorded = result.outputFiles?.find(
+          (file) => file.name === 'grandchild_pid.txt',
+        );
+        if (!recorded) {
+          expect.fail('the executed code never recorded a grandchild pid');
+        }
+        const grandchildPid = Number(recorded.content);
+        // Without this the assertion below passes on a pid that never parsed.
+        expect(Number.isInteger(grandchildPid)).toBe(true);
+
+        const deadline = Date.now() + 10_000;
+        while (Date.now() < deadline && isAlive(grandchildPid)) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        expect(isAlive(grandchildPid)).toBe(false);
+      },
+      30000,
+    );
   });
 });
