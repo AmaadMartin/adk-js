@@ -50,6 +50,7 @@ import {
   serializeAgent,
   serializeAppInfo,
 } from './app_info.js';
+import {corsOriginOption, parseCorsOrigins} from './cors_origins.js';
 import {
   getAllowedRequestHosts,
   isDnsRebindingRequest,
@@ -292,7 +293,7 @@ export class AdkApiServer {
     if (this.allowOrigins) {
       app.use(
         cors({
-          origin: this.allowOrigins!,
+          origin: corsOriginOption(parseCorsOrigins(this.allowOrigins)),
         }),
       );
     }
