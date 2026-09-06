@@ -12,7 +12,6 @@ import {
   deployToCloudRun,
 } from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {A2A_AUTH_TOKEN_ENV_VAR} from '../../src/server/adk_api_server.js';
-import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {
   createTempDir,
   isFile,
@@ -35,11 +34,13 @@ vi.mock('node:child_process', () => ({
     spawnMock(cmd, args, opts),
 }));
 
+// Implementations go in the vi.fn() constructor argument so they survive the
+// vi.restoreAllMocks() in afterEach.
 vi.mock('node:fs/promises', () => {
   const mockFs = {
-    cp: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-    rm: vi.fn().mockResolvedValue(undefined),
+    cp: vi.fn(async () => {}),
+    mkdir: vi.fn(async () => {}),
+    rm: vi.fn(async () => {}),
   };
   return {
     ...mockFs,
@@ -48,12 +49,12 @@ vi.mock('node:fs/promises', () => {
 });
 
 vi.mock('../../src/utils/agent_loader.js', () => ({
-  AgentLoader: vi.fn().mockImplementation(() => ({
-    listAgents: vi.fn().mockResolvedValue(['agent1']),
-    getAgentFile: vi.fn().mockResolvedValue({
-      getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
-    }),
-    disposeAll: vi.fn().mockResolvedValue(undefined),
+  AgentLoader: vi.fn(() => ({
+    listAgents: vi.fn(async () => ['agent1']),
+    getAgentFile: vi.fn(async () => ({
+      getFilePath: vi.fn(() => 'path/to/agent1.ts'),
+    })),
+    disposeAll: vi.fn(async () => {}),
   })),
 }));
 
@@ -243,14 +244,6 @@ describe('deployToCloudRun', () => {
       },
     });
 
-    (AgentLoader as Mock).mockImplementation(() => ({
-      listAgents: vi.fn().mockResolvedValue(['agent1']),
-      getAgentFile: vi.fn().mockResolvedValue({
-        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
-      }),
-      disposeAll: vi.fn().mockResolvedValue(undefined),
-    }));
-
     execMock.mockImplementation((cmd: string, callback: Callback) => {
       if (cmd.includes('config get-value project')) {
         callback(null, {stdout: 'gcloud-project\n'});
@@ -294,6 +287,18 @@ describe('deployToCloudRun', () => {
       recursive: true,
       force: true,
     });
+  });
+
+  // Deliberately not the first test in the block: it only holds if the fakes
+  // survived the preceding test's `vi.restoreAllMocks()`. This pins the
+  // fixture rather than product behaviour, because every call site awaits
+  // these fakes, where a bare `undefined` and a resolved promise behave alike.
+  it('should keep the node:fs/promises fakes returning promises after a restore', async () => {
+    await expect(
+      fs.rm('/tmp/x', {recursive: true, force: true}),
+    ).resolves.toBeUndefined();
+    await expect(fs.mkdir('/tmp/x')).resolves.toBeUndefined();
+    await expect(fs.cp('/tmp/x', '/tmp/y')).resolves.toBeUndefined();
   });
 
   it('should resolve default project and region from gcloud if not provided', async () => {

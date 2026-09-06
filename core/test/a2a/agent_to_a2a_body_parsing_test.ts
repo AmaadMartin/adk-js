@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {DefaultRequestHandler} from '@a2a-js/sdk/server';
 import express from 'express';
 import type {Server} from 'node:http';
 import type {AddressInfo} from 'node:net';
@@ -32,18 +33,20 @@ vi.mock('@a2a-js/sdk/server/express', () => {
   };
 });
 
+// Implementations go in the vi.fn() constructor argument so they survive the
+// vi.restoreAllMocks() in afterEach.
 vi.mock('@a2a-js/sdk/server', () => ({
-  DefaultRequestHandler: vi.fn().mockImplementation(() => ({})),
-  InMemoryTaskStore: vi.fn().mockImplementation(() => ({})),
+  DefaultRequestHandler: vi.fn(() => ({})),
+  InMemoryTaskStore: vi.fn(() => ({})),
 }));
 
 vi.mock('../../src/a2a/agent_executor.js', () => ({
-  A2AAgentExecutor: vi.fn().mockImplementation(() => ({})),
+  A2AAgentExecutor: vi.fn(() => ({})),
 }));
 
 vi.mock('../../src/a2a/agent_card.js', () => ({
-  getA2AAgentCard: vi.fn().mockResolvedValue({name: 'mocked_card'}),
-  resolveAgentCard: vi.fn().mockResolvedValue({name: 'resolved_card'}),
+  getA2AAgentCard: vi.fn(async () => ({name: 'mocked_card'})),
+  resolveAgentCard: vi.fn(async () => ({name: 'resolved_card'})),
 }));
 
 class TestAgent extends BaseAgent {
@@ -104,5 +107,15 @@ describe('toA2a body parsing', () => {
     await post('/rest', 'application/json', JSON.stringify(payload));
 
     expect(receivedBodies[0]).toEqual(payload);
+  });
+
+  // Deliberately not the first test in the file: it only holds if the agent
+  // card fake survived the preceding test's `vi.restoreAllMocks()`.
+  it('builds the request handler from the generated agent card', () => {
+    expect(DefaultRequestHandler).toHaveBeenCalledWith(
+      {name: 'mocked_card'},
+      expect.anything(),
+      expect.anything(),
+    );
   });
 });
