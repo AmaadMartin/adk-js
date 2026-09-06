@@ -54,14 +54,32 @@ const stdioParams = {
   serverParams: {command: 'test'},
 } as unknown as MCPConnectionParams;
 
+/** Stubs the next client so that the server advertises `names`, in order. */
+function serveToolsOnce(names: string[]) {
+  vi.mocked(Client).mockImplementationOnce(
+    () =>
+      ({
+        connect: noop(),
+        close: noop(),
+        listTools: vi.fn().mockResolvedValue({
+          tools: names.map((name, index) => ({
+            name,
+            description: `tool ${index}`,
+            inputSchema: {},
+          })),
+        }),
+      }) as unknown as Client,
+  );
+}
+
 describe('MCPToolset', () => {
   it('discovers tools without prefix', async () => {
     const toolset = new MCPToolset(stdioParams);
     const tools = await toolset.getTools();
 
     expect(tools).toHaveLength(2);
-    expect(tools[0].name).toBe('test-tool');
-    expect(tools[1].name).toBe('other-tool');
+    expect(tools[0].name).toBe('other-tool');
+    expect(tools[1].name).toBe('test-tool');
   });
 
   it('discovers tools with prefix applied', async () => {
@@ -69,8 +87,92 @@ describe('MCPToolset', () => {
     const tools = await toolset.getTools();
 
     expect(tools).toHaveLength(2);
-    expect(tools[0].name).toBe('myprefix_test-tool');
-    expect(tools[1].name).toBe('myprefix_other-tool');
+    expect(tools[0].name).toBe('myprefix_other-tool');
+    expect(tools[1].name).toBe('myprefix_test-tool');
+  });
+
+  describe('ordering', () => {
+    it('returns tools sorted by name', async () => {
+      serveToolsOnce(['charlie', 'alpha', 'bravo']);
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'alpha',
+        'bravo',
+        'charlie',
+      ]);
+    });
+
+    it('sorts on the prefixed name', async () => {
+      serveToolsOnce(['charlie', 'alpha', 'bravo']);
+      const toolset = new MCPToolset(stdioParams, [], 'myprefix');
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'myprefix_alpha',
+        'myprefix_bravo',
+        'myprefix_charlie',
+      ]);
+    });
+
+    it('sorts when a string-array filter is applied', async () => {
+      serveToolsOnce(['charlie', 'alpha', 'bravo']);
+      const toolset = new MCPToolset(stdioParams, ['charlie', 'alpha']);
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual(['alpha', 'charlie']);
+    });
+
+    it('sorts when a predicate filter is applied', async () => {
+      serveToolsOnce(['charlie', 'alpha', 'bravo']);
+      const toolset = new MCPToolset(
+        stdioParams,
+        (tool) => tool.name !== 'bravo',
+      );
+
+      const tools = await toolset.getTools({} as ReadonlyContext);
+
+      expect(tools.map((tool) => tool.name)).toEqual(['alpha', 'charlie']);
+    });
+
+    it('keeps the input order of duplicate names', async () => {
+      serveToolsOnce(['bravo', 'alpha', 'bravo']);
+      const toolset = new MCPToolset(stdioParams);
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'alpha',
+        'bravo',
+        'bravo',
+      ]);
+      // The two 'bravo' entries stay in the order the server sent them.
+      expect(tools.map((tool) => tool.description)).toEqual([
+        'tool 1',
+        'tool 0',
+        'tool 2',
+      ]);
+    });
+
+    it('sorts when a predicate filter has no context', async () => {
+      serveToolsOnce(['charlie', 'alpha', 'bravo']);
+      const toolset = new MCPToolset(
+        stdioParams,
+        (tool) => tool.name !== 'bravo',
+      );
+
+      const tools = await toolset.getTools();
+
+      expect(tools.map((tool) => tool.name)).toEqual([
+        'alpha',
+        'bravo',
+        'charlie',
+      ]);
+    });
   });
 
   describe('toolFilter', () => {
