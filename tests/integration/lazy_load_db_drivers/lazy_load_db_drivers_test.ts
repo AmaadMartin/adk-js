@@ -35,8 +35,12 @@ describe('Lazy load DB drivers', () => {
     // Only sqlite is used, and it is NOT mocked to throw, so it should initialize successfully.
     const svc = new DatabaseSessionService('sqlite://:memory:');
 
-    // We expect successful initialization because it doesn't need the other drivers.
-    await expect(svc.init()).resolves.toBeUndefined();
+    try {
+      // We expect successful initialization because it doesn't need the other drivers.
+      await expect(svc.init()).resolves.toBeUndefined();
+    } finally {
+      await svc.close();
+    }
   });
 
   describe.each(missingDrivers)('Driver: $name', ({uri}) => {

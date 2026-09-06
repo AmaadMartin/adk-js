@@ -100,6 +100,24 @@ export class DatabaseSessionService extends BaseSessionService {
     this.initialized = true;
   }
 
+  /**
+   * Closes the underlying database connection and releases pooled resources.
+   *
+   * Safe to call more than once, safe to call before {@link init}, and safe to
+   * call after a failed {@link init}. The state is reset before the connection
+   * is closed, so the service stays re-initializable even when the driver
+   * reports a failure while closing: a subsequent operation calls {@link init}
+   * again and opens a fresh connection. An error raised by the driver
+   * propagates to the caller.
+   */
+  async close(): Promise<void> {
+    const orm = this.orm;
+    this.orm = undefined;
+    this.initialized = false;
+
+    await orm?.close();
+  }
+
   async createSession({
     appName,
     userId,
