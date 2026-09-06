@@ -272,6 +272,9 @@ describe('ManagedAgent construction and client', () => {
 
   it('test_lazy_client_enterprise_uses_global_location', () => {
     vi.stubEnv('GOOGLE_GENAI_USE_ENTERPRISE', '1');
+    // genai rejects an enterprise client that resolves no project, so the
+    // test supplies one rather than depending on the machine's credentials.
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
     const agent = new ManagedAgent({name: 'mgr', agentId: 'agents/a'});
 
     expect(agent.apiClient.vertexai).toBe(true);
@@ -299,6 +302,7 @@ describe('ManagedAgent construction and client', () => {
 
   it('test_lazy_client_is_built_once', () => {
     vi.stubEnv('GOOGLE_GENAI_USE_ENTERPRISE', '1');
+    vi.stubEnv('GOOGLE_CLOUD_PROJECT', 'test-project');
     const agent = new ManagedAgent({name: 'mgr', agentId: 'agents/a'});
 
     expect(agent.apiClient).toBe(agent.apiClient);
