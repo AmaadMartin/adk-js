@@ -218,6 +218,18 @@ export {LLMRegistry} from './models/registry.js';
 export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
+export type {AgentOptimizer} from './optimization/agent_optimizer.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export type {
+  ExampleSet,
+  SampleAndScoreParams,
+  Sampler,
+} from './optimization/sampler.js';
 export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
