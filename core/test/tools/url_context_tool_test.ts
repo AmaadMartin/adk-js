@@ -93,6 +93,36 @@ describe('UrlContextTool', () => {
     });
   });
 
+  describe('managed agent mode', () => {
+    it('configures the tool when the request names an agent, not a model', async () => {
+      const req = makeRequest(undefined);
+      req.isManagedAgent = true;
+
+      await new UrlContextTool().processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+
+    it('creates the tools array when the request has no config', async () => {
+      const req: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        isManagedAgent: true,
+      };
+
+      await new UrlContextTool().processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{urlContext: {}}]);
+    });
+  });
+
   it('has a global instance URL_CONTEXT', () => {
     expect(URL_CONTEXT).toBeInstanceOf(UrlContextTool);
   });

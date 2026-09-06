@@ -94,6 +94,36 @@ describe('GoogleSearchTool', () => {
     });
   });
 
+  describe('managed agent mode', () => {
+    it('configures the tool when the request names an agent, not a model', async () => {
+      const req = makeRequest(undefined);
+      req.isManagedAgent = true;
+
+      await new GoogleSearchTool().processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{googleSearch: {}}]);
+    });
+
+    it('creates the tools array when the request has no config', async () => {
+      const req: LlmRequest = {
+        contents: [],
+        toolsDict: {},
+        liveConnectConfig: {},
+        isManagedAgent: true,
+      };
+
+      await new GoogleSearchTool().processLlmRequest({
+        llmRequest: req,
+        toolContext: {} as never,
+      });
+
+      expect(req.config!.tools).toEqual([{googleSearch: {}}]);
+    });
+  });
+
   it('has a global instance GOOGLE_SEARCH', () => {
     expect(GOOGLE_SEARCH).toBeInstanceOf(GoogleSearchTool);
   });
