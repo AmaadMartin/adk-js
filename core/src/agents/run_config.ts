@@ -6,11 +6,16 @@
 
 import {
   AudioTranscriptionConfig,
+  AvatarConfig,
   ContextWindowCompressionConfig,
+  HttpOptions,
+  LiveConnectConfig,
   Modality,
   ProactivityConfig,
   RealtimeInputConfig,
+  SessionResumptionConfig,
   SpeechConfig,
+  TranslationConfig,
 } from '@google/genai';
 
 import {logger} from '../utils/logger.js';
@@ -30,6 +35,33 @@ export enum StreamingMode {
 }
 
 /**
+ * Configures the exchange of history between the client and the server.
+ *
+ * Mirrors the `HistoryConfig` shape the Live API accepts. Declared here rather
+ * than imported because `@google/genai` 2.9.0 — the pinned version — does not
+ * export it; replace this with the SDK type when the dependency is raised.
+ */
+export interface HistoryConfig {
+  /**
+   * If true, after `setup_complete` the server first processes
+   * `client_content` messages until `turnComplete` is true. That initial
+   * history does not trigger a model call.
+   */
+  initialHistoryInClientContent?: boolean;
+}
+
+/**
+ * A `LiveConnectConfig` that also carries {@link HistoryConfig}.
+ *
+ * `@google/genai` 2.9.0 does not model `historyConfig` on `LiveConnectConfig`;
+ * the Live API accepts it. Delete this and use the SDK type once the
+ * dependency is raised.
+ */
+export interface LiveConnectConfigWithHistory extends LiveConnectConfig {
+  historyConfig?: HistoryConfig;
+}
+
+/**
  * Configs for runtime behavior of agents.
  */
 export interface RunConfig {
@@ -39,9 +71,27 @@ export interface RunConfig {
   speechConfig?: SpeechConfig;
 
   /**
+   * HTTP options for this invocation, for example custom headers or a
+   * request timeout. Merged over the agent's own `generateContentConfig`
+   * HTTP options, with these values winning.
+   */
+  httpOptions?: HttpOptions;
+
+  /**
+   * User labels for this invocation, for example for billing or attribution.
+   * Merged over the agent's own labels.
+   */
+  labels?: Record<string, string>;
+
+  /**
    * The output modalities. If not set, it's default to AUDIO.
    */
   responseModalities?: Modality[];
+
+  /**
+   * Avatar configuration for the live agent.
+   */
+  avatarConfig?: AvatarConfig;
 
   /**
    * Whether or not to save the input blobs as artifacts.
@@ -93,10 +143,45 @@ export interface RunConfig {
   realtimeInputConfig?: RealtimeInputConfig;
 
   /**
+   * Whether the model emits explicit voice activity detection (VAD) signals.
+   */
+  explicitVadSignal?: boolean;
+
+  /**
+   * Configures real-time speech-to-speech translation. Only supported by
+   * translation models.
+   */
+  translationConfig?: TranslationConfig;
+
+  /**
+   * Configures the session resumption mechanism. Only transparent session
+   * resumption is supported today.
+   */
+  sessionResumption?: SessionResumptionConfig;
+
+  /**
+   * Configures the exchange of history between the client and the server.
+   */
+  historyConfig?: HistoryConfig;
+
+  /**
    * Context window compression config. When the running context exceeds
    * `triggerTokens`, the server compresses older history to `targetTokens`.
    */
   contextWindowCompression?: ContextWindowCompressionConfig;
+
+  /**
+   * Whether `Runner.runLive` saves the live video and audio a model sends to
+   * the artifact service and keeps the event in the session. Off by default,
+   * so those events are yielded to the caller and then dropped.
+   */
+  saveLiveBlob?: boolean;
+
+  /**
+   * @deprecated Use {@link RunConfig.saveLiveBlob} instead. Setting this to
+   * true turns `saveLiveBlob` on and logs a warning.
+   */
+  saveLiveAudio?: boolean;
 
   /**
    * A limit on the total number of llm calls for a given run.
@@ -171,6 +256,9 @@ export interface RunConfig {
  * - `streamingMode` → {@link StreamingMode.NONE}
  * - `maxLlmCalls` → `500` (validated via `validateMaxLlmCalls`)
  * - `pauseOnToolCalls` → `false`
+ * - `saveLiveBlob` → `false`
+ *
+ * A deprecated `saveLiveAudio` flag turns `saveLiveBlob` on and logs a warning.
  *
  * @param params - Optional partial {@link RunConfig} overriding defaults.
  * @returns A merged {@link RunConfig} object.
@@ -179,15 +267,25 @@ export interface RunConfig {
  */
 export function createRunConfig(params: Partial<RunConfig> = {}) {
   validateStreamingMode(params.streamingMode);
-  return {
+  const config = {
     saveInputBlobsAsArtifacts: false,
     supportCfc: false,
     enableAffectiveDialog: false,
     streamingMode: StreamingMode.NONE,
     pauseOnToolCalls: false,
+    saveLiveBlob: false,
     ...params,
     maxLlmCalls: validateMaxLlmCalls(params.maxLlmCalls ?? 500),
   };
+  if (params.saveLiveAudio !== undefined) {
+    logger.warn(
+      'The `saveLiveAudio` config is deprecated and will be removed in a future release. Use `saveLiveBlob` instead.',
+    );
+    if (params.saveLiveAudio) {
+      config.saveLiveBlob = true;
+    }
+  }
+  return config;
 }
 
 function validateStreamingMode(streamingMode?: StreamingMode): void {

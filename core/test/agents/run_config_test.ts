@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {
+  AvatarConfig,
+  HttpOptions,
+  SessionResumptionConfig,
+  TranslationConfig,
+} from '@google/genai';
 import {describe, expect, it, vi} from 'vitest';
 import {createRunConfig, StreamingMode} from '../../src/agents/run_config.js';
 import {logger} from '../../src/utils/logger.js';
@@ -76,5 +82,118 @@ describe('createRunConfig', () => {
     expect(() =>
       createRunConfig({maxLlmCalls: Number.MAX_SAFE_INTEGER + 1}),
     ).toThrow();
+  });
+});
+
+describe('createRunConfig parity fields', () => {
+  it('leaves every optional parity field undefined by default', () => {
+    const config = createRunConfig();
+    expect(config.httpOptions).toBeUndefined();
+    expect(config.labels).toBeUndefined();
+    expect(config.avatarConfig).toBeUndefined();
+    expect(config.explicitVadSignal).toBeUndefined();
+    expect(config.translationConfig).toBeUndefined();
+    expect(config.sessionResumption).toBeUndefined();
+    expect(config.historyConfig).toBeUndefined();
+  });
+
+  it('round-trips httpOptions and labels unchanged', () => {
+    const httpOptions: HttpOptions = {
+      timeout: 30_000,
+      headers: {'x-request-id': 'req-1'},
+    };
+    const labels = {team: 'search', cost_center: 'abc-123'};
+
+    const config = createRunConfig({httpOptions, labels});
+
+    expect(config.httpOptions).toEqual(httpOptions);
+    expect(config.labels).toEqual(labels);
+  });
+
+  it('round-trips the live-connect fields unchanged', () => {
+    const translationConfig: TranslationConfig = {
+      targetLanguageCode: 'es-ES',
+    };
+    const sessionResumption: SessionResumptionConfig = {transparent: true};
+
+    const config = createRunConfig({
+      explicitVadSignal: true,
+      translationConfig,
+      sessionResumption,
+      historyConfig: {initialHistoryInClientContent: true},
+    });
+
+    expect(config.explicitVadSignal).toBe(true);
+    expect(config.translationConfig).toEqual(translationConfig);
+    expect(config.sessionResumption).toEqual(sessionResumption);
+    expect(config.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    });
+  });
+
+  it('keeps a customized avatar intact', () => {
+    const avatarConfig: AvatarConfig = {
+      customizedAvatar: {
+        imageMimeType: 'image/png',
+        imageData: 'AAA=',
+      },
+      audioBitrateBps: 128_000,
+    };
+
+    const config = createRunConfig({avatarConfig});
+
+    expect(config.avatarConfig).toEqual(avatarConfig);
+  });
+
+  it('keeps a named avatar intact', () => {
+    const config = createRunConfig({avatarConfig: {avatarName: 'ada'}});
+
+    expect(config.avatarConfig).toEqual({avatarName: 'ada'});
+  });
+});
+
+describe('createRunConfig saveLiveBlob', () => {
+  it('defaults saveLiveBlob to false', () => {
+    expect(createRunConfig().saveLiveBlob).toBe(false);
+  });
+
+  it('preserves an explicit saveLiveBlob of true without warning', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const config = createRunConfig({saveLiveBlob: true});
+
+    expect(config.saveLiveBlob).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('turns saveLiveBlob on and warns when saveLiveAudio is true', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const config = createRunConfig({saveLiveAudio: true});
+
+    expect(config.saveLiveBlob).toBe(true);
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0][0]).toContain('saveLiveAudio');
+    warnSpy.mockRestore();
+  });
+
+  it('leaves saveLiveBlob off but still warns when saveLiveAudio is false', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const config = createRunConfig({saveLiveAudio: false});
+
+    expect(config.saveLiveBlob).toBe(false);
+    expect(warnSpy).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+  });
+
+  it('lets saveLiveAudio true override an explicit saveLiveBlob false', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    const config = createRunConfig({saveLiveAudio: true, saveLiveBlob: false});
+
+    expect(config.saveLiveBlob).toBe(true);
+    warnSpy.mockRestore();
   });
 });
