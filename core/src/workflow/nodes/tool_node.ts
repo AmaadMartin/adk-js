@@ -7,6 +7,7 @@
 import type {FunctionCall} from '@google/genai';
 import {handleFunctionCallList} from '../../agents/functions.js';
 import {Event} from '../../events/event.js';
+import {isDefaultEventActions} from '../../events/event_actions.js';
 import {getFunctionResponses} from '../../models/llm_response.js';
 import {BaseTool} from '../../tools/base_tool.js';
 import {isContent} from '../../utils/content_utils.js';
@@ -32,7 +33,13 @@ export interface ToolNodeConfig extends Partial<Omit<BaseNodeConfig, 'name'>> {
  * tool callbacks, the confirmation gate, telemetry, and everything the tool
  * writes to its context (`stateDelta`, `artifactDelta`, requested credentials /
  * confirmations, …) all apply — exactly as when the same tool is called from an
- * LLM agent. The emitted event carries a canonical `functionResponse` part.
+ * LLM agent.
+ *
+ * A tool that returns a response yields an event carrying a canonical
+ * `functionResponse` part, and the response becomes the node output. A tool
+ * that returns nothing — including a long-running tool deferring its response
+ * — yields a bare event carrying whatever it recorded, or no event at all when
+ * it recorded nothing.
  */
 export class ToolNode extends BaseNode {
   readonly tool: BaseTool;
@@ -41,13 +48,6 @@ export class ToolNode extends BaseNode {
     // Spread first so an explicit `undefined` name in `config` can't clobber
     // the fallback (which BaseNode requires to be non-empty).
     super({...config, name: config.name ?? tool.name});
-    if (tool.isLongRunning) {
-      // Long-running/HITL tools suspend the invocation; that machinery lands in
-      // a later part. Fail loud rather than silently completing the call.
-      throw new Error(
-        `ToolNode does not support long-running tools yet (tool '${tool.name}').`,
-      );
-    }
     this.tool = tool;
   }
 
@@ -86,15 +86,52 @@ export class ToolNode extends BaseNode {
       return;
     }
     responseEvent.author = this.name;
-    // Surface the tool's (post-callback) response as the node output so it can
-    // drive downstream nodes, while the event keeps its canonical
-    // functionResponse content for history.
-    const responses = getFunctionResponses(responseEvent);
-    if (responses.length > 0) {
-      responseEvent.output = responses[0].response;
+
+    const response = toolResponse(responseEvent);
+    if (response !== undefined) {
+      // Surface the tool's (post-callback) response as the node output so it
+      // can drive downstream nodes, while the event keeps its canonical
+      // functionResponse content for history.
+      responseEvent.output = response;
+      yield responseEvent;
+      return;
     }
-    yield responseEvent;
+
+    // No response: match adk-python `_tool_node`, which yields a state-only
+    // event or nothing rather than an output the successor node would read.
+    if (!isDefaultEventActions(responseEvent.actions)) {
+      // Drop the `{result: <nullish>}` part so the event carries only what the
+      // tool recorded. A deferred long-running response has no content already.
+      responseEvent.content = undefined;
+      yield responseEvent;
+    }
   }
+}
+
+/**
+ * The tool's post-callback response, or `undefined` when it produced none.
+ *
+ * `agents/functions.ts` wraps a nullish tool result as `{result: <nullish>}`
+ * and emits an actions-only event (no function-response part) for a
+ * long-running tool that defers its response; both mean "no response".
+ *
+ * A tool that returns the object `{result: null}` reads as "no response" too.
+ * adk-python's `_tool_node` tests `response is not None` against the raw return
+ * and so keeps the two apart, but the wrap above erases the difference before
+ * this function runs. Separating them needs a second return channel on
+ * {@link handleFunctionCallList}, which merges N calls into one event and has
+ * no well-defined per-call result to expose.
+ */
+function toolResponse(event: Event): Record<string, unknown> | undefined {
+  const response = getFunctionResponses(event)[0]?.response;
+  if (response == null) {
+    return undefined;
+  }
+  const keys = Object.keys(response);
+  if (keys.length === 1 && keys[0] === 'result' && response['result'] == null) {
+    return undefined;
+  }
+  return response;
 }
 
 /** Coerces arbitrary node input into a tool-arguments record. */
