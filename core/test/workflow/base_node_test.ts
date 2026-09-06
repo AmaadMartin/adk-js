@@ -6,12 +6,7 @@
 
 import {Content} from '@google/genai';
 import {describe, expect, it} from 'vitest';
-import {
-  isBaseNode,
-  isContent,
-  START,
-  toContent,
-} from '../../src/workflow/base_node.js';
+import {isBaseNode, START, toContent} from '../../src/workflow/base_node.js';
 import {node} from '../../src/workflow/node.js';
 import {isWorkflow, Workflow} from '../../src/workflow/workflow.js';
 import {FnNode} from './test_helpers.js';
@@ -47,20 +42,6 @@ describe('isWorkflow', () => {
     expect(isWorkflow(START)).toBe(false);
     expect(isWorkflow({})).toBe(false);
     expect(isWorkflow(null)).toBe(false);
-  });
-});
-
-describe('isContent', () => {
-  it('is true for objects with a parts array', () => {
-    expect(isContent({parts: []})).toBe(true);
-    expect(isContent({role: 'model', parts: [{text: 'x'}]})).toBe(true);
-  });
-
-  it('is false without a parts array', () => {
-    expect(isContent({role: 'model'})).toBe(false);
-    expect(isContent({parts: 'x'})).toBe(false);
-    expect(isContent('x')).toBe(false);
-    expect(isContent(null)).toBe(false);
   });
 });
 

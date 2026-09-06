@@ -287,6 +287,14 @@ describe('Phase 5b — rehydration utility', () => {
     ];
     expect(reconstructNodeStates(events).get('a')?.output).toBe('A');
   });
+
+  it('keys a node name containing @ the same way in both modes', () => {
+    const events: Event[] = [
+      createEvent({nodeInfo: {path: 'root.a@b@2'}, output: 'AT'}),
+    ];
+    expect(reconstructNodeStates(events, 'root').get('a@b')?.output).toBe('AT');
+    expect(reconstructNodeStates(events).get('a@b')?.output).toBe('AT');
+  });
 });
 
 describe('Phase 5b — a reply that answers no open interrupt', () => {

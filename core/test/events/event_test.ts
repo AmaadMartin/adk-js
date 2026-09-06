@@ -8,15 +8,21 @@ import {
   AuthConfig,
   createEvent,
   createEventActions,
+  getEventNodeName,
   getFunctionCalls,
   getFunctionResponses,
+  getNodeInfoName,
+  getNodeRunId,
+  getParentNodeRunId,
   hasThoughts,
   hasTrailingCodeExecutionResult,
+  InputValidationError,
   isFinalResponse,
   pruneThoughts,
+  setEventMessage,
   stringifyContent,
 } from '@google/adk';
-import {Outcome} from '@google/genai';
+import {Content, Outcome, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   createNewEventId,
@@ -463,5 +469,283 @@ describe('Event Utils', () => {
       populateClientFunctionCallId(event);
       expect(event.content!.parts![0].text).toBe('hello');
     });
+  });
+});
+
+describe('createEvent convenience kwargs', () => {
+  describe('message', () => {
+    it('builds content from a string', () => {
+      const event = createEvent({author: 'user', message: 'Hello!'});
+      expect(event.content).toEqual({role: 'user', parts: [{text: 'Hello!'}]});
+    });
+
+    it('passes a Content through by identity', () => {
+      const content: Content = {role: 'model', parts: [{text: 'hi'}]};
+      const event = createEvent({message: content});
+      expect(event.content).toBe(content);
+    });
+
+    it('converts a single part', () => {
+      const part: Part = {text: 'one'};
+      expect(createEvent({message: part}).content).toEqual({
+        role: 'user',
+        parts: [part],
+      });
+    });
+
+    it('converts a part list preserving order', () => {
+      const parts: Part[] = [{text: 'a'}, {text: 'b'}];
+      expect(createEvent({message: parts}).content).toEqual({
+        role: 'user',
+        parts,
+      });
+    });
+
+    it('rejects message together with content', () => {
+      expect(() =>
+        createEvent({message: 'hi', content: {parts: [{text: 'world'}]}}),
+      ).toThrow(InputValidationError);
+      expect(() =>
+        createEvent({message: 'hi', content: {parts: [{text: 'world'}]}}),
+      ).toThrow(/mutually exclusive/);
+    });
+
+    it('still accepts content on its own', () => {
+      const content: Content = {role: 'user', parts: [{text: 'only'}]};
+      expect(createEvent({content}).content).toBe(content);
+    });
+
+    it('leaves content undefined when neither is given', () => {
+      expect(createEvent({author: 'user'}).content).toBeUndefined();
+    });
+  });
+
+  describe('state', () => {
+    it('lands on actions.stateDelta', () => {
+      const event = createEvent({author: 'a', state: {k: 'v'}});
+      expect(event.actions.stateDelta).toEqual({k: 'v'});
+    });
+
+    it('leaves stateDelta empty when omitted', () => {
+      expect(createEvent({author: 'a'}).actions.stateDelta).toEqual({});
+    });
+
+    it('keeps the other action fields when actions is also given', () => {
+      const event = createEvent({
+        state: {k: 'v'},
+        actions: {escalate: true, transferToAgent: 'other'},
+      });
+      expect(event.actions.stateDelta).toEqual({k: 'v'});
+      expect(event.actions.escalate).toBe(true);
+      expect(event.actions.transferToAgent).toBe('other');
+    });
+  });
+
+  describe('nodePath', () => {
+    it('lands on nodeInfo.path', () => {
+      expect(createEvent({nodePath: 'root.n'}).nodeInfo).toEqual({
+        path: 'root.n',
+      });
+    });
+
+    it('keeps the other nodeInfo fields when nodeInfo is also given', () => {
+      const event = createEvent({
+        nodePath: 'root.n',
+        nodeInfo: {path: 'stale', outputFor: ['root'], messageAsOutput: true},
+      });
+      expect(event.nodeInfo).toEqual({
+        path: 'root.n',
+        outputFor: ['root'],
+        messageAsOutput: true,
+      });
+    });
+
+    it('leaves nodeInfo undefined when neither is given', () => {
+      expect(createEvent({author: 'a'}).nodeInfo).toBeUndefined();
+    });
+  });
+
+  describe('combined', () => {
+    it('routes message and state together', () => {
+      const event = createEvent({message: 'hi', state: {k: 'v'}});
+      expect(event.content!.parts![0].text).toBe('hi');
+      expect(event.actions.stateDelta).toEqual({k: 'v'});
+    });
+
+    it('routes message and nodePath together', () => {
+      const event = createEvent({message: 'hi', nodePath: 'wf@1.n@2'});
+      expect(event.content!.parts![0].text).toBe('hi');
+      expect(event.nodeInfo!.path).toBe('wf@1.n@2');
+    });
+  });
+
+  it('does not copy the convenience keys onto the event', () => {
+    const event = createEvent({
+      message: 'hi',
+      state: {k: 'v'},
+      nodePath: 'root.n',
+    });
+    expect(Object.keys(event)).not.toContain('message');
+    expect(Object.keys(event)).not.toContain('state');
+    expect(Object.keys(event)).not.toContain('nodePath');
+  });
+
+  it('serializes the message under content', () => {
+    const serialized = transformToSnakeCaseEvent(
+      createEvent({message: 'hi', state: {k: 'v'}, nodePath: 'root.n'}),
+    );
+    expect(serialized['content']).toEqual({
+      role: 'user',
+      parts: [{text: 'hi'}],
+    });
+    expect(serialized).not.toHaveProperty('message');
+    expect(serialized).not.toHaveProperty('node_path');
+    expect(serialized['node_info']).toEqual({path: 'root.n'});
+  });
+
+  it('does not mutate the params object', () => {
+    const params = {
+      author: 'a',
+      message: 'hi',
+      state: {k: 'v'},
+      nodePath: 'root.n',
+      actions: {escalate: true},
+    };
+    const before = structuredClone(params);
+    createEvent(params);
+    expect(params).toEqual(before);
+  });
+});
+
+describe('setEventMessage', () => {
+  it('rebuilds content from a string', () => {
+    const event = createEvent({message: 'first'});
+    setEventMessage(event, 'updated');
+    expect(event.content).toEqual({role: 'user', parts: [{text: 'updated'}]});
+  });
+
+  it('stores a Content by identity', () => {
+    const event = createEvent({author: 'a'});
+    const content: Content = {role: 'model', parts: [{text: 'x'}]};
+    setEventMessage(event, content);
+    expect(event.content).toBe(content);
+  });
+
+  it('clears the content for undefined and null', () => {
+    const event = createEvent({message: 'first'});
+    setEventMessage(event, undefined);
+    expect(event.content).toBeUndefined();
+
+    setEventMessage(event, 'again');
+    setEventMessage(event, null);
+    expect(event.content).toBeUndefined();
+  });
+});
+
+describe('node identity accessors', () => {
+  it('derives the run id, parent run id and name from the path', () => {
+    const event = createEvent({author: 'a', nodePath: 'wf@1.review@3'});
+    expect(getNodeRunId(event.nodeInfo)).toBe('3');
+    expect(getParentNodeRunId(event.nodeInfo)).toBe('1');
+    expect(getNodeInfoName(event.nodeInfo)).toBe('review');
+  });
+
+  it('reads a path written with the Python separator', () => {
+    const event = createEvent({author: 'a', nodePath: 'wf@1/review@3'});
+    expect(getNodeRunId(event.nodeInfo)).toBe('3');
+    expect(getParentNodeRunId(event.nodeInfo)).toBe('1');
+    expect(getNodeInfoName(event.nodeInfo)).toBe('review');
+  });
+
+  it('degrades on a path with no run ids', () => {
+    const event = createEvent({author: 'a', nodePath: 'wf.review'});
+    expect(getNodeRunId(event.nodeInfo)).toBe('');
+    expect(getParentNodeRunId(event.nodeInfo)).toBeUndefined();
+    expect(getNodeInfoName(event.nodeInfo)).toBe('review');
+  });
+
+  it('degrades on an event with no nodeInfo', () => {
+    const event = createEvent({author: 'a'});
+    expect(getNodeRunId(event.nodeInfo)).toBe('');
+    expect(getParentNodeRunId(event.nodeInfo)).toBeUndefined();
+    expect(getNodeInfoName(event.nodeInfo)).toBe('');
+  });
+});
+
+describe('getEventNodeName', () => {
+  it('returns the leaf node name for a plain node event', () => {
+    expect(getEventNodeName(createEvent({nodePath: 'wf@1.review@3'}))).toBe(
+      'review',
+    );
+  });
+
+  it('returns an empty string when the event ends an agent', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.review@3',
+      actions: {endOfAgent: true},
+    });
+    expect(getEventNodeName(event)).toBe('');
+  });
+
+  it('returns an empty string when the event carries agent state', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.review@3',
+      actions: {agentState: {step: 1}},
+    });
+    expect(getEventNodeName(event)).toBe('');
+  });
+
+  it('keeps the node name when agentState is empty', () => {
+    const event = createEvent({
+      nodePath: 'wf@1.review@3',
+      actions: {agentState: {}},
+    });
+    expect(getEventNodeName(event)).toBe('review');
+  });
+
+  it('returns an empty string when the event has no nodeInfo', () => {
+    expect(getEventNodeName(createEvent({author: 'a'}))).toBe('');
+  });
+});
+
+describe('longRunningToolIds serialization', () => {
+  it('sorts the ids', () => {
+    const serialized = transformToSnakeCaseEvent(
+      createEvent({longRunningToolIds: ['zzz', 'aaa', 'mmm']}),
+    );
+    expect(serialized['long_running_tool_ids']).toEqual(['aaa', 'mmm', 'zzz']);
+  });
+
+  it('collapses duplicates', () => {
+    const serialized = transformToSnakeCaseEvent(
+      createEvent({longRunningToolIds: ['zzz', 'aaa', 'aaa']}),
+    );
+    expect(serialized['long_running_tool_ids']).toEqual(['aaa', 'zzz']);
+  });
+
+  it('does not mutate the event array', () => {
+    const event = createEvent({longRunningToolIds: ['zzz', 'aaa']});
+    transformToSnakeCaseEvent(event);
+    expect(event.longRunningToolIds).toEqual(['zzz', 'aaa']);
+  });
+
+  it('keeps an empty array empty', () => {
+    const serialized = transformToSnakeCaseEvent(createEvent({}));
+    expect(serialized['long_running_tool_ids']).toEqual([]);
+  });
+
+  it('does not invent an absent value', () => {
+    const event = createEvent({});
+    delete event.longRunningToolIds;
+    const serialized = transformToSnakeCaseEvent(event);
+    expect(serialized['long_running_tool_ids']).toBeUndefined();
+  });
+
+  it('restores the ids on a round trip', () => {
+    const serialized = transformToSnakeCaseEvent(
+      createEvent({longRunningToolIds: ['zzz', 'aaa']}),
+    );
+    const restored = transformToCamelCaseEvent(serialized);
+    expect(restored.longRunningToolIds).toEqual(['aaa', 'zzz']);
   });
 });
