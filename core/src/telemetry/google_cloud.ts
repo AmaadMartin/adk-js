@@ -24,8 +24,8 @@ import {
   SdkLogRecord,
 } from '@opentelemetry/sdk-logs';
 import {
-  MetricReader,
   PeriodicExportingMetricReader,
+  PushMetricExporter,
 } from '@opentelemetry/sdk-metrics';
 import {BatchSpanProcessor, SpanProcessor} from '@opentelemetry/sdk-trace-base';
 import {AuthClient, GoogleAuth} from 'google-auth-library';
@@ -40,6 +40,10 @@ import {
 } from '../utils/mtls_utils.js';
 import {version} from '../version.js';
 
+import {
+  buildRequestDrivenMetrics,
+  MIN_EXPORT_INTERVAL_MS,
+} from './agent_engine_metric_exporter.js';
 import {OtelExportersConfig, OTelHooks} from './setup.js';
 
 const GCP_PROJECT_ERROR_MESSAGE =
@@ -69,13 +73,6 @@ export const DEFAULT_TELEMETRY_LOGS_ENDPOINT =
 /** Where log records are exported when mutual TLS is on. */
 export const DEFAULT_MTLS_TELEMETRY_LOGS_ENDPOINT =
   'https://telemetry.mtls.googleapis.com/v1/logs';
-
-/**
- * Shortest metric export interval Cloud Monitoring accepts.
- *
- * Points written more often than this are rejected as duplicates.
- */
-const MIN_EXPORT_INTERVAL_MS = 5000;
 
 const CLOUD_RESOURCE_MANAGER_ENDPOINT =
   'https://cloudresourcemanager.googleapis.com';
@@ -259,21 +256,34 @@ async function getGcpSpanExporter(
   );
 }
 
-/** Builds the periodic reader that drains the OTLP metric exporter. */
-async function getGcpMetricsExporter(
-  authClient: AuthClient,
-): Promise<MetricReader> {
-  const exporter = new OTLPMetricExporter(
+/**
+ * Builds the metric hooks that drain the OTLP metric exporter.
+ *
+ * On the Vertex AI Agent Runtime this is the request-driven reader, plus the
+ * span processor that drives it: the runtime throttles CPU between requests, so
+ * a periodic reader's timer is starved. Everywhere else it is a periodic reader
+ * at the shared minimum interval.
+ */
+async function getGcpMetricHooks(authClient: AuthClient): Promise<OTelHooks> {
+  const exporter: PushMetricExporter = new OTLPMetricExporter(
     await createOtlpExporterConfig(
       authClient,
       DEFAULT_TELEMETRY_METRICS_ENDPOINT,
       DEFAULT_MTLS_TELEMETRY_METRICS_ENDPOINT,
     ),
   );
-  return new PeriodicExportingMetricReader({
-    exporter,
-    exportIntervalMillis: MIN_EXPORT_INTERVAL_MS,
-  });
+  if (!process.env[AGENT_ENGINE_ID_ENV]) {
+    return {
+      metricReaders: [
+        new PeriodicExportingMetricReader({
+          exporter,
+          exportIntervalMillis: MIN_EXPORT_INTERVAL_MS,
+        }),
+      ],
+    };
+  }
+  const {reader, spanProcessor} = buildRequestDrivenMetrics(exporter);
+  return {metricReaders: [reader], spanProcessors: [spanProcessor]};
 }
 
 /** Builds the log record processor that exports to telemetry.googleapis.com. */
@@ -510,11 +520,16 @@ export async function getGcpExporters(
   }
   const {authClient, projectId} = auth;
 
+  const metricHooks: OTelHooks = enableMetrics
+    ? await getGcpMetricHooks(authClient)
+    : {};
+
   return {
-    spanProcessors: enableTracing ? [await getGcpSpanExporter(authClient)] : [],
-    metricReaders: enableMetrics
-      ? [await getGcpMetricsExporter(authClient)]
-      : [],
+    spanProcessors: [
+      ...(enableTracing ? [await getGcpSpanExporter(authClient)] : []),
+      ...(metricHooks.spanProcessors ?? []),
+    ],
+    metricReaders: metricHooks.metricReaders ?? [],
     logRecordProcessors: enableLogging
       ? [await getGcpLogsExporter(authClient, projectId)]
       : [],
