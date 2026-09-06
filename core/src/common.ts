@@ -198,6 +198,27 @@ export {
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
 export type {
+  OpenAIContentPart,
+  OpenAIOutputItem,
+  OpenAIReasoningConfig,
+  OpenAIResponse,
+  OpenAIStreamEvent,
+  OpenAIUsage,
+} from './labs/openai/openai_responses_converters.js';
+export {
+  AzureOpenAIResponsesLlm,
+  OpenAIResponsesLlm,
+} from './labs/openai/openai_responses_llm.js';
+export type {
+  AzureOpenAIResponsesLlmParams,
+  OpenAIApiKeyProvider,
+  OpenAIClientOptions,
+  OpenAIRequestOptions,
+  OpenAIResponsesClient,
+  OpenAIResponsesLlmParams,
+  OpenAIResponsesResource,
+} from './labs/openai/openai_responses_llm.js';
+export type {
   BaseMemoryService,
   SearchMemoryRequest,
   SearchMemoryResponse,
