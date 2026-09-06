@@ -188,6 +188,31 @@ function isGoogleApiCallError(err: unknown): err is Error {
   );
 }
 
+/**
+ * Loads the `@google-cloud/text-to-speech` optional peer and builds a client
+ * from Application Default Credentials.
+ *
+ * `GOOGLE_CLOUD_PROJECT`, when set, becomes both the project and the quota
+ * project, matching what the other Google Cloud clients in ADK do with it.
+ * Credentials are resolved by the SDK on the first call, not here.
+ *
+ * @return A client for {@link CloudTtsLlm} to synthesize through.
+ * @throws {Error} If `@google-cloud/text-to-speech` is not installed.
+ */
+export async function createCloudTtsClient(): Promise<CloudTtsClient> {
+  const {TextToSpeechClient} = await loadOptionalPeer(
+    CLOUD_TTS_PEER,
+    () => import('@google-cloud/text-to-speech'),
+  );
+  const projectId = process.env['GOOGLE_CLOUD_PROJECT'];
+  return projectId
+    ? new TextToSpeechClient({
+        projectId,
+        clientOptions: {quotaProjectId: projectId},
+      })
+    : new TextToSpeechClient();
+}
+
 /** Builds the Cloud TTS `audioConfig`, omitting the fields set to `null`. */
 function buildAudioConfig(
   audioEncoding: SupportedAudioEncoding,
@@ -237,8 +262,10 @@ export class CloudTtsLlm extends BaseLlm {
   constructor(params: CloudTtsLlmParams = {}) {
     super({model: params.model ?? CLOUD_TTS_MODEL_NAME});
     this.audioEncoding = params.audioEncoding ?? DEFAULT_TTS_AUDIO_ENCODING;
-    this.speakingSpeed = params.speakingSpeed ?? 1.0;
-    this.pitch = params.pitch ?? 0.0;
+    // Only `undefined` takes the default: an explicit `null` omits the field.
+    this.speakingSpeed =
+      params.speakingSpeed === undefined ? 1.0 : params.speakingSpeed;
+    this.pitch = params.pitch === undefined ? 0.0 : params.pitch;
     this.injectedClient = params.client;
   }
 
@@ -332,18 +359,7 @@ export class CloudTtsLlm extends BaseLlm {
   private getClient(): Promise<CloudTtsClient> {
     this.clientPromise ??= this.injectedClient
       ? Promise.resolve(this.injectedClient)
-      : loadOptionalPeer(
-          CLOUD_TTS_PEER,
-          () => import('@google-cloud/text-to-speech'),
-        ).then(({TextToSpeechClient}) => {
-          const projectId = process.env['GOOGLE_CLOUD_PROJECT'];
-          return projectId
-            ? new TextToSpeechClient({
-                projectId,
-                clientOptions: {quotaProjectId: projectId},
-              })
-            : new TextToSpeechClient();
-        });
+      : createCloudTtsClient();
     return this.clientPromise;
   }
 }
