@@ -28,6 +28,25 @@ export class BranchPath {
     return [...this.segments];
   }
 
+  /**
+   * Returns the run id of every segment that carries one — the text after the
+   * last `@`. A segment with no `@`, or with nothing after it, contributes no
+   * run id.
+   *
+   * @example new BranchPath(['parent@1', 'child@2', 'node']).getRunIds() -> {'1', '2'}
+   */
+  getRunIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const segment of this.segments) {
+      const separatorIndex = segment.lastIndexOf('@');
+      const runId = segment.slice(separatorIndex + 1);
+      if (separatorIndex !== -1 && runId) {
+        ids.add(runId);
+      }
+    }
+    return ids;
+  }
+
   /** Whether this path is a strict descendant of `ancestor`. */
   isDescendantOf(ancestor: BranchPath): boolean {
     if (this.segments.length <= ancestor.segments.length) {

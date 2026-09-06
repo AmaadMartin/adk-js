@@ -8,6 +8,7 @@ import {Content} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
 import {createEvent, Event} from '../events/event.js';
+import type {EventActions} from '../events/event_actions.js';
 
 import {
   runAsyncGeneratorWithOtelContext,
@@ -54,6 +55,17 @@ export interface BaseAgentConfig extends BaseNodeConfig {
   beforeAgentCallback?: BeforeAgentCallback;
   afterAgentCallback?: AfterAgentCallback;
 }
+
+/**
+ * The resumption checkpoint an agent records for the current invocation.
+ *
+ * Declare a concrete state with `type`, not `interface`: a TypeScript
+ * `interface` has no implicit index signature and so is not assignable to
+ * `Record<string, unknown>`.
+ *
+ * Mirrors adk-python `BaseAgentState`.
+ */
+export type BaseAgentState = Record<string, unknown>;
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -421,6 +433,52 @@ export abstract class BaseAgent<
     }
 
     return undefined;
+  }
+
+  /**
+   * Loads this agent's resumption checkpoint from the invocation context.
+   *
+   * `parse` narrows the persisted record into the agent's own state type. It
+   * is the analogue of adk-python validating the snapshot against a pydantic
+   * model, so it should throw on a snapshot it cannot read rather than guess.
+   *
+   * @param ctx The invocation context.
+   * @param parse Converts the persisted record into the agent's state type.
+   * @return The parsed state, or undefined when this agent has no checkpoint.
+   */
+  protected loadAgentState<T>(
+    ctx: InvocationContext,
+    parse: (raw: BaseAgentState) => T,
+  ): T | undefined {
+    const raw = ctx.agentStates[this.name];
+    if (raw === undefined) {
+      return undefined;
+    }
+    return parse(raw);
+  }
+
+  /**
+   * Builds the checkpoint event that carries this agent's current state.
+   *
+   * @param ctx The invocation context.
+   * @return An event authored by this agent, carrying its recorded state and
+   *     its end-of-agent flag.
+   */
+  protected createAgentStateEvent(ctx: InvocationContext): Event {
+    const actions: Partial<EventActions> = {};
+    const agentState = ctx.agentStates[this.name];
+    if (agentState !== undefined) {
+      actions.agentState = agentState;
+    }
+    if (ctx.endOfAgents[this.name]) {
+      actions.endOfAgent = true;
+    }
+    return createEvent({
+      invocationId: ctx.invocationId,
+      author: this.name,
+      branch: ctx.branch,
+      actions,
+    });
   }
 
   /**

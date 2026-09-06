@@ -43,6 +43,25 @@ describe('BranchPath.append', () => {
   });
 });
 
+describe('BranchPath.getRunIds', () => {
+  it('collects the run id of every segment that has one', () => {
+    const ids = branchPathFromString('parent@1.child@2.node').getRunIds();
+    expect([...ids]).toEqual(['1', '2']);
+  });
+
+  it('returns an empty set when no segment carries a run id', () => {
+    expect(branchPathFromString('a.b.c').getRunIds().size).toBe(0);
+  });
+
+  it('skips a segment whose @ has nothing after it', () => {
+    expect([...branchPathFromString('a@.b@2').getRunIds()]).toEqual(['2']);
+  });
+
+  it('takes the text after the last @ of a segment', () => {
+    expect([...branchPathFromString('a@1@2').getRunIds()]).toEqual(['2']);
+  });
+});
+
 describe('BranchPath.isDescendantOf', () => {
   it('is true for a strict descendant', () => {
     expect(

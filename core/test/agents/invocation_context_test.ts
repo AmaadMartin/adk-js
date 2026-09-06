@@ -13,6 +13,8 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createResumabilityConfig,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -170,5 +172,250 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+/**
+ * A leaf agent that yields nothing. Used only to build agent trees whose
+ * checkpoints `resetSubAgentStates` has to clear.
+ */
+class SilentAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for these tests.
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for these tests.
+  }
+}
+
+function makeResumableContext(params: {
+  agent?: BaseAgent;
+  events?: Event[];
+  isResumable?: boolean;
+  invocationId?: string;
+}): InvocationContext {
+  return new InvocationContext({
+    invocationId: params.invocationId ?? 'inv-1',
+    agent: params.agent,
+    session: createSession({
+      id: 'sess',
+      appName: 'app',
+      userId: 'user',
+      events: params.events ?? [],
+    }),
+    pluginManager: new PluginManager(),
+    resumabilityConfig: createResumabilityConfig({
+      isResumable: params.isResumable ?? true,
+    }),
+  });
+}
+
+describe('InvocationContext.isResumable', () => {
+  it('is false when no resumability config is given', () => {
+    const context = new InvocationContext({
+      invocationId: 'inv-1',
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+    });
+
+    expect(context.isResumable).toBe(false);
+  });
+
+  it('follows the resumability config', () => {
+    expect(makeResumableContext({isResumable: true}).isResumable).toBe(true);
+    expect(makeResumableContext({isResumable: false}).isResumable).toBe(false);
+  });
+});
+
+describe('InvocationContext.setAgentState', () => {
+  it('records a checkpoint and clears the end-of-agent flag', () => {
+    const context = makeResumableContext({});
+
+    context.setAgentState('a', {agentState: {step: 1}});
+
+    expect(context.agentStates['a']).toEqual({step: 1});
+    expect(context.endOfAgents['a']).toBe(false);
+  });
+
+  it('sets the end-of-agent flag and drops the checkpoint', () => {
+    const context = makeResumableContext({});
+    context.setAgentState('a', {agentState: {step: 1}});
+
+    context.setAgentState('a', {agentState: {step: 2}, endOfAgent: true});
+
+    expect(context.endOfAgents['a']).toBe(true);
+    expect(context.agentStates['a']).toBeUndefined();
+  });
+
+  it('clears both when neither option is given', () => {
+    const context = makeResumableContext({});
+    context.setAgentState('a', {agentState: {step: 1}});
+
+    context.setAgentState('a');
+
+    expect(context.agentStates['a']).toBeUndefined();
+    expect(context.endOfAgents['a']).toBeUndefined();
+  });
+
+  it('shares the state maps with a cloned context', () => {
+    const context = makeResumableContext({});
+
+    const child = context.clone({agent: new SilentAgent({name: 'child'})});
+    child.setAgentState('a', {agentState: {step: 1}});
+
+    expect(context.agentStates).toBe(child.agentStates);
+    expect(context.agentStates['a']).toEqual({step: 1});
+  });
+});
+
+describe('InvocationContext.resetSubAgentStates', () => {
+  it('clears every descendant across two levels', () => {
+    const grandChild = new SilentAgent({name: 'grandchild'});
+    const child = new SilentAgent({name: 'child', subAgents: [grandChild]});
+    const root = new SilentAgent({name: 'root', subAgents: [child]});
+    const context = makeResumableContext({agent: root});
+    context.setAgentState('root', {agentState: {step: 0}});
+    context.setAgentState('child', {agentState: {step: 1}});
+    context.setAgentState('grandchild', {agentState: {step: 2}});
+
+    context.resetSubAgentStates('root');
+
+    expect(context.agentStates['child']).toBeUndefined();
+    expect(context.agentStates['grandchild']).toBeUndefined();
+    expect(context.agentStates['root']).toEqual({step: 0});
+  });
+
+  it('does nothing for an agent name that is not in the tree', () => {
+    const root = new SilentAgent({name: 'root'});
+    const context = makeResumableContext({agent: root});
+    context.setAgentState('root', {agentState: {step: 0}});
+
+    context.resetSubAgentStates('absent');
+
+    expect(context.agentStates['root']).toEqual({step: 0});
+  });
+
+  it('does nothing when the context drives no agent', () => {
+    const context = makeResumableContext({});
+    context.setAgentState('a', {agentState: {step: 0}});
+
+    context.resetSubAgentStates('a');
+
+    expect(context.agentStates['a']).toEqual({step: 0});
+  });
+});
+
+describe('InvocationContext.shouldPauseInvocation', () => {
+  function longRunningCallEvent(callId: string): Event {
+    return createEvent({
+      invocationId: 'inv-1',
+      author: 'agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: callId, name: 'approve', args: {}}}],
+      },
+      longRunningToolIds: [callId],
+    });
+  }
+
+  it('pauses on a long-running call nothing has answered', () => {
+    const event = longRunningCallEvent('call-1');
+    const context = makeResumableContext({events: [event]});
+
+    expect(context.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('pauses when the event is not in the session history yet', () => {
+    const event = longRunningCallEvent('call-1');
+    const context = makeResumableContext({});
+
+    expect(context.shouldPauseInvocation(event)).toBe(true);
+  });
+
+  it('does not pause without long-running tool ids', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call-1', name: 'approve', args: {}}}],
+      },
+    });
+    const context = makeResumableContext({events: [event]});
+
+    expect(context.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause without a function call', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent',
+      content: {role: 'model', parts: [{text: 'hi'}]},
+      longRunningToolIds: ['call-1'],
+    });
+    const context = makeResumableContext({events: [event]});
+
+    expect(context.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause on a call whose id is not long-running', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {id: 'call-1', name: 'approve', args: {}}}],
+      },
+      longRunningToolIds: ['other-call'],
+    });
+    const context = makeResumableContext({events: [event]});
+
+    expect(context.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause on a call with no id', () => {
+    const event = createEvent({
+      invocationId: 'inv-1',
+      author: 'agent',
+      content: {
+        role: 'model',
+        parts: [{functionCall: {name: 'approve', args: {}}}],
+      },
+      longRunningToolIds: ['call-1'],
+    });
+    const context = makeResumableContext({events: [event]});
+
+    expect(context.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('does not pause when a later user event answers the call in a sub-branch', () => {
+    const event = longRunningCallEvent('call-1');
+    const answer = createEvent({
+      invocationId: 'inv-1',
+      author: 'user',
+      branch: 'root.approve@call-1',
+      content: {role: 'user', parts: [{text: 'approved'}]},
+    });
+    const context = makeResumableContext({events: [event, answer]});
+
+    expect(context.shouldPauseInvocation(event)).toBe(false);
+  });
+
+  it('still pauses when the answering user event precedes the call', () => {
+    const event = longRunningCallEvent('call-1');
+    const answer = createEvent({
+      invocationId: 'inv-1',
+      author: 'user',
+      branch: 'root.approve@call-1',
+      content: {role: 'user', parts: [{text: 'approved'}]},
+    });
+    const context = makeResumableContext({events: [answer, event]});
+
+    expect(context.shouldPauseInvocation(event)).toBe(true);
   });
 });

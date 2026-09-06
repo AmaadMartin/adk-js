@@ -8,6 +8,7 @@ import {
   AgentTransferLlmRequestProcessor,
   BaseAgent,
   BaseAgentConfig,
+  BaseAgentState,
   Event,
   FunctionTool,
   InvocationContext,
@@ -15,6 +16,7 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -297,5 +299,125 @@ describe('BaseAgent', () => {
       expect(clone.name).toBe('mock');
       expect(clone.description).toBe('a mock');
     });
+  });
+});
+
+/** The parsed shape {@link AgentStateProbe} reads its checkpoint into. */
+type ProbeState = {step: number};
+
+/**
+ * Exercises the protected agent-state helpers through the public `runAsync`,
+ * so no test has to widen their visibility. Each run yields the checkpoint
+ * event, then an event whose text reports what `loadAgentState` returned.
+ */
+class AgentStateProbe extends BaseAgent {
+  constructor(
+    config: BaseAgentConfig,
+    private readonly parse: (raw: BaseAgentState) => ProbeState = (raw) => ({
+      step: Number(raw['step']),
+    }),
+  ) {
+    super(config);
+  }
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    const loaded = this.loadAgentState(context, this.parse);
+    yield this.createAgentStateEvent(context);
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {
+        role: 'model',
+        parts: [
+          {text: loaded === undefined ? 'undefined' : `step=${loaded.step}`},
+        ],
+      },
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for this test.
+  }
+}
+
+async function collectProbeEvents(
+  agent: BaseAgent,
+  context: InvocationContext,
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of agent.runAsync(context)) {
+    events.push(event);
+  }
+  return events;
+}
+
+function makeProbeContext(agent: BaseAgent): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'inv-state',
+    branch: 'root.probe',
+    agent,
+    session: createSession({id: 's', appName: 'app', userId: 'u'}),
+    pluginManager: new PluginManager(),
+  });
+}
+
+describe('BaseAgent agent state helpers', () => {
+  it('loadAgentState returns undefined when this agent has no checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+
+    const events = await collectProbeEvents(agent, makeProbeContext(agent));
+
+    expect(events[1].content?.parts?.[0].text).toBe('undefined');
+  });
+
+  it('loadAgentState parses the recorded checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 3}});
+
+    const events = await collectProbeEvents(agent, context);
+
+    expect(events[1].content?.parts?.[0].text).toBe('step=3');
+  });
+
+  it('loadAgentState propagates the error a parse throws', async () => {
+    const agent = new AgentStateProbe({name: 'probe'}, () => {
+      throw new Error('unreadable checkpoint');
+    });
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 'nonsense'}});
+
+    await expect(collectProbeEvents(agent, context)).rejects.toThrowError(
+      /unreadable checkpoint/,
+    );
+  });
+
+  it('createAgentStateEvent carries the recorded checkpoint and the context identity', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {agentState: {step: 7}});
+
+    const events = await collectProbeEvents(agent, context);
+
+    expect(events[0].actions.agentState).toEqual({step: 7});
+    expect(events[0].actions.endOfAgent).toBeUndefined();
+    expect(events[0].author).toBe('probe');
+    expect(events[0].branch).toBe('root.probe');
+    expect(events[0].invocationId).toBe('inv-state');
+  });
+
+  it('createAgentStateEvent carries endOfAgent and drops the checkpoint', async () => {
+    const agent = new AgentStateProbe({name: 'probe'});
+    const context = makeProbeContext(agent);
+    context.setAgentState('probe', {endOfAgent: true});
+
+    const events = await collectProbeEvents(agent, context);
+
+    expect(events[0].actions.endOfAgent).toBe(true);
+    expect(events[0].actions.agentState).toBeUndefined();
   });
 });

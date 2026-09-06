@@ -17,6 +17,7 @@ import {
   InvocationContext,
   isRoutableLlmAgent,
   LlmAgent,
+  ResumabilityConfig,
   Runner,
 } from '@google/adk';
 import {Content, FunctionCall, FunctionResponse} from '@google/genai';
@@ -1513,5 +1514,74 @@ describe('Runner reserved function call rejection', () => {
     });
 
     expect(error).toBeUndefined();
+  });
+});
+
+/** Records the invocation context the runner builds for it. */
+class ContextCapturingAgent extends BaseAgent {
+  context?: InvocationContext;
+
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    this.context = context;
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      content: {role: 'model', parts: [{text: 'done'}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    _context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    // Not needed for these tests.
+  }
+}
+
+describe('Runner resumability wiring', () => {
+  async function runAndCaptureContext(
+    resumabilityConfig?: ResumabilityConfig,
+  ): Promise<InvocationContext> {
+    const agent = new ContextCapturingAgent({name: 'capturing_agent'});
+    const sessionService = new InMemorySessionService();
+    const runner = new Runner({
+      appName: TEST_APP_ID,
+      agent,
+      sessionService,
+      resumabilityConfig,
+    });
+    const session = await sessionService.createSession({
+      appName: TEST_APP_ID,
+      userId: 'user',
+    });
+
+    for await (const _ of runner.runAsync({
+      userId: 'user',
+      sessionId: session.id,
+      newMessage: {role: 'user', parts: [{text: 'go'}]},
+    })) {
+      // Drain the stream so the agent runs to completion.
+    }
+
+    const captured = agent.context;
+    if (!captured) {
+      expect.fail('the agent never received an invocation context');
+    }
+    return captured;
+  }
+
+  it('marks the invocation resumable when the runner is', async () => {
+    const context = await runAndCaptureContext(
+      createResumabilityConfig({isResumable: true}),
+    );
+
+    expect(context.isResumable).toBe(true);
+  });
+
+  it('marks the invocation non-resumable without a resumability config', async () => {
+    const context = await runAndCaptureContext();
+
+    expect(context.isResumable).toBe(false);
   });
 });
