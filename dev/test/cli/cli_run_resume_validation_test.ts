@@ -128,6 +128,42 @@ describe('adk run --resume input validation', () => {
     expect(printed).toContain('[user]: hello again');
   });
 
+  it('carries the saved state into the resumed session', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const filePath = await writeSessionFile(
+      JSON.stringify({
+        id: 'old-session',
+        appName: 'resume_agent',
+        userId: 'test_user',
+        state: {city: 'Paris'},
+        events: [],
+      }),
+    );
+
+    await runAgent({
+      agentPath: path.join(dir, 'agent.ts'),
+      savedSessionFile: filePath,
+      sessionService,
+    });
+
+    // listSessions omits state, so the created sessions are read back by id.
+    const {sessions} = await sessionService.listSessions({
+      appName: 'resume_agent',
+      userId: 'test_user',
+    });
+    const states = await Promise.all(
+      sessions.map(async (listed) => {
+        const session = await sessionService.getSession({
+          appName: 'resume_agent',
+          userId: 'test_user',
+          sessionId: listed.id,
+        });
+        return session?.state;
+      }),
+    );
+    expect(states).toContainEqual({city: 'Paris'});
+  });
+
   it('resumes a session document that carries no transcript', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const filePath = await writeSessionFile(

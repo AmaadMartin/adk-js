@@ -374,6 +374,13 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
       });
     } else if (options.savedSessionFile) {
       const loadedSession = await loadSavedSession(options.savedSessionFile);
+      // The resumed conversation carries the state it was saved with, as
+      // adk-python's cli.py does.
+      session = await sessionService.createSession({
+        appName: app?.name ?? rootAgent.name,
+        userId,
+        state: loadedSession.state,
+      });
       for (const event of loadedSession.events) {
         await sessionService.appendEvent({session, event});
         printEvent(event, {announcePauses: false});

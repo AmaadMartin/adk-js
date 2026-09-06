@@ -70,13 +70,14 @@ file is a saved session rather than the document described above.
 adk run agent.ts --resume old-session.session.json
 ```
 
-The CLI replays every event in the file into a new session, prints the
-transcript, then hands you the prompt. It reads two fields.
+The CLI starts a new session with the saved state, replays every event in the
+file into it, prints the transcript, then hands you the prompt. It reads two
+fields.
 
-| Field    | Type             | Meaning                                   |
-| -------- | ---------------- | ----------------------------------------- |
-| `state`  | object           | The state the session carried when saved. |
-| `events` | array of objects | The transcript to replay, oldest first.   |
+| Field    | Type             | Meaning                                 |
+| -------- | ---------------- | --------------------------------------- |
+| `state`  | object           | The state the new session starts with.  |
+| `events` | array of objects | The transcript to replay, oldest first. |
 
 Both fields are optional and default to an empty object and an empty array, as
 they do in adk-python's `Session` model. Every other field the file carries,
