@@ -752,6 +752,23 @@ describe('RestApiTool Utilities', () => {
       expect(result.headers).toEqual({});
     });
 
+    it('drops a fragment the spec put on the path', () => {
+      // The generated Application Integration connector spec appends
+      // `#<operation>_<entity>` so that two operations on one path stay
+      // distinct. An HTTP request carries no fragment.
+      const endpoint = {
+        baseUrl: 'http://api.example.com',
+        path: '/v2/integrations/Execute:execute?triggerId=t#list_Issues',
+        method: 'POST',
+      };
+
+      const result = prepareRequestParams(endpoint, [], {});
+
+      expect(result.url).toBe(
+        'http://api.example.com/v2/integrations/Execute:execute?triggerId=t',
+      );
+    });
+
     describe('path parameter encoding', () => {
       const usersEndpoint = {
         baseUrl: 'http://api.example.com',
