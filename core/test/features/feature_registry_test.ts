@@ -6,14 +6,18 @@
 
 import {
   FeatureName,
-  FeatureStage,
-  getFeatureConfig,
   isFeatureEnabled,
   overrideFeatureEnabled,
-  registerFeature,
   withTemporaryFeatureOverride,
 } from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+// These three are deliberately not on the `@google/adk` public surface, so a
+// relative import is the only way to reach them. Do not "tidy" it back.
+import {
+  FeatureStage,
+  getFeatureConfig,
+  registerFeature,
+} from '../../src/features/feature_registry.js';
 
 describe('FeatureRegistry', () => {
   const originalEnv = process.env;
