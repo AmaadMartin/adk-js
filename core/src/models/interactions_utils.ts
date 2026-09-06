@@ -885,7 +885,7 @@ export async function* generateContentViaInteractions(
   const generationConfig = buildGenerationConfig(llmRequest.config || {});
   const previousInteractionId = llmRequest.previousInteractionId;
 
-  logger.info(
+  logger.debug(
     `Sending request via interactions API, model: ${llmRequest.model}, stream: ${stream}, previous_interaction_id: ${previousInteractionId}`,
   );
 
@@ -940,7 +940,7 @@ export async function* generateContentViaInteractions(
       previous_interaction_id: previousInteractionId,
     })) as ExtendedInteraction;
 
-    logger.info('Interaction response received from the model.');
+    logger.debug('Interaction response received from the model.');
     yield convertInteractionToLlmResponse(interaction);
   }
 }

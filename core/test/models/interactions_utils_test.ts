@@ -12,12 +12,13 @@ import {
   FunctionCall,
   FunctionResponse,
   GenerateContentConfig,
+  GoogleGenAI,
   Interactions,
   Language,
   Outcome,
   Part,
 } from '@google/genai';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   convertContentToSteps,
   convertInteractionEventToLlmResponse,
@@ -28,6 +29,9 @@ import {
   generateContentViaInteractions,
   getLatestUserContents,
 } from '../../src/models/interactions_utils.js';
+import {LlmRequest} from '../../src/models/llm_request.js';
+import {LlmResponse} from '../../src/models/llm_response.js';
+import {logger} from '../../src/utils/logger.js';
 
 describe('interactions_utils', () => {
   describe('getLatestUserContents', () => {
@@ -2193,6 +2197,88 @@ describe('interactions_utils', () => {
         responses.push(res);
       }
       expect(responses[0].interactionId).toBe('int-camel-case');
+    });
+  });
+
+  describe('generateContentViaInteractions logging', () => {
+    const MODEL = 'gemini-2.5-flash';
+    const REQUEST_MESSAGE = 'Sending request via interactions API';
+    const RESPONSE_MESSAGE = 'Interaction response received from the model.';
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function createApiClient(): GoogleGenAI {
+      return new GoogleGenAI({apiKey: 'placeholder-api-key'});
+    }
+
+    function createLlmRequest(): LlmRequest {
+      return {
+        model: MODEL,
+        contents: [{role: 'user', parts: [{text: 'Hello'}]}],
+        liveConnectConfig: {},
+        toolsDict: {},
+      };
+    }
+
+    async function drain(
+      generator: AsyncGenerator<LlmResponse, void, void>,
+    ): Promise<LlmResponse[]> {
+      const responses: LlmResponse[] = [];
+      for await (const response of generator) {
+        responses.push(response);
+      }
+      return responses;
+    }
+
+    it('logs the request and the response at debug for a non-streaming call', async () => {
+      const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+      const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
+      const apiClient = createApiClient();
+      vi.spyOn(apiClient.interactions, 'create').mockResolvedValue({
+        id: 'int-log',
+        status: 'completed',
+        steps: [
+          {type: 'model_output', content: [{type: 'text', text: 'Logged'}]},
+        ],
+      });
+
+      const responses = await drain(
+        generateContentViaInteractions(apiClient, createLlmRequest(), false),
+      );
+
+      expect(responses.length).toBe(1);
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `${REQUEST_MESSAGE}, model: ${MODEL}, stream: false`,
+        ),
+      );
+      expect(debugSpy).toHaveBeenCalledWith(RESPONSE_MESSAGE);
+      expect(infoSpy).not.toHaveBeenCalled();
+    });
+
+    it('logs the request at debug for a streaming call that fails', async () => {
+      const debugSpy = vi.spyOn(logger, 'debug').mockImplementation(() => {});
+      const infoSpy = vi.spyOn(logger, 'info').mockImplementation(() => {});
+      const apiClient = createApiClient();
+      vi.spyOn(apiClient.interactions, 'create').mockRejectedValue(
+        new Error('interactions API unavailable'),
+      );
+
+      await expect(
+        drain(
+          generateContentViaInteractions(apiClient, createLlmRequest(), true),
+        ),
+      ).rejects.toThrow('interactions API unavailable');
+
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `${REQUEST_MESSAGE}, model: ${MODEL}, stream: true`,
+        ),
+      );
+      expect(debugSpy).not.toHaveBeenCalledWith(RESPONSE_MESSAGE);
+      expect(infoSpy).not.toHaveBeenCalled();
     });
   });
 });
