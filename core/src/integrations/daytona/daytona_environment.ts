@@ -30,12 +30,6 @@ const SECONDS_PER_MINUTE = 60;
 /** Exit code reported for a command that exceeded its timeout. */
 const TIMED_OUT_EXIT_CODE = -1;
 
-/** HTTP status a Daytona error carries when the resource is missing. */
-const HTTP_NOT_FOUND = 404;
-
-/** HTTP status a Daytona error carries when the resource already exists. */
-const HTTP_CONFLICT = 409;
-
 const TIMEOUT_MESSAGE = /timeout/i;
 const ALREADY_EXISTS_MESSAGE = /already exists/i;
 
@@ -114,19 +108,12 @@ function autoStopIntervalMinutes(timeoutSeconds: number): number {
   return minutes === 0 && timeoutSeconds > 0 ? 1 : minutes;
 }
 
-/** Reads the HTTP status a Daytona error carries when it came from a response. */
-function statusCodeOf(err: unknown): number | undefined {
-  return err instanceof Error
-    ? (err as Error & {statusCode?: number}).statusCode
-    : undefined;
-}
-
 /**
  * Whether `err` reports that a command exceeded its timeout.
  *
  * `sdk` is the namespace the client was built from, so the class identities
- * match. The message and status-code checks below cover an error that reaches
- * us from a second copy of the SDK, where `instanceof` fails.
+ * match. The message check catches the detail-less `DaytonaError` the SDK
+ * raises when a failure carries no structured metadata to pick a class from.
  */
 function isTimeoutError(sdk: DaytonaSdk, err: unknown): boolean {
   return (
@@ -137,17 +124,13 @@ function isTimeoutError(sdk: DaytonaSdk, err: unknown): boolean {
 
 /** Whether `err` reports that the requested file does not exist. */
 function isFileNotFoundError(sdk: DaytonaSdk, err: unknown): boolean {
-  return (
-    err instanceof sdk.DaytonaNotFoundError ||
-    statusCodeOf(err) === HTTP_NOT_FOUND
-  );
+  return err instanceof sdk.DaytonaNotFoundError;
 }
 
 /** Whether `err` reports that the directory being created already exists. */
 function isAlreadyExistsError(sdk: DaytonaSdk, err: unknown): boolean {
   return (
     err instanceof sdk.DaytonaConflictError ||
-    statusCodeOf(err) === HTTP_CONFLICT ||
     (err instanceof Error && ALREADY_EXISTS_MESSAGE.test(err.message))
   );
 }

@@ -206,20 +206,6 @@ describe('DaytonaEnvironment.readFile', () => {
     resetFakeDaytona();
   });
 
-  it('reports a 404 from a second copy of the SDK as a missing file', async () => {
-    // The error class comes from another module instance, so `instanceof`
-    // fails and only the status code identifies it.
-    const failure = Object.assign(new Error('no such file'), {
-      statusCode: 404,
-    });
-    currentSandbox().fs.downloadFile.mockRejectedValue(failure);
-    const env = await initialized();
-
-    await expect(env.readFile('missing.txt')).rejects.toThrow(
-      'File not found: /workspaces/missing.txt',
-    );
-  });
-
   it('propagates a download failure that is not a missing file', async () => {
     const failure = {message: 'connection reset'};
     currentSandbox().fs.downloadFile.mockRejectedValue(failure);
@@ -248,7 +234,6 @@ describe('DaytonaEnvironment.writeFile', () => {
 
   it.each([
     ['a conflict error', new DaytonaConflictError('nope')],
-    ['a 409 status', Object.assign(new Error('nope'), {statusCode: 409})],
     ['an "already exists" message', new Error('Folder already exists')],
   ])(
     'continues past %s from createFolder and still uploads',
