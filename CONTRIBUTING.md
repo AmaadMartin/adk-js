@@ -21,6 +21,10 @@ To set up your local development environment for contributing:
    npm install
    ```
 
+   CI installs with `npm ci`, which fails when `package-lock.json` disagrees
+   with any `package.json`. Keep using `npm install` here (it regenerates the
+   lockfile), and commit the updated lockfile with any manifest change.
+
 1. **Build and test**: Ensure everything is working correctly:
 
    ```bash
