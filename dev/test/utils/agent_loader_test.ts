@@ -594,12 +594,6 @@ describe('AgentLoader', () => {
       };
 
       plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-
-      expect(mockBuild.onLoad).toHaveBeenCalledWith(
-        {filter: /.*/},
-        expect.any(Function),
-      );
-
       const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
 
       await fs.writeFile(filePath, content);
@@ -634,23 +628,23 @@ describe('AgentLoader', () => {
       expect(result.loader).toBe('js');
     });
 
-    it('returns undefined for node_modules', async () => {
-      const filePath = '/path/to/node_modules/some_pkg/index.js';
-      const plugin = replaceDirnamePlugin(
-        path.join(tempAgentsDir, 'test_agent.ts'),
-        tempAgentsDir,
-      );
+    it('registers an onLoad filter matching only the escaped entrypoint', () => {
+      const entryPath = path.join(tempAgentsDir, 'agent (v1).ts');
+      const plugin = replaceDirnamePlugin(entryPath, tempAgentsDir);
 
       const mockBuild = {
         onLoad: vi.fn(),
       };
 
       plugin.setup(mockBuild as unknown as esbuild.PluginBuild);
-      const onLoadCallback = mockBuild.onLoad.mock.calls[0][1];
+      const {filter} = mockBuild.onLoad.mock.calls[0][0];
 
-      const result = await onLoadCallback({path: filePath});
-
-      expect(result).toBeUndefined();
+      expect(filter.test(entryPath)).toBe(true);
+      // Unescaped, `(v1)` would be a group and `.` a wildcard, matching this too.
+      expect(filter.test(path.join(tempAgentsDir, 'agent v1_ts'))).toBe(false);
+      // Anchored at both ends, so neither a longer nor a nested path matches.
+      expect(filter.test(`${entryPath}.map`)).toBe(false);
+      expect(filter.test(path.join('/prefix', entryPath))).toBe(false);
     });
 
     it('uses js loader for non-ts files', async () => {
@@ -761,6 +755,40 @@ describe('AgentLoader', () => {
       const agents = await agentLoader.listAgents();
       expect(agents).toEqual(['agent1', 'agent2', 'agent3']);
       await agentLoader.disposeAll();
+    });
+
+    it('does not descend into node_modules or dot-entries', async () => {
+      await fs.writeFile(
+        path.join(tempAgentsDir, 'node_modules', 'agent.js'),
+        agent1JsContent,
+      );
+      await fs.writeFile(
+        path.join(tempAgentsDir, '.eslintrc.js'),
+        agent1JsContent,
+      );
+
+      const agentLoader = new AgentLoader(tempAgentsDir);
+
+      expect(await agentLoader.listAgents()).toEqual([
+        'agent1',
+        'agent2',
+        'agent3',
+      ]);
+
+      await agentLoader.disposeAll();
+    });
+
+    // The dot filter applies to entries found inside a scanned directory, never
+    // to a path the user named; `adk run ./.hidden_agent.js` must keep working.
+    it('loads an explicitly named dot-prefixed agent file', async () => {
+      const hiddenAgentPath = path.join(tempAgentsDir, '.hidden_agent.js');
+      await fs.writeFile(hiddenAgentPath, agent1JsContent);
+
+      const loader = new AgentLoader(hiddenAgentPath);
+
+      expect(await loader.listAgents()).toEqual(['.hidden_agent']);
+
+      await loader.disposeAll();
     });
 
     it('gets agent file', async () => {
