@@ -23,7 +23,7 @@ describe('RemoteMcpServer leaf-module invariant', () => {
    * `agents/` imports `tools/`, so a runtime import back into `agents/` from
    * this module closes a cycle. A type-only import is erased and is safe.
    */
-  it('imports nothing from agents/ at runtime', () => {
+  it('test_tools_import_first_has_no_cycle', () => {
     const source = readFileSync(SOURCE_PATH, 'utf8');
     const agentImports = source
       .split('\n')
