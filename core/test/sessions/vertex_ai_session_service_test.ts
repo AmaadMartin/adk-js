@@ -14,7 +14,7 @@ import {
   VertexAiSessionService,
 } from '@google/adk';
 import {createSession, Session} from '@google/adk/sessions/session.js';
-import {ApiError} from '@google/genai';
+import {ApiError, HttpOptions} from '@google/genai';
 import {ApiClient} from '@google/genai/vertex_internal';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -184,6 +184,13 @@ describe('VertexAiSessionService', () => {
   }
   let mockClient: MockSessions;
 
+  /**
+   * The mock as the `Sessions` client a service takes. It implements only the
+   * methods this file drives, so it needs a double cast; this is the file's
+   * one place that does it.
+   */
+  const mockSessions = () => mockClient as unknown as Sessions;
+
   beforeEach(() => {
     mockClient = {
       createInternal: vi.fn().mockResolvedValue({
@@ -221,7 +228,7 @@ describe('VertexAiSessionService', () => {
     };
 
     service = new VertexAiSessionService({
-      sessions: mockClient as unknown as Sessions,
+      sessions: mockSessions(),
     });
   });
 
@@ -287,7 +294,7 @@ describe('VertexAiSessionService', () => {
 
     it('never builds a client when sessions are injected', () => {
       new VertexAiSessionService({
-        sessions: mockClient as unknown as Sessions,
+        sessions: mockSessions(),
       });
 
       expect(clientConstructor).not.toHaveBeenCalled();
@@ -445,7 +452,7 @@ describe('VertexAiSessionService', () => {
 
   it('uses agentEngineId if provided', async () => {
     const serviceWithEngineId = new VertexAiSessionService({
-      sessions: mockClient as unknown as Sessions,
+      sessions: mockSessions(),
       agentEngineId: 'custom-engine-id',
     });
 
@@ -2258,6 +2265,393 @@ describe('VertexAiSessionService', () => {
       );
     });
   });
+
+  /** A session for the append tests, matching the mock's app name. */
+  const appendSession = () =>
+    createSession({
+      id: 'append-session',
+      appName: '12345',
+      userId: 'testUser',
+      events: [],
+      lastUpdateTime: Date.now(),
+    });
+
+  // Ported from adk-python
+  // tests/unittests/sessions/test_vertex_ai_session_service.py @ 25f5214c.
+  // Names are kept verbatim so a reviewer can grep the original. They are
+  // nested here rather than put in a top-level describe so they reuse this
+  // file's `@google-cloud/vertexai` mock harness.
+  describe('adk-python parity tests', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('test_append_event_retries_once_on_429', async () => {
+      mockClient.events.append.mockRejectedValueOnce(
+        new ApiError({message: 'Resource exhausted', status: 429}),
+      );
+      const event = createEvent({
+        invocationId: 'inv_429',
+        author: 'model',
+        timestamp: 1734005533000,
+        content: {role: 'user', parts: [{text: 'retry test'}]},
+      });
+      vi.useFakeTimers();
+
+      const appendPromise = service.appendEvent({
+        session: appendSession(),
+        event,
+      });
+
+      // Pins the backoff to exactly 1000 ms: nothing may be re-sent before it
+      // elapses, and the retry must go out as soon as it does.
+      await vi.advanceTimersByTimeAsync(999);
+      expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+      await expect(appendPromise).resolves.toBe(event);
+    });
+
+    it('test_append_event_raises_after_retry_on_persistent_429', async () => {
+      // `code` rather than `status` on one of the two 429 tests, because the
+      // gRPC transport reports the quota rejection that way.
+      const rejection = {code: 429, message: 'Resource exhausted'};
+      mockClient.events.append.mockRejectedValue(rejection);
+      const event = createEvent({
+        invocationId: 'inv_429',
+        author: 'model',
+        timestamp: 1734005533000,
+      });
+      vi.useFakeTimers();
+
+      const appendPromise = service.appendEvent({
+        session: appendSession(),
+        event,
+      });
+
+      await Promise.all([
+        expect(appendPromise).rejects.toBe(rejection),
+        vi.runAllTimersAsync(),
+      ]);
+      expect(mockClient.events.append).toHaveBeenCalledTimes(2);
+    });
+
+    it('test_append_event_does_not_retry_on_read_timeout', async () => {
+      const rejection = new Error('socket hang up');
+      mockClient.events.append.mockRejectedValue(rejection);
+      const event = createEvent({
+        invocationId: 'inv_timeout',
+        author: 'model',
+        timestamp: 1734005533000,
+      });
+      vi.useFakeTimers();
+
+      await expect(
+        service.appendEvent({session: appendSession(), event}),
+      ).rejects.toBe(rejection);
+
+      expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('test_append_event_does_not_retry_on_non_429_client_error', async () => {
+      // Adapted: adk-python uses a 400 here. In adk-js a 400 is the signal to
+      // strip `rawEvent` and retry, standing in for the client-side
+      // `pydantic.ValidationError` adk-python falls back on, so this uses a
+      // 503 to test the same "no retry on a non-429" behaviour.
+      const rejection = new ApiError({message: 'try later', status: 503});
+      mockClient.events.append.mockRejectedValue(rejection);
+      const event = createEvent({
+        invocationId: 'inv_503',
+        author: 'model',
+        timestamp: 1734005533000,
+      });
+      vi.useFakeTimers();
+
+      await expect(
+        service.appendEvent({session: appendSession(), event}),
+      ).rejects.toBe(rejection);
+
+      expect(mockClient.events.append).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('test_append_event_round_trips_event_id', async () => {
+      const event = createEvent({
+        invocationId: 'inv_event_id_rt',
+        author: 'user',
+        timestamp: 1734005535000,
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      });
+
+      await service.appendEvent({session: appendSession(), event});
+
+      const {rawEvent} = mockClient.events.append.mock.calls[0][0].config;
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'reasoningEngines/12345/sessions/append-session/events/server-assigned-id',
+            invocationId: 'inv_event_id_rt',
+            author: 'user',
+            rawEvent,
+          },
+        ],
+      });
+
+      const reloaded = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'append-session',
+      });
+
+      expect(event.id).not.toBe('server-assigned-id');
+      expect(reloaded?.events[0].id).toBe(event.id);
+    });
+
+    it('test_get_session_falls_back_to_resource_id_without_raw_event_id', async () => {
+      const event = createEvent({
+        invocationId: 'inv_event_id_rt',
+        author: 'user',
+        timestamp: 1734005535000,
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      });
+
+      await service.appendEvent({session: appendSession(), event});
+
+      const {rawEvent} = mockClient.events.append.mock.calls[0][0].config;
+      delete rawEvent.id;
+      mockClient.events.listInternal.mockResolvedValue({
+        sessionEvents: [
+          {
+            name: 'reasoningEngines/12345/sessions/append-session/events/server-assigned-id',
+            invocationId: 'inv_event_id_rt',
+            author: 'user',
+            timestamp: '2024-12-12T12:12:13.000Z',
+            rawEvent,
+          },
+        ],
+      });
+
+      const reloaded = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'append-session',
+      });
+
+      expect(reloaded?.events[0].id).toBe('server-assigned-id');
+      // The stored payload keeps its own id, but the server's timestamp still
+      // replaces the one it was written with.
+      expect(reloaded?.events[0].timestamp).toBe(
+        Date.parse('2024-12-12T12:12:13.000Z'),
+      );
+    });
+  });
+
+  describe('httpOptions', () => {
+    let overriding: VertexAiSessionService;
+
+    /** The config object the mock recorded for its first call. */
+    const firstConfig = (mock: ReturnType<typeof vi.fn>) =>
+      mock.mock.calls[0][0].config;
+
+    beforeEach(() => {
+      overriding = new VertexAiSessionService({
+        sessions: mockSessions(),
+        httpOptions: OVERRIDE_HTTP_OPTIONS,
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('sends them on createInternal', async () => {
+      await overriding.createSession({appName: '12345', userId: 'testUser'});
+
+      expect(firstConfig(mockClient.createInternal).httpOptions).toEqual(
+        OVERRIDE_HTTP_OPTIONS,
+      );
+    });
+
+    it('sends them on the create operation poll', async () => {
+      mockClient.createInternal.mockResolvedValue({
+        name: 'operations/1',
+        done: false,
+      });
+      vi.useFakeTimers();
+
+      const createPromise = overriding.createSession({
+        appName: '12345',
+        userId: 'testUser',
+      });
+      await Promise.all([createPromise, vi.runAllTimersAsync()]);
+
+      expect(
+        firstConfig(mockClient.getSessionOperationInternal).httpOptions,
+      ).toEqual(OVERRIDE_HTTP_OPTIONS);
+    });
+
+    it('sends them on get and events.listInternal', async () => {
+      await overriding.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(firstConfig(mockClient.get).httpOptions).toEqual(
+        OVERRIDE_HTTP_OPTIONS,
+      );
+      expect(firstConfig(mockClient.events.listInternal).httpOptions).toEqual(
+        OVERRIDE_HTTP_OPTIONS,
+      );
+    });
+
+    it('sends them on listInternal', async () => {
+      await overriding.listSessions({appName: '12345', userId: 'testUser'});
+
+      expect(firstConfig(mockClient.listInternal).httpOptions).toEqual(
+        OVERRIDE_HTTP_OPTIONS,
+      );
+    });
+
+    it('sends them on delete', async () => {
+      await overriding.deleteSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'delete-session',
+      });
+
+      expect(firstConfig(mockClient.delete).httpOptions).toEqual(
+        OVERRIDE_HTTP_OPTIONS,
+      );
+    });
+
+    it('sends them on events.append', async () => {
+      const event = createEvent({timestamp: 1620000000000});
+
+      await overriding.appendEvent({session: appendSession(), event});
+
+      expect(firstConfig(mockClient.events.append).httpOptions).toEqual(
+        OVERRIDE_HTTP_OPTIONS,
+      );
+    });
+
+    it('sends no httpOptions key at all when the service has none', async () => {
+      const event = createEvent({timestamp: 1620000000000});
+
+      await service.createSession({appName: '12345', userId: 'testUser'});
+      await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+      await service.listSessions({appName: '12345', userId: 'testUser'});
+      await service.deleteSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'delete-session',
+      });
+      await service.appendEvent({session: appendSession(), event});
+
+      for (const mock of [
+        mockClient.createInternal,
+        mockClient.get,
+        mockClient.events.listInternal,
+        mockClient.listInternal,
+        mockClient.delete,
+        mockClient.events.append,
+      ]) {
+        expect(mock.mock.calls[0][0]).not.toHaveProperty('config.httpOptions');
+      }
+      expect(mockClient.delete.mock.calls[0][0]).not.toHaveProperty('config');
+    });
+  });
+
+  describe('createSession apiConfig passthrough', () => {
+    it('forwards displayName, labels and waitForCompletion to the create config', async () => {
+      await service.createSession({
+        appName: '12345',
+        userId: 'testUser',
+        apiConfig: {
+          displayName: 'a friendly name',
+          labels: {team: 'search'},
+          waitForCompletion: true,
+        },
+      });
+
+      expect(mockClient.createInternal).toHaveBeenCalledWith({
+        name: 'reasoningEngines/12345',
+        userId: 'testUser',
+        config: {
+          displayName: 'a friendly name',
+          labels: {team: 'search'},
+          waitForCompletion: true,
+        },
+      });
+    });
+  });
+
+  describe('deleteSession failure', () => {
+    it('logs the session id and rethrows when the delete fails', async () => {
+      const rejection = new Error('backend unavailable');
+      mockClient.delete.mockRejectedValue(rejection);
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+      await expect(
+        service.deleteSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'doomed-session',
+        }),
+      ).rejects.toBe(rejection);
+
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Error deleting session doomed-session: backend unavailable',
+      );
+      loggerSpy.mockRestore();
+    });
+  });
+
+  describe('append retry after the rawEvent fallback', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('retries a 429 on the rawEvent-stripped attempt too', async () => {
+      const loggerSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      // The retry reuses one request object, so record what each attempt
+      // carried instead of inspecting it afterwards.
+      const sentRawEvent: boolean[] = [];
+      mockClient.events.append
+        .mockImplementationOnce(async (params) => {
+          sentRawEvent.push(params.config?.rawEvent !== undefined);
+          throw new ApiError({message: 'Unknown name', status: 400});
+        })
+        .mockImplementationOnce(async (params) => {
+          sentRawEvent.push(params.config?.rawEvent !== undefined);
+          throw new ApiError({message: 'Resource exhausted', status: 429});
+        })
+        .mockImplementationOnce(async (params) => {
+          sentRawEvent.push(params.config?.rawEvent !== undefined);
+          return {};
+        });
+      const event = createEvent({
+        timestamp: 1620000000000,
+        content: {role: 'user', parts: [{text: 'hello'}]},
+      });
+      vi.useFakeTimers();
+
+      const appendPromise = service.appendEvent({
+        session: appendSession(),
+        event,
+      });
+      await Promise.all([appendPromise, vi.runAllTimersAsync()]);
+
+      expect(mockClient.events.append).toHaveBeenCalledTimes(3);
+      expect(sentRawEvent).toEqual([true, false, false]);
+      loggerSpy.mockRestore();
+    });
+  });
 });
 
 describe('VertexAiSessionService unsupported and invalid requests', () => {
@@ -2295,3 +2689,9 @@ describe('VertexAiSessionService unsupported and invalid requests', () => {
     ).rejects.toThrow(InputValidationError);
   });
 });
+
+/** The options the `httpOptions` tests configure their service with. */
+const OVERRIDE_HTTP_OPTIONS: HttpOptions = {
+  baseUrl: 'https://example.invalid',
+  apiVersion: 'v1beta1',
+};

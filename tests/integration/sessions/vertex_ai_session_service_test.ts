@@ -5,7 +5,7 @@
  */
 
 import {Sessions} from '@google-cloud/vertexai/build/src/genai/sessions.js';
-import {VertexAiSessionService} from '@google/adk';
+import {createEvent, createSession, VertexAiSessionService} from '@google/adk';
 import {
   ApiClient,
   Auth,
@@ -249,5 +249,78 @@ describe('VertexAiSessionService session expiration over the wire', () => {
     expect(bodies).toEqual([
       {userId: 'user-1', expireTime: '2026-10-01T00:00:00Z'},
     ]);
+  });
+});
+
+/**
+ * Drives the append retry against an error the SDK builds from a real 429
+ * response. The unit tests construct that error directly, so they pin its
+ * shape but not the translation of an HTTP status into it -- and misreading
+ * that translation is the class of bug the NOT_FOUND test above was written
+ * for.
+ */
+describe('VertexAiSessionService append retry over the wire', () => {
+  let server: http.Server;
+  let service: VertexAiSessionService;
+  let requestCount: number;
+
+  beforeAll(async () => {
+    server = http.createServer((_request, response) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        response.writeHead(429, {'content-type': 'application/json'});
+        response.end(
+          JSON.stringify({error: {code: 429, message: 'Resource exhausted'}}),
+        );
+        return;
+      }
+      response.writeHead(200, {'content-type': 'application/json'});
+      response.end('{}');
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+
+    const apiClient = new ApiClient({
+      auth: unauthenticated,
+      uploader: new NodeUploader(),
+      downloader: new NodeDownloader(),
+      project: 'test-project',
+      location: 'us-central1',
+      vertexai: true,
+      httpOptions: {
+        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      },
+    });
+    service = new VertexAiSessionService({
+      agentEngineId: AGENT_ENGINE_ID,
+      sessions: createSessionsClient(apiClient),
+    });
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  beforeEach(() => {
+    requestCount = 0;
+  });
+
+  it('appends the event after the backend answers 429 once', async () => {
+    const session = createSession({
+      id: 'session-1',
+      appName: AGENT_ENGINE_ID,
+      userId: 'user-1',
+      events: [],
+      lastUpdateTime: 0,
+    });
+    const event = createEvent({
+      author: 'user',
+      invocationId: 'inv-retry',
+      timestamp: 1734005533000,
+      content: {role: 'user', parts: [{text: 'hello'}]},
+    });
+
+    await expect(service.appendEvent({session, event})).resolves.toBe(event);
+
+    expect(requestCount).toBe(2);
   });
 });

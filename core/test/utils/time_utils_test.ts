@@ -26,6 +26,22 @@ describe('sleep', () => {
     expect(slept).toBe(true);
   });
 
+  it('resolves only once the requested time has passed', async () => {
+    vi.useFakeTimers();
+    let resolved = false;
+
+    const pending = sleep(1000).then(() => {
+      resolved = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(resolved).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(resolved).toBe(true);
+  });
+
   it('resolves on a real timer too', async () => {
     await expect(sleep(1)).resolves.toBeUndefined();
   });
