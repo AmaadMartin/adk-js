@@ -9,7 +9,7 @@ import {OpenAPIV3} from 'openapi-types';
 import {ReadonlyContext} from '../../agents/readonly_context.js';
 import {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
-import {BaseTool} from '../base_tool.js';
+import {HttpDispatcher} from '../../utils/ssl_utils.js';
 import {BaseToolset, ToolPredicate} from '../base_toolset.js';
 import {OpenApiSpecParser} from './openapi_spec_parser/openapi_spec_parser.js';
 import {createRestApiTool, RestApiTool} from './rest_api_tool.js';
@@ -30,6 +30,9 @@ export class OpenAPIToolset extends BaseToolset {
       authCredential?: AuthCredential;
       credentialKey?: string;
       headerProvider?: (context: ReadonlyContext) => Record<string, string>;
+
+      /** Dispatcher every generated tool sends its requests on. */
+      dispatcher?: HttpDispatcher;
     } = {},
   ) {
     super(options.toolFilter || [], options.prefix);
@@ -73,6 +76,7 @@ export class OpenAPIToolset extends BaseToolset {
           preservePropertyNames: options.preservePropertyNames,
           headerProvider: options.headerProvider,
           credentialKey: options.credentialKey,
+          dispatcher: options.dispatcher,
         },
       );
 
@@ -90,7 +94,7 @@ export class OpenAPIToolset extends BaseToolset {
   }
 
   @experimental
-  override async getTools(context?: ReadonlyContext): Promise<BaseTool[]> {
+  override async getTools(context?: ReadonlyContext): Promise<RestApiTool[]> {
     return this.tools.filter((tool) => {
       if (Array.isArray(this.toolFilter) && this.toolFilter.length > 0) {
         return (this.toolFilter as string[]).includes(tool.name);
