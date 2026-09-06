@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getLogger} from '@google/adk';
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {Readable} from 'node:stream';
+import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlAgentConfig} from '../../src/conformance/yaml_agent_loader.js';
 
 vi.mock('fast-glob', () => ({
@@ -67,6 +69,10 @@ tools:
 describe('batchLoadYamlAgentConfig', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should load and parse yaml files recursively', async () => {
@@ -344,6 +350,20 @@ tools:
         },
       },
     });
+  });
+
+  it('logs the source directory at debug level', async () => {
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/dir/agent1.yaml']),
+    );
+    vi.mocked(fs.readFile).mockResolvedValue(AGENT_ONE_YAML);
+    const loggerSpy = vi
+      .spyOn(getLogger(), 'debug')
+      .mockImplementation(() => {});
+
+    await batchLoadYamlAgentConfig('/root/dir');
+
+    expect(loggerSpy).toHaveBeenCalledWith('Loading agents from /root/dir');
   });
 
   it('should handle extra fields gracefully (forward compatibility)', async () => {

@@ -6,6 +6,7 @@
 import {
   BaseAgent,
   Event,
+  getLogger,
   InMemorySessionService,
   isLlmAgent,
   Runner,
@@ -24,6 +25,8 @@ import {
   TestInfo,
   UserMessage,
 } from './test_types.js';
+
+const logger = getLogger();
 
 const SKIPPED_TESTS = [
   {
@@ -49,7 +52,9 @@ export class TestRunner {
     if (!force) {
       for (const skip of SKIPPED_TESTS) {
         if (skip.name == testInfo.name) {
-          console.log('Skipping test', testInfo.name, 'because:', skip.reason);
+          logger.debug(
+            `Skipping test ${testInfo.name} because: ${skip.reason}`,
+          );
           return true;
         }
       }

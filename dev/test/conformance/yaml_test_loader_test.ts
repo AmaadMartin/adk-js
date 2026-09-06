@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {getLogger} from '@google/adk';
 import fg from 'fast-glob';
 import * as fs from 'node:fs/promises';
-import {beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {Readable} from 'node:stream';
+import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
 import {batchLoadYamlTestDefs} from '../../src/conformance/yaml_test_loader.js';
 
 vi.mock('fast-glob', () => ({
@@ -53,8 +55,10 @@ recordings:
 describe('batchLoadYamlTestDefs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Silence console.log during tests
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should load and parse test definitions recursively', async () => {
@@ -116,6 +120,26 @@ describe('batchLoadYamlTestDefs', () => {
     expect(tests.size).toBe(2);
     expect(tests.has('t1')).toBe(true);
     expect(tests.has('t2')).toBe(true);
+  });
+
+  it('logs each loaded test at debug level', async () => {
+    vi.mocked(fg.stream).mockReturnValue(
+      Readable.from(['/root/tests/t1/spec.yaml', '/root/tests/t2/spec.yaml']),
+    );
+    vi.mocked(fs.readFile).mockResolvedValue('{}');
+    const loggerSpy = vi
+      .spyOn(getLogger(), 'debug')
+      .mockImplementation(() => {});
+
+    await batchLoadYamlTestDefs('/root/tests');
+
+    expect(loggerSpy).toHaveBeenCalledTimes(2);
+    expect(loggerSpy).toHaveBeenCalledWith(
+      'Loaded test t1 from /root/tests/t1',
+    );
+    expect(loggerSpy).toHaveBeenCalledWith(
+      'Loaded test t2 from /root/tests/t2',
+    );
   });
 
   it('should load and parse test definitions with Windows-style paths', async () => {
