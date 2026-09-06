@@ -107,6 +107,7 @@ fails the turn instead of sending a request the server will reject.
 
 ## What crosses the wire
 
+ADK maps the specification internally; you do not call the mapping yourself.
 The specification becomes one `mcp_server` tool param:
 
 ```json

@@ -73,7 +73,7 @@ describe('createRemoteMcpServer validation', () => {
   it('names the allowedTools entry that is not a string', () => {
     expect(() =>
       createRemoteMcpServer({url: URL, allowedTools: ['a', 2]}),
-    ).toThrow('RemoteMcpServer.allowedTools[1] must be a string.');
+    ).toThrow('RemoteMcpServer.allowedTools.1 must be a string.');
   });
 
   it('rejects a headerProvider that is not a function', () => {
