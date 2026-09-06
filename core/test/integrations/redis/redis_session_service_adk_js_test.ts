@@ -307,6 +307,10 @@ describe('RedisSessionService defensive parsing', () => {
       'an events entry that is not an object',
       JSON.stringify({...envelope, events: [1]}),
     ],
+    [
+      'an event without a numeric timestamp',
+      JSON.stringify({...envelope, events: [{author: 'user'}]}),
+    ],
   ])('skips a scanned key holding %s', async (_label, payload) => {
     fakeRedis.seed(redisSessionKey(KEY_PREFIX, 'app1', 'u1', 'bad'), payload);
 
@@ -459,6 +463,81 @@ describe('RedisSessionService storage contract', () => {
       sessionId: 's1',
     });
     expect(fetched?.lastUpdateTime).toBe(1_770_000_000_123);
+  });
+
+  it('stores an event timestamp in seconds and reads it back in milliseconds', async () => {
+    const fakeRedis = new FakeRedis();
+    const service = serviceWith(fakeRedis);
+    const session = await service.createSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    await service.appendEvent({
+      session,
+      event: createEvent({author: 'user', timestamp: 1_770_000_000_123}),
+    });
+
+    const raw = fakeRedis.rawValue(
+      redisSessionKey(KEY_PREFIX, 'app1', 'u1', 's1'),
+    );
+    if (raw === undefined) {
+      expect.fail('the session key holds no value');
+    }
+    const stored = JSON.parse(raw) as {events: Array<{timestamp: number}>};
+    // The same unit as last_update_time in the same document: adk-python reads
+    // both as POSIX seconds.
+    expect(stored.events[0].timestamp).toBe(1_770_000_000.123);
+
+    const fetched = await service.getSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 's1',
+    });
+    expect(fetched?.events[0].timestamp).toBe(1_770_000_000_123);
+  });
+
+  it('reads the event clock of a session adk-python wrote', async () => {
+    const fakeRedis = new FakeRedis();
+    const service = serviceWith(fakeRedis);
+    // An envelope in adk-python's shape: Session.model_dump_json(), with
+    // Event.timestamp and last_update_time both float seconds.
+    fakeRedis.seed(
+      redisSessionKey(KEY_PREFIX, 'app1', 'u1', 'from_python'),
+      JSON.stringify({
+        id: 'from_python',
+        app_name: 'app1',
+        user_id: 'u1',
+        state: {topic: 'weather'},
+        events: [
+          {
+            id: 'e1',
+            author: 'user',
+            invocation_id: 'inv-1',
+            timestamp: 1_770_000_000.5,
+          },
+        ],
+        last_update_time: 1_770_000_000.5,
+      }),
+    );
+
+    const fetched = await service.getSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 'from_python',
+    });
+    expect(fetched?.lastUpdateTime).toBe(1_770_000_000_500);
+    expect(fetched?.events[0].timestamp).toBe(1_770_000_000_500);
+
+    // The adk-js filter is millisecond-based, so a python event only survives
+    // it once its clock has been converted.
+    const filtered = await service.getSession({
+      appName: 'app1',
+      userId: 'u1',
+      sessionId: 'from_python',
+      config: {afterTimestamp: 1_770_000_000_000},
+    });
+    expect(filtered?.events).toHaveLength(1);
   });
 
   it('writes no expiry when ttlSeconds is zero', async () => {
@@ -758,5 +837,31 @@ describe('RedisSessionService client construction', () => {
     await service.close();
     expect(clientMock.close).not.toHaveBeenCalled();
     expect(createClientMock).not.toHaveBeenCalled();
+  });
+
+  it('retries after a failed connect instead of replaying the error', async () => {
+    connectMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const service = new RedisSessionService({uri: 'redis://localhost:6379'});
+
+    await expect(
+      service.getUserState({appName: 'app1', userId: 'u1'}),
+    ).rejects.toThrow('ECONNREFUSED');
+    // The failed client keeps a reconnect timer, so it is released.
+    expect(clientMock.close).toHaveBeenCalledTimes(1);
+
+    await expect(
+      service.getUserState({appName: 'app1', userId: 'u1'}),
+    ).resolves.toEqual({});
+    expect(createClientMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces the connect error even when the release fails', async () => {
+    connectMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    clientMock.close.mockRejectedValueOnce(new Error('already closed'));
+    const service = new RedisSessionService({uri: 'redis://localhost:6379'});
+
+    await expect(
+      service.getUserState({appName: 'app1', userId: 'u1'}),
+    ).rejects.toThrow('ECONNREFUSED');
   });
 });

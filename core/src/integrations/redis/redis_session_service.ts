@@ -102,6 +102,10 @@ export interface RedisClientLike {
   /**
    * Writes a key. Resolves to a falsy value when `NX` was requested and the
    * key already existed.
+   *
+   * node-redis v6 deprecates `EX` and `NX` in favour of `expiration` and
+   * `condition`, but still honours them, and they are the only form the v5
+   * half of the supported peer range accepts.
    */
   set(
     key: string,
@@ -286,6 +290,17 @@ function splitStateByScope(state: Record<string, unknown>): ScopedState {
   return scoped;
 }
 
+/**
+ * Returns true when `value` is a stored event.
+ *
+ * The clock is checked because {@link decodeEvent} converts it: adk-python
+ * writes `Event.timestamp` as POSIX seconds and always sets it, so an entry
+ * without a numeric one is not an event this service wrote or can read.
+ */
+function isStoredEvent(value: unknown): value is Record<string, unknown> {
+  return isPlainRecord(value) && typeof value['timestamp'] === 'number';
+}
+
 /** Returns true when `value` has every field of a stored session envelope. */
 function isSessionEnvelope(value: unknown): value is StoredSessionEnvelope {
   return (
@@ -296,8 +311,29 @@ function isSessionEnvelope(value: unknown): value is StoredSessionEnvelope {
     typeof value.last_update_time === 'number' &&
     isPlainRecord(value.state) &&
     Array.isArray(value.events) &&
-    value.events.every(isPlainRecord)
+    value.events.every(isStoredEvent)
   );
+}
+
+/**
+ * Serializes an event, converting its clock to the seconds adk-python stores.
+ *
+ * `transformToSnakeCaseEvent` only renames keys. `Event.timestamp` carries the
+ * same kind of value as `last_update_time`, so it needs the same conversion:
+ * leaving it in milliseconds would put every adk-js event a thousand times
+ * into the future for an adk-python reader of the same envelope.
+ */
+function encodeEvent(event: Event): Record<string, unknown> {
+  const encoded = transformToSnakeCaseEvent(event);
+  encoded['timestamp'] = toEpochSeconds(event.timestamp);
+  return encoded;
+}
+
+/** Reads a stored event back, converting its clock to epoch milliseconds. */
+function decodeEvent(stored: Record<string, unknown>): Event {
+  const event = transformToCamelCaseEvent(stored);
+  event.timestamp = toMilliseconds(event.timestamp);
+  return event;
 }
 
 /** Serializes a session into the envelope adk-python reads. */
@@ -307,7 +343,7 @@ function encodeSessionEnvelope(session: Session): string {
     app_name: session.appName,
     user_id: session.userId,
     state: session.state,
-    events: session.events.map(transformToSnakeCaseEvent),
+    events: session.events.map(encodeEvent),
     last_update_time: toEpochSeconds(session.lastUpdateTime),
   };
   return JSON.stringify(envelope);
@@ -341,7 +377,7 @@ function decodeSessionEnvelope(raw: string, key: string): Session | undefined {
     appName: parsed.app_name,
     userId: parsed.user_id,
     state: toNullPrototypeRecord(parsed.state),
-    events: parsed.events.map(transformToCamelCaseEvent),
+    events: parsed.events.map(decodeEvent),
     lastUpdateTime: toMilliseconds(parsed.last_update_time),
   });
 }
@@ -467,10 +503,25 @@ export class RedisSessionService extends BaseSessionService {
    * calls share one connection instead of opening two.
    */
   private getClient(): Promise<RedisClientLike> {
-    this.clientPromise ??= this.injectedClient
-      ? Promise.resolve(this.injectedClient)
-      : this.connect();
+    this.clientPromise ??= this.openClient();
     return this.clientPromise;
+  }
+
+  /** Resolves an injected client, or starts one connection attempt. */
+  private openClient(): Promise<RedisClientLike> {
+    if (this.injectedClient) {
+      return Promise.resolve(this.injectedClient);
+    }
+    const pending = this.connect();
+    // A caching service must not be poisoned by one failed attempt: drop the
+    // rejected promise so the next call reconnects instead of replaying the
+    // old error for the life of the process.
+    pending.catch(() => {
+      if (this.clientPromise === pending) {
+        this.clientPromise = undefined;
+      }
+    });
+    return pending;
   }
 
   /** Loads the `redis` peer, builds a client from the config and connects it. */
@@ -496,7 +547,15 @@ export class RedisSessionService extends BaseSessionService {
     client.on('error', (err: Error) => {
       logger.error(`Redis connection to ${target} failed: ${err.message}`);
     });
-    await client.connect();
+    try {
+      await client.connect();
+    } catch (err: unknown) {
+      // node-redis keeps its reconnect timer running after a failed connect,
+      // so release the client. A close failure must not mask the connect
+      // failure, which is the one the caller needs to see.
+      await client.close().catch(() => undefined);
+      throw err;
+    }
     return client;
   }
 
