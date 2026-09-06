@@ -162,4 +162,42 @@ describe('MCPTool', () => {
     // Assert that closeSession was still called despite the error
     expect(mockSessionManager.closeSession).toHaveBeenCalledWith(mockClient);
   });
+
+  it('passes the session manager request timeout to callTool', async () => {
+    const mockTool: Tool = {
+      name: 'test-tool',
+      description: 'A test tool',
+      inputSchema: {type: 'object', properties: {}},
+    };
+
+    const mockClient = {
+      callTool: vi.fn().mockResolvedValue({content: []}),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Client;
+
+    const mockSessionManager = {
+      createSession: vi.fn().mockResolvedValue(mockClient),
+      closeSession: vi.fn().mockResolvedValue(undefined),
+      requestTimeoutMs: 5000,
+    } as unknown as MCPSessionManager;
+
+    const tool = new MCPTool(mockTool, mockSessionManager);
+
+    const signal = new AbortController().signal;
+    const invocationContext = {
+      abortSignal: signal,
+      session: {state: {}},
+    } as unknown as InvocationContext;
+
+    await tool.runAsync({
+      args: {},
+      toolContext: new Context({invocationContext}),
+    });
+
+    expect(mockClient.callTool).toHaveBeenCalledWith(
+      {name: 'test-tool', arguments: {}},
+      undefined,
+      {signal, timeout: 5000},
+    );
+  });
 });
