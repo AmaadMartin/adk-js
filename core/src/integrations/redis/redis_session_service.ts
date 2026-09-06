@@ -51,8 +51,6 @@ const DEFAULT_HOST = 'localhost';
 const DEFAULT_PORT = 6379;
 /** Default Redis database index. */
 const DEFAULT_DB = 0;
-/** Whether the default connection uses TLS. */
-const DEFAULT_SSL = false;
 /** Default expiry for every key this service writes: seven days. */
 const DEFAULT_TTL_SECONDS = 604800;
 /** Default prefix for every key this service writes. */
@@ -137,38 +135,6 @@ export interface RedisSessionServiceOptions extends RedisSessionServiceConfig {
    * It belongs to its caller: the service never connects or closes it.
    */
   client?: RedisClientLike;
-}
-
-/** A {@link RedisSessionServiceConfig} with every default applied. */
-interface ResolvedConfig extends RedisSessionServiceConfig {
-  host: string;
-  port: number;
-  ssl: boolean;
-  db: number;
-  ttlSeconds: number;
-  keyPrefix: string;
-}
-
-/**
- * Fills in the default of every setting the caller left out.
- *
- * The service resolves its configuration once, so no later reader has to know
- * which fields carry a default.
- *
- * @param config The caller's settings.
- * @return The same settings, fully populated.
- */
-function resolveConfig(config: RedisSessionServiceConfig): ResolvedConfig {
-  return {
-    uri: config.uri,
-    host: config.host ?? DEFAULT_HOST,
-    port: config.port ?? DEFAULT_PORT,
-    password: config.password,
-    ssl: config.ssl ?? DEFAULT_SSL,
-    db: config.db ?? DEFAULT_DB,
-    ttlSeconds: config.ttlSeconds ?? DEFAULT_TTL_SECONDS,
-    keyPrefix: config.keyPrefix ?? DEFAULT_KEY_PREFIX,
-  };
 }
 
 /** The parameters for {@link RedisSessionService.getUserState}. */
@@ -483,9 +449,7 @@ async function scanKeys(
  * ```
  */
 export class RedisSessionService extends BaseSessionService {
-  private readonly config: ResolvedConfig;
-  /** The client the caller supplied, which the service never closes. */
-  private readonly injectedClient: RedisClientLike | undefined;
+  private readonly options: RedisSessionServiceOptions;
   private readonly keyPrefix: string;
   /** The `EX` argument for every write, or undefined when expiry is off. */
   private readonly expiry: number | undefined;
@@ -493,11 +457,10 @@ export class RedisSessionService extends BaseSessionService {
 
   constructor(options: RedisSessionServiceOptions = {}) {
     super();
-    this.config = resolveConfig(options);
-    this.injectedClient = options.client;
-    this.keyPrefix = this.config.keyPrefix;
-    this.expiry =
-      this.config.ttlSeconds > 0 ? this.config.ttlSeconds : undefined;
+    this.options = options;
+    this.keyPrefix = options.keyPrefix ?? DEFAULT_KEY_PREFIX;
+    const ttlSeconds = options.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+    this.expiry = ttlSeconds > 0 ? ttlSeconds : undefined;
   }
 
   /**
@@ -508,8 +471,8 @@ export class RedisSessionService extends BaseSessionService {
    * never enters that cache, which is what leaves it for its owner to close.
    */
   private getClient(): Promise<RedisClientLike> {
-    if (this.injectedClient) {
-      return Promise.resolve(this.injectedClient);
+    if (this.options.client) {
+      return Promise.resolve(this.options.client);
     }
     if (this.clientPromise === undefined) {
       const pending = this.connect();
@@ -532,13 +495,15 @@ export class RedisSessionService extends BaseSessionService {
       {packageName: 'redis', feature: 'RedisSessionService'},
       () => import('redis'),
     );
-    const {uri, host, port, password, ssl, db} = this.config;
+    const {uri, password, ssl} = this.options;
+    const host = this.options.host ?? DEFAULT_HOST;
+    const port = this.options.port ?? DEFAULT_PORT;
     const client = uri
       ? createClient({url: uri})
       : createClient({
           socket: ssl ? {host, port, tls: true} : {host, port},
           password,
-          database: db,
+          database: this.options.db ?? DEFAULT_DB,
         });
 
     const target = uri ? redactUriPassword(uri) : `${host}:${port}`;
