@@ -34,6 +34,20 @@ import {
 export type SchemaLike = z3.ZodType | z4.ZodType | Schema;
 
 /**
+ * Whether the schema is a genai `Schema` rather than one of the two Zod
+ * dialects.
+ *
+ * `isZodSchema` narrows the Zod arms but cannot narrow the remainder: its
+ * predicate names `ZodType<unknown>` while {@link SchemaLike} holds `ZodType`
+ * with its default parameters, so the two are not the same type to exclude.
+ * Stating the complement once gives a caller the genai form typed rather than
+ * asserted.
+ */
+export function isGenaiSchema(schema: SchemaLike): schema is Schema {
+  return !isZodSchema(schema);
+}
+
+/**
  * Compiled validators for genai `Schema` objects, keyed by the schema itself.
  *
  * Compiling a schema means converting it to JSON Schema and building a Zod
@@ -196,6 +210,34 @@ export function formatSchemaValidationError(error: unknown): string {
   return error.issues
     .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
     .join('\n');
+}
+
+/**
+ * Renders a schema validation failure as one `path: message` line per issue.
+ *
+ * Zod v3 and v4 both attach an `issues` array to the error {@link
+ * parseWithSchema} throws. An error carrying none — a `refine` predicate that
+ * threw, say — renders as itself, so a caller relaying the failure still says
+ * why it failed.
+ */
+export function describeSchemaIssues(error: unknown): string[] {
+  const issues =
+    typeof error === 'object' && error !== null && 'issues' in error
+      ? error.issues
+      : undefined;
+  if (!Array.isArray(issues)) {
+    return [String(error)];
+  }
+  // Zod declares `path` and `message` on every issue in both major versions,
+  // and `parseWithSchema` throws nothing else carrying an `issues` array.
+  const described = issues as ReadonlyArray<{
+    path: ReadonlyArray<string | number>;
+    message: string;
+  }>;
+  return described.map(({path, message}) => {
+    const location = path.join('.');
+    return location ? `${location}: ${message}` : message;
+  });
 }
 
 /**

@@ -10,6 +10,13 @@ import {Event} from '../events/event.js';
 import {appendInstructions} from '../models/llm_request.js';
 import {getFunctionResponses} from '../models/llm_response.js';
 import {
+  describeSchemaIssues,
+  isGenaiSchema,
+  parseWithSchema,
+  SchemaLike,
+  toJsonSchema,
+} from '../utils/schema.js';
+import {
   BaseTool,
   RunAsyncToolRequest,
   ToolProcessLlmRequest,
@@ -65,6 +72,20 @@ export function isFinishTaskTerminalResponse(event: Event): boolean {
   });
 }
 
+/**
+ * The parameter a non-object output schema is wrapped under, because the GenAI
+ * API requires object-typed tool parameters.
+ */
+export const FINISH_TASK_DEFAULT_WRAPPER_KEY = 'result';
+
+/** The instruction {@link FinishTaskTool} appends to the request. */
+export const FINISH_TASK_INSTRUCTION =
+  'Do NOT call `finish_task` prematurely. Use your available tools to fully' +
+  ' complete every aspect of the task first. If the task is unclear, ask' +
+  ' the user for clarification before proceeding. Once the task is fully' +
+  ' complete, call `finish_task` by itself with no accompanying text' +
+  ' output.';
+
 /** The default output schema when the task agent declares none. */
 const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
   type: Type.OBJECT,
@@ -76,6 +97,90 @@ const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
   },
   required: ['result'],
 };
+
+/**
+ * JSON Schema keys that only carry meaning at the root of a document: the
+ * definition block a `$ref` addresses from the root, and the dialect
+ * declaration. Nesting a schema under a wrapper property would take them with
+ * it, so they are lifted back out.
+ */
+const ROOT_ONLY_KEYS = ['$defs', '$schema'] as const;
+
+/**
+ * The key `finish_task` arguments wrap the task output under, or `undefined`
+ * when the schema is object-typed and the output sits at the top level of the
+ * arguments.
+ *
+ * Mirrors adk-python's `_finish_task_tool.FinishTaskTool.__init__`, which keys
+ * the decision off the declared `type` alone: a schema that declares
+ * `properties` but no `type` counts as a non-object and is wrapped.
+ */
+export function getOutputWrapperKey(
+  outputSchema?: SchemaLike,
+): string | undefined {
+  const schema = outputSchema ?? DEFAULT_TASK_OUTPUT_SCHEMA;
+  return schemaTypeName(schema) === 'object'
+    ? undefined
+    : FINISH_TASK_DEFAULT_WRAPPER_KEY;
+}
+
+/**
+ * The schema document a declaration and a wrapper key are read from.
+ *
+ * A Zod schema is serialized; every other form already is a JSON Schema record
+ * in all but name. A genai `Schema` is read directly rather than through
+ * `toJsonSchema`, because `genaiSchemaToJsonSchema` maps types through the
+ * genai `Type` enum and so drops the lowercase `'object'` that a schema
+ * deserialized from JSON carries.
+ */
+function schemaDocument(schema: SchemaLike): Record<string, unknown> {
+  return isGenaiSchema(schema)
+    ? (schema as Record<string, unknown>)
+    : toJsonSchema(schema);
+}
+
+/** The schema's declared top-level type, lowercased. */
+function schemaTypeName(schema: SchemaLike): string | undefined {
+  const type = schemaDocument(schema)['type'];
+  return typeof type === 'string' ? type.toLowerCase() : undefined;
+}
+
+/** Whether the document carries a key that has to stay at its root. */
+function hasRootOnlyKeys(document: Record<string, unknown>): boolean {
+  return ROOT_ONLY_KEYS.some((key) => document[key] !== undefined);
+}
+
+/** The `required` key list an object schema declares. */
+function requiredKeys(schema: SchemaLike): string[] {
+  const required = schemaDocument(schema)['required'];
+  return Array.isArray(required)
+    ? required.filter((key): key is string => typeof key === 'string')
+    : [];
+}
+
+/**
+ * Wraps a schema document under `wrapperKey`, hoisting its root-only keys to
+ * the root of the wrapping document so its `$ref` pointers still resolve.
+ */
+function wrapWithHoistedRootKeys(
+  wrapperKey: string,
+  document: Record<string, unknown>,
+): Record<string, unknown> {
+  const inner = {...document};
+  const hoisted: Record<string, unknown> = {};
+  for (const key of ROOT_ONLY_KEYS) {
+    if (inner[key] !== undefined) {
+      hoisted[key] = inner[key];
+      delete inner[key];
+    }
+  }
+  return {
+    ...hoisted,
+    type: 'object',
+    properties: {[wrapperKey]: inner},
+    required: [wrapperKey],
+  };
+}
 
 /**
  * Tool for signaling that a task-mode {@link LlmAgent} has completed its task.
@@ -90,7 +195,7 @@ const DEFAULT_TASK_OUTPUT_SCHEMA: Schema = {
  */
 export class FinishTaskTool extends BaseTool {
   /** The schema describing the expected task output. */
-  private readonly outputSchema: Schema;
+  readonly outputSchema: SchemaLike;
   /**
    * When the output schema is a non-object (primitive/array), the value is
    * wrapped under this key (the GenAI API requires object-typed parameters).
@@ -98,7 +203,20 @@ export class FinishTaskTool extends BaseTool {
    */
   readonly wrapperKey?: string;
 
-  constructor(outputSchema?: Schema) {
+  /** The schema {@link runAsync} checks the model's arguments against. */
+  private readonly validationSchema: SchemaLike;
+  /** The `required` keys of an object output schema. */
+  private readonly requiredKeys: readonly string[];
+
+  /**
+   * @param outputSchema The expected task output, defaulting to a single
+   *   `result` string.
+   * @param validationSchema The schema arguments are checked against,
+   *   defaulting to `outputSchema`. A task agent passes its schema as the
+   *   caller supplied it, because the genai form derived from it drops the
+   *   refinements and custom messages the caller wrote.
+   */
+  constructor(outputSchema?: SchemaLike, validationSchema?: SchemaLike) {
     const schema = outputSchema ?? DEFAULT_TASK_OUTPUT_SCHEMA;
     let description =
       'Signal that this agent has completed its delegated task. Call this' +
@@ -108,18 +226,47 @@ export class FinishTaskTool extends BaseTool {
     }
     super({name: FINISH_TASK_TOOL_NAME, description});
     this.outputSchema = schema;
-    this.wrapperKey = schema.type === Type.OBJECT ? undefined : 'result';
+    this.wrapperKey = getOutputWrapperKey(schema);
+    this.validationSchema = validationSchema ?? schema;
+    this.requiredKeys = this.wrapperKey ? [] : requiredKeys(schema);
   }
 
   override _getDeclaration(): FunctionDeclaration {
-    const parameters: Schema = this.wrapperKey
-      ? {
-          type: Type.OBJECT,
-          properties: {[this.wrapperKey]: this.outputSchema},
-          required: [this.wrapperKey],
-        }
-      : this.outputSchema;
-    return {name: this.name, description: this.description, parameters};
+    const {name, description, outputSchema, wrapperKey} = this;
+    if (!isGenaiSchema(outputSchema)) {
+      const document = toJsonSchema(outputSchema);
+      return {
+        name,
+        description,
+        parametersJsonSchema: wrapperKey
+          ? wrapWithHoistedRootKeys(wrapperKey, document)
+          : document,
+      };
+    }
+    if (!wrapperKey) {
+      return {name, description, parameters: outputSchema};
+    }
+    // Wrapping moves the schema into a property, which would take a `$defs`
+    // block with it and leave every `#/$defs/...` pointer dangling. The genai
+    // dialect has no field for one, but a declaration deserialized from JSON
+    // still carries it.
+    const document = schemaDocument(outputSchema);
+    if (hasRootOnlyKeys(document)) {
+      return {
+        name,
+        description,
+        parametersJsonSchema: wrapWithHoistedRootKeys(wrapperKey, document),
+      };
+    }
+    return {
+      name,
+      description,
+      parameters: {
+        type: Type.OBJECT,
+        properties: {[wrapperKey]: outputSchema},
+        required: [wrapperKey],
+      },
+    };
   }
 
   override async processLlmRequest(
@@ -128,13 +275,7 @@ export class FinishTaskTool extends BaseTool {
     await super.processLlmRequest(request);
     // Tell the model when to call finish_task (mirrors Python's tool
     // instruction), so it completes the task deliberately.
-    appendInstructions(request.llmRequest, [
-      'Do NOT call `finish_task` prematurely. Use your available tools to fully' +
-        ' complete every aspect of the task first. If the task is unclear, ask' +
-        ' the user for clarification before proceeding. Once the task is fully' +
-        ' complete, call `finish_task` by itself with no accompanying text' +
-        ' output.',
-    ]);
+    appendInstructions(request.llmRequest, [FINISH_TASK_INSTRUCTION]);
   }
 
   /**
@@ -150,33 +291,40 @@ export class FinishTaskTool extends BaseTool {
 
   override async runAsync({args}: RunAsyncToolRequest): Promise<unknown> {
     const value = this.wrapperKey ? args[this.wrapperKey] : args;
-    const missing = this.missingRequiredKeys(value);
+    // The presence check is the floor: `parseWithSchema` returns the value
+    // unvalidated for a schema it cannot compile, so dropping it would lose the
+    // check the tool already performs.
+    const missing = this.missingRequiredKeys(args);
     if (missing.length > 0) {
-      return {
-        error:
-          `Invoking \`${this.name}()\` failed due to missing required ` +
-          `parameters: ${missing.join(', ')}. You could retry calling this ` +
-          'tool, but it is IMPORTANT for you to provide all the mandatory ' +
-          'parameters with correct types.',
-      };
+      return this.validationError(
+        missing.map((key) => `${key}: field required`),
+      );
+    }
+    try {
+      parseWithSchema(this.validationSchema, value);
+    } catch (error) {
+      return this.validationError(describeSchemaIssues(error));
     }
     return FINISH_TASK_SUCCESS_RESULT;
   }
 
-  /** Returns any `required` keys the schema declares that are absent. */
-  private missingRequiredKeys(value: unknown): string[] {
-    const required = this.wrapperKey
-      ? value === undefined || value === null
-        ? [this.wrapperKey]
-        : []
-      : (this.outputSchema.required ?? []);
+  /** Returns any `required` keys the arguments do not carry. */
+  private missingRequiredKeys(args: Record<string, unknown>): string[] {
     if (this.wrapperKey) {
-      return required;
+      const wrapped = args[this.wrapperKey];
+      return wrapped === undefined || wrapped === null ? [this.wrapperKey] : [];
     }
-    if (typeof value !== 'object' || value === null) {
-      return required;
-    }
-    const obj = value as Record<string, unknown>;
-    return required.filter((key) => obj[key] === undefined);
+    return this.requiredKeys.filter((key) => args[key] === undefined);
+  }
+
+  /** The retry payload the model receives when its arguments do not validate. */
+  private validationError(issues: string[]): {error: string} {
+    return {
+      error:
+        `Invoking \`${this.name}()\` failed due to validation errors:\n` +
+        `${issues.join('\n')}\n` +
+        'You could retry calling this tool, but it is IMPORTANT for you to' +
+        ' provide all the mandatory parameters with correct types.',
+    };
   }
 }

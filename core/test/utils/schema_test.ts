@@ -9,6 +9,7 @@ import {describe, expect, it} from 'vitest';
 import {z as z3} from 'zod/v3';
 import {z as z4} from 'zod/v4';
 import {
+  describeSchemaIssues,
   formatSchemaValidationError,
   objectSchemaFields,
   parseWithSchema,
@@ -436,5 +437,56 @@ describe('formatSchemaValidationError', () => {
     expect(formatSchemaValidationError(new Error('boom'))).toBe('Error: boom');
     expect(formatSchemaValidationError('plain')).toBe('plain');
     expect(formatSchemaValidationError(undefined)).toBe('undefined');
+  });
+});
+
+describe('describeSchemaIssues', () => {
+  it('renders one path: message line per issue', () => {
+    const schema = z4.object({name: z4.string(), count: z4.number()});
+    try {
+      parseWithSchema(schema, {name: 1, count: 'two'});
+      expect.fail('expected the parse to throw');
+    } catch (error) {
+      expect(describeSchemaIssues(error)).toEqual([
+        'name: Invalid input: expected string, received number',
+        'count: Invalid input: expected number, received string',
+      ]);
+    }
+  });
+
+  it('joins a nested path with dots', () => {
+    const schema = z4.object({details: z4.object({pages: z4.number()})});
+    try {
+      parseWithSchema(schema, {details: {pages: 'many'}});
+      expect.fail('expected the parse to throw');
+    } catch (error) {
+      expect(describeSchemaIssues(error)[0]).toMatch(/^details\.pages: /);
+    }
+  });
+
+  it('drops the empty path a whole-object issue carries', () => {
+    const schema = z4
+      .object({count: z4.number()})
+      .refine((value) => value.count > 0, 'count must be positive');
+    try {
+      parseWithSchema(schema, {count: -1});
+      expect.fail('expected the parse to throw');
+    } catch (error) {
+      expect(describeSchemaIssues(error)).toEqual(['count must be positive']);
+    }
+  });
+
+  it('renders an error carrying no issue list as itself', () => {
+    const schema = z4.string().refine(() => {
+      throw new Error('predicate exploded');
+    });
+    try {
+      parseWithSchema(schema, 'value');
+      expect.fail('expected the parse to throw');
+    } catch (error) {
+      expect(describeSchemaIssues(error)).toEqual([
+        'Error: predicate exploded',
+      ]);
+    }
   });
 });
