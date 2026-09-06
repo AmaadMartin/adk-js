@@ -89,30 +89,34 @@ await service.close();
 | `{keyPrefix}user_state:{appName}:{userId}`  | A JSON object of `user:` keys, prefix stripped.                                 | Every session of one user.        |
 | `{keyPrefix}app_state:{appName}`            | A JSON object of `app:` keys, prefix stripped.                                  | Every session of the application. |
 
-The envelope uses adk-python's `snake_case` field names, and writes
-`last_update_time` as POSIX seconds. adk-js holds `Session.lastUpdateTime` in
-milliseconds and converts on both sides.
+The envelope uses adk-python's `snake_case` field names. Both clocks in it —
+`last_update_time` and each event's `timestamp` — are written as POSIX seconds,
+which is what adk-python stores. adk-js holds them in milliseconds and converts
+in both directions, so a session written by either runtime reads correctly in
+the other.
 
 ## Connection lifecycle
 
 The service connects on the first call that touches Redis, not in the
 constructor, and it caches the connection so two concurrent first calls share
-one socket. `close()` closes a connection the service opened. A client you
-passed in through `client` belongs to you: the service never connects or closes
-it, so close it yourself.
+one socket. A failed attempt is not cached: the call rejects, the half-open
+client is released, and the next call reconnects. `close()` closes a connection
+the service opened. A client you passed in through `client` belongs to you: the
+service never connects or closes it, so close it yourself.
 
 ## Failure modes
 
-| Situation                                           | Behaviour                                                                               |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `createSession` with an id that already exists      | Throws `AlreadyExistsError`. The write uses `SET … NX`, so it cannot overwrite.         |
-| `redis` is not installed and no client was passed   | Throws an error naming the package and the `npm install` command.                       |
-| `getSession` on a session that is absent or expired | Resolves `undefined`.                                                                   |
-| `deleteSession` on a session that is absent         | Resolves. The shared state keys are untouched.                                          |
-| `getUserState` with nothing stored                  | Resolves `{}`.                                                                          |
-| A scanned key holds something that is not a session | The listing skips it and logs a warning naming the key.                                 |
-| `numRecentEvents` is negative                       | Throws `InputValidationError` before any read.                                          |
-| The connection drops                                | The service logs the error with the password redacted, and the failing command rejects. |
+| Situation                                           | Behaviour                                                                                                                                                                   |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createSession` with an id that already exists      | Throws `AlreadyExistsError`. The write uses `SET … NX`, so it cannot overwrite. Any `app:` and `user:` state in the request is written before that check, as in adk-python. |
+| `redis` is not installed and no client was passed   | Throws an error naming the package and the `npm install` command.                                                                                                           |
+| `getSession` on a session that is absent or expired | Resolves `undefined`.                                                                                                                                                       |
+| `deleteSession` on a session that is absent         | Resolves. The shared state keys are untouched.                                                                                                                              |
+| `getUserState` with nothing stored                  | Resolves `{}`.                                                                                                                                                              |
+| A scanned key holds something that is not a session | The listing skips it and logs a warning naming the key.                                                                                                                     |
+| A session key holds something that is not a session | `getSession` resolves `undefined` and logs the same warning.                                                                                                                |
+| `numRecentEvents` is negative                       | Throws `InputValidationError` before any read.                                                                                                                              |
+| The connection drops                                | The service logs the error with the password redacted, and the failing command rejects.                                                                                     |
 
 ## Differences from adk-python
 
@@ -129,3 +133,18 @@ which is an adk-js capability that adk-python's signature has no room for.
 - The application name and the user ID are escaped before they go into the
   `SCAN` pattern, so a user ID of `*` cannot widen the pattern onto another
   user's sessions. adk-python interpolates them unescaped.
+
+## Differences from the other adk-js session services
+
+Two behaviours follow adk-python where the adk-js interface documents something
+else. Both are visible to a caller that swaps this service for another.
+
+- `ListSessionsRequest.order` says no ordering is applied when it is omitted.
+  This service sorts descending instead, because `SCAN` returns keys in an
+  order that varies between calls, so "no ordering" would mean a result that
+  changes between two sweeps of the same keys.
+- `ListSessionsResponse` says state is not set on the returned sessions, and
+  `InMemorySessionService` returns `state: {}`. This service merges the app,
+  user and session scopes into each listed session, which is what adk-python
+  does and what its `test_list_sessions_state_merging` asserts. Events are
+  still left empty.
