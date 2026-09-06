@@ -7,10 +7,10 @@
 import {InMemoryRunner, LlmAgent, RestApiTool} from '@google/adk';
 import {createUserContent} from '@google/genai';
 import * as dotenv from 'dotenv';
-import * as fs from 'fs';
-import * as http from 'http';
+import * as fs from 'node:fs';
+import * as http from 'node:http';
+import * as path from 'node:path';
 import {OpenAPIV3} from 'openapi-types';
-import * as path from 'path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 
 describe('RestApiTool Auth E2E', () => {
