@@ -22,7 +22,11 @@ export function getTokenEndpoint(authScheme: AuthScheme): string | undefined {
     return (authScheme as OpenIdConnectWithConfig).tokenEndpoint;
   }
 
-  if (authScheme.type === 'oauth2' && authScheme.flows) {
+  if (
+    authScheme.type === 'oauth2' &&
+    'flows' in authScheme &&
+    authScheme.flows
+  ) {
     const flows = authScheme.flows;
     const flow =
       flows.authorizationCode ||
