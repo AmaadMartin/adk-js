@@ -908,12 +908,12 @@ describe('Runner error handling', () => {
     userId: string,
   ): Promise<Error | null> {
     try {
-      for await (const event of runner.runAsync({
+      for await (const _event of runner.runAsync({
         userId,
         sessionId,
         newMessage: {role: 'user', parts: [{text: TEST_MESSAGE}]},
       })) {
-        console.log('Unexpected event:', event);
+        // Drain the stream; the runner is expected to throw before yielding.
       }
       return null;
     } catch (e) {
