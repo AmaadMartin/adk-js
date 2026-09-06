@@ -329,8 +329,7 @@ function decodeSessionEnvelope(raw: string, key: string): Session | undefined {
   try {
     parsed = JSON.parse(raw);
   } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    logger.warn(`Redis key ${key} does not hold valid JSON: ${reason}`);
+    logger.warn(`Redis key ${key} does not hold valid JSON: ${String(err)}`);
     return undefined;
   }
   if (!isSessionEnvelope(parsed)) {
