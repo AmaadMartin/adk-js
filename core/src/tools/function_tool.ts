@@ -110,11 +110,19 @@ function toSchema<TParameters extends ToolInputParameters>(
 const FUNCTION_TOOL_SIGNATURE_SYMBOL = Symbol.for('google.adk.functionTool');
 
 /**
- * Type guard to check if an object is an instance of BaseTool.
+ * Type guard to check if an object is a {@link FunctionTool}.
+ *
+ * The brand check proves nothing about the parameter schema, so this narrows to
+ * `FunctionTool<ToolInputParameters>` — a function tool with some schema —
+ * rather than to the default `FunctionTool<undefined>`, which would claim the
+ * tool takes no parameters.
+ *
  * @param obj The object to check.
- * @returns True if the object is an instance of BaseTool, false otherwise.
+ * @returns True if the object is a {@link FunctionTool}, false otherwise.
  */
-export function isFunctionTool(obj: unknown): obj is FunctionTool {
+export function isFunctionTool(
+  obj: unknown,
+): obj is FunctionTool<ToolInputParameters> {
   return (
     typeof obj === 'object' &&
     obj !== null &&
@@ -136,6 +144,10 @@ export class FunctionTool<
 > extends BaseTool {
   /** A unique symbol to identify ADK function tool class. */
   readonly [FUNCTION_TOOL_SIGNATURE_SYMBOL] = true;
+
+  // These stay private so declaration emit strips TParameters from the
+  // published .d.ts, keeping every FunctionTool<T> mutually assignable for
+  // consumers. A public member referencing TParameters reopens that decision.
 
   // User defined function.
   private readonly execute: ToolExecuteFunction<TParameters>;
