@@ -97,6 +97,45 @@ interface ServerOptions {
   registerProcessors?: (tracerProvider: TracerProvider) => void;
 }
 
+/**
+ * A Node system error: an `Error` that carries an errno string in `code`.
+ *
+ * The `@types/node` package declares this shape only as
+ * `NodeJS.ErrnoException`, in an ambient namespace that the repository's
+ * `no-undef` lint rule rejects.
+ */
+interface SystemError extends Error {
+  code?: string;
+}
+
+/**
+ * Converts a `listen()` failure into the error the caller reports.
+ *
+ * The CLI prints only `error.message`, so a cause the operator can act on has
+ * to be in the message itself. An errno with no better wording than the system
+ * error is returned unchanged.
+ */
+export function toListenError(
+  err: SystemError,
+  host: string,
+  port: number,
+): Error {
+  switch (err.code) {
+    case 'EADDRINUSE':
+      return new Error(`Port ${port} is already in use`, {cause: err});
+    case 'EACCES':
+      return new Error(
+        `Permission denied binding ${host}:${port}. Ports below 1024 need ` +
+          `elevated privileges. Windows also reserves blocks of ports; list ` +
+          `them with "netsh interface ipv4 show excludedportrange ` +
+          `protocol=tcp". Use a different port, or port 0 for any free port.`,
+        {cause: err},
+      );
+    default:
+      return err;
+  }
+}
+
 export class AdkApiServer {
   private readonly host: string;
   private readonly port: number;
@@ -1144,15 +1183,8 @@ export class AdkApiServer {
         }
       });
 
-      this.server.on('error', (err: unknown) => {
-        if ((err as {code: string}).code === 'EADDRINUSE') {
-          const error = new Error();
-          error.cause = err;
-          error.message = `Port ${this.port} is already in use`;
-          reject(error);
-        } else {
-          reject(err);
-        }
+      this.server.on('error', (err: SystemError) => {
+        reject(toListenError(err, this.host, this.port));
       });
     });
   }

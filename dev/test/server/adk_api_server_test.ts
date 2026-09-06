@@ -31,6 +31,7 @@ import {z} from 'zod';
 import {
   A2A_AUTH_TOKEN_ENV_VAR,
   AdkApiServer,
+  toListenError,
 } from '../../src/server/adk_api_server.js';
 import {AgentLoader} from '../../src/utils/agent_loader.js';
 import {version} from '../../src/version.js';
@@ -1780,5 +1781,50 @@ describe('AdkWebServer', () => {
         expect(response.status).toBe(404);
       }
     });
+  });
+});
+
+describe('toListenError', () => {
+  it('keeps the in-use wording for EADDRINUSE', () => {
+    const err = Object.assign(
+      new Error('listen EADDRINUSE: address already in use ::1:8000'),
+      {code: 'EADDRINUSE'},
+    );
+
+    const error = toListenError(err, 'localhost', 8000);
+
+    expect(error.message).toBe('Port 8000 is already in use');
+    expect(error.cause).toBe(err);
+  });
+
+  it('explains both causes of EACCES and how to work around them', () => {
+    const err = Object.assign(
+      new Error('listen EACCES: permission denied ::1:80'),
+      {code: 'EACCES'},
+    );
+
+    const error = toListenError(err, 'localhost', 80);
+
+    expect(error.message).toContain('localhost:80');
+    expect(error.message).toContain('below 1024');
+    expect(error.message).toContain(
+      'netsh interface ipv4 show excludedportrange protocol=tcp',
+    );
+    expect(error.message).toContain('port 0');
+    expect(error.cause).toBe(err);
+  });
+
+  it('passes an unrelated errno through unchanged', () => {
+    const err = Object.assign(new Error('read ECONNRESET'), {
+      code: 'ECONNRESET',
+    });
+
+    expect(toListenError(err, 'localhost', 8000)).toBe(err);
+  });
+
+  it('passes an error with no code through unchanged', () => {
+    const err = new Error('something else went wrong');
+
+    expect(toListenError(err, 'localhost', 8000)).toBe(err);
   });
 });
