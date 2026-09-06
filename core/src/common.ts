@@ -197,6 +197,19 @@ export {
   isBaseExampleProvider,
 } from './examples/base_example_provider.js';
 export type {Example} from './examples/example.js';
+export {
+  AzureOpenAiResponsesLlm,
+  OpenAiResponsesLlm,
+} from './labs/openai/openai_responses_llm.js';
+export type {
+  AzureOpenAiResponsesLlmParams,
+  OpenAiApiKeyProvider,
+  OpenAiRequestOptions,
+  OpenAiResponsesApi,
+  OpenAiResponsesClient,
+  OpenAiResponsesLlmParams,
+  ResponseCreateBody,
+} from './labs/openai/openai_responses_llm.js';
 export type {
   BaseMemoryService,
   SearchMemoryRequest,
