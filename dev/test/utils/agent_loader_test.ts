@@ -20,7 +20,7 @@ import {
   vi,
 } from 'vitest';
 
-import {App, isApp} from '@google/adk';
+import {App, inferAgentOrigin, isApp} from '@google/adk';
 import {
   AgentFile,
   AgentLoader,
@@ -885,6 +885,25 @@ describe('AgentLoader', () => {
 
       expect(agents).not.toContain('bad_agent_dir');
       await loader.disposeAll();
+    });
+
+    it('stamps the discovered app name and location on the loaded agent', async () => {
+      const loader = new AgentLoader(tempAgentsDir);
+      const agent = await (await loader.getAgentFile('agent1')).loadAgent();
+
+      expect(inferAgentOrigin(agent)).toEqual({
+        appName: 'agent1',
+        path: path.join(tempAgentsDir, 'agent1.js'),
+      });
+      await loader.disposeAll();
+    });
+
+    it('records no origin on an agent the loader never discovered', async () => {
+      const agentFile = new AgentFile(path.join(tempAgentsDir, 'agent1.js'));
+      const agent = await agentFile.loadAgent();
+
+      expect(inferAgentOrigin(agent)).toEqual({});
+      await agentFile.dispose();
     });
 
     it('discovers app entrypoint files (e.g. app.js) in directories and lists them via listApps() / getAppFile()', async () => {

@@ -7,6 +7,7 @@
 import {Content, createPartFromText, Modality, Part} from '@google/genai';
 import {context, trace} from '@opentelemetry/api';
 
+import {AgentOrigin, inferAgentOrigin} from '../agents/agent_origin.js';
 import {BaseAgent, isBaseAgent} from '../agents/base_agent.js';
 import {reservedFunctionCallName} from '../agents/framework_function_calls.js';
 import {findMatchingFunctionCall} from '../agents/functions.js';
@@ -18,6 +19,7 @@ import {
 import {LiveRequestQueue} from '../agents/live_request_queue.js';
 import {isLlmAgent} from '../agents/llm_agent.js';
 import {createRunConfig, RunConfig} from '../agents/run_config.js';
+import {canTransferBetweenAgents} from '../agents/transfer_utils.js';
 import {App} from '../apps/app.js';
 import {ResumabilityConfig} from '../apps/resumability_config.js';
 import {BaseArtifactService} from '../artifacts/base_artifact_service.js';
@@ -28,6 +30,7 @@ import {
   BuiltInCodeExecutor,
   isBuiltInCodeExecutor,
 } from '../code_executors/built_in_code_executor.js';
+import {SessionNotFoundError} from '../errors/session_not_found_error.js';
 import {createEvent, Event} from '../events/event.js';
 import {createEventActions} from '../events/event_actions.js';
 import {BaseMemoryService} from '../memory/base_memory_service.js';
@@ -103,7 +106,25 @@ export interface RunnerConfig {
    * An optional resumability configuration applied to the runner.
    */
   resumabilityConfig?: ResumabilityConfig;
+
+  /**
+   * Whether to create the session when it is not found. Defaults to false, in
+   * which case a missing session raises {@link SessionNotFoundError}.
+   *
+   * Enabling this trades a loud failure for a quiet one: a caller that mistypes
+   * a session id gets a new empty conversation instead of an error. Turn it on
+   * only where the caller owns the session id and a first use is expected to
+   * create it.
+   */
+  autoCreateSession?: boolean;
 }
+
+/**
+ * App names that have already been warned about running agent transfer without
+ * a context cache. Module-level so the warning is emitted once per process,
+ * not once per runner.
+ */
+const UNCACHED_TRANSFER_APPS = new Set<string>();
 
 /**
  * A unique symbol to identify ADK agent classes.
@@ -164,6 +185,13 @@ export class Runner {
   readonly memoryService?: BaseMemoryService;
   readonly credentialService?: BaseCredentialService;
   readonly resumabilityConfig?: ResumabilityConfig;
+  /** Whether a missing session is created instead of reported as an error. */
+  readonly autoCreateSession: boolean;
+
+  /** Where a loader found the root agent, when a loader recorded it. */
+  private readonly agentOrigin: AgentOrigin;
+  /** Set when {@link appName} disagrees with {@link agentOrigin}. */
+  private appNameAlignmentHint?: string;
 
   /**
    * Creates a new Runner instance.
@@ -191,6 +219,106 @@ export class Runner {
     this.credentialService = input.credentialService;
     this.resumabilityConfig =
       input.app?.resumabilityConfig ?? input.resumabilityConfig;
+    this.autoCreateSession = input.autoCreateSession ?? false;
+    this.agentOrigin = inferAgentOrigin(this.agent);
+    this.enforceAppNameAlignment();
+    this.warnUncachedAgentTransfer();
+  }
+
+  /**
+   * Warns when the configured app name disagrees with the directory the root
+   * agent was loaded from, and keeps the explanation for the session-not-found
+   * message. A mismatch usually means sessions are being written under one app
+   * name and looked up under another.
+   */
+  private enforceAppNameAlignment(): void {
+    const originName = this.agentOrigin.appName;
+    if (!originName || originName.startsWith('__')) {
+      return;
+    }
+    if (originName === this.appName) {
+      return;
+    }
+    const originLocation = this.agentOrigin.path ?? originName;
+    const mismatchDetails =
+      `The runner is configured with app name "${this.appName}", but the ` +
+      `root agent was loaded from "${originLocation}", which implies app ` +
+      `name "${originName}".`;
+    this.appNameAlignmentHint =
+      `${mismatchDetails} Ensure the runner appName matches that directory ` +
+      'or pass appName explicitly when constructing the runner.';
+    logger.warn(`App name mismatch detected. ${mismatchDetails}`);
+  }
+
+  /**
+   * Warns once per app name when the agent tree can transfer between agents.
+   *
+   * adk-python skips this warning when the app configures a context cache.
+   * `adk-js` has no context cache configuration, so there is nothing to skip
+   * on; add that guard when context caching lands here.
+   */
+  private warnUncachedAgentTransfer(): void {
+    if (UNCACHED_TRANSFER_APPS.has(this.appName)) {
+      return;
+    }
+    if (!canTransferBetweenAgents(this.agent)) {
+      return;
+    }
+    UNCACHED_TRANSFER_APPS.add(this.appName);
+    logger.warn(
+      `App "${this.appName}" can transfer between agents. Every transfer ` +
+        'swaps the system instruction and the tool set, so the request prefix ' +
+        'changes and the whole prompt is re-sent after each transfer.',
+    );
+  }
+
+  /**
+   * Looks the session up, and creates it when it is missing and
+   * {@link autoCreateSession} is set.
+   *
+   * @throws {SessionNotFoundError} When the session is missing and
+   *     {@link autoCreateSession} is not set.
+   */
+  private async getOrCreateSession(params: {
+    userId: string;
+    sessionId: string;
+  }): Promise<Session> {
+    const key = {
+      appName: this.appName,
+      userId: params.userId,
+      sessionId: params.sessionId,
+    };
+    const session = await this.sessionService.getSession(key);
+    if (session) {
+      return session;
+    }
+    if (!this.appName) {
+      throw new Error(
+        'Session lookup failed: appName must be provided in runner constructor (or via app.name)',
+      );
+    }
+    if (this.autoCreateSession) {
+      return this.sessionService.createSession(key);
+    }
+    throw new SessionNotFoundError(
+      this.formatSessionNotFoundMessage(params.sessionId),
+    );
+  }
+
+  /**
+   * The message reported when a session cannot be found, extended with the
+   * app-name alignment hint when one applies.
+   */
+  private formatSessionNotFoundMessage(sessionId: string): string {
+    const message = `Session not found: ${sessionId}`;
+    if (!this.appNameAlignmentHint) {
+      return message;
+    }
+    return (
+      `${message}. ${this.appNameAlignmentHint} The mismatch prevents the ` +
+      'runner from locating the session. To automatically create a session ' +
+      'when missing, set autoCreateSession: true when constructing the runner.'
+    );
   }
 
   /**
@@ -272,23 +400,10 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getSession({
-            appName: this.appName,
-            userId,
-            sessionId,
-          });
+          const session = await this.getOrCreateSession({userId, sessionId});
 
           if (params.abortSignal?.aborted) {
             return;
-          }
-
-          if (!session) {
-            if (!this.appName) {
-              throw new Error(
-                `Session lookup failed: appName must be provided in runner constructor (or via app.name)`,
-              );
-            }
-            throw new Error(`Session not found: ${sessionId}`);
           }
 
           if (runConfig.supportCfc && isLlmAgent(this.agent)) {
@@ -685,8 +800,7 @@ export class Runner {
         ctx,
         this,
         async function* () {
-          const session = await this.sessionService.getOrCreateSession({
-            appName: this.appName,
+          const session = await this.getOrCreateSession({
             userId: params.userId,
             sessionId: params.sessionId,
           });

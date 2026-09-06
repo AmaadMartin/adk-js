@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {App, isApp, isRunnableRoot, RunnableRoot} from '@google/adk';
+import {
+  App,
+  isApp,
+  isRunnableRoot,
+  RunnableRoot,
+  stampAgentOrigin,
+} from '@google/adk';
 import esbuild from 'esbuild';
 import {shimPlugin} from 'esbuild-shim-plugin';
 import * as fs from 'node:fs';
@@ -320,6 +326,18 @@ export class AgentFile {
     return this.agent!;
   }
 
+  /**
+   * Records the app name this agent was discovered under, and where it came
+   * from, so a `Runner` configured with a different app name can report the
+   * mismatch.
+   */
+  stampOrigin(appName: string, location: string): void {
+    const root = this.app?.rootAgent ?? this.agent;
+    if (root) {
+      stampAgentOrigin(root, {appName, path: location});
+    }
+  }
+
   async loadApp(): Promise<App> {
     const loaded = await this.load();
     if (isApp(loaded)) {
@@ -572,6 +590,7 @@ export class AgentLoader {
     try {
       const agentFile = new AgentFile(file.path, this.options);
       await agentFile.load();
+      agentFile.stampOrigin(file.name, file.path);
       this.preloadedAgents[file.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(file.name, file.path, e);
@@ -591,6 +610,7 @@ export class AgentLoader {
     try {
       const agentFile = new AgentFile(possibleEntryFile.path, this.options);
       await agentFile.load();
+      agentFile.stampOrigin(dir.name, dir.path);
       this.preloadedAgents[dir.name] = agentFile;
     } catch (e) {
       this.recordLoadFailure(dir.name, possibleEntryFile.path, e);
