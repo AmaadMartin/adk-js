@@ -20,7 +20,7 @@ import {
   isFolderExists,
   loadFileData,
   removeFolder,
-  tryToFindFileRecursively,
+  tryToFindFolderRecursively,
 } from './file_utils.js';
 import {AdkLogger} from './logger.js';
 
@@ -30,6 +30,9 @@ const logger = new AdkLogger({label: 'AgentLoader', colorize: {all: true}});
  * Supported file extensions for JavaScript and TypeScript.
  */
 const JS_FILES_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.mts', '.cts'];
+
+/** Folder levels to walk up when looking for `node_modules`. */
+const MAX_NODE_MODULES_LOOKUP_LEVELS = 10;
 
 /**
  * Supported JS/TS file module types.
@@ -711,21 +714,22 @@ async function linkProjectNodeModules(
   }
 }
 
+/**
+ * Finds the `node_modules` that serves the agent's source folder.
+ *
+ * The walk continues past the nearest `package.json`, because a hoisted
+ * workspace install puts `node_modules` at the workspace root instead of
+ * beside the sub-package manifest.
+ */
 async function getProjectNodeModulesDir(
   sourceDir: string,
 ): Promise<string | undefined> {
   try {
-    const packageJsonPath = await tryToFindFileRecursively(
+    return await tryToFindFolderRecursively(
       sourceDir,
-      'package.json',
-      10,
-    );
-    const nodeModulesDir = path.join(
-      path.dirname(packageJsonPath),
       'node_modules',
+      MAX_NODE_MODULES_LOOKUP_LEVELS,
     );
-
-    return (await isFolderExists(nodeModulesDir)) ? nodeModulesDir : undefined;
   } catch {
     return undefined;
   }

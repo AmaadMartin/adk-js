@@ -15,6 +15,7 @@ import {
   loadFileData,
   saveToFile,
   tryToFindFileRecursively,
+  tryToFindFolderRecursively,
 } from '../../src/utils/file_utils.js';
 
 vi.mock('node:fs/promises', async () => {
@@ -167,6 +168,70 @@ describe('file_utils', () => {
     await expect(
       tryToFindFileRecursively('/a/b/c', 'target.txt', 2),
     ).rejects.toThrow(/No target.txt found/);
+  });
+
+  /** Makes only the given paths exist, as directories or as plain files. */
+  function mockEntries(directories: string[], files: string[] = []) {
+    const exists = (p: string) => directories.includes(p) || files.includes(p);
+    fsPromises.access.mockImplementation((p: string) =>
+      exists(p)
+        ? Promise.resolve(undefined)
+        : Promise.reject(new Error('no access')),
+    );
+    fsPromises.stat.mockImplementation((p: string) =>
+      exists(p)
+        ? Promise.resolve({
+            isDirectory: () => directories.includes(p),
+            isFile: () => files.includes(p),
+          })
+        : Promise.reject(new Error('not found')),
+    );
+  }
+
+  it('tryToFindFolderRecursively finds a folder in the source folder itself', async () => {
+    const nodeModules = path.join('/a/b/c', 'node_modules');
+    mockEntries([nodeModules]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 5),
+    ).resolves.toBe(nodeModules);
+  });
+
+  it('tryToFindFolderRecursively finds a folder one level up', async () => {
+    const nodeModules = path.join('/a/b', 'node_modules');
+    mockEntries([nodeModules]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 5),
+    ).resolves.toBe(nodeModules);
+  });
+
+  it('tryToFindFolderRecursively finds a folder two levels up', async () => {
+    const nodeModules = path.join('/a', 'node_modules');
+    mockEntries([nodeModules]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 5),
+    ).resolves.toBe(nodeModules);
+  });
+
+  it('tryToFindFolderRecursively skips a same-named file and keeps walking up', async () => {
+    const nodeModules = path.join('/a', 'node_modules');
+    mockEntries([nodeModules], [path.join('/a/b/c', 'node_modules')]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 5),
+    ).resolves.toBe(nodeModules);
+  });
+
+  it('tryToFindFolderRecursively throws when folder not found within maxIterations', async () => {
+    mockEntries([]);
+
+    await expect(
+      tryToFindFolderRecursively('/a/b/c', 'node_modules', 2),
+    ).rejects.toThrow(
+      'No node_modules found in /a/b/c or its parent folders up to 2 levels.',
+    );
   });
 
   it('listFiles returns entries', async () => {
