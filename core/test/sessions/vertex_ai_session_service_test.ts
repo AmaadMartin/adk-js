@@ -552,6 +552,164 @@ describe('VertexAiSessionService', () => {
       expect(session?.events[0].id).toBe('e2');
     });
 
+    it('follows nextPageToken until the events are exhausted', async () => {
+      mockClient.events.listInternal
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e1', timestamp: '2026-04-09T13:00:00Z'}],
+          nextPageToken: 'token-page-2',
+        })
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e2', timestamp: '2026-04-09T13:01:00Z'}],
+          nextPageToken: 'token-page-3',
+        })
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e3', timestamp: '2026-04-09T13:02:00Z'}],
+        });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(session?.events.map((event) => event.id)).toEqual([
+        'e1',
+        'e2',
+        'e3',
+      ]);
+      expect(mockClient.events.listInternal).toHaveBeenCalledTimes(3);
+    });
+
+    it('sends the page token on the follow-up event requests', async () => {
+      mockClient.events.listInternal
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e1', timestamp: '2026-04-09T13:00:00Z'}],
+          nextPageToken: 'token-page-2',
+        })
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e2', timestamp: '2026-04-09T13:01:00Z'}],
+        });
+
+      await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(mockClient.events.listInternal.mock.calls).toEqual([
+        [
+          {
+            name: 'reasoningEngines/12345/sessions/my-session-id',
+            config: {},
+          },
+        ],
+        [
+          {
+            name: 'reasoningEngines/12345/sessions/my-session-id',
+            config: {pageToken: 'token-page-2'},
+          },
+        ],
+      ]);
+    });
+
+    it('keeps the afterTimestamp filter on paged event requests', async () => {
+      const afterTimestamp = 1600000000000;
+      mockClient.events.listInternal
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e1', timestamp: '2026-04-09T13:00:00Z'}],
+          nextPageToken: 'token-page-2',
+        })
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e2', timestamp: '2026-04-09T13:01:00Z'}],
+        });
+
+      await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+        config: {afterTimestamp},
+      });
+
+      expect(mockClient.events.listInternal.mock.calls[1][0]).toEqual({
+        name: 'reasoningEngines/12345/sessions/my-session-id',
+        config: {
+          filter: `timestamp>="${new Date(afterTimestamp).toISOString()}"`,
+          pageToken: 'token-page-2',
+        },
+      });
+    });
+
+    it('slices numRecentEvents across all pages', async () => {
+      mockClient.events.listInternal
+        .mockResolvedValueOnce({
+          sessionEvents: [
+            {name: 'e1', timestamp: '2026-04-09T13:00:00Z'},
+            {name: 'e2', timestamp: '2026-04-09T13:01:00Z'},
+          ],
+          nextPageToken: 'token-page-2',
+        })
+        .mockResolvedValueOnce({
+          sessionEvents: [
+            {name: 'e3', timestamp: '2026-04-09T13:02:00Z'},
+            {name: 'e4', timestamp: '2026-04-09T13:03:00Z'},
+          ],
+        });
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+        config: {numRecentEvents: 3},
+      });
+
+      expect(session?.events.map((event) => event.id)).toEqual([
+        'e2',
+        'e3',
+        'e4',
+      ]);
+    });
+
+    it('propagates an error raised while fetching a later page', async () => {
+      const loggerSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      mockClient.events.listInternal
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e1', timestamp: '2026-04-09T13:00:00Z'}],
+          nextPageToken: 'token-page-2',
+        })
+        .mockRejectedValueOnce(
+          new ApiError({message: 'Backend unavailable', status: 503}),
+        );
+
+      await expect(
+        service.getSession({
+          appName: '12345',
+          userId: 'testUser',
+          sessionId: 'my-session-id',
+        }),
+      ).rejects.toThrow('Backend unavailable');
+      expect(loggerSpy).toHaveBeenCalled();
+      loggerSpy.mockRestore();
+    });
+
+    it('returns undefined when a later event page reports NOT_FOUND', async () => {
+      mockClient.events.listInternal
+        .mockResolvedValueOnce({
+          sessionEvents: [{name: 'e1', timestamp: '2026-04-09T13:00:00Z'}],
+          nextPageToken: 'token-page-2',
+        })
+        .mockRejectedValueOnce(
+          new ApiError({message: 'Session not found', status: 404}),
+        );
+
+      const session = await service.getSession({
+        appName: '12345',
+        userId: 'testUser',
+        sessionId: 'my-session-id',
+      });
+
+      expect(session).toBeUndefined();
+    });
+
     it('returns undefined if session does not exist (code 5)', async () => {
       mockClient.get.mockRejectedValueOnce({code: 5, message: 'Not found'});
 

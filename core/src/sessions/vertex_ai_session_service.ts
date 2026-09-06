@@ -265,9 +265,18 @@ export class VertexAiSessionService extends BaseSessionService {
           }),
         ]);
         getSessionResponse = sessionRes as VertexAiSession;
-        eventsIterator =
-          (eventsRes as {sessionEvents?: VertexAiSessionEvent[]})
-            .sessionEvents || [];
+
+        let eventsPage = eventsRes;
+        eventsIterator = eventsPage.sessionEvents || [];
+        while (eventsPage.nextPageToken) {
+          eventsPage = await this.sessions.events.listInternal({
+            name: sessionResourceName,
+            config: {...listConfig, pageToken: eventsPage.nextPageToken},
+          });
+          eventsIterator = eventsIterator.concat(
+            eventsPage.sessionEvents || [],
+          );
+        }
       }
 
       const sessionObj = getSessionResponse!;
