@@ -38,6 +38,10 @@ const RETRIEVE_URL =
   `https://agentidentitycredentials.googleapis.com/v1/` +
   `${AUTH_PROVIDER_NAME}/credentials:retrieve`;
 
+const CONNECTOR_RETRIEVE_URL =
+  `https://iamconnectorcredentials.googleapis.com/v1alpha/` +
+  `${CONNECTOR_NAME}/credentials:retrieve`;
+
 describe('GcpAuthProvider', () => {
   let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
@@ -74,17 +78,28 @@ describe('GcpAuthProvider', () => {
   });
 
   it('test_get_auth_credential_routes_to_iam_connector_service_provider', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          done: true,
+          response: {header: 'Authorization: Bearer', token: 'connector-token'},
+        }),
+        {status: 200},
+      ),
+    );
     const provider = new GcpAuthProvider();
 
-    await expect(
-      provider.getAuthCredential(
-        createAuthConfig(createAuthScheme({name: CONNECTOR_NAME})),
-        createContext(),
-      ),
-    ).rejects.toThrow(
-      `IAM Connector auth providers are not supported yet: '${CONNECTOR_NAME}'.`,
+    const result = await provider.getAuthCredential(
+      createAuthConfig(createAuthScheme({name: CONNECTOR_NAME})),
+      createContext(),
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(CONNECTOR_RETRIEVE_URL);
+    expect(result).toEqual({
+      authType: AuthCredentialTypes.HTTP,
+      http: {scheme: 'Bearer', credentials: {token: 'connector-token'}},
+    });
   });
 
   it('test_get_auth_credential_routes_to_agent_identity_service_provider', async () => {
@@ -115,7 +130,15 @@ describe('isGcpAuthProviderScheme', () => {
   });
 
   it.each<[string, AuthScheme]>([
-    ['an OpenAPI scheme', {type: 'apiKey', name: 'x-api-key', in: 'header'}],
+    ['an API key scheme', {type: 'apiKey', name: 'x-api-key', in: 'header'}],
+    ['an HTTP scheme', {type: 'http', scheme: 'bearer'}],
+    [
+      'an OpenID Connect scheme',
+      {
+        type: 'openIdConnect',
+        openIdConnectUrl: 'https://example.com/.well-known',
+      },
+    ],
     ['another custom scheme', {type: 'myProviderScheme'}],
     ['a scheme with no name', {type: 'gcpAuthProviderScheme'}],
   ])('rejects %s', (_label, candidate) => {

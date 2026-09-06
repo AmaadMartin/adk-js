@@ -1,8 +1,10 @@
 # GcpAuthProvider and Agent Identity credentials
 
-`GcpAuthProvider` fetches an end-user credential from the Google Cloud Agent
-Identity Credentials service. Reach for it when a tool calls a third-party API
-on the user's behalf and you do not want to write the OAuth flow yourself.
+`GcpAuthProvider` fetches an end-user credential from Google Cloud. Reach for it
+when a tool calls a third-party API on the user's behalf and you do not want to
+write the OAuth flow yourself. The scheme's resource name picks the service: an
+`authProviders` name goes to Agent Identity Credentials, and a legacy
+`connectors` name goes to IAM Connector Credentials.
 
 ## Introduction
 
@@ -107,8 +109,9 @@ async function fetchCredential(
 }
 ```
 
-A `GcpAuthProviderScheme` goes straight into an `AuthConfig`, because
-`AuthScheme` admits any scheme extending `CustomAuthScheme`.
+A `GcpAuthProviderScheme` goes straight into an `AuthConfig`, and needs no cast.
+It is a member of the `AuthScheme` union, which admits any scheme extending
+`CustomAuthScheme`.
 
 ADK does not resolve a `gcpAuthProviderScheme` on its own yet: nothing in the
 framework reads `AuthProviderRegistry`. Your application asks the provider for
@@ -170,7 +173,6 @@ Every failure rejects with an `Error`.
 | Condition                                     | Message                                                                                                   |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | The scheme is not a `gcpAuthProviderScheme`   | `Expected GcpAuthProviderScheme, got <type>`                                                              |
-| The scheme names an IAM connector             | `IAM Connector auth providers are not supported yet: '<name>'.`                                           |
 | No context, or no user id                     | `GcpAuthProvider requires a context with a valid user_id.`                                                |
 | The service call failed                       | `Failed to retrieve credential for user '<id>' on provider '<name>'.`, with the original error as `cause` |
 | The user refused consent                      | `Operation failed: User consent rejected.`                                                                |
@@ -181,8 +183,33 @@ Every failure rejects with an `Error`.
 
 ## IAM connector resource names
 
-adk-js has no IAM Connector Credentials client, so a scheme naming
-`projects/<p>/locations/<l>/connectors/<c>` rejects.
+A scheme naming `projects/<p>/locations/<l>/connectors/<c>` routes to the IAM
+Connector Credentials service instead. That service predates Agent Identity and
+serves the same three flows, so the credential you get back has the same shape.
+Nothing in the scheme changes but the resource name:
+
+```ts
+const authScheme: GcpAuthProviderScheme = {
+  type: 'gcpAuthProviderScheme',
+  name: 'projects/my-project/locations/global/connectors/jira',
+  scopes: ['https://www.example.com/auth/issues.read'],
+};
+```
+
+Two things differ underneath. The service answers with a long-running operation
+rather than a credential, so a retrieval that is not finished reports its state
+in the operation metadata. And `IAM_CONNECTOR_CREDENTIALS_TARGET_HOST`, not
+`AGENT_IDENTITY_CREDENTIALS_TARGET_HOST`, overrides its host.
+
+The error messages name the connector rather than the provider:
+
+| Condition                                     | Message                                                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| The service call failed                       | `Failed to retrieve credential for user '<id>' on connector '<name>'.`          |
+| The operation failed                          | `Operation failed: <message>`                                                   |
+| The operation finished with no credential     | `IAM Connector Credentials operation completed without a response.`             |
+| The service returned an empty header or token | `Received either empty header or token from IAM Connector Credentials service.` |
+| The service returned no state this port reads | `IAM Connector Credentials service returned an unsupported state.`              |
 
 ## Testing it against the real service
 

@@ -18,6 +18,12 @@ import {
   RetrieveCredentialsRequest,
   RetrieveCredentialsResponse,
 } from '../../../src/integrations/agent_identity/agent_identity_credentials_client.js';
+import {
+  IamConnectorCredentialsClient,
+  RetrieveConnectorCredentialsRequest,
+  RetrieveCredentialsMetadata,
+  RetrieveCredentialsOperation,
+} from '../../../src/integrations/agent_identity/iam_connector_credentials_client.js';
 
 /** The auth provider resource name the ported tests use. */
 export const AUTH_PROVIDER_NAME =
@@ -100,4 +106,57 @@ export function bearerSuccess(
   token = 'test-token',
 ): RetrieveCredentialsResponse {
   return {success: {header: 'Authorization: Bearer', token}};
+}
+
+/** The connector resource name the ported connector tests use. */
+export const CONNECTOR_NAME =
+  'projects/test-project/locations/global/connectors/test-connector';
+
+/** The scheme the ported connector tests pass to the provider. */
+export function createConnectorScheme(
+  overrides: Partial<GcpAuthProviderScheme> = {},
+): GcpAuthProviderScheme {
+  return createAuthScheme({name: CONNECTOR_NAME, ...overrides});
+}
+
+/** A connector client that answers from a caller-supplied function. */
+export class FakeConnectorClient implements IamConnectorCredentialsClient {
+  readonly connectors: string[] = [];
+  readonly requests: RetrieveConnectorCredentialsRequest[] = [];
+
+  constructor(
+    public respond: (callIndex: number) => RetrieveCredentialsOperation,
+  ) {}
+
+  async retrieveCredentials(
+    connector: string,
+    request: RetrieveConnectorCredentialsRequest,
+  ): Promise<RetrieveCredentialsOperation> {
+    this.connectors.push(connector);
+    this.requests.push(request);
+    return this.respond(this.requests.length - 1);
+  }
+}
+
+/** A connector client that always fails, so the error path can be exercised. */
+export class FailingConnectorClient implements IamConnectorCredentialsClient {
+  constructor(private readonly error: Error) {}
+
+  retrieveCredentials(): Promise<RetrieveCredentialsOperation> {
+    return Promise.reject(this.error);
+  }
+}
+
+/** A completed operation carrying a bearer token. */
+export function bearerOperation(
+  token = 'test-token',
+): RetrieveCredentialsOperation {
+  return {done: true, response: {header: 'Authorization: Bearer', token}};
+}
+
+/** A running operation whose metadata reports the given status. */
+export function pendingOperation(
+  metadata: RetrieveCredentialsMetadata,
+): RetrieveCredentialsOperation {
+  return {done: false, metadata};
 }

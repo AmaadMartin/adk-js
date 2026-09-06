@@ -19,6 +19,7 @@ import {
   SetModelResponseTool,
 } from '../tools/set_model_response_tool.js';
 import {AsyncQueue} from '../utils/async_queue.js';
+import {sleep} from '../utils/async_utils.js';
 import {isBaseNode, type BaseNode} from '../workflow/base_node.js';
 import {NodeContext} from '../workflow/node_context.js';
 import {NodeTool} from '../workflow/nodes/node_tool.js';
@@ -160,10 +161,6 @@ function isRecoverableLiveError(err: unknown): boolean {
   return /ConnectionClosed|connection closed|ECONNRESET|socket hang up/i.test(
     message,
   );
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

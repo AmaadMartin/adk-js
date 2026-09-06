@@ -80,6 +80,7 @@ documentation, visit [adk.dev](https://adk.dev/).
   OpenAPI tool auth layer's exchange contract, and the error that reports a
   missing credential.
 - [CredentialManager](auth/credential_manager/index.md) - Resolving the credential an authenticated tool runs with, and the provider, exchanger and refresher extension points.
+- [GcpAuthProvider and Agent Identity credentials](auth/gcp_agent_identity/index.md) - Letting Google Cloud acquire an end-user credential, including the consent flow.
 - [OAuth2 credential exchange](auth/oauth2_credential_exchange/index.md) - Trading an authorization code or client credentials for an access token, and what happens when the exchange fails.
 - [Service account tokens for OpenAPI tools](auth/service_account_tokens/index.md) - Access tokens, Cloud Run ID tokens, the quota project header, and the token cache.
 - [ToolAuthHandler](auth/tool_auth_handler/index.md) - How an OpenAPI tool gets its credential, keeps it between calls, and refreshes it.

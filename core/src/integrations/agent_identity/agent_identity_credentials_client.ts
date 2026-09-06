@@ -5,6 +5,12 @@
  */
 
 import {GoogleAuth} from 'google-auth-library';
+import {
+  BaseRetrieveRequest,
+  CredentialsServiceName,
+  HeaderCredentials,
+  postRetrieveCredentials,
+} from './credentials_utils.js';
 
 /** Default host of the Agent Identity Credentials v1 API. */
 const DEFAULT_TARGET_HOST = 'agentidentitycredentials.googleapis.com';
@@ -19,41 +25,18 @@ const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
  * Request body of `POST v1/{authProvider}/credentials:retrieve`.
  *
  * Field names follow the v1 discovery document, so they are camelCase on the
- * wire.
+ * wire. The service also reads `forceRefreshToken`, which this client never
+ * sends, so the body is the base request and nothing more.
  */
-export interface RetrieveCredentialsRequest {
-  /** The identity of the end user. */
-  userId: string;
-
-  /** The OAuth scopes the caller needs. */
-  scopes?: string[];
-
-  /** Where the auth provider sends the user once consent completes. */
-  continueUri?: string;
-}
+export type RetrieveCredentialsRequest = BaseRetrieveRequest;
 
 /** The credentials the service returned. */
-export interface RetrieveCredentialsSuccess {
-  /** The token itself. */
-  token?: string;
-
-  /** The HTTP header that carries the token, e.g. `Authorization: Bearer`. */
-  header?: string;
-
-  /** When the token expires, if the service knows. */
-  expireTime?: string;
-
-  /** The scopes the token actually carries, which may be fewer than asked. */
-  scopes?: string[];
-}
+export type RetrieveCredentialsSuccess = HeaderCredentials;
 
 /** The consent the end user must give before a token exists. */
 export interface UriConsentRequired {
   /** Where to send the user to grant consent. */
   authorizationUri?: string;
-
-  /** The id of this credential retrieval operation. */
-  uid?: string;
 
   /** A one-time value that ties the whole consent flow to one user. */
   consentNonce?: string;
@@ -108,26 +91,19 @@ export class RestAgentIdentityCredentialsClient implements AgentIdentityCredenti
     this.auth = new GoogleAuth({scopes: [CLOUD_PLATFORM_SCOPE]});
   }
 
-  async retrieveCredentials(
+  retrieveCredentials(
     authProvider: string,
     request: RetrieveCredentialsRequest,
   ): Promise<RetrieveCredentialsResponse> {
-    const url = `https://${this.host}/v1/${authProvider}/credentials:retrieve`;
-    const client = await this.auth.getClient();
-    const headers = await client.getRequestHeaders(url);
-    headers.set('Content-Type', 'application/json');
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(request),
-    });
-    if (!response.ok) {
-      throw new Error(
-        `Agent Identity Credentials request failed with status ` +
-          `${response.status}: ${await response.text()}`,
-      );
-    }
-    return (await response.json()) as RetrieveCredentialsResponse;
+    return postRetrieveCredentials(
+      this.auth,
+      {
+        host: this.host,
+        apiVersion: 'v1',
+        resource: authProvider,
+        service: CredentialsServiceName.AGENT_IDENTITY,
+      },
+      request,
+    );
   }
 }

@@ -12,6 +12,7 @@ import {BaseAuthProvider} from '../../auth/base_auth_provider.js';
 import {experimental} from '../../utils/experimental.js';
 import {AgentIdentityCredentialsProvider} from './agent_identity_credentials_provider.js';
 import {GcpAuthProviderScheme} from './gcp_auth_provider_scheme.js';
+import {IamConnectorCredentialsProvider} from './iam_connector_credentials_provider.js';
 
 /** The scheme `type` this provider is registered under. */
 export const GCP_AUTH_PROVIDER_SCHEME_TYPE = 'gcpAuthProviderScheme';
@@ -42,14 +43,15 @@ export class GcpAuthProvider implements BaseAuthProvider {
   private readonly agentIdentityProvider =
     new AgentIdentityCredentialsProvider();
 
+  private readonly iamConnectorProvider = new IamConnectorCredentialsProvider();
+
   /**
    * Retrieves a credential for the scheme in `authConfig`.
    *
    * @param authConfig The auth configuration carrying the scheme.
    * @param context The context of the current tool call.
    * @returns The credential the delegate produced.
-   * @throws Error If the scheme is not a `gcpAuthProviderScheme`, or if it
-   *     names an IAM connector.
+   * @throws Error If the scheme is not a `gcpAuthProviderScheme`.
    */
   async getAuthCredential(
     authConfig: AuthConfig,
@@ -61,10 +63,7 @@ export class GcpAuthProvider implements BaseAuthProvider {
     }
 
     if (CONNECTOR_RESOURCE_NAME_PATTERN.test(authScheme.name)) {
-      throw new Error(
-        'IAM Connector auth providers are not supported yet: ' +
-          `'${authScheme.name}'.`,
-      );
+      return this.iamConnectorProvider.getAuthCredential(authScheme, context);
     }
 
     return this.agentIdentityProvider.getAuthCredential(authScheme, context);

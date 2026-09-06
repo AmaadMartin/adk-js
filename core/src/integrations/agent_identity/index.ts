@@ -5,7 +5,7 @@
  */
 
 // Only the scheme and the router are public, matching adk-python, which keeps
-// the credentials providers and their client private. `GcpAuthProviderScheme`
+// both credentials providers and their clients private. `GcpAuthProviderScheme`
 // is declared in `auth/auth_schemes` and reaches a user through this module.
 // An interface is erased at build time, so it must leave through `export type`;
 // a value re-export of an erased name makes the built ESM module fail to load.
