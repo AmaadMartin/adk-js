@@ -11,6 +11,7 @@ import {SequentialAgent} from '../../src/agents/sequential_agent.js';
 import {
   deprecated,
   resetDeprecationWarnings,
+  warnDeprecatedOnce,
 } from '../../src/utils/deprecated.js';
 import {logger} from '../../src/utils/logger.js';
 
@@ -85,5 +86,45 @@ describe('the composite shell agents are deprecated', () => {
     );
     // The constructor is wrapped, so the reported class name has to survive it.
     expect(agent.constructor.name).toBe(name);
+  });
+});
+
+describe('warnDeprecatedOnce', () => {
+  beforeEach(() => {
+    resetDeprecationWarnings();
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetDeprecationWarnings();
+  });
+
+  it('warns once per key', () => {
+    warnDeprecatedOnce('OldSchema', 'OldSchema is deprecated.');
+    warnDeprecatedOnce('OldSchema', 'OldSchema is deprecated.');
+    warnDeprecatedOnce('OldFunction', 'OldFunction is deprecated.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith('OldSchema is deprecated.');
+    expect(logger.warn).toHaveBeenCalledWith('OldFunction is deprecated.');
+  });
+
+  it('warns again after the registry is reset', () => {
+    warnDeprecatedOnce('OldSchema', 'OldSchema is deprecated.');
+    resetDeprecationWarnings();
+    warnDeprecatedOnce('OldSchema', 'OldSchema is deprecated.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares its registry with the class decorator', () => {
+    @deprecated('Shared is deprecated.')
+    class Shared {}
+
+    new Shared();
+    warnDeprecatedOnce('Shared', 'Shared is deprecated.');
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 });

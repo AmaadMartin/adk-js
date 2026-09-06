@@ -13,6 +13,24 @@ export function resetDeprecationWarnings(): void {
   warnedItems.clear();
 }
 
+/**
+ * Logs `reason` the first time `key` is reported, and stays silent after that.
+ *
+ * {@link deprecated} covers a class, which is all a decorator can reach. This
+ * covers what it cannot: a function, or a schema. Both share one registry, so
+ * {@link resetDeprecationWarnings} clears both.
+ *
+ * @param key Names the deprecated item. This is what "once" counts.
+ * @param reason What is deprecated, and what a caller uses instead.
+ */
+export function warnDeprecatedOnce(key: string, reason: string): void {
+  if (warnedItems.has(key)) {
+    return;
+  }
+  warnedItems.add(key);
+  logger.warn(reason);
+}
+
 // `any[]` rather than `unknown[]`: a class whose constructor takes a typed
 // config (every agent) is not assignable to `new (...args: unknown[]) => …`,
 // so the stricter signature would reject exactly the classes this decorates.
