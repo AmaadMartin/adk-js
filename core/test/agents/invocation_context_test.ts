@@ -8,6 +8,7 @@ import {
   BaseAgent,
   BaseAgentConfig,
   Event,
+  InMemoryCredentialService,
   InvocationContext,
   LoopAgent,
   PluginManager,
@@ -170,5 +171,34 @@ describe('InvocationContext LLM-call cost tracking', () => {
     // Exactly the 3 permitted iterations produced an event before the throw,
     // proving the counter is shared across the per-iteration child contexts.
     expect(events).toHaveLength(3);
+  });
+});
+
+describe('InvocationContext credential service', () => {
+  const credentialService = new InMemoryCredentialService();
+
+  function makeContext(): InvocationContext {
+    return new InvocationContext({
+      invocationId: 'invocation-1',
+      session: makeSession(),
+      pluginManager: new PluginManager(),
+      credentialService,
+    });
+  }
+
+  it('keeps the credential service it was constructed with', () => {
+    // The field was declared and accepted but never assigned, so every tool
+    // that reads it — `AgentTool` forwards it to its nested runner — saw
+    // undefined however the runner was configured.
+    expect(makeContext().credentialService).toBe(credentialService);
+  });
+
+  it('carries the credential service into a sub-agent branch', () => {
+    const child = new InvocationContext({
+      ...makeContext(),
+      branch: 'parent.child',
+    });
+
+    expect(child.credentialService).toBe(credentialService);
   });
 });

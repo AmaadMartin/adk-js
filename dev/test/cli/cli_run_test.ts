@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {BaseAgent, BaseSessionService, Runner} from '@google/adk';
+import {
+  BaseAgent,
+  BaseSessionService,
+  InMemoryCredentialService,
+  isApp,
+  Runner,
+} from '@google/adk';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
@@ -12,9 +18,34 @@ import {runAgent} from '../../src/cli/cli_run.js';
 import {AgentFile} from '../../src/utils/agent_loader.js';
 import {loadFileData, saveToFile} from '../../src/utils/file_utils.js';
 
-vi.mock('../../src/utils/agent_loader.js', () => ({
-  AgentFile: vi.fn(),
+vi.mock('../../src/utils/agent_loader.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/agent_loader.js')>();
+  return {
+    // Naming an agent after its path stays real; only the loader is faked.
+    resolveAgentLocation: actual.resolveAgentLocation,
+    AgentFile: vi.fn(),
+  };
+});
+
+/** The reload listener `runAgent` registered, captured by the `watch` fake. */
+const watchState = vi.hoisted(() => ({
+  listener: undefined as (() => Promise<void>) | undefined,
 }));
+
+// Only `watch` is faked, so the reload subscriber can be driven without
+// waiting on a real filesystem event.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    default: actual,
+    watch: (_path: string, listener: () => Promise<void>) => {
+      watchState.listener = listener;
+      return {close: () => {}};
+    },
+  };
+});
 
 // Only the I/O is faked; getAbsolutePath is the real resolver under test.
 vi.mock('../../src/utils/file_utils.js', async (importOriginal) => ({
@@ -714,6 +745,128 @@ describe('cli_run', () => {
       });
 
       expect(output).not.toContain('[streamer]');
+    });
+  });
+  describe('run context', () => {
+    /** The options every `Runner` this run built was constructed with. */
+    const runnerOptions = () =>
+      vi.mocked(Runner).mock.calls.map((call) => call[0]);
+
+    const AGENT_PATH = path.resolve(
+      path.sep,
+      'tmp',
+      'agents',
+      'weather',
+      'agent.ts',
+    );
+
+    it('gives the runner an in-memory credential service by default', async () => {
+      await runAgent({
+        agentPath: 'agent.ts',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(runnerOptions()[0].credentialService).toBeInstanceOf(
+        InMemoryCredentialService,
+      );
+    });
+
+    it('gives the runner the injected credential service', async () => {
+      const credentialService = new InMemoryCredentialService();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        credentialService,
+        sessionService: createMockSessionService(),
+      });
+
+      expect(runnerOptions()[0].credentialService).toBe(credentialService);
+    });
+
+    it('gives the scripted run the credential service as well', async () => {
+      (loadFileData as Mock).mockResolvedValue({state: {}, queries: ['Hello']});
+      const credentialService = new InMemoryCredentialService();
+
+      await runAgent({
+        agentPath: 'agent.ts',
+        inputFile: 'input.json',
+        credentialService,
+        sessionService: createMockSessionService(),
+      });
+
+      expect(runnerOptions()[0].credentialService).toBe(credentialService);
+    });
+
+    it('keeps the credential service and the app name across a reload', async () => {
+      const credentialService = new InMemoryCredentialService();
+      (mockRl.question as Mock).mockImplementationOnce(
+        async (_prompt: string, cb: (answer: string) => void) => {
+          await watchState.listener?.();
+          cb('exit');
+        },
+      );
+
+      await runAgent({
+        agentPath: AGENT_PATH,
+        reloadAgents: true,
+        credentialService,
+        sessionService: createMockSessionService(),
+      });
+
+      const options = runnerOptions();
+      expect(options).toHaveLength(2);
+      expect(options[1].credentialService).toBe(credentialService);
+      expect(options[1].appName).toBe('weather');
+    });
+
+    it("names a bare agent's session after its directory", async () => {
+      const sessionService = createMockSessionService();
+      mockAgentFile.load = vi.fn().mockResolvedValue({name: 'assistant'});
+
+      await runAgent({agentPath: AGENT_PATH, sessionService});
+
+      expect(sessionService.createSession).toHaveBeenCalledWith({
+        appName: 'weather',
+        userId: 'test_user',
+      });
+      expect(runnerOptions()[0].appName).toBe('weather');
+    });
+
+    it('names the session after the App the file exports', async () => {
+      const sessionService = createMockSessionService();
+      mockAgentFile.load = vi.fn().mockResolvedValue({
+        name: 'custom_cli_app',
+        rootAgent: {name: 'assistant'},
+      });
+      vi.mocked(isApp).mockReturnValue(true);
+
+      await runAgent({agentPath: AGENT_PATH, sessionService});
+
+      expect(sessionService.createSession).toHaveBeenCalledWith({
+        appName: 'custom_cli_app',
+        userId: 'test_user',
+      });
+      expect(runnerOptions()[0].appName).toBe('custom_cli_app');
+    });
+
+    it('saves the session beside the agent, not under the App name', async () => {
+      mockAgentFile.load = vi.fn().mockResolvedValue({
+        name: 'custom_cli_app',
+        rootAgent: {name: 'assistant'},
+      });
+      vi.mocked(isApp).mockReturnValue(true);
+
+      await runAgent({
+        agentPath: AGENT_PATH,
+        saveSession: true,
+        sessionId: 'sess123',
+        sessionService: createMockSessionService(),
+      });
+
+      expect(saveToFile).toHaveBeenCalledWith(
+        path.join(path.dirname(AGENT_PATH), 'sess123.session.json'),
+        expect.anything(),
+      );
     });
   });
 });

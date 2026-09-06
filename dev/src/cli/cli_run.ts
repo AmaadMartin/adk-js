@@ -7,12 +7,14 @@
 import {
   App,
   BaseArtifactService,
+  BaseCredentialService,
   BaseMemoryService,
   BaseSessionService,
   Event,
   getPendingUserInputRequests,
   getUserInputRequests,
   InMemoryArtifactService,
+  InMemoryCredentialService,
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
@@ -27,7 +29,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 
-import {AgentFile, AgentFileOptions} from '../utils/agent_loader.js';
+import {
+  AgentFile,
+  AgentFileOptions,
+  resolveAgentLocation,
+} from '../utils/agent_loader.js';
 import {
   getAbsolutePath,
   loadFileData,
@@ -188,6 +194,7 @@ interface RunFromInputFileOptions {
   agent: RunnableRoot;
   artifactService: BaseArtifactService;
   sessionService: BaseSessionService;
+  credentialService: BaseCredentialService;
   memoryService?: BaseMemoryService;
   filePath: string;
 }
@@ -246,9 +253,11 @@ async function runFromInputFile(
 interface RunInteractivelyOptions {
   rootAgent?: RunnableRoot;
   app?: App;
+  appName: string;
   session: Session;
   artifactService: BaseArtifactService;
   sessionService: BaseSessionService;
+  credentialService: BaseCredentialService;
   memoryService?: BaseMemoryService;
   onAgentFileReloaded?: (subscribe: (newAgent: RunnableRoot) => void) => void;
 }
@@ -262,21 +271,25 @@ async function runInteractively(
   let currentAgent: RunnableRoot = currentRoot;
   let runner = new Runner({
     app: options.app,
-    appName: options.app?.name ?? currentAgent.name,
+    appName: options.appName,
     agent: options.app?.rootAgent ?? currentAgent,
     artifactService: options.artifactService,
     sessionService: options.sessionService,
     memoryService: options.memoryService,
+    credentialService: options.credentialService,
   });
 
   options.onAgentFileReloaded?.((newAgent: RunnableRoot) => {
     currentAgent = newAgent;
+    // The run keeps its app name: renaming it here would file the rest of the
+    // conversation under an app the open session does not belong to.
     runner = new Runner({
-      appName: newAgent.name,
+      appName: options.appName,
       agent: newAgent,
       artifactService: options.artifactService,
       sessionService: options.sessionService,
       memoryService: options.memoryService,
+      credentialService: options.credentialService,
     });
     console.log(`Agent reloaded. New runner created with existing session.`);
   });
@@ -325,6 +338,8 @@ export interface RunAgentOptions {
   artifactService?: BaseArtifactService;
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
+  /** Credential store for the run. Defaults to an in-memory store. */
+  credentialService?: BaseCredentialService;
   otelToCloud?: boolean;
   agentFileLoadOptions?: AgentFileOptions;
   reloadAgents?: boolean;
@@ -335,6 +350,8 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     options.artifactService || new InMemoryArtifactService();
   const sessionService = options.sessionService || new InMemorySessionService();
   const memoryService = options.memoryService || new InMemoryMemoryService();
+  const credentialService =
+    options.credentialService ?? new InMemoryCredentialService();
   await using agentFile = new AgentFile(
     getAbsolutePath(options.agentPath),
     options.agentFileLoadOptions,
@@ -342,9 +359,12 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   const loaded = await agentFile.load();
   const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
   const app = isApp(loaded) ? loaded : undefined;
+  // A bare agent is named after its directory, the key `adk web` and
+  // `adk api_server` serve it under. An App keeps the name it declares.
+  const appName = app?.name ?? resolveAgentLocation(options.agentPath).name;
 
   let session = await sessionService.createSession({
-    appName: app?.name ?? rootAgent.name,
+    appName,
     userId,
   });
 
@@ -378,11 +398,12 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     if (options.inputFile) {
       session =
         (await runFromInputFile({
-          appName: app?.name ?? rootAgent.name,
+          appName,
           userId,
           agent: rootAgent,
           artifactService,
           sessionService,
+          credentialService,
           memoryService,
           filePath: options.inputFile,
         })) || session;
@@ -408,8 +429,10 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
       await runInteractively({
         rootAgent,
         app,
+        appName,
         artifactService,
         sessionService,
+        credentialService,
         memoryService,
         session,
         onAgentFileReloaded: options.reloadAgents
@@ -423,8 +446,10 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
       await runInteractively({
         rootAgent,
         app,
+        appName,
         artifactService,
         sessionService,
+        credentialService,
         memoryService,
         session,
         onAgentFileReloaded: options.reloadAgents
