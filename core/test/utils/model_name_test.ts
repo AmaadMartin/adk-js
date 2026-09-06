@@ -6,6 +6,79 @@
 
 import {isGemini2OrAbove, isGemini3xFlashLive} from '@google/adk';
 import {describe, expect, it} from 'vitest';
+import {isGemini1Model, isGeminiModel} from '../../src/utils/model_name.js';
+
+describe('isGemini1Model', () => {
+  const gemini1Models = [
+    'gemini-1.5-flash',
+    'gemini-1.0-pro',
+    'gemini-1.5-pro-preview',
+    'gemini-1.9-experimental',
+    'projects/265104255505/locations/us-central1/publishers/google/models/gemini-1.5-flash',
+    'projects/12345/locations/us-east1/publishers/google/models/gemini-1.0-pro-preview',
+  ];
+
+  describe('valid models', () => {
+    for (const model of gemini1Models) {
+      it(`should return true for model: ${model}`, () => {
+        expect(isGemini1Model(model)).toBe(true);
+      });
+    }
+  });
+
+  describe('invalid models', () => {
+    const invalidModels = [
+      // A double-digit major must not be read as Gemini 1.x.
+      'gemini-10.0-pro',
+      // The dotted minor version is mandatory.
+      'gemini-1',
+      'gemini-1-pro',
+      'gemini-1.',
+      'gemini-1x-foo',
+      'gemini-2.5-flash',
+      'claude-3-sonnet',
+      // Present but not anchored at the start of the model name.
+      'my-gemini-1.5-model',
+      '',
+      'projects/265104255505/locations/us-central1/publishers/google/models/gemini-2.5-flash',
+    ];
+
+    for (const model of invalidModels) {
+      it(`should return false for model: ${model || '<empty string>'}`, () => {
+        expect(isGemini1Model(model)).toBe(false);
+      });
+    }
+  });
+
+  describe('classification invariants', () => {
+    const allModels = [
+      ...gemini1Models,
+      'gemini-10.0-pro',
+      'gemini-1',
+      'gemini-1-pro',
+      'gemini-2.5-flash',
+      'gemini-3-pro-preview',
+      'claude-3-sonnet',
+      '',
+    ];
+
+    it('should never classify a model as both Gemini 1.x and Gemini 2.0+', () => {
+      expect(
+        allModels.filter(
+          (model) => isGemini1Model(model) && isGemini2OrAbove(model),
+        ),
+      ).toEqual([]);
+    });
+
+    it('should classify every Gemini 1.x model as a Gemini model', () => {
+      expect(
+        allModels.filter(
+          (model) => isGemini1Model(model) && !isGeminiModel(model),
+        ),
+      ).toEqual([]);
+    });
+  });
+});
 
 describe('isGemini2OrAbove', () => {
   describe('valid models', () => {
