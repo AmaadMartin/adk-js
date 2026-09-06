@@ -55,6 +55,7 @@ export interface LlmRequest {
 
 /**
  * Appends instructions to the system instruction.
+ * @param llmRequest The request to mutate.
  * @param instructions The instructions to append.
  */
 export function appendInstructions(
@@ -74,6 +75,7 @@ export function appendInstructions(
 
 /**
  * Appends tools to the request.
+ * @param llmRequest The request to mutate.
  * @param tools The tools to append.
  */
 export function appendTools(llmRequest: LlmRequest, tools: BaseTool[]): void {
@@ -104,6 +106,7 @@ export function appendTools(llmRequest: LlmRequest, tools: BaseTool[]): void {
 /**
  * Sets the output schema for the request.
  *
+ * @param llmRequest The request to mutate.
  * @param schema The JSON Schema object to set as the output schema.
  */
 export function setOutputSchema(
