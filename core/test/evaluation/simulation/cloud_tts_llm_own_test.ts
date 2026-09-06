@@ -15,6 +15,7 @@ import {CloudTtsLlm, LLMRegistry, LlmRequest, LlmResponse} from '@google/adk';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  cloudTtsClientOptions,
   createCloudTtsClient,
   extractText,
   extractVoiceConfig,
@@ -208,7 +209,7 @@ describe('CloudTtsLlm request assembly', () => {
   });
 });
 
-describe('createCloudTtsClient', () => {
+describe('cloudTtsClientOptions', () => {
   const projectEnvKey = 'GOOGLE_CLOUD_PROJECT';
   const originalProject = process.env[projectEnvKey];
 
@@ -220,17 +221,23 @@ describe('createCloudTtsClient', () => {
     }
   });
 
-  it('builds a client when GOOGLE_CLOUD_PROJECT is unset', async () => {
+  it('selects no project when GOOGLE_CLOUD_PROJECT is unset', () => {
     delete process.env[projectEnvKey];
 
-    const client = await createCloudTtsClient();
-
-    expect(typeof client.synthesizeSpeech).toBe('function');
+    expect(cloudTtsClientOptions()).toEqual({});
   });
 
-  it('builds a client scoped to GOOGLE_CLOUD_PROJECT when it is set', async () => {
+  it('selects the project named by GOOGLE_CLOUD_PROJECT', () => {
     process.env[projectEnvKey] = 'adk-tts-test-project';
 
+    expect(cloudTtsClientOptions()).toEqual({
+      projectId: 'adk-tts-test-project',
+    });
+  });
+});
+
+describe('createCloudTtsClient', () => {
+  it('builds a client from the installed Cloud TTS package', async () => {
     const client = await createCloudTtsClient();
 
     expect(typeof client.synthesizeSpeech).toBe('function');
