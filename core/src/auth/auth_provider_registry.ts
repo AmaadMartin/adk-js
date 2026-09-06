@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {AuthScheme} from './auth_schemes.js';
+import {AuthScheme, CustomAuthScheme} from './auth_schemes.js';
 import {BaseAuthProvider} from './base_auth_provider.js';
 
 /**
@@ -29,7 +29,9 @@ export class AuthProviderRegistry {
    * @param authScheme The auth scheme to get provider for.
    * @returns The provider instance if registered, undefined otherwise.
    */
-  getProvider(authScheme: AuthScheme): BaseAuthProvider | undefined {
+  getProvider(
+    authScheme: AuthScheme | CustomAuthScheme,
+  ): BaseAuthProvider | undefined {
     return this.providers.get(authScheme.type);
   }
 }
