@@ -13,12 +13,26 @@ describe('truncate', () => {
     expect(truncate('abc', 10)).toBe('abc');
   });
 
+  it('leaves text shorter than the limit untouched', () => {
+    expect(truncate('hello', 10)).toBe('hello');
+  });
+
   it('returns text that is exactly at the limit unchanged', () => {
     expect(truncate('abcde', 5)).toBe('abcde');
   });
 
+  it('leaves text exactly at the limit untouched', () => {
+    expect(truncate('a'.repeat(10), 10)).toBe('a'.repeat(10));
+  });
+
   it('adds the notice when the text is one character over', () => {
     expect(truncate('abcdef', 5)).toBe('abcde\n... (truncated, 6 total chars)');
+  });
+
+  it('truncates one character over the limit and reports the original length', () => {
+    expect(truncate('a'.repeat(11), 10)).toBe(
+      `${'a'.repeat(10)}\n... (truncated, 11 total chars)`,
+    );
   });
 
   it('adds the notice when the cut is well inside the text', () => {
@@ -33,15 +47,30 @@ describe('truncate', () => {
     );
   });
 
-  it('does not split a surrogate pair at the cut', () => {
-    // '😀' is two UTF-16 code units, so a cut at 3 would land inside it.
-    const text = 'ab😀cd';
-    expect(truncate(text, 3)).toBe('ab\n... (truncated, 6 total chars)');
+  it('counts an astral character as one, matching adk-python', () => {
+    // 'abcd🚀efg' is 9 UTF-16 code units but 8 code points.
+    expect(truncate('abcd🚀efg', 8)).toBe('abcd🚀efg');
   });
 
-  it('keeps a surrogate pair that ends exactly at the cut', () => {
-    const text = 'ab😀cd';
-    expect(truncate(text, 4)).toBe('ab😀\n... (truncated, 6 total chars)');
+  it('does not split a surrogate pair at the cut', () => {
+    // '😀' is one code point, so a cut at 3 keeps it whole.
+    expect(truncate('ab😀cd', 3)).toBe('ab😀\n... (truncated, 5 total chars)');
+  });
+
+  it('keeps a surrogate pair that sits before the cut', () => {
+    expect(truncate('ab😀cd', 4)).toBe('ab😀c\n... (truncated, 5 total chars)');
+  });
+
+  it('keeps a whole surrogate pair when the cut lands just after it', () => {
+    expect(truncate('abcd🚀efg', 5)).toBe(
+      'abcd🚀\n... (truncated, 8 total chars)',
+    );
+  });
+
+  it('never splits a surrogate pair when the cut lands just before it', () => {
+    expect(truncate('abcd🚀efg', 4)).toBe(
+      'abcd\n... (truncated, 8 total chars)',
+    );
   });
 
   it('truncates everything when the limit is zero', () => {

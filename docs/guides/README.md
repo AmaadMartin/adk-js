@@ -327,6 +327,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 - [Environment simulation mock strategies](tools/environment_simulation_strategies/index.md) - Answering a tool call with a simulated response, so an agent runs without the tool's real backend.
 - [EnvironmentToolset](tools/environment_toolset/index.md) - Giving an agent a working directory it can run commands in, read files from and edit, and the confirmation gate on shell execution.
 - [ExampleTool.fromConfig](tools/example_tool/index.md) - Building an ExampleTool from a configuration record, and naming an example provider that user code exports.
+- [ExecuteTool](tools/execute_tool/index.md) - Running a shell command in an environment working directory, and the confirmation gate in front of it.
 - [FunctionTool parameters and the sync-callable runner](tools/function_tool/index.md) - How a tool's parameter declaration is built, and how a host keeps a blocking tool body off the event loop.
 - [GCSCredentialsConfig](tools/gcs_credentials/index.md) - How a Cloud Storage tool authenticates: the three credential modes, the default scope and the token cache key.
 - [GcsAdminToolset](tools/gcs_admin_toolset/index.md) - Cloud Storage bucket

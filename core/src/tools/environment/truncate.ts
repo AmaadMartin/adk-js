@@ -6,33 +6,23 @@
 
 import {MAX_OUTPUT_CHARS} from './constants.js';
 
-/** Lowest and highest UTF-16 code units that start a surrogate pair. */
-const HIGH_SURROGATE_MIN = 0xd800;
-const HIGH_SURROGATE_MAX = 0xdbff;
-
 /**
- * Truncates `text` to `limit` characters and appends a notice naming the
- * original length.
+ * Caps `text` at `limit` characters and appends a notice reporting how long it
+ * really was.
  *
  * The notice is model-facing and is reproduced from adk-python's `truncate` in
- * `src/google/adk/tools/environment/_utils.py`. The reported length counts
- * UTF-16 code units, where Python counts code points, so an astral character
- * contributes 2 here and 1 there.
+ * `src/google/adk/tools/environment/_utils.py`. Lengths count code points,
+ * matching adk-python, so the cut can never split a surrogate pair.
  *
  * @param text The text to cap.
- * @param limit Maximum number of characters to keep.
- * @return `text` unchanged when it fits, otherwise the capped text plus notice.
+ * @param limit Maximum characters to keep. Defaults to `MAX_OUTPUT_CHARS`.
+ * @returns `text` unchanged when it fits, otherwise the capped text followed by
+ *   the truncation notice.
  */
 export function truncate(text: string, limit = MAX_OUTPUT_CHARS): string {
-  if (text.length <= limit) {
+  const chars = [...text];
+  if (chars.length <= limit) {
     return text;
   }
-  // Cutting at a code-unit index can split a surrogate pair and leave a lone
-  // high surrogate before the notice, so drop that half of the pair.
-  const lastKept = text.charCodeAt(limit - 1);
-  const end =
-    lastKept >= HIGH_SURROGATE_MIN && lastKept <= HIGH_SURROGATE_MAX
-      ? limit - 1
-      : limit;
-  return `${text.slice(0, end)}\n... (truncated, ${text.length} total chars)`;
+  return `${chars.slice(0, limit).join('')}\n... (truncated, ${chars.length} total chars)`;
 }

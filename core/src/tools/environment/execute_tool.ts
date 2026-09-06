@@ -6,7 +6,10 @@
 
 import {FunctionDeclaration, Type} from '@google/genai';
 import {Context} from '../../agents/context.js';
-import {BaseEnvironment} from '../../environment/base_environment.js';
+import {
+  BaseEnvironment,
+  ExecutionResult,
+} from '../../environment/base_environment.js';
 import {formatError} from '../../utils/error_utils.js';
 import {experimental} from '../../utils/experimental.js';
 import {logger} from '../../utils/logger.js';
@@ -24,6 +27,11 @@ export enum ExecuteToolErrorCode {
   CONFIRMATION_REJECTED = 'CONFIRMATION_REJECTED',
 }
 
+/**
+ * Description shown to the model. Copied verbatim from adk-python's
+ * `_EXECUTE_TOOL_DESCRIPTION`, including its punctuation, because the model
+ * sees this text and parity keeps the two SDKs behaving alike.
+ */
 const EXECUTE_TOOL_DESCRIPTION = `
 Run a shell command in the environment. For running programs, tests, and build
 commands ONLY. WARNING: Do NOT use for file reading -- use the ReadFile tool
@@ -32,13 +40,50 @@ Good: Execute("python3 script.py"), Execute("pytest"), Execute("find ...").
 Bad: Execute("head ..."), Execute("cat ...").
 `;
 
+/** How much of stdout and stderr reaches the debug log. */
+const LOGGED_OUTPUT_CHARS = 200;
+
+/** Telemetry error type reported for a failed call. */
+const TOOL_ERROR_TYPE = 'TOOL_ERROR';
+
 /** Options for {@link ExecuteTool}. */
 export interface ExecuteToolOptions {
-  /** Character cap applied to stdout and stderr. */
+  /**
+   * Character cap applied to stdout and stderr independently. Defaults to
+   * 30000.
+   */
   maxOutputChars?: number;
 }
 
-/** Run a shell command in the environment's working directory. */
+/**
+ * The object {@link ExecuteTool.runAsync} resolves to once a command has run.
+ *
+ * The keys are model-facing wire names, so `exit_code` stays snake_case to
+ * match adk-python even though the rest of the codebase is camelCase.
+ */
+interface ExecuteToolResponse {
+  status: 'ok' | 'error';
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number;
+  error?: string;
+}
+
+/**
+ * Runs a shell command in a {@link BaseEnvironment}'s working directory.
+ *
+ * The command runs through {@link BaseEnvironment.execute}, so the host it
+ * reaches is whatever environment you pass in. With `LocalEnvironment` that is
+ * the developer's machine, unsandboxed, which is why every call is gated
+ * behind an explicit client confirmation. There is no way to switch the gate
+ * off.
+ *
+ * The environment must already be initialized. This tool never calls
+ * `initialize()` or `close()` on it.
+ *
+ * A non-zero exit code is a result, not an exception: it comes back as
+ * `{status: 'error', exit_code}` alongside whatever the command printed.
+ */
 @experimental
 export class ExecuteTool extends BaseTool {
   private readonly maxOutputChars: number;
@@ -78,40 +123,75 @@ export class ExecuteTool extends BaseTool {
       return {status: 'error', error: '`command` is required.'};
     }
 
-    const confirmationResult = enforceConfirmation(toolContext, command);
-    if (confirmationResult) {
-      return confirmationResult;
+    const refusal = enforceConfirmation(toolContext, command);
+    if (refusal) {
+      return refusal;
     }
 
-    logger.debug(`Execute command: ${command}`);
-    let executionResult;
+    logger.debug('Execute command:', command);
+    let executionResult: ExecutionResult;
     try {
       executionResult = await this.environment.execute(
         command,
         DEFAULT_TIMEOUT_SECONDS,
       );
     } catch (e: unknown) {
-      return {status: 'error', error: formatError(e)};
+      const error = formatError(e);
+      logger.error('Execute failed:', error);
+      return {status: 'error', error};
     }
 
-    const result: Record<string, unknown> = {status: 'ok'};
+    logger.debug(
+      'Execute result:',
+      `exit_code=${executionResult.exitCode},`,
+      `stdout=${JSON.stringify(executionResult.stdout.slice(0, LOGGED_OUTPUT_CHARS))},`,
+      `stderr=${JSON.stringify(executionResult.stderr.slice(0, LOGGED_OUTPUT_CHARS))},`,
+      `timed_out=${executionResult.timedOut}`,
+    );
+
+    const result: ExecuteToolResponse = {status: 'ok'};
     if (executionResult.stdout) {
-      result['stdout'] = truncate(executionResult.stdout, this.maxOutputChars);
+      result.stdout = truncate(executionResult.stdout, this.maxOutputChars);
     }
     if (executionResult.stderr) {
-      result['stderr'] = truncate(executionResult.stderr, this.maxOutputChars);
+      result.stderr = truncate(executionResult.stderr, this.maxOutputChars);
     }
     if (executionResult.exitCode !== 0) {
-      result['status'] = 'error';
-      result['exit_code'] = executionResult.exitCode;
+      result.status = 'error';
+      result.exit_code = executionResult.exitCode;
     }
     if (executionResult.timedOut) {
-      result['status'] = 'error';
-      result['error'] = `Command timed out after ${DEFAULT_TIMEOUT_SECONDS}s.`;
+      result.status = 'error';
+      result.error = `Command timed out after ${DEFAULT_TIMEOUT_SECONDS}s.`;
     }
     return result;
   }
+
+  /**
+   * Telemetry hook reporting whether a response describes a failure.
+   *
+   * It reads `status`, not the presence of an `error` key, so a response
+   * carrying only `{error}` is not counted as a tool error.
+   *
+   * @param response The value {@link runAsync} resolved to.
+   * @returns `'TOOL_ERROR'` for a failed call, otherwise `undefined`.
+   */
+  detectErrorInResponse(response: unknown): string | undefined {
+    if (
+      typeof response !== 'object' ||
+      response === null ||
+      !('status' in response)
+    ) {
+      return undefined;
+    }
+    return response.status === 'error' ? TOOL_ERROR_TYPE : undefined;
+  }
 }
+
+/** The result of the confirmation gate, or `undefined` to proceed. */
+type ConfirmationRefusal =
+  | {partial: string}
+  | {status: 'error'; error: string; errorCode: ExecuteToolErrorCode};
 
 /**
  * Enforces a human-in-the-loop confirmation gate before running a command,
@@ -123,15 +203,13 @@ export class ExecuteTool extends BaseTool {
  *
  * @param toolContext The context of the current tool call.
  * @param command The shell command the model asked to run.
- * @return An intermediate or rejection result, or `undefined` to proceed.
+ * @returns An intermediate result while approval is pending, a rejection error
+ *   when the client refused, or `undefined` when the command may run.
  */
 function enforceConfirmation(
   toolContext: Context,
   command: string,
-):
-  | {partial: string}
-  | {status: string; error: string; errorCode: ExecuteToolErrorCode}
-  | undefined {
+): ConfirmationRefusal | undefined {
   const confirmation = toolContext.toolConfirmation;
 
   if (!confirmation) {

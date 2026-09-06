@@ -1331,6 +1331,7 @@ export type {
 } from './tools/tool_configs.js';
 export {
   IntentMismatchError,
+  REQUIRE_CONFIRMATION_MESSAGE,
   ToolConfirmation,
   isIntentMismatchError,
 } from './tools/tool_confirmation.js';
