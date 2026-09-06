@@ -496,4 +496,81 @@ describe('deployToCloudRun', () => {
       expect.stringContaining('\x1b[0m'),
     );
   });
+
+  it('should warn and keep going when the temp folder cannot be removed', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    const consoleErrorSpy = vi.spyOn(console, 'error');
+    (fs.rm as Mock).mockRejectedValueOnce(
+      new Error(`EBUSY: resource busy or locked, unlink '/tmp/test-deploy'`),
+    );
+
+    await expect(deployToCloudRun(defaultOptions)).resolves.toBeUndefined();
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('EBUSY'),
+    );
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('should report the gcloud failure, not the cleanup failure, when both fail', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    const consoleErrorSpy = vi.spyOn(console, 'error');
+    spawnMock.mockReturnValue({
+      on: vi.fn((event: string, cb: (code: number) => void) => {
+        if (event === 'close') {
+          process.nextTick(() => cb(1));
+        }
+      }),
+    });
+    (fs.rm as Mock).mockRejectedValueOnce(
+      new Error(`EBUSY: resource busy or locked, unlink '/tmp/test-deploy'`),
+    );
+
+    // deployToCloudRun swallows the deploy error today.
+    await expect(deployToCloudRun(defaultOptions)).resolves.toBeUndefined();
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('\x1b[31mFailed to deploy to Cloud Run:'),
+      expect.stringContaining('Command failed with exit code 1'),
+      expect.stringContaining('\x1b[0m'),
+    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('EBUSY'),
+    );
+  });
+
+  it('should still dispose the agent loader when the temp folder cannot be removed', async () => {
+    const disposeAll = vi.fn().mockResolvedValue(undefined);
+    (AgentLoader as Mock).mockImplementation(() => ({
+      listAgents: vi.fn().mockResolvedValue(['agent1']),
+      getAgentFile: vi.fn().mockResolvedValue({
+        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+      }),
+      disposeAll,
+    }));
+    (fs.rm as Mock).mockRejectedValueOnce(
+      new Error(`EBUSY: resource busy or locked, unlink '/tmp/test-deploy'`),
+    );
+
+    await expect(deployToCloudRun(defaultOptions)).resolves.toBeUndefined();
+
+    expect(disposeAll).toHaveBeenCalled();
+  });
+
+  it('should warn when disposing the agent loader fails', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn');
+    (AgentLoader as Mock).mockImplementation(() => ({
+      listAgents: vi.fn().mockResolvedValue(['agent1']),
+      getAgentFile: vi.fn().mockResolvedValue({
+        getFilePath: vi.fn().mockReturnValue('path/to/agent1.ts'),
+      }),
+      disposeAll: vi.fn().mockRejectedValue(new Error('watcher close failed')),
+    }));
+
+    await expect(deployToCloudRun(defaultOptions)).resolves.toBeUndefined();
+
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('watcher close failed'),
+    );
+  });
 });
