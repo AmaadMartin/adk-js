@@ -218,6 +218,12 @@ export * from './integrations/secret_manager/secret_client.js';
 // Exported here rather than from `common.ts`, which also feeds the web build:
 // these tools reach the network through `google-auth-library`.
 export * from './telemetry/google_cloud.js';
+// Exported here rather than from `common.ts`, which also feeds the web build:
+// the executor spawns the Cloud Run guest sandbox binary.
+export {
+  CloudRunSandboxCodeExecutor,
+  type CloudRunSandboxCodeExecutorOptions,
+} from './integrations/cloud_run/cloud_run_sandbox_code_executor.js';
 export * from './telemetry/setup.js';
 // Also available as `@google/adk/tools/bigtable`, which does not evaluate the
 // rest of this barrel.
