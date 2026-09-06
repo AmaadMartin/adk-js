@@ -5,7 +5,16 @@
  */
 
 import {LogLevel, setLogLevel} from '@google/adk';
-import {afterEach, beforeEach, describe, expect, it, Mock, vi} from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  Mock,
+  MockInstance,
+  vi,
+} from 'vitest';
 import {createProgram} from '../../src/cli/cli.js';
 import {createAgent} from '../../src/cli/cli_create.js';
 import {runAgent} from '../../src/cli/cli_run.js';
@@ -13,10 +22,13 @@ import {deployToAgentEngine} from '../../src/cli/deploy/cli_deploy_agent_engine.
 import {deployToCloudRun} from '../../src/cli/deploy/cli_deploy_cloud_run.js';
 import {AdkApiServer} from '../../src/server/adk_api_server.js';
 
+/** Shared so a test can decide how `AdkApiServer.start()` settles. */
+const {mockServerStart} = vi.hoisted(() => ({mockServerStart: vi.fn()}));
+
 vi.mock('../../src/server/adk_api_server', () => {
   return {
     AdkApiServer: vi.fn(() => ({
-      start: vi.fn(),
+      start: mockServerStart,
     })),
   };
 });
@@ -48,6 +60,57 @@ vi.mock('@google/adk', async (importOriginal) => {
     setLogLevel: vi.fn(),
   };
 });
+
+/** Thrown by the `process.exit` stub so nothing runs past the exit. */
+class ProcessExitError extends Error {
+  constructor(code: number | string | null | undefined) {
+    super(`process.exit(${code})`);
+  }
+}
+
+type StderrWrite = typeof process.stderr.write;
+
+interface StderrCapture {
+  /** Everything written to stderr, in write order. */
+  readonly chunks: string[];
+  /** Flush callbacks withheld from the writer, in write order. */
+  readonly withheldFlushes: Array<() => void>;
+  readonly write: StderrWrite;
+}
+
+/**
+ * Builds a `process.stderr.write` replacement that records what was written.
+ *
+ * With `holdFlush` the flush callback is withheld instead of invoked, so a test
+ * can observe what the CLI does while the write is still in flight.
+ */
+function captureStderr(holdFlush = false): StderrCapture {
+  const chunks: string[] = [];
+  const withheldFlushes: Array<() => void> = [];
+
+  const write: StderrWrite = (
+    chunk: string | Uint8Array,
+    encodingOrCallback?: string | ((error?: Error | null) => void),
+    callback?: (error?: Error | null) => void,
+  ): boolean => {
+    chunks.push(
+      typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'),
+    );
+
+    const flush =
+      typeof encodingOrCallback === 'function' ? encodingOrCallback : callback;
+    if (flush) {
+      if (holdFlush) {
+        withheldFlushes.push(() => flush());
+      } else {
+        flush();
+      }
+    }
+    return true;
+  };
+
+  return {chunks, withheldFlushes, write};
+}
 
 describe('CLI Entrypoint', () => {
   let program: ReturnType<typeof createProgram>;
@@ -192,6 +255,119 @@ describe('CLI Entrypoint', () => {
 
       const args = (AdkApiServer as unknown as Mock).mock.calls[0][0];
       expect(args.a2aAuthToken).toBe('tok');
+    });
+
+    it('should forward --port 0 to AdkApiServer unchanged', async () => {
+      await parse(['api_server', '--port', '0']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.port).toBe(0);
+    });
+  });
+
+  describe('server start-up failure', () => {
+    const FAILURE_MESSAGE = 'Port 41234 is already in use';
+
+    let stderr: StderrCapture;
+    let exitSpy: MockInstance<typeof process.exit>;
+
+    const stubProcess = (holdFlush = false) => {
+      stderr = captureStderr(holdFlush);
+      vi.spyOn(process.stderr, 'write').mockImplementation(stderr.write);
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+        throw new ProcessExitError(code);
+      });
+    };
+
+    // Drops a rejection queued by a test that failed before the CLI consumed
+    // it, so it cannot leak into the next test.
+    afterEach(() => {
+      mockServerStart.mockReset();
+    });
+
+    const runExpectingExit = async (argv: string[]) => {
+      try {
+        await program.parseAsync(['node', 'cli_entrypoint.js', ...argv]);
+      } catch (error: unknown) {
+        expect(error).toBeInstanceOf(ProcessExitError);
+        return;
+      }
+      expect.fail('the CLI did not exit');
+    };
+
+    it('should write the API server failure and its stack to stderr', async () => {
+      stubProcess();
+      const error = new Error(FAILURE_MESSAGE);
+      mockServerStart.mockRejectedValueOnce(error);
+
+      await runExpectingExit(['api_server']);
+
+      const {stack} = error;
+      if (!stack) expect.fail('the fixture error carries no stack');
+      const written = stderr.chunks.join('');
+      expect(written).toContain('[ADK CLI] Error starting API server: ');
+      expect(written).toContain(stack);
+      expect(written.endsWith('\n')).toBe(true);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('should write the web server failure and its stack to stderr', async () => {
+      stubProcess();
+      const error = new Error(FAILURE_MESSAGE);
+      mockServerStart.mockRejectedValueOnce(error);
+
+      await runExpectingExit(['web']);
+
+      const {stack} = error;
+      if (!stack) expect.fail('the fixture error carries no stack');
+      const written = stderr.chunks.join('');
+      expect(written).toContain('[ADK CLI] Error starting web server: ');
+      expect(written).toContain(stack);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('should exit only once the stderr diagnostic has flushed', async () => {
+      stubProcess(true);
+      mockServerStart.mockRejectedValueOnce(new Error(FAILURE_MESSAGE));
+
+      const run = runExpectingExit(['api_server']);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(stderr.chunks.join('')).toContain(FAILURE_MESSAGE);
+      expect(exitSpy).not.toHaveBeenCalled();
+
+      const [flush] = stderr.withheldFlushes;
+      if (!flush) expect.fail('the CLI did not write to stderr');
+      flush();
+
+      await run;
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('should report a rejection value that is not an Error', async () => {
+      stubProcess();
+      mockServerStart.mockRejectedValueOnce(
+        'the agent directory does not exist',
+      );
+
+      await runExpectingExit(['api_server']);
+
+      expect(stderr.chunks.join('')).toContain(
+        '[ADK CLI] Error starting API server: the agent directory does not exist',
+      );
+    });
+
+    it('should fall back to the message when the error carries no stack', async () => {
+      stubProcess();
+      const error = new Error(FAILURE_MESSAGE);
+      error.stack = undefined;
+      mockServerStart.mockRejectedValueOnce(error);
+
+      await runExpectingExit(['api_server']);
+
+      expect(stderr.chunks.join('')).toContain(
+        `[ADK CLI] Error starting API server: ${FAILURE_MESSAGE}\n`,
+      );
     });
   });
 

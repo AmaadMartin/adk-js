@@ -214,13 +214,42 @@ export const AGENT_ENGINE_ID_OPTION = new Option(
   'Optional. ID of the Agent Engine instance to update if it exists (default: undefined, which means a new instance will be created). If project and region are set, this should be the resource ID or the full resource name (projects/.../locations/.../reasoningEngines/...).',
 );
 
+/** Label prefixed to everything the CLI reports. */
+const CLI_LOG_LABEL = 'ADK CLI';
+
+/**
+ * Reports a fatal server start-up failure and exits non-zero.
+ *
+ * The stack is preferred over the message alone because `AdkApiServer.start()`
+ * rejects from agent bundling as readily as from a failed bind, and the message
+ * on its own does not say which.
+ */
+async function exitOnStartupFailure(
+  serverName: string,
+  error: unknown,
+): Promise<never> {
+  const detail =
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+  // `process.exit()` discards pending asynchronous writes and writes to a pipe
+  // are asynchronous on Windows, so wait for the flush callback before exiting.
+  // The logger is bypassed for the same reason: its winston Console transport
+  // defers the write by at least a tick, which `process.exit()` also outruns.
+  await new Promise<void>((resolve) => {
+    process.stderr.write(
+      `[${CLI_LOG_LABEL}] Error starting ${serverName}: ${detail}\n`,
+      () => resolve(),
+    );
+  });
+  process.exit(1);
+}
+
 /**
  * Creates the ADK CLI program.
  * @returns The ADK CLI program.
  */
 export function createProgram(): Command {
   const logger = new AdkLogger({
-    label: 'ADK CLI',
+    label: CLI_LOG_LABEL,
     colorize: {all: true},
   });
 
@@ -275,8 +304,7 @@ export function createProgram(): Command {
 
         await server.start();
       } catch (error) {
-        logger.error('Error starting web server:', (error as Error).message);
-        process.exit(1);
+        await exitOnStartupFailure('web server', error);
       }
     });
 
@@ -322,8 +350,7 @@ export function createProgram(): Command {
         });
         await server.start();
       } catch (error) {
-        logger.error('Error starting API server:', (error as Error).message);
-        process.exit(1);
+        await exitOnStartupFailure('API server', error);
       }
     });
 
