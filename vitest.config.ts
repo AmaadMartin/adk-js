@@ -20,6 +20,22 @@ const INTEGRATION_HOOK_TIMEOUT_MS = 120000;
  */
 const INTEGRATION_TEST_TIMEOUT_MS = 60000;
 
+/**
+ * Module aliases shared by every test project, so that a new workspace package
+ * cannot be wired into one project and forgotten in the other five. Each entry
+ * points a package specifier at its TypeScript sources.
+ *
+ * `@google/adk-devtools` is deliberately absent: its `AdkApiServer` serves the
+ * web UI from a path relative to `dist/{esm,cjs}/server`, so resolving it from
+ * `dev/src` would break `tests/integration/adk_web/webui_test.ts`, which also
+ * spawns the CLI from `dev/dist`. Tests that want dev sources import them
+ * relatively, as `tests/integration/test_api_server.ts` does.
+ */
+const alias = {
+  '@google/adk': path.resolve(__dirname, './core/src'),
+  '@google/adk-integrations': path.resolve(__dirname, './integrations/src'),
+};
+
 export default defineConfig({
   test: {
     poolOptions: {
@@ -35,13 +51,7 @@ export default defineConfig({
         test: {
           name: 'unit:core',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias,
           include: ['core/test/**/*_test.ts'],
         },
       },
@@ -49,13 +59,7 @@ export default defineConfig({
         test: {
           name: 'unit:dev',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias,
           include: ['dev/test/**/*_test.ts'],
         },
       },
@@ -63,13 +67,7 @@ export default defineConfig({
         test: {
           name: 'unit:integrations',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias,
           include: ['integrations/test/**/*_test.ts'],
         },
       },
@@ -79,13 +77,7 @@ export default defineConfig({
           environment: 'node',
           hookTimeout: INTEGRATION_HOOK_TIMEOUT_MS,
           testTimeout: INTEGRATION_TEST_TIMEOUT_MS,
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias,
           include: ['tests/integration/**/*_test.ts'],
         },
       },
@@ -93,13 +85,7 @@ export default defineConfig({
         test: {
           name: 'e2e',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias,
           include: ['tests/e2e/**/*_test.ts'],
         },
       },
@@ -107,13 +93,7 @@ export default defineConfig({
         test: {
           name: 'cross-language',
           environment: 'node',
-          alias: {
-            '@google/adk': path.resolve(__dirname, './core/src'),
-            '@google/adk-integrations': path.resolve(
-              __dirname,
-              './integrations/src',
-            ),
-          },
+          alias,
           include: ['tests/cross_language/**/*_test.ts'],
         },
       },
