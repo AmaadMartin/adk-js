@@ -155,6 +155,37 @@ export {
   ToolErrorType,
   ToolExecutionError,
 } from './errors/tool_execution_error.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {getAllToolCalls, isInvocationEvents} from './evaluation/eval_case.js';
+export type {
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+} from './evaluation/eval_case.js';
+export type {EvalSet} from './evaluation/eval_set.js';
+export {
+  convertEventsToEvalInvocations,
+  generateInferencesFromAgentModule,
+  generateInferencesFromRootAgent,
+  generateResponses,
+  generateResponsesFromSession,
+} from './evaluation/evaluation_generator.js';
+export type {
+  EvalCaseResponses,
+  EvalRow,
+} from './evaluation/evaluation_generator.js';
+export {
+  UserSimulatorStatus,
+  validateNextUserMessage,
+} from './evaluation/simulation/user_simulator.js';
+export type {
+  NextUserMessage,
+  UserSimulator,
+} from './evaluation/simulation/user_simulator.js';
 export {isCompactedEvent, isScratchpadEvent} from './events/compacted_event.js';
 export type {CompactedEvent} from './events/compacted_event.js';
 export {
