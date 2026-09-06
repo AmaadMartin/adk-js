@@ -103,10 +103,15 @@ describe('CLI service registry hook', () => {
         errors.push(parts.join(' '));
       },
     );
-    vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    vi.spyOn(process, 'exit').mockImplementation(
+      (code?: string | number | null) => {
+        throw new Error(`process.exit(${code})`);
+      },
+    );
 
-    await run(['run', agentPath, '--session_service_uri', 'nosuch://x']);
-
+    await expect(
+      run(['run', agentPath, '--session_service_uri', 'nosuch://x']),
+    ).rejects.toThrow('process.exit(1)');
     expect(errors.join('\n')).toContain('Unsupported session service URI');
   });
 
