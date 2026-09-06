@@ -15,6 +15,7 @@ import {
   PluginManager,
   Session,
   createEvent,
+  createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
 
@@ -39,6 +40,50 @@ class MockAgent extends BaseAgent {
   ): AsyncGenerator<Event, void, void> {
     // Not needed for this test
   }
+}
+
+/** Reports the branch it was run on, over both the async and the live path. */
+class BranchEchoAgent extends BaseAgent {
+  protected async *runAsyncImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield createEvent({
+      invocationId: context.invocationId,
+      author: this.name,
+      branch: context.branch,
+      content: {role: 'model', parts: [{text: `Response from ${this.name}`}]},
+    });
+  }
+
+  protected async *runLiveImpl(
+    context: InvocationContext,
+  ): AsyncGenerator<Event, void, void> {
+    yield* this.runAsyncImpl(context);
+  }
+}
+
+function createBranchContext(
+  agent: BaseAgent,
+  branch?: string,
+): InvocationContext {
+  return new InvocationContext({
+    invocationId: 'test-invocation',
+    agent,
+    session: createSession({id: 'test-session', appName: 'test-app'}),
+    pluginManager: new PluginManager(),
+    branch,
+  });
+}
+
+async function collectEvents(
+  generator: AsyncGenerator<Event, void, void>,
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for await (const event of generator) {
+    events.push(event);
+  }
+
+  return events;
 }
 
 describe('BaseAgent', () => {
@@ -296,6 +341,41 @@ describe('BaseAgent', () => {
       expect(clone).toBeInstanceOf(MockAgent);
       expect(clone.name).toBe('mock');
       expect(clone.description).toBe('a mock');
+    });
+  });
+
+  describe('branch propagation', () => {
+    it('should leave the parent branch untouched on runAsync', async () => {
+      const agent = new BranchEchoAgent({name: 'echo_agent'});
+
+      const events = await collectEvents(
+        agent.runAsync(createBranchContext(agent, 'parent_branch')),
+      );
+
+      expect(events.length).toBe(1);
+      expect(events[0].branch).toBe('parent_branch');
+    });
+
+    it('should leave the parent branch untouched on runLive', async () => {
+      const agent = new BranchEchoAgent({name: 'echo_agent'});
+
+      const events = await collectEvents(
+        agent.runLive(createBranchContext(agent, 'parent_branch')),
+      );
+
+      expect(events.length).toBe(1);
+      expect(events[0].branch).toBe('parent_branch');
+    });
+
+    it('should leave the branch undefined when the parent has none', async () => {
+      const agent = new BranchEchoAgent({name: 'echo_agent'});
+
+      const events = await collectEvents(
+        agent.runAsync(createBranchContext(agent)),
+      );
+
+      expect(events.length).toBe(1);
+      expect(events[0].branch).toBeUndefined();
     });
   });
 });
