@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {dictToAuthScheme} from '@google/adk';
 import {OpenAPIV3} from 'openapi-types';
 import {describe, expect, it} from 'vitest';
 import {
@@ -134,6 +135,96 @@ describe('auth_helpers', () => {
         type: 'http',
         scheme: 'bearer',
       });
+    });
+  });
+
+  describe('dictToAuthScheme', () => {
+    it('should accept an apiKey scheme', () => {
+      const data = {type: 'apiKey', name: 'X-API-Key', in: 'header'};
+      expect(dictToAuthScheme(data)).toEqual(data);
+    });
+
+    it('should accept an http basic scheme', () => {
+      const data = {type: 'http', scheme: 'basic'};
+      expect(dictToAuthScheme(data)).toEqual(data);
+    });
+
+    it('should accept an http bearer scheme', () => {
+      const data = {type: 'http', scheme: 'bearer', bearerFormat: 'JWT'};
+      expect(dictToAuthScheme(data)).toEqual(data);
+    });
+
+    it('should accept an oauth2 scheme', () => {
+      const data = {
+        type: 'oauth2',
+        flows: {
+          authorizationCode: {
+            authorizationUrl: 'https://example.com/auth',
+            tokenUrl: 'https://example.com/token',
+            scopes: {},
+          },
+        },
+      };
+      expect(dictToAuthScheme(data)).toEqual(data);
+    });
+
+    it('should accept an openIdConnect scheme', () => {
+      const data = {
+        type: 'openIdConnect',
+        openIdConnectUrl:
+          'https://example.com/.well-known/openid-configuration',
+      };
+      expect(dictToAuthScheme(data)).toEqual(data);
+    });
+
+    it('should reject a scheme that names no type', () => {
+      expect(() => dictToAuthScheme({in: 'header'})).toThrow(
+        "Missing 'type' field in security scheme dictionary.",
+      );
+    });
+
+    it('should reject a value that is not an object', () => {
+      expect(() => dictToAuthScheme('apiKey')).toThrow(
+        "Missing 'type' field in security scheme dictionary.",
+      );
+    });
+
+    it('should reject an unknown type', () => {
+      expect(() => dictToAuthScheme({type: 'nope'})).toThrow(
+        'Invalid security scheme type: nope',
+      );
+    });
+
+    it('should reject an apiKey scheme with no name', () => {
+      expect(() => dictToAuthScheme({type: 'apiKey', in: 'header'})).toThrow(
+        "Invalid security scheme data: 'name' must be a string.",
+      );
+    });
+
+    it('should reject an apiKey scheme with an unsupported location', () => {
+      expect(() =>
+        dictToAuthScheme({type: 'apiKey', name: 'X-API-Key', in: 'body'}),
+      ).toThrow(
+        "Invalid security scheme data: 'in' must be one of query, header, cookie.",
+      );
+    });
+
+    it('should reject an http scheme with no scheme', () => {
+      expect(() => dictToAuthScheme({type: 'http'})).toThrow(
+        "Invalid security scheme data: 'scheme' must be a string.",
+      );
+    });
+
+    it('should reject an oauth2 scheme with no flows', () => {
+      expect(() => dictToAuthScheme({type: 'oauth2'})).toThrow(
+        "Invalid security scheme data: 'flows' must be an object.",
+      );
+    });
+
+    it('should reject an openIdConnect scheme with no url', () => {
+      expect(() => dictToAuthScheme({type: 'openIdConnect'})).toThrow(
+        "Invalid security scheme data: 'openIdConnectUrl' must be a string.",
+      );
     });
   });
 });

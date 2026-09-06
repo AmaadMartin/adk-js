@@ -10,10 +10,19 @@ import {
   AuthCredentialTypes,
   Context,
   createRestApiTool,
+  createSession,
+  FeatureName,
+  InvocationContext,
   OpenApiSpecParser,
+  OperationEndpoint,
+  OperationParser,
+  PluginManager,
   RestApiTool,
   ToolAuthHandler,
+  withTemporaryFeatureOverride,
 } from '@google/adk';
+import {Type} from '@google/genai';
+import {inspect} from 'node:util';
 import {OpenAPIV3} from 'openapi-types';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -305,7 +314,7 @@ describe('RestApiTool', () => {
     expect(declaration).toEqual({
       name: 'test_tool',
       description: 'description',
-      parameters: mockSchema,
+      parameters: {type: Type.OBJECT, properties: {}},
     });
   });
 
@@ -1151,5 +1160,600 @@ describe('RestApiTool Utilities', () => {
         'Content-Type': 'application/json',
       });
     });
+  });
+});
+
+const PETS_ENDPOINT: OperationEndpoint = {
+  baseUrl: 'http://api.example.com',
+  path: '/pets',
+  method: 'GET',
+};
+
+const PETS_OPERATION: OpenAPIV3.OperationObject = {
+  operationId: 'listPets',
+  parameters: [
+    {
+      name: 'limit',
+      in: 'query',
+      required: true,
+      description: 'How many pets to return.',
+      schema: {type: 'integer'},
+    },
+  ],
+  responses: {},
+};
+
+const API_KEY_SCHEME: OpenAPIV3.SecuritySchemeObject = {
+  type: 'apiKey',
+  name: 'X-API-Key',
+  in: 'header',
+};
+
+const API_KEY_CREDENTIAL: AuthCredential = {
+  authType: AuthCredentialTypes.API_KEY,
+  apiKey: 'sk-live-secret-api-key-12345',
+};
+
+function newContext(): Context {
+  return new Context({
+    invocationContext: new InvocationContext({
+      invocationId: 'inv-1',
+      session: createSession({id: 'session-1', appName: 'app'}),
+      pluginManager: new PluginManager(),
+    }),
+    functionCallId: 'fc-1',
+  });
+}
+
+function stubFetch(response: Response) {
+  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {'content-type': 'application/json'},
+  });
+}
+
+function headerRecord(headers: Headers): Record<string, string> {
+  const record: Record<string, string> = {};
+  headers.forEach((value, name) => {
+    record[name] = value;
+  });
+  return record;
+}
+
+async function callAndReadHeaders(tool: RestApiTool): Promise<Headers> {
+  const fetchSpy = stubFetch(jsonResponse({result: 'ok'}));
+  await tool.runAsync({args: {}, toolContext: newContext()});
+  const init = fetchSpy.mock.calls[0][1];
+  return new Headers(init?.headers);
+}
+
+describe('RestApiTool declaration', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should convert the schema to a Gemini schema when the flag is off', () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+    );
+
+    const declaration = tool._getDeclaration();
+
+    expect(declaration.parametersJsonSchema).toBeUndefined();
+    expect(declaration.parameters?.type).toBe(Type.OBJECT);
+    expect(declaration.parameters?.properties?.['limit']?.type).toBe(
+      Type.INTEGER,
+    );
+    expect(declaration.parameters?.required).toEqual(['limit']);
+  });
+
+  it('should pass the raw JSON schema through when the flag is on', async () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+    );
+
+    const declaration = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => tool._getDeclaration(),
+    );
+
+    expect(declaration.parameters).toBeUndefined();
+    expect(declaration.parametersJsonSchema).toEqual({
+      type: 'object',
+      properties: {limit: {type: 'integer'}},
+      required: ['limit'],
+      title: 'listPets_Arguments',
+    });
+  });
+
+  it('should read the flag on every call, not once in the constructor', async () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+    );
+
+    const withFlagOff = tool._getDeclaration();
+    const withFlagOn = await withTemporaryFeatureOverride(
+      FeatureName.JSON_SCHEMA_FOR_FUNC_DECL,
+      true,
+      () => tool._getDeclaration(),
+    );
+
+    expect(withFlagOff.parametersJsonSchema).toBeUndefined();
+    expect(withFlagOff.parameters).toBeDefined();
+    expect(withFlagOn.parametersJsonSchema).toBeDefined();
+    expect(withFlagOn.parameters).toBeUndefined();
+  });
+});
+
+describe('RestApiTool construction', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should keep a typed endpoint, operation and scheme observable', () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+      API_KEY_SCHEME,
+      API_KEY_CREDENTIAL,
+    );
+
+    expect(tool.toString()).toContain(JSON.stringify(PETS_ENDPOINT));
+    expect(inspect(tool)).toContain(JSON.stringify(PETS_OPERATION));
+    expect(inspect(tool)).toContain(JSON.stringify(API_KEY_SCHEME));
+  });
+
+  it('should accept the JSON string form of every argument', () => {
+    const fromObjects = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+      API_KEY_SCHEME,
+      API_KEY_CREDENTIAL,
+    );
+    const fromStrings = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      JSON.stringify(PETS_ENDPOINT),
+      JSON.stringify(PETS_OPERATION),
+      JSON.stringify(API_KEY_SCHEME),
+      JSON.stringify(API_KEY_CREDENTIAL),
+    );
+
+    expect(fromStrings._getDeclaration()).toEqual(
+      fromObjects._getDeclaration(),
+    );
+    expect(fromStrings.toString()).toBe(fromObjects.toString());
+    expect(inspect(fromStrings)).toBe(inspect(fromObjects));
+  });
+
+  it('should send the credential the JSON string form carries', async () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      JSON.stringify(PETS_ENDPOINT),
+      JSON.stringify(PETS_OPERATION),
+      JSON.stringify(API_KEY_SCHEME),
+      JSON.stringify(API_KEY_CREDENTIAL),
+    );
+
+    const headers = await callAndReadHeaders(tool);
+
+    expect(headers.get('X-API-Key')).toBe(API_KEY_CREDENTIAL.apiKey);
+  });
+
+  it('should reject an endpoint string that is not JSON', () => {
+    expect(
+      () =>
+        new RestApiTool('list_pets', 'List pets.', 'not json', PETS_OPERATION),
+    ).toThrow(/Invalid endpoint:/);
+  });
+
+  it('should reject an endpoint string that is not an object', () => {
+    expect(
+      () => new RestApiTool('list_pets', 'List pets.', '[]', PETS_OPERATION),
+    ).toThrow('Invalid endpoint: expected a JSON object.');
+  });
+
+  it('should reject an endpoint string with no method', () => {
+    const endpoint = JSON.stringify({
+      baseUrl: 'http://api.example.com',
+      path: '/pets',
+    });
+
+    expect(
+      () =>
+        new RestApiTool('list_pets', 'List pets.', endpoint, PETS_OPERATION),
+    ).toThrow("Invalid endpoint: 'method' must be a string.");
+  });
+
+  it('should reject an operation string that parses to an array', () => {
+    expect(
+      () => new RestApiTool('list_pets', 'List pets.', PETS_ENDPOINT, '[]'),
+    ).toThrow('Invalid operation: expected a JSON object.');
+  });
+
+  it('should reject an operation string with no responses', () => {
+    expect(
+      () =>
+        new RestApiTool(
+          'list_pets',
+          'List pets.',
+          PETS_ENDPOINT,
+          JSON.stringify({operationId: 'listPets'}),
+        ),
+    ).toThrow("Invalid operation: 'responses' must be an object.");
+  });
+
+  it('should reject a credential string with an unknown authType', () => {
+    expect(
+      () =>
+        new RestApiTool(
+          'list_pets',
+          'List pets.',
+          PETS_ENDPOINT,
+          PETS_OPERATION,
+          API_KEY_SCHEME,
+          JSON.stringify({authType: 'telepathy'}),
+        ),
+    ).toThrow('Invalid auth credential: unknown authType telepathy.');
+  });
+
+  it('should reject a credential string with no authType', () => {
+    expect(
+      () =>
+        new RestApiTool(
+          'list_pets',
+          'List pets.',
+          PETS_ENDPOINT,
+          PETS_OPERATION,
+          API_KEY_SCHEME,
+          '{}',
+        ),
+    ).toThrow("Invalid auth credential: 'authType' is missing.");
+  });
+
+  it('should reject a credential string that is not JSON', () => {
+    expect(
+      () =>
+        new RestApiTool(
+          'list_pets',
+          'List pets.',
+          PETS_ENDPOINT,
+          PETS_OPERATION,
+          API_KEY_SCHEME,
+          'not json',
+        ),
+    ).toThrow(/Invalid auth credential:/);
+  });
+});
+
+describe('RestApiTool shouldParseOperation', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function countingOperation(counter: {reads: number}) {
+    const operation: OpenAPIV3.OperationObject = {
+      operationId: 'listPets',
+      responses: {},
+      get parameters() {
+        counter.reads++;
+        return [];
+      },
+    };
+    return operation;
+  }
+
+  it('should parse the operation by default', () => {
+    const counter = {reads: 0};
+
+    new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      countingOperation(counter),
+    );
+
+    expect(counter.reads).toBe(1);
+  });
+
+  it('should not parse the operation when asked not to', () => {
+    const counter = {reads: 0};
+
+    new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      countingOperation(counter),
+      undefined,
+      undefined,
+      {shouldParseOperation: false},
+    );
+
+    expect(counter.reads).toBe(0);
+  });
+
+  it('should tell the caller to install a parser before declaring', () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+      undefined,
+      undefined,
+      {shouldParseOperation: false},
+    );
+
+    expect(() => tool._getDeclaration()).toThrow(/setOperationParser\(\)/);
+  });
+
+  it('should tell the caller to install a parser before running', async () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+      undefined,
+      undefined,
+      {shouldParseOperation: false},
+    );
+
+    await expect(
+      tool.runAsync({args: {}, toolContext: newContext()}),
+    ).rejects.toThrow(/setOperationParser\(\)/);
+  });
+
+  it('should declare once the caller installs a parser', () => {
+    const tool = new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+      undefined,
+      undefined,
+      {shouldParseOperation: false},
+    );
+
+    tool.setOperationParser(new OperationParser(PETS_OPERATION));
+
+    expect(
+      tool._getDeclaration().parameters?.properties?.['limit'],
+    ).toBeDefined();
+  });
+});
+
+describe('RestApiTool auth configuration', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function newTool(): RestApiTool {
+    return new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+    );
+  }
+
+  it('should coerce an untyped scheme into one that sends its header', async () => {
+    const tool = newTool();
+    tool.configureAuthScheme({
+      type: 'apiKey',
+      in: 'header',
+      name: 'X-API-Key',
+    });
+    tool.configureAuthCredential(API_KEY_CREDENTIAL);
+
+    const headers = await callAndReadHeaders(tool);
+
+    expect(headers.get('X-API-Key')).toBe(API_KEY_CREDENTIAL.apiKey);
+  });
+
+  it('should accept the JSON string form of a scheme', async () => {
+    const tool = newTool();
+    tool.configureAuthScheme(JSON.stringify(API_KEY_SCHEME));
+    tool.configureAuthCredential(API_KEY_CREDENTIAL);
+
+    const headers = await callAndReadHeaders(tool);
+
+    expect(headers.get('X-API-Key')).toBe(API_KEY_CREDENTIAL.apiKey);
+  });
+
+  it('should reject a scheme string that is not JSON', () => {
+    expect(() => newTool().configureAuthScheme('not json')).toThrow(
+      /Invalid security scheme:/,
+    );
+  });
+
+  it('should reject a scheme that names no type', () => {
+    expect(() => newTool().configureAuthScheme({in: 'header'})).toThrow(
+      "Missing 'type' field in security scheme dictionary.",
+    );
+  });
+
+  it('should reject a scheme with an unknown type', () => {
+    expect(() => newTool().configureAuthScheme({type: 'nope'})).toThrow(
+      'Invalid security scheme type: nope',
+    );
+  });
+
+  it('should reject an apiKey scheme sited in the body', () => {
+    expect(() =>
+      newTool().configureAuthScheme({
+        type: 'apiKey',
+        name: 'X-API-Key',
+        in: 'body',
+      }),
+    ).toThrow("Invalid security scheme data: 'in' must be one of");
+  });
+
+  it('should reject an oauth2 scheme with no flows', () => {
+    expect(() => newTool().configureAuthScheme({type: 'oauth2'})).toThrow(
+      "Invalid security scheme data: 'flows' must be an object.",
+    );
+  });
+
+  it('should send the same header for a credential given as JSON text', async () => {
+    const fromObject = newTool();
+    fromObject.configureAuthScheme(API_KEY_SCHEME);
+    fromObject.configureAuthCredential(API_KEY_CREDENTIAL);
+
+    const fromString = newTool();
+    fromString.configureAuthScheme(API_KEY_SCHEME);
+    fromString.configureAuthCredential(JSON.stringify(API_KEY_CREDENTIAL));
+
+    expect(headerRecord(await callAndReadHeaders(fromString))).toEqual(
+      headerRecord(await callAndReadHeaders(fromObject)),
+    );
+  });
+
+  it('should clear the credential when given nothing', async () => {
+    const tool = newTool();
+    tool.configureAuthScheme(API_KEY_SCHEME);
+    tool.configureAuthCredential(API_KEY_CREDENTIAL);
+    tool.configureAuthCredential();
+
+    const fetchSpy = stubFetch(jsonResponse({result: 'ok'}));
+    const result = await tool.runAsync({
+      args: {},
+      toolContext: newContext(),
+    });
+
+    expect(result).toEqual({
+      pending: true,
+      message: 'Needs your authorization to access your data.',
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('RestApiTool rendering', () => {
+  function newTool(): RestApiTool {
+    return new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+      API_KEY_SCHEME,
+      API_KEY_CREDENTIAL,
+    );
+  }
+
+  it('should render the name, description and endpoint', () => {
+    const rendered = newTool().toString();
+
+    expect(rendered).toContain('name="list_pets"');
+    expect(rendered).toContain('description="List pets."');
+    expect(rendered).toContain('endpoint="');
+    expect(rendered).not.toContain('operation="');
+    expect(rendered).not.toContain('authScheme="');
+  });
+
+  it('should additionally render the operation and scheme when inspected', () => {
+    const rendered = inspect(newTool());
+
+    expect(rendered).toContain('name="list_pets"');
+    expect(rendered).toContain('endpoint="');
+    expect(rendered).toContain('operation="');
+    expect(rendered).toContain('authScheme="');
+  });
+
+  it('should never render the credential', () => {
+    const tool = newTool();
+
+    for (const rendered of [tool.toString(), inspect(tool)]) {
+      expect(rendered).not.toContain('sk-live-secret-api-key-12345');
+      expect(rendered).not.toContain('authCredential');
+    }
+  });
+});
+
+describe('RestApiTool detectErrorInResponse', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function newTool(): RestApiTool {
+    return new RestApiTool(
+      'list_pets',
+      'List pets.',
+      PETS_ENDPOINT,
+      PETS_OPERATION,
+    );
+  }
+
+  it('should classify a response carrying a truthy error', () => {
+    expect(newTool().detectErrorInResponse({error: 'boom'})).toBe('HTTP_ERROR');
+  });
+
+  it.each([
+    ['an empty error', {error: ''}],
+    ['a null error', {error: null}],
+    ['no error key', {result: 'ok'}],
+    ['an empty array', []],
+    ['an array of strings', ['error']],
+    ['a string', 'error'],
+    ['null', null],
+    ['undefined', undefined],
+    ['a number', 0],
+  ])('should not classify %s', (_name, response) => {
+    expect(newTool().detectErrorInResponse(response)).toBeUndefined();
+  });
+
+  it('should classify what runAsync returns for a failed request', async () => {
+    const tool = newTool();
+    stubFetch(jsonResponse({error: 'Status Code: 500'}, 500));
+
+    const response = await tool.runAsync({
+      args: {},
+      toolContext: newContext(),
+    });
+
+    expect(tool.detectErrorInResponse(response)).toBe('HTTP_ERROR');
+  });
+
+  it('should classify what runAsync returns for a transport failure', async () => {
+    const tool = newTool();
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new Error('connect ECONNREFUSED'),
+    );
+
+    const response = await tool.runAsync({
+      args: {},
+      toolContext: newContext(),
+    });
+
+    expect(tool.detectErrorInResponse(response)).toBe('HTTP_ERROR');
+  });
+
+  it('should not classify what runAsync returns for a successful request', async () => {
+    const tool = newTool();
+    stubFetch(jsonResponse({result: 'ok'}));
+
+    const response = await tool.runAsync({
+      args: {},
+      toolContext: newContext(),
+    });
+
+    expect(tool.detectErrorInResponse(response)).toBeUndefined();
   });
 });
