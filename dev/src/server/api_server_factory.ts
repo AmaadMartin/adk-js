@@ -126,6 +126,11 @@ export interface ApiServerOptions {
    * an `HttpError` from it to reject with a specific status.
    */
   triggerAuthVerifier?: TriggerVerifier;
+  /**
+   * Model used by an agent that declares none and has no ancestor that does.
+   * Applied process-wide when the server starts.
+   */
+  defaultLlmModel?: string;
   /** Logger the server and the factory log through. */
   logger?: Logger;
   /** Level the logger reports at. Defaults to `LogLevel.INFO`. */
@@ -183,6 +188,7 @@ export function createApiServer(options: ApiServerOptions): AdkApiServer {
     triggerOidcAudience: options.triggerOidcAudience,
     triggerOidcServiceAccounts: options.triggerOidcServiceAccounts,
     triggerAuthVerifier: options.triggerAuthVerifier,
+    defaultLlmModel: options.defaultLlmModel,
     logger,
     logLevel: options.logLevel,
   });

@@ -252,6 +252,7 @@ documentation, visit [adk.dev](https://adk.dev/).
 
 - [Configuring the ADK API server](server/api_server_configuration/index.md) - The credential service, automatic session creation and URL prefix options of `AdkApiServer`.
 - [CORS origins](server/cors_origins/index.md) - Accepting a family of browser origins with one `regex:` pattern, and the deprecated `AdkWebServer` alias.
+- [Per-app plugins and the default model](server/api_server_plugins/index.md) - Attaching the plugin an app declares in `plugins.yaml`, and setting the model for agents that declare none.
 
 ### Sessions
 

@@ -137,6 +137,7 @@ function getApiServerOptions(
     a2a: getBoolean(options['a2a']),
     a2aAuthToken: options['a2a_auth_token'],
     reloadAgents: getBoolean(options['reload_agents']),
+    defaultLlmModel: options['default_llm_model'],
     urlPrefix: options['url_prefix'],
     autoCreateSession: getBoolean(options['auto_create_session']),
     triggerSources: splitCommaSeparated(options['trigger_sources']),
@@ -347,6 +348,7 @@ function addServerCommand(
     .addOption(A2A_OPTION)
     .addOption(A2A_AUTH_TOKEN_OPTION)
     .addOption(RELOAD_AGENTS_OPTION)
+    .addOption(DEFAULT_LLM_MODEL_OPTION)
     .addOption(TRIGGER_SOURCES_OPTION)
     .addOption(TRIGGER_OIDC_AUDIENCE_OPTION)
     .addOption(TRIGGER_OIDC_SERVICE_ACCOUNTS_OPTION)

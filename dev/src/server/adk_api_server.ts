@@ -9,6 +9,7 @@ import {
   BaseArtifactService,
   BaseCredentialService,
   BaseMemoryService,
+  BasePlugin,
   BaseSessionService,
   bearerTokenUserBuilder,
   CompositeSessionKey,
@@ -20,6 +21,7 @@ import {
   InMemoryMemoryService,
   InMemorySessionService,
   isApp,
+  LlmAgent,
   Logger,
   LogLevel,
   RunConfig,
@@ -59,6 +61,7 @@ import {
   isDnsRebindingRequest,
 } from './dns_rebinding_guard.js';
 import {withoutEvalSessions} from './eval_sessions.js';
+import {loadBigQueryAnalyticsPlugin} from './plugins_config.js';
 import {renderStructureGraphAsDot} from './structure_graph.js';
 import {
   GoogleOidcVerifier,
@@ -83,6 +86,25 @@ export const A2A_AUTH_TOKEN_ENV_VAR = 'ADK_A2A_AUTH_TOKEN';
 export function normalizeUrlPrefix(prefix?: string): string {
   const trimmed = prefix?.replace(/^\/+|\/+$/g, '') ?? '';
   return trimmed ? `/${trimmed}` : '';
+}
+
+/**
+ * Returns an app that also carries `extra` plugins, or the app itself when
+ * there are none. The `App` fields are copied one by one because `App` has no
+ * copy constructor.
+ */
+function withExtraPlugins(app: App, extra: BasePlugin[]): App {
+  if (extra.length === 0) {
+    return app;
+  }
+  return new App({
+    name: app.name,
+    rootAgent: app.rootAgent,
+    plugins: [...app.plugins, ...extra],
+    resumabilityConfig: app.resumabilityConfig,
+    eventsCompactionConfig: app.eventsCompactionConfig,
+    contextCacheConfig: app.contextCacheConfig,
+  });
 }
 
 interface ServerOptions {
@@ -155,6 +177,13 @@ interface ServerOptions {
    * an `HttpError` from it to reject with a specific status.
    */
   triggerAuthVerifier?: TriggerVerifier;
+  /**
+   * Model used by an agent that declares none and has no ancestor that does.
+   * Applied process-wide through {@link LlmAgent.setDefaultModel} when the
+   * server starts, so it also reaches an agent bundled with its own copy of
+   * `@google/adk`.
+   */
+  defaultLlmModel?: string;
 }
 
 export class AdkApiServer {
@@ -214,6 +243,7 @@ export class AdkApiServer {
   private readonly triggerOidcAudience?: string;
   private readonly triggerOidcServiceAccounts?: string[];
   private readonly triggerAuthVerifier?: TriggerVerifier;
+  private readonly defaultLlmModel?: string;
   private initPromise?: Promise<void>;
   private a2aPromise?: Promise<void>;
 
@@ -263,6 +293,7 @@ export class AdkApiServer {
     this.triggerOidcAudience = options.triggerOidcAudience;
     this.triggerOidcServiceAccounts = options.triggerOidcServiceAccounts;
     this.triggerAuthVerifier = options.triggerAuthVerifier;
+    this.defaultLlmModel = options.defaultLlmModel;
     this.app = express();
   }
 
@@ -332,6 +363,10 @@ export class AdkApiServer {
 
   private async initApp(): Promise<void> {
     const app = this.app;
+    if (this.defaultLlmModel) {
+      this.logger.info(`Overriding default model to ${this.defaultLlmModel}`);
+      LlmAgent.setDefaultModel(this.defaultLlmModel);
+    }
     await this.setupTelemetry();
 
     // Registered before any route (including /health, /, /version) so the
@@ -1387,8 +1422,21 @@ export class AdkApiServer {
     appName: string,
   ): Promise<Runner> {
     if (!(appName in this.runnerCache)) {
+      const bigQueryPlugin = this.agentsDir
+        ? await loadBigQueryAnalyticsPlugin(
+            this.agentsDir,
+            appName,
+            this.logger,
+          )
+        : undefined;
+      const plugins = bigQueryPlugin ? [bigQueryPlugin] : [];
       this.runnerCache[appName] = new Runner({
-        ...(isApp(agentOrApp) ? {app: agentOrApp} : {agent: agentOrApp}),
+        // The `Runner` rejects `plugins` next to `app`, so an app takes the
+        // analytics plugin appended to its own. It ends up last either way,
+        // as it does in adk-python.
+        ...(isApp(agentOrApp)
+          ? {app: withExtraPlugins(agentOrApp, plugins)}
+          : {agent: agentOrApp, plugins}),
         appName,
         memoryService: this.memoryService,
         sessionService: this.sessionService,

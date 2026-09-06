@@ -162,6 +162,13 @@ describe('CLI Entrypoint', () => {
       expect(instance.start).toHaveBeenCalled();
     });
 
+    it('should pass defaultLlmModel when --default_llm_model is set', async () => {
+      await parse(['web', '--default_llm_model', 'gemini-2.5-flash']);
+
+      const args = vi.mocked(AdkApiServer).mock.calls[0][0];
+      expect(args.defaultLlmModel).toBe('gemini-2.5-flash');
+    });
+
     it('honours --log_level debug', async () => {
       // LogLevel.DEBUG is 0, so the previous `|| LogLevel.INFO` fallback
       // discarded it and the flag did nothing.
@@ -367,6 +374,20 @@ describe('CLI Entrypoint', () => {
       const args = serverOptions();
       expect(args.triggerOidcAudience).toBe('https://svc.example.run.app');
       expect(args.triggerOidcServiceAccounts).toEqual(['a@project.iam']);
+    });
+
+    it('should pass defaultLlmModel when --default_llm_model is set', async () => {
+      await parse(['api_server', '--default_llm_model', 'gemini-2.5-flash']);
+
+      const args = serverOptions();
+      expect(args.defaultLlmModel).toBe('gemini-2.5-flash');
+    });
+
+    it('should leave defaultLlmModel unset without the flag', async () => {
+      await parse(['api_server']);
+
+      const args = serverOptions();
+      expect(args.defaultLlmModel).toBeUndefined();
     });
   });
 
