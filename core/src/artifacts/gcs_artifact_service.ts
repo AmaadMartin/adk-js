@@ -280,7 +280,7 @@ export class GcsArtifactService implements BaseArtifactService {
         version,
         mimeType: metadata.contentType,
         customMetadata: metadata.metadata as Record<string, unknown>,
-        canonicalUri: file.publicUrl(),
+        canonicalUri: `gs://${this.bucket.name}/${file.name}`,
       };
     } catch (e) {
       logger.warn(
