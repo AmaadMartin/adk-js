@@ -690,6 +690,11 @@ export {
   BigQueryCredentialsConfig,
 } from './integrations/bigquery/bigquery_credentials.js';
 export {
+  WriteMode,
+  createBigQueryToolConfig,
+  type BigQueryToolConfig,
+} from './integrations/bigquery/config.js';
+export {
   CrewaiTool,
   isCrewaiToolLike,
 } from './integrations/crewai/crewai_tool.js';
