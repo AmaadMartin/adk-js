@@ -12,33 +12,19 @@
  * are kept apart from the ported tests.
  */
 
-import {
-  cleanupClients,
-  createSession,
-  EventarcToolset,
-  InvocationContext,
-  PluginManager,
-  ReadonlyContext,
-  type BaseTool,
-} from '@google/adk';
+import {cleanupClients, EventarcToolset, type BaseTool} from '@google/adk';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {builtClients, resetEventarcFake} from './eventarc_test_utils.js';
+import {
+  builtClients,
+  readonlyContext,
+  resetEventarcFake,
+  toolContext,
+} from './eventarc_test_utils.js';
 
 vi.mock('@google-cloud/eventarc-publishing', async () => {
   const {FakePublisherClient} = await import('./eventarc_test_utils.js');
   return {PublisherClient: FakePublisherClient};
 });
-
-/** A context with just enough of an invocation for a tool filter to run. */
-function readonlyContext(): ReadonlyContext {
-  return new ReadonlyContext(
-    new InvocationContext({
-      invocationId: 'test-invocation',
-      session: createSession({id: 'test-session', appName: 'test-app'}),
-      pluginManager: new PluginManager(),
-    }),
-  );
-}
 
 describe('EventarcToolset naming and filtering', () => {
   beforeEach(async () => {
@@ -158,7 +144,10 @@ describe('the publish_message tool declaration', () => {
     });
     const [tool] = await toolset.getTools();
 
-    await tool.runAsync({args: {bus: 'bus', type: 'type', source: 'source'}});
+    await tool.runAsync({
+      args: {bus: 'bus', type: 'type', source: 'source'},
+      toolContext: toolContext(),
+    });
 
     expect(builtClients).toHaveLength(1);
     expect(builtClients[0].options?.projectId).toBe('bound-project');
@@ -170,7 +159,10 @@ describe('the publish_message tool declaration', () => {
     const [tool] = await new EventarcToolset().getTools();
 
     await expect(
-      tool.runAsync({args: {bus: 'bus', type: 'type'}}),
+      tool.runAsync({
+        args: {bus: 'bus', type: 'type'},
+        toolContext: toolContext(),
+      }),
     ).rejects.toThrow(/publish_message/);
   });
 });
