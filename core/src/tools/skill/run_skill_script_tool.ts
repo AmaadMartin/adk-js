@@ -175,7 +175,10 @@ function buildWrapperCode(
     case CodeExecutionLanguage.SHELL:
       return `source ./${scriptPath} "$@"`;
     case CodeExecutionLanguage.POWERSHELL:
-      return `& .\\${scriptPath.replace(/\//g, '\\\\')} $args`;
+      // `exit` inside the called script ends that script and returns here, so
+      // the wrapper has to hand the status on or the caller reads a failure as
+      // a clean run.
+      return `& .\\${scriptPath.replace(/\//g, '\\\\')} $args\nexit $LASTEXITCODE`;
     case CodeExecutionLanguage.WINDOWS_CMD:
       return `call .\\${scriptPath.replace(/\//g, '\\\\')} %*`;
     default:

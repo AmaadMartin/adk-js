@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {spawn} from 'node:child_process';
+import {ChildProcess, spawn} from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -17,8 +17,26 @@ import {
   CodeExecutionResult,
   File,
 } from './code_execution_utils.js';
+import {
+  PYTHON_RUNNER_SOURCE,
+  pythonChildEnv,
+  pythonRunName,
+} from './python_runner.js';
 
 const IS_WINDOWS = os.platform() === 'win32';
+
+/**
+ * Whether the child leads its own process group, so that a timeout can reach
+ * everything the executed code spawned. On Windows `detached` opens a new
+ * console window instead, and there is no group to signal.
+ */
+const USE_PROCESS_GROUP = !IS_WINDOWS;
+
+/**
+ * How long a timed-out execution has to exit after `SIGTERM` before it is
+ * killed outright.
+ */
+const TERMINATE_GRACE_MS = 5000;
 
 /**
  * Prepended to every PowerShell invocation; `-NoProfile` keeps ambient profile
@@ -47,6 +65,25 @@ function isPowerShellCommand(commandPath: string): boolean {
 }
 
 /**
+ * Signals the whole execution: first the group that holds whatever the code
+ * spawned, then the child itself, which is what platforms with no group have.
+ */
+function signalExecution(
+  child: ChildProcess,
+  signal: 'SIGTERM' | 'SIGKILL',
+): void {
+  if (USE_PROCESS_GROUP && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+    } catch (e: unknown) {
+      // An already-empty group reports ESRCH, which is not an error here.
+      logger.debug(`Could not signal the execution process group: ${e}`);
+    }
+  }
+  child.kill(signal);
+}
+
+/**
  * Options for UnsafeLocalCodeExecutor.
  */
 export interface UnsafeLocalCodeExecutorOptions {
@@ -70,35 +107,44 @@ export interface UnsafeLocalCodeExecutorOptions {
    * shell script.
    */
   shellCommandPath?: string;
+  /**
+   * Rejected when true: this executor cannot be stateful.
+   */
+  stateful?: boolean;
+  /**
+   * Rejected when true: this executor cannot optimize data files.
+   */
+  optimizeDataFile?: boolean;
 }
 
-async function createTempScriptFile(
+async function createTempDir(): Promise<string> {
+  // mkdtemp names the directory itself and creates it exclusively at 0o700.
+  return fs.mkdtemp(path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'));
+}
+
+async function writeScriptFile(
+  tempDir: string,
   code: string,
   language: CodeExecutionLanguage,
   shellCommandPath?: string,
-): Promise<{filePath: string; tempDir: string}> {
-  // mkdtemp names the directory itself and creates it exclusively at 0o700.
-  const tempDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), 'adk_js_unsafe_code_executor_'),
-  );
-
+): Promise<string> {
   const ext = getExtensionForLanguage(language, shellCommandPath) || '.js';
   const filePath = path.join(tempDir, `script${ext}`);
   await fs.writeFile(filePath, code);
 
-  return {filePath, tempDir};
+  return filePath;
 }
 
+/**
+ * The extension of the script file a language runs from. Python has none: its
+ * program is written to the child's stdin instead.
+ */
 function getExtensionForLanguage(
   language: CodeExecutionLanguage,
   shellCommandPath?: string,
 ): string | undefined {
   if (language === CodeExecutionLanguage.JAVASCRIPT) {
     return '.js';
-  }
-
-  if (language === CodeExecutionLanguage.PYTHON) {
-    return '.py';
   }
 
   if (language === CodeExecutionLanguage.POWERSHELL) {
@@ -134,10 +180,20 @@ function getExtensionForLanguage(
  * - **Python**: Executed via `python3` on Unix, and `python` on Windows.
  * - **Shell**: Executed via `bash` on Unix, and defaults to `powershell` (injecting `-NoProfile` and `-ExecutionPolicy Bypass`) or `cmd.exe` (injecting `/D`) on Windows.
  *
+ * Python code is passed to the interpreter on stdin and compiled under the
+ * name `<code>`, so it has no `__file__` and reads stdin at end-of-file.
+ *
+ * On POSIX the child leads its own process group, so that a timeout reaches
+ * everything the code spawned. It therefore no longer receives the parent
+ * terminal's `SIGINT`.
+ *
  * WARNING: This executor runs code in the local environment without sandboxing or security restrictions.
  * Use with caution and only for trusted code.
  */
 export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
+  override readonly stateful = false;
+  override readonly optimizeDataFile = false;
+
   private readonly timeoutSeconds: number;
   private readonly nodeCommandPath: string;
   private readonly pythonCommandPath: string;
@@ -145,14 +201,20 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
 
   constructor(options: UnsafeLocalCodeExecutorOptions = {}) {
     super();
+    if (options.stateful) {
+      throw new Error('Cannot set `stateful=true` in UnsafeLocalCodeExecutor.');
+    }
+    if (options.optimizeDataFile) {
+      throw new Error(
+        'Cannot set `optimizeDataFile=true` in UnsafeLocalCodeExecutor.',
+      );
+    }
     this.timeoutSeconds = options.timeoutSeconds ?? 30;
     this.nodeCommandPath = options.commandPath ?? process.execPath;
     this.pythonCommandPath =
       options.pythonCommandPath ?? (IS_WINDOWS ? 'python' : 'python3');
     this.shellCommandPath =
       options.shellCommandPath ?? (IS_WINDOWS ? 'powershell' : 'bash');
-    this.stateful = false;
-    this.optimizeDataFile = false;
   }
 
   async executeCode(params: ExecuteCodeParams): Promise<CodeExecutionResult> {
@@ -181,38 +243,46 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         '====================================================================================\n',
     );
 
+    const isPython = language === CodeExecutionLanguage.PYTHON;
     let tempDir: string | undefined;
     try {
-      const res = await createTempScriptFile(
-        code,
-        language,
-        this.shellCommandPath,
-      );
-      const filePath = res.filePath;
-      tempDir = res.tempDir;
+      tempDir = await createTempDir();
 
       if (params.codeExecutionInput.inputFiles) {
         await materializeFiles(params.codeExecutionInput.inputFiles, tempDir);
       }
 
       let command = this.nodeCommandPath;
-      let args = [filePath];
+      let args: string[];
+      let scriptFileName: string | undefined;
 
-      if (language === CodeExecutionLanguage.PYTHON) {
+      if (isPython) {
         command = this.pythonCommandPath;
-      } else if (language === CodeExecutionLanguage.SHELL) {
-        command = this.shellCommandPath;
-        if (isPowerShellCommand(this.shellCommandPath)) {
+        args = ['-c', PYTHON_RUNNER_SOURCE, pythonRunName(code)];
+      } else {
+        const filePath = await writeScriptFile(
+          tempDir,
+          code,
+          language,
+          this.shellCommandPath,
+        );
+        scriptFileName = path.basename(filePath);
+        args = [filePath];
+
+        if (language === CodeExecutionLanguage.SHELL) {
+          command = this.shellCommandPath;
+          if (isPowerShellCommand(this.shellCommandPath)) {
+            args = [...POWERSHELL_BASE_ARGS, filePath];
+          } else if (this.shellCommandPath.toLowerCase().includes('cmd')) {
+            args = [...CMD_BASE_ARGS, filePath];
+          }
+        } else if (language === CodeExecutionLanguage.POWERSHELL) {
+          command = IS_WINDOWS ? 'powershell' : 'pwsh';
           args = [...POWERSHELL_BASE_ARGS, filePath];
-        } else if (this.shellCommandPath.toLowerCase().includes('cmd')) {
+        } else if (language === CodeExecutionLanguage.WINDOWS_CMD) {
+          command = 'cmd.exe';
           args = [...CMD_BASE_ARGS, filePath];
         }
-      } else if (language === CodeExecutionLanguage.POWERSHELL) {
-        command = IS_WINDOWS ? 'powershell' : 'pwsh';
-        args = [...POWERSHELL_BASE_ARGS, filePath];
-      } else if (language === CodeExecutionLanguage.WINDOWS_CMD) {
-        command = 'cmd.exe';
-        args = [...CMD_BASE_ARGS, filePath];
       }
 
       if (params.codeExecutionInput.args) {
@@ -230,11 +300,16 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         stderr: string;
         exitCode: number | null;
       }>((resolve) => {
-        const child = spawn(command, args, {cwd: tempDir});
+        const child = spawn(command, args, {
+          cwd: tempDir,
+          detached: USE_PROCESS_GROUP,
+          env: isPython ? pythonChildEnv() : undefined,
+        });
 
         let stdout = '';
         let stderr = '';
         let timedOut = false;
+        let escalationTimer: ReturnType<typeof setTimeout> | undefined;
 
         // `spawn`'s own `timeout` option kills the interpreter and then leaves
         // us waiting on 'close', which only fires once every stdio stream is
@@ -245,9 +320,14 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         // the timeout is actually enforced. Mirrors LocalEnvironment.execute.
         const timer = setTimeout(() => {
           timedOut = true;
-          child.kill('SIGKILL');
-          child.stdout?.destroy();
-          child.stderr?.destroy();
+          // SIGTERM first, so the code and everything it spawned get the same
+          // grace period before anything is killed outright.
+          signalExecution(child, 'SIGTERM');
+          escalationTimer = setTimeout(() => {
+            signalExecution(child, 'SIGKILL');
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+          }, TERMINATE_GRACE_MS);
         }, this.timeoutSeconds * 1000);
 
         if (child.stdout) {
@@ -266,19 +346,36 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           stderr += `Process error: ${err.message}\n`;
         });
 
+        if (isPython) {
+          child.stdin?.on('error', (err) => {
+            // A child that died before reading reports EPIPE, which would
+            // otherwise surface as an unhandled stream error.
+            logger.debug(`Could not write the program to python: ${err}`);
+          });
+          child.stdin?.write(code);
+          child.stdin?.end();
+        }
+
         child.on('close', (exitCode, signal) => {
           clearTimeout(timer);
-          // Prefer the flag over the signal: Windows does not report a
-          // terminating signal the way POSIX does, so a killed child can close
-          // with signal `null` there.
-          if (timedOut || signal === 'SIGKILL' || signal === 'SIGTERM') {
-            stderr += `\nCode execution timed out after ${this.timeoutSeconds} seconds.`;
-          } else if (exitCode !== 0 && exitCode !== null) {
-            if (!stderr) {
-              stderr = `Exit code ${exitCode}`;
-            }
+          // Signalling a group id the OS may have recycled is what an armed
+          // escalation timer would do once the child is reaped.
+          clearTimeout(escalationTimer);
+          // Node reports either an exit code or the terminating signal; Python
+          // reports the negative signal number (`-9` for SIGKILL), so map back.
+          const exitStatus =
+            signal === null ? exitCode : -os.constants.signals[signal];
+
+          if (timedOut) {
+            // Whatever the code wrote before it was killed is still the useful
+            // diagnostic, but on its own it would hide the cut-short run.
+            const note = `Code execution timed out after ${this.timeoutSeconds} seconds.`;
+            stderr = stderr ? `${stderr}\n${note}` : note;
+          } else if (!stderr && exitStatus !== null && exitStatus !== 0) {
+            // The code died without saying why: a signal, or `os._exit`.
+            stderr = `Code execution exited with status ${exitStatus}.`;
           }
-          resolve({stdout, stderr, exitCode});
+          resolve({stdout, stderr, exitCode: exitStatus});
         });
       });
 
@@ -294,7 +391,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
           }
 
           // Skip the script file
-          if (relativeFilePath === path.basename(filePath)) {
+          if (relativeFilePath === scriptFileName) {
             continue;
           }
 
@@ -325,6 +422,7 @@ export class UnsafeLocalCodeExecutor extends BaseCodeExecutor {
         stdout: executionResult.stdout,
         stderr: executionResult.stderr,
         outputFiles,
+        exitCode: executionResult.exitCode,
       };
     } finally {
       if (tempDir) {
