@@ -41,6 +41,12 @@ class MockSummarizer implements BaseSummarizer {
   }
 }
 
+class NullSummarizer implements BaseSummarizer {
+  async summarize(): Promise<CompactedEvent | null> {
+    return null;
+  }
+}
+
 function createMockEvent(
   id: string,
   isToolCall?: boolean,
@@ -165,6 +171,33 @@ describe('AgentControlledContextCompactor', () => {
     expect(summarizeSpy).not.toHaveBeenCalled();
     expect(context.session.events.length).toBe(2);
     expect(context.session.state['temp:consolidate_context']).toBeUndefined();
+  });
+
+  it('appends nothing and still clears flags when the summarizer declines with null', async () => {
+    const summarizer = new NullSummarizer();
+    const summarizeSpy = vi.spyOn(summarizer, 'summarize');
+    const compactor = new AgentControlledContextCompactor({summarizer});
+
+    const events = [
+      createMockEvent('1'),
+      createMockEvent('2'),
+      createMockEvent('3', true, 'consolidate_context'),
+    ];
+    const state = {
+      'temp:consolidate_context': true,
+      'temp:consolidate_context_detail': 'some detail',
+    };
+    const context = createMockInvocationContext(events, state);
+
+    await compactor.compact(context);
+
+    expect(summarizeSpy).toHaveBeenCalledOnce();
+    expect(context.session.events.length).toBe(3);
+    expect(context.session.events.map((e) => e.id)).toEqual(['1', '2', '3']);
+    expect(context.session.state['temp:consolidate_context']).toBeUndefined();
+    expect(
+      context.session.state['temp:consolidate_context_detail'],
+    ).toBeUndefined();
   });
 
   it('clears flags even if summarizer fails', async () => {

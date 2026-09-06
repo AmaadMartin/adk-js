@@ -75,7 +75,9 @@ export class AgentControlledContextCompactor implements BaseContextCompactor {
 
     try {
       const compactedEvent = await this.summarizer.summarize(eventsToCompact);
-      invocationContext.session.events.push(compactedEvent);
+      if (compactedEvent) {
+        invocationContext.session.events.push(compactedEvent);
+      }
     } catch (error) {
       // If the summarizer fails, log the error, clear the flags, and proceed without compaction.
       // (do not block the agent run)
