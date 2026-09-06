@@ -94,6 +94,31 @@ describe.each(Object.entries(dialects))(
       state.update({counter: 1, label: 'ok'});
       expect(state.get('label')).toBe('ok');
     });
+
+    it('validates the default that setDefault() writes', () => {
+      const state = stateWithSchema();
+      expect(() => state.setDefault('nope', 1)).toThrow(
+        /not declared in the state schema/,
+      );
+      expect(() => state.setDefault('counter', 'seven')).toThrow(
+        /does not match the type declared/,
+      );
+      expect(state.setDefault('counter', 7)).toBe(7);
+    });
+
+    it('does not validate a key setDefault() finds already present', () => {
+      const state = stateWithSchema();
+      state.set('counter', 1);
+      expect(state.setDefault('counter', 'seven')).toBe(1);
+    });
+
+    it('never validates a prefixed key passed to setDefault()', () => {
+      const state = stateWithSchema();
+      expect(state.setDefault('temp:scratch', {anything: true})).toEqual({
+        anything: true,
+      });
+      expect(state.get('temp:scratch')).toEqual({anything: true});
+    });
   },
 );
 
