@@ -16,3 +16,14 @@ export class InputValidationError extends Error {
     this.name = 'InputValidationError';
   }
 }
+
+/**
+ * Type guard for {@link InputValidationError}.
+ *
+ * Matches on `name` rather than `instanceof` so it stays correct when errors
+ * cross a package boundary (two copies of adk-js in one runtime would fail an
+ * `instanceof` check between them).
+ */
+export function isInputValidationError(e: unknown): e is InputValidationError {
+  return e instanceof Error && e.name === 'InputValidationError';
+}
