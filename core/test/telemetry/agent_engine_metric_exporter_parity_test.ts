@@ -25,7 +25,8 @@
  * instead of reading it.
  */
 
-import {afterEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {logger} from '../../src/utils/logger.js';
 import {
   FLOOR_MS,
   Harness,
@@ -34,9 +35,6 @@ import {
 
 const FLOOR_ENV =
   'GOOGLE_CLOUD_AGENT_ENGINE_METRICS_COLLECTION_INTERVAL_FLOOR_MS';
-
-/** The default floor, from `MIN_EXPORT_INTERVAL_MS`. */
-const DEFAULT_FLOOR_MS = 5000;
 
 /** I1 and I2, the checks the reference applies to every scenario. */
 function assertInvariants(h: Harness): void {
@@ -204,8 +202,14 @@ describe('RequestDrivenMetricReader ported from adk-python', () => {
 });
 
 describe('the collect floor resolved from the environment', () => {
+  beforeEach(() => {
+    // The invalid-value case warns by design; the adk-js suite asserts on it.
+    vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   /**

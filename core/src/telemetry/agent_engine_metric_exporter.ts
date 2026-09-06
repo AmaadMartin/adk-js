@@ -178,8 +178,13 @@ export class RequestDrivenMetricReader extends MetricReader {
   private inFlight = 0;
   /** Time of the last collect that actually ran. */
   private lastCollect: number | undefined;
-  /** Start of the current busy period, stamped when in-flight goes 0 to 1. */
-  private busyStart: number | undefined;
+  /**
+   * Start of the current busy period, stamped when in-flight goes 0 to 1.
+   *
+   * Only read while a request is in flight, so the constructor's value is never
+   * the one used.
+   */
+  private busyStart: number;
   /** A collect is committed or running. */
   private collecting = false;
   /** The next guidepost on the grid. */
@@ -211,7 +216,9 @@ export class RequestDrivenMetricReader extends MetricReader {
     this.floorMs =
       options.floorMillis ??
       envMillis(AGENT_ENGINE_METRICS_FLOOR_ENV, MIN_EXPORT_INTERVAL_MS);
-    this.nextDue = this.now() + this.periodMs;
+    const startedAt = this.now();
+    this.nextDue = startedAt + this.periodMs;
+    this.busyStart = startedAt;
   }
 
   /**
@@ -360,9 +367,6 @@ export class RequestDrivenMetricReader extends MetricReader {
    * the floor, and mutes the drain that carries that request's points.
    */
   private overdue(now: number): boolean {
-    if (this.busyStart === undefined) {
-      return false;
-    }
     const ref =
       this.lastCollect === undefined
         ? this.busyStart
