@@ -370,6 +370,117 @@ export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
 export {SkillToolset} from './tools/skill/skill_toolset.js';
 
+export {
+  AgentDetailsSchema,
+  AppDetailsSchema,
+  getDeveloperInstructions,
+  getToolsByAgentName,
+} from './evaluation/app_details.js';
+export type {AgentDetails, AppDetails} from './evaluation/app_details.js';
+export {
+  DEFAULT_LIVE_TIMEOUT_SECONDS,
+  MISSING_EVAL_DEPENDENCIES_MESSAGE,
+} from './evaluation/constants.js';
+export {
+  ConversationGenerationConfigSchema,
+  ConversationScenarioSchema,
+  ConversationScenariosSchema,
+} from './evaluation/conversation_scenarios.js';
+export type {
+  ConversationGenerationConfig,
+  ConversationScenario,
+  ConversationScenarios,
+} from './evaluation/conversation_scenarios.js';
+export {
+  EvalCaseSchema,
+  IntermediateDataSchema,
+  IntermediateDataTypeSchema,
+  InvocationEventSchema,
+  InvocationEventsSchema,
+  InvocationSchema,
+  SessionInputSchema,
+  getAllToolCalls,
+  getAllToolCallsWithResponses,
+  getAllToolResponses,
+} from './evaluation/eval_case.js';
+export type {
+  EvalCase,
+  IntermediateData,
+  IntermediateDataType,
+  Invocation,
+  InvocationEvent,
+  InvocationEvents,
+  SessionInput,
+  SessionState,
+  StaticConversation,
+  ToolCallAndResponse,
+} from './evaluation/eval_case.js';
+export {
+  BaseCriterionSchema,
+  EvalMetricResultDetailsSchema,
+  EvalMetricResultPerInvocationSchema,
+  EvalMetricResultSchema,
+  EvalMetricSchema,
+  EvalStatus,
+  HallucinationsCriterionSchema,
+  IntervalSchema,
+  JudgeModelOptionsSchema,
+  LlmAsAJudgeCriterionSchema,
+  LlmBackedUserSimulatorCriterionSchema,
+  MatchType,
+  MetricInfoSchema,
+  MetricValueInfoSchema,
+  PrebuiltMetrics,
+  RubricsBasedCriterionSchema,
+  ToolTrajectoryCriterionSchema,
+} from './evaluation/eval_metrics.js';
+export type {
+  BaseCriterion,
+  EvalMetric,
+  EvalMetricResult,
+  EvalMetricResultDetails,
+  EvalMetricResultPerInvocation,
+  HallucinationsCriterion,
+  Interval,
+  JudgeModelOptions,
+  LlmAsAJudgeCriterion,
+  LlmBackedUserSimulatorCriterion,
+  MetricInfo,
+  MetricInfoProvider,
+  MetricName,
+  MetricValueInfo,
+  RubricsBasedCriterion,
+  Threshold,
+  ToolTrajectoryCriterion,
+} from './evaluation/eval_metrics.js';
+export {
+  EvalCaseResultSchema,
+  EvalSetResultSchema,
+} from './evaluation/eval_result.js';
+export type {EvalCaseResult, EvalSetResult} from './evaluation/eval_result.js';
+export {
+  RubricContentSchema,
+  RubricSchema,
+  RubricScoreSchema,
+} from './evaluation/eval_rubrics.js';
+export type {
+  Rubric,
+  RubricContent,
+  RubricScore,
+} from './evaluation/eval_rubrics.js';
+export {EvalSetSchema} from './evaluation/eval_set.js';
+export type {EvalSet} from './evaluation/eval_set.js';
+export {
+  UserBehaviorSchema,
+  UserPersonaSchema,
+  getBehaviorInstructionsStr,
+  getViolationRubricsStr,
+} from './evaluation/simulation/user_simulator_personas.js';
+export type {
+  UserBehavior,
+  UserPersona,
+} from './evaluation/simulation/user_simulator_personas.js';
+
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
 export * from './memory/base_memory_service.js';
