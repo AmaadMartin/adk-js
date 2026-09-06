@@ -50,6 +50,18 @@ class MockToolset extends BaseToolset {
   async close() {}
 }
 
+class PrefixedMockToolset extends BaseToolset {
+  constructor(
+    private readonly tools: BaseTool[],
+    prefix: string,
+  ) {
+    super([], prefix);
+  }
+  async getTools() {
+    return this.tools;
+  }
+}
+
 describe('Agent Card', () => {
   const dummyTransport = {
     transport: 'grpc',
@@ -110,6 +122,32 @@ describe('Agent Card', () => {
 
       const innerToolSkill = card.skills.find((s) => s.name === 'inner_tool');
       expect(innerToolSkill).toBeDefined();
+    });
+
+    it('advertises a prefixed toolset under its prefixed tool names', async () => {
+      const toolset = new PrefixedMockToolset(
+        [
+          new FunctionTool({
+            name: 'search',
+            execute: async () => 'ok',
+            description: 'Search the server',
+          }),
+        ],
+        'serverA',
+      );
+
+      const agent = new LlmAgent({
+        name: 'llm_agent',
+        description: 'An LLM agent',
+        tools: [toolset],
+      });
+
+      const card = await getA2AAgentCard(agent, [dummyTransport]);
+
+      expect(card.skills.map((skill) => skill.name)).toContain(
+        'serverA_search',
+      );
+      expect(card.skills.map((skill) => skill.name)).not.toContain('search');
     });
 
     it('works with workflow agents and builds correct orchestration descriptions', async () => {

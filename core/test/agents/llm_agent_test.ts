@@ -12,6 +12,7 @@ import {
   BaseLlmResponseProcessor,
   BasePlugin,
   BaseTool,
+  BaseToolset,
   CONTENT_REQUEST_PROCESSOR,
   Context,
   ContextCompactorRequestProcessor,
@@ -1427,5 +1428,86 @@ describe('LlmAgent unresolvable tool calls', () => {
     expect(responses[0].functionResponse!.response).toHaveProperty('error');
 
     expect(parts.some((p) => p.text === 'Recovered.')).toBe(true);
+  });
+});
+
+describe('LlmAgent.canonicalTools toolset prefixing', () => {
+  class PrefixedToolset extends BaseToolset {
+    constructor(
+      private readonly tools: BaseTool[],
+      prefix: string,
+    ) {
+      super([], prefix);
+    }
+
+    async getTools(): Promise<BaseTool[]> {
+      return this.tools;
+    }
+  }
+
+  it('resolves a toolset through getToolsWithPrefix', async () => {
+    const agent = new LlmAgent({
+      name: 'prefixing_agent',
+      tools: [
+        new PrefixedToolset(
+          [
+            new FunctionTool({
+              name: 'search',
+              description: 'Search the server',
+              execute: async () => 'ok',
+            }),
+          ],
+          'serverA',
+        ),
+      ],
+    });
+
+    const tools = await agent.canonicalTools();
+
+    expect(tools.map((tool) => tool.name)).toEqual(['serverA_search']);
+    expect(tools[0]._getDeclaration()?.name).toBe('serverA_search');
+  });
+
+  it('gives two toolsets that expose the same tool distinct names', async () => {
+    const makeSearch = () =>
+      new FunctionTool({
+        name: 'search',
+        description: 'Search the server',
+        execute: async () => 'ok',
+      });
+    const agent = new LlmAgent({
+      name: 'two_server_agent',
+      tools: [
+        new PrefixedToolset([makeSearch()], 'serverA'),
+        new PrefixedToolset([makeSearch()], 'serverB'),
+      ],
+    });
+
+    const llmRequest: LlmRequest = {
+      contents: [],
+      toolsDict: {},
+      liveConnectConfig: {},
+    };
+    const toolContext = new Context({
+      invocationContext: new InvocationContext({
+        invocationId: 'inv-1',
+        agent,
+        session: createSession({
+          id: 'session-1',
+          appName: 'test_app',
+          userId: 'test_user',
+        }),
+        pluginManager: new PluginManager([]),
+      }),
+    });
+
+    for (const tool of await agent.canonicalTools()) {
+      await tool.processLlmRequest({toolContext, llmRequest});
+    }
+
+    expect(Object.keys(llmRequest.toolsDict)).toEqual([
+      'serverA_search',
+      'serverB_search',
+    ]);
   });
 });

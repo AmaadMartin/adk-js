@@ -117,7 +117,7 @@ describe('AgentRegistry Integration E2E', () => {
 
     // 3. Retrieve tool wrappers and verify they have the telemetry destination key attached
     const context = {} as ReadonlyContext;
-    const tools = await toolset.getTools(context);
+    const tools = await toolset.getToolsWithPrefix(context);
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe('Billing_Server_retrieve_billing_data');
 
