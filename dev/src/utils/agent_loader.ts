@@ -13,6 +13,7 @@ import {createRequire} from 'node:module';
 import * as path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
+import {BaseAgentLoader} from './base_agent_loader.js';
 import {
   createTempDir,
   isFile,
@@ -376,7 +377,7 @@ export class AgentFile {
  * Agent/App file should have export of the rootAgent as instance of BaseAgent
  * (or a Workflow, which is adapted into one) or app/rootApp as instance of App.
  */
-export class AgentLoader {
+export class AgentLoader implements BaseAgentLoader {
   private agentsAlreadyPreloaded = false;
   private readonly preloadedAgents: Record<string, AgentFile> = {};
   private readonly loadFailures: Record<string, AgentLoadFailure> = {};
@@ -476,6 +477,15 @@ export class AgentLoader {
     await this.preloadAgents();
 
     return Object.keys(this.preloadedAgents).sort();
+  }
+
+  async loadAgent(agentName: string): Promise<RunnableRoot | App> {
+    // Not `await using`: this `AgentFile` is the cached, shared one, so
+    // disposing it here unlinks the compiled bundle other callers still read.
+    // `invalidateAll` and `disposeAll` own its lifetime.
+    const agentFile = await this.getAgentFile(agentName);
+
+    return agentFile.load();
   }
 
   async listApps(): Promise<string[]> {

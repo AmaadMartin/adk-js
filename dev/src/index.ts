@@ -6,3 +6,4 @@
 
 export {AdkApiClient} from './server/adk_api_client.js';
 export {AdkApiServer} from './server/adk_api_server.js';
+export type {BaseAgentLoader} from './utils/base_agent_loader.js';

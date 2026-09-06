@@ -35,6 +35,7 @@ import * as path from 'node:path';
 import {version} from '../version.js';
 
 import {AgentFileOptions, AgentLoader} from '../utils/agent_loader.js';
+import {BaseAgentLoader} from '../utils/base_agent_loader.js';
 import {AdkLogger} from '../utils/logger.js';
 import {
   ApiServerSpanExporter,
@@ -70,7 +71,7 @@ interface ServerOptions {
   sessionService?: BaseSessionService;
   memoryService?: BaseMemoryService;
   artifactService?: BaseArtifactService;
-  agentLoader?: AgentLoader;
+  agentLoader?: BaseAgentLoader;
   agentFileLoadOptions?: AgentFileOptions;
   serveDebugUI?: boolean;
   allowOrigins?: string;
@@ -112,7 +113,7 @@ export class AdkApiServer {
   }
 
   readonly app: express.Application;
-  private readonly agentLoader: AgentLoader;
+  private readonly agentLoader: BaseAgentLoader;
   /**
    * Caches below are keyed by request path parameters (`appName`, `eventId`,
    * `sessionId`), so each is created with `Object.create(null)`. On an
@@ -203,8 +204,7 @@ export class AdkApiServer {
       : undefined;
 
     for (const appName of appNames) {
-      const agentFile = await this.agentLoader.getAgentFile(appName);
-      const loaded = await agentFile.load();
+      const loaded = await this.agentLoader.loadAgent(appName);
       const agent = isApp(loaded) ? loaded.rootAgent : loaded;
       const adkApp = isApp(loaded) ? loaded : undefined;
       const runner = await this.getRunner(adkApp ?? agent, appName);
@@ -413,8 +413,7 @@ export class AdkApiServer {
 
           const functionCalls = getFunctionCalls(event);
           const functionResponses = getFunctionResponses(event);
-          await using agentFile = await this.agentLoader.getAgentFile(appName);
-          const loaded = await agentFile.load();
+          const loaded = await this.agentLoader.loadAgent(appName);
           const rootAgent = isApp(loaded) ? loaded.rootAgent : loaded;
 
           const workflowHighlights = getWorkflowHighlights(
@@ -1194,8 +1193,7 @@ export class AdkApiServer {
       return undefined;
     }
 
-    await using agentFile = await this.agentLoader.getAgentFile(appName);
-    const loaded = await agentFile.load();
+    const loaded = await this.agentLoader.loadAgent(appName);
 
     return isApp(loaded) ? loaded.rootAgent : loaded;
   }
@@ -1229,10 +1227,7 @@ export class AdkApiServer {
     runConfig?: RunConfig;
     abortSignal: AbortSignal;
   }): AsyncGenerator<Event> {
-    await using agentFile = await this.agentLoader.getAgentFile(
-      options.appName,
-    );
-    const loaded = await agentFile.load();
+    const loaded = await this.agentLoader.loadAgent(options.appName);
     const runner = await this.getRunner(loaded, options.appName);
 
     yield* runner.runAsync({
