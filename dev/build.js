@@ -22,10 +22,10 @@ const cacheDir = path.join(__dirname, '.cache');
 const zipCachePath = path.join(cacheDir, `adk-web-${ADK_WEB_VERSION}.zip`);
 
 const licenseHeaderText = `/**
-  * @license
-  * Copyright 2026 Google LLC
-  * SPDX-License-Identifier: Apache-2.0
-  */
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
 `;
 
 const commonOptions = {
