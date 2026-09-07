@@ -367,3 +367,110 @@ describe('VertexAiSessionService compaction over the wire', () => {
     );
   });
 });
+
+/**
+ * Drives getSession's event pagination through the real Agent Engine Sessions
+ * client against a loopback server. The unit tests can only assert the config
+ * object handed to the SDK, so they cannot see how it reaches the wire. This
+ * asserts the query string the SDK builds, and fails if an upgrade of
+ * `@google-cloud/vertexai` renames or drops `pageToken`.
+ */
+describe('VertexAiSessionService event pagination over the wire', () => {
+  const EVENT_PATH = `reasoningEngines/${AGENT_ENGINE_ID}/sessions/${SESSION_ID}/events`;
+
+  let server: http.Server;
+  let service: VertexAiSessionService;
+  let urls: string[];
+
+  beforeAll(async () => {
+    server = http.createServer((request, response) => {
+      if (serveMetadataToken(request, response)) return;
+      const url = request.url ?? '';
+      urls.push(url);
+      response.writeHead(200, {'content-type': 'application/json'});
+
+      if (!url.includes('/events')) {
+        response.end(
+          JSON.stringify({
+            name: `reasoningEngines/${AGENT_ENGINE_ID}/sessions/${SESSION_ID}`,
+            userId: USER_ID,
+            updateTime: '2026-01-01T00:00:00Z',
+          }),
+        );
+        return;
+      }
+
+      response.end(
+        JSON.stringify(
+          url.includes('pageToken=page-2')
+            ? {
+                sessionEvents: [
+                  {
+                    name: `${EVENT_PATH}/e2`,
+                    author: 'user',
+                    timestamp: '2026-01-01T00:00:01Z',
+                  },
+                ],
+              }
+            : {
+                sessionEvents: [
+                  {
+                    name: `${EVENT_PATH}/e1`,
+                    author: 'user',
+                    timestamp: '2026-01-01T00:00:00Z',
+                  },
+                ],
+                nextPageToken: 'page-2',
+              },
+        ),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+
+    const {port} = server.address() as AddressInfo;
+    pointAdcAt(port);
+    const client = new Client({
+      project: PROJECT,
+      location: LOCATION,
+      apiEndpoint: `http://127.0.0.1:${port}`,
+    });
+    service = new VertexAiSessionService({
+      agentEngineId: AGENT_ENGINE_ID,
+      sessions: client.agentEnginesInternal.sessions,
+    });
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  beforeEach(() => {
+    urls = [];
+  });
+
+  it('reads every event page the backend returns', async () => {
+    const session = await service.getSession({
+      appName: AGENT_ENGINE_ID,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    expect(session?.events.map((event) => event.id)).toEqual(['e1', 'e2']);
+  });
+
+  it('sends the page token as a query parameter on the second request', async () => {
+    await service.getSession({
+      appName: AGENT_ENGINE_ID,
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+    });
+
+    const eventUrls = urls.filter((url) => url.includes('/events'));
+    expect(eventUrls).toHaveLength(2);
+    expect(eventUrls[0]).not.toContain('pageToken');
+    expect(eventUrls[1]).toContain('pageToken=page-2');
+  });
+});
