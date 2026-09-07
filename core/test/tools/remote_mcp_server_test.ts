@@ -7,15 +7,17 @@
 /**
  * Ported from adk-python
  * `tests/unittests/agents/test_managed_agent.py` at commit
- * a3bd11152db6562054db1c509ec44509436d99e7. The `it()` string keeps the Python
- * test name.
+ * a3bd11152db6562054db1c509ec44509436d99e7. The `it()` strings keep the Python
+ * test names so a reader can find the original.
  */
 
 import {
+  InputValidationError,
   InvocationContext,
   PluginManager,
   ReadonlyContext,
   RemoteMcpServer,
+  createRemoteMcpServer,
   createSession,
 } from '@google/adk';
 import {describe, expect, it} from 'vitest';
@@ -55,5 +57,41 @@ describe('RemoteMcpServer', () => {
       headers: {'X-Static': 'v', Authorization: 'Bearer t'},
       allowed_tools: [{tools: ['a', 'b']}],
     });
+  });
+});
+
+describe('createRemoteMcpServer', () => {
+  it('test_remote_mcp_server_constructs_and_is_exported', () => {
+    const headerProvider = () => ({Authorization: 'Bearer t'});
+
+    const server: RemoteMcpServer = createRemoteMcpServer({
+      url: 'https://mcp.example.com/mcp',
+      name: 'example',
+      headers: {'X-Static': 'v'},
+      allowedTools: ['a', 'b'],
+      headerProvider,
+    });
+
+    expect(server.url).toBe('https://mcp.example.com/mcp');
+    expect(server.name).toBe('example');
+    expect(server.headers).toEqual({'X-Static': 'v'});
+    expect(server.allowedTools).toEqual(['a', 'b']);
+    expect(server.headerProvider).toBe(headerProvider);
+  });
+
+  it('test_remote_mcp_server_defaults', () => {
+    const server = createRemoteMcpServer({url: 'https://x/mcp'});
+
+    expect(server.name).toBeUndefined();
+    expect(server.headers).toBeUndefined();
+    expect(server.allowedTools).toBeUndefined();
+    expect(server.headerProvider).toBeUndefined();
+  });
+
+  it('test_remote_mcp_server_forbids_extra_fields', () => {
+    const spec = {url: 'https://x/mcp', bogus: 'nope'};
+
+    expect(() => createRemoteMcpServer(spec)).toThrow(InputValidationError);
+    expect(() => createRemoteMcpServer(spec)).toThrow('bogus');
   });
 });

@@ -1073,6 +1073,10 @@ export async function* createInteractions(
  * Mirrors `_build_mcp_server_param` in google/adk-python
  * `models/interactions_utils.py`.
  *
+ * Resolving the headers is the caller's job, through
+ * `resolveRemoteMcpServerHeaders` or {@link resolveMcpServerParam}, so that one
+ * turn mints them once for every server it forwards.
+ *
  * @param server The server spec.
  * @param resolvedHeaders The static headers already merged with any
  *     `headerProvider` output. An empty map omits the `headers` field.

@@ -1304,6 +1304,7 @@ export {
 export {createPubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export type {PubSubToolConfig} from './tools/pubsub/pubsub_tool_config.js';
 export {
+  createRemoteMcpServer,
   isRemoteMcpServer,
   resolveRemoteMcpServerHeaders,
 } from './tools/remote_mcp_server.js';
