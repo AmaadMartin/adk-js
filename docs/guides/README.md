@@ -14,10 +14,6 @@ Versioned binary and text storage (`Part` payloads) scoped to an individual sess
 
 - [Artifacts](artifacts/index.md) - `BaseArtifactService`, `InMemoryArtifactService`, `FileArtifactService`, `GcsArtifactService`, and session-bound `ctx.artifactService` (`SessionArtifactService`).
 
-### Memory
-
-- [Selecting a memory service from the CLI](memory/memory_service_uri/index.md) - Choosing a memory backend with `--memory_service_uri`, and resolving the same URI in your own code.
-
 ### Tools
 
 #### Retrieval
