@@ -69,6 +69,46 @@ await manager.flushCaches(ctx, {flushUserAudio: false, flushModelAudio: true});
 `getCacheStats(ctx)` reports the chunk counts and the decoded byte totals of
 both caches.
 
+## Configuration
+
+The constructor takes an optional `AudioCacheConfig`, which records the bounds
+a cache should stay inside. Build one with `createAudioCacheConfig`, which
+fills anything you leave out:
+
+```ts
+import {AudioCacheManager, createAudioCacheConfig} from '@google/adk';
+
+const manager = new AudioCacheManager(
+  createAudioCacheConfig({maxCacheSizeBytes: 5 * 1024 * 1024}),
+);
+```
+
+The three fields and their defaults:
+
+| Field                     | Default             | Meaning                                             |
+| ------------------------- | ------------------- | --------------------------------------------------- |
+| `maxCacheSizeBytes`       | `10485760` (10 MiB) | Maximum cache size in bytes before an auto-flush.   |
+| `maxCacheDurationSeconds` | `300`               | Maximum time to keep data in the cache, in seconds. |
+| `autoFlushThreshold`      | `100`               | Number of chunks that triggers an auto-flush.       |
+
+**The manager reads none of them.** It stores the config on its `config`
+property and never flushes on its own, exactly as adk-python's
+`AudioCacheConfig` behaves. The fields are there so a host can state its bounds
+in one place and act on them:
+
+```ts
+const stats = manager.getCacheStats(ctx);
+if (stats.inputChunks >= manager.config.autoFlushThreshold) {
+  await manager.flushCaches(ctx, {
+    flushUserAudio: true,
+    flushModelAudio: false,
+  });
+}
+```
+
+The factory rejects nothing. adk-python's `AudioCacheConfig` is a plain class
+with no validators, so a negative or zero bound is stored, not refused.
+
 ## Guarantees
 
 - **A cache is cleared only when its own flush succeeds.** If the artifact
@@ -91,7 +131,7 @@ leaves the cache untouched.
 
 ## Differences from adk-python
 
-This class ports `src/google/adk/flows/llm_flows/audio_cache_manager.py`. Three
+This class ports `src/google/adk/flows/llm_flows/audio_cache_manager.py`. Five
 things differ:
 
 - **Chunk data is base64 text**, since a `@google/genai` `Blob` carries a
@@ -100,6 +140,12 @@ things differ:
 - **Timestamps are epoch milliseconds**, matching adk-js event timestamps.
   adk-python stores epoch seconds and scales them for the filename, so the
   filenames agree.
-- **There is no `AudioCacheConfig`.** adk-python has one, describing an
-  automatic flush that neither SDK implements and whose three fields nothing
-  reads. Every flush is one you ask for.
+- **`AudioCacheConfig` is an interface with a factory**, where adk-python uses
+  a class with keyword defaults. The field names are camelCase and the values
+  are the same.
+- **A bad argument raises `InputValidationError`**, adk-js's typed argument
+  error, where adk-python raises `ValueError`. The message text is unchanged.
+- **A malformed entry is not rejected at runtime.** adk-python's
+  `RealtimeCacheEntry` is a pydantic model with `extra='forbid'`. adk-js's is a
+  structural interface, so TypeScript checks it at compile time and nothing
+  checks it after that.

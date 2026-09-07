@@ -24,6 +24,8 @@ export type {
 } from './agents/agent_config.js';
 export {inferAgentOrigin, stampAgentOrigin} from './agents/agent_origin.js';
 export type {AgentOrigin} from './agents/agent_origin.js';
+export {createAudioCacheConfig} from './agents/audio_cache_config.js';
+export type {AudioCacheConfig} from './agents/audio_cache_config.js';
 export {AudioCacheManager} from './agents/audio_cache_manager.js';
 export type {
   AudioCacheStats,

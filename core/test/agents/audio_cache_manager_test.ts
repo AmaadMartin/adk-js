@@ -9,9 +9,8 @@
  * `tests/unittests/flows/llm_flows/test_audio_cache_manager.py` @ main.
  *
  * Every `it(...)` keeps its Python test name verbatim, so a reader can grep
- * the reference file for it. The reference's `TestAudioCacheConfig` class has
- * no counterpart here, because this port does not carry `AudioCacheConfig`:
- * nothing in either SDK reads its three fields.
+ * the reference file for it. The reference's `TestAudioCacheConfig` and
+ * `TestRealtimeCacheEntry` classes live in `audio_cache_config_test.ts`.
  */
 
 import {
@@ -21,6 +20,7 @@ import {
   InvocationContext,
   LlmAgent,
   PluginManager,
+  createAudioCacheConfig,
   createSession,
 } from '@google/adk';
 import {describe, expect, it, vi} from 'vitest';
@@ -32,7 +32,8 @@ import {
 } from './audio_cache_manager_test_utils.js';
 
 describe('TestAudioCacheManager', () => {
-  const manager = new AudioCacheManager();
+  // The reference's `setup_method` builds the manager with a default config.
+  const manager = new AudioCacheManager(createAudioCacheConfig());
 
   it('test_cache_input_audio', () => {
     const ctx = createTestContext();

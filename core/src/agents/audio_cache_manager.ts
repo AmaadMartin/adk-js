@@ -11,6 +11,10 @@ import {Event, createEvent} from '../events/event.js';
 import {base64DecodeBytes, base64Encode} from '../utils/env_aware_utils.js';
 import {logger} from '../utils/logger.js';
 
+import {
+  AudioCacheConfig,
+  createAudioCacheConfig,
+} from './audio_cache_config.js';
 import {InvocationContext, requireAgent} from './invocation_context.js';
 import {RealtimeCacheEntry} from './realtime_cache_entry.js';
 
@@ -48,6 +52,18 @@ function requireAudioData(blob: Blob): string {
 }
 
 /**
+ * Decodes one cached chunk to bytes, treating an entry with no data as empty.
+ *
+ * `cacheAudio` rejects a data-less blob, so such an entry only reaches here
+ * when a caller seeds a cache through `InvocationContextParams` directly.
+ * Every reader below counts it as zero bytes rather than raising, so one
+ * malformed entry cannot wedge a cache that no flush can ever drain.
+ */
+function decodedChunk(entry: RealtimeCacheEntry): Uint8Array {
+  return base64DecodeBytes(entry.data.data ?? '');
+}
+
+/**
  * Concatenates the chunks of `cache` into one audio payload.
  *
  * The chunks are decoded before they are joined, because a chunk whose decoded
@@ -56,7 +72,7 @@ function requireAudioData(blob: Blob): string {
  * after it.
  */
 function combineAudioChunks(cache: RealtimeCacheEntry[]): Uint8Array {
-  const chunks = cache.map((entry) => base64DecodeBytes(entry.data.data ?? ''));
+  const chunks = cache.map(decodedChunk);
   const combined = new Uint8Array(
     chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
   );
@@ -82,8 +98,7 @@ function buildArtifactFilename(
 
 function totalDecodedBytes(cache: RealtimeCacheEntry[]): number {
   return cache.reduce(
-    (total, entry) =>
-      total + base64DecodeBytes(requireAudioData(entry.data)).byteLength,
+    (total, entry) => total + decodedChunk(entry).byteLength,
     0,
   );
 }
@@ -167,6 +182,20 @@ async function flushCacheToServices(
  * `src/google/adk/flows/llm_flows/audio_cache_manager.py`.
  */
 export class AudioCacheManager {
+  /**
+   * The cache bounds this manager advertises.
+   *
+   * The manager never reads them, so it never flushes on its own. adk-python
+   * stores the same config and consults none of its fields either. A live loop
+   * that wants an automatic flush reads these bounds and calls
+   * {@link AudioCacheManager.flushCaches} itself.
+   */
+  readonly config: AudioCacheConfig;
+
+  constructor(config: AudioCacheConfig = createAudioCacheConfig()) {
+    this.config = config;
+  }
+
   /**
    * Appends one incoming user chunk or outgoing model chunk to its cache.
    *
@@ -252,7 +281,8 @@ export class AudioCacheManager {
   /**
    * Reports the chunk and decoded-byte totals of both caches.
    *
-   * @throws {InputValidationError} if a cached blob carries no data.
+   * An entry carrying no data counts as a chunk of zero bytes, matching what
+   * a flush writes for it.
    */
   getCacheStats(ctx: InvocationContext): AudioCacheStats {
     const inputCache = ctx.inputRealtimeCache ?? [];
