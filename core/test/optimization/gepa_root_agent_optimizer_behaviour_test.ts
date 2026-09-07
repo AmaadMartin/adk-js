@@ -50,6 +50,9 @@ const TRAIN_IDS = ['train1', 'train2'];
 const VALIDATION_IDS = ['val1', 'val2'];
 const CLONE_OUTPUT_DIR = scriptOutputDir('adk-gepa-clone-output');
 
+/** Enough budget for the seed pass and exactly one reflection round. */
+const BUNDLED_RUN_BUDGET = 6;
+
 /** A model that counts its own construction and never answers. */
 class CountingReflectionLlm extends BaseLlm {
   static override readonly supportedModels: Array<string | RegExp> = [
@@ -240,19 +243,22 @@ describe('proposeNewTexts', () => {
     ).rejects.toThrow('Unknown component type for update: mystery_component');
   });
 
-  it('rejects a reply carrying no fenced block', async () => {
-    const reflectionLm = new RecordingReflectionLm(['No block here.']);
+  it('returns the whole reply when it carries no fenced block', async () => {
+    const reflectionLm = new RecordingReflectionLm(['  No block here.  ']);
 
-    await expect(
-      createAdapter(createAgent(), reflectionLm).proposeNewTexts(
-        {[AGENT_PROMPT_NAME]: 'Old prompt'},
-        {[AGENT_PROMPT_NAME]: []},
-        [AGENT_PROMPT_NAME],
-      ),
-    ).rejects.toThrow(/no fenced block for component agent_prompt/);
+    const newTexts = await createAdapter(
+      createAgent(),
+      reflectionLm,
+    ).proposeNewTexts(
+      {[AGENT_PROMPT_NAME]: 'Old prompt'},
+      {[AGENT_PROMPT_NAME]: []},
+      [AGENT_PROMPT_NAME],
+    );
+
+    expect(newTexts).toEqual({[AGENT_PROMPT_NAME]: 'No block here.'});
   });
 
-  it('takes the last fenced block when the model restates the input', async () => {
+  it('takes everything between the first and last fence', async () => {
     const reflectionLm = new RecordingReflectionLm([
       `Here is what you gave me:\n${fenced('Old prompt')}\n` +
         `Here is the rewrite:\n${fenced('Rewritten prompt')}`,
@@ -269,7 +275,10 @@ describe('proposeNewTexts', () => {
       [AGENT_PROMPT_NAME],
     );
 
-    expect(newTexts).toEqual({[AGENT_PROMPT_NAME]: 'Rewritten prompt'});
+    expect(newTexts).toEqual({
+      [AGENT_PROMPT_NAME]:
+        'Old prompt\n```\nHere is the rewrite:\n```\nRewritten prompt',
+    });
   });
 
   it('substitutes the current text literally, without expanding $ patterns', async () => {
@@ -287,19 +296,42 @@ describe('proposeNewTexts', () => {
   });
 });
 
-describe('error paths', () => {
-  it('throws before the sampler runs when no engine is configured', async () => {
+beforeAll(() => {
+  LLMRegistry.register(CountingReflectionLlm);
+});
+
+describe('the bundled engine', () => {
+  it('runs the bundled engine when no engine is configured', async () => {
     const sampler = createSampler();
 
-    await expect(
-      new GEPARootAgentOptimizer().optimize({
-        initialAgent: createAgent(),
-        sampler,
-      }),
-    ).rejects.toThrow(/requires a GEPA engine/);
-    expect(sampler.calls).toEqual([]);
+    const {optimizedAgents, gepaResult} = await new GEPARootAgentOptimizer({
+      optimizerModel: 'behaviour-gepa-reflector',
+      maxMetricCalls: BUNDLED_RUN_BUDGET,
+    }).optimize({initialAgent: createAgent(), sampler});
+
+    expect(sampler.calls.length).toBeGreaterThan(0);
+    expect(optimizedAgents).toHaveLength(1);
+    expect(optimizedAgents[0].optimizedAgent.instruction).toBe(
+      INITIAL_INSTRUCTION,
+    );
+    expect(gepaResult).toMatchObject({totalMetricCalls: BUNDLED_RUN_BUDGET});
   });
 
+  it('lets a configured engine override the bundled one', async () => {
+    const engine = new FakeGepaEngine(runResult([], []));
+    const sampler = createSampler();
+
+    await new GEPARootAgentOptimizer({engine}).optimize({
+      initialAgent: createAgent(),
+      sampler,
+    });
+
+    expect(engine.calls).toHaveLength(1);
+    expect(sampler.calls).toEqual([]);
+  });
+});
+
+describe('error paths', () => {
   it('rejects an instruction provider', async () => {
     await expect(
       new GEPARootAgentOptimizer({
@@ -363,10 +395,6 @@ describe('warnings', () => {
 });
 
 describe('the reflection model', () => {
-  beforeAll(() => {
-    LLMRegistry.register(CountingReflectionLlm);
-  });
-
   it('is not built when the engine never reflects', async () => {
     const before = CountingReflectionLlm.constructions;
     const engine = new FakeGepaEngine(runResult([], []));

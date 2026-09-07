@@ -246,7 +246,7 @@ describe('RootAgentGepaAdapter', () => {
       'a new version of the agent core instructions',
     );
     expect(reflectionLm.prompts[0]).toContain('Old prompt');
-    expect(reflectionLm.prompts[0]).toContain('"score": 1');
+    expect(reflectionLm.prompts[0]).toContain('## score\n1');
     expect(reflectionLm.prompts[1]).toContain(
       `a skill named \`${SKILL_NAME}\``,
     );
