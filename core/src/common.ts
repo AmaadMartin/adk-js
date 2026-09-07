@@ -219,6 +219,42 @@ export type {BaseLlmType} from './models/registry.js';
 export {RoutedLlm} from './models/routed_llm.js';
 export type {LlmRouter} from './models/routed_llm.js';
 export {
+  AgentOptimizer,
+  isAgentOptimizer,
+} from './optimization/agent_optimizer.js';
+export type {OptimizeParams} from './optimization/agent_optimizer.js';
+export type {
+  AgentWithScores,
+  OptimizerResult,
+  SamplingResult,
+  UnstructuredSamplingResult,
+} from './optimization/data_types.js';
+export type {
+  EvaluationBatch,
+  GepaAdapter,
+  GepaEngine,
+  GepaOptimizeParams,
+  GepaRunResult,
+  ReflectionLm,
+} from './optimization/gepa_engine.js';
+export {
+  GEPARootAgentOptimizer,
+  RootAgentGepaAdapter,
+} from './optimization/gepa_root_agent_optimizer.js';
+export type {
+  GEPARootAgentOptimizerConfig,
+  GEPARootAgentOptimizerResult,
+  RootAgentGepaAdapterParams,
+} from './optimization/gepa_root_agent_optimizer.js';
+export {requireStaticInstruction} from './optimization/gepa_utils.js';
+export {
+  AGENT_PROMPT_NAME,
+  SKILL_KEY_PREFIX,
+  skillComponentKey,
+} from './optimization/instruction_proposal.js';
+export {Sampler, isSampler} from './optimization/sampler.js';
+export type {ExampleSet, SampleAndScoreParams} from './optimization/sampler.js';
+export {
   GLOBAL_SCOPE_KEY,
   REFLECT_AND_RETRY_RESPONSE_TYPE,
   ScopedFailureTracker,
@@ -368,7 +404,7 @@ export {ListSkillsTool} from './tools/skill/list_skills_tool.js';
 export {LoadSkillResourceTool} from './tools/skill/load_skill_resource_tool.js';
 export {LoadSkillTool} from './tools/skill/load_skill_tool.js';
 export {SearchSkillsTool} from './tools/skill/search_skills_tool.js';
-export {SkillToolset} from './tools/skill/skill_toolset.js';
+export {SkillToolset, isSkillToolset} from './tools/skill/skill_toolset.js';
 
 export * from './artifacts/base_artifact_service.js';
 export * from './features/feature_registry.js';
