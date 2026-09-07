@@ -182,6 +182,86 @@ describe('ParallelAgent', () => {
     ]);
   });
 
+  it('should prefix the existing parent branch', async () => {
+    const event = createEvent({
+      author: 'sub',
+      content: {role: 'model', parts: [{text: 'hello'}]},
+    });
+
+    const sub = new MockSubAgent({name: 'sub'}, [event]);
+
+    const parallelAgent = new ParallelAgent({
+      name: 'parallel',
+      subAgents: [sub],
+    });
+
+    const session = createSession({
+      id: 'test-session',
+      appName: 'test-app',
+    });
+
+    const context = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: parallelAgent,
+      session,
+      pluginManager: new PluginManager(),
+      branch: 'parent',
+    });
+
+    const yieldedEvents: Event[] = [];
+    for await (const e of parallelAgent.runAsync(context)) {
+      yieldedEvents.push(e);
+    }
+
+    expect(yieldedEvents.length).toBe(1);
+    expect(yieldedEvents[0].branch).toBe('parent.parallel.sub');
+  });
+
+  it('should not mutate the context it was given', async () => {
+    const event1 = createEvent({
+      author: 'sub1',
+      content: {role: 'model', parts: [{text: 'one'}]},
+    });
+    const event2 = createEvent({
+      author: 'sub2',
+      content: {role: 'model', parts: [{text: 'two'}]},
+    });
+
+    const sub1 = new MockSubAgent({name: 'sub1'}, [event1]);
+    const sub2 = new MockSubAgent({name: 'sub2'}, [event2]);
+
+    const parallelAgent = new ParallelAgent({
+      name: 'parallel',
+      subAgents: [sub1, sub2],
+    });
+
+    const session = createSession({
+      id: 'test-session',
+      appName: 'test-app',
+    });
+
+    const context = new InvocationContext({
+      invocationId: 'test-invocation',
+      agent: parallelAgent,
+      session,
+      pluginManager: new PluginManager(),
+      branch: 'parent',
+    });
+
+    const yieldedEvents: Event[] = [];
+    for await (const e of parallelAgent.runAsync(context)) {
+      yieldedEvents.push(e);
+    }
+
+    expect(context.branch).toBe('parent');
+    expect(new Map(yieldedEvents.map((e) => [e.author, e.branch]))).toEqual(
+      new Map([
+        ['sub1', 'parent.parallel.sub1'],
+        ['sub2', 'parent.parallel.sub2'],
+      ]),
+    );
+  });
+
   it('should respect abort signal', async () => {
     const event = createEvent({
       author: 'sub',
