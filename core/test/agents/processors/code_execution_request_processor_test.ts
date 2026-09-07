@@ -12,6 +12,7 @@ import {
   PluginManager,
   createSession,
 } from '@google/adk';
+import {Language} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
   CODE_EXECUTION_REQUEST_PROCESSOR,
@@ -123,6 +124,57 @@ describe('CodeExecutionRequestProcessor', () => {
       expect(events).toHaveLength(0);
       // Content should still be present after processing
       expect(llmRequest.contents).toHaveLength(1);
+    });
+  });
+
+  describe('code block rendering', () => {
+    async function renderPythonPart(
+      executor: BaseCodeExecutor,
+    ): Promise<string | undefined> {
+      const agent = new LlmAgent({
+        name: 'agent-with-executor',
+        model: 'gemini-2.5-flash',
+        codeExecutor: executor,
+      });
+      const llmRequest = createLlmRequest({
+        contents: [
+          {
+            role: 'model',
+            parts: [
+              {executableCode: {code: 'x = 1', language: Language.PYTHON}},
+            ],
+          },
+        ],
+      });
+
+      await collectEvents(
+        CODE_EXECUTION_REQUEST_PROCESSOR.runAsync(
+          createMockInvocationContext(agent),
+          llmRequest,
+        ),
+      );
+
+      return llmRequest.contents[0].parts![0].text;
+    }
+
+    it('renders a python part with the python fence from the default list', async () => {
+      expect(await renderPythonPart(new TestCodeExecutor())).toBe(
+        '```python\nx = 1\n```',
+      );
+    });
+
+    it('renders with the only pair a single-delimiter executor declares', async () => {
+      const executor = new TestCodeExecutor();
+      executor.codeBlockDelimiters = [['```sql\n', '\n```']];
+
+      expect(await renderPythonPart(executor)).toBe('```sql\nx = 1\n```');
+    });
+
+    it('renders without a fence when the executor declares no delimiters', async () => {
+      const executor = new TestCodeExecutor();
+      executor.codeBlockDelimiters = [];
+
+      expect(await renderPythonPart(executor)).toBe('x = 1');
     });
   });
 });

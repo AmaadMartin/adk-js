@@ -4,18 +4,33 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {Content, Language, Outcome} from '@google/genai';
+import {Content, Language, Outcome, Part} from '@google/genai';
 import {describe, expect, it} from 'vitest';
 import {
+  BaseCodeExecutor,
+  ExecuteCodeParams,
+} from '../../src/code_executors/base_code_executor.js';
+import {
   CodeExecutionLanguage,
+  CodeExecutionResult,
   FileContentEncoding,
   buildCodeExecutionResultPart,
   buildExecutableCodePart,
   convertCodeExecutionParts,
   extractCodeAndTruncateContent,
   getEncodedFileContent,
+  selectCodeBlockDelimiter,
 } from '../../src/code_executors/code_execution_utils.js';
 import {base64Encode} from '../../src/utils/env_aware_utils.js';
+
+class TestCodeExecutor extends BaseCodeExecutor {
+  async executeCode(_params: ExecuteCodeParams): Promise<CodeExecutionResult> {
+    return {stdout: '', stderr: '', outputFiles: []};
+  }
+}
+
+/** The delimiters every executor inherits, read from the base class itself. */
+const DEFAULT_DELIMITERS = new TestCodeExecutor().codeBlockDelimiters;
 
 // ---------------------------------------------------------------------------
 // getEncodedFileContent
@@ -253,13 +268,13 @@ describe('convertCodeExecutionParts', () => {
 
   it('does nothing when parts is empty', () => {
     const content = {parts: [], role: 'model'};
-    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+    convertCodeExecutionParts(content, [CODE_DELIM], RESULT_DELIM);
     expect(content.parts).toHaveLength(0);
   });
 
   it('does nothing when parts is undefined', () => {
     const content = {role: 'model'} as unknown as Content;
-    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+    convertCodeExecutionParts(content, [CODE_DELIM], RESULT_DELIM);
     expect(content.parts).toBeUndefined();
   });
 
@@ -268,7 +283,7 @@ describe('convertCodeExecutionParts', () => {
       parts: [{executableCode: {code: 'x = 1', language: Language.PYTHON}}],
       role: 'model',
     };
-    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+    convertCodeExecutionParts(content, [CODE_DELIM], RESULT_DELIM);
     expect(content.parts![0].text).toBe('```python\nx = 1\n```');
     expect(content.parts![0].executableCode).toBeUndefined();
   });
@@ -285,7 +300,7 @@ describe('convertCodeExecutionParts', () => {
       ],
       role: 'model',
     };
-    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+    convertCodeExecutionParts(content, [CODE_DELIM], RESULT_DELIM);
     expect(content.parts![0].text).toBe('```tool_output\nhello\n```');
     expect(content.role).toBe('user');
   });
@@ -303,7 +318,7 @@ describe('convertCodeExecutionParts', () => {
       ],
       role: 'model',
     };
-    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+    convertCodeExecutionParts(content, [CODE_DELIM], RESULT_DELIM);
     // last part has codeExecutionResult but length > 1, so no conversion
     expect(content.parts[1].codeExecutionResult).toBeDefined();
     expect(content.role).toBe('model');
@@ -314,9 +329,103 @@ describe('convertCodeExecutionParts', () => {
       parts: [{text: 'just text'}],
       role: 'model',
     };
-    convertCodeExecutionParts(content, CODE_DELIM, RESULT_DELIM);
+    convertCodeExecutionParts(content, [CODE_DELIM], RESULT_DELIM);
     expect(content.parts[0].text).toBe('just text');
     expect(content.role).toBe('model');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectCodeBlockDelimiter
+// ---------------------------------------------------------------------------
+describe('selectCodeBlockDelimiter', () => {
+  const PYTHON_PART: Part = {
+    executableCode: {code: 'x = 1', language: Language.PYTHON},
+  };
+
+  it('picks the python fence from the default list, not the first pair', () => {
+    const selected = selectCodeBlockDelimiter(PYTHON_PART, DEFAULT_DELIMITERS);
+
+    expect(selected).toEqual(['```python\n', '\n```']);
+    expect(selected).not.toBe(DEFAULT_DELIMITERS[0]);
+  });
+
+  it('falls back to the first pair when the part declares no language', () => {
+    const part: Part = {executableCode: {code: 'x = 1'}};
+
+    expect(selectCodeBlockDelimiter(part, DEFAULT_DELIMITERS)).toEqual([
+      '```tool_code\n',
+      '\n```',
+    ]);
+  });
+
+  it('falls back to the first pair for an unspecified language', () => {
+    const part: Part = {
+      executableCode: {code: 'x = 1', language: Language.LANGUAGE_UNSPECIFIED},
+    };
+
+    expect(selectCodeBlockDelimiter(part, DEFAULT_DELIMITERS)).toEqual([
+      '```tool_code\n',
+      '\n```',
+    ]);
+  });
+
+  it('falls back to the first pair when no fence names the language', () => {
+    const custom: Array<[string, string]> = [['<code>', '</code>']];
+
+    expect(selectCodeBlockDelimiter(PYTHON_PART, custom)).toEqual([
+      '<code>',
+      '</code>',
+    ]);
+  });
+
+  it('returns an empty pair for an empty delimiter list', () => {
+    expect(selectCodeBlockDelimiter(PYTHON_PART, [])).toEqual(['', '']);
+  });
+
+  it('matches the fence case-insensitively', () => {
+    // Language.PYTHON is 'PYTHON', so an exact compare against the lowercase
+    // fence tag would never match.
+    const part: Part = {
+      executableCode: {code: 'x = 1', language: Language.PYTHON},
+    };
+
+    expect(selectCodeBlockDelimiter(part, DEFAULT_DELIMITERS)).toEqual([
+      '```python\n',
+      '\n```',
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// convertCodeExecutionParts with the executor's full delimiter list
+// ---------------------------------------------------------------------------
+describe('convertCodeExecutionParts with the default delimiter list', () => {
+  const RESULT_DELIM: [string, string] = ['```tool_output\n', '\n```'];
+
+  it('renders a python part with the python fence', () => {
+    const content: Content = {
+      parts: [{executableCode: {code: 'x = 1', language: Language.PYTHON}}],
+      role: 'model',
+    };
+
+    convertCodeExecutionParts(content, DEFAULT_DELIMITERS, RESULT_DELIM);
+
+    expect(content.parts![0].text).toBe('```python\nx = 1\n```');
+  });
+
+  it('renders a code execution result with the result delimiters', () => {
+    const content: Content = {
+      parts: [
+        {codeExecutionResult: {outcome: Outcome.OUTCOME_OK, output: 'hello'}},
+      ],
+      role: 'model',
+    };
+
+    convertCodeExecutionParts(content, DEFAULT_DELIMITERS, RESULT_DELIM);
+
+    expect(content.parts![0].text).toBe('```tool_output\nhello\n```');
+    expect(content.role).toBe('user');
   });
 });
 
