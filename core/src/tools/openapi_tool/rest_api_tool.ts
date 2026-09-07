@@ -9,6 +9,7 @@ import type {OpenAPIV3} from 'openapi-types';
 import type {ReadonlyContext} from '../../agents/readonly_context.js';
 import type {AuthCredential} from '../../auth/auth_credential.js';
 import {experimental} from '../../utils/experimental.js';
+import {toGeminiSchema} from '../../utils/gemini_schema_util.js';
 import type {RunAsyncToolRequest} from '../base_tool.js';
 import {BaseTool} from '../base_tool.js';
 import {applyCredential} from './auth/auth_helpers.js';
@@ -63,11 +64,10 @@ export class RestApiTool extends BaseTool {
 
   @experimental
   override _getDeclaration(): FunctionDeclaration {
-    const schema = this.operationParser.getJsonSchema();
     return {
       name: this.name,
       description: this.description,
-      parameters: schema,
+      parameters: toGeminiSchema(this.operationParser.getJsonSchema()),
     };
   }
 
