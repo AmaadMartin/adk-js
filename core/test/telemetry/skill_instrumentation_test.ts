@@ -20,17 +20,13 @@ import {afterAll, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {Skill} from '../../src/skills/skill.js';
 import {
-  confirmedNotHallucinated,
-  maybeHallucinated,
-} from '../../src/telemetry/_hallucination.js';
-import {
   attachSkillTelemetry,
   createSkillToolScope,
   dispatchSkillTelemetry,
+  SkillLoadTelemetry,
+  SkillResourceLoadTelemetry,
+  SkillScriptExecutionTelemetry,
   SkillToolScope,
-  trackSkillLoad,
-  trackSkillResourceLoad,
-  trackSkillScriptExecution,
   withSkillToolScope,
 } from '../../src/telemetry/_skill_instrumentation.js';
 import {tracer} from '../../src/telemetry/tracing.js';
@@ -83,42 +79,48 @@ function loadedSkill(): Skill {
 describe('skill telemetry reaches the enclosing tool execution', () => {
   it('test_record_skill_load_reaches_the_enclosing_tool_execution', async () => {
     const scope = await recordToolExecution('load_skill', async () => {
-      const skillTelemetry = trackSkillLoad(maybeHallucinated('sample_skill'));
+      const skillTelemetry: SkillLoadTelemetry = {
+        kind: 'load',
+        skillName: 'requested_name',
+      };
+      attachSkillTelemetry(skillTelemetry);
       skillTelemetry.skill = loadedSkill();
-      skillTelemetry.skillName = confirmedNotHallucinated('sample_skill');
+      skillTelemetry.skillName = 'sample_skill';
     });
 
     expect(scope.skillTelemetry?.kind).toBe('load');
-    expect(scope.skillTelemetry?.skillName.confirmed).toBe(true);
+    expect(scope.skillTelemetry?.skillName).toBe('sample_skill');
     expect(scope.skillTelemetry?.skill).toEqual(loadedSkill());
   });
 
   it('test_record_skill_resource_load_reaches_the_enclosing_tool_execution', async () => {
     const scope = await recordToolExecution('load_skill_resource', async () => {
-      const skillTelemetry = trackSkillResourceLoad(
-        maybeHallucinated('sample_skill'),
-        maybeHallucinated('sample_path'),
-      );
-      skillTelemetry.skillName = confirmedNotHallucinated('sample_skill');
-      skillTelemetry.resourcePath = confirmedNotHallucinated('sample_path');
+      attachSkillTelemetry({
+        kind: 'resourceLoad',
+        skillName: 'sample_skill',
+        resourcePath: 'sample_path',
+      });
     });
 
     const skillTelemetry = scope.skillTelemetry;
     if (skillTelemetry?.kind !== 'resourceLoad') {
       return expect.fail('expected a resource load record');
     }
-    expect(skillTelemetry.skillName.confirmed).toBe(true);
-    expect(skillTelemetry.resourcePath.confirmed).toBe(true);
+    expect(skillTelemetry.skillName).toBe('sample_skill');
+    expect(skillTelemetry.resourcePath).toBe('sample_path');
   });
 
   it('test_record_skill_script_execution_reaches_the_enclosing_tool_execution', async () => {
     const scope = await recordToolExecution('run_skill_script', async () => {
+      const skillTelemetry: SkillScriptExecutionTelemetry = {
+        kind: 'scriptExecution',
+        skillName: 'sample_skill',
+        scriptPath: 'scripts/sample.py',
+      };
+      attachSkillTelemetry(skillTelemetry);
       // The exit code is only known once the script has run, so the tool keeps
-      // the object the tracker handed it and fills this in afterwards.
-      trackSkillScriptExecution(
-        maybeHallucinated('sample_skill'),
-        maybeHallucinated('scripts/sample.py'),
-      ).scriptExitCode = 0;
+      // the record it attached and fills this in afterwards.
+      skillTelemetry.scriptExitCode = 0;
     });
 
     const skillTelemetry = scope.skillTelemetry;
@@ -126,17 +128,14 @@ describe('skill telemetry reaches the enclosing tool execution', () => {
       return expect.fail('expected a script execution record');
     }
     expect(skillTelemetry.scriptExitCode).toBe(0);
-    expect(skillTelemetry.scriptPath.maybeHallucinatedValue).toBe(
-      'scripts/sample.py',
-    );
+    expect(skillTelemetry.scriptPath).toBe('scripts/sample.py');
   });
 
   it('test_record_skill_load_outside_tool_execution_is_a_noop', () => {
     const debug = vi.spyOn(logger, 'debug');
 
-    const skillTelemetry = trackSkillLoad(maybeHallucinated('sample_skill'));
+    attachSkillTelemetry({kind: 'load', skillName: 'sample_skill'});
 
-    expect(skillTelemetry.kind).toBe('load');
     expect(tracing.spans()).toHaveLength(0);
     expect(debug).toHaveBeenCalledWith(
       expect.stringContaining('No tool execution is being recorded'),
@@ -144,31 +143,29 @@ describe('skill telemetry reaches the enclosing tool execution', () => {
   });
 
   it('test_record_skill_script_execution_outside_tool_execution_is_a_noop', () => {
-    const skillTelemetry = trackSkillScriptExecution(
-      maybeHallucinated('sample_skill'),
-      maybeHallucinated('scripts/sample.py'),
-    );
+    const skillTelemetry: SkillScriptExecutionTelemetry = {
+      kind: 'scriptExecution',
+      skillName: 'sample_skill',
+      scriptPath: 'scripts/sample.py',
+    };
+
+    attachSkillTelemetry(skillTelemetry);
 
     expect(tracing.spans()).toHaveLength(0);
-    // Unconfirmed until the tool resolves them: nothing has looked either up
-    // yet. The tool still gets an object to record the exit code on.
-    expect(skillTelemetry.skillName).toEqual(maybeHallucinated('sample_skill'));
-    expect(skillTelemetry.scriptPath).toEqual(
-      maybeHallucinated('scripts/sample.py'),
-    );
+    // The tool still holds a usable record to write the exit code onto.
+    skillTelemetry.scriptExitCode = 0;
+    expect(skillTelemetry.scriptExitCode).toBe(0);
   });
 
   it('replaces an already-attached record and warns about it', async () => {
     const warn = vi.spyOn(logger, 'warn');
 
     const scope = await recordToolExecution('load_skill', async () => {
-      trackSkillLoad(maybeHallucinated('first_skill'));
-      trackSkillLoad(maybeHallucinated('second_skill'));
+      attachSkillTelemetry({kind: 'load', skillName: 'first_skill'});
+      attachSkillTelemetry({kind: 'load', skillName: 'second_skill'});
     });
 
-    expect(scope.skillTelemetry?.skillName.maybeHallucinatedValue).toBe(
-      'second_skill',
-    );
+    expect(scope.skillTelemetry?.skillName).toBe('second_skill');
     expect(warn).toHaveBeenCalledWith(
       'Tool execution already has attached skill telemetry, overwriting.',
     );
@@ -180,10 +177,11 @@ describe('skill loads on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('load_skill', async () => {
-      const skillTelemetry = trackSkillLoad(
-        confirmedNotHallucinated('sample_skill'),
-      );
-      skillTelemetry.skill = loadedSkill();
+      attachSkillTelemetry({
+        kind: 'load',
+        skillName: 'sample_skill',
+        skill: loadedSkill(),
+      });
     });
 
     const attributes = tracing.onlySpan().attributes;
@@ -200,7 +198,7 @@ describe('skill loads on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('load_skill', async () => {
-      trackSkillLoad(maybeHallucinated('sample_skill'));
+      attachSkillTelemetry({kind: 'load', skillName: 'sample_skill'});
     });
 
     // The span keeps what the model actually asked for.
@@ -212,10 +210,11 @@ describe('skill loads on the execute_tool span', () => {
 
   it('test_skill_load_is_silent_without_the_experimental_opt_in', async () => {
     await recordToolExecution('load_skill', async () => {
-      const skillTelemetry = trackSkillLoad(
-        confirmedNotHallucinated('sample_skill'),
-      );
-      skillTelemetry.skill = loadedSkill();
+      attachSkillTelemetry({
+        kind: 'load',
+        skillName: 'sample_skill',
+        skill: loadedSkill(),
+      });
     });
 
     expect(experimentalAttributes(tracing.onlySpan())).toEqual([]);
@@ -225,12 +224,9 @@ describe('skill loads on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('load_skill', async () => {
-      const skillTelemetry = trackSkillLoad(
-        confirmedNotHallucinated('sample_skill'),
-      );
       const skill = loadedSkill();
       skill.frontmatter.metadata = {adk_additional_tools: ['a_tool', 'b_tool']};
-      skillTelemetry.skill = skill;
+      attachSkillTelemetry({kind: 'load', skillName: 'sample_skill', skill});
     });
 
     expect(
@@ -242,12 +238,9 @@ describe('skill loads on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('load_skill', async () => {
-      const skillTelemetry = trackSkillLoad(
-        confirmedNotHallucinated('sample_skill'),
-      );
       const skill = loadedSkill();
       skill.frontmatter.metadata = {adk_additional_tools: ['a_tool', 7]};
-      skillTelemetry.skill = skill;
+      attachSkillTelemetry({kind: 'load', skillName: 'sample_skill', skill});
     });
 
     expect(tracing.onlySpan().attributes).not.toHaveProperty(
@@ -259,10 +252,11 @@ describe('skill loads on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('load_skill', async () => {
-      const skillTelemetry = trackSkillLoad(
-        confirmedNotHallucinated('sample_skill'),
-      );
-      skillTelemetry.skill = {...loadedSkill(), uri: undefined};
+      attachSkillTelemetry({
+        kind: 'load',
+        skillName: 'sample_skill',
+        skill: {...loadedSkill(), uri: undefined},
+      });
     });
 
     const attributes = tracing.onlySpan().attributes;
@@ -278,11 +272,12 @@ describe('skill resource loads on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('load_skill_resource', async () => {
-      const skillTelemetry = trackSkillResourceLoad(
-        confirmedNotHallucinated('sample_skill'),
-        confirmedNotHallucinated('references/sample.md'),
-      );
-      skillTelemetry.skill = loadedSkill();
+      attachSkillTelemetry({
+        kind: 'resourceLoad',
+        skillName: 'sample_skill',
+        resourcePath: 'references/sample.md',
+        skill: loadedSkill(),
+      });
     });
 
     const attributes = tracing.onlySpan().attributes;
@@ -299,10 +294,12 @@ describe('skill resource loads on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('load_skill_resource', async () => {
-      trackSkillResourceLoad(
-        maybeHallucinated('sample_skill'),
-        maybeHallucinated('references/invented.md'),
-      );
+      const skillTelemetry: SkillResourceLoadTelemetry = {
+        kind: 'resourceLoad',
+        skillName: 'sample_skill',
+        resourcePath: 'references/invented.md',
+      };
+      attachSkillTelemetry(skillTelemetry);
     });
 
     const attributes = tracing.onlySpan().attributes;
@@ -318,12 +315,13 @@ describe('skill script executions on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('run_skill_script', async () => {
-      const skillTelemetry = trackSkillScriptExecution(
-        confirmedNotHallucinated('sample_skill'),
-        confirmedNotHallucinated('scripts/sample.py'),
-      );
-      skillTelemetry.skill = loadedSkill();
-      skillTelemetry.scriptExitCode = 0;
+      attachSkillTelemetry({
+        kind: 'scriptExecution',
+        skillName: 'sample_skill',
+        scriptPath: 'scripts/sample.py',
+        skill: loadedSkill(),
+        scriptExitCode: 0,
+      });
     });
 
     const span = tracing.onlySpan();
@@ -343,12 +341,13 @@ describe('skill script executions on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('run_skill_script', async () => {
-      const skillTelemetry = trackSkillScriptExecution(
-        confirmedNotHallucinated('sample_skill'),
-        confirmedNotHallucinated('scripts/sample.py'),
-      );
-      skillTelemetry.skill = loadedSkill();
-      skillTelemetry.scriptExitCode = 3;
+      attachSkillTelemetry({
+        kind: 'scriptExecution',
+        skillName: 'sample_skill',
+        scriptPath: 'scripts/sample.py',
+        skill: loadedSkill(),
+        scriptExitCode: 3,
+      });
     });
 
     const span = tracing.onlySpan();
@@ -358,14 +357,20 @@ describe('skill script executions on the execute_tool span', () => {
     expect(span.attributes['adk.experimental.skill.script.exit_code']).toBe(3);
   });
 
-  it('fails the span for a script killed by a signal', async () => {
+  it('fails the span for a script that reported a negative status', async () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('run_skill_script', async () => {
-      trackSkillScriptExecution(
-        confirmedNotHallucinated('sample_skill'),
-        confirmedNotHallucinated('scripts/sample.py'),
-      ).scriptExitCode = -9;
+      // Synthetic: the bundled UnsafeLocalCodeExecutor reports no exit code
+      // for a signal kill rather than a negative one. Any BaseCodeExecutor can
+      // set `exitCode`, so a negative status is representable, and this pins
+      // that the guard reads "not zero" rather than "greater than zero".
+      attachSkillTelemetry({
+        kind: 'scriptExecution',
+        skillName: 'sample_skill',
+        scriptPath: 'scripts/sample.py',
+        scriptExitCode: -9,
+      });
     });
 
     const span = tracing.onlySpan();
@@ -378,10 +383,11 @@ describe('skill script executions on the execute_tool span', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
 
     await recordToolExecution('run_skill_script', async () => {
-      trackSkillScriptExecution(
-        maybeHallucinated('sample_skill'),
-        maybeHallucinated('scripts/sample.py'),
-      );
+      attachSkillTelemetry({
+        kind: 'scriptExecution',
+        skillName: 'sample_skill',
+        scriptPath: 'scripts/sample.py',
+      });
     });
 
     const span = tracing.onlySpan();
@@ -397,29 +403,14 @@ describe('skill script executions on the execute_tool span', () => {
     );
   });
 
-  it('reports no exit code when the executor could not name one', async () => {
-    process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
-
-    await recordToolExecution('run_skill_script', async () => {
-      trackSkillScriptExecution(
-        confirmedNotHallucinated('sample_skill'),
-        confirmedNotHallucinated('scripts/sample.py'),
-      ).scriptExitCode = null;
-    });
-
-    const span = tracing.onlySpan();
-    expect(span.attributes).not.toHaveProperty(
-      'adk.experimental.skill.script.exit_code',
-    );
-    expect(span.status.code).toBe(SpanStatusCode.UNSET);
-  });
-
   it('test_skill_script_execution_is_silent_without_the_experimental_opt_in', async () => {
     await recordToolExecution('run_skill_script', async () => {
-      trackSkillScriptExecution(
-        confirmedNotHallucinated('sample_skill'),
-        confirmedNotHallucinated('scripts/sample.py'),
-      ).scriptExitCode = 3;
+      attachSkillTelemetry({
+        kind: 'scriptExecution',
+        skillName: 'sample_skill',
+        scriptPath: 'scripts/sample.py',
+        scriptExitCode: 3,
+      });
     });
 
     const span = tracing.onlySpan();
@@ -435,7 +426,7 @@ describe('dispatchSkillTelemetry never fails a tool call', () => {
 
     await expect(
       recordToolExecution('load_skill', async () => {
-        trackSkillLoad(confirmedNotHallucinated('sample_skill'));
+        attachSkillTelemetry({kind: 'load', skillName: 'sample_skill'});
         throw new Error('the tool blew up');
       }),
     ).rejects.toThrow('the tool blew up');
@@ -449,10 +440,7 @@ describe('dispatchSkillTelemetry never fails a tool call', () => {
     process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
     const warn = vi.spyOn(logger, 'warn');
     const scope = createSkillToolScope();
-    scope.skillTelemetry = {
-      kind: 'load',
-      skillName: confirmedNotHallucinated('sample_skill'),
-    };
+    scope.skillTelemetry = {kind: 'load', skillName: 'sample_skill'};
     const span = tracer.startSpan('execute_tool load_skill');
     vi.spyOn(span, 'setAttributes').mockImplementation(() => {
       throw new Error('span is already ended');
@@ -482,19 +470,11 @@ describe('attachSkillTelemetry', () => {
     const scope = createSkillToolScope();
 
     await withSkillToolScope(scope, async () => {
-      attachSkillTelemetry({
-        kind: 'load',
-        skillName: maybeHallucinated('inside_the_scope'),
-      });
+      attachSkillTelemetry({kind: 'load', skillName: 'inside_the_scope'});
     });
-    attachSkillTelemetry({
-      kind: 'load',
-      skillName: maybeHallucinated('outside_the_scope'),
-    });
+    attachSkillTelemetry({kind: 'load', skillName: 'outside_the_scope'});
 
-    expect(scope.skillTelemetry?.skillName.maybeHallucinatedValue).toBe(
-      'inside_the_scope',
-    );
+    expect(scope.skillTelemetry?.skillName).toBe('inside_the_scope');
     expect(debug).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,6 +20,7 @@ import {
   InMemorySessionService,
   InvocationContext,
   LlmAgent,
+  loadSkillFromDir,
   PluginManager,
   Skill,
   SkillToolset,
@@ -31,7 +32,8 @@ import {ReadableSpan} from '@opentelemetry/sdk-trace-base';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {afterAll, beforeEach, describe, expect, it} from 'vitest';
+import {pathToFileURL} from 'node:url';
+import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 
 import {
   experimentalAttributes,
@@ -42,42 +44,56 @@ const {handleFunctionCallList} = functionsExportedForTestingOnly;
 
 const tracing = startInMemoryTracing();
 const sessionService = new InMemorySessionService();
-let scriptOutputDir: string;
+
+let workDir: string;
+let skillDir: string;
+let sampleSkill: Skill;
+
+/** Writes a real skill directory and loads it the way an application would. */
+beforeAll(async () => {
+  workDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'adk_skill_telemetry_test_'),
+  );
+  skillDir = path.join(workDir, 'sample_skill');
+  await fs.mkdir(path.join(skillDir, 'scripts'), {recursive: true});
+  await fs.mkdir(path.join(skillDir, 'references'), {recursive: true});
+  await fs.writeFile(
+    path.join(skillDir, 'SKILL.md'),
+    `---
+name: sample_skill
+description: A sample skill.
+metadata:
+  adk_additional_tools:
+    - weather_tool
+---
+Do the sample thing.`,
+  );
+  await fs.writeFile(path.join(skillDir, 'references', 'notes.md'), 'Notes.');
+  await fs.writeFile(
+    path.join(skillDir, 'scripts', 'ok.js'),
+    'process.exit(0);',
+  );
+  await fs.writeFile(
+    path.join(skillDir, 'scripts', 'boom.js'),
+    'process.exit(2);',
+  );
+  sampleSkill = await loadSkillFromDir(skillDir);
+});
 
 afterAll(async () => {
   await tracing.shutdown();
-  await fs.rm(scriptOutputDir, {recursive: true, force: true});
+  await fs.rm(workDir, {recursive: true, force: true});
 });
 
-beforeEach(async () => {
+beforeEach(() => {
   tracing.reset();
   process.env.ADK_EXPERIMENTAL_TELEMETRY = 'true';
-  scriptOutputDir ??= await fs.mkdtemp(
-    path.join(os.tmpdir(), 'adk_skill_telemetry_test_'),
-  );
 });
 
-const SAMPLE_SKILL: Skill = {
-  frontmatter: {
-    name: 'sample_skill',
-    description: 'A sample skill.',
-    metadata: {adk_additional_tools: ['weather_tool']},
-  },
-  instructions: 'Do the sample thing.',
-  uri: 'file:/skills/sample',
-  resources: {
-    references: {'notes.md': 'Some notes.'},
-    scripts: {
-      'ok.js': {src: 'process.exit(0);'},
-      'boom.js': {src: 'process.exit(2);'},
-    },
-  },
-};
-
 function skillToolset(): SkillToolset {
-  return new SkillToolset([SAMPLE_SKILL], {
+  return new SkillToolset([sampleSkill], {
     codeExecutor: new UnsafeLocalCodeExecutor(),
-    scriptOutputDir,
+    scriptOutputDir: path.join(workDir, 'script_output'),
   });
 }
 
@@ -128,7 +144,7 @@ describe('load_skill telemetry', () => {
       'A sample skill.',
     );
     expect(span.attributes['adk.experimental.skill.source.uri']).toBe(
-      'file:/skills/sample',
+      pathToFileURL(skillDir).href,
     );
     expect(span.attributes['adk.experimental.skill.additional_tools']).toEqual([
       'weather_tool',
@@ -174,7 +190,7 @@ describe('load_skill_resource telemetry', () => {
       'references/notes.md',
     );
     expect(span.attributes['adk.experimental.skill.source.uri']).toBe(
-      'file:/skills/sample',
+      pathToFileURL(skillDir).href,
     );
   });
 

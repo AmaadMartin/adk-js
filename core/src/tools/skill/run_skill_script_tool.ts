@@ -13,10 +13,9 @@ import {
 } from '../../code_executors/code_execution_utils.js';
 import {Script, Skill} from '../../skills/skill.js';
 import {
-  confirmedNotHallucinated,
-  maybeHallucinated,
-} from '../../telemetry/_hallucination.js';
-import {trackSkillScriptExecution} from '../../telemetry/_skill_instrumentation.js';
+  attachSkillTelemetry,
+  SkillScriptExecutionTelemetry,
+} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {
   getMimeTypeAndEncoding,
@@ -84,10 +83,12 @@ export class RunSkillScriptTool extends BaseTool {
       };
     }
 
-    const skillTelemetry = trackSkillScriptExecution(
-      maybeHallucinated(skillName),
-      maybeHallucinated(scriptPath),
-    );
+    const skillTelemetry: SkillScriptExecutionTelemetry = {
+      kind: 'scriptExecution',
+      skillName,
+      scriptPath,
+    };
+    attachSkillTelemetry(skillTelemetry);
 
     let skill;
     try {
@@ -111,7 +112,7 @@ export class RunSkillScriptTool extends BaseTool {
 
     skillTelemetry.skill = skill;
     // The registry can resolve an alias, so the resolved skill names itself.
-    skillTelemetry.skillName = confirmedNotHallucinated(skill.frontmatter.name);
+    skillTelemetry.skillName = skill.frontmatter.name;
 
     const relScriptPath = scriptPath.startsWith('scripts/')
       ? scriptPath.substring('scripts/'.length)
@@ -127,8 +128,6 @@ export class RunSkillScriptTool extends BaseTool {
         errorCode: 'SCRIPT_NOT_FOUND',
       };
     }
-
-    skillTelemetry.scriptPath = confirmedNotHallucinated(scriptPath);
 
     let codeExecutor = this.toolset.codeExecutor;
     if (!codeExecutor) {

@@ -18,9 +18,9 @@
  * | Attribute | Written for |
  * | --- | --- |
  * | `adk.experimental.skill.name` | every kind |
+ * | `adk.experimental.skill.source.uri` | any resolved skill with a `uri` |
  * | `adk.experimental.skill.description` | a resolved skill load |
  * | `adk.experimental.skill.additional_tools` | a resolved skill load |
- * | `adk.experimental.skill.source.uri` | any resolved skill with a `uri` |
  * | `adk.experimental.skill.resource.path` | a resource load |
  * | `adk.experimental.skill.script.path` | a script execution |
  * | `adk.experimental.skill.script.exit_code` | a script that reported one |
@@ -59,20 +59,26 @@ import {
   ADK_EXPERIMENTAL_SKILL_SCRIPT_PATH,
   ADK_EXPERIMENTAL_SKILL_SOURCE_URI,
 } from './_adk_attributes.js';
-import {MaybeHallucinated} from './_hallucination.js';
 
 const ERROR_TYPE = 'error.type';
 
 /** The `error.type` a script that exited non-zero reports. */
 const SKILL_SCRIPT_EXECUTION_ERROR = 'SKILL_SCRIPT_EXECUTION_ERROR';
 
+/** The environment variable that opts a run into experimental telemetry. */
+const EXPERIMENTAL_TELEMETRY_ENV_VAR = 'ADK_EXPERIMENTAL_TELEMETRY';
+
 /** The skill frontmatter key listing the tools a skill also needs. */
 const ADDITIONAL_TOOLS_METADATA_KEY = 'adk_additional_tools';
 
 /** What every skill telemetry record carries. */
 interface SkillTelemetryCommon {
-  /** The name of the skill, as the model wrote it until something resolves it. */
-  skillName: MaybeHallucinated<string>;
+  /**
+   * The name of the skill. The model writes it, so it starts as whatever the
+   * model asked for; the tool replaces it with the resolved skill's own name,
+   * which a registry alias can make different.
+   */
+  skillName: string;
   /**
    * The skill the toolset resolved, or `undefined` when the load produced
    * none. Nothing about the skill is recorded in that case; the failure itself
@@ -89,20 +95,20 @@ export interface SkillLoadTelemetry extends SkillTelemetryCommon {
 /** What a `load_skill_resource` call reports. */
 export interface SkillResourceLoadTelemetry extends SkillTelemetryCommon {
   readonly kind: 'resourceLoad';
-  /** The resource path, as the model wrote it until the resource resolves. */
-  resourcePath: MaybeHallucinated<string>;
+  /** The resource path the model asked for. */
+  resourcePath: string;
 }
 
 /** What a `run_skill_script` call reports. */
 export interface SkillScriptExecutionTelemetry extends SkillTelemetryCommon {
   readonly kind: 'scriptExecution';
-  /** The script path, as the model wrote it until the script resolves. */
-  scriptPath: MaybeHallucinated<string>;
+  /** The script path the model asked for. */
+  scriptPath: string;
   /**
-   * The status the script exited with. `undefined` or `null` means the script
-   * never ran, or the executor cannot report one.
+   * The status the script exited with. `undefined` means the script never ran,
+   * or the executor cannot report one.
    */
-  scriptExitCode?: number | null;
+  scriptExitCode?: number;
 }
 
 /** What one skill tool call reports about the skill it touched. */
@@ -178,60 +184,14 @@ export function attachSkillTelemetry(skillTelemetry: SkillTelemetry): void {
   scope.skillTelemetry = skillTelemetry;
 }
 
-/** Opens a skill load record and attaches it to the enclosing tool execution. */
-export function trackSkillLoad(
-  skillName: MaybeHallucinated<string>,
-): SkillLoadTelemetry {
-  const skillTelemetry: SkillLoadTelemetry = {kind: 'load', skillName};
-  attachSkillTelemetry(skillTelemetry);
-  return skillTelemetry;
-}
-
-/**
- * Opens a skill resource load record and attaches it to the enclosing tool
- * execution.
- */
-export function trackSkillResourceLoad(
-  skillName: MaybeHallucinated<string>,
-  resourcePath: MaybeHallucinated<string>,
-): SkillResourceLoadTelemetry {
-  const skillTelemetry: SkillResourceLoadTelemetry = {
-    kind: 'resourceLoad',
-    skillName,
-    resourcePath,
-  };
-  attachSkillTelemetry(skillTelemetry);
-  return skillTelemetry;
-}
-
-/**
- * Opens a skill script execution record and attaches it to the enclosing tool
- * execution.
- */
-export function trackSkillScriptExecution(
-  skillName: MaybeHallucinated<string>,
-  scriptPath: MaybeHallucinated<string>,
-): SkillScriptExecutionTelemetry {
-  const skillTelemetry: SkillScriptExecutionTelemetry = {
-    kind: 'scriptExecution',
-    skillName,
-    scriptPath,
-  };
-  attachSkillTelemetry(skillTelemetry);
-  return skillTelemetry;
-}
-
 /**
  * Reads the tools a resolved skill also needs.
  *
- * @returns The tool names, or `undefined` when the skill did not resolve or
- *     the frontmatter does not list a string array.
+ * @returns The tool names, or `undefined` when the frontmatter does not list a
+ *     string array.
  */
-export function additionalToolsOf(
-  skillTelemetry: SkillLoadTelemetry,
-): string[] | undefined {
-  const value =
-    skillTelemetry.skill?.frontmatter.metadata?.[ADDITIONAL_TOOLS_METADATA_KEY];
+function additionalToolsOf(skill: Skill): string[] | undefined {
+  const value = skill.frontmatter.metadata?.[ADDITIONAL_TOOLS_METADATA_KEY];
   if (
     !Array.isArray(value) ||
     !value.every((tool) => typeof tool === 'string')
@@ -239,11 +199,6 @@ export function additionalToolsOf(
     return undefined;
   }
   return value;
-}
-
-/** Whether the run opted into experimental telemetry. */
-function shouldEmitExperimentalTelemetry(): boolean {
-  return getBooleanEnvVar('ADK_EXPERIMENTAL_TELEMETRY');
 }
 
 /**
@@ -257,94 +212,60 @@ export function dispatchSkillTelemetry(
   scope: SkillToolScope,
 ): void {
   const skillTelemetry = scope.skillTelemetry;
-  if (skillTelemetry === undefined || !shouldEmitExperimentalTelemetry()) {
+  if (
+    skillTelemetry === undefined ||
+    !getBooleanEnvVar(EXPERIMENTAL_TELEMETRY_ENV_VAR)
+  ) {
     return;
   }
+
   try {
-    switch (skillTelemetry.kind) {
-      case 'load':
-        traceSkillLoad(span, skillTelemetry);
-        return;
-      case 'resourceLoad':
-        traceSkillResourceLoad(span, skillTelemetry);
-        return;
-      case 'scriptExecution':
-        traceSkillScriptExecution(span, skillTelemetry);
-        return;
+    const attributes: Attributes = {
+      [ADK_EXPERIMENTAL_SKILL_NAME]: skillTelemetry.skillName,
+    };
+    const uri = skillTelemetry.skill?.uri;
+    if (uri !== undefined) {
+      attributes[ADK_EXPERIMENTAL_SKILL_SOURCE_URI] = uri;
     }
+
+    switch (skillTelemetry.kind) {
+      case 'load': {
+        const skill = skillTelemetry.skill;
+        if (skill !== undefined) {
+          attributes[ADK_EXPERIMENTAL_SKILL_DESCRIPTION] =
+            skill.frontmatter.description;
+          const additionalTools = additionalToolsOf(skill);
+          if (additionalTools !== undefined) {
+            attributes[ADK_EXPERIMENTAL_SKILL_ADDITIONAL_TOOLS] =
+              additionalTools;
+          }
+        }
+        break;
+      }
+      case 'resourceLoad':
+        attributes[ADK_EXPERIMENTAL_SKILL_RESOURCE_PATH] =
+          skillTelemetry.resourcePath;
+        break;
+      case 'scriptExecution': {
+        attributes[ADK_EXPERIMENTAL_SKILL_SCRIPT_PATH] =
+          skillTelemetry.scriptPath;
+        const exitCode = skillTelemetry.scriptExitCode;
+        if (exitCode !== undefined) {
+          attributes[ADK_EXPERIMENTAL_SKILL_SCRIPT_EXIT_CODE] = exitCode;
+          if (exitCode !== 0) {
+            attributes[ERROR_TYPE] = SKILL_SCRIPT_EXECUTION_ERROR;
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: SKILL_SCRIPT_EXECUTION_ERROR,
+            });
+          }
+        }
+        break;
+      }
+    }
+
+    span.setAttributes(attributes);
   } catch (e: unknown) {
     logger.warn(`Failed to record skill telemetry: ${formatError(e)}`);
   }
-}
-
-function traceSkillLoad(span: Span, skillTelemetry: SkillLoadTelemetry): void {
-  const attributes: Attributes = {
-    [ADK_EXPERIMENTAL_SKILL_NAME]:
-      skillTelemetry.skillName.maybeHallucinatedValue,
-  };
-
-  const skill = skillTelemetry.skill;
-  if (skill !== undefined) {
-    attributes[ADK_EXPERIMENTAL_SKILL_DESCRIPTION] =
-      skill.frontmatter.description;
-    if (skill.uri !== undefined) {
-      attributes[ADK_EXPERIMENTAL_SKILL_SOURCE_URI] = skill.uri;
-    }
-    const additionalTools = additionalToolsOf(skillTelemetry);
-    if (additionalTools !== undefined) {
-      attributes[ADK_EXPERIMENTAL_SKILL_ADDITIONAL_TOOLS] = additionalTools;
-    }
-  }
-
-  span.setAttributes(attributes);
-}
-
-function traceSkillResourceLoad(
-  span: Span,
-  skillTelemetry: SkillResourceLoadTelemetry,
-): void {
-  const attributes: Attributes = {
-    [ADK_EXPERIMENTAL_SKILL_NAME]:
-      skillTelemetry.skillName.maybeHallucinatedValue,
-    [ADK_EXPERIMENTAL_SKILL_RESOURCE_PATH]:
-      skillTelemetry.resourcePath.maybeHallucinatedValue,
-  };
-
-  const uri = skillTelemetry.skill?.uri;
-  if (uri !== undefined) {
-    attributes[ADK_EXPERIMENTAL_SKILL_SOURCE_URI] = uri;
-  }
-
-  span.setAttributes(attributes);
-}
-
-function traceSkillScriptExecution(
-  span: Span,
-  skillTelemetry: SkillScriptExecutionTelemetry,
-): void {
-  const attributes: Attributes = {
-    [ADK_EXPERIMENTAL_SKILL_NAME]:
-      skillTelemetry.skillName.maybeHallucinatedValue,
-    [ADK_EXPERIMENTAL_SKILL_SCRIPT_PATH]:
-      skillTelemetry.scriptPath.maybeHallucinatedValue,
-  };
-
-  const exitCode = skillTelemetry.scriptExitCode;
-  if (typeof exitCode === 'number') {
-    attributes[ADK_EXPERIMENTAL_SKILL_SCRIPT_EXIT_CODE] = exitCode;
-    if (exitCode !== 0) {
-      attributes[ERROR_TYPE] = SKILL_SCRIPT_EXECUTION_ERROR;
-      span.setStatus({
-        code: SpanStatusCode.ERROR,
-        message: SKILL_SCRIPT_EXECUTION_ERROR,
-      });
-    }
-  }
-
-  const uri = skillTelemetry.skill?.uri;
-  if (uri !== undefined) {
-    attributes[ADK_EXPERIMENTAL_SKILL_SOURCE_URI] = uri;
-  }
-
-  span.setAttributes(attributes);
 }

@@ -104,10 +104,10 @@ export interface CodeExecutionResult {
 
   /**
    * The status the executed process exited with, when the executor can report
-   * one. `undefined` or `null` means the executor does not know: a built-in
-   * model-side executor never sees a process.
+   * one. `undefined` means the executor does not know: a built-in model-side
+   * executor never sees a process.
    */
-  exitCode?: number | null;
+  exitCode?: number;
 }
 
 /**

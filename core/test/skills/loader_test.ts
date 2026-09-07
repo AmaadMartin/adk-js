@@ -8,6 +8,7 @@ import AdmZip from 'adm-zip';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {
   loadAllSkillsInDir,
@@ -144,6 +145,27 @@ Instructions content`,
       expect(skill.resources?.references).toEqual({});
       expect(skill.resources?.assets).toEqual({});
       expect(skill.resources?.scripts).toEqual({});
+
+      await fs.rm(tempDir, {recursive: true, force: true});
+    });
+
+    it('names the directory it read the skill from', async () => {
+      tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'adk-skill-test-'));
+      const skillDir = path.join(tempDir, 'test-skill');
+      await fs.mkdir(skillDir);
+
+      await fs.writeFile(
+        path.join(skillDir, 'SKILL.md'),
+        `---
+name: test-skill
+description: A test skill
+---
+Instructions content`,
+      );
+
+      const skill = await loadSkillFromDir(skillDir);
+      expect(skill.uri).toBe(pathToFileURL(skillDir).href);
+      expect(skill.uri?.startsWith('file://')).toBe(true);
 
       await fs.rm(tempDir, {recursive: true, force: true});
     });

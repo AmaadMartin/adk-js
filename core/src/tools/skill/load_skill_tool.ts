@@ -7,10 +7,9 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import {requireAgent} from '../../agents/invocation_context.js';
 import {
-  confirmedNotHallucinated,
-  maybeHallucinated,
-} from '../../telemetry/_hallucination.js';
-import {trackSkillLoad} from '../../telemetry/_skill_instrumentation.js';
+  attachSkillTelemetry,
+  SkillLoadTelemetry,
+} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {BaseTool, RunAsyncToolRequest} from '../base_tool.js';
 import {SkillToolset} from './skill_toolset.js';
@@ -53,7 +52,8 @@ export class LoadSkillTool extends BaseTool {
       };
     }
 
-    const skillTelemetry = trackSkillLoad(maybeHallucinated(skillName));
+    const skillTelemetry: SkillLoadTelemetry = {kind: 'load', skillName};
+    attachSkillTelemetry(skillTelemetry);
 
     let skill;
     try {
@@ -77,7 +77,7 @@ export class LoadSkillTool extends BaseTool {
 
     skillTelemetry.skill = skill;
     // The registry can resolve an alias, so the resolved skill names itself.
-    skillTelemetry.skillName = confirmedNotHallucinated(skill.frontmatter.name);
+    skillTelemetry.skillName = skill.frontmatter.name;
 
     // Record skill activation in agent state
     const agentName = requireAgent(toolContext.invocationContext).name;

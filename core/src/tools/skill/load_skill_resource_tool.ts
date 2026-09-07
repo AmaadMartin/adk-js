@@ -7,10 +7,9 @@
 import {FunctionDeclaration, Type} from '@google/genai';
 import path from 'node:path';
 import {
-  confirmedNotHallucinated,
-  maybeHallucinated,
-} from '../../telemetry/_hallucination.js';
-import {trackSkillResourceLoad} from '../../telemetry/_skill_instrumentation.js';
+  attachSkillTelemetry,
+  SkillResourceLoadTelemetry,
+} from '../../telemetry/_skill_instrumentation.js';
 import {experimental} from '../../utils/experimental.js';
 import {guessMimeType} from '../../utils/file_utils.js';
 import {
@@ -77,10 +76,12 @@ export class LoadSkillResourceTool extends BaseTool {
 
     resourcePath = path.posix.normalize(resourcePath);
 
-    const skillTelemetry = trackSkillResourceLoad(
-      maybeHallucinated(skillName),
-      maybeHallucinated(resourcePath),
-    );
+    const skillTelemetry: SkillResourceLoadTelemetry = {
+      kind: 'resourceLoad',
+      skillName,
+      resourcePath,
+    };
+    attachSkillTelemetry(skillTelemetry);
 
     let skill;
     try {
@@ -104,7 +105,7 @@ export class LoadSkillResourceTool extends BaseTool {
 
     skillTelemetry.skill = skill;
     // The registry can resolve an alias, so the resolved skill names itself.
-    skillTelemetry.skillName = confirmedNotHallucinated(skill.frontmatter.name);
+    skillTelemetry.skillName = skill.frontmatter.name;
 
     let content: string | Buffer | undefined;
     const skillResources = skill.resources || {};
@@ -134,8 +135,6 @@ export class LoadSkillResourceTool extends BaseTool {
         error_code: 'RESOURCE_NOT_FOUND',
       };
     }
-
-    skillTelemetry.resourcePath = confirmedNotHallucinated(resourcePath);
 
     if (Buffer.isBuffer(content)) {
       return {
