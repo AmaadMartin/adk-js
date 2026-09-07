@@ -751,7 +751,7 @@ describe('openApiSchemaToGeminiSchema parity with adk-python v0.1.0', () => {
     });
   });
 
-  it('test_to_gemini_schema_ignore_title_default_format', () => {
+  it('test_to_gemini_schema_keeps_title_ignores_default_and_format', () => {
     const geminiSchema = openApiSchemaToGeminiSchema({
       type: 'string',
       title: 'Test Title',
@@ -759,7 +759,10 @@ describe('openApiSchemaToGeminiSchema parity with adk-python v0.1.0', () => {
       format: 'date',
     });
 
-    expect(geminiSchema?.title).toBeUndefined();
+    // adk-python's allowlist is google.genai JSONSchema, which declares title,
+    // so a title survives. A default and an unsupported format are still
+    // dropped.
+    expect(geminiSchema?.title).toBe('Test Title');
     expect(geminiSchema?.default).toBeUndefined();
     expect(geminiSchema?.format).toBeUndefined();
   });

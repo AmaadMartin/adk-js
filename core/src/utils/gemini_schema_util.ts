@@ -184,6 +184,10 @@ export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
       geminiSchema.format = mcp.format;
     }
 
+    if (typeof mcp.title === 'string') {
+      geminiSchema.title = mcp.title;
+    }
+
     if (typeof mcp.pattern === 'string') {
       geminiSchema.pattern = mcp.pattern;
     }
@@ -196,9 +200,12 @@ export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
       geminiSchema.maximum = mcp.maximum;
     }
 
+    // A bound arrives as a number from JSON Schema and as a string from a
+    // genai-dialect schema. Both are kept; genai sends int64 on the wire.
     for (const key of NUMERIC_STRING_KEYS) {
-      if (typeof mcp[key] === 'number') {
-        geminiSchema[key] = String(mcp[key]);
+      const bound: unknown = mcp[key];
+      if (typeof bound === 'number' || typeof bound === 'string') {
+        geminiSchema[key] = String(bound);
       }
     }
 
@@ -206,7 +213,9 @@ export function toGeminiSchema(mcpSchema?: object): Schema | undefined {
       geminiSchema.propertyOrdering = mcp.propertyOrdering;
     }
 
-    if (mcp.default !== undefined) {
+    // A Pydantic `Optional[str] = None` field emits `default: null`. Gemini
+    // reads that as "the default is null", so drop it, as adk-python does.
+    if (mcp.default !== undefined && mcp.default !== null) {
       geminiSchema.default = mcp.default;
     }
 
@@ -277,18 +286,19 @@ const GEMINI_SCHEMA_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Fields the Gemini backend rejects even though `Schema` declares them.
+ * Fields dropped from an OpenAPI schema even though `Schema` declares them.
  *
- * `format` is not here. The backend accepts a narrow set of formats and rejects
- * the rest, so a `format` is kept only when `isSupportedFormat` allows it, the
- * same rule adk-python applies. A `format` of `date` on a STRING, for example,
- * fails with "only 'enum' and 'date-time' are supported for STRING type" and is
- * dropped, while `int64` on an INTEGER survives.
+ * `title` is not here. adk-python keeps it: google.genai `JSONSchema` declares
+ * `title` and its only guard is "the field is not None", so a title survives
+ * and the declaration carries the `<operationId>_Arguments` title the parser
+ * sets. `format` is not here either. The backend accepts a narrow set of
+ * formats and rejects the rest, so a `format` is kept only when
+ * `isSupportedFormat` allows it, the same rule adk-python applies. A `format`
+ * of `date` on a STRING, for example, fails with "only 'enum' and 'date-time'
+ * are supported for STRING type" and is dropped, while `int64` on an INTEGER
+ * survives.
  */
-const GEMINI_REJECTED_SCHEMA_FIELDS: ReadonlySet<string> = new Set([
-  'title',
-  'default',
-]);
+const GEMINI_REJECTED_SCHEMA_FIELDS: ReadonlySet<string> = new Set(['default']);
 
 /**
  * Placeholder property of an otherwise empty OBJECT schema. The Gemini backend
