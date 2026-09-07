@@ -27,12 +27,12 @@ import type {
   GepaEngine,
   ReflectionLm,
 } from './gepa_engine.js';
+import {AGENT_PROMPT_NAME} from './gepa_root_agent_prompt_optimizer.js';
 import {
   generateReflectionResponse,
   requireStaticInstruction,
 } from './gepa_utils.js';
 import {
-  AGENT_PROMPT_NAME,
   extractNewInstruction,
   renderProposalPrompt,
   SKILL_KEY_PREFIX,

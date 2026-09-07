@@ -114,6 +114,7 @@ export function isSkillToolset(obj: unknown): obj is SkillToolset {
 export class SkillToolset extends BaseToolset {
   readonly [SKILL_TOOLSET_SIGNATURE_SYMBOL] = true;
 
+  private readonly constructorOptions: SkillToolsetOptions;
   public skills: Record<string, Skill>;
   private tools: BaseTool[];
   public additionalTools: Array<BaseTool | BaseToolset>;
@@ -123,7 +124,6 @@ export class SkillToolset extends BaseToolset {
   public readonly scriptTimeoutSeconds: number;
   private readonly configuredSkillsFolder?: string;
   private readonly scriptOutputDir?: string;
-  private readonly allowInlineScripts: boolean;
   private toolCache = new Map<string, BaseTool[]>();
   private fetchedSkillCache = new Map<string, Map<string, Skill>>();
   private tempOutputDir?: Promise<string>;
@@ -137,12 +137,12 @@ export class SkillToolset extends BaseToolset {
     // The exposed tool list grows within an invocation as the model loads
     // skills, so the per-invocation tool cache must not serve a stale list.
     this.useInvocationCache = false;
+    this.constructorOptions = options;
     this.skills = Array.isArray(skills) ? toSkillMap(skills) : skills;
     this.codeExecutor = options.codeExecutor;
     this.additionalTools = options.additionalTools || [];
     this.registry = options.registry;
     this.scriptOutputDir = options.scriptOutputDir;
-    this.allowInlineScripts = options.allowInlineScripts ?? false;
     this.environment = options.environment;
     this.scriptTimeoutSeconds =
       options.scriptTimeoutSeconds ?? DEFAULT_SCRIPT_TIMEOUT_SECONDS;
@@ -174,7 +174,7 @@ export class SkillToolset extends BaseToolset {
 
     // Inline-script execution is opt-in: only expose the tool when explicitly
     // enabled, so agents are secure-by-default.
-    if (this.allowInlineScripts) {
+    if (options.allowInlineScripts) {
       this.tools.push(new RunSkillInlineScriptTool(this));
     }
 
@@ -277,22 +277,16 @@ export class SkillToolset extends BaseToolset {
    *
    * A fresh instance is required rather than a shallow copy: the toolset owns
    * the skill tools it built around itself, plus per-invocation caches, so a
-   * copy would keep serving the original's skills. Every constructor option is
-   * forwarded here, and a new option must be added to this list too.
+   * copy would keep serving the original's skills.
+   *
+   * The options the caller passed are forwarded whole rather than listed field
+   * by field, so an option added to {@link SkillToolsetOptions} survives the
+   * clone without anyone remembering to extend this method.
    *
    * @param skills The skills the new toolset exposes.
    */
   cloneWithUpdatedSkills(skills: Skill[]): SkillToolset {
-    return new SkillToolset(skills, {
-      codeExecutor: this.codeExecutor,
-      additionalTools: this.additionalTools,
-      registry: this.registry,
-      allowInlineScripts: this.allowInlineScripts,
-      scriptOutputDir: this.scriptOutputDir,
-      environment: this.environment,
-      skillsFolder: this.configuredSkillsFolder,
-      scriptTimeoutSeconds: this.scriptTimeoutSeconds,
-    });
+    return new SkillToolset(skills, this.constructorOptions);
   }
 
   /**

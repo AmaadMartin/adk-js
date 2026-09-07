@@ -7,8 +7,11 @@
 import {
   BaseTool,
   BaseToolset,
+  BuiltInCodeExecutor,
   Context,
   createSession,
+  Frontmatter,
+  FunctionTool,
   InvocationContext,
   LlmAgent,
   LlmRequest,
@@ -16,11 +19,13 @@ import {
   ReadonlyContext,
   Skill,
   SkillToolset,
+  SkillToolsetOptions,
 } from '@google/adk';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
+import {FakeEnvironment} from './fake_environment.js';
 
 const TEST_AGENT_NAME = 'test-agent';
 
@@ -427,6 +432,96 @@ describe('skill_toolset', () => {
       const after = await toolset.getToolsWithPrefix(context);
 
       expect(after.map((t) => t.name)).toContain('late_tool');
+    });
+  });
+
+  describe('cloneWithUpdatedSkills option forwarding', () => {
+    /**
+     * `Required` makes this fail to compile when SkillToolsetOptions grows an
+     * option, which is the point: the clone forwards whatever this object
+     * holds, so a new option must be given a value and an assertion here
+     * rather than being silently dropped.
+     */
+    const everyOption: Required<SkillToolsetOptions> = {
+      codeExecutor: new BuiltInCodeExecutor(),
+      additionalTools: [
+        new FunctionTool({
+          name: 'ping',
+          description: 'A tool.',
+          execute: async () => 'pong',
+        }),
+      ],
+      registry: {
+        getSkill: (name: string): Promise<Skill> =>
+          expect.unreachable(`getSkill(${name}) is not expected.`),
+        searchSkills: (): Promise<Frontmatter[]> => Promise.resolve([]),
+      },
+      allowInlineScripts: true,
+      scriptOutputDir: path.join(os.tmpdir(), 'skill_toolset_clone_test'),
+      environment: new FakeEnvironment({workingDir: '/workspace'}),
+      skillsFolder: '/workspace/custom_skills',
+      scriptTimeoutSeconds: 42,
+      toolFilter: () => true,
+      toolNamePrefix: 'cloned',
+    };
+
+    // The constructor rejects `codeExecutor` together with `environment`, so
+    // the options are exercised as the two configurations it accepts.
+    const withCodeExecutor: SkillToolsetOptions = {
+      ...everyOption,
+      environment: undefined,
+      skillsFolder: undefined,
+    };
+    const withEnvironment: SkillToolsetOptions = {
+      ...everyOption,
+      codeExecutor: undefined,
+    };
+
+    it('hands the clone every option the constructor was given', async () => {
+      const clone = new SkillToolset(
+        [mockSkill],
+        withCodeExecutor,
+      ).cloneWithUpdatedSkills([{...mockSkill, instructions: 'Rewritten'}]);
+
+      expect(clone.codeExecutor).toBe(everyOption.codeExecutor);
+      expect(clone.additionalTools).toBe(everyOption.additionalTools);
+      expect(clone.registry).toBe(everyOption.registry);
+      expect(await clone.getScriptOutputDir()).toBe(
+        everyOption.scriptOutputDir,
+      );
+      expect(clone.scriptTimeoutSeconds).toBe(everyOption.scriptTimeoutSeconds);
+      expect(clone.toolFilter).toBe(everyOption.toolFilter);
+      expect(clone.prefix).toBe(everyOption.toolNamePrefix);
+      expect((await clone.getTools()).map((tool) => tool.name)).toContain(
+        `${everyOption.toolNamePrefix}_run_skill_inline_script`,
+      );
+    });
+
+    it('hands the clone the environment options too', async () => {
+      const clone = new SkillToolset(
+        [mockSkill],
+        withEnvironment,
+      ).cloneWithUpdatedSkills([{...mockSkill, instructions: 'Rewritten'}]);
+
+      expect(clone.environment).toBe(everyOption.environment);
+      expect(clone.skillsFolder).toBe(everyOption.skillsFolder);
+    });
+
+    it('keeps forwarding them through a chain of clones', async () => {
+      // Each clone re-passes the options it received, so an option cannot
+      // decay after the first generation.
+      const clone = new SkillToolset([mockSkill], withCodeExecutor)
+        .cloneWithUpdatedSkills([{...mockSkill, instructions: 'First'}])
+        .cloneWithUpdatedSkills([{...mockSkill, instructions: 'Second'}]);
+
+      expect(clone.codeExecutor).toBe(everyOption.codeExecutor);
+      expect(clone.registry).toBe(everyOption.registry);
+      expect(await clone.getScriptOutputDir()).toBe(
+        everyOption.scriptOutputDir,
+      );
+      expect(clone.toolFilter).toBe(everyOption.toolFilter);
+      expect(clone.prefix).toBe(everyOption.toolNamePrefix);
+      expect(clone.skills['test-skill'].instructions).toBe('Second');
     });
   });
 
