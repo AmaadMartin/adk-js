@@ -5,6 +5,7 @@
  */
 
 import {redactUriPassword} from '../utils/redact_uri.js';
+import {REASONING_ENGINE_NAME_PATTERN} from '../utils/vertex_ai_utils.js';
 import {BaseMemoryService} from './base_memory_service.js';
 import {
   InMemoryMemoryService,
@@ -52,19 +53,14 @@ export function parseAgentEngineMemoryUri(
     return {projectId, location, agentEngineId: resource};
   }
 
-  const parts = resource.split('/');
-  if (
-    parts.length !== 6 ||
-    parts[0] !== 'projects' ||
-    parts[2] !== 'locations' ||
-    parts[4] !== 'reasoningEngines'
-  ) {
+  const match = resource.match(REASONING_ENGINE_NAME_PATTERN);
+  if (!match) {
     throw new Error(
       'Agent engine resource name is mal-formatted. It should be of format: projects/{project_id}/locations/{location}/reasoningEngines/{resource_id}',
     );
   }
 
-  return {projectId: parts[1], location: parts[3], agentEngineId: parts[5]};
+  return {projectId: match[1], location: match[2], agentEngineId: match[3]};
 }
 
 export function getMemoryServiceFromUri(uri: string): BaseMemoryService {
